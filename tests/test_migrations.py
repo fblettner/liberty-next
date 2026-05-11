@@ -7,6 +7,7 @@ import pytest_asyncio
 from sqlalchemy import text
 
 from liberty.connectors.config import ApiConnectorConfig, SqlConnectorConfig, parse_connectors
+from liberty.menus import parse_menus
 from liberty.migrate_cli import main as migrate_main
 from liberty.migrations import (
     make_engine,
@@ -14,12 +15,14 @@ from liberty.migrations import (
     migrate_api,
     migrate_column_hints,
     migrate_dictionary,
+    migrate_menus,
     migrate_pools,
     migrate_sql_queries,
     read_api,
     read_applications,
     read_column_hints,
     read_dictionary,
+    read_menus,
     read_sql_queries,
     render_toml,
     slugify,
@@ -359,6 +362,8 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
     "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
+    "CREATE TABLE ly_menus (menu_seq_ukid TEXT PRIMARY KEY, menu_parent_id TEXT, menu_child_id TEXT, menu_component TEXT, menu_component_id INTEGER, menu_label TEXT, menu_level INTEGER)",
+    "CREATE TABLE ly_menus_l (lng_id TEXT, lng_seq_ukid TEXT, lng_label TEXT)",
     "CREATE TABLE ly_api_conn (conn_id INTEGER PRIMARY KEY, conn_label TEXT, conn_url TEXT, conn_user TEXT, conn_password TEXT)",
     "CREATE TABLE ly_api (api_id INTEGER PRIMARY KEY, api_label TEXT, api_source TEXT, api_method TEXT, api_url TEXT, api_user TEXT, api_password TEXT, api_body TEXT, api_conn_id INTEGER)",
     "CREATE TABLE ly_api_header (api_id INTEGER, hdr_id INTEGER, hdr_key TEXT, hdr_value TEXT)",
@@ -425,6 +430,21 @@ async def _seed_v1(engine) -> None:
             text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_component, col_dd_id, col_label, col_target, col_type, col_visible)"
                  " VALUES (:f, :c, :ta, :s, :cm, :dd, :lab, :tgt, :ty, :v)"),
             [{"f": 7, "c": 1, "ta": 1, "s": 1, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_menus (menu_seq_ukid, menu_parent_id, menu_child_id, menu_component, menu_component_id, menu_label, menu_level)"
+                 " VALUES (:seq, :par, :chl, :cmp, :cid, :lab, :lvl)"),
+            [
+                {"seq": "100001.", "par": "0", "chl": "100001.", "cmp": None, "cid": None, "lab": "Security", "lvl": 1},
+                # FormsTable → ly_tables.tbl_id=5 → query 1 ("Users List", crud SELECT) → users_list_select
+                {"seq": "100001.100001.", "par": "100001.", "chl": "100001.100001.", "cmp": "FormsTable", "cid": 5, "lab": "Users", "lvl": 2},
+                # a Dashboard node — not a query screen → a folder placeholder with no children
+                {"seq": "100002.", "par": "0", "chl": "100002.", "cmp": "Dashboard", "cid": 1, "lab": "Overview", "lvl": 1},
+            ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_menus_l (lng_id, lng_seq_ukid, lng_label) VALUES (:lng, :seq, :lab)"),
+            [{"lng": "fr", "seq": "100001.100001.", "lab": "Utilisateurs"}],
         )
         await conn.execute(
             text("INSERT INTO ly_api_conn (conn_id, conn_label, conn_url, conn_user, conn_password) VALUES (:i, :l, :u, :usr, :p)"),
@@ -507,14 +527,39 @@ async def test_read_dictionary(v1_engine) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_applications_column_hints_dictionary_missing_tables(tmp_path) -> None:
+async def test_read_menus(v1_engine) -> None:
+    menu_rows, menu_l_rows, tables_rows, dlg_frm_rows, sql_rows = await read_menus(v1_engine)
+    assert {r["menu_seq_ukid"] for r in menu_rows} == {"100001.", "100001.100001.", "100002."}
+    assert {(r["lng_seq_ukid"], r["lng_id"]) for r in menu_l_rows} == {("100001.100001.", "fr")}
+    assert {r["tbl_id"] for r in tables_rows} == {5} and {r["query_id"] for r in sql_rows} == {1, 2}
+    out = migrate_menus(menu_rows, menu_l_rows, tables_rows, dlg_frm_rows, sql_rows, app_name="nomasx1")
+    items = {it["id"]: it for it in out["menus"]["nomasx1"]["items"]}
+    assert set(items) == {"security", "users", "overview"}
+    assert items["security"].get("type") is None and "parent" not in items["security"]  # top-level folder
+    assert items["users"] == {
+        "id": "users", "label": "Users", "parent": "security",
+        "type": "query", "target": "users_list_select", "l": {"fr": "Utilisateurs"},
+    }  # FormsTable → ly_tables 5 → query 1 (SELECT) → the name migrate_sql_queries gives it; connector defaults to the app
+    assert items["overview"].get("type") is None  # Dashboard → unresolved → folder placeholder
+    # the menu target lines up with what migrate_sql_queries actually emits
+    queries, sql_q = await read_sql_queries(v1_engine)
+    sql_conn = migrate_sql_queries(queries, sql_q)["connectors"]["default"]
+    assert "users_list_select" in {q["name"] for q in sql_conn["queries"]}
+    # and the whole thing round-trips through the menus schema
+    m = parse_menus(tomllib.loads(render_toml(out)))
+    assert [it.id for it in m.menus["nomasx1"].items] == ["security", "users", "overview"]
+
+
+@pytest.mark.asyncio
+async def test_read_applications_column_hints_dictionary_menus_missing_tables(tmp_path) -> None:
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_meta.db'}")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))
     try:
-        assert await read_applications(engine) == []          # no ly_applications → []
-        assert await read_column_hints(engine) == ([], [])    # no ly_tbl_col/ly_dlg_col → ([], [])
-        assert await read_dictionary(engine) == ([], [])      # no ly_dictionary/ly_dictionary_l → ([], [])
+        assert await read_applications(engine) == []           # no ly_applications → []
+        assert await read_column_hints(engine) == ([], [])     # no ly_tbl_col/ly_dlg_col → ([], [])
+        assert await read_dictionary(engine) == ([], [])       # no ly_dictionary/ly_dictionary_l → ([], [])
+        assert await read_menus(engine) == ([], [], [], [], [])  # no ly_menus/… → all empty
     finally:
         await engine.dispose()
 
@@ -589,3 +634,17 @@ def test_cli_dictionary(tmp_path) -> None:
     d2 = parse_dictionary(tomllib.loads(txt2))
     assert d2.resolve("USR_NAME", "fr", connector="nomasx1") == ("Nom d'utilisateur", None)
     assert d2.resolve("USR_NAME", "fr") == (None, None)  # nothing at the top level
+
+
+def test_cli_menu(tmp_path) -> None:
+    url = _make_v1_db(tmp_path)
+    out = tmp_path / "menus.toml"
+    assert migrate_main(["menu", "--source-url", url, "--connector", "nomasx1", "-o", str(out)]) == 0
+    txt = out.read_text()
+    assert txt.startswith("# migrated:") and "[menus.nomasx1]" in txt
+    assert "overview" in txt  # the Dashboard placeholder is flagged in the header
+    m = parse_menus(tomllib.loads(txt))  # comments + TOML both parse against the menus schema
+    items = {it.id: it for it in m.menus["nomasx1"].items}
+    assert set(items) == {"security", "users", "overview"}
+    assert items["users"].type == "query" and items["users"].target == "users_list_select"
+    assert items["users"].parent == "security" and items["users"].l == {"fr": "Utilisateurs"}

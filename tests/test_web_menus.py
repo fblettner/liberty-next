@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+import asyncio
+import textwrap
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from liberty.auth.db import AuthDatabase
+from liberty.auth.service import AuthService
+from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, MenuSettings, Settings
+from liberty.connectors.config import PoolConfig
+from liberty.connectors.db import PoolRegistry
+from liberty.main import create_app
+
+JWT_SECRET = "web-menus-test-secret"
+
+
+def _connectors_toml(db_url: str) -> str:
+    return textwrap.dedent(
+        f"""
+        [pools.default]
+        url = "{db_url}"
+
+        [connectors.app1]
+        type = "sql"
+        pool = "default"
+        [[connectors.app1.queries]]
+        name = "users_get"
+        sql = "SELECT 1 AS id"
+        [[connectors.app1.queries]]
+        name = "roles_get"
+        sql = "SELECT 1 AS id"
+        [[connectors.app1.queries]]
+        name = "secret_get"
+        sql = "SELECT 1 AS id"
+        """
+    )
+
+
+def _menus_toml() -> str:
+    return textwrap.dedent(
+        """
+        [menus.app1]
+        label = "App One"
+
+        [[menus.app1.items]]
+        id = "security"
+        label = "Security"
+        l.fr = "Sécurité"
+
+        [[menus.app1.items]]
+        id = "security.users"
+        parent = "security"
+        label = "Users"
+        l.fr = "Utilisateurs"
+        type = "query"
+        target = "users_get"
+
+        [[menus.app1.items]]
+        id = "security.roles"
+        parent = "security"
+        label = "Roles"
+        type = "query"
+        target = "roles_get"
+
+        [[menus.app1.items]]
+        id = "security.secret"
+        parent = "security"
+        label = "Secret"
+        type = "query"
+        target = "secret_get"
+
+        [[menus.app1.items]]
+        id = "empty_folder"
+        label = "Nothing here"
+        """
+    )
+
+
+def _seed(db_url: str) -> None:
+    async def go() -> None:
+        pools = PoolRegistry({"default": PoolConfig(url=db_url)})
+        db = AuthDatabase(pools, "default")
+        await db.create_schema()
+        async with db.session() as s:
+            svc = AuthService(s)
+            await svc.get_or_create_role("admin", permissions=["*"])
+            # "user" can see users_get + roles_get on app1 but not secret_get
+            await svc.get_or_create_role("user", permissions=["sql:app1:users_get", "sql:app1:roles_get"])
+            await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
+            await svc.create_user("user", password="userpw", roles=["user"])
+            await svc.create_user("nobody", password="nobodypw")
+        await pools.dispose()
+
+    asyncio.run(go())
+
+
+@pytest.fixture
+def app(tmp_path):
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
+    (tmp_path / "menus.toml").write_text(_menus_toml())
+    _seed(db_url)
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
+        menus=MenuSettings(config_path=Path(tmp_path / "menus.toml")),
+        auth=AuthSettings(jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    return create_app(settings)
+
+
+def _h(client: TestClient, username: str) -> dict[str, str]:
+    tok = client.post("/auth/login", json={"username": username, "password": f"{username}pw"}).json()["access_token"]
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def test_menus_full_for_admin_and_localized(app) -> None:
+    with TestClient(app) as client:
+        r = client.get("/api/menus", headers=_h(client, "admin"))
+        assert r.status_code == 200
+        app1 = r.json()["menus"]["app1"]
+        assert app1["app"] == "app1" and app1["label"] == "App One"
+        sec = app1["items"][0]
+        assert sec["id"] == "security" and sec["label"] == "Security"  # default language
+        assert [c["target"] for c in sec["items"]] == ["users_get", "roles_get", "secret_get"]
+        assert all(c["connector"] == "app1" for c in sec["items"])
+        # the empty folder collapses away
+        assert [n["id"] for n in app1["items"]] == ["security"]
+        # X-Liberty-Lang switches the labels
+        fr = client.get("/api/menus", headers={**_h(client, "admin"), "X-Liberty-Lang": "fr"}).json()["menus"]["app1"]
+        assert fr["items"][0]["label"] == "Sécurité"
+        assert fr["items"][0]["items"][0]["label"] == "Utilisateurs"
+
+
+def test_menus_pruned_by_permission(app) -> None:
+    with TestClient(app) as client:
+        # "user" can't run secret_get → that leaf is gone, the rest stay
+        app1 = client.get("/api/menus", headers=_h(client, "user")).json()["menus"]["app1"]
+        assert [c["target"] for c in app1["items"][0]["items"]] == ["users_get", "roles_get"]
+        # "nobody" can run nothing → the whole app's menu disappears
+        assert client.get("/api/menus", headers=_h(client, "nobody")).json()["menus"] == {}
+
+
+def test_one_app_menu_and_404(app) -> None:
+    with TestClient(app) as client:
+        r = client.get("/api/menus/app1", headers=_h(client, "admin"))
+        assert r.status_code == 200 and r.json()["app"] == "app1"
+        assert client.get("/api/menus/ghost", headers=_h(client, "admin")).status_code == 404
+        # no accessible items → 404 too
+        assert client.get("/api/menus/app1", headers=_h(client, "nobody")).status_code == 404
+
+
+def test_menus_requires_auth(app) -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/menus").status_code == 401
+        assert client.get("/api/menus/app1").status_code == 401
+
+
+def test_info_reports_menu_apps(app) -> None:
+    with TestClient(app) as client:
+        assert client.get("/info").json()["menus"] == {"apps": ["app1"]}
+
+
+def test_reload_rereads_menus(app, tmp_path) -> None:
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        (tmp_path / "menus.toml").write_text("")  # wipe the menu file
+        r = client.post("/admin/reload", headers=h)
+        assert r.status_code == 200 and r.json()["menu_apps"] == []
+        assert client.get("/api/menus", headers=h).json()["menus"] == {}

@@ -4,11 +4,19 @@
     liberty-migrate api        --source-url <v1-db-url> [--prefix v1_] [-o out.toml]
     liberty-migrate all        --source-url <v1-db-url> [--dbtype …] [--prefix …] [-o out.toml]
     liberty-migrate dictionary --source-url <v1-db-url> [--default-language en] [--connector <app>] [-o dictionary.toml]
+    liberty-migrate menu       --source-url <v1-db-url> --connector <app> [-o menus.toml]
 
 ``--source-url`` is a SQLAlchemy *async* URL — e.g.
 ``postgresql+asyncpg://user:pw@host/liberty`` for a real v1 DB. v1 is read-only:
 this only ``SELECT``s. Output goes to ``--out`` (or stdout); review it, then merge
-it into ``config/connectors.toml`` (the ``dictionary`` output → ``config/dictionary.toml``).
+it into ``config/connectors.toml`` (the ``dictionary`` output → ``config/dictionary.toml``,
+the ``menu`` output → ``config/menus.toml``).
+
+``menu`` migrates v1's ``ly_menus`` (+ ``ly_menus_l`` translations) into ``[menus.<app>]`` —
+the app's navigation tree (flat, items linked by ``parent``); a query-backed node resolves
+through ``ly_tables``/``ly_dlg_frm`` → ``ly_query`` to the matching read query's v2 name, so
+run ``liberty-migrate sql`` / ``all`` first (or together). ``--connector`` names the app the
+menu belongs to. v1's ``ly_menus_filters`` (per-node role/param filters) isn't migrated yet.
 
 ``sql``/``all`` also scaffold ``[pools.*]`` from v1's ``ly_applications`` (one per
 ``apps_pool``, with a SQLAlchemy URL built from ``apps_host``/``apps_port``/``apps_database``
@@ -36,12 +44,14 @@ from liberty.migrations import (
     migrate_api,
     migrate_column_hints,
     migrate_dictionary,
+    migrate_menus,
     migrate_pools,
     migrate_sql_queries,
     read_api,
     read_applications,
     read_column_hints,
     read_dictionary,
+    read_menus,
     read_sql_queries,
     render_toml,
 )
@@ -66,6 +76,8 @@ async def _build(args: argparse.Namespace) -> dict:
             return migrate_dictionary(
                 *await read_dictionary(engine), default_language=args.default_language, connector_name=args.connector
             )
+        if args.command == "menu":
+            return migrate_menus(*await read_menus(engine), app_name=args.connector)
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -97,6 +109,23 @@ def _summary(data: dict, *, command: str) -> str:
         return (f"# migrated: {len(entries)} {scope} dictionary field(s), default language "
                 f"'{data.get('default_language', 'en')}'" + (f", {n_l} translation(s)" if n_l else "")
                 + " — put this at config/dictionary.toml")
+    if command == "menu":
+        apps = data.get("menus") or {}
+        app = next(iter(apps), "?")
+        items = (apps.get(app) or {}).get("items") or []
+        screens = sum(1 for it in items if it.get("type"))
+        n_l = sum(len(it.get("l") or {}) for it in items)
+        parents = {it.get("parent") for it in items if it.get("parent")}
+        stray = [it["id"] for it in items if not it.get("type") and it["id"] not in parents]
+        lines = [
+            f"# migrated: {len(items)} item(s) for [menus.{app}] — {screens} screen(s), "
+            f"{len(items) - screens} folder(s)" + (f", {n_l} translation(s)" if n_l else "")
+            + " — put this at config/menus.toml"
+        ]
+        if stray:
+            lines.append("# folder(s) with no children (e.g. a v1 Dashboard/Chart component we can't map): "
+                         + ", ".join(stray) + " — give each children or a `type`/`target`, or drop it")
+        return "\n".join(lines)
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]
@@ -130,6 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("api", "migrate ly_api/ly_api_conn"),
         ("all", "sql + api"),
         ("dictionary", "migrate ly_dictionary (+ ly_dictionary_l) → dictionary.toml"),
+        ("menu", "migrate ly_menus (+ ly_menus_l) → menus.toml"),
     ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
@@ -138,6 +168,9 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--connector", default=None,
                            help="nest the entries under [connectors.<name>.entries.*] (v1 dictionaries were per-app); default: top-level")
             p.set_defaults(prefix="", dbtype=None)
+        elif name == "menu":
+            p.add_argument("--connector", required=True, help="the app/connector this menu belongs to ([menus.<name>])")
+            p.set_defaults(prefix="", dbtype=None, default_language="en")
         else:
             p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
             if name == "api":

@@ -21,7 +21,8 @@ from liberty.auth.tokens import TokenConfig, TokenService
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
 from liberty.connectors.base import ConnectorError
-from liberty.web import admin_router, connectors_router
+from liberty.menus import load_menus
+from liberty.web import admin_router, connectors_router, menus_router
 
 _log = logging.getLogger("liberty")
 
@@ -71,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             dictionary_path=settings.connectors.dictionary_path,
             master_key=settings.crypto.master_key,
         )
+        app.state.menus = load_menus(settings.menus.config_path)
         app.state.auth_db = AuthDatabase(app.state.connectors.pools, settings.auth.pool)
         app.state.token_service = _build_token_service(settings.auth)
         app.state.oidc = build_oidc(settings.oidc)
@@ -101,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(connectors_router)
+    app.include_router(menus_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
 
@@ -123,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "entries": len(connectors.dictionary.entries),
                 "default_language": connectors.dictionary.default_language,
             },
+            "menus": {"apps": list(app.state.menus.menus)},
             "auth": {"pool": s.auth.pool, "oidc_enabled": app.state.oidc is not None},
             "ai": {
                 "enabled": ai is not None,

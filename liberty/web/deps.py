@@ -13,10 +13,29 @@ from fastapi import HTTPException, Request, status
 
 from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry
+from liberty.menus import MenusFile
 
 
 def get_connectors(request: Request) -> ConnectorRegistry:
     return request.app.state.connectors
+
+
+def get_menus(request: Request) -> MenusFile:
+    return request.app.state.menus
+
+
+def request_language(request: Request) -> str | None:
+    """The UI/result language for a request: the ``X-Liberty-Lang`` header (the SPA sends its
+    current i18n language), else the first ``Accept-Language`` tag (region stripped), else
+    ``None`` → fall back to the relevant ``default_language``."""
+    h = (request.headers.get("x-liberty-lang") or "").strip()
+    if h:
+        return h
+    al = request.headers.get("accept-language")
+    if al:
+        first = al.split(",")[0].split(";")[0].strip()
+        return first.split("-")[0] or None
+    return None
 
 
 def require_permission(principal: Principal, permission: str) -> None:

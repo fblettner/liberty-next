@@ -1,5 +1,7 @@
 // Left navigation rail — collapsible (preference persisted to localStorage),
 // react-router NavLinks with lucide icons. Adapted from nomaubl's Sidebar.
+// When a workspace app is active it leads with that app's menu tree (SidebarMenu),
+// then a divider, then the framework links (Connectors / Assistant / Settings).
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
@@ -7,6 +9,8 @@ import { useTranslation } from 'react-i18next'
 import { LayoutGrid, Sparkles, SlidersHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
+import { useWorkspace } from '../workspace/WorkspaceContext'
+import SidebarMenu from './SidebarMenu'
 
 const COLLAPSE_KEY = 'liberty.sidebar.collapsed'
 
@@ -109,6 +113,20 @@ const ExtItem = styled.a<{ $collapsed: boolean }>`
   &:hover { color: ${colors.text.secondary}; border-color: ${colors.border}; text-decoration: none; }
 `
 
+const SectionDivider = styled.div`
+  border-top: 1px solid ${colors.border};
+  margin: 10px 6px 8px;
+`
+
+const GroupLabel = styled.div`
+  font-size: ${fontSize.micro};
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: ${colors.text.muted};
+  padding: 0 10px 5px;
+`
+
 const Bottom = styled.div`
   padding: 8px 8px 0;
   border-top: 1px solid ${colors.border};
@@ -136,6 +154,7 @@ const CollapseBtn = styled.button<{ $collapsed: boolean }>`
 export default function Sidebar() {
   const { t } = useTranslation()
   const { user } = useAuth()
+  const { currentMenu } = useWorkspace()
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(COLLAPSE_KEY) === 'true'
@@ -164,6 +183,13 @@ export default function Sidebar() {
       </Brand>
 
       <Items>
+        {currentMenu && !collapsed && (
+          <>
+            <SidebarMenu menu={currentMenu} />
+            <SectionDivider />
+            <GroupLabel>{t('app.title')}</GroupLabel>
+          </>
+        )}
         <Item to="/" end $collapsed={collapsed} title={collapsed ? t('nav.connectors') : undefined}>
           <LayoutGrid size={iconSize} />
           {!collapsed && t('nav.connectors')}

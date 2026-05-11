@@ -4,9 +4,9 @@
 // already permission-scoped on the server; this just remembers which connector
 // ("app" — nomasx1, nomajde, …) you're focused on so the Connectors page / nav
 // don't show everything at once. Persisted to localStorage. No backend role —
-// the permission checks are still what actually enforces access. It also owns
-// the one `GET /api/connectors` fetch, shared by the header picker and the
-// Connectors page (and re-runnable via `refresh()` after a config reload).
+// the permission checks are still what actually enforces access. It owns the
+// one `GET /api/connectors` + `GET /api/menus` fetch, shared by the header
+// picker, the Connectors page and the Sidebar (re-runnable via `refresh()`).
 import {
   createContext,
   useCallback,
@@ -19,6 +19,7 @@ import {
 import { useLocation } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
+import type { AppMenuTree, MenusByApp } from '../types/menus'
 import { useAuth } from '../auth/AuthContext'
 
 const APP_KEY = 'liberty.app'
@@ -27,8 +28,10 @@ const CONNECTOR_ROUTE = /^\/(?:sql|http)\/([^/]+)\//
 
 interface WorkspaceState {
   connectors: ConnectorMeta[] | null // null while loading / signed out
+  menus: MenusByApp | null // app → its (permission-pruned, localized) menu tree
   error: string | null
-  currentApp: string | null // null = all accessible connectors
+  currentApp: string | null // the explicitly picked connector; null = all accessible
+  currentMenu: AppMenuTree | null // the menu to show in the Sidebar (the picked app's, or — if there's only one connector — that one's)
   setCurrentApp: (name: string | null) => void
   refresh: () => void
 }
@@ -57,6 +60,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth()
   const { pathname } = useLocation()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
+  const [menus, setMenus] = useState<MenusByApp | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [currentApp, setCurrentAppState] = useState<string | null>(readApp)
   const [nonce, setNonce] = useState(0)
@@ -64,15 +68,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ready || !user) {
       setConnectors(null)
+      setMenus(null)
       setError(null)
       return
     }
     let cancelled = false
     setError(null)
-    api
-      .get<{ connectors: ConnectorMeta[] }>('/api/connectors')
-      .then((r) => {
-        if (!cancelled) setConnectors(r.connectors)
+    Promise.all([
+      api.get<{ connectors: ConnectorMeta[] }>('/api/connectors'),
+      api.get<{ menus: MenusByApp }>('/api/menus'),
+    ])
+      .then(([c, m]) => {
+        if (cancelled) return
+        setConnectors(c.connectors)
+        setMenus(m.menus)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e))
@@ -107,9 +116,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
+  // With exactly one connector there's no picker, so the Sidebar follows it implicitly.
+  const currentMenu = useMemo<AppMenuTree | null>(() => {
+    if (!menus) return null
+    const app = currentApp ?? (connectors?.length === 1 ? connectors[0].name : null)
+    return (app && menus[app]) || null
+  }, [menus, connectors, currentApp])
+
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, error, currentApp, setCurrentApp, refresh }),
-    [connectors, error, currentApp, setCurrentApp, refresh],
+    () => ({ connectors, menus, error, currentApp, currentMenu, setCurrentApp, refresh }),
+    [connectors, menus, error, currentApp, currentMenu, setCurrentApp, refresh],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

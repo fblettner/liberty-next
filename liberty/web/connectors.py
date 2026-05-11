@@ -24,7 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError, detect_statement_type
-from liberty.web.deps import get_connectors, public_connector, require_permission
+from liberty.web.deps import get_connectors, public_connector, request_language, require_permission
 from liberty.web.errors import http_for_connector_error
 
 router = APIRouter(prefix="/api", tags=["connectors"])
@@ -67,20 +67,6 @@ def _params_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
     return nested if isinstance(nested, dict) else body
 
 
-def _language_of(request: Request) -> str | None:
-    """The result language for column-hint resolution: the ``X-Liberty-Lang`` header (the
-    SPA sends its current i18n language), else the first ``Accept-Language`` tag (region
-    stripped), else ``None`` → the dictionary's ``default_language``."""
-    h = (request.headers.get("x-liberty-lang") or "").strip()
-    if h:
-        return h
-    al = request.headers.get("accept-language")
-    if al:
-        first = al.split(",")[0].split(";")[0].strip()
-        return first.split("-")[0] or None
-    return None
-
-
 async def _run_sql(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *, language: str | None = None
 ) -> dict[str, Any]:
@@ -106,7 +92,7 @@ async def sql_query_get(
         raise http_for_connector_error(exc) from exc
     if detect_statement_type(qdef.sql) != "SELECT":
         raise HTTPException(status.HTTP_405_METHOD_NOT_ALLOWED, detail="Non-SELECT queries must be run with POST")
-    return await _run_sql(connectors, connector, query, dict(request.query_params), language=_language_of(request))
+    return await _run_sql(connectors, connector, query, dict(request.query_params), language=request_language(request))
 
 
 @router.post("/sql/{connector}/{query}")
@@ -115,7 +101,7 @@ async def sql_query_post(
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     require_permission(principal, f"sql:{connector}:{query}")
-    return await _run_sql(connectors, connector, query, _params_from_body(body), language=_language_of(request))
+    return await _run_sql(connectors, connector, query, _params_from_body(body), language=request_language(request))
 
 
 # --------------------------------------------------------------------------- #

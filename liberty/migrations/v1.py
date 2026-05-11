@@ -26,6 +26,10 @@ v1 → v2 mapping
 * ``ly_applications`` → ``[pools.*]`` (one per ``apps_pool``) via :func:`migrate_pools` — a real
   SQLAlchemy URL from ``apps_dbtype``/``apps_host``/``apps_port``/``apps_database`` (or ``apps_jdbc``),
   the DB password a ``${MIGRATED_PW_<NAME>}`` placeholder; v1's reserved ``default`` pool is skipped.
+* ``ly_menus`` (+ ``ly_menus_l``) → ``[menus.<app>]`` via :func:`migrate_menus` — the app's
+  navigation tree (flat, items linked by ``parent``), each query-backed node resolved through
+  ``ly_tables``/``ly_dlg_frm`` → ``ly_query`` to the matching read query's v2 name; goes in
+  ``config/menus.toml``, not ``connectors.toml``.
 """
 
 from __future__ import annotations
@@ -296,6 +300,125 @@ def migrate_dictionary(
     if connector_name:
         return {"default_language": default_language, "connectors": {connector_name: {"entries": entries}}}
     return {"default_language": default_language, "entries": entries}
+
+
+# --------------------------------------------------------------------------- #
+# Menus  (ly_menus / ly_menus_l → menus.toml)
+# --------------------------------------------------------------------------- #
+
+# `menu_component` values that open a query-backed screen (a TableView in v2). Others
+# (Dashboard, Chart, …) aren't a query screen — their `menu_component_id` points at a
+# different table, so we don't try to resolve them; they become folder placeholders.
+_QUERY_COMPONENTS = {"FORMSTABLE", "FORMSGRID", "FORMS", "FORM", "TABLE", "GRID", "TABLEFORM"}
+_FORM_COMPONENTS = {"FORMS", "FORM"}  # of those, the ones that resolve via ly_dlg_frm first
+
+
+def migrate_menus(
+    menu_rows: Iterable[Mapping[str, Any]],
+    menu_l_rows: Iterable[Mapping[str, Any]] = (),
+    tables_rows: Iterable[Mapping[str, Any]] = (),
+    dlg_frm_rows: Iterable[Mapping[str, Any]] = (),
+    sql_rows: Iterable[Mapping[str, Any]] = (),
+    *,
+    app_name: str,
+    app_label: str | None = None,
+) -> dict[str, Any]:
+    """Build the ``menus.toml`` dict from v1's ``ly_menus`` (+ ``ly_menus_l``) for one app.
+
+    Produces ``{"menus": {<app_name>: {"label"?: …, "items": [flat menu items]}}}`` — items in
+    ``ly_menus`` order (``menu_seq_ukid`` is a sortable dotted path), each linked to its parent
+    by ``parent``. A node with a query-backed ``menu_component`` becomes a ``type = "query"``
+    leaf whose ``target`` is resolved through ``ly_tables.tbl_id`` / ``ly_dlg_frm.frm_id`` →
+    ``ly_query.query_id`` → ``slugify(<query_label>_<read CRUD>)`` — i.e. the exact name
+    :func:`migrate_sql_queries` gives that query's *read* variant (``GET`` preferred, then
+    ``SELECT``; ``GET`` when the query isn't in *sql_rows*); the connector defaults to *app_name*
+    so it's left off. A node with no component is a folder; one whose component can't be resolved
+    (``Dashboard`` etc.) becomes a folder placeholder for the operator to wire up. Item ids are
+    slugs of the labels, deduped. (v1's ``ly_menus_filters`` — per-node role/param filters — isn't
+    migrated yet; the schema's ``roles``/``params`` are there for hand-editing.)
+
+    Args:
+        menu_rows: ``ly_menus`` (``menu_seq_ukid``, ``menu_parent_id``, ``menu_component``,
+            ``menu_component_id``, ``menu_label``).
+        menu_l_rows: ``ly_menus_l`` (``lng_id``, ``lng_seq_ukid``, ``lng_label``).
+        tables_rows / dlg_frm_rows: ``ly_tables`` (``tbl_id`` → ``tbl_query_id``) / ``ly_dlg_frm``
+            (``frm_id`` → ``frm_query_id``).
+        sql_rows: ``ly_qry_sql`` joined with ``ly_query`` (``query_id``, ``query_label``,
+            ``query_crud``) — gives the label and read CRUD that name the migrated query.
+        app_name: the connector this menu belongs to (``[menus.<app_name>]``).
+        app_label: optional display name for the app (default at render time: the connector name).
+    """
+    tbl_to_query = {
+        int(r["tbl_id"]): int(r["tbl_query_id"])
+        for r in tables_rows if r.get("tbl_id") is not None and r.get("tbl_query_id") is not None
+    }
+    frm_to_query = {
+        int(r["frm_id"]): int(r["frm_query_id"])
+        for r in dlg_frm_rows if r.get("frm_id") is not None and r.get("frm_query_id") is not None
+    }
+    query_label: dict[int, str] = {}
+    read_crud: dict[int, str] = {}  # query_id → the crud its read variant migrated under (GET / SELECT / READ)
+    for r in sql_rows:
+        qid_raw = r.get("query_id")
+        if qid_raw is None:
+            continue
+        qid = int(qid_raw)
+        query_label.setdefault(qid, str(r.get("query_label") or ""))
+        crud = str(r.get("query_crud") or "").upper()
+        if crud in _READ_CRUD and qid not in read_crud:
+            read_crud[qid] = crud  # source rows arrive ordered by crud → GET wins over SELECT
+
+    def query_name(component: str, component_id: Any) -> str | None:
+        if component_id is None or component.upper() not in _QUERY_COMPONENTS:
+            return None
+        cid = int(component_id)
+        primary, secondary = (
+            (frm_to_query, tbl_to_query) if component.upper() in _FORM_COMPONENTS else (tbl_to_query, frm_to_query)
+        )
+        qid = primary.get(cid)
+        if qid is None:
+            qid = secondary.get(cid)  # some v1 menus mix the two up
+        if qid is None:
+            return None
+        crud = read_crud.get(qid, "GET")
+        return slugify(f"{query_label.get(qid) or f'q{qid}'}_{crud}", fallback=f"q{qid}_{crud.lower()}")
+
+    translations: dict[str, dict[str, str]] = {}
+    for r in menu_l_rows:
+        seq = str(r.get("lng_seq_ukid") or "").strip()
+        lng = str(r.get("lng_id") or "").strip()
+        lbl = str(r.get("lng_label") or "").strip()
+        if seq and lng and lbl:
+            translations.setdefault(seq, {})[lng] = lbl
+
+    rows = sorted((dict(r) for r in menu_rows), key=lambda r: str(r.get("menu_seq_ukid") or ""))
+    seq_to_id: dict[str, str] = {}
+    taken: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        seq = str(r.get("menu_seq_ukid") or "").strip()
+        if not seq:
+            continue
+        label = str(r.get("menu_label") or "").strip() or seq
+        item_id = _uniquify(slugify(label, fallback="item"), taken)
+        seq_to_id[seq] = item_id
+        parent_seq = str(r.get("menu_parent_id") or "").strip()
+        parent_id = seq_to_id.get(parent_seq) if parent_seq and parent_seq != "0" else None
+        item: dict[str, Any] = {"id": item_id, "label": label}
+        if parent_id:
+            item["parent"] = parent_id
+        if seq in translations:
+            item["l"] = translations[seq]
+        target = query_name(str(r.get("menu_component") or "").strip(), r.get("menu_component_id"))
+        if target:
+            item["type"] = "query"
+            item["target"] = target  # connector defaults to the app — left off
+        items.append(item)
+
+    app: dict[str, Any] = {"items": items}
+    if app_label:
+        app["label"] = app_label
+    return {"menus": {app_name: app}}
 
 
 # --------------------------------------------------------------------------- #

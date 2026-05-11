@@ -57,6 +57,14 @@ class ConnectorSettings(BaseModel):
     dictionary_path: Path | None = None
 
 
+class MenuSettings(BaseModel):
+    """App navigation menus (the v2 form of v1's ``ly_menus``)."""
+
+    # `[menus.<app>]` per app; a missing file is fine (no menus → the UI falls back to
+    # the flat connector list).
+    config_path: Path = Path("config/menus.toml")
+
+
 class AuthSettings(BaseModel):
     """Internal-user auth: which pool the auth tables live on, JWT signing."""
 
@@ -120,6 +128,7 @@ class CryptoSettings(BaseModel):
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
+    menus: MenuSettings = Field(default_factory=MenuSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)

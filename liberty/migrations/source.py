@@ -52,6 +52,16 @@ _DICTIONARY = text("""
     FROM ly_dictionary ORDER BY dd_id
 """)
 _DICTIONARY_L = text("SELECT dd_id, lng_id, lng_label FROM ly_dictionary_l ORDER BY dd_id, lng_id")
+# App navigation: ly_menus (the tree, by menu_seq_ukid) + ly_menus_l (per-language labels) +
+# the lookup tables that resolve a node's menu_component/menu_component_id to a query
+# (ly_tables.tbl_id → tbl_query_id ; ly_dlg_frm.frm_id → frm_query_id ; ly_query → label).
+_MENUS = text("""
+    SELECT menu_seq_ukid, menu_parent_id, menu_child_id, menu_component, menu_component_id, menu_label, menu_level
+    FROM ly_menus ORDER BY menu_seq_ukid
+""")
+_MENUS_L = text("SELECT lng_id, lng_seq_ukid, lng_label FROM ly_menus_l ORDER BY lng_seq_ukid, lng_id")
+_TABLES = text("SELECT tbl_id, tbl_query_id FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id")
+_DLG_FRM = text("SELECT frm_id, frm_query_id FROM ly_dlg_frm WHERE frm_query_id IS NOT NULL ORDER BY frm_id")
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
 _APIS = text("SELECT api_id, api_label, api_source, api_method, api_url, api_user, api_password, api_body, api_conn_id FROM ly_api ORDER BY api_id")
 _API_HEADERS = text("SELECT api_id, hdr_id, hdr_key, hdr_value FROM ly_api_header ORDER BY api_id, hdr_id")
@@ -106,6 +116,23 @@ async def read_dictionary(engine: AsyncEngine) -> tuple[list[dict[str, Any]], li
     return (
         await _rows_or_empty(engine, _DICTIONARY, what="ly_dictionary"),
         await _rows_or_empty(engine, _DICTIONARY_L, what="ly_dictionary_l translations"),
+    )
+
+
+async def read_menus(
+    engine: AsyncEngine,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_menus`` rows, ``ly_menus_l`` rows, ``ly_tables`` rows, ``ly_dlg_frm`` rows,
+    ``ly_qry_sql`` rows joined with ``ly_query``) — the menu tree, its translations, and the
+    lookup tables that resolve a node's ``menu_component``/``menu_component_id`` to a v2 query
+    name (the joined query rows give both the label and the read CRUD that name the migrated
+    query). Feeds :func:`liberty.migrations.v1.migrate_menus`. Missing tables → empty lists."""
+    return (
+        await _rows_or_empty(engine, _MENUS, what="ly_menus"),
+        await _rows_or_empty(engine, _MENUS_L, what="ly_menus_l translations"),
+        await _rows_or_empty(engine, _TABLES, what="ly_tables (menu component → query)"),
+        await _rows_or_empty(engine, _DLG_FRM, what="ly_dlg_frm (menu component → query)"),
+        await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (menu component → query name)"),
     )
 
 
