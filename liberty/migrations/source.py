@@ -52,6 +52,18 @@ _DICTIONARY = text("""
     FROM ly_dictionary ORDER BY dd_id
 """)
 _DICTIONARY_L = text("SELECT dd_id, lng_id, lng_label FROM ly_dictionary_l ORDER BY dd_id, lng_id")
+# Display rules that the dictionary entries reference via dd_rules / dd_rules_values:
+# ly_enum + ly_enum_val (+ ly_enum_val_l translations) feed `[enums.*]`; ly_lookup feeds
+# `[lookups.*]` (its lkp_query_id resolves to a v2 query name through ly_qry_sql).
+_ENUMS = text("SELECT enum_id, enum_label FROM ly_enum ORDER BY enum_id")
+_ENUM_VAL = text("SELECT enum_id, val_enum, val_label FROM ly_enum_val ORDER BY enum_id, val_enum")
+_ENUM_VAL_L = text(
+    "SELECT enum_id, val_enum, lng_id, lng_label FROM ly_enum_val_l ORDER BY enum_id, val_enum, lng_id"
+)
+_LOOKUPS = text(
+    "SELECT lkp_id, lkp_description, lkp_query_id, lkp_dd_id, lkp_dd_label, lkp_dd_group "
+    "FROM ly_lookup ORDER BY lkp_id"
+)
 # App navigation: ly_menus (the tree, by menu_seq_ukid) + ly_menus_l (per-language labels) +
 # the lookup tables that resolve a node's menu_component/menu_component_id to a query
 # (ly_tables.tbl_id → tbl_query_id ; ly_dlg_frm.frm_id → frm_query_id ; ly_query → label).
@@ -116,6 +128,24 @@ async def read_dictionary(engine: AsyncEngine) -> tuple[list[dict[str, Any]], li
     return (
         await _rows_or_empty(engine, _DICTIONARY, what="ly_dictionary"),
         await _rows_or_empty(engine, _DICTIONARY_L, what="ly_dictionary_l translations"),
+    )
+
+
+async def read_dictionary_rules(
+    engine: AsyncEngine,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_enum`` rows, ``ly_enum_val`` rows, ``ly_enum_val_l`` rows, ``ly_lookup`` rows,
+    ``ly_qry_sql⋈ly_query`` rows) — the v1 data the dictionary's display rules reference
+    (``dd_rules = "ENUM"`` → ``ly_enum``/``ly_enum_val``; ``dd_rules = "LOOKUP"`` → ``ly_lookup``,
+    whose ``lkp_query_id`` resolves to a v2 query name through the joined sql rows). Missing
+    tables → empty lists. Passed alongside :func:`read_dictionary` into
+    :func:`liberty.migrations.v1.migrate_dictionary`."""
+    return (
+        await _rows_or_empty(engine, _ENUMS, what="ly_enum"),
+        await _rows_or_empty(engine, _ENUM_VAL, what="ly_enum_val"),
+        await _rows_or_empty(engine, _ENUM_VAL_L, what="ly_enum_val_l translations"),
+        await _rows_or_empty(engine, _LOOKUPS, what="ly_lookup"),
+        await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (lookup target → query name)"),
     )
 
 

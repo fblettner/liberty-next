@@ -250,26 +250,45 @@ def migrate_column_hints(
 def migrate_dictionary(
     dictionary_rows: Iterable[Mapping[str, Any]],
     dictionary_l_rows: Iterable[Mapping[str, Any]] = (),
+    enum_rows: Iterable[Mapping[str, Any]] = (),
+    enum_val_rows: Iterable[Mapping[str, Any]] = (),
+    enum_val_l_rows: Iterable[Mapping[str, Any]] = (),
+    lookup_rows: Iterable[Mapping[str, Any]] = (),
+    sql_rows: Iterable[Mapping[str, Any]] = (),
     *,
     default_language: str = "en",
     connector_name: str | None = None,
 ) -> dict[str, Any]:
-    """Build the ``dictionary.toml`` dict from v1's ``ly_dictionary`` (+ ``ly_dictionary_l``).
+    """Build the ``dictionary.toml`` dict from v1's ``ly_dictionary`` (+ ``ly_dictionary_l``,
+    ``ly_enum``/``ly_enum_val``/``ly_enum_val_l``, ``ly_lookup``).
 
     One ``[entries.<dd_id>]`` per ``ly_dictionary`` row: ``label`` = ``dd_label``, ``format`` =
     a non-trivial ``dd_type``, ``rules``/``rules_values``/``default`` carried over verbatim, and
-    ``[entries.<dd_id>.l]`` = ``{lng_id: lng_label}`` from the ``ly_dictionary_l`` rows. If
-    *connector_name* is given (v1 dictionaries were per-app), the entries are nested under
-    ``[connectors.<connector_name>.entries.*]`` instead of the top-level ``[entries.*]`` — so
-    several migrated apps don't clash on a ``dd_id``.
+    ``[entries.<dd_id>.l]`` = ``{lng_id: lng_label}`` from the ``ly_dictionary_l`` rows. The
+    display rules ``dd_rules = "ENUM"`` and ``"LOOKUP"`` reference small data sets that travel
+    along as ``[enums.<enum_id>]`` (from ``ly_enum``/``ly_enum_val``, with ``[enums.*.values.l]``
+    translations from ``ly_enum_val_l``) and ``[lookups.<lkp_id>]`` (from ``ly_lookup``, with the
+    ``lkp_query_id`` resolved through *sql_rows* to the matching read query's v2 name). The
+    SQL connector reads them at result time and emits a ``Column.rule`` for the frontend to
+    render (see :meth:`DictionaryFile.resolve_rule`). If *connector_name* is given (v1
+    dictionaries were per-app), all three sections nest under
+    ``[connectors.<connector_name>.{entries,enums,lookups}]`` so two apps don't clash on a
+    ``dd_id``/``enum_id``/``lkp_id``.
 
     Args:
         dictionary_rows: rows from ``ly_dictionary`` (``dd_id``, ``dd_label``, ``dd_type``,
             ``dd_rules``, ``dd_rules_values``, ``dd_default``).
         dictionary_l_rows: rows from ``ly_dictionary_l`` (``dd_id``, ``lng_id``, ``lng_label``).
+        enum_rows / enum_val_rows / enum_val_l_rows: rows from ``ly_enum`` / ``ly_enum_val`` /
+            ``ly_enum_val_l`` (see :func:`liberty.migrations.source.read_dictionary_rules`).
+        lookup_rows: rows from ``ly_lookup`` (``lkp_id``, ``lkp_description``, ``lkp_query_id``,
+            ``lkp_dd_id`` — the value column, ``lkp_dd_label`` — the display column, ``lkp_dd_group``).
+        sql_rows: rows from ``ly_qry_sql`` joined with ``ly_query`` (``query_id``, ``query_label``,
+            ``query_crud``) — resolves ``lkp_query_id`` to the v2 read query name.
         default_language: the language of ``ly_dictionary.dd_label`` (v1's base labels) — ``"en"``.
-        connector_name: nest the entries under this connector's section (default: top-level).
+        connector_name: nest the migrated sections under this connector (default: top-level).
     """
+    # entries  -------------------------------------------------------------- #
     translations: dict[str, dict[str, str]] = {}
     for r in dictionary_l_rows:
         dd = str(r.get("dd_id") or "").strip()
@@ -297,9 +316,87 @@ def migrate_dictionary(
     for dd, l in translations.items():
         if dd not in entries:
             entries[dd] = {"l": l}
+
+    # enums  ---------------------------------------------------------------- #
+    enum_translations: dict[tuple[str, str], dict[str, str]] = {}
+    for r in enum_val_l_rows:
+        eid = str(r.get("enum_id") or "").strip()
+        val = str(r.get("val_enum") or "").strip()
+        lng = str(r.get("lng_id") or "").strip()
+        lbl = str(r.get("lng_label") or "").strip()
+        if eid and val and lng and lbl:
+            enum_translations.setdefault((eid, val), {})[lng] = lbl
+    enum_values_by_id: dict[str, list[dict[str, Any]]] = {}
+    for r in enum_val_rows:
+        eid = str(r.get("enum_id") or "").strip()
+        val = str(r.get("val_enum") or "").strip()
+        if not eid or not val:
+            continue
+        v: dict[str, Any] = _drop_none({"value": val, "label": str(r.get("val_label") or "").strip() or None})
+        if (eid, val) in enum_translations:
+            v["l"] = enum_translations[(eid, val)]
+        enum_values_by_id.setdefault(eid, []).append(v)
+    enums: dict[str, dict[str, Any]] = {}
+    for r in enum_rows:
+        eid = str(r.get("enum_id") or "").strip()
+        if not eid:
+            continue
+        d: dict[str, Any] = _drop_none({"label": str(r.get("enum_label") or "").strip() or None})
+        vals = enum_values_by_id.get(eid)
+        if vals:
+            d["values"] = vals
+        enums[eid] = d
+    # enum-values whose enum_id wasn't in ly_enum (orphaned) — preserve them anyway
+    for eid, vals in enum_values_by_id.items():
+        if eid not in enums:
+            enums[eid] = {"values": vals}
+
+    # lookups  -------------------------------------------------------------- #
+    # ly_lookup.lkp_query_id → the *read* variant migrate_sql_queries gives that query: same logic
+    # as migrate_menus, so both stay in sync.
+    query_label: dict[int, str] = {}
+    read_crud: dict[int, str] = {}
+    for r in sql_rows:
+        qid_raw = r.get("query_id")
+        if qid_raw is None:
+            continue
+        qid = int(qid_raw)
+        query_label.setdefault(qid, str(r.get("query_label") or ""))
+        c = str(r.get("query_crud") or "").upper()
+        if c in _READ_CRUD and qid not in read_crud:
+            read_crud[qid] = c
+    lookups: dict[str, dict[str, Any]] = {}
+    for r in lookup_rows:
+        lid = str(r.get("lkp_id") or "").strip()
+        if not lid:
+            continue
+        value_col = str(r.get("lkp_dd_id") or "").strip()
+        label_col = str(r.get("lkp_dd_label") or "").strip()
+        qid = r.get("lkp_query_id")
+        target: str | None = None
+        if qid is not None:
+            q = int(qid)
+            crud = read_crud.get(q, "GET")
+            target = slugify(f"{query_label.get(q) or f'q{q}'}_{crud}", fallback=f"q{q}_{crud.lower()}")
+        if not value_col or not label_col or not target:
+            continue  # an unresolvable lookup — operator will fix it by hand or remove it
+        lookups[lid] = _drop_none({
+            "description": str(r.get("lkp_description") or "").strip() or None,
+            "query": target,
+            "value": value_col,
+            "label": label_col,
+            "group": str(r.get("lkp_dd_group") or "").strip() or None,
+        })
+
+    # output  --------------------------------------------------------------- #
+    section: dict[str, Any] = {"entries": entries}
+    if enums:
+        section["enums"] = enums
+    if lookups:
+        section["lookups"] = lookups
     if connector_name:
-        return {"default_language": default_language, "connectors": {connector_name: {"entries": entries}}}
-    return {"default_language": default_language, "entries": entries}
+        return {"default_language": default_language, "connectors": {connector_name: section}}
+    return {"default_language": default_language, **section}
 
 
 # --------------------------------------------------------------------------- #

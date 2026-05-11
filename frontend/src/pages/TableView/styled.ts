@@ -46,4 +46,10 @@ export const DataTable = styled.table`
   }
   td.null { color: ${colors.text.muted}; font-style: italic; }
   tr:hover td { background: var(--hover-subtle); }
+
+  /* Display-rule rendering — BOOLEAN ticks, ENUM/LOOKUP-resolved labels, an unresolved (still-loading) lookup. */
+  .bool-true { color: ${colors.green.main}; font-weight: 600; }
+  .bool-false { color: ${colors.red.main}; opacity: 0.7; }
+  .enum, .lookup { font-family: ${fonts.sans}; }
+  .lookup-pending { color: ${colors.text.muted}; font-style: italic; }
 `

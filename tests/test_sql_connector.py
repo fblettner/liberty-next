@@ -128,6 +128,45 @@ async def test_column_hints_resolve_from_dictionary(pools: PoolRegistry) -> None
 
 
 @pytest.mark.asyncio
+async def test_column_hints_attach_display_rule(pools: PoolRegistry) -> None:
+    # The dictionary's entries can carry a display rule (BOOLEAN / ENUM / LOOKUP — v1's dd_rules).
+    # The SQL connector resolves it at result time and emits it as Column.rule for the frontend.
+    from liberty.connectors.dictionary import (
+        DictionaryEntry, DictionaryFile, DictionarySection, EnumDef, EnumValue, LookupDef,
+    )
+    d = DictionaryFile(connectors={"db": DictionarySection(
+        entries={
+            "status": DictionaryEntry(label="Status", format="boolean", rules="BOOLEAN", rules_values="on"),
+            "kind": DictionaryEntry(label="Kind", rules="ENUM", rules_values="1"),
+            "owner": DictionaryEntry(label="Owner", rules="LOOKUP", rules_values="users"),
+            "password": DictionaryEntry(label="Password", rules="PASSWORD"),  # form-layer → no display rule
+        },
+        enums={"1": EnumDef(values=[EnumValue(value="A", label="Active", l={"fr": "Actif"}),
+                                    EnumValue(value="I", label="Inactive")])},
+        lookups={"users": LookupDef(query="users_get", value="USR_ID", label="USR_NAME")},
+    )})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(
+        name="q", sql="SELECT id, status, status AS kind, status AS owner, status AS password FROM item ORDER BY id",
+        columns=[ColumnHint(name="status"), ColumnHint(name="kind"), ColumnHint(name="owner"), ColumnHint(name="password")],
+    )])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    cols = {c.name: c for c in (await conn.execute("q", language="fr")).columns}
+    assert cols["status"].rule == {"kind": "boolean", "true_value": "on"}
+    assert cols["kind"].rule == {
+        "kind": "enum",
+        "values": [{"value": "A", "label": "Actif"}, {"value": "I", "label": "Inactive"}],  # fr falls back per-value
+    }
+    assert cols["owner"].rule == {
+        "kind": "lookup", "connector": "db", "query": "users_get", "value": "USR_ID", "label": "USR_NAME",
+    }
+    assert cols["password"].rule is None  # PASSWORD is a form-layer rule — not a display transform
+    # the resolved rule rides along in to_dict() (so the frontend gets it via /api/sql/...)
+    cols_d = {c["name"]: c for c in (await conn.execute("q")).to_dict()["columns"]}
+    assert cols_d["status"]["rule"]["kind"] == "boolean"
+    assert "rule" not in cols_d["password"]  # no rule → no key emitted
+
+
+@pytest.mark.asyncio
 async def test_column_hints_match_case_insensitively(pools: PoolRegistry) -> None:
     # The database may report column names in a different case than the hints use
     # (Postgres folds unquoted identifiers to lowercase; v1's migrated col_target/dd are

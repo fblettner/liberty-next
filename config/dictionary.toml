@@ -1,317 +1,30 @@
-# migrated: 525 [connectors.nomasx1] dictionary field(s), default language 'en', 469 translation(s) — put this at config/dictionary.toml
+# migrated: 525 [connectors.nomasx1] dictionary field(s) (89 with display rules), 6 enum(s), 12 lookup(s), default language 'en', 469 translation(s) — put this at config/dictionary.toml
 
 default_language = "en"
 
-[connectors.nomasx1.entries.ACL_APPS_ID]
-label = "Application ID"
-format = "number"
+[connectors.nomasx1.entries.SEC_NAME]
+label = "Table name"
 
-[connectors.nomasx1.entries.ACL_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.ACL_APPS_TYPE]
-label = "ACL Application Type"
-rules = "ENUM"
-rules_values = "5"
-
-[connectors.nomasx1.entries.ACL_APPS_TYPE.l]
-fr = "ACL Type d'application"
-
-[connectors.nomasx1.entries.ACL_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-rules = "SYSDATE"
-
-[connectors.nomasx1.entries.ACL_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.ACL_AUDIT_USER]
-label = "User (Audit)"
-rules = "LOGIN"
-
-[connectors.nomasx1.entries.ACL_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.ACL_COUNT]
-label = "Record count"
-
-[connectors.nomasx1.entries.ACL_COUNT.l]
-fr = "Nombre d'enregistrement"
-
-[connectors.nomasx1.entries.ACL_DT_TRANSACTION]
-label = "Transaction date"
-format = "date"
-
-[connectors.nomasx1.entries.ACL_DT_TRANSACTION.l]
-fr = "Date de transaction"
-
-[connectors.nomasx1.entries.ACL_NAME]
-label = "Name"
-
-[connectors.nomasx1.entries.ACL_NAME.l]
-fr = "Nom"
-
-[connectors.nomasx1.entries.ACL_OBJECT_ID]
-label = "Object"
-
-[connectors.nomasx1.entries.ACL_OBJECT_ID.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.ACL_RULE]
-label = "ACL Rule"
-rules = "ENUM"
-rules_values = "6"
-
-[connectors.nomasx1.entries.ACL_RULE.l]
-fr = "ACL Règle"
-
-[connectors.nomasx1.entries.ACL_SCHEMA]
-label = "Owner"
-
-[connectors.nomasx1.entries.ACL_SCHEMA.l]
-fr = "Schéma"
-
-[connectors.nomasx1.entries.ACL_TABLE_NAME]
-label = "Table Name"
-
-[connectors.nomasx1.entries.ACL_TABLE_NAME.l]
+[connectors.nomasx1.entries.SEC_NAME.l]
 fr = "Table"
 
-[connectors.nomasx1.entries.ACL_TYPE]
-label = "ACL Type"
-rules = "ENUM"
-rules_values = "4"
+[connectors.nomasx1.entries.SEC_LANGUAGE]
+label = "Language"
 
-[connectors.nomasx1.entries.ACL_TYPE.l]
-fr = "ACL Type"
+[connectors.nomasx1.entries.SEC_LANGUAGE.l]
+fr = "Language"
 
-[connectors.nomasx1.entries.ACL_USER_ID]
-label = "User ID"
+[connectors.nomasx1.entries.SEC_DESCRIPTION]
+label = "Table description"
 
-[connectors.nomasx1.entries.ACL_USER_ID.l]
-fr = "Utilisateur"
+[connectors.nomasx1.entries.SEC_DESCRIPTION.l]
+fr = "Description"
 
-[connectors.nomasx1.entries.ACT1_NAME]
-label = "Activity 1"
+[connectors.nomasx1.entries.SEC_SEQUENCE]
+label = "Sequence"
 
-[connectors.nomasx1.entries.ACT1_NAME.l]
-fr = "Activité 1"
-
-[connectors.nomasx1.entries.ACT2_NAME]
-label = "Activity 2"
-
-[connectors.nomasx1.entries.ACT2_NAME.l]
-fr = "Activité 2"
-
-[connectors.nomasx1.entries.ACT_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.ACT_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.ACT_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.ACT_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.ACT_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.ACT_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.ACT_ID]
-label = "Activity ID"
-rules = "LOOKUP"
-rules_values = "10"
-
-[connectors.nomasx1.entries.ACT_ID.l]
-fr = "Activité ID"
-
-[connectors.nomasx1.entries.ACTIVE_USERS_COUNT]
-label = "# Active Users"
-format = "number"
-
-[connectors.nomasx1.entries.ACTIVE_USERS_COUNT.l]
-fr = "# Utilisateurs actif"
-
-[connectors.nomasx1.entries.ACT_NAME]
-label = "Activity"
-
-[connectors.nomasx1.entries.ACT_NAME.l]
-fr = "Activité"
-
-[connectors.nomasx1.entries.ACT_NAME_2]
-label = "Activity 2 Name"
-
-[connectors.nomasx1.entries.ACT_NAME_2.l]
-fr = "Nom Activité 2"
-
-[connectors.nomasx1.entries.ACT_PROCESS_ID]
-label = "Process ID"
-
-[connectors.nomasx1.entries.ACT_PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.ACT_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "2"
-
-[connectors.nomasx1.entries.ACT_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.APPS_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.APPS_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.APPS_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.APPS_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.APPS_CTRY_ID]
-label = "Country Code"
-
-[connectors.nomasx1.entries.APPS_CTRY_ID.l]
-fr = "Code Pays"
-
-[connectors.nomasx1.entries.APPS_DATABASE]
-label = "Database"
-
-[connectors.nomasx1.entries.APPS_DATABASE.l]
-fr = "Base de données"
-
-[connectors.nomasx1.entries.APPS_DBLINK]
-label = "DB-Link"
-
-[connectors.nomasx1.entries.APPS_DBLINK.l]
-fr = "DB-Link"
-
-[connectors.nomasx1.entries.APPS_DBTYPE]
-label = "Database"
-rules = "ENUM"
-rules_values = "2"
-
-[connectors.nomasx1.entries.APPS_DBTYPE.l]
-fr = "Base de données"
-
-[connectors.nomasx1.entries.APPS_DIRECTDB]
-label = "Direct connection"
-
-[connectors.nomasx1.entries.APPS_DIRECTDB.l]
-fr = "Connexion directe"
-
-[connectors.nomasx1.entries.APPS_HOST]
-label = "Host"
-
-[connectors.nomasx1.entries.APPS_HOST.l]
-fr = "Serveur"
-
-[connectors.nomasx1.entries.APPS_ID]
-label = "Application ID"
-format = "number"
-rules = "LOOKUP"
-rules_values = "1"
-
-[connectors.nomasx1.entries.APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.APPS_JDBC]
-label = "JDBC"
-
-[connectors.nomasx1.entries.APPS_JDBC.l]
-fr = "JDBC"
-
-[connectors.nomasx1.entries.APPS_LICENSE]
-label = "Enable licenses (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.APPS_LICENSE.l]
-fr = "Activer licences (Y/N)"
-
-[connectors.nomasx1.entries.APPS_NAME]
-label = "Application Name"
-
-[connectors.nomasx1.entries.APPS_NAME.l]
-fr = "Nom de l'application"
-
-[connectors.nomasx1.entries.APPS_PASSWORD]
-label = "Password"
-rules = "PASSWORD"
-
-[connectors.nomasx1.entries.APPS_PASSWORD.l]
-fr = "Mot de passe"
-
-[connectors.nomasx1.entries.APPS_PERFORMANCE]
-label = "Enable performance (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.APPS_PERFORMANCE.l]
-fr = "Activer performance (Y/N)"
-
-[connectors.nomasx1.entries.APPS_POPULATE]
-label = "Auto populate (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.APPS_POPULATE.l]
-fr = "Chargement automatique (Y/N)"
-
-[connectors.nomasx1.entries.APPS_PORT]
-label = "Port"
-format = "number"
-
-[connectors.nomasx1.entries.APPS_PORT.l]
-fr = "Port"
-
-[connectors.nomasx1.entries.APPS_SECURITY]
-label = "Enable security (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.APPS_SECURITY.l]
-fr = "Activer sécurité (Y/N)"
-
-[connectors.nomasx1.entries.APPS_TYPE]
-label = "Appplication Type"
-rules = "ENUM"
-rules_values = "1"
-
-[connectors.nomasx1.entries.APPS_TYPE.l]
-fr = "Type d\\'application"
-
-[connectors.nomasx1.entries.APPS_USER]
-label = "User"
-
-[connectors.nomasx1.entries.APPS_USER.l]
-fr = "Utilisateur"
-
-[connectors.nomasx1.entries.APPS_VERSION]
-label = "Appplication version"
-
-[connectors.nomasx1.entries.APPS_VERSION.l]
-fr = "Version applicative"
-
-[connectors.nomasx1.entries.AUD_AFTER_VALUE]
-label = "After Value"
-
-[connectors.nomasx1.entries.AUD_AFTER_VALUE.l]
-fr = "Valeur après"
+[connectors.nomasx1.entries.SEC_SEQUENCE.l]
+fr = "Séquence"
 
 [connectors.nomasx1.entries.AUD_APPS_ID]
 label = "Application ID"
@@ -320,30 +33,11 @@ format = "number"
 [connectors.nomasx1.entries.AUD_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.AUD_AUDIT_DATE]
-label = "Refresh date"
+[connectors.nomasx1.entries.AUD_TABLE]
+label = "Module"
 
-[connectors.nomasx1.entries.AUD_AUDIT_DATE.l]
-fr = "Date de mise à jour"
-
-[connectors.nomasx1.entries.AUD_AUDIT_USER]
-label = "User"
-
-[connectors.nomasx1.entries.AUD_AUDIT_USER.l]
-fr = "Utilisateur"
-
-[connectors.nomasx1.entries.AUD_BEFORE_VALUE]
-label = "Before Value"
-
-[connectors.nomasx1.entries.AUD_BEFORE_VALUE.l]
-fr = "Valeur avant"
-
-[connectors.nomasx1.entries.AUD_COUNT]
-label = "#Records"
-format = "number"
-
-[connectors.nomasx1.entries.AUD_DATABASE]
-label = "Database"
+[connectors.nomasx1.entries.AUD_TABLE.l]
+fr = "Module"
 
 [connectors.nomasx1.entries.AUD_DESCRIPTION]
 label = "Table description"
@@ -351,315 +45,84 @@ label = "Table description"
 [connectors.nomasx1.entries.AUD_DESCRIPTION.l]
 fr = "Description"
 
-[connectors.nomasx1.entries.AUD_DT_TRANSACTION]
-label = "Transaction date"
-format = "date"
-
-[connectors.nomasx1.entries.AUD_HOST]
-label = "Host"
-
-[connectors.nomasx1.entries.AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-rules = "SYSDATE"
-
-[connectors.nomasx1.entries.AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.AUDIT_USER]
-label = "User (Audit)"
-rules = "LOGIN"
-
-[connectors.nomasx1.entries.AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.AUD_LAST]
-label = "Last Timestamp"
-format = "date"
-
-[connectors.nomasx1.entries.AUD_MODULE]
-label = "Module"
-
-[connectors.nomasx1.entries.AUD_MODULE.l]
-fr = "Module"
-
-[connectors.nomasx1.entries.AUD_NAME]
-label = "Column"
-
-[connectors.nomasx1.entries.AUD_OPERATION]
-label = "Operation"
-
-[connectors.nomasx1.entries.AUD_PASSWORD]
-label = "Password"
-rules = "PASSWORD"
-
-[connectors.nomasx1.entries.AUD_PORT]
-label = "Port"
-format = "number"
-
-[connectors.nomasx1.entries.AUD_ROW_ID]
-label = "Row ID"
-format = "number"
-
-[connectors.nomasx1.entries.AUD_SCN]
-label = "Last SCN"
-format = "number"
-
-[connectors.nomasx1.entries.AUD_SEG_NAME]
-label = "Table Name"
-
-[connectors.nomasx1.entries.AUD_SEG_OWNER]
-label = "Schema"
-
-[connectors.nomasx1.entries.AUD_SEG_TYPE]
-label = "Object Type"
-
-[connectors.nomasx1.entries.AUD_SQL]
-label = "Query"
-format = "textarea"
-
-[connectors.nomasx1.entries.AUD_TABLE]
-label = "Module"
-
-[connectors.nomasx1.entries.AUD_TABLE.l]
-fr = "Module"
-
-[connectors.nomasx1.entries.AUD_TYPE]
-label = "Type"
-
-[connectors.nomasx1.entries.AUD_UNDO]
-label = "Undo Query"
-format = "textarea"
-
-[connectors.nomasx1.entries.AUD_USER]
-label = "User ID"
-
-[connectors.nomasx1.entries.AUD_USERNAME]
+[connectors.nomasx1.entries.AUD_AUDIT_USER]
 label = "User"
 
-[connectors.nomasx1.entries.AUD_VAL_ID]
-label = "Value ID"
-format = "number"
+[connectors.nomasx1.entries.AUD_AUDIT_USER.l]
+fr = "Utilisateur"
 
-[connectors.nomasx1.entries.AUD_VALUE]
-label = "Value"
-
-[connectors.nomasx1.entries.CFD_ACT1_ID]
-label = "Activity 1"
-rules = "LOOKUP"
-rules_values = "10"
-
-[connectors.nomasx1.entries.CFD_ACT1_ID.l]
-fr = "Activité 1"
-
-[connectors.nomasx1.entries.CFD_ACT1_OBJECT]
-label = "Object 1"
-rules = "LOOKUP"
-rules_values = "11"
-
-[connectors.nomasx1.entries.CFD_ACT1_OBJECT.l]
-fr = "Programme 1"
-
-[connectors.nomasx1.entries.CFD_ACT2_ID]
-label = "Activity 2"
-rules = "LOOKUP"
-rules_values = "10"
-
-[connectors.nomasx1.entries.CFD_ACT2_ID.l]
-fr = "Activité 2"
-
-[connectors.nomasx1.entries.CFD_ACT2_OBJECT]
-label = "Object 2"
-rules = "LOOKUP"
-rules_values = "11"
-
-[connectors.nomasx1.entries.CFD_ACT2_OBJECT.l]
-fr = "Objet 2"
-
-[connectors.nomasx1.entries.CFD_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.CFD_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.CFD_PRIVILEGED]
-label = "Privileged (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.CFD_PRIVILEGED.l]
-fr = "Privilèges (Y/N)"
-
-[connectors.nomasx1.entries.CFD_PROCESS_ID]
-label = "Process ID"
-
-[connectors.nomasx1.entries.CFD_PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.CFD_REFRESH]
-label = "Refresh Date"
-
-[connectors.nomasx1.entries.CFD_REFRESH.l]
-fr = "Date mise à jour"
-
-[connectors.nomasx1.entries.CFD_RISK_ID]
-label = "Risk ID"
-
-[connectors.nomasx1.entries.CFD_RISK_ID.l]
-fr = "Risque ID"
-
-[connectors.nomasx1.entries.CFD_ROLE1_ID]
-label = "Role 1"
-rules = "LOOKUP"
-rules_values = "7"
-
-[connectors.nomasx1.entries.CFD_ROLE1_ID.l]
-fr = "Rôle 1"
-
-[connectors.nomasx1.entries.CFD_ROLE2_ID]
-label = "Role 2"
-rules = "LOOKUP"
-rules_values = "7"
-
-[connectors.nomasx1.entries.CFD_ROLE2_ID.l]
-fr = "Rôle 2"
-
-[connectors.nomasx1.entries.CFD_UKID]
-label = "UKID"
-format = "number"
-
-[connectors.nomasx1.entries.CFD_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.CFD_USER_ID]
-label = "User ID"
-
-[connectors.nomasx1.entries.CFD_USER_ID.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.CFS_ACT1_ID]
-label = "Activity 1 ID"
-
-[connectors.nomasx1.entries.CFS_ACT1_ID.l]
-fr = "Activité 1 ID"
-
-[connectors.nomasx1.entries.CFS_ACT2_ID]
-label = "Activity 2 ID"
-
-[connectors.nomasx1.entries.CFS_ACT2_ID.l]
-fr = "Activité 2 ID"
-
-[connectors.nomasx1.entries.CFS_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.CFS_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.CFS_COUNT]
-label = "Count"
-
-[connectors.nomasx1.entries.CFS_COUNT.l]
-fr = "Nombre"
-
-[connectors.nomasx1.entries.CFS_PRIVILEGED]
-label = "Privileged (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.CFS_PRIVILEGED.l]
-fr = "Privilèges (Y/N)"
-
-[connectors.nomasx1.entries.CFS_PROCESS_ID]
-label = "Process ID"
-
-[connectors.nomasx1.entries.CFS_PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.CFS_REFRESH]
+[connectors.nomasx1.entries.AUD_AUDIT_DATE]
 label = "Refresh date"
 
-[connectors.nomasx1.entries.CFS_REFRESH.l]
-fr = "Date mise à jour"
+[connectors.nomasx1.entries.AUD_AUDIT_DATE.l]
+fr = "Date de mise à jour"
 
-[connectors.nomasx1.entries.CFS_RISK_ID]
-label = "Risk ID"
+[connectors.nomasx1.entries.APPS_VERSION]
+label = "Appplication version"
 
-[connectors.nomasx1.entries.CFS_RISK_ID.l]
-fr = "Risque ID"
+[connectors.nomasx1.entries.APPS_VERSION.l]
+fr = "Version applicative"
 
-[connectors.nomasx1.entries.CFS_UKID]
-label = "UKID"
-format = "number"
+[connectors.nomasx1.entries.APPS_CTRY_ID]
+label = "Country Code"
 
-[connectors.nomasx1.entries.CFS_UKID.l]
-fr = "UKID"
+[connectors.nomasx1.entries.APPS_CTRY_ID.l]
+fr = "Code Pays"
 
-[connectors.nomasx1.entries.COMPLIANCE]
-label = "# Compliance"
-format = "number"
+[connectors.nomasx1.entries.APPS_NAME]
+label = "Application Name"
 
-[connectors.nomasx1.entries.COMPLIANCE.l]
-fr = "# Conformité"
+[connectors.nomasx1.entries.APPS_NAME.l]
+fr = "Nom de l'application"
 
-[connectors.nomasx1.entries.CONFLICTS_COUNT]
-label = "# Conflicts"
-format = "number"
+[connectors.nomasx1.entries.APPS_DIRECTDB]
+label = "Direct connection"
 
-[connectors.nomasx1.entries.CONFLICTS_COUNT.l]
-fr = "Nombre de conflits"
+[connectors.nomasx1.entries.APPS_DIRECTDB.l]
+fr = "Connexion directe"
 
-[connectors.nomasx1.entries.CPT_AUDIT_DATE]
+[connectors.nomasx1.entries.APPS_DBLINK]
+label = "DB-Link"
+
+[connectors.nomasx1.entries.APPS_DBLINK.l]
+fr = "DB-Link"
+
+[connectors.nomasx1.entries.APPS_JDBC]
+label = "JDBC"
+
+[connectors.nomasx1.entries.APPS_JDBC.l]
+fr = "JDBC"
+
+[connectors.nomasx1.entries.APPS_USER]
+label = "User"
+
+[connectors.nomasx1.entries.APPS_USER.l]
+fr = "Utilisateur"
+
+[connectors.nomasx1.entries.APPS_HOST]
+label = "Host"
+
+[connectors.nomasx1.entries.APPS_HOST.l]
+fr = "Serveur"
+
+[connectors.nomasx1.entries.APPS_DATABASE]
+label = "Database"
+
+[connectors.nomasx1.entries.APPS_DATABASE.l]
+fr = "Base de données"
+
+[connectors.nomasx1.entries.APPS_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.APPS_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.APPS_AUDIT_DATE]
 label = "Date (Audit)"
 format = "date"
 
-[connectors.nomasx1.entries.CPT_AUDIT_DATE.l]
+[connectors.nomasx1.entries.APPS_AUDIT_DATE.l]
 fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.CPT_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.CPT_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.CPT_CATEGORY]
-label = "Category"
-
-[connectors.nomasx1.entries.CPT_CATEGORY.l]
-fr = "Catégorie"
-
-[connectors.nomasx1.entries.CPT_COMPONENT]
-label = "Component"
-
-[connectors.nomasx1.entries.CPT_COMPONENT.l]
-fr = "Composant"
-
-[connectors.nomasx1.entries.CPT_ID]
-label = "Component ID"
-format = "number"
-rules = "LOOKUP"
-rules_values = "2"
-
-[connectors.nomasx1.entries.CPT_ID.l]
-fr = "Composant ID"
-
-[connectors.nomasx1.entries.CPT_LISTS]
-label = "Price List"
-
-[connectors.nomasx1.entries.CPT_LISTS.l]
-fr = "Liste de prix"
-
-[connectors.nomasx1.entries.CPT_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "13"
-
-[connectors.nomasx1.entries.CPT_UKID.l]
-fr = "UKID"
 
 [connectors.nomasx1.entries.CREATE_DBLINK]
 label = "Create DB LINK"
@@ -667,144 +130,11 @@ label = "Create DB LINK"
 [connectors.nomasx1.entries.CREATE_DBLINK.l]
 fr = "Créer un DB LINK"
 
-[connectors.nomasx1.entries.CSI_APPS_ID]
-label = "Application ID"
-format = "number"
+[connectors.nomasx1.entries.JDE_SY]
+label = "JDE SY"
 
-[connectors.nomasx1.entries.CSI_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.CSI_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.CSI_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.CSI_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.CSI_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.CSI_DESCRIPTION]
-label = "Description"
-
-[connectors.nomasx1.entries.CSI_DESCRIPTION.l]
-fr = "Description"
-
-[connectors.nomasx1.entries.CSI_FROM_DATE]
-label = "From Date"
-format = "date"
-
-[connectors.nomasx1.entries.CSI_FROM_DATE.l]
-fr = "Date Début"
-
-[connectors.nomasx1.entries.CSI_ID]
-label = "CSI Number"
-format = "number"
-rules = "LOOKUP"
-rules_values = "4"
-
-[connectors.nomasx1.entries.CSI_ID.l]
-fr = "N° CSI"
-
-[connectors.nomasx1.entries.CSI_STATUS]
-label = "Enabled (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-default = "Y"
-
-[connectors.nomasx1.entries.CSI_STATUS.l]
-fr = "Actif (Y/N)"
-
-[connectors.nomasx1.entries.CSI_TO_DATE]
-label = "To Date"
-format = "date"
-
-[connectors.nomasx1.entries.CSI_TO_DATE.l]
-fr = "Date Fin"
-
-[connectors.nomasx1.entries.FEA_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.FEA_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.FEA_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.FEA_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.FEA_CPT_ID]
-label = "Component ID"
-format = "number"
-
-[connectors.nomasx1.entries.FEA_CPT_ID.l]
-fr = "Composant ID"
-
-[connectors.nomasx1.entries.FEA_DESCRIPTION]
-label = "Description"
-
-[connectors.nomasx1.entries.FEA_DESCRIPTION.l]
-fr = "Description"
-
-[connectors.nomasx1.entries.FEA_FEATURES]
-label = "Features"
-
-[connectors.nomasx1.entries.FEA_FEATURES.l]
-fr = "Fonctionnalités"
-
-[connectors.nomasx1.entries.FEA_ID]
-label = "Features ID"
-
-[connectors.nomasx1.entries.FEA_ID.l]
-fr = "Fonctions ID"
-
-[connectors.nomasx1.entries.FEA_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "12"
-
-[connectors.nomasx1.entries.FEA_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.JDE_ACTIVE_USERS]
-label = "Enabled Users"
-
-[connectors.nomasx1.entries.JDE_ACTIVE_USERS.l]
-fr = "Afficher les utilisateurs actifs"
-
-[connectors.nomasx1.entries.JDE_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-rules = "SYSDATE"
-
-[connectors.nomasx1.entries.JDE_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.JDE_AUDIT_USER]
-label = "User (Audit)"
-rules = "LOGIN"
-
-[connectors.nomasx1.entries.JDE_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.JDE_CO]
-label = "JDE CO"
-
-[connectors.nomasx1.entries.JDE_CO.l]
-fr = "JDE CO"
-
-[connectors.nomasx1.entries.JDE_CTL]
-label = "JDE CTL"
-
-[connectors.nomasx1.entries.JDE_CTL.l]
-fr = "JDE CTL"
+[connectors.nomasx1.entries.JDE_SY.l]
+fr = "JDE SY"
 
 [connectors.nomasx1.entries.JDE_DTA]
 label = "JDE DTA"
@@ -812,29 +142,29 @@ label = "JDE DTA"
 [connectors.nomasx1.entries.JDE_DTA.l]
 fr = "JDE DTA"
 
-[connectors.nomasx1.entries.JDE_E1COMPOSITE]
-label = "E1 Composite (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
+[connectors.nomasx1.entries.JDE_CTL]
+label = "JDE CTL"
 
-[connectors.nomasx1.entries.JDE_E1COMPOSITE.l]
-fr = "E1 Composite (Y/N)"
+[connectors.nomasx1.entries.JDE_CTL.l]
+fr = "JDE CTL"
 
-[connectors.nomasx1.entries.JDE_E1PAGES]
-label = "E1 Pages (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
+[connectors.nomasx1.entries.JDE_SVM]
+label = "JDE SVM"
 
-[connectors.nomasx1.entries.JDE_E1PAGES.l]
-fr = "E1 Pages (Y/N)"
+[connectors.nomasx1.entries.JDE_SVM.l]
+fr = "JDE SVM"
 
-[connectors.nomasx1.entries.JDE_F00950]
-label = "F00950"
+[connectors.nomasx1.entries.JDE_CO]
+label = "JDE CO"
 
-[connectors.nomasx1.entries.JDE_F00950.l]
-fr = "F00950"
+[connectors.nomasx1.entries.JDE_CO.l]
+fr = "JDE CO"
+
+[connectors.nomasx1.entries.JDE_OL]
+label = "JDE OL"
+
+[connectors.nomasx1.entries.JDE_OL.l]
+fr = "JDE OL"
 
 [connectors.nomasx1.entries.JDE_MENU_STANDARD]
 label = "Standard Menu (Y/N)"
@@ -845,260 +175,83 @@ rules_values = "Y"
 [connectors.nomasx1.entries.JDE_MENU_STANDARD.l]
 fr = "Menu standard (Y/N)"
 
-[connectors.nomasx1.entries.JDE_NOTRANSACTION_USERS]
-label = "Without Transactions"
-
-[connectors.nomasx1.entries.JDE_NOTRANSACTION_USERS.l]
-fr = "Sans Transactions"
-
-[connectors.nomasx1.entries.JDEO_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.JDEO_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.JDEO_DESCRIPTION]
-label = "Description"
-
-[connectors.nomasx1.entries.JDEO_DESCRIPTION.l]
-fr = "Description"
-
-[connectors.nomasx1.entries.JDE_OL]
-label = "JDE OL"
-
-[connectors.nomasx1.entries.JDE_OL.l]
-fr = "JDE OL"
-
-[connectors.nomasx1.entries.JDEO_OBJECT]
-label = "Object"
-rules = "LOOKUP"
-rules_values = "12"
-
-[connectors.nomasx1.entries.JDEO_OBJECT.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.JDEO_SY]
-label = "System Code"
-
-[connectors.nomasx1.entries.JDEO_TYPE]
-label = "Object Type"
-
-[connectors.nomasx1.entries.JDEO_TYPE.l]
-fr = "Type Objet"
-
-[connectors.nomasx1.entries.JDEO_UKID]
-label = "UKID"
-format = "number"
-
-[connectors.nomasx1.entries.JDE_OUT_PURGE]
-label = "Purge OUT (Y/N)"
+[connectors.nomasx1.entries.JDE_E1PAGES]
+label = "E1 Pages (Y/N)"
 format = "boolean"
 rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.JDE_OUT_PURGE.l]
-fr = "Purge OUT"
+[connectors.nomasx1.entries.JDE_E1PAGES.l]
+fr = "E1 Pages (Y/N)"
 
-[connectors.nomasx1.entries.JDE_OUT_RETENTION]
-label = "OUT Retention Days"
-format = "number"
+[connectors.nomasx1.entries.JDE_E1COMPOSITE]
+label = "E1 Composite (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.JDE_OUT_RETENTION.l]
-fr = "Jours Retention OUT"
+[connectors.nomasx1.entries.JDE_E1COMPOSITE.l]
+fr = "E1 Composite (Y/N)"
 
-[connectors.nomasx1.entries.JDES_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
+[connectors.nomasx1.entries.JDE_F00950]
+label = "F00950"
 
-[connectors.nomasx1.entries.JDES_AUDIT_DATE.l]
-fr = "Date (Audit)"
+[connectors.nomasx1.entries.JDE_F00950.l]
+fr = "F00950"
 
-[connectors.nomasx1.entries.JDES_AUDIT_USER]
+[connectors.nomasx1.entries.APPS_POPULATE]
+label = "Auto populate (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.APPS_POPULATE.l]
+fr = "Chargement automatique (Y/N)"
+
+[connectors.nomasx1.entries.APPS_LICENSE]
+label = "Enable licenses (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.APPS_LICENSE.l]
+fr = "Activer licences (Y/N)"
+
+[connectors.nomasx1.entries.APPS_SECURITY]
+label = "Enable security (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.APPS_SECURITY.l]
+fr = "Activer sécurité (Y/N)"
+
+[connectors.nomasx1.entries.APPS_PERFORMANCE]
+label = "Enable performance (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.APPS_PERFORMANCE.l]
+fr = "Activer performance (Y/N)"
+
+[connectors.nomasx1.entries.LDAPD_GROUP]
+label = "Group"
+
+[connectors.nomasx1.entries.LDAPD_GROUP.l]
+fr = "Groupe"
+
+[connectors.nomasx1.entries.LDAPD_DEPARTEMENT]
+label = "Départment"
+
+[connectors.nomasx1.entries.LDAPD_DEPARTEMENT.l]
+fr = "Département"
+
+[connectors.nomasx1.entries.LDAPD_AUDIT_USER]
 label = "User (Audit)"
 
-[connectors.nomasx1.entries.JDES_AUDIT_USER.l]
+[connectors.nomasx1.entries.LDAPD_AUDIT_USER.l]
 fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.JDES_DESCRIPTION]
-label = "Description"
-
-[connectors.nomasx1.entries.JDES_DESCRIPTION.l]
-fr = "Description"
-
-[connectors.nomasx1.entries.JDES_OBJECT]
-label = "Object"
-
-[connectors.nomasx1.entries.JDES_OBJECT.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.JDES_SY]
-label = "System Code"
-rules = "LOOKUP"
-rules_values = "5"
-
-[connectors.nomasx1.entries.JDES_SY.l]
-fr = "Code système"
-
-[connectors.nomasx1.entries.JDES_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "9"
-
-[connectors.nomasx1.entries.JDES_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.JDE_SVM]
-label = "JDE SVM"
-
-[connectors.nomasx1.entries.JDE_SVM.l]
-fr = "JDE SVM"
-
-[connectors.nomasx1.entries.JDE_SY]
-label = "JDE SY"
-
-[connectors.nomasx1.entries.JDE_SY.l]
-fr = "JDE SY"
-
-[connectors.nomasx1.entries.JDE_TRANSACTION_NOUSERS]
-label = "Users not declared"
-
-[connectors.nomasx1.entries.JDE_TRANSACTION_NOUSERS.l]
-fr = "Utilisateurs non déclarés"
-
-[connectors.nomasx1.entries.JDE_TRANSACTION_USERS]
-label = "With Transactions"
-
-[connectors.nomasx1.entries.JDE_TRANSACTION_USERS.l]
-fr = "Avec Transactions"
-
-[connectors.nomasx1.entries.LAST_USAGE]
-label = "Last Usage"
-format = "date"
-
-[connectors.nomasx1.entries.LAST_USAGE.l]
-fr = "Dernière utilisation"
-
-[connectors.nomasx1.entries.LCA_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.LCA_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.LCA_CSI_ID]
-label = "CSI Number"
-format = "number"
-rules = "LOOKUP"
-rules_values = "4"
-
-[connectors.nomasx1.entries.LCA_CSI_ID.l]
-fr = "N° CSI"
-
-[connectors.nomasx1.entries.LCC_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.LCC_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.LCC_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.LCC_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.LCC_CPT_ID]
-label = "Component ID"
-format = "number"
-rules = "LOOKUP"
-rules_values = "2"
-
-[connectors.nomasx1.entries.LCC_CSI_ID]
-label = "CSI Number"
-format = "number"
-rules = "LOOKUP"
-rules_values = "4"
-
-[connectors.nomasx1.entries.LCC_CSI_ID.l]
-fr = "N° CSI"
-
-[connectors.nomasx1.entries.LCC_MET_ID]
-label = "Metric ID"
-format = "number"
-rules = "LOOKUP"
-rules_values = "3"
-
-[connectors.nomasx1.entries.LCC_QUANTITY]
-label = "Quantity"
-format = "number"
-
-[connectors.nomasx1.entries.LCC_QUANTITY.l]
-fr = "Quantité"
-
-[connectors.nomasx1.entries.LCC_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "19"
-
-[connectors.nomasx1.entries.LCC_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.LDAP_ACCOUNT]
-label = "SamAccountName"
-
-[connectors.nomasx1.entries.LDAP_ACCOUNT.l]
-fr = "SamAccountName"
-
-[connectors.nomasx1.entries.LDAP_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.LDAP_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.LDAP_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-rules = "SYSDATE"
-
-[connectors.nomasx1.entries.LDAP_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.LDAP_AUDIT_USER]
-label = "User (Audit)"
-rules = "LOGIN"
-
-[connectors.nomasx1.entries.LDAP_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.LDAP_CITY]
-label = "City"
-
-[connectors.nomasx1.entries.LDAP_CITY.l]
-fr = "City"
-
-[connectors.nomasx1.entries.LDAP_COMPANY]
-label = "Company"
-
-[connectors.nomasx1.entries.LDAP_COMPANY.l]
-fr = "Company"
-
-[connectors.nomasx1.entries.LDAP_CONTEXT]
-label = "LDAP Context"
-format = "textarea"
-
-[connectors.nomasx1.entries.LDAP_CONTEXT.l]
-fr = "Contexte LDAP"
-
-[connectors.nomasx1.entries.LDAP_CREATION]
-label = "WhenCreated"
-
-[connectors.nomasx1.entries.LDAP_CREATION.l]
-fr = "WhenCreated"
 
 [connectors.nomasx1.entries.LDAPD_AUDIT_DATE]
 label = "Date (Audit)"
@@ -1107,17 +260,137 @@ format = "date"
 [connectors.nomasx1.entries.LDAPD_AUDIT_DATE.l]
 fr = "Date (Audit)"
 
-[connectors.nomasx1.entries.LDAPD_AUDIT_USER]
+[connectors.nomasx1.entries.SQL_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.SQL_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.SQL_DEFAULT]
+label = "Embedded query"
+
+[connectors.nomasx1.entries.SQL_DEFAULT.l]
+fr = "Prédéfinie (Y/N)"
+
+[connectors.nomasx1.entries.SQL_JDBC]
+label = "JDBC"
+
+[connectors.nomasx1.entries.SQL_JDBC.l]
+fr = "JDBC"
+
+[connectors.nomasx1.entries.SQL_USER]
+label = "User"
+
+[connectors.nomasx1.entries.SQL_USER.l]
+fr = "Utilisateur"
+
+[connectors.nomasx1.entries.SQL_AUDIT_USER]
 label = "User (Audit)"
 
-[connectors.nomasx1.entries.LDAPD_AUDIT_USER.l]
+[connectors.nomasx1.entries.SQL_AUDIT_USER.l]
 fr = "Utilisateur (Audit)"
 
-[connectors.nomasx1.entries.LDAPD_DEPARTEMENT]
-label = "Départment"
+[connectors.nomasx1.entries.SQL_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
 
-[connectors.nomasx1.entries.LDAPD_DEPARTEMENT.l]
-fr = "Département"
+[connectors.nomasx1.entries.SQL_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.USR_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.USR_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.USR_NAME]
+label = "User Name"
+
+[connectors.nomasx1.entries.USR_NAME.l]
+fr = "Utilisateur"
+
+[connectors.nomasx1.entries.USR_REGISTRATION]
+label = "Registration"
+
+[connectors.nomasx1.entries.USR_REGISTRATION.l]
+fr = "Matricule"
+
+[connectors.nomasx1.entries.USR_STATUS]
+label = "Status"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "01"
+
+[connectors.nomasx1.entries.USR_STATUS.l]
+fr = "Statut"
+
+[connectors.nomasx1.entries.USR_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.USR_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[connectors.nomasx1.entries.USR_DT_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[connectors.nomasx1.entries.USR_DT_REFRESH.l]
+fr = "Date mise à jour"
+
+[connectors.nomasx1.entries.USR_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.USR_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.LDAP_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.LDAP_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.LDAP_ACCOUNT]
+label = "SamAccountName"
+
+[connectors.nomasx1.entries.LDAP_ACCOUNT.l]
+fr = "SamAccountName"
+
+[connectors.nomasx1.entries.LDAP_DN]
+label = "distinguishedName"
+
+[connectors.nomasx1.entries.LDAP_DN.l]
+fr = "distinguishedName"
+
+[connectors.nomasx1.entries.LDAP_NAME]
+label = "Name"
+
+[connectors.nomasx1.entries.LDAP_NAME.l]
+fr = "Name"
+
+[connectors.nomasx1.entries.LDAP_LOGON]
+label = "UserPrincipalName"
+
+[connectors.nomasx1.entries.LDAP_LOGON.l]
+fr = "UserPrincipalName"
+
+[connectors.nomasx1.entries.LDAP_COMPANY]
+label = "Company"
+
+[connectors.nomasx1.entries.LDAP_COMPANY.l]
+fr = "Company"
+
+[connectors.nomasx1.entries.LDAP_CITY]
+label = "City"
+
+[connectors.nomasx1.entries.LDAP_CITY.l]
+fr = "City"
 
 [connectors.nomasx1.entries.LDAP_DEPARTMENT]
 label = "Department"
@@ -1131,58 +404,11 @@ label = "Description"
 [connectors.nomasx1.entries.LDAP_DESCRIPTION.l]
 fr = "Description"
 
-[connectors.nomasx1.entries.LDAPD_GROUP]
-label = "Group"
-
-[connectors.nomasx1.entries.LDAPD_GROUP.l]
-fr = "Groupe"
-
 [connectors.nomasx1.entries.LDAP_DISPLAY_NAME]
 label = "DisplayName"
 
 [connectors.nomasx1.entries.LDAP_DISPLAY_NAME.l]
 fr = "DisplayName"
-
-[connectors.nomasx1.entries.LDAP_DN]
-label = "distinguishedName"
-
-[connectors.nomasx1.entries.LDAP_DN.l]
-fr = "distinguishedName"
-
-[connectors.nomasx1.entries.LDAPD_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "16"
-
-[connectors.nomasx1.entries.LDAPD_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.LDAP_EXCLUDE]
-label = "LDAP Exclude"
-format = "textarea"
-
-[connectors.nomasx1.entries.LDAP_EXCLUDE.l]
-fr = "Exclusion LDAP"
-
-[connectors.nomasx1.entries.LDAP_EXPIRES]
-label = "accountExpires"
-
-[connectors.nomasx1.entries.LDAP_EXPIRES.l]
-fr = "accountExpires"
-
-[connectors.nomasx1.entries.LDAP_FILTER]
-label = "LDAP Filter"
-format = "textarea"
-
-[connectors.nomasx1.entries.LDAP_FILTER.l]
-fr = "Filtre LDAP"
-
-[connectors.nomasx1.entries.LDAP_LOGON]
-label = "UserPrincipalName"
-
-[connectors.nomasx1.entries.LDAP_LOGON.l]
-fr = "UserPrincipalName"
 
 [connectors.nomasx1.entries.LDAP_MAIL]
 label = "Mail"
@@ -1196,35 +422,11 @@ label = "Manager"
 [connectors.nomasx1.entries.LDAP_MANAGER.l]
 fr = "Manager"
 
-[connectors.nomasx1.entries.LDAP_MOBILE]
-label = "mobile"
-
-[connectors.nomasx1.entries.LDAP_MOBILE.l]
-fr = "mobile"
-
-[connectors.nomasx1.entries.LDAP_NAME]
-label = "Name"
-
-[connectors.nomasx1.entries.LDAP_NAME.l]
-fr = "Name"
-
-[connectors.nomasx1.entries.LDAP_NEVER_EXPIRES]
-label = "userAccountControl"
-
-[connectors.nomasx1.entries.LDAP_NEVER_EXPIRES.l]
-fr = "userAccountControl"
-
 [connectors.nomasx1.entries.LDAP_OFFICE]
 label = "physicalDeliveryOfficeName"
 
 [connectors.nomasx1.entries.LDAP_OFFICE.l]
 fr = "physicalDeliveryOfficeName"
-
-[connectors.nomasx1.entries.LDAP_REFRESH]
-label = "Refresh Date"
-
-[connectors.nomasx1.entries.LDAP_REFRESH.l]
-fr = "Date mise à jour"
 
 [connectors.nomasx1.entries.LDAP_TELEPHONE]
 label = "telephoneNumber"
@@ -1232,11 +434,41 @@ label = "telephoneNumber"
 [connectors.nomasx1.entries.LDAP_TELEPHONE.l]
 fr = "telephoneNumber"
 
+[connectors.nomasx1.entries.LDAP_MOBILE]
+label = "mobile"
+
+[connectors.nomasx1.entries.LDAP_MOBILE.l]
+fr = "mobile"
+
 [connectors.nomasx1.entries.LDAP_TITLE]
 label = "title"
 
 [connectors.nomasx1.entries.LDAP_TITLE.l]
 fr = "title"
+
+[connectors.nomasx1.entries.LDAP_CREATION]
+label = "WhenCreated"
+
+[connectors.nomasx1.entries.LDAP_CREATION.l]
+fr = "WhenCreated"
+
+[connectors.nomasx1.entries.LDAP_EXPIRES]
+label = "accountExpires"
+
+[connectors.nomasx1.entries.LDAP_EXPIRES.l]
+fr = "accountExpires"
+
+[connectors.nomasx1.entries.LDAP_NEVER_EXPIRES]
+label = "userAccountControl"
+
+[connectors.nomasx1.entries.LDAP_NEVER_EXPIRES.l]
+fr = "userAccountControl"
+
+[connectors.nomasx1.entries.LDAP_REFRESH]
+label = "Refresh Date"
+
+[connectors.nomasx1.entries.LDAP_REFRESH.l]
+fr = "Date mise à jour"
 
 [connectors.nomasx1.entries.LDAP_UKID]
 label = "UKID"
@@ -1245,313 +477,242 @@ format = "number"
 [connectors.nomasx1.entries.LDAP_UKID.l]
 fr = "UKID"
 
-[connectors.nomasx1.entries.LEMP_APPS_ID]
+[connectors.nomasx1.entries.USRP_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.LEMP_APPS_ID.l]
+[connectors.nomasx1.entries.USRP_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.LEMP_COMPANY]
-label = "Company"
+[connectors.nomasx1.entries.USRP_ID]
+label = "User ID"
 
-[connectors.nomasx1.entries.LEMP_COMPANY.l]
-fr = "Société"
+[connectors.nomasx1.entries.USRP_ID.l]
+fr = "Utilisateur ID"
 
-[connectors.nomasx1.entries.LEMP_COUNT]
-label = "# Employees"
-format = "number"
+[connectors.nomasx1.entries.USRP_NAME]
+label = "User Name"
 
-[connectors.nomasx1.entries.LEMP_COUNT.l]
-fr = "# Employés"
+[connectors.nomasx1.entries.USRP_NAME.l]
+fr = "Utilisateur"
 
-[connectors.nomasx1.entries.LEMP_DT_EXTRACT]
-label = "Extract Date"
-format = "date"
-
-[connectors.nomasx1.entries.LEMP_DT_EXTRACT.l]
-fr = "Date de collecte"
-
-[connectors.nomasx1.entries.LEMP_DT_START]
-label = "Start Date"
-format = "date"
-
-[connectors.nomasx1.entries.LEMP_DT_START.l]
-fr = "Date de début"
-
-[connectors.nomasx1.entries.LEMP_DT_WORK]
-label = "Last work date"
-format = "date"
-
-[connectors.nomasx1.entries.LEMP_DT_WORK.l]
-fr = "Date de dernière activité"
-
-[connectors.nomasx1.entries.LEMP_GROUP]
-label = "Employees Group"
-
-[connectors.nomasx1.entries.LEMP_GROUP.l]
-fr = "Groupe Employés"
-
-[connectors.nomasx1.entries.LEMP_ID]
-label = "Employee ID"
-format = "number"
-
-[connectors.nomasx1.entries.LEMP_ID.l]
-fr = "Employé ID"
-
-[connectors.nomasx1.entries.LEMP_NAME]
-label = "Employee Name"
-
-[connectors.nomasx1.entries.LEMP_NAME.l]
-fr = "Nom Employé"
-
-[connectors.nomasx1.entries.LEMP_TYPE]
-label = "Employee Type"
-
-[connectors.nomasx1.entries.LEMP_TYPE.l]
-fr = "Type Employé"
-
-[connectors.nomasx1.entries.LEMP_TYPE_DESC]
-label = "Type"
-
-[connectors.nomasx1.entries.LEMP_TYPE_DESC.l]
-fr = "Type"
-
-[connectors.nomasx1.entries.LKP_ID]
-label = "Lookup ID"
-rules = "SEQUENCE"
-rules_values = "15"
-
-[connectors.nomasx1.entries.LKP_ID.l]
-fr = "Recherche ID"
-
-[connectors.nomasx1.entries.LOBJ_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.LOBJ_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.LOBJ_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.LOBJ_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.LOBJ_AUDIT_USER]
+[connectors.nomasx1.entries.USRP_AUDIT_USER]
 label = "User (Audit)"
 
-[connectors.nomasx1.entries.LOBJ_AUDIT_USER.l]
+[connectors.nomasx1.entries.USRP_AUDIT_USER.l]
 fr = "Utilisateur (Audit)"
 
-[connectors.nomasx1.entries.LOBJ_COMPONENT]
-label = "Component"
+[connectors.nomasx1.entries.USRP_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
 
-[connectors.nomasx1.entries.LOBJ_COMPONENT.l]
-fr = "Composant"
+[connectors.nomasx1.entries.USRP_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
 
-[connectors.nomasx1.entries.LOBJ_DESCRIPTION]
-label = "Description"
+[connectors.nomasx1.entries.USRP_TECHNICAL]
+label = "Technical (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
 
-[connectors.nomasx1.entries.LOBJ_DESCRIPTION.l]
-fr = "Description"
+[connectors.nomasx1.entries.USRP_TECHNICAL.l]
+fr = "Technique (Y/N)"
 
-[connectors.nomasx1.entries.LOBJ_OBJECT]
-label = "Object"
+[connectors.nomasx1.entries.USRP_GENERIC]
+label = "Generic (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
 
-[connectors.nomasx1.entries.LOBJ_OBJECT.l]
-fr = "Objet"
+[connectors.nomasx1.entries.USRP_GENERIC.l]
+fr = "Générique (Y/N)"
 
-[connectors.nomasx1.entries.LOBJ_PRODUCT]
-label = "Product"
+[connectors.nomasx1.entries.USRP_IS_LINKED]
+label = "Is Linked (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
 
-[connectors.nomasx1.entries.LOBJ_PRODUCT.l]
-fr = "Produit"
+[connectors.nomasx1.entries.USRP_IS_LINKED.l]
+fr = "Lié (Y/N)"
 
-[connectors.nomasx1.entries.LOBJ_SY]
-label = "System Code"
+[connectors.nomasx1.entries.USRP_ID_LINKED]
+label = "Linked User ID"
 
-[connectors.nomasx1.entries.LOBJ_SY.l]
-fr = "Code système"
+[connectors.nomasx1.entries.USRP_ID_LINKED.l]
+fr = "Utilisateur lié"
 
-[connectors.nomasx1.entries.LOBJ_TYPE]
-label = "Type"
+[connectors.nomasx1.entries.USRP_IS_PREVIOUS]
+label = "Is renamed (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
 
-[connectors.nomasx1.entries.LOBJ_TYPE.l]
-fr = "Type"
+[connectors.nomasx1.entries.USRP_IS_PREVIOUS.l]
+fr = "Renommé (Y/N)"
 
-[connectors.nomasx1.entries.LOBJ_UKID]
+[connectors.nomasx1.entries.USRP_ID_PREVIOUS]
+label = "Previous User ID"
+
+[connectors.nomasx1.entries.USRP_ID_PREVIOUS.l]
+fr = "Utilisateur précédent"
+
+[connectors.nomasx1.entries.ROL_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.ROL_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.ROL_NAME]
+label = "Role Name"
+
+[connectors.nomasx1.entries.ROL_NAME.l]
+fr = "Nom du rôle"
+
+[connectors.nomasx1.entries.ROL_SEQ]
+label = "Sequence"
+
+[connectors.nomasx1.entries.ROL_SEQ.l]
+fr = "Séquence"
+
+[connectors.nomasx1.entries.ROL_DT_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[connectors.nomasx1.entries.ROL_DT_REFRESH.l]
+fr = "Date mise à jour"
+
+[connectors.nomasx1.entries.ROL_UKID]
 label = "UKID"
 format = "number"
 
-[connectors.nomasx1.entries.LOBJ_UKID.l]
+[connectors.nomasx1.entries.ROL_UKID.l]
 fr = "UKID"
 
-[connectors.nomasx1.entries.LOUT_APPS_ID]
+[connectors.nomasx1.entries.RLU_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.LOUT_APPS_ID.l]
+[connectors.nomasx1.entries.RLU_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.LOUT_COUNT]
-label = "# Call"
-format = "number"
+[connectors.nomasx1.entries.RLU_USER_ID]
+label = "User ID"
 
-[connectors.nomasx1.entries.LOUT_COUNT.l]
-fr = "# Appel"
+[connectors.nomasx1.entries.RLU_USER_ID.l]
+fr = "Utilisateur ID"
 
-[connectors.nomasx1.entries.LOUT_ENV]
-label = "Environment"
-
-[connectors.nomasx1.entries.LOUT_ENV.l]
-fr = "Environnement"
-
-[connectors.nomasx1.entries.LOUT_OBJECT]
-label = "Object"
-
-[connectors.nomasx1.entries.LOUT_OBJECT.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.LOUT_ROLE]
+[connectors.nomasx1.entries.RLU_ROLE_ID]
 label = "Role ID"
 
-[connectors.nomasx1.entries.LOUT_ROLE.l]
-fr = "Rôle ID"
+[connectors.nomasx1.entries.RLU_ROLE_ID.l]
+fr = "Role ID"
 
-[connectors.nomasx1.entries.LOUT_TYPE]
-label = "Object Type"
+[connectors.nomasx1.entries.APPS_TYPE]
+label = "Appplication Type"
+rules = "ENUM"
+rules_values = "1"
 
-[connectors.nomasx1.entries.LOUT_TYPE.l]
-fr = "Type Objet"
+[connectors.nomasx1.entries.APPS_TYPE.l]
+fr = "Type d\\'application"
 
-[connectors.nomasx1.entries.LOUT_USAGE]
-label = "Tracking Date"
-format = "date"
-rules = "CURRENT_DATE"
-
-[connectors.nomasx1.entries.LOUT_USAGE.l]
-fr = "Date Utilisation"
-
-[connectors.nomasx1.entries.LOUT_USER]
-label = "User ID"
-
-[connectors.nomasx1.entries.LOUT_USER.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.LOUT_VERSION]
-label = "Version"
-
-[connectors.nomasx1.entries.LOUT_VERSION.l]
-fr = "Version"
-
-[connectors.nomasx1.entries.LUSR_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.LUSR_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.LUSR_COUNT]
-label = "Record Count"
-
-[connectors.nomasx1.entries.LUSR_COUNT.l]
-fr = "Nombre de lignes"
-
-[connectors.nomasx1.entries.LUSR_DT_TRANSACTION]
-label = "Last transaction"
-format = "date"
-
-[connectors.nomasx1.entries.LUSR_DT_TRANSACTION.l]
-fr = "Dernière transaction"
-
-[connectors.nomasx1.entries.LUSR_LICENSE_COUNT]
-label = "Licenses used"
-
-[connectors.nomasx1.entries.LUSR_LICENSE_COUNT.l]
-fr = "Licences utilisées"
-
-[connectors.nomasx1.entries.LUSR_OBJECT]
-label = "Object"
-
-[connectors.nomasx1.entries.LUSR_OBJECT.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.LUSR_UKID]
-label = "UKID"
-format = "number"
-
-[connectors.nomasx1.entries.LUSR_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.LUSR_USER_ID]
-label = "User ID"
-
-[connectors.nomasx1.entries.LUSR_USER_ID.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.MATRIX_ACT1_ID]
-label = "Activity 1 ID"
-rules = "LOOKUP"
-rules_values = "10"
-
-[connectors.nomasx1.entries.MATRIX_ACT1_ID.l]
-fr = "Activité 1 ID"
-
-[connectors.nomasx1.entries.MATRIX_ACT2_ID]
-label = "Activity 2 ID"
-rules = "LOOKUP"
-rules_values = "10"
-
-[connectors.nomasx1.entries.MATRIX_ACT2_ID.l]
-fr = "Activité 2 ID"
-
-[connectors.nomasx1.entries.MATRIX_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.MATRIX_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.MATRIX_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.MATRIX_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.MATRIX_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.MATRIX_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.MATRIX_PROCESS_ID]
-label = "Process ID"
-
-[connectors.nomasx1.entries.MATRIX_PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.MATRIX_RISK_ID]
-label = "Risk ID"
-
-[connectors.nomasx1.entries.MATRIX_RISK_ID.l]
-fr = "Risque ID"
-
-[connectors.nomasx1.entries.MATRIX_RISK_LEVEL]
-label = "Risk Level"
-
-[connectors.nomasx1.entries.MATRIX_RISK_LEVEL.l]
-fr = "Niveau de risque"
-
-[connectors.nomasx1.entries.MATRIX_UKID]
+[connectors.nomasx1.entries.LDAPD_UKID]
 label = "UKID"
 format = "number"
 rules = "SEQUENCE"
-rules_values = "4"
+rules_values = "16"
 
-[connectors.nomasx1.entries.MATRIX_UKID.l]
+[connectors.nomasx1.entries.LDAPD_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.USRP_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "17"
+
+[connectors.nomasx1.entries.USRP_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.RLU_DT_EFFECTIVE]
+label = "Effective Date"
+format = "date"
+
+[connectors.nomasx1.entries.RLU_DT_EFFECTIVE.l]
+fr = "Date effective"
+
+[connectors.nomasx1.entries.RLU_DT_EXPIRATION]
+label = "Expiration Date"
+format = "date"
+
+[connectors.nomasx1.entries.RLU_DT_EXPIRATION.l]
+fr = "Date expiration"
+
+[connectors.nomasx1.entries.LDAP_EXCLUDE]
+label = "LDAP Exclude"
+format = "textarea"
+
+[connectors.nomasx1.entries.LDAP_EXCLUDE.l]
+fr = "Exclusion LDAP"
+
+[connectors.nomasx1.entries.LDAP_FILTER]
+label = "LDAP Filter"
+format = "textarea"
+
+[connectors.nomasx1.entries.LDAP_FILTER.l]
+fr = "Filtre LDAP"
+
+[connectors.nomasx1.entries.LDAP_CONTEXT]
+label = "LDAP Context"
+format = "textarea"
+
+[connectors.nomasx1.entries.LDAP_CONTEXT.l]
+fr = "Contexte LDAP"
+
+[connectors.nomasx1.entries.APPS_PORT]
+label = "Port"
+format = "number"
+
+[connectors.nomasx1.entries.APPS_PORT.l]
+fr = "Port"
+
+[connectors.nomasx1.entries.USR_DT_LOGIN]
+label = "Login Date"
+format = "date"
+
+[connectors.nomasx1.entries.USR_DT_LOGIN.l]
+fr = "Date de connexion"
+
+[connectors.nomasx1.entries.SQL_BLOB]
+label = "Query"
+format = "textarea"
+
+[connectors.nomasx1.entries.SQL_BLOB.l]
+fr = "Requête"
+
+[connectors.nomasx1.entries.SQL_METHOD]
+label = "SQL Method"
+rules = "ENUM"
+rules_values = "3"
+
+[connectors.nomasx1.entries.SQL_METHOD.l]
+fr = "Nom de la méthode SQL"
+
+[connectors.nomasx1.entries.RLU_DT_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[connectors.nomasx1.entries.RLU_DT_REFRESH.l]
+fr = "Date mise à jour"
+
+[connectors.nomasx1.entries.RLU_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.RLU_UKID.l]
 fr = "UKID"
 
 [connectors.nomasx1.entries.MENU_APPS_ID]
@@ -1561,47 +722,41 @@ format = "number"
 [connectors.nomasx1.entries.MENU_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.MENU_CHILD_ID]
-label = "Child ID"
-
-[connectors.nomasx1.entries.MENU_CHILD_ID.l]
-fr = "Enfant ID"
-
-[connectors.nomasx1.entries.MENU_FORM]
-label = "Form"
-
-[connectors.nomasx1.entries.MENU_FORM.l]
-fr = "Ecran"
-
-[connectors.nomasx1.entries.MENU_ID]
-label = "Menu ID"
-
-[connectors.nomasx1.entries.MENU_ID.l]
-fr = "Menu ID"
-
 [connectors.nomasx1.entries.MENU_LANGUAGE]
 label = "Language"
 
 [connectors.nomasx1.entries.MENU_LANGUAGE.l]
 fr = "Langue"
 
-[connectors.nomasx1.entries.MENU_LEVEL]
-label = "Level"
+[connectors.nomasx1.entries.MENU_ROOT_ID]
+label = "Root ID"
 
-[connectors.nomasx1.entries.MENU_LEVEL.l]
-fr = "Niveau"
+[connectors.nomasx1.entries.MENU_ROOT_ID.l]
+fr = "Racine ID"
+
+[connectors.nomasx1.entries.MENU_PARENT_ID]
+label = "Parent ID"
+
+[connectors.nomasx1.entries.MENU_PARENT_ID.l]
+fr = "Parent ID"
+
+[connectors.nomasx1.entries.MENU_CHILD_ID]
+label = "Child ID"
+
+[connectors.nomasx1.entries.MENU_CHILD_ID.l]
+fr = "Enfant ID"
+
+[connectors.nomasx1.entries.MENU_ROOT]
+label = "Root"
+
+[connectors.nomasx1.entries.MENU_ROOT.l]
+fr = "Racine"
 
 [connectors.nomasx1.entries.MENU_LEVEL1]
 label = "Level 1"
 
 [connectors.nomasx1.entries.MENU_LEVEL1.l]
 fr = "Niveau 1"
-
-[connectors.nomasx1.entries.MENU_LEVEL10]
-label = "Level 10"
-
-[connectors.nomasx1.entries.MENU_LEVEL10.l]
-fr = "Niveau 10"
 
 [connectors.nomasx1.entries.MENU_LEVEL2]
 label = "Level 2"
@@ -1651,739 +806,23 @@ label = "Level 9"
 [connectors.nomasx1.entries.MENU_LEVEL9.l]
 fr = "Niveau 9"
 
+[connectors.nomasx1.entries.MENU_LEVEL10]
+label = "Level 10"
+
+[connectors.nomasx1.entries.MENU_LEVEL10.l]
+fr = "Niveau 10"
+
+[connectors.nomasx1.entries.MENU_ID]
+label = "Menu ID"
+
+[connectors.nomasx1.entries.MENU_ID.l]
+fr = "Menu ID"
+
 [connectors.nomasx1.entries.MENU_OBJECT]
 label = "Object"
 
 [connectors.nomasx1.entries.MENU_OBJECT.l]
 fr = "Objet"
-
-[connectors.nomasx1.entries.MENU_PARENT_ID]
-label = "Parent ID"
-
-[connectors.nomasx1.entries.MENU_PARENT_ID.l]
-fr = "Parent ID"
-
-[connectors.nomasx1.entries.MENU_REFRESH]
-label = "Refresh Date"
-format = "date"
-
-[connectors.nomasx1.entries.MENU_REFRESH.l]
-fr = "Date de mise à jour"
-
-[connectors.nomasx1.entries.MENU_ROOT]
-label = "Root"
-
-[connectors.nomasx1.entries.MENU_ROOT.l]
-fr = "Racine"
-
-[connectors.nomasx1.entries.MENU_ROOT_ID]
-label = "Root ID"
-
-[connectors.nomasx1.entries.MENU_ROOT_ID.l]
-fr = "Racine ID"
-
-[connectors.nomasx1.entries.MENU_SEQ]
-label = "Sequence"
-
-[connectors.nomasx1.entries.MENU_SEQ.l]
-fr = "Séquence"
-
-[connectors.nomasx1.entries.MENU_SEQ_UKID]
-label = "Menu UKID"
-
-[connectors.nomasx1.entries.MENU_SEQ_UKID.l]
-fr = "Menu UKID"
-
-[connectors.nomasx1.entries.MENU_UKID]
-label = "UKID"
-format = "number"
-
-[connectors.nomasx1.entries.MENU_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.MENU_VERSION]
-label = "Version"
-
-[connectors.nomasx1.entries.MENU_VERSION.l]
-fr = "Version"
-
-[connectors.nomasx1.entries.MET_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.MET_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.MET_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.MET_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.MET_DESCRIPTION]
-label = "Metric"
-
-[connectors.nomasx1.entries.MET_DESCRIPTION.l]
-fr = "Métrique"
-
-[connectors.nomasx1.entries.MET_ID]
-label = "Metric ID"
-format = "number"
-rules = "LOOKUP"
-rules_values = "3"
-
-[connectors.nomasx1.entries.MET_ID.l]
-fr = "Métrique ID"
-
-[connectors.nomasx1.entries.MET_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "14"
-
-[connectors.nomasx1.entries.MET_UKID.l]
-fr = "MET_UKID"
-
-[connectors.nomasx1.entries.OBJECT1_NAME]
-label = "Object Name 1"
-
-[connectors.nomasx1.entries.OBJECT1_NAME.l]
-fr = "Nom Objet 1"
-
-[connectors.nomasx1.entries.OBJECT2_NAME]
-label = "Object Name 2"
-
-[connectors.nomasx1.entries.OBJECT2_NAME.l]
-fr = "Nom Objet 2"
-
-[connectors.nomasx1.entries.OBJECT_ACT_ID]
-label = "Activity ID"
-
-[connectors.nomasx1.entries.OBJECT_ACT_ID.l]
-fr = "Activité ID"
-
-[connectors.nomasx1.entries.OBJECT_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.OBJECT_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.OBJECT_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.OBJECT_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.OBJECT_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.OBJECT_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.OBJECT_ID]
-label = "Object Code"
-
-[connectors.nomasx1.entries.OBJECT_ID.l]
-fr = "Code Objet"
-
-[connectors.nomasx1.entries.OBJECT_NAME]
-label = "Object Name"
-
-[connectors.nomasx1.entries.OBJECT_NAME.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.OBJECT_PROCESS_ID]
-label = "Process ID"
-
-[connectors.nomasx1.entries.OBJECT_PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.OBJECT_ROW_ID]
-label = "Object ID"
-
-[connectors.nomasx1.entries.OBJECT_ROW_ID.l]
-fr = "Objet ID"
-
-[connectors.nomasx1.entries.OBJECT_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "5"
-
-[connectors.nomasx1.entries.OBJECT_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.OPAR_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.OPAR_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.OPAR_MIN_CREATED]
-label = "Create Date"
-format = "date"
-
-[connectors.nomasx1.entries.OPAR_MIN_LAST_DDL]
-label = "Last Date"
-format = "date"
-
-[connectors.nomasx1.entries.OPAR_MIN_LAST_DDL.l]
-fr = "Date d'utilisation"
-
-[connectors.nomasx1.entries.OPAR_OWNER]
-label = "User ID"
-
-[connectors.nomasx1.entries.OPAR_OWNER.l]
-fr = "User ID"
-
-[connectors.nomasx1.entries.OPAR_SEGMENT_NAME]
-label = "Segment Name"
-
-[connectors.nomasx1.entries.OPAR_SEGMENT_NAME.l]
-fr = "Nom du segment"
-
-[connectors.nomasx1.entries.OPAR_SEGMENT_TYPE]
-label = "Segment Type"
-
-[connectors.nomasx1.entries.OPAR_SEGMENT_TYPE.l]
-fr = "Type de segment"
-
-[connectors.nomasx1.entries.OPT_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.OPT_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.OPT_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.OPT_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.OPT_CPT_ID]
-label = "Component ID"
-format = "number"
-
-[connectors.nomasx1.entries.OPT_CPT_ID.l]
-fr = "Composant ID"
-
-[connectors.nomasx1.entries.OPT_ID]
-label = "Option ID"
-
-[connectors.nomasx1.entries.OPT_ID.l]
-fr = "Option ID"
-
-[connectors.nomasx1.entries.OPT_OPTION]
-label = "Option"
-
-[connectors.nomasx1.entries.OPT_OPTION.l]
-fr = "Option"
-
-[connectors.nomasx1.entries.OPT_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "11"
-
-[connectors.nomasx1.entries.OPT_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.ORAF_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.ORAF_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.ORAF_FEATURE]
-label = "Feature"
-
-[connectors.nomasx1.entries.ORAF_FEATURE.l]
-fr = "Caractéristique"
-
-[connectors.nomasx1.entries.ORAF_FIRST_USAGE]
-label = "First Usage"
-
-[connectors.nomasx1.entries.ORAF_FIRST_USAGE.l]
-fr = "Première utilisation"
-
-[connectors.nomasx1.entries.ORAF_INST_ID]
-label = "Instance"
-
-[connectors.nomasx1.entries.ORAF_INST_ID.l]
-fr = "Instance"
-
-[connectors.nomasx1.entries.ORAF_LAST_USAGE]
-label = "Last Usage"
-
-[connectors.nomasx1.entries.ORAF_LAST_USAGE.l]
-fr = "Dernière Utilisation"
-
-[connectors.nomasx1.entries.ORAF_USAGE]
-label = "# Usage"
-
-[connectors.nomasx1.entries.ORAF_USAGE.l]
-fr = "# Utilisation"
-
-[connectors.nomasx1.entries.ORAL_USED]
-label = "Required License"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.ORAL_USED.l]
-fr = "Licence requise"
-
-[connectors.nomasx1.entries.ORAO_INST_ID]
-label = "Instance"
-
-[connectors.nomasx1.entries.ORAO_INST_ID.l]
-fr = "Instance"
-
-[connectors.nomasx1.entries.ORAO_PARAMETER]
-label = "Option"
-
-[connectors.nomasx1.entries.ORAO_PARAMETER.l]
-fr = "Option"
-
-[connectors.nomasx1.entries.ORAO_VALUE]
-label = "Enabled (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.ORAO_VALUE.l]
-fr = "Active (Y/N)"
-
-[connectors.nomasx1.entries.ORAP_ACTIVE_USERS]
-label = "# Active users"
-
-[connectors.nomasx1.entries.ORAP_ACTIVE_USERS.l]
-fr = "# Utilisateurs actifs"
-
-[connectors.nomasx1.entries.ORAP_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.ORAP_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.ORAP_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.ORAP_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.ORAP_COUNT_INST]
-label = "# Instance"
-
-[connectors.nomasx1.entries.ORAP_COUNT_INST.l]
-fr = "# Instance"
-
-[connectors.nomasx1.entries.ORAP_CPU]
-label = "CPU"
-
-[connectors.nomasx1.entries.ORAP_CPU.l]
-fr = "CPU"
-
-[connectors.nomasx1.entries.ORAP_DBID]
-label = "Id"
-
-[connectors.nomasx1.entries.ORAP_DBID.l]
-fr = "Id"
-
-[connectors.nomasx1.entries.ORAP_DG]
-label = "Data Guard (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.ORAP_DG.l]
-fr = "Data Guard (Y/N)"
-
-[connectors.nomasx1.entries.ORAP_FULL_VERSION]
-label = "Full Version"
-
-[connectors.nomasx1.entries.ORAP_FULL_VERSION.l]
-fr = "Version complète"
-
-[connectors.nomasx1.entries.ORAP_HOSTNAME]
-label = "Hostname"
-
-[connectors.nomasx1.entries.ORAP_HOSTNAME.l]
-fr = "Serveur"
-
-[connectors.nomasx1.entries.ORAP_NAME]
-label = "Name"
-
-[connectors.nomasx1.entries.ORAP_NAME.l]
-fr = "Nom"
-
-[connectors.nomasx1.entries.ORAP_PACK]
-label = "Pack OEM"
-
-[connectors.nomasx1.entries.ORAP_PACK.l]
-fr = "Pack OEM"
-
-[connectors.nomasx1.entries.ORAP_PRODUCT]
-label = "Component"
-
-[connectors.nomasx1.entries.ORAP_PRODUCT.l]
-fr = "Composant"
-
-[connectors.nomasx1.entries.ORAP_SIZE_GB]
-label = "Size GB"
-format = "number"
-
-[connectors.nomasx1.entries.ORAP_SIZE_GB.l]
-fr = "Taille Gb"
-
-[connectors.nomasx1.entries.ORAP_TECHNICAL_USERS]
-label = "# Technical Users"
-
-[connectors.nomasx1.entries.ORAP_TECHNICAL_USERS.l]
-fr = "# Utilisateurs Techniques"
-
-[connectors.nomasx1.entries.ORAP_TOTAL_USERS]
-label = "# Total users"
-
-[connectors.nomasx1.entries.ORAP_TOTAL_USERS.l]
-fr = "# Utilisateurs déclarés"
-
-[connectors.nomasx1.entries.ORAP_UKID]
-label = "UKID"
-format = "number"
-
-[connectors.nomasx1.entries.ORAP_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.ORAP_VERSION]
-label = "Version"
-
-[connectors.nomasx1.entries.ORAP_VERSION.l]
-fr = "Version"
-
-[connectors.nomasx1.entries.PRC_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.PRC_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.PRC_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.PRC_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.PRC_COMPONENT_ID]
-label = "Component ID"
-
-[connectors.nomasx1.entries.PRC_COMPONENT_ID.l]
-fr = "Composant ID"
-
-[connectors.nomasx1.entries.PRC_CPT_ID]
-label = "Component ID"
-format = "number"
-
-[connectors.nomasx1.entries.PRC_CPT_ID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.PRC_ID]
-label = "ID"
-format = "number"
-
-[connectors.nomasx1.entries.PRC_ID.l]
-fr = "ID"
-
-[connectors.nomasx1.entries.PRC_MET_ID]
-label = "Metric ID"
-format = "number"
-
-[connectors.nomasx1.entries.PRC_MET_ID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.PRC_METRIC_ID]
-label = "Metric ID"
-
-[connectors.nomasx1.entries.PRC_METRIC_ID.l]
-fr = "Métrique ID"
-
-[connectors.nomasx1.entries.PRC_MINIMUM]
-label = "Minimum"
-
-[connectors.nomasx1.entries.PRC_MINIMUM.l]
-fr = "Minimum"
-
-[connectors.nomasx1.entries.PRC_PRICE]
-label = "Price"
-format = "number"
-
-[connectors.nomasx1.entries.PRC_PRICE.l]
-fr = "Tarif"
-
-[connectors.nomasx1.entries.PRC_SUPPORT]
-label = "Support"
-format = "number"
-
-[connectors.nomasx1.entries.PRC_SUPPORT.l]
-fr = "Support"
-
-[connectors.nomasx1.entries.PRC_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "15"
-
-[connectors.nomasx1.entries.PRC_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.PROCESS_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.PROCESS_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.PROCESS_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.PROCESS_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.PROCESS_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.PROCESS_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.PROCESS_ID]
-label = "Process ID"
-rules = "LOOKUP"
-rules_values = "8"
-
-[connectors.nomasx1.entries.PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.PROCESS_NAME]
-label = "Process"
-
-[connectors.nomasx1.entries.PROCESS_NAME.l]
-fr = "Process"
-
-[connectors.nomasx1.entries.PROCESS_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "1"
-
-[connectors.nomasx1.entries.PROCESS_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.PRQ_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.PRQ_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.PRQ_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.PRQ_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.PRQ_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.PRQ_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.PRQ_COMPONENT]
-label = "Component"
-
-[connectors.nomasx1.entries.PRQ_COMPONENT.l]
-fr = "Composant"
-
-[connectors.nomasx1.entries.PRQ_PREREQ]
-label = "Prerequisite"
-
-[connectors.nomasx1.entries.PRQ_PREREQ.l]
-fr = "Pré-requis"
-
-[connectors.nomasx1.entries.PRQ_PRODUCT]
-label = "Product"
-
-[connectors.nomasx1.entries.PRQ_PRODUCT.l]
-fr = "Produit"
-
-[connectors.nomasx1.entries.PRQ_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "7"
-
-[connectors.nomasx1.entries.PRQ_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.QUERY_CRUD]
-label = "Query Type"
-
-[connectors.nomasx1.entries.QUERY_CRUD.l]
-fr = "Type de requête"
-
-[connectors.nomasx1.entries.QUERY_ORDER]
-label = "Sort order"
-
-[connectors.nomasx1.entries.QUERY_ORDER.l]
-fr = "Ordre de tri"
-
-[connectors.nomasx1.entries.QUERY_PATH]
-label = "Query ID"
-
-[connectors.nomasx1.entries.QUERY_PATH.l]
-fr = "Identifiant de requête"
-
-[connectors.nomasx1.entries.QUERY_SQL]
-label = "SQL Query"
-
-[connectors.nomasx1.entries.QUERY_SQL.l]
-fr = "Requête SQL"
-
-[connectors.nomasx1.entries.RISK_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.RISK_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.RISK_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.RISK_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.RISK_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.RISK_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.RISK_ID]
-label = "Risk ID"
-rules = "LOOKUP"
-rules_values = "9"
-
-[connectors.nomasx1.entries.RISK_ID.l]
-fr = "Risque ID"
-
-[connectors.nomasx1.entries.RISK_LEVEL]
-label = "Critical Level"
-
-[connectors.nomasx1.entries.RISK_LEVEL.l]
-fr = "Niveau critique"
-
-[connectors.nomasx1.entries.RISK_NAME]
-label = "Risk"
-format = "textarea"
-
-[connectors.nomasx1.entries.RISK_NAME.l]
-fr = "Risque"
-
-[connectors.nomasx1.entries.RISK_PROCESS_ID]
-label = "Process ID"
-
-[connectors.nomasx1.entries.RISK_PROCESS_ID.l]
-fr = "Process ID"
-
-[connectors.nomasx1.entries.RISK_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "3"
-
-[connectors.nomasx1.entries.RISK_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.RLU_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.RLU_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.RLU_DT_EFFECTIVE]
-label = "Effective Date"
-format = "date"
-
-[connectors.nomasx1.entries.RLU_DT_EFFECTIVE.l]
-fr = "Date effective"
-
-[connectors.nomasx1.entries.RLU_DT_EXPIRATION]
-label = "Expiration Date"
-format = "date"
-
-[connectors.nomasx1.entries.RLU_DT_EXPIRATION.l]
-fr = "Date expiration"
-
-[connectors.nomasx1.entries.RLU_DT_REFRESH]
-label = "Refresh Date"
-format = "date"
-
-[connectors.nomasx1.entries.RLU_DT_REFRESH.l]
-fr = "Date mise à jour"
-
-[connectors.nomasx1.entries.RLU_ROLE_ID]
-label = "Role ID"
-
-[connectors.nomasx1.entries.RLU_ROLE_ID.l]
-fr = "Role ID"
-
-[connectors.nomasx1.entries.RLU_UKID]
-label = "UKID"
-format = "number"
-
-[connectors.nomasx1.entries.RLU_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.RLU_USER_ID]
-label = "User ID"
-
-[connectors.nomasx1.entries.RLU_USER_ID.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.ROL1_NAME]
-label = "Role Name 1"
-
-[connectors.nomasx1.entries.ROL1_NAME.l]
-fr = "Nom du rôle 1"
-
-[connectors.nomasx1.entries.ROL2_NAME]
-label = "Role Name 2"
-
-[connectors.nomasx1.entries.ROL2_NAME.l]
-fr = "Nom du rôle 2"
-
-[connectors.nomasx1.entries.ROL_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.ROL_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.ROL_DT_REFRESH]
-label = "Refresh Date"
-format = "date"
-
-[connectors.nomasx1.entries.ROL_DT_REFRESH.l]
-fr = "Date mise à jour"
 
 [connectors.nomasx1.entries.ROL_ID]
 label = "Role ID"
@@ -2393,110 +832,86 @@ rules_values = "7"
 [connectors.nomasx1.entries.ROL_ID.l]
 fr = "Role ID"
 
-[connectors.nomasx1.entries.ROL_NAME]
-label = "Role Name"
+[connectors.nomasx1.entries.MENU_FORM]
+label = "Form"
 
-[connectors.nomasx1.entries.ROL_NAME.l]
-fr = "Nom du rôle"
+[connectors.nomasx1.entries.MENU_FORM.l]
+fr = "Ecran"
 
-[connectors.nomasx1.entries.ROL_NAME_2]
-label = "Role Name 2"
+[connectors.nomasx1.entries.MENU_VERSION]
+label = "Version"
 
-[connectors.nomasx1.entries.ROL_NAME_2.l]
-fr = "Nom du rôle 2"
+[connectors.nomasx1.entries.MENU_VERSION.l]
+fr = "Version"
 
-[connectors.nomasx1.entries.ROL_SEQ]
+[connectors.nomasx1.entries.MENU_LEVEL]
+label = "Level"
+
+[connectors.nomasx1.entries.MENU_LEVEL.l]
+fr = "Niveau"
+
+[connectors.nomasx1.entries.MENU_SEQ]
 label = "Sequence"
 
-[connectors.nomasx1.entries.ROL_SEQ.l]
+[connectors.nomasx1.entries.MENU_SEQ.l]
 fr = "Séquence"
 
-[connectors.nomasx1.entries.ROL_UKID]
+[connectors.nomasx1.entries.MENU_UKID]
 label = "UKID"
 format = "number"
 
-[connectors.nomasx1.entries.ROL_UKID.l]
+[connectors.nomasx1.entries.MENU_UKID.l]
 fr = "UKID"
 
-[connectors.nomasx1.entries.RTC_APPS_ID]
+[connectors.nomasx1.entries.XREF_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.RTC_APPS_ID.l]
+[connectors.nomasx1.entries.XREF_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.RTC_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
+[connectors.nomasx1.entries.XREF_TYPE_FROM]
+label = "Type From"
 
-[connectors.nomasx1.entries.RTC_AUDIT_DATE.l]
-fr = "Date (Audit)"
+[connectors.nomasx1.entries.XREF_TYPE_FROM.l]
+fr = "Type From"
 
-[connectors.nomasx1.entries.RTC_AUDIT_USER]
-label = "User (Audit)"
+[connectors.nomasx1.entries.XREF_OBJECT_FROM]
+label = "Object From"
 
-[connectors.nomasx1.entries.RTC_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
+[connectors.nomasx1.entries.XREF_OBJECT_FROM.l]
+fr = "Object From"
 
-[connectors.nomasx1.entries.RTC_COMPONENT]
-label = "Component"
+[connectors.nomasx1.entries.XREF_DESCRIPTION_FROM]
+label = "Description From"
 
-[connectors.nomasx1.entries.RTC_COMPONENT.l]
-fr = "Composant"
+[connectors.nomasx1.entries.XREF_DESCRIPTION_FROM.l]
+fr = "Description From"
 
-[connectors.nomasx1.entries.RTC_PRODUCT]
-label = "Product"
+[connectors.nomasx1.entries.XREF_TYPE_TO]
+label = "Type To"
 
-[connectors.nomasx1.entries.RTC_PRODUCT.l]
-fr = "Produit"
+[connectors.nomasx1.entries.XREF_TYPE_TO.l]
+fr = "Type To"
 
-[connectors.nomasx1.entries.RTC_RESTRICTION]
-label = "Restrictions"
+[connectors.nomasx1.entries.XREF_OBJECT_TO]
+label = "Object To"
 
-[connectors.nomasx1.entries.RTC_RESTRICTION.l]
-fr = "Restrictions"
+[connectors.nomasx1.entries.XREF_OBJECT_TO.l]
+fr = "Object To"
 
-[connectors.nomasx1.entries.RTC_UKID]
+[connectors.nomasx1.entries.XREF_DESCRIPTION_TO]
+label = "Description To"
+
+[connectors.nomasx1.entries.XREF_DESCRIPTION_TO.l]
+fr = "Description To"
+
+[connectors.nomasx1.entries.XREF_UKID]
 label = "UKID"
 format = "number"
-rules = "SEQUENCE"
-rules_values = "8"
 
-[connectors.nomasx1.entries.RTC_UKID.l]
+[connectors.nomasx1.entries.XREF_UKID.l]
 fr = "UKID"
-
-[connectors.nomasx1.entries.SEC_DESCRIPTION]
-label = "Table description"
-
-[connectors.nomasx1.entries.SEC_DESCRIPTION.l]
-fr = "Description"
-
-[connectors.nomasx1.entries.SEC_LANGUAGE]
-label = "Language"
-
-[connectors.nomasx1.entries.SEC_LANGUAGE.l]
-fr = "Language"
-
-[connectors.nomasx1.entries.SEC_NAME]
-label = "Table name"
-
-[connectors.nomasx1.entries.SEC_NAME.l]
-fr = "Table"
-
-[connectors.nomasx1.entries.SEC_SEQUENCE]
-label = "Sequence"
-
-[connectors.nomasx1.entries.SEC_SEQUENCE.l]
-fr = "Séquence"
-
-[connectors.nomasx1.entries.SER_ADD]
-label = "A"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.SER_ADD.l]
-fr = "A"
 
 [connectors.nomasx1.entries.SER_APPS_ID]
 label = "Application ID"
@@ -2505,53 +920,11 @@ format = "number"
 [connectors.nomasx1.entries.SER_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.SER_CHG]
-label = "C"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
+[connectors.nomasx1.entries.SER_ROOT_ID]
+label = "Root ID"
 
-[connectors.nomasx1.entries.SER_CHG.l]
-fr = "M"
-
-[connectors.nomasx1.entries.SER_DEL]
-label = "D"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.SER_DEL.l]
-fr = "S"
-
-[connectors.nomasx1.entries.SERL_FORM]
-label = "Form"
-
-[connectors.nomasx1.entries.SERL_FORM.l]
-fr = "Ecran"
-
-[connectors.nomasx1.entries.SER_MENU_SEQUKID]
-label = "Menu ID"
-
-[connectors.nomasx1.entries.SER_MENU_SEQUKID.l]
-fr = "Menu ID"
-
-[connectors.nomasx1.entries.SER_OBJECT]
-label = "Object"
-
-[connectors.nomasx1.entries.SER_OBJECT.l]
-fr = "Objet"
-
-[connectors.nomasx1.entries.SER_REFRESH]
-label = "Refresh Date"
-
-[connectors.nomasx1.entries.SER_REFRESH.l]
-fr = "Date mise à jour"
-
-[connectors.nomasx1.entries.SER_ROLE_ACTION_ID]
-label = "Role Action ID"
-
-[connectors.nomasx1.entries.SER_ROLE_ACTION_ID.l]
-fr = "Role Action ID"
+[connectors.nomasx1.entries.SER_ROOT_ID.l]
+fr = "Racine ID"
 
 [connectors.nomasx1.entries.SER_ROLE_ID]
 label = "Role ID"
@@ -2559,20 +932,41 @@ label = "Role ID"
 [connectors.nomasx1.entries.SER_ROLE_ID.l]
 fr = "Role ID"
 
-[connectors.nomasx1.entries.SER_ROOT_ID]
-label = "Root ID"
+[connectors.nomasx1.entries.SER_USER_ID]
+label = "User ID"
 
-[connectors.nomasx1.entries.SER_ROOT_ID.l]
-fr = "Racine ID"
+[connectors.nomasx1.entries.SER_USER_ID.l]
+fr = "Utilisateur ID"
 
-[connectors.nomasx1.entries.SER_RUN]
-label = "Run"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
+[connectors.nomasx1.entries.SER_ROLE_ACTION_ID]
+label = "Role Action ID"
 
-[connectors.nomasx1.entries.SER_RUN.l]
-fr = "Exécuter"
+[connectors.nomasx1.entries.SER_ROLE_ACTION_ID.l]
+fr = "Role Action ID"
+
+[connectors.nomasx1.entries.SER_OBJECT]
+label = "Object"
+
+[connectors.nomasx1.entries.SER_OBJECT.l]
+fr = "Objet"
+
+[connectors.nomasx1.entries.SERL_FORM]
+label = "Form"
+
+[connectors.nomasx1.entries.SERL_FORM.l]
+fr = "Ecran"
+
+[connectors.nomasx1.entries.SER_VERSION]
+label = "Version"
+
+[connectors.nomasx1.entries.SER_VERSION.l]
+fr = "Version"
+
+[connectors.nomasx1.entries.SER_REFRESH]
+label = "Refresh Date"
+
+[connectors.nomasx1.entries.SER_REFRESH.l]
+fr = "Date mise à jour"
 
 [connectors.nomasx1.entries.SER_UKID]
 label = "UKID"
@@ -2581,84 +975,339 @@ format = "number"
 [connectors.nomasx1.entries.SER_UKID.l]
 fr = "UKID"
 
-[connectors.nomasx1.entries.SER_USER_ID]
-label = "User ID"
-
-[connectors.nomasx1.entries.SER_USER_ID.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.SER_VERSION]
-label = "Version"
-
-[connectors.nomasx1.entries.SER_VERSION.l]
-fr = "Version"
-
-[connectors.nomasx1.entries.SQL_APPS_ID]
+[connectors.nomasx1.entries.ACT_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.SQL_APPS_ID.l]
+[connectors.nomasx1.entries.ACT_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.SQL_AUDIT_DATE]
+[connectors.nomasx1.entries.ACT_PROCESS_ID]
+label = "Process ID"
+
+[connectors.nomasx1.entries.ACT_PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.ACT_NAME]
+label = "Activity"
+
+[connectors.nomasx1.entries.ACT_NAME.l]
+fr = "Activité"
+
+[connectors.nomasx1.entries.ACT1_NAME]
+label = "Activity 1"
+
+[connectors.nomasx1.entries.ACT1_NAME.l]
+fr = "Activité 1"
+
+[connectors.nomasx1.entries.ACT2_NAME]
+label = "Activity 2"
+
+[connectors.nomasx1.entries.ACT2_NAME.l]
+fr = "Activité 2"
+
+[connectors.nomasx1.entries.ACT_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.ACT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.ACT_AUDIT_DATE]
 label = "Date (Audit)"
 format = "date"
 
-[connectors.nomasx1.entries.SQL_AUDIT_DATE.l]
+[connectors.nomasx1.entries.ACT_AUDIT_DATE.l]
 fr = "Date (Audit)"
 
-[connectors.nomasx1.entries.SQL_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.SQL_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.SQL_BLOB]
-label = "Query"
-format = "textarea"
-
-[connectors.nomasx1.entries.SQL_BLOB.l]
-fr = "Requête"
-
-[connectors.nomasx1.entries.SQL_DEFAULT]
-label = "Embedded query"
-
-[connectors.nomasx1.entries.SQL_DEFAULT.l]
-fr = "Prédéfinie (Y/N)"
-
-[connectors.nomasx1.entries.SQL_JDBC]
-label = "JDBC"
-
-[connectors.nomasx1.entries.SQL_JDBC.l]
-fr = "JDBC"
-
-[connectors.nomasx1.entries.SQL_METHOD]
-label = "SQL Method"
-rules = "ENUM"
-rules_values = "3"
-
-[connectors.nomasx1.entries.SQL_METHOD.l]
-fr = "Nom de la méthode SQL"
-
-[connectors.nomasx1.entries.SQL_PASSWORD]
-label = "Password"
-rules = "PASSWORD"
-
-[connectors.nomasx1.entries.SQL_PASSWORD.l]
-fr = "Mot de passe"
-
-[connectors.nomasx1.entries.SQL_USER]
-label = "User"
-
-[connectors.nomasx1.entries.SQL_USER.l]
-fr = "Utilisateur"
-
-[connectors.nomasx1.entries.SUBSCRIBED]
-label = "# Subscribed"
+[connectors.nomasx1.entries.PROCESS_APPS_ID]
+label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.SUBSCRIBED.l]
-fr = "Licences acquises"
+[connectors.nomasx1.entries.PROCESS_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.PROCESS_NAME]
+label = "Process"
+
+[connectors.nomasx1.entries.PROCESS_NAME.l]
+fr = "Process"
+
+[connectors.nomasx1.entries.PROCESS_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.PROCESS_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.PROCESS_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.PROCESS_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.MATRIX_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.MATRIX_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.MATRIX_PROCESS_ID]
+label = "Process ID"
+
+[connectors.nomasx1.entries.MATRIX_PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.RISK_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.RISK_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.RISK_PROCESS_ID]
+label = "Process ID"
+
+[connectors.nomasx1.entries.RISK_PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.RISK_LEVEL]
+label = "Critical Level"
+
+[connectors.nomasx1.entries.RISK_LEVEL.l]
+fr = "Niveau critique"
+
+[connectors.nomasx1.entries.RISK_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.RISK_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.RISK_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.RISK_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.MATRIX_RISK_ID]
+label = "Risk ID"
+
+[connectors.nomasx1.entries.MATRIX_RISK_ID.l]
+fr = "Risque ID"
+
+[connectors.nomasx1.entries.MATRIX_RISK_LEVEL]
+label = "Risk Level"
+
+[connectors.nomasx1.entries.MATRIX_RISK_LEVEL.l]
+fr = "Niveau de risque"
+
+[connectors.nomasx1.entries.MATRIX_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.MATRIX_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.MATRIX_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.MATRIX_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.OBJECT_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.OBJECT_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.OBJECT_PROCESS_ID]
+label = "Process ID"
+
+[connectors.nomasx1.entries.OBJECT_PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.OBJECT_ACT_ID]
+label = "Activity ID"
+
+[connectors.nomasx1.entries.OBJECT_ACT_ID.l]
+fr = "Activité ID"
+
+[connectors.nomasx1.entries.OBJECT_ROW_ID]
+label = "Object ID"
+
+[connectors.nomasx1.entries.OBJECT_ROW_ID.l]
+fr = "Objet ID"
+
+[connectors.nomasx1.entries.OBJECT_ID]
+label = "Object Code"
+
+[connectors.nomasx1.entries.OBJECT_ID.l]
+fr = "Code Objet"
+
+[connectors.nomasx1.entries.OBJECT_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.OBJECT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.OBJECT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.OBJECT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.CFD_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.CFD_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.CFD_PROCESS_ID]
+label = "Process ID"
+
+[connectors.nomasx1.entries.CFD_PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.CFD_RISK_ID]
+label = "Risk ID"
+
+[connectors.nomasx1.entries.CFD_RISK_ID.l]
+fr = "Risque ID"
+
+[connectors.nomasx1.entries.CFD_USER_ID]
+label = "User ID"
+
+[connectors.nomasx1.entries.CFD_USER_ID.l]
+fr = "Utilisateur ID"
+
+[connectors.nomasx1.entries.CFD_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.CFD_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[connectors.nomasx1.entries.CFD_REFRESH]
+label = "Refresh Date"
+
+[connectors.nomasx1.entries.CFD_REFRESH.l]
+fr = "Date mise à jour"
+
+[connectors.nomasx1.entries.CFD_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.CFD_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.CFS_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.CFS_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.CFS_PROCESS_ID]
+label = "Process ID"
+
+[connectors.nomasx1.entries.CFS_PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.CFS_ACT1_ID]
+label = "Activity 1 ID"
+
+[connectors.nomasx1.entries.CFS_ACT1_ID.l]
+fr = "Activité 1 ID"
+
+[connectors.nomasx1.entries.CFS_ACT2_ID]
+label = "Activity 2 ID"
+
+[connectors.nomasx1.entries.CFS_ACT2_ID.l]
+fr = "Activité 2 ID"
+
+[connectors.nomasx1.entries.CFS_RISK_ID]
+label = "Risk ID"
+
+[connectors.nomasx1.entries.CFS_RISK_ID.l]
+fr = "Risque ID"
+
+[connectors.nomasx1.entries.CFS_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.CFS_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[connectors.nomasx1.entries.CFS_COUNT]
+label = "Count"
+
+[connectors.nomasx1.entries.CFS_COUNT.l]
+fr = "Nombre"
+
+[connectors.nomasx1.entries.CFS_REFRESH]
+label = "Refresh date"
+
+[connectors.nomasx1.entries.CFS_REFRESH.l]
+fr = "Date mise à jour"
+
+[connectors.nomasx1.entries.CFS_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.CFS_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.ACL_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.ACL_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.ACL_SCHEMA]
+label = "Owner"
+
+[connectors.nomasx1.entries.ACL_SCHEMA.l]
+fr = "Schéma"
+
+[connectors.nomasx1.entries.ACL_TABLE_NAME]
+label = "Table Name"
+
+[connectors.nomasx1.entries.ACL_TABLE_NAME.l]
+fr = "Table"
+
+[connectors.nomasx1.entries.ACL_USER_ID]
+label = "User ID"
+
+[connectors.nomasx1.entries.ACL_USER_ID.l]
+fr = "Utilisateur"
+
+[connectors.nomasx1.entries.ACL_DT_TRANSACTION]
+label = "Transaction date"
+format = "date"
+
+[connectors.nomasx1.entries.ACL_DT_TRANSACTION.l]
+fr = "Date de transaction"
+
+[connectors.nomasx1.entries.ACL_COUNT]
+label = "Record count"
+
+[connectors.nomasx1.entries.ACL_COUNT.l]
+fr = "Nombre d'enregistrement"
+
+[connectors.nomasx1.entries.ACL_OBJECT_ID]
+label = "Object"
+
+[connectors.nomasx1.entries.ACL_OBJECT_ID.l]
+fr = "Objet"
 
 [connectors.nomasx1.entries.SYC_APPS_ID]
 label = "Application ID"
@@ -2667,18 +1316,23 @@ format = "number"
 [connectors.nomasx1.entries.SYC_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.SYC_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
+[connectors.nomasx1.entries.SYC_ID]
+label = "Code"
 
-[connectors.nomasx1.entries.SYC_AUDIT_DATE.l]
-fr = "Date (Audit)"
+[connectors.nomasx1.entries.SYC_ID.l]
+fr = "Code"
 
-[connectors.nomasx1.entries.SYC_AUDIT_USER]
-label = "User (Audit)"
+[connectors.nomasx1.entries.SYC_DESCRIPTION]
+label = "Description"
 
-[connectors.nomasx1.entries.SYC_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
+[connectors.nomasx1.entries.SYC_DESCRIPTION.l]
+fr = "Description"
+
+[connectors.nomasx1.entries.SYC_MODULE]
+label = "Module E1"
+
+[connectors.nomasx1.entries.SYC_MODULE.l]
+fr = "Module E1"
 
 [connectors.nomasx1.entries.SYC_COMPONENT_E1]
 label = "E1 Component"
@@ -2692,30 +1346,49 @@ label = "Pricing Component"
 [connectors.nomasx1.entries.SYC_COMPONENT_PRICING.l]
 fr = "Module prix"
 
-[connectors.nomasx1.entries.SYC_CPT_ID]
-label = "Component ID"
+[connectors.nomasx1.entries.SYC_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.SYC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.SYC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.SYC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.PRC_ID]
+label = "ID"
 format = "number"
 
-[connectors.nomasx1.entries.SYC_CPT_ID.l]
+[connectors.nomasx1.entries.PRC_ID.l]
+fr = "ID"
+
+[connectors.nomasx1.entries.PRC_COMPONENT_ID]
+label = "Component ID"
+
+[connectors.nomasx1.entries.PRC_COMPONENT_ID.l]
 fr = "Composant ID"
 
-[connectors.nomasx1.entries.SYC_DESCRIPTION]
-label = "Description"
+[connectors.nomasx1.entries.RISK_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "3"
 
-[connectors.nomasx1.entries.SYC_DESCRIPTION.l]
-fr = "Description"
+[connectors.nomasx1.entries.RISK_UKID.l]
+fr = "UKID"
 
-[connectors.nomasx1.entries.SYC_ID]
-label = "Code"
+[connectors.nomasx1.entries.OBJECT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "5"
 
-[connectors.nomasx1.entries.SYC_ID.l]
-fr = "Code"
-
-[connectors.nomasx1.entries.SYC_MODULE]
-label = "Module E1"
-
-[connectors.nomasx1.entries.SYC_MODULE.l]
-fr = "Module E1"
+[connectors.nomasx1.entries.OBJECT_UKID.l]
+fr = "UKID"
 
 [connectors.nomasx1.entries.SYC_UKID]
 label = "UKID"
@@ -2726,95 +1399,436 @@ rules_values = "6"
 [connectors.nomasx1.entries.SYC_UKID.l]
 fr = "UKID"
 
-[connectors.nomasx1.entries.TOTAL_COMPLIANCE]
-label = "Total Costs"
+[connectors.nomasx1.entries.PRC_METRIC_ID]
+label = "Metric ID"
+
+[connectors.nomasx1.entries.PRC_METRIC_ID.l]
+fr = "Métrique ID"
+
+[connectors.nomasx1.entries.PRC_PRICE]
+label = "Price"
 format = "number"
 
-[connectors.nomasx1.entries.TOTAL_COMPLIANCE.l]
-fr = "Coût Total"
+[connectors.nomasx1.entries.PRC_PRICE.l]
+fr = "Tarif"
 
-[connectors.nomasx1.entries.TOTAL_PRICE]
-label = "Licenses Costs"
+[connectors.nomasx1.entries.PRC_MINIMUM]
+label = "Minimum"
+
+[connectors.nomasx1.entries.PRC_MINIMUM.l]
+fr = "Minimum"
+
+[connectors.nomasx1.entries.OBJECT_NAME]
+label = "Object Name"
+
+[connectors.nomasx1.entries.OBJECT_NAME.l]
+fr = "Objet"
+
+[connectors.nomasx1.entries.MENU_SEQ_UKID]
+label = "Menu UKID"
+
+[connectors.nomasx1.entries.MENU_SEQ_UKID.l]
+fr = "Menu UKID"
+
+[connectors.nomasx1.entries.SER_MENU_SEQUKID]
+label = "Menu ID"
+
+[connectors.nomasx1.entries.SER_MENU_SEQUKID.l]
+fr = "Menu ID"
+
+[connectors.nomasx1.entries.PRC_SUPPORT]
+label = "Support"
 format = "number"
 
-[connectors.nomasx1.entries.TOTAL_PRICE.l]
-fr = "Coût Licences"
+[connectors.nomasx1.entries.PRC_SUPPORT.l]
+fr = "Support"
 
-[connectors.nomasx1.entries.TOTAL_SUPPORT]
-label = "Support Costs"
-format = "number"
+[connectors.nomasx1.entries.PRC_AUDIT_USER]
+label = "User (Audit)"
 
-[connectors.nomasx1.entries.TOTAL_SUPPORT.l]
-fr = "Coût Support"
+[connectors.nomasx1.entries.PRC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
 
-[connectors.nomasx1.entries.TV_APPS_ID]
+[connectors.nomasx1.entries.PRC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.PRC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.PRQ_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.TV_APPS_ID.l]
+[connectors.nomasx1.entries.PRQ_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.TV_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-rules = "SYSDATE"
+[connectors.nomasx1.entries.PRQ_PRODUCT]
+label = "Product"
 
-[connectors.nomasx1.entries.TV_AUDIT_DATE.l]
-fr = "Date (Audit)"
+[connectors.nomasx1.entries.PRQ_PRODUCT.l]
+fr = "Produit"
 
-[connectors.nomasx1.entries.TV_AUDIT_USER]
+[connectors.nomasx1.entries.PRQ_COMPONENT]
+label = "Component"
+
+[connectors.nomasx1.entries.PRQ_COMPONENT.l]
+fr = "Composant"
+
+[connectors.nomasx1.entries.PRQ_PREREQ]
+label = "Prerequisite"
+
+[connectors.nomasx1.entries.PRQ_PREREQ.l]
+fr = "Pré-requis"
+
+[connectors.nomasx1.entries.PRQ_AUDIT_USER]
 label = "User (Audit)"
-rules = "LOGIN"
 
-[connectors.nomasx1.entries.TV_AUDIT_USER.l]
+[connectors.nomasx1.entries.PRQ_AUDIT_USER.l]
 fr = "Utilisateur (Audit)"
 
-[connectors.nomasx1.entries.TV_SECURITY]
-label = "Collect Security (Y/N)"
+[connectors.nomasx1.entries.PRQ_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.PRQ_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.RTC_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.RTC_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.RTC_PRODUCT]
+label = "Product"
+
+[connectors.nomasx1.entries.RTC_PRODUCT.l]
+fr = "Produit"
+
+[connectors.nomasx1.entries.RTC_COMPONENT]
+label = "Component"
+
+[connectors.nomasx1.entries.RTC_COMPONENT.l]
+fr = "Composant"
+
+[connectors.nomasx1.entries.RTC_RESTRICTION]
+label = "Restrictions"
+
+[connectors.nomasx1.entries.RTC_RESTRICTION.l]
+fr = "Restrictions"
+
+[connectors.nomasx1.entries.RTC_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.RTC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.RTC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.RTC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.JDES_OBJECT]
+label = "Object"
+
+[connectors.nomasx1.entries.JDES_OBJECT.l]
+fr = "Objet"
+
+[connectors.nomasx1.entries.JDES_DESCRIPTION]
+label = "Description"
+
+[connectors.nomasx1.entries.JDES_DESCRIPTION.l]
+fr = "Description"
+
+[connectors.nomasx1.entries.JDES_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.JDES_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.SER_CHG]
+label = "C"
 format = "boolean"
 rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.TV_SECURITY.l]
-fr = "Collecter la sécurité (Y/N)"
+[connectors.nomasx1.entries.SER_CHG.l]
+fr = "M"
 
-[connectors.nomasx1.entries.TV_TASK_ID]
-label = "Task ID"
+[connectors.nomasx1.entries.SER_RUN]
+label = "Run"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
 
-[connectors.nomasx1.entries.TV_TASK_ID.l]
-fr = "Tâche ID"
+[connectors.nomasx1.entries.SER_RUN.l]
+fr = "Exécuter"
 
-[connectors.nomasx1.entries.TV_TASK_NAME]
-label = "Task Name"
+[connectors.nomasx1.entries.JDES_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
 
-[connectors.nomasx1.entries.TV_TASK_NAME.l]
-fr = "Nom Tâche"
+[connectors.nomasx1.entries.JDES_AUDIT_DATE.l]
+fr = "Date (Audit)"
 
-[connectors.nomasx1.entries.USERS_COUNT]
-label = "# Users"
-format = "number"
-
-[connectors.nomasx1.entries.USERS_COUNT.l]
-fr = "# Utilisateurs"
-
-[connectors.nomasx1.entries.USR_APPS_ID]
+[connectors.nomasx1.entries.LOBJ_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.USR_APPS_ID.l]
+[connectors.nomasx1.entries.LOBJ_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.USRD_ABAT1]
-label = "User Type"
+[connectors.nomasx1.entries.ACT_ID]
+label = "Activity ID"
+rules = "LOOKUP"
+rules_values = "10"
 
-[connectors.nomasx1.entries.USRD_ABAT1.l]
-fr = "Type Utilisateur"
+[connectors.nomasx1.entries.ACT_ID.l]
+fr = "Activité ID"
 
-[connectors.nomasx1.entries.USRD_ABAT1_DESC]
-label = "Type Description"
+[connectors.nomasx1.entries.RISK_NAME]
+label = "Risk"
+format = "textarea"
 
-[connectors.nomasx1.entries.USRD_ABAT1_DESC.l]
-fr = "Description Type"
+[connectors.nomasx1.entries.RISK_NAME.l]
+fr = "Risque"
+
+[connectors.nomasx1.entries.CFD_ACT2_ID]
+label = "Activity 2"
+rules = "LOOKUP"
+rules_values = "10"
+
+[connectors.nomasx1.entries.CFD_ACT2_ID.l]
+fr = "Activité 2"
+
+[connectors.nomasx1.entries.CFD_ROLE1_ID]
+label = "Role 1"
+rules = "LOOKUP"
+rules_values = "7"
+
+[connectors.nomasx1.entries.CFD_ROLE1_ID.l]
+fr = "Rôle 1"
+
+[connectors.nomasx1.entries.MATRIX_ACT1_ID]
+label = "Activity 1 ID"
+rules = "LOOKUP"
+rules_values = "10"
+
+[connectors.nomasx1.entries.MATRIX_ACT1_ID.l]
+fr = "Activité 1 ID"
+
+[connectors.nomasx1.entries.CFD_ACT2_OBJECT]
+label = "Object 2"
+rules = "LOOKUP"
+rules_values = "11"
+
+[connectors.nomasx1.entries.CFD_ACT2_OBJECT.l]
+fr = "Objet 2"
+
+[connectors.nomasx1.entries.LOBJ_PRODUCT]
+label = "Product"
+
+[connectors.nomasx1.entries.LOBJ_PRODUCT.l]
+fr = "Produit"
+
+[connectors.nomasx1.entries.LOBJ_COMPONENT]
+label = "Component"
+
+[connectors.nomasx1.entries.LOBJ_COMPONENT.l]
+fr = "Composant"
+
+[connectors.nomasx1.entries.LOBJ_OBJECT]
+label = "Object"
+
+[connectors.nomasx1.entries.LOBJ_OBJECT.l]
+fr = "Objet"
+
+[connectors.nomasx1.entries.LOBJ_DESCRIPTION]
+label = "Description"
+
+[connectors.nomasx1.entries.LOBJ_DESCRIPTION.l]
+fr = "Description"
+
+[connectors.nomasx1.entries.LOBJ_SY]
+label = "System Code"
+
+[connectors.nomasx1.entries.LOBJ_SY.l]
+fr = "Code système"
+
+[connectors.nomasx1.entries.LOBJ_TYPE]
+label = "Type"
+
+[connectors.nomasx1.entries.LOBJ_TYPE.l]
+fr = "Type"
+
+[connectors.nomasx1.entries.LOBJ_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.LOBJ_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.LOBJ_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.LOBJ_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.LOBJ_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.LOBJ_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.LUSR_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.LUSR_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.LUSR_OBJECT]
+label = "Object"
+
+[connectors.nomasx1.entries.LUSR_OBJECT.l]
+fr = "Objet"
+
+[connectors.nomasx1.entries.LUSR_USER_ID]
+label = "User ID"
+
+[connectors.nomasx1.entries.LUSR_USER_ID.l]
+fr = "Utilisateur ID"
+
+[connectors.nomasx1.entries.LUSR_DT_TRANSACTION]
+label = "Last transaction"
+format = "date"
+
+[connectors.nomasx1.entries.LUSR_DT_TRANSACTION.l]
+fr = "Dernière transaction"
+
+[connectors.nomasx1.entries.LUSR_COUNT]
+label = "Record Count"
+
+[connectors.nomasx1.entries.LUSR_COUNT.l]
+fr = "Nombre de lignes"
+
+[connectors.nomasx1.entries.LUSR_LICENSE_COUNT]
+label = "Licenses used"
+
+[connectors.nomasx1.entries.LUSR_LICENSE_COUNT.l]
+fr = "Licences utilisées"
+
+[connectors.nomasx1.entries.LUSR_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.LUSR_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.VER_ID]
+label = "Version ID"
+
+[connectors.nomasx1.entries.VER_ID.l]
+fr = "Version ID"
+
+[connectors.nomasx1.entries.VER_VERSION]
+label = "Version"
+
+[connectors.nomasx1.entries.VER_VERSION.l]
+fr = "Version"
+
+[connectors.nomasx1.entries.VER_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.VER_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.VER_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.VER_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.FEA_ID]
+label = "Features ID"
+
+[connectors.nomasx1.entries.FEA_ID.l]
+fr = "Fonctions ID"
+
+[connectors.nomasx1.entries.FEA_FEATURES]
+label = "Features"
+
+[connectors.nomasx1.entries.FEA_FEATURES.l]
+fr = "Fonctionnalités"
+
+[connectors.nomasx1.entries.FEA_DESCRIPTION]
+label = "Description"
+
+[connectors.nomasx1.entries.FEA_DESCRIPTION.l]
+fr = "Description"
+
+[connectors.nomasx1.entries.FEA_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.FEA_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.FEA_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.FEA_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.OPT_ID]
+label = "Option ID"
+
+[connectors.nomasx1.entries.OPT_ID.l]
+fr = "Option ID"
+
+[connectors.nomasx1.entries.OPT_OPTION]
+label = "Option"
+
+[connectors.nomasx1.entries.OPT_OPTION.l]
+fr = "Option"
+
+[connectors.nomasx1.entries.OPT_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.OPT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.OPT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.OPT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.USRD_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.USRD_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.USRD_ID]
+label = "User ID"
+
+[connectors.nomasx1.entries.USRD_ID.l]
+fr = "Utilisateur ID"
+
+[connectors.nomasx1.entries.USRD_AN8]
+label = "Address Number"
+
+[connectors.nomasx1.entries.USRD_AN8.l]
+fr = "Référence"
 
 [connectors.nomasx1.entries.USRD_AC01]
 label = "Cat.1 Id"
@@ -2876,178 +1890,11 @@ label = "Cat.5"
 [connectors.nomasx1.entries.USRD_AC05_DESC.l]
 fr = "Cat.5"
 
-[connectors.nomasx1.entries.USRD_AC06]
-label = "Cat.6 Id"
-
-[connectors.nomasx1.entries.USRD_AC06_DESC]
-label = "Cat.6"
-
-[connectors.nomasx1.entries.USRD_AC07]
-label = "Cat.7 Id"
-
-[connectors.nomasx1.entries.USRD_AC07_DESC]
-label = "Cat.7"
-
-[connectors.nomasx1.entries.USRD_AC08]
-label = "Cat.8 Id"
-
-[connectors.nomasx1.entries.USRD_AC08_DESC]
-label = "Cat.8"
-
-[connectors.nomasx1.entries.USRD_AC09]
-label = "Cat.9 Id"
-
-[connectors.nomasx1.entries.USRD_AC09_DESC]
-label = "Cat.9"
-
-[connectors.nomasx1.entries.USRD_AC10]
-label = "Cat.10 Id"
-
-[connectors.nomasx1.entries.USRD_AC10_DESC]
-label = "Cat.10"
-
-[connectors.nomasx1.entries.USRD_AC11]
-label = "Cat.11 Id"
-
-[connectors.nomasx1.entries.USRD_AC11_DESC]
-label = "Cat.11"
-
-[connectors.nomasx1.entries.USRD_AC12]
-label = "Cat.12 Id"
-
-[connectors.nomasx1.entries.USRD_AC12_DESC]
-label = "Cat.12"
-
-[connectors.nomasx1.entries.USRD_AC13]
-label = "Cat.13 Id"
-
-[connectors.nomasx1.entries.USRD_AC13_DESC]
-label = "Cat.13"
-
-[connectors.nomasx1.entries.USRD_AC14]
-label = "Cat.14 Id"
-
-[connectors.nomasx1.entries.USRD_AC14_DESC]
-label = "Cat.14"
-
-[connectors.nomasx1.entries.USRD_AC15]
-label = "Cat.15 Id"
-
-[connectors.nomasx1.entries.USRD_AC15_DESC]
-label = "Cat.15"
-
-[connectors.nomasx1.entries.USRD_AC16]
-label = "Cat.16 Id"
-
-[connectors.nomasx1.entries.USRD_AC16_DESC]
-label = "Cat.16"
-
-[connectors.nomasx1.entries.USRD_AC17]
-label = "Cat.17 Id"
-
-[connectors.nomasx1.entries.USRD_AC17_DESC]
-label = "Cat.17"
-
-[connectors.nomasx1.entries.USRD_AC18]
-label = "Cat.18 Id"
-
-[connectors.nomasx1.entries.USRD_AC18_DESC]
-label = "Cat.18"
-
-[connectors.nomasx1.entries.USRD_AC19]
-label = "Cat.19 Id"
-
-[connectors.nomasx1.entries.USRD_AC19_DESC]
-label = "Cat.19"
-
-[connectors.nomasx1.entries.USRD_AC20]
-label = "Cat.20 Id"
-
-[connectors.nomasx1.entries.USRD_AC20_DESC]
-label = "Cat.20"
-
-[connectors.nomasx1.entries.USRD_AN8]
-label = "Address Number"
-
-[connectors.nomasx1.entries.USRD_AN8.l]
-fr = "Référence"
-
-[connectors.nomasx1.entries.USRD_APPS_ID]
-label = "Application ID"
-format = "number"
-
-[connectors.nomasx1.entries.USRD_APPS_ID.l]
-fr = "Application ID"
-
-[connectors.nomasx1.entries.USRD_EAEMAL]
-label = "Email"
-
-[connectors.nomasx1.entries.USRD_EAEMAL.l]
-fr = "Email"
-
-[connectors.nomasx1.entries.USRD_ID]
-label = "User ID"
-
-[connectors.nomasx1.entries.USRD_ID.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.USRD_MCCO]
-label = "Company"
-
-[connectors.nomasx1.entries.USRD_MCCO.l]
-fr = "Société"
-
-[connectors.nomasx1.entries.USRD_MCMCU]
-label = "Business Unit"
-
-[connectors.nomasx1.entries.USRD_MCMCU.l]
-fr = "Centre de coût"
-
-[connectors.nomasx1.entries.USRD_MCRP08]
-label = "BU Code Cat 8"
-
-[connectors.nomasx1.entries.USRD_MCRP08.l]
-fr = "CC Code Cat 8"
-
-[connectors.nomasx1.entries.USRD_MCRP09]
-label = "BU Code Cat 9"
-
-[connectors.nomasx1.entries.USRD_MCRP09.l]
-fr = "CC Code Cat 9"
-
 [connectors.nomasx1.entries.USRD_REFRESH]
 label = "Refresh date"
 
 [connectors.nomasx1.entries.USRD_REFRESH.l]
 fr = "Refresh date"
-
-[connectors.nomasx1.entries.USR_DT_CREATION]
-label = "Creation Date"
-format = "date"
-
-[connectors.nomasx1.entries.USR_DT_CREATION.l]
-fr = "Date de création"
-
-[connectors.nomasx1.entries.USR_DT_LOGIN]
-label = "Login Date"
-format = "date"
-
-[connectors.nomasx1.entries.USR_DT_LOGIN.l]
-fr = "Date de connexion"
-
-[connectors.nomasx1.entries.USR_DT_REFRESH]
-label = "Refresh Date"
-format = "date"
-
-[connectors.nomasx1.entries.USR_DT_REFRESH.l]
-fr = "Date mise à jour"
-
-[connectors.nomasx1.entries.USR_DT_UPDATE]
-label = "Last Update"
-format = "date"
-
-[connectors.nomasx1.entries.USR_DT_UPDATE.l]
-fr = "Date MAJ"
 
 [connectors.nomasx1.entries.USRD_UKID]
 label = "UKID"
@@ -3056,73 +1903,637 @@ format = "number"
 [connectors.nomasx1.entries.USRD_UKID.l]
 fr = "UKID"
 
-[connectors.nomasx1.entries.USRD_ULCTR]
-label = "Country"
-
-[connectors.nomasx1.entries.USRD_ULCTR.l]
-fr = "Pays"
-
-[connectors.nomasx1.entries.USRD_ULFRMT]
-label = "Format Date"
-
-[connectors.nomasx1.entries.USRD_ULFRMT.l]
-fr = "Format de date"
-
-[connectors.nomasx1.entries.USRD_ULLNGP]
-label = "Language"
-
-[connectors.nomasx1.entries.USRD_ULLNGP.l]
-fr = "Langue"
-
-[connectors.nomasx1.entries.USRD_ULLUSER]
-label = "Long User"
-
-[connectors.nomasx1.entries.USRD_ULLUSER.l]
-fr = "Utilisateur Long"
-
-[connectors.nomasx1.entries.USR_ID]
-label = "User ID"
-rules = "LOOKUP"
-rules_values = "6"
-
-[connectors.nomasx1.entries.USR_ID.l]
-fr = "Utilisateur ID"
-
-[connectors.nomasx1.entries.USR_NAME]
-label = "User Name"
-
-[connectors.nomasx1.entries.USR_NAME.l]
-fr = "Utilisateur"
-
-[connectors.nomasx1.entries.USRP_APPS_ID]
+[connectors.nomasx1.entries.CSI_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.USRP_APPS_ID.l]
+[connectors.nomasx1.entries.CSI_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.USRP_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-rules = "SYSDATE"
+[connectors.nomasx1.entries.CSI_DESCRIPTION]
+label = "Description"
 
-[connectors.nomasx1.entries.USRP_AUDIT_DATE.l]
-fr = "Date (Audit)"
+[connectors.nomasx1.entries.CSI_DESCRIPTION.l]
+fr = "Description"
 
-[connectors.nomasx1.entries.USRP_AUDIT_USER]
+[connectors.nomasx1.entries.CSI_AUDIT_USER]
 label = "User (Audit)"
 
-[connectors.nomasx1.entries.USRP_AUDIT_USER.l]
+[connectors.nomasx1.entries.CSI_AUDIT_USER.l]
 fr = "Utilisateur (Audit)"
 
-[connectors.nomasx1.entries.USRP_GENERIC]
-label = "Generic (Y/N)"
+[connectors.nomasx1.entries.CSI_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.CSI_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.CPT_LISTS]
+label = "Price List"
+
+[connectors.nomasx1.entries.CPT_LISTS.l]
+fr = "Liste de prix"
+
+[connectors.nomasx1.entries.CPT_CATEGORY]
+label = "Category"
+
+[connectors.nomasx1.entries.CPT_CATEGORY.l]
+fr = "Catégorie"
+
+[connectors.nomasx1.entries.CPT_COMPONENT]
+label = "Component"
+
+[connectors.nomasx1.entries.CPT_COMPONENT.l]
+fr = "Composant"
+
+[connectors.nomasx1.entries.CPT_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.CPT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.CPT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.CPT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.MET_DESCRIPTION]
+label = "Metric"
+
+[connectors.nomasx1.entries.MET_DESCRIPTION.l]
+fr = "Métrique"
+
+[connectors.nomasx1.entries.MET_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.MET_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.MET_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.MET_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.LCC_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.LCC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.LCC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.LCC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.ORAP_DBID]
+label = "Id"
+
+[connectors.nomasx1.entries.ORAP_DBID.l]
+fr = "Id"
+
+[connectors.nomasx1.entries.ORAP_PRODUCT]
+label = "Component"
+
+[connectors.nomasx1.entries.ORAP_PRODUCT.l]
+fr = "Composant"
+
+[connectors.nomasx1.entries.ORAP_FULL_VERSION]
+label = "Full Version"
+
+[connectors.nomasx1.entries.ORAP_FULL_VERSION.l]
+fr = "Version complète"
+
+[connectors.nomasx1.entries.ORAP_VERSION]
+label = "Version"
+
+[connectors.nomasx1.entries.ORAP_VERSION.l]
+fr = "Version"
+
+[connectors.nomasx1.entries.ORAP_HOSTNAME]
+label = "Hostname"
+
+[connectors.nomasx1.entries.ORAP_HOSTNAME.l]
+fr = "Serveur"
+
+[connectors.nomasx1.entries.ORAP_NAME]
+label = "Name"
+
+[connectors.nomasx1.entries.ORAP_NAME.l]
+fr = "Nom"
+
+[connectors.nomasx1.entries.ORAP_COUNT_INST]
+label = "# Instance"
+
+[connectors.nomasx1.entries.ORAP_COUNT_INST.l]
+fr = "# Instance"
+
+[connectors.nomasx1.entries.ORAP_CPU]
+label = "CPU"
+
+[connectors.nomasx1.entries.ORAP_CPU.l]
+fr = "CPU"
+
+[connectors.nomasx1.entries.ORAP_ACTIVE_USERS]
+label = "# Active users"
+
+[connectors.nomasx1.entries.ORAP_ACTIVE_USERS.l]
+fr = "# Utilisateurs actifs"
+
+[connectors.nomasx1.entries.ORAP_TOTAL_USERS]
+label = "# Total users"
+
+[connectors.nomasx1.entries.ORAP_TOTAL_USERS.l]
+fr = "# Utilisateurs déclarés"
+
+[connectors.nomasx1.entries.ORAP_TECHNICAL_USERS]
+label = "# Technical Users"
+
+[connectors.nomasx1.entries.ORAP_TECHNICAL_USERS.l]
+fr = "# Utilisateurs Techniques"
+
+[connectors.nomasx1.entries.ORAP_DG]
+label = "Data Guard (Y/N)"
 format = "boolean"
 rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.USRP_GENERIC.l]
-fr = "Générique (Y/N)"
+[connectors.nomasx1.entries.ORAP_DG.l]
+fr = "Data Guard (Y/N)"
+
+[connectors.nomasx1.entries.ORAP_PACK]
+label = "Pack OEM"
+
+[connectors.nomasx1.entries.ORAP_PACK.l]
+fr = "Pack OEM"
+
+[connectors.nomasx1.entries.ORAP_AUDIT_USER]
+label = "User (Audit)"
+
+[connectors.nomasx1.entries.ORAP_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.ORAP_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[connectors.nomasx1.entries.ORAP_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.ORAP_UKID]
+label = "UKID"
+format = "number"
+
+[connectors.nomasx1.entries.ORAP_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.ORAO_INST_ID]
+label = "Instance"
+
+[connectors.nomasx1.entries.ORAO_INST_ID.l]
+fr = "Instance"
+
+[connectors.nomasx1.entries.ORAO_PARAMETER]
+label = "Option"
+
+[connectors.nomasx1.entries.ORAO_PARAMETER.l]
+fr = "Option"
+
+[connectors.nomasx1.entries.ORAO_VALUE]
+label = "Enabled (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.ORAO_VALUE.l]
+fr = "Active (Y/N)"
+
+[connectors.nomasx1.entries.ORAF_INST_ID]
+label = "Instance"
+
+[connectors.nomasx1.entries.ORAF_INST_ID.l]
+fr = "Instance"
+
+[connectors.nomasx1.entries.ORAF_FEATURE]
+label = "Feature"
+
+[connectors.nomasx1.entries.ORAF_FEATURE.l]
+fr = "Caractéristique"
+
+[connectors.nomasx1.entries.ORAF_USAGE]
+label = "# Usage"
+
+[connectors.nomasx1.entries.ORAF_USAGE.l]
+fr = "# Utilisation"
+
+[connectors.nomasx1.entries.ORAF_FIRST_USAGE]
+label = "First Usage"
+
+[connectors.nomasx1.entries.ORAF_FIRST_USAGE.l]
+fr = "Première utilisation"
+
+[connectors.nomasx1.entries.ORAF_LAST_USAGE]
+label = "Last Usage"
+
+[connectors.nomasx1.entries.ORAF_LAST_USAGE.l]
+fr = "Dernière Utilisation"
+
+[connectors.nomasx1.entries.OPAR_OWNER]
+label = "User ID"
+
+[connectors.nomasx1.entries.OPAR_OWNER.l]
+fr = "User ID"
+
+[connectors.nomasx1.entries.OPAR_SEGMENT_TYPE]
+label = "Segment Type"
+
+[connectors.nomasx1.entries.OPAR_SEGMENT_TYPE.l]
+fr = "Type de segment"
+
+[connectors.nomasx1.entries.OPAR_SEGMENT_NAME]
+label = "Segment Name"
+
+[connectors.nomasx1.entries.OPAR_SEGMENT_NAME.l]
+fr = "Nom du segment"
+
+[connectors.nomasx1.entries.JDE_ACTIVE_USERS]
+label = "Enabled Users"
+
+[connectors.nomasx1.entries.JDE_ACTIVE_USERS.l]
+fr = "Afficher les utilisateurs actifs"
+
+[connectors.nomasx1.entries.ACT_NAME_2]
+label = "Activity 2 Name"
+
+[connectors.nomasx1.entries.ACT_NAME_2.l]
+fr = "Nom Activité 2"
+
+[connectors.nomasx1.entries.ACTIVE_USERS_COUNT]
+label = "# Active Users"
+format = "number"
+
+[connectors.nomasx1.entries.ACTIVE_USERS_COUNT.l]
+fr = "# Utilisateurs actif"
+
+[connectors.nomasx1.entries.CONFLICTS_COUNT]
+label = "# Conflicts"
+format = "number"
+
+[connectors.nomasx1.entries.CONFLICTS_COUNT.l]
+fr = "Nombre de conflits"
+
+[connectors.nomasx1.entries.JDE_TRANSACTION_USERS]
+label = "With Transactions"
+
+[connectors.nomasx1.entries.JDE_TRANSACTION_USERS.l]
+fr = "Avec Transactions"
+
+[connectors.nomasx1.entries.JDE_NOTRANSACTION_USERS]
+label = "Without Transactions"
+
+[connectors.nomasx1.entries.JDE_NOTRANSACTION_USERS.l]
+fr = "Sans Transactions"
+
+[connectors.nomasx1.entries.CSI_FROM_DATE]
+label = "From Date"
+format = "date"
+
+[connectors.nomasx1.entries.CSI_FROM_DATE.l]
+fr = "Date Début"
+
+[connectors.nomasx1.entries.CSI_TO_DATE]
+label = "To Date"
+format = "date"
+
+[connectors.nomasx1.entries.CSI_TO_DATE.l]
+fr = "Date Fin"
+
+[connectors.nomasx1.entries.CPT_ID]
+label = "Component ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "2"
+
+[connectors.nomasx1.entries.CPT_ID.l]
+fr = "Composant ID"
+
+[connectors.nomasx1.entries.MET_ID]
+label = "Metric ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "3"
+
+[connectors.nomasx1.entries.MET_ID.l]
+fr = "Métrique ID"
+
+[connectors.nomasx1.entries.PRQ_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "7"
+
+[connectors.nomasx1.entries.PRQ_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.JDES_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "9"
+
+[connectors.nomasx1.entries.JDES_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.ORAL_USED]
+label = "Required License"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.ORAL_USED.l]
+fr = "Licence requise"
+
+[connectors.nomasx1.entries.OPT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "11"
+
+[connectors.nomasx1.entries.OPT_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.FEA_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "12"
+
+[connectors.nomasx1.entries.FEA_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.JDE_TRANSACTION_NOUSERS]
+label = "Users not declared"
+
+[connectors.nomasx1.entries.JDE_TRANSACTION_NOUSERS.l]
+fr = "Utilisateurs non déclarés"
+
+[connectors.nomasx1.entries.JDEO_DESCRIPTION]
+label = "Description"
+
+[connectors.nomasx1.entries.JDEO_DESCRIPTION.l]
+fr = "Description"
+
+[connectors.nomasx1.entries.QUERY_PATH]
+label = "Query ID"
+
+[connectors.nomasx1.entries.QUERY_PATH.l]
+fr = "Identifiant de requête"
+
+[connectors.nomasx1.entries.QUERY_CRUD]
+label = "Query Type"
+
+[connectors.nomasx1.entries.QUERY_CRUD.l]
+fr = "Type de requête"
+
+[connectors.nomasx1.entries.QUERY_SQL]
+label = "SQL Query"
+
+[connectors.nomasx1.entries.QUERY_SQL.l]
+fr = "Requête SQL"
+
+[connectors.nomasx1.entries.QUERY_ORDER]
+label = "Sort order"
+
+[connectors.nomasx1.entries.QUERY_ORDER.l]
+fr = "Ordre de tri"
+
+[connectors.nomasx1.entries.USERS_COUNT]
+label = "# Users"
+format = "number"
+
+[connectors.nomasx1.entries.USERS_COUNT.l]
+fr = "# Utilisateurs"
+
+[connectors.nomasx1.entries.TOTAL_SUPPORT]
+label = "Support Costs"
+format = "number"
+
+[connectors.nomasx1.entries.TOTAL_SUPPORT.l]
+fr = "Coût Support"
+
+[connectors.nomasx1.entries.TOTAL_COMPLIANCE]
+label = "Total Costs"
+format = "number"
+
+[connectors.nomasx1.entries.TOTAL_COMPLIANCE.l]
+fr = "Coût Total"
+
+[connectors.nomasx1.entries.COMPLIANCE]
+label = "# Compliance"
+format = "number"
+
+[connectors.nomasx1.entries.COMPLIANCE.l]
+fr = "# Conformité"
+
+[connectors.nomasx1.entries.SUBSCRIBED]
+label = "# Subscribed"
+format = "number"
+
+[connectors.nomasx1.entries.SUBSCRIBED.l]
+fr = "Licences acquises"
+
+[connectors.nomasx1.entries.TOTAL_PRICE]
+label = "Licenses Costs"
+format = "number"
+
+[connectors.nomasx1.entries.TOTAL_PRICE.l]
+fr = "Coût Licences"
+
+[connectors.nomasx1.entries.APPS_DBTYPE]
+label = "Database"
+rules = "ENUM"
+rules_values = "2"
+
+[connectors.nomasx1.entries.APPS_DBTYPE.l]
+fr = "Base de données"
+
+[connectors.nomasx1.entries.AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[connectors.nomasx1.entries.AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[connectors.nomasx1.entries.AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.CSI_STATUS]
+label = "Enabled (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+default = "Y"
+
+[connectors.nomasx1.entries.CSI_STATUS.l]
+fr = "Actif (Y/N)"
+
+[connectors.nomasx1.entries.LKP_ID]
+label = "Lookup ID"
+rules = "SEQUENCE"
+rules_values = "15"
+
+[connectors.nomasx1.entries.LKP_ID.l]
+fr = "Recherche ID"
+
+[connectors.nomasx1.entries.CSI_ID]
+label = "CSI Number"
+format = "number"
+rules = "LOOKUP"
+rules_values = "4"
+
+[connectors.nomasx1.entries.CSI_ID.l]
+fr = "N° CSI"
+
+[connectors.nomasx1.entries.PROCESS_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "1"
+
+[connectors.nomasx1.entries.PROCESS_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.ACT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "2"
+
+[connectors.nomasx1.entries.ACT_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.MATRIX_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "4"
+
+[connectors.nomasx1.entries.MATRIX_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.SYC_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[connectors.nomasx1.entries.SYC_CPT_ID.l]
+fr = "Composant ID"
+
+[connectors.nomasx1.entries.JDEO_OBJECT]
+label = "Object"
+rules = "LOOKUP"
+rules_values = "12"
+
+[connectors.nomasx1.entries.JDEO_OBJECT.l]
+fr = "Objet"
+
+[connectors.nomasx1.entries.RTC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "8"
+
+[connectors.nomasx1.entries.RTC_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.JDES_SY]
+label = "System Code"
+rules = "LOOKUP"
+rules_values = "5"
+
+[connectors.nomasx1.entries.JDES_SY.l]
+fr = "Code système"
+
+[connectors.nomasx1.entries.VER_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "10"
+
+[connectors.nomasx1.entries.VER_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.VER_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[connectors.nomasx1.entries.VER_CPT_ID.l]
+fr = "Composant ID"
+
+[connectors.nomasx1.entries.OPT_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[connectors.nomasx1.entries.OPT_CPT_ID.l]
+fr = "Composant ID"
+
+[connectors.nomasx1.entries.FEA_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[connectors.nomasx1.entries.FEA_CPT_ID.l]
+fr = "Composant ID"
+
+[connectors.nomasx1.entries.CPT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "13"
+
+[connectors.nomasx1.entries.CPT_UKID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.MET_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "14"
+
+[connectors.nomasx1.entries.MET_UKID.l]
+fr = "MET_UKID"
+
+[connectors.nomasx1.entries.PRC_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[connectors.nomasx1.entries.PRC_CPT_ID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.PRC_MET_ID]
+label = "Metric ID"
+format = "number"
+
+[connectors.nomasx1.entries.PRC_MET_ID.l]
+fr = "UKID"
+
+[connectors.nomasx1.entries.PRC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "15"
+
+[connectors.nomasx1.entries.PRC_UKID.l]
+fr = "UKID"
 
 [connectors.nomasx1.entries.USRP_GENERIC_COUNT]
 label = "Generic count"
@@ -3132,105 +2543,168 @@ default = "0"
 [connectors.nomasx1.entries.USRP_GENERIC_COUNT.l]
 fr = "Générique nombre"
 
-[connectors.nomasx1.entries.USRP_ID]
+[connectors.nomasx1.entries.LCC_QUANTITY]
+label = "Quantity"
+format = "number"
+
+[connectors.nomasx1.entries.LCC_QUANTITY.l]
+fr = "Quantité"
+
+[connectors.nomasx1.entries.ROL2_NAME]
+label = "Role Name 2"
+
+[connectors.nomasx1.entries.ROL2_NAME.l]
+fr = "Nom du rôle 2"
+
+[connectors.nomasx1.entries.ROL1_NAME]
+label = "Role Name 1"
+
+[connectors.nomasx1.entries.ROL1_NAME.l]
+fr = "Nom du rôle 1"
+
+[connectors.nomasx1.entries.OBJECT1_NAME]
+label = "Object Name 1"
+
+[connectors.nomasx1.entries.OBJECT1_NAME.l]
+fr = "Nom Objet 1"
+
+[connectors.nomasx1.entries.OBJECT2_NAME]
+label = "Object Name 2"
+
+[connectors.nomasx1.entries.OBJECT2_NAME.l]
+fr = "Nom Objet 2"
+
+[connectors.nomasx1.entries.USR_DT_CREATION]
+label = "Creation Date"
+format = "date"
+
+[connectors.nomasx1.entries.USR_DT_CREATION.l]
+fr = "Date de création"
+
+[connectors.nomasx1.entries.APPS_PASSWORD]
+label = "Password"
+rules = "PASSWORD"
+
+[connectors.nomasx1.entries.APPS_PASSWORD.l]
+fr = "Mot de passe"
+
+[connectors.nomasx1.entries.LAST_USAGE]
+label = "Last Usage"
+format = "date"
+
+[connectors.nomasx1.entries.LAST_USAGE.l]
+fr = "Dernière utilisation"
+
+[connectors.nomasx1.entries.LOUT_USER]
 label = "User ID"
 
-[connectors.nomasx1.entries.USRP_ID.l]
+[connectors.nomasx1.entries.LOUT_USER.l]
 fr = "Utilisateur ID"
 
-[connectors.nomasx1.entries.USRP_ID_LINKED]
-label = "Linked User ID"
+[connectors.nomasx1.entries.LOUT_OBJECT]
+label = "Object"
 
-[connectors.nomasx1.entries.USRP_ID_LINKED.l]
-fr = "Utilisateur lié"
+[connectors.nomasx1.entries.LOUT_OBJECT.l]
+fr = "Objet"
 
-[connectors.nomasx1.entries.USRP_ID_PREVIOUS]
-label = "Previous User ID"
+[connectors.nomasx1.entries.LOUT_VERSION]
+label = "Version"
 
-[connectors.nomasx1.entries.USRP_ID_PREVIOUS.l]
-fr = "Utilisateur précédent"
+[connectors.nomasx1.entries.LOUT_VERSION.l]
+fr = "Version"
 
-[connectors.nomasx1.entries.USRP_IS_LINKED]
-label = "Is Linked (Y/N)"
+[connectors.nomasx1.entries.TV_TASK_ID]
+label = "Task ID"
+
+[connectors.nomasx1.entries.TV_TASK_ID.l]
+fr = "Tâche ID"
+
+[connectors.nomasx1.entries.TV_TASK_NAME]
+label = "Task Name"
+
+[connectors.nomasx1.entries.TV_TASK_NAME.l]
+fr = "Nom Tâche"
+
+[connectors.nomasx1.entries.TV_SECURITY]
+label = "Collect Security (Y/N)"
 format = "boolean"
 rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.USRP_IS_LINKED.l]
-fr = "Lié (Y/N)"
+[connectors.nomasx1.entries.TV_SECURITY.l]
+fr = "Collecter la sécurité (Y/N)"
 
-[connectors.nomasx1.entries.USRP_IS_PREVIOUS]
-label = "Is renamed (Y/N)"
+[connectors.nomasx1.entries.SER_ADD]
+label = "A"
 format = "boolean"
 rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.USRP_IS_PREVIOUS.l]
-fr = "Renommé (Y/N)"
+[connectors.nomasx1.entries.SER_ADD.l]
+fr = "A"
 
-[connectors.nomasx1.entries.USRP_NAME]
-label = "User Name"
-
-[connectors.nomasx1.entries.USRP_NAME.l]
-fr = "Utilisateur"
-
-[connectors.nomasx1.entries.USRP_PRIVILEGED]
-label = "Privileged (Y/N)"
+[connectors.nomasx1.entries.SER_DEL]
+label = "D"
 format = "boolean"
 rules = "BOOLEAN"
 rules_values = "Y"
 
-[connectors.nomasx1.entries.USRP_PRIVILEGED.l]
-fr = "Privilèges (Y/N)"
+[connectors.nomasx1.entries.SER_DEL.l]
+fr = "S"
 
-[connectors.nomasx1.entries.USR_PRIVILEGED]
-label = "Privileged (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
+[connectors.nomasx1.entries.ROL_NAME_2]
+label = "Role Name 2"
 
-[connectors.nomasx1.entries.USR_PRIVILEGED.l]
-fr = "Privilèges (Y/N)"
+[connectors.nomasx1.entries.ROL_NAME_2.l]
+fr = "Nom du rôle 2"
 
-[connectors.nomasx1.entries.USRP_TECHNICAL]
-label = "Technical (Y/N)"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "Y"
-
-[connectors.nomasx1.entries.USRP_TECHNICAL.l]
-fr = "Technique (Y/N)"
-
-[connectors.nomasx1.entries.USRP_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "17"
-
-[connectors.nomasx1.entries.USRP_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.USR_REGISTRATION]
-label = "Registration"
-
-[connectors.nomasx1.entries.USR_REGISTRATION.l]
-fr = "Matricule"
-
-[connectors.nomasx1.entries.USR_STATUS]
-label = "Status"
-format = "boolean"
-rules = "BOOLEAN"
-rules_values = "01"
-
-[connectors.nomasx1.entries.USR_STATUS.l]
-fr = "Statut"
-
-[connectors.nomasx1.entries.USR_UKID]
-label = "UKID"
+[connectors.nomasx1.entries.ORAP_SIZE_GB]
+label = "Size GB"
 format = "number"
 
-[connectors.nomasx1.entries.USR_UKID.l]
-fr = "UKID"
+[connectors.nomasx1.entries.ORAP_SIZE_GB.l]
+fr = "Taille Gb"
+
+[connectors.nomasx1.entries.OPAR_MIN_LAST_DDL]
+label = "Last Date"
+format = "date"
+
+[connectors.nomasx1.entries.OPAR_MIN_LAST_DDL.l]
+fr = "Date d'utilisation"
+
+[connectors.nomasx1.entries.OPAR_MIN_CREATED]
+label = "Create Date"
+format = "date"
+
+[connectors.nomasx1.entries.ACL_NAME]
+label = "Name"
+
+[connectors.nomasx1.entries.ACL_NAME.l]
+fr = "Nom"
+
+[connectors.nomasx1.entries.ACL_APPS_TYPE]
+label = "ACL Application Type"
+rules = "ENUM"
+rules_values = "5"
+
+[connectors.nomasx1.entries.ACL_APPS_TYPE.l]
+fr = "ACL Type d'application"
+
+[connectors.nomasx1.entries.ACL_RULE]
+label = "ACL Rule"
+rules = "ENUM"
+rules_values = "6"
+
+[connectors.nomasx1.entries.ACL_RULE.l]
+fr = "ACL Règle"
+
+[connectors.nomasx1.entries.ACL_TYPE]
+label = "ACL Type"
+rules = "ENUM"
+rules_values = "4"
+
+[connectors.nomasx1.entries.ACL_TYPE.l]
+fr = "ACL Type"
 
 [connectors.nomasx1.entries.VAL_ENUM]
 label = "Enum ID"
@@ -3244,93 +2718,751 @@ label = "Description"
 [connectors.nomasx1.entries.VAL_LABEL.l]
 fr = "Description"
 
-[connectors.nomasx1.entries.VER_AUDIT_DATE]
-label = "Date (Audit)"
-format = "date"
-
-[connectors.nomasx1.entries.VER_AUDIT_DATE.l]
-fr = "Date (Audit)"
-
-[connectors.nomasx1.entries.VER_AUDIT_USER]
-label = "User (Audit)"
-
-[connectors.nomasx1.entries.VER_AUDIT_USER.l]
-fr = "Utilisateur (Audit)"
-
-[connectors.nomasx1.entries.VER_CPT_ID]
-label = "Component ID"
-format = "number"
-
-[connectors.nomasx1.entries.VER_CPT_ID.l]
-fr = "Composant ID"
-
-[connectors.nomasx1.entries.VER_ID]
-label = "Version ID"
-
-[connectors.nomasx1.entries.VER_ID.l]
-fr = "Version ID"
-
-[connectors.nomasx1.entries.VER_UKID]
-label = "UKID"
-format = "number"
-rules = "SEQUENCE"
-rules_values = "10"
-
-[connectors.nomasx1.entries.VER_UKID.l]
-fr = "UKID"
-
-[connectors.nomasx1.entries.VER_VERSION]
-label = "Version"
-
-[connectors.nomasx1.entries.VER_VERSION.l]
-fr = "Version"
-
-[connectors.nomasx1.entries.XREF_APPS_ID]
+[connectors.nomasx1.entries.LCA_APPS_ID]
 label = "Application ID"
 format = "number"
 
-[connectors.nomasx1.entries.XREF_APPS_ID.l]
+[connectors.nomasx1.entries.LCA_APPS_ID.l]
 fr = "Application ID"
 
-[connectors.nomasx1.entries.XREF_DESCRIPTION_FROM]
-label = "Description From"
+[connectors.nomasx1.entries.LCA_CSI_ID]
+label = "CSI Number"
+format = "number"
+rules = "LOOKUP"
+rules_values = "4"
 
-[connectors.nomasx1.entries.XREF_DESCRIPTION_FROM.l]
-fr = "Description From"
+[connectors.nomasx1.entries.LCA_CSI_ID.l]
+fr = "N° CSI"
 
-[connectors.nomasx1.entries.XREF_DESCRIPTION_TO]
-label = "Description To"
+[connectors.nomasx1.entries.LCC_CSI_ID]
+label = "CSI Number"
+format = "number"
+rules = "LOOKUP"
+rules_values = "4"
 
-[connectors.nomasx1.entries.XREF_DESCRIPTION_TO.l]
-fr = "Description To"
+[connectors.nomasx1.entries.LCC_CSI_ID.l]
+fr = "N° CSI"
 
-[connectors.nomasx1.entries.XREF_OBJECT_FROM]
-label = "Object From"
+[connectors.nomasx1.entries.LCC_CPT_ID]
+label = "Component ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "2"
 
-[connectors.nomasx1.entries.XREF_OBJECT_FROM.l]
-fr = "Object From"
+[connectors.nomasx1.entries.LCC_MET_ID]
+label = "Metric ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "3"
 
-[connectors.nomasx1.entries.XREF_OBJECT_TO]
-label = "Object To"
+[connectors.nomasx1.entries.USRP_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
 
-[connectors.nomasx1.entries.XREF_OBJECT_TO.l]
-fr = "Object To"
+[connectors.nomasx1.entries.USRP_AUDIT_DATE.l]
+fr = "Date (Audit)"
 
-[connectors.nomasx1.entries.XREF_TYPE_FROM]
-label = "Type From"
+[connectors.nomasx1.entries.USRD_ULLNGP]
+label = "Language"
 
-[connectors.nomasx1.entries.XREF_TYPE_FROM.l]
-fr = "Type From"
+[connectors.nomasx1.entries.USRD_ULLNGP.l]
+fr = "Langue"
 
-[connectors.nomasx1.entries.XREF_TYPE_TO]
-label = "Type To"
+[connectors.nomasx1.entries.USRD_ULFRMT]
+label = "Format Date"
 
-[connectors.nomasx1.entries.XREF_TYPE_TO.l]
-fr = "Type To"
+[connectors.nomasx1.entries.USRD_ULFRMT.l]
+fr = "Format de date"
 
-[connectors.nomasx1.entries.XREF_UKID]
+[connectors.nomasx1.entries.USRD_ULCTR]
+label = "Country"
+
+[connectors.nomasx1.entries.USRD_ULCTR.l]
+fr = "Pays"
+
+[connectors.nomasx1.entries.USRD_ULLUSER]
+label = "Long User"
+
+[connectors.nomasx1.entries.USRD_ULLUSER.l]
+fr = "Utilisateur Long"
+
+[connectors.nomasx1.entries.USRD_MCCO]
+label = "Company"
+
+[connectors.nomasx1.entries.USRD_MCCO.l]
+fr = "Société"
+
+[connectors.nomasx1.entries.USRD_MCMCU]
+label = "Business Unit"
+
+[connectors.nomasx1.entries.USRD_MCMCU.l]
+fr = "Centre de coût"
+
+[connectors.nomasx1.entries.USRD_MCRP09]
+label = "BU Code Cat 9"
+
+[connectors.nomasx1.entries.USRD_MCRP09.l]
+fr = "CC Code Cat 9"
+
+[connectors.nomasx1.entries.USRD_MCRP08]
+label = "BU Code Cat 8"
+
+[connectors.nomasx1.entries.USRD_MCRP08.l]
+fr = "CC Code Cat 8"
+
+[connectors.nomasx1.entries.USRD_EAEMAL]
+label = "Email"
+
+[connectors.nomasx1.entries.USRD_EAEMAL.l]
+fr = "Email"
+
+[connectors.nomasx1.entries.AUD_MODULE]
+label = "Module"
+
+[connectors.nomasx1.entries.AUD_MODULE.l]
+fr = "Module"
+
+[connectors.nomasx1.entries.SQL_PASSWORD]
+label = "Password"
+rules = "PASSWORD"
+
+[connectors.nomasx1.entries.SQL_PASSWORD.l]
+fr = "Mot de passe"
+
+[connectors.nomasx1.entries.TV_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.TV_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.ACL_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[connectors.nomasx1.entries.ACL_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.TV_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[connectors.nomasx1.entries.TV_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.JDE_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[connectors.nomasx1.entries.JDE_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.JDE_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[connectors.nomasx1.entries.JDE_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.USRD_ABAT1]
+label = "User Type"
+
+[connectors.nomasx1.entries.USRD_ABAT1.l]
+fr = "Type Utilisateur"
+
+[connectors.nomasx1.entries.USRD_ABAT1_DESC]
+label = "Type Description"
+
+[connectors.nomasx1.entries.USRD_ABAT1_DESC.l]
+fr = "Description Type"
+
+[connectors.nomasx1.entries.TV_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[connectors.nomasx1.entries.TV_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.ACL_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[connectors.nomasx1.entries.ACL_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.LDAP_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[connectors.nomasx1.entries.LDAP_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[connectors.nomasx1.entries.LDAP_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[connectors.nomasx1.entries.LDAP_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[connectors.nomasx1.entries.LEMP_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.LEMP_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.LEMP_DT_EXTRACT]
+label = "Extract Date"
+format = "date"
+
+[connectors.nomasx1.entries.LEMP_DT_EXTRACT.l]
+fr = "Date de collecte"
+
+[connectors.nomasx1.entries.LEMP_TYPE_DESC]
+label = "Type"
+
+[connectors.nomasx1.entries.LEMP_TYPE_DESC.l]
+fr = "Type"
+
+[connectors.nomasx1.entries.LEMP_COUNT]
+label = "# Employees"
+format = "number"
+
+[connectors.nomasx1.entries.LEMP_COUNT.l]
+fr = "# Employés"
+
+[connectors.nomasx1.entries.LEMP_ID]
+label = "Employee ID"
+format = "number"
+
+[connectors.nomasx1.entries.LEMP_ID.l]
+fr = "Employé ID"
+
+[connectors.nomasx1.entries.LEMP_NAME]
+label = "Employee Name"
+
+[connectors.nomasx1.entries.LEMP_NAME.l]
+fr = "Nom Employé"
+
+[connectors.nomasx1.entries.LEMP_TYPE]
+label = "Employee Type"
+
+[connectors.nomasx1.entries.LEMP_TYPE.l]
+fr = "Type Employé"
+
+[connectors.nomasx1.entries.LEMP_COMPANY]
+label = "Company"
+
+[connectors.nomasx1.entries.LEMP_COMPANY.l]
+fr = "Société"
+
+[connectors.nomasx1.entries.LEMP_DT_WORK]
+label = "Last work date"
+format = "date"
+
+[connectors.nomasx1.entries.LEMP_DT_WORK.l]
+fr = "Date de dernière activité"
+
+[connectors.nomasx1.entries.LEMP_GROUP]
+label = "Employees Group"
+
+[connectors.nomasx1.entries.LEMP_GROUP.l]
+fr = "Groupe Employés"
+
+[connectors.nomasx1.entries.APPS_ID]
+label = "Application ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "1"
+
+[connectors.nomasx1.entries.APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.USR_ID]
+label = "User ID"
+rules = "LOOKUP"
+rules_values = "6"
+
+[connectors.nomasx1.entries.USR_ID.l]
+fr = "Utilisateur ID"
+
+[connectors.nomasx1.entries.PROCESS_ID]
+label = "Process ID"
+rules = "LOOKUP"
+rules_values = "8"
+
+[connectors.nomasx1.entries.PROCESS_ID.l]
+fr = "Process ID"
+
+[connectors.nomasx1.entries.CFD_ACT1_ID]
+label = "Activity 1"
+rules = "LOOKUP"
+rules_values = "10"
+
+[connectors.nomasx1.entries.CFD_ACT1_ID.l]
+fr = "Activité 1"
+
+[connectors.nomasx1.entries.CFD_ROLE2_ID]
+label = "Role 2"
+rules = "LOOKUP"
+rules_values = "7"
+
+[connectors.nomasx1.entries.CFD_ROLE2_ID.l]
+fr = "Rôle 2"
+
+[connectors.nomasx1.entries.LEMP_DT_START]
+label = "Start Date"
+format = "date"
+
+[connectors.nomasx1.entries.LEMP_DT_START.l]
+fr = "Date de début"
+
+[connectors.nomasx1.entries.RISK_ID]
+label = "Risk ID"
+rules = "LOOKUP"
+rules_values = "9"
+
+[connectors.nomasx1.entries.RISK_ID.l]
+fr = "Risque ID"
+
+[connectors.nomasx1.entries.ORAF_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.ORAF_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.OPAR_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.OPAR_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.CFD_ACT1_OBJECT]
+label = "Object 1"
+rules = "LOOKUP"
+rules_values = "11"
+
+[connectors.nomasx1.entries.CFD_ACT1_OBJECT.l]
+fr = "Programme 1"
+
+[connectors.nomasx1.entries.LOUT_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.LOUT_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.JDEO_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[connectors.nomasx1.entries.JDEO_APPS_ID.l]
+fr = "Application ID"
+
+[connectors.nomasx1.entries.JDEO_TYPE]
+label = "Object Type"
+
+[connectors.nomasx1.entries.JDEO_TYPE.l]
+fr = "Type Objet"
+
+[connectors.nomasx1.entries.JDEO_SY]
+label = "System Code"
+
+[connectors.nomasx1.entries.JDEO_UKID]
 label = "UKID"
 format = "number"
 
-[connectors.nomasx1.entries.XREF_UKID.l]
+[connectors.nomasx1.entries.MATRIX_ACT2_ID]
+label = "Activity 2 ID"
+rules = "LOOKUP"
+rules_values = "10"
+
+[connectors.nomasx1.entries.MATRIX_ACT2_ID.l]
+fr = "Activité 2 ID"
+
+[connectors.nomasx1.entries.LCC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "19"
+
+[connectors.nomasx1.entries.LCC_UKID.l]
 fr = "UKID"
+
+[connectors.nomasx1.entries.AUD_HOST]
+label = "Host"
+
+[connectors.nomasx1.entries.AUD_LAST]
+label = "Last Timestamp"
+format = "date"
+
+[connectors.nomasx1.entries.AUD_PASSWORD]
+label = "Password"
+rules = "PASSWORD"
+
+[connectors.nomasx1.entries.AUD_PORT]
+label = "Port"
+format = "number"
+
+[connectors.nomasx1.entries.AUD_SCN]
+label = "Last SCN"
+format = "number"
+
+[connectors.nomasx1.entries.AUD_USER]
+label = "User ID"
+
+[connectors.nomasx1.entries.AUD_DATABASE]
+label = "Database"
+
+[connectors.nomasx1.entries.AUD_COUNT]
+label = "#Records"
+format = "number"
+
+[connectors.nomasx1.entries.AUD_DT_TRANSACTION]
+label = "Transaction date"
+format = "date"
+
+[connectors.nomasx1.entries.AUD_OPERATION]
+label = "Operation"
+
+[connectors.nomasx1.entries.AUD_SEG_NAME]
+label = "Table Name"
+
+[connectors.nomasx1.entries.AUD_SEG_OWNER]
+label = "Schema"
+
+[connectors.nomasx1.entries.AUD_ROW_ID]
+label = "Row ID"
+format = "number"
+
+[connectors.nomasx1.entries.AUD_SEG_TYPE]
+label = "Object Type"
+
+[connectors.nomasx1.entries.AUD_SQL]
+label = "Query"
+format = "textarea"
+
+[connectors.nomasx1.entries.AUD_UNDO]
+label = "Undo Query"
+format = "textarea"
+
+[connectors.nomasx1.entries.AUD_USERNAME]
+label = "User"
+
+[connectors.nomasx1.entries.AUD_NAME]
+label = "Column"
+
+[connectors.nomasx1.entries.AUD_TYPE]
+label = "Type"
+
+[connectors.nomasx1.entries.AUD_VAL_ID]
+label = "Value ID"
+format = "number"
+
+[connectors.nomasx1.entries.AUD_VALUE]
+label = "Value"
+
+[connectors.nomasx1.entries.AUD_BEFORE_VALUE]
+label = "Before Value"
+
+[connectors.nomasx1.entries.AUD_BEFORE_VALUE.l]
+fr = "Valeur avant"
+
+[connectors.nomasx1.entries.AUD_AFTER_VALUE]
+label = "After Value"
+
+[connectors.nomasx1.entries.AUD_AFTER_VALUE.l]
+fr = "Valeur après"
+
+[connectors.nomasx1.entries.MENU_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[connectors.nomasx1.entries.MENU_REFRESH.l]
+fr = "Date de mise à jour"
+
+[connectors.nomasx1.entries.USR_DT_UPDATE]
+label = "Last Update"
+format = "date"
+
+[connectors.nomasx1.entries.USR_DT_UPDATE.l]
+fr = "Date MAJ"
+
+[connectors.nomasx1.entries.USRD_AC06]
+label = "Cat.6 Id"
+
+[connectors.nomasx1.entries.USRD_AC07]
+label = "Cat.7 Id"
+
+[connectors.nomasx1.entries.USRD_AC08]
+label = "Cat.8 Id"
+
+[connectors.nomasx1.entries.USRD_AC09]
+label = "Cat.9 Id"
+
+[connectors.nomasx1.entries.USRD_AC10]
+label = "Cat.10 Id"
+
+[connectors.nomasx1.entries.USRD_AC11]
+label = "Cat.11 Id"
+
+[connectors.nomasx1.entries.USRD_AC12]
+label = "Cat.12 Id"
+
+[connectors.nomasx1.entries.USRD_AC13]
+label = "Cat.13 Id"
+
+[connectors.nomasx1.entries.USRD_AC14]
+label = "Cat.14 Id"
+
+[connectors.nomasx1.entries.USRD_AC15]
+label = "Cat.15 Id"
+
+[connectors.nomasx1.entries.USRD_AC16]
+label = "Cat.16 Id"
+
+[connectors.nomasx1.entries.USRD_AC17]
+label = "Cat.17 Id"
+
+[connectors.nomasx1.entries.USRD_AC18]
+label = "Cat.18 Id"
+
+[connectors.nomasx1.entries.USRD_AC19]
+label = "Cat.19 Id"
+
+[connectors.nomasx1.entries.USRD_AC20]
+label = "Cat.20 Id"
+
+[connectors.nomasx1.entries.USRD_AC06_DESC]
+label = "Cat.6"
+
+[connectors.nomasx1.entries.USRD_AC07_DESC]
+label = "Cat.7"
+
+[connectors.nomasx1.entries.USRD_AC08_DESC]
+label = "Cat.8"
+
+[connectors.nomasx1.entries.USRD_AC09_DESC]
+label = "Cat.9"
+
+[connectors.nomasx1.entries.USRD_AC10_DESC]
+label = "Cat.10"
+
+[connectors.nomasx1.entries.USRD_AC11_DESC]
+label = "Cat.11"
+
+[connectors.nomasx1.entries.USRD_AC12_DESC]
+label = "Cat.12"
+
+[connectors.nomasx1.entries.USRD_AC13_DESC]
+label = "Cat.13"
+
+[connectors.nomasx1.entries.USRD_AC14_DESC]
+label = "Cat.14"
+
+[connectors.nomasx1.entries.USRD_AC15_DESC]
+label = "Cat.15"
+
+[connectors.nomasx1.entries.USRD_AC16_DESC]
+label = "Cat.16"
+
+[connectors.nomasx1.entries.USRD_AC17_DESC]
+label = "Cat.17"
+
+[connectors.nomasx1.entries.USRD_AC18_DESC]
+label = "Cat.18"
+
+[connectors.nomasx1.entries.USRD_AC19_DESC]
+label = "Cat.19"
+
+[connectors.nomasx1.entries.USRD_AC20_DESC]
+label = "Cat.20"
+
+[connectors.nomasx1.entries.LOUT_ENV]
+label = "Environment"
+
+[connectors.nomasx1.entries.LOUT_ENV.l]
+fr = "Environnement"
+
+[connectors.nomasx1.entries.LOUT_USAGE]
+label = "Tracking Date"
+format = "date"
+rules = "CURRENT_DATE"
+
+[connectors.nomasx1.entries.LOUT_USAGE.l]
+fr = "Date Utilisation"
+
+[connectors.nomasx1.entries.LOUT_ROLE]
+label = "Role ID"
+
+[connectors.nomasx1.entries.LOUT_ROLE.l]
+fr = "Rôle ID"
+
+[connectors.nomasx1.entries.JDE_OUT_PURGE]
+label = "Purge OUT (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.JDE_OUT_PURGE.l]
+fr = "Purge OUT"
+
+[connectors.nomasx1.entries.JDE_OUT_RETENTION]
+label = "OUT Retention Days"
+format = "number"
+rules_values = "Y"
+
+[connectors.nomasx1.entries.JDE_OUT_RETENTION.l]
+fr = "Jours Retention OUT"
+
+[connectors.nomasx1.entries.LOUT_TYPE]
+label = "Object Type"
+
+[connectors.nomasx1.entries.LOUT_TYPE.l]
+fr = "Type Objet"
+
+[connectors.nomasx1.entries.LOUT_COUNT]
+label = "# Call"
+format = "number"
+
+[connectors.nomasx1.entries.LOUT_COUNT.l]
+fr = "# Appel"
+
+[connectors.nomasx1.enums.2]
+label = "Datasource Type"
+values = [
+    { value = "ORACLE", label = "Oracle" },
+    { value = "MYSQL", label = "My SQL" },
+    { value = "DB2", label = "IBM DB2" },
+    { value = "MSSQL", label = "Microsoft SQL Server" },
+    { value = "LDAP", label = "LDAP" },
+    { value = "POSTGRES", label = "Postgres" },
+    { value = "GENERIC", label = "Generic" },
+    { value = "MARIADB", label = "MariaDB" },
+]
+
+[connectors.nomasx1.enums.1]
+label = "Application Type"
+values = [
+    { value = "JDE", label = "JD Edwards" },
+    { value = "DATABASE", label = "Database" },
+    { value = "LDAP", label = "LDAP" },
+    { value = "WEBLOGIC", label = "Weblogic" },
+    { value = "CUSTOM", label = "Custom Application" },
+]
+
+[connectors.nomasx1.enums.3]
+label = "Query Method"
+values = [
+    { value = "SECURITY_USERS", label = "Users" },
+    { value = "SECURITY_ROLES", label = "Roles" },
+    { value = "SECURITY_ASSIGNMENTS", label = "Assignments" },
+    { value = "SECURITY_MENUS", label = "Menus" },
+    { value = "SECURITY_RIGHTS", label = "Rights" },
+]
+
+[connectors.nomasx1.enums.4]
+label = "ACL Type"
+values = [
+    { value = "SCHEMA", label = "Schema" },
+    { value = "TABLE", label = "Table" },
+    { value = "USER", label = "User" },
+    { value = "ROLE", label = "Role" },
+]
+
+[connectors.nomasx1.enums.5]
+label = "ACL Application Type"
+values = [
+    { value = "DATABASE", label = "Database" },
+    { value = "JDEDWARDS", label = "JD Edwards" },
+]
+
+[connectors.nomasx1.enums.6]
+label = "ACL Rules"
+values = [
+    { value = "INCLUDE", label = "Include" },
+    { value = "EXCLUDE", label = "Exclude" },
+    { value = "AUDIT", label = "Audit", l = { fr = "Audit" } },
+]
+
+[connectors.nomasx1.lookups.1]
+description = "Get Applications from SETTINGS_APPLICATIONS"
+query = "get_applications_from_settings_applications_get"
+value = "APPS_ID"
+label = "APPS_NAME"
+
+[connectors.nomasx1.lookups.4]
+description = "Get CSI from LICENSE_CSI"
+query = "get_csi_from_license_csi_get"
+value = "CSI_ID"
+label = "CSI_DESCRIPTION"
+
+[connectors.nomasx1.lookups.2]
+description = "Get Components from SETTINGS_LIC_COMPONENTS"
+query = "get_component_from_settings_lic_components_get"
+value = "CPT_ID"
+label = "CPT_COMPONENT"
+group = "CPT_CATEGORY"
+
+[connectors.nomasx1.lookups.3]
+description = "Get Metric from SETTINGS_LIC_METRICS"
+query = "get_metric_from_settings_lic_metrics_get"
+value = "MET_ID"
+label = "MET_DESCRIPTION"
+
+[connectors.nomasx1.lookups.5]
+description = "Get SYC_ID from SETTINGS_JDE_SY"
+query = "get_syc_id_from_settings_jde_sy_get"
+value = "SYC_ID"
+label = "SYC_DESCRIPTION"
+
+[connectors.nomasx1.lookups.6]
+description = "Get Users from SECURITY_USERS"
+query = "get_users_from_security_users_get"
+value = "USR_ID"
+label = "USR_NAME"
+
+[connectors.nomasx1.lookups.7]
+description = "Get Roles from SECURITY_ROLES"
+query = "get_roles_from_security_roles_get"
+value = "ROL_ID"
+label = "ROL_NAME"
+
+[connectors.nomasx1.lookups.8]
+description = "Get Process ID from Process (SOD_PROCESS)"
+query = "get_process_id_from_process_sod_process_get"
+value = "PROCESS_ID"
+label = "PROCESS_NAME"
+
+[connectors.nomasx1.lookups.11]
+description = "Get Object ID from Objects (SOD_OBJECTS)"
+query = "get_object_id_from_objects_sod_objects_get"
+value = "OBJECT_ID"
+label = "OBJECT_NAME"
+group = "OBJECT_ACT_ID"
+
+[connectors.nomasx1.lookups.9]
+description = "Get Risk ID from Risk (SOD_RISKS)"
+query = "get_risk_id_from_risk_sod_risks_get"
+value = "RISK_ID"
+label = "RISK_NAME"
+
+[connectors.nomasx1.lookups.12]
+description = "Get Object ID from Objects (JDE_OBJECTS)"
+query = "get_object_id_from_objects_jde_objects_get"
+value = "JDEO_OBJECT"
+label = "JDEO_DESCRIPTION"
+
+[connectors.nomasx1.lookups.10]
+description = "Get Activity ID from Activities (SOD_ACTIVITIES)"
+query = "get_activity_id_from_activities_sod_activities_get"
+value = "ACT_ID"
+label = "ACT_NAME"
+group = "ACT_PROCESS_ID"

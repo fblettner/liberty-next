@@ -358,6 +358,10 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_applications (apps_name TEXT, apps_pool TEXT, apps_dbtype TEXT, apps_jdbc TEXT, apps_user TEXT, apps_password TEXT, apps_host TEXT, apps_port INTEGER, apps_database TEXT, apps_pool_min INTEGER, apps_pool_max INTEGER)",
     "CREATE TABLE ly_dictionary (dd_id TEXT PRIMARY KEY, dd_label TEXT, dd_type TEXT, dd_rules TEXT, dd_rules_values TEXT, dd_default TEXT)",
     "CREATE TABLE ly_dictionary_l (dd_id TEXT, lng_id TEXT, lng_label TEXT)",
+    "CREATE TABLE ly_enum (enum_id INTEGER PRIMARY KEY, enum_label TEXT)",
+    "CREATE TABLE ly_enum_val (enum_id INTEGER, val_enum TEXT, val_label TEXT)",
+    "CREATE TABLE ly_enum_val_l (enum_id INTEGER, val_enum TEXT, lng_id TEXT, lng_label TEXT)",
+    "CREATE TABLE ly_lookup (lkp_id INTEGER PRIMARY KEY, lkp_description TEXT, lkp_query_id INTEGER, lkp_dd_id TEXT, lkp_dd_label TEXT, lkp_dd_group TEXT)",
     "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT)",
     "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
@@ -408,6 +412,32 @@ async def _seed_v1(engine) -> None:
         await conn.execute(
             text("INSERT INTO ly_dictionary_l (dd_id, lng_id, lng_label) VALUES (:i, :lng, :lab)"),
             [{"i": "USR_NAME", "lng": "fr", "lab": "Nom d'utilisateur"}],
+        )
+        # Display rules on a few of the dictionary entries — exercises the BOOLEAN/ENUM/LOOKUP shapes.
+        await conn.execute(
+            text("UPDATE ly_dictionary SET dd_rules = :r, dd_rules_values = :v WHERE dd_id = :i"),
+            [
+                {"i": "USR_ID", "r": "LOOKUP", "v": "1"},     # → ly_lookup.lkp_id = 1
+                {"i": "USR_NAME", "r": "ENUM", "v": "1"},     # → ly_enum.enum_id = 1
+                {"i": "USR_PWD", "r": "PASSWORD", "v": None}, # form-layer — no display rule emitted
+            ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_enum (enum_id, enum_label) VALUES (:i, :l)"),
+            [{"i": 1, "l": "User Status"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_enum_val (enum_id, val_enum, val_label) VALUES (:i, :v, :l)"),
+            [{"i": 1, "v": "A", "l": "Active"}, {"i": 1, "v": "I", "l": "Inactive"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_enum_val_l (enum_id, val_enum, lng_id, lng_label) VALUES (:i, :v, :lng, :lab)"),
+            [{"i": 1, "v": "A", "lng": "fr", "lab": "Actif"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_lookup (lkp_id, lkp_description, lkp_query_id, lkp_dd_id, lkp_dd_label, lkp_dd_group) "
+                 "VALUES (:i, :d, :q, :v, :l, :g)"),
+            [{"i": 1, "d": "Users list", "q": 1, "v": "USR_ID", "l": "USR_NAME", "g": None}],
         )
         await conn.execute(
             text("INSERT INTO ly_tables (tbl_id, tbl_query_id, tbl_label) VALUES (:i, :q, :l)"),
@@ -527,6 +557,43 @@ async def test_read_dictionary(v1_engine) -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_dictionary_rules_and_migrate(v1_engine) -> None:
+    from liberty.connectors.dictionary import parse_dictionary
+    from liberty.migrations import read_dictionary_rules
+    dict_rows, dict_l_rows = await read_dictionary(v1_engine)
+    enum_rows, enum_val_rows, enum_val_l_rows, lookup_rows, sql_rows = await read_dictionary_rules(v1_engine)
+    assert [r["enum_id"] for r in enum_rows] == [1]
+    assert {(r["enum_id"], r["val_enum"]) for r in enum_val_rows} == {(1, "A"), (1, "I")}
+    assert {r["lkp_id"] for r in lookup_rows} == {1}
+    out = migrate_dictionary(
+        dict_rows, dict_l_rows, enum_rows, enum_val_rows, enum_val_l_rows, lookup_rows, sql_rows,
+        connector_name="db",
+    )
+    d = parse_dictionary(tomllib.loads(render_toml(out)))
+    sec = d.connectors["db"]
+    # enum migrated, with the fr translation on the Active value
+    assert sec.enums["1"].label == "User Status"
+    vals = {v.value: v for v in sec.enums["1"].values}
+    assert vals["A"].label == "Active" and vals["A"].label_for("fr") == "Actif"
+    assert vals["I"].label_for("fr") == "Inactive"  # no fr translation → falls back to the default
+    # lookup migrated, with lkp_query_id=1 → the read-variant name migrate_sql_queries gives that query
+    assert sec.lookups["1"].query == "users_list_select"
+    assert sec.lookups["1"].value == "USR_ID" and sec.lookups["1"].label == "USR_NAME"
+    # the entries' rules round-trip; resolve_rule returns the right wire shape
+    usr_id_rule = d.resolve_rule(sec.entries["USR_ID"], connector="db", language="en")
+    assert usr_id_rule == {
+        "kind": "lookup", "connector": "db", "query": "users_list_select", "value": "USR_ID", "label": "USR_NAME",
+    }
+    usr_name_rule = d.resolve_rule(sec.entries["USR_NAME"], connector="db", language="fr")
+    assert usr_name_rule == {
+        "kind": "enum",
+        "values": [{"value": "A", "label": "Actif"}, {"value": "I", "label": "Inactive"}],
+    }
+    # PASSWORD is a form-layer rule — not a display transform; resolve_rule returns None
+    assert d.resolve_rule(sec.entries["USR_PWD"], connector="db") is None
+
+
+@pytest.mark.asyncio
 async def test_read_menus(v1_engine) -> None:
     menu_rows, menu_l_rows, tables_rows, dlg_frm_rows, sql_rows = await read_menus(v1_engine)
     assert {r["menu_seq_ukid"] for r in menu_rows} == {"100001.", "100001.100001.", "100002."}
@@ -552,6 +619,7 @@ async def test_read_menus(v1_engine) -> None:
 
 @pytest.mark.asyncio
 async def test_read_applications_column_hints_dictionary_menus_missing_tables(tmp_path) -> None:
+    from liberty.migrations import read_dictionary_rules
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_meta.db'}")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))
@@ -560,6 +628,7 @@ async def test_read_applications_column_hints_dictionary_menus_missing_tables(tm
         assert await read_column_hints(engine) == ([], [])     # no ly_tbl_col/ly_dlg_col → ([], [])
         assert await read_dictionary(engine) == ([], [])       # no ly_dictionary/ly_dictionary_l → ([], [])
         assert await read_menus(engine) == ([], [], [], [], [])  # no ly_menus/… → all empty
+        assert await read_dictionary_rules(engine) == ([], [], [], [], [])  # no ly_enum/ly_lookup/… → all empty
     finally:
         await engine.dispose()
 

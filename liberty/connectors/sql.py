@@ -69,7 +69,9 @@ _PG_OID_NAMES: dict[int, str] = {
 class Column:
     """One result column: its name and a best-effort type label (may be ``None``),
     plus optional display hints carried over from the query's ``columns`` config
-    (label/hidden/width/align/format — see :class:`~liberty.connectors.config.ColumnHint`)."""
+    (label/hidden/width/align/format — see :class:`~liberty.connectors.config.ColumnHint`)
+    and an optional ``rule`` (resolved from the dictionary entry — BOOLEAN's true-value, an ENUM's
+    value→label map, or a LOOKUP reference; see :meth:`DictionaryFile.resolve_rule`)."""
 
     name: str
     type: str | None = None
@@ -78,6 +80,7 @@ class Column:
     width: int | None = None
     align: str | None = None
     format: str | None = None
+    rule: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "type": self.type}
@@ -91,6 +94,8 @@ class Column:
             d["align"] = self.align
         if self.format is not None:
             d["format"] = self.format
+        if self.rule is not None:
+            d["rule"] = self.rule
         return d
 
 
@@ -292,17 +297,25 @@ def _resolve_hint(
 ) -> Column:
     """A :class:`Column` from a hint: ``label``/``format`` come from the hint if set, else
     from the dictionary entry (key = ``h.dd`` or, when unset, ``h.name``; ``dd = ""`` opts out)
-    in *language* — *connector*'s per-connector section first, then the shared top-level entries;
-    ``hidden``/``width``/``align`` are always the hint's. *name* overrides the column name (used
-    when the result reports a different case than the hint — see :func:`_apply_column_hints`)."""
+    in *language* — *connector*'s per-connector section first, then the shared top-level entries.
+    The entry's display ``rule`` (BOOLEAN / ENUM / LOOKUP — see :meth:`DictionaryFile.resolve_rule`)
+    is resolved too and attached for the frontend. ``hidden``/``width``/``align`` are always the
+    hint's. *name* overrides the column name (used when the result reports a different case than
+    the hint — see :func:`_apply_column_hints`)."""
     label, fmt = h.label, h.format
-    if (label is None or fmt is None) and h.dictionary_key:
-        dlabel, dfmt = dictionary.resolve(h.dictionary_key, language, connector=connector)
-        if label is None:
-            label = dlabel
-        if fmt is None:
-            fmt = dfmt
-    return Column(name=name or h.name, type=type_, label=label, hidden=h.hidden, width=h.width, align=h.align, format=fmt)
+    rule: dict[str, Any] | None = None
+    if h.dictionary_key:
+        entry = dictionary.find_entry(h.dictionary_key, connector=connector)
+        if entry is not None:
+            if label is None:
+                label = entry.label_for(language)
+            if fmt is None:
+                fmt = entry.format
+            rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+    return Column(
+        name=name or h.name, type=type_, label=label, hidden=h.hidden,
+        width=h.width, align=h.align, format=fmt, rule=rule,
+    )
 
 
 def _hint_to_dict(h: ColumnHint, dictionary: DictionaryFile, language: str | None, *, connector: str | None = None) -> dict[str, Any]:

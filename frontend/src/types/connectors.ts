@@ -41,6 +41,11 @@ export interface ApiConnectorMeta {
 
 export type ConnectorMeta = SqlConnectorMeta | ApiConnectorMeta
 
+export type DisplayRule =
+  | { kind: 'boolean'; true_value: string }
+  | { kind: 'enum'; values: { value: string; label: string }[] }
+  | { kind: 'lookup'; connector: string; query: string; value: string; label: string }
+
 export interface Column {
   name: string
   type: string | null
@@ -50,6 +55,8 @@ export interface Column {
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string
+  /** Resolved BOOLEAN / ENUM / LOOKUP display rule from the field dictionary (the v2 form of v1's dd_rules). */
+  rule?: DisplayRule
 }
 
 export interface QueryResult {

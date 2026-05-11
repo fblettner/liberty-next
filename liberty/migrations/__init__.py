@@ -6,6 +6,7 @@ from liberty.migrations.source import (
     read_applications,
     read_column_hints,
     read_dictionary,
+    read_dictionary_rules,
     read_menus,
     read_sql_queries,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "read_applications",
     "read_column_hints",
     "read_dictionary",
+    "read_dictionary_rules",
     "read_menus",
     "read_sql_queries",
     "render_toml",
