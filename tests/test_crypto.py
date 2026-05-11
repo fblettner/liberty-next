@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from liberty.crypto import PREFIX, CryptoError, decrypt, decrypt_if_needed, decrypt_or_keep, encrypt, is_encrypted
 
-MK = "3zTvzr3p67VC61jmV54rIYu1545x4TlY"  # v1's stock MASTER_KEY
+MK = "v1-compat-test-master-key"  # arbitrary — the PBKDF2 key derivation works for any string
 
 
 def _v1_encrypt(text: str, master_key: str) -> str:

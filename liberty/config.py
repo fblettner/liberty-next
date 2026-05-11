@@ -109,8 +109,8 @@ class CryptoSettings(BaseModel):
     """Field-level encryption — must match v1's ``MASTER_KEY`` so v1-encrypted DB values
     (e.g. ``SETTINGS_APPLICATIONS.password``, ``ly_api_conn.conn_password``) round-trip."""
 
-    # ${LIBERTY_MASTER_KEY}; the v1 stock default is "3zTvzr3p67VC61jmV54rIYu1545x4TlY"
-    # — set this to whatever your v1 secrets.json holds. Empty → crypto ops fail loudly.
+    # ${LIBERTY_MASTER_KEY} — the value in v1's secrets.json; provide it via the env var,
+    # never hard-code it. Empty → crypto ops fail loudly.
     master_key: str = ""
 
 

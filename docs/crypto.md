@@ -34,9 +34,9 @@ the value is just left as the `ENC:` blob and a warning is logged.
 ## Where the v1 `MASTER_KEY` lives
 
 In v1's `secrets.json` (which v1 keeps encrypted as `secrets.json.enc`, Fernet key in
-`encryption.key`). v1's stock default is `3zTvzr3p67VC61jmV54rIYu1545x4TlY`, but use whatever
-your v1 install actually has — the same value your other scripts already use to decrypt those
-columns. (v2 does **not** read `secrets.json`; the key is just an env var here.)
+`encryption.key`) — the same value your other scripts already use to decrypt those columns.
+Keep it out of this repo: v2 reads it from the `LIBERTY_MASTER_KEY` env var, never from a
+committed file. (v2 does **not** read `secrets.json`.)
 
 ---
 

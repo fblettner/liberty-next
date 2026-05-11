@@ -37,9 +37,9 @@ session_secret = ""              # falls back to jwt_secret if empty
 
 # Field-level encryption — for DB columns that hold encrypted secrets (e.g.
 # SETTINGS_APPLICATIONS.password, ly_api_conn.conn_password). Must equal v1's MASTER_KEY
-# so v1-encrypted values round-trip and other tools stay interoperable. The v1 stock
-# default is "3zTvzr3p67VC61jmV54rIYu1545x4TlY" — set this to whatever your v1 secrets.json
-# holds. Connector auth fields prefixed "ENC:" are decrypted at runtime with this key;
+# (the value in v1's secrets.json) so v1-encrypted values round-trip and other tools stay
+# interoperable. Always provide it via the LIBERTY_MASTER_KEY env var — never hard-code the
+# key here. Connector auth fields prefixed "ENC:" are decrypted at runtime with this key;
 # `liberty-crypto encrypt|decrypt` and `from liberty.crypto import encrypt, decrypt` use it too.
 [crypto]
 master_key = "${LIBERTY_MASTER_KEY}"

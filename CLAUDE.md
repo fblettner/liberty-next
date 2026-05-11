@@ -291,10 +291,9 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   reimplementation, both directions). `encrypt`/`decrypt` (raise `CryptoError`),
   `is_encrypted`, `encrypt`/`decrypt` are **idempotent on an `ENC:` value**,
   `decrypt_if_needed`, `decrypt_or_keep` (never raises → `(value_or_plain, err_or_None)`).
-- The master key lives in `[crypto] master_key` in `config/app.toml`
-  (`= "${LIBERTY_MASTER_KEY}"`; v1's stock default is `"3zTvzr3p67VC61jmV54rIYu1545x4TlY"`,
-  but use whatever your v1 `secrets.json` `MASTER_KEY` actually is). `liberty/config.py` →
-  `Settings.crypto.master_key`; `/info` reports `crypto.configured` (bool, never the key).
+- The master key lives in `[crypto] master_key` in `config/app.toml` (`= "${LIBERTY_MASTER_KEY}"` —
+  always supplied via the env var, never hard-coded; it's the `MASTER_KEY` from v1's `secrets.json`).
+  `liberty/config.py` → `Settings.crypto.master_key`; `/info` reports `crypto.configured` (bool, never the key).
 - `APIConnector` decrypts `ENC:` `auth_username`/`auth_password`/`auth_token` at init via
   the `master_key` threaded through `load_connectors(master_key=…)` /
   `ConnectorRegistry(master_key=…)` (from `settings.crypto.master_key` in `main.py`'s

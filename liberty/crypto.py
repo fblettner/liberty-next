@@ -8,8 +8,8 @@ v1 wrote are readable here, values v2 writes are readable by v1 (and by any othe
 that uses the same ``MASTER_KEY``) — re-encrypting an existing database is not required.
 
 Set the key via ``[crypto] master_key`` in ``config/app.toml`` / ``LIBERTY_MASTER_KEY``.
-It must equal v1's ``MASTER_KEY`` (the value in v1's ``secrets.json`` — the stock default
-is ``3zTvzr3p67VC61jmV54rIYu1545x4TlY`` if you never changed it).
+It must equal v1's ``MASTER_KEY`` (the value in v1's ``secrets.json``) — always supply it
+through the environment, never hard-code it in a config file or the source.
 
 Standalone usage from another script::
 
