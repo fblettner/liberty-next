@@ -70,11 +70,33 @@ class OIDCSettings(BaseModel):
     session_secret: str = ""
 
 
+class AISettings(BaseModel):
+    """Anthropic-backed assistant: model, tool exposure, server-side web_fetch."""
+
+    enabled: bool = True
+    api_key: str = ""  # ${ANTHROPIC_API_KEY}; empty → chat endpoint reports it unconfigured
+    model: str = "claude-opus-4-7"
+    max_tokens: int = 8192
+    max_iterations: int = 8  # safety cap on tool-use round trips
+    system_prompt: str = ""  # empty → built-in default (see liberty.ai.assistant)
+    thinking: bool = False  # enable adaptive thinking
+    effort: str = ""  # "" | low | medium | high | xhigh | max — only sent when set
+    request_timeout: float = 120.0
+    # Tool exposure
+    connector_tools: bool = True  # list_connectors + sql_query (read-only queries only)
+    api_tool: bool = False  # api_call — off by default (API endpoints may have side effects)
+    allowed_connectors: list[str] = Field(default_factory=list)  # empty → all
+    # Server-side web_fetch (Anthropic-hosted); disabled unless domains are listed
+    web_fetch_domains: list[str] = Field(default_factory=list)
+    web_fetch_max_uses: int = 5
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
+    ai: AISettings = Field(default_factory=AISettings)
 
 
 def load_settings(

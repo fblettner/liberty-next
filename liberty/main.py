@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 from liberty import __version__
+from liberty.ai.assistant import build_assistant
+from liberty.ai.routes import router as ai_router
 from liberty.auth.db import AuthDatabase
 from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
@@ -47,9 +49,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.auth_db = AuthDatabase(app.state.connectors.pools, settings.auth.pool)
         app.state.token_service = _build_token_service(settings.auth)
         app.state.oidc = build_oidc(settings.oidc)
+        app.state.ai = build_assistant(settings.ai, app.state.connectors)
         try:
             yield
         finally:
+            if app.state.ai is not None:
+                await app.state.ai.aclose()
             await app.state.connectors.aclose()
 
     app = FastAPI(title="Liberty v2", version=__version__, lifespan=lifespan)
@@ -64,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(auth_router)
+    app.include_router(ai_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -73,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def info() -> dict[str, object]:
         s: Settings = app.state.settings
         connectors: ConnectorRegistry = app.state.connectors
+        ai = app.state.ai
         return {
             "name": s.app.name,
             "version": __version__,
@@ -80,6 +87,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "connectors": connectors.names(),
             "pools": connectors.pools.names(),
             "auth": {"pool": s.auth.pool, "oidc_enabled": app.state.oidc is not None},
+            "ai": {
+                "enabled": ai is not None,
+                "available": ai.available if ai is not None else False,
+                "model": ai.settings.model if ai is not None else None,
+            },
         }
 
     return app

@@ -54,7 +54,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Frontend | **Fresh React 19 + Vite + TS inside v2**, embedded as static. No shared libraries. |
 | Location | **Sibling directory** `../liberty-v2/`. |
 | Config format | **TOML** files on disk (nomaubl uses flat XML properties — the flat-config insight stands, TOML is the Python-idiomatic form). |
-| AI | **Anthropic SDK**, drop OpenAI. Port nomaubl's `AiAssistant.java` tool-use loop. |
+| AI | **Anthropic SDK** (`AsyncAnthropic`), drop OpenAI. Default model `claude-opus-4-7` (operator-overridable). Own `@tool` decorator + manual streaming loop — the SDK's `@beta_tool`/`tool_runner` returns complete messages, can't per-token stream (the SSE endpoint needs it). The `claude-api` skill is the source of SDK truth. |
 | Auth | Internal users (**argon2id**) + **OIDC via authlib** (Keycloak-ready); own JWTs (HS256). |
 | Users storage | **Dedicated ORM table** (`ly2_users`/`ly2_roles`) created via `liberty-admin init-db`, *not* SQLConnector queries — auth is infra, not a configurable screen; users are app data so the "no metadata tables" rule still holds. |
 
@@ -125,7 +125,7 @@ params = [{ name = "id" }]
 response_field = "data.0.name"
 ```
 
-### Phase 2 — Auth + AI — 🚧 IN PROGRESS
+### Phase 2 — Auth + AI — ✅ DONE
 
 **2a — Auth (internal users + OIDC) — ✅ DONE.** `liberty/auth/`:
 - `models.py` — SQLAlchemy 2.0 ORM `User` / `Role` / `user_roles` (`ly2_*` tables).
@@ -165,14 +165,41 @@ response_field = "data.0.name"
   a full OIDC flow integration test (needs a fake IdP), an HTTP "admin users"
   endpoint (CLI only for now).
 
-**2b — AI (Anthropic tool-use loop) — ⏳ NEXT.**
-- AI module: Anthropic SDK, tool-use loop ported from nomaubl `AiAssistant.java`
-  — tools = decorated Python functions w/ type hints (JSON schema derived from the
-  signature); the SQL/API connectors are the first tools to expose; SSE token
-  streaming; max-iteration cap; optional `web_fetch` restricted to allowlisted
-  domains. Gate the chat endpoint behind `require_permission("ai:chat")` (or similar).
+**2b — AI (Anthropic tool-use loop) — ✅ DONE.** `liberty/ai/`:
+- `tools.py` — `@tool` decorator: a (sync/async) Python function → a `Tool` whose
+  Anthropic `input_schema` is derived from the type hints, with the description +
+  per-param descriptions read from a Google-style docstring `Args:` block. `ToolRegistry`
+  dispatches by name, JSON-encodes results, and returns `(content, is_error)`.
+  (Built our own rather than the SDK's `@beta_tool`/`tool_runner` — that runner
+  returns complete messages and can't per-token stream, which the SSE endpoint needs.)
+- `connector_tools.py` — the Phase 1 connectors as tools: `list_connectors`
+  (discovery — descriptions stay byte-stable for prompt caching, the catalog is in
+  the result), `sql_query` (**read-only** — refuses `writable` queries), `api_call`
+  (off unless `[ai] api_tool` — API endpoints can mutate). An `allowed_connectors`
+  list can restrict which connectors the assistant sees.
+- `assistant.py` — `AiAssistant.chat(messages)` is an async generator of `ChatEvent`
+  (`token`/`thinking`/`tool_call`/`tool_result`/`error`/`done`): stream via
+  `AsyncAnthropic.messages.stream`, surface text deltas, execute local tools, feed
+  `tool_result` back, loop until a non-`tool_use` stop reason or the `max_iterations`
+  cap; `pause_turn` → re-send to resume. `system` block carries `cache_control`
+  (caches the stable tool list too). Optional server-side `web_fetch_20260209`,
+  restricted to `web_fetch_domains` (off unless set). Model default `claude-opus-4-7`
+  (operator-overridable in config / per request); no `temperature`/`top_p` (removed
+  on Opus 4.7); `thinking` (adaptive) and `effort` are config opt-ins.
+  `build_assistant(settings.ai, connectors)` → `AiAssistant | None`.
+- `routes.py` — `POST /ai/chat` → `StreamingResponse` of SSE; `GET /ai/tools` →
+  the tool catalog + availability. Both behind `require_permission("ai:chat")`.
+  AI disabled → 404; enabled but no API key → the stream's first event is `error`.
+- `liberty/config.py` — `[ai]` settings; API key from `${ANTHROPIC_API_KEY}`.
+- `liberty/main.py` — lifespan builds `app.state.ai`; `/info` reports `ai.{enabled,available,model}`.
+- 38 new tests (148 total). The `claude-api` skill holds the live Anthropic-SDK
+  guidance — re-consult it before changing this module or the model.
+- *Not done:* prompt caching only covers the system+tools prefix (message-history
+  caching: TODO); finer-grained per-connector permission gating beyond the chat
+  endpoint's `ai:chat`; the Anthropic `web_fetch_20260209` tool version is assumed
+  GA (no beta header) — surfaces as an API error if a beta header turns out to be needed.
 
-### Phase 3 — Web layer — (~2 wks)
+### Phase 3 — Web layer — ⏳ NEXT  (~2 wks)
 - `GET/POST /api/sql/{connector}/query/{name}` — params in querystring/body.
 - `POST /api/api/{connector}/call/{endpoint}`.
 - SSE for AI streaming and long-running queries.
@@ -226,6 +253,14 @@ to validate against.
   (wire up in Phase 3 web layer / Phase 4 settings UI).
 - DB migrations — auth tables are created via `create_all` (`liberty-admin init-db`),
   no Alembic. Fine while the schema is small; add Alembic before the schema churns.
+- AI prompt caching — only the system+tools prefix is `cache_control`-ed; growing
+  message history (incl. tool-loop turns) isn't cached. Add a moving message
+  breakpoint (or top-level auto-cache) if cost on long conversations matters.
+- AI permission granularity — the chat endpoint is gated by `ai:chat`; there's no
+  per-connector ACL beyond `[ai] allowed_connectors` / read-only SQL. Tighten if a
+  tenant needs the AI to see only a subset of connectors.
+- `web_fetch_20260209` beta header — assumed GA. If Anthropic requires a beta
+  header for that tool version, switch the AI loop to `client.beta.messages.stream(betas=[...])`.
 - Reporting/PDF — v1 has Excel export (`tbl_workbook`/`tbl_sheet`), nomaubl has
   XSLT→PDF via BI Publisher. Out of scope until a user asks.
 - JDE Julian date conversion — only if v2 needs to talk to JD Edwards data
@@ -235,11 +270,11 @@ to validate against.
 
 1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
 2. Read this file for the full picture.
-3. Done: Phase 0, Phase 1 (connectors), Phase 2a (auth — internal users + OIDC).
-   Next is **Phase 2b — the Anthropic tool-use loop** (`liberty/ai/`): port
-   nomaubl `AiAssistant.java`. AI tools = plain decorated Python functions whose
-   JSON schema is derived from the type hints; the Phase 1 SQL/API connectors are
-   the obvious first tools to expose. SSE streaming, max-iteration cap, allowlisted
-   `web_fetch`. Gate the chat endpoint with `require_permission(...)` from
-   `liberty.auth.dependencies`. After that: Phase 3 (web layer — the connector
-   HTTP routes, themselves guarded by the auth deps).
+3. Done: Phase 0, Phase 1 (connectors), Phase 2 (auth + AI).
+   Next is **Phase 3 — the web layer**: HTTP routes for the connectors —
+   `GET/POST /api/sql/{connector}/query/{name}`, `POST /api/api/{connector}/call/{endpoint}`
+   — guarded by `require_permission(...)` from `liberty.auth.dependencies` (settle the
+   permission-string scheme, e.g. `sql:{connector}:{query}:read`); OpenAPI auto-doc;
+   SSE for long-running queries; maybe a `POST /admin/reload` to rebuild the
+   `ConnectorRegistry`. The AI's `/ai/chat` (SSE) is already a working reference for
+   streaming responses, and `ConnectorRegistry.describe()` is the discovery surface.

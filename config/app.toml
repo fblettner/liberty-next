@@ -34,3 +34,24 @@ email_claim = "email"
 name_claim = "name"
 redirect_url = ""                # override the auto-derived /auth/oidc/callback URL behind a proxy
 session_secret = ""              # falls back to jwt_secret if empty
+
+# AI assistant — Anthropic Messages API with an agentic tool-use loop.
+# POST /ai/chat streams Server-Sent Events; gated behind the `ai:chat` permission.
+# Set api_key via the environment; if empty the endpoint exists but reports it
+# unconfigured. The connectors are exposed as read-only tools (list_connectors,
+# sql_query). web_fetch is Anthropic-hosted and stays off unless domains are set.
+[ai]
+enabled = true
+api_key = "${ANTHROPIC_API_KEY}"
+model = "claude-opus-4-7"
+max_tokens = 8192
+max_iterations = 8               # safety cap on tool-use round trips
+system_prompt = ""               # empty → built-in default
+thinking = false                 # enable adaptive thinking
+effort = ""                      # "" | low | medium | high | xhigh | max (sent only when set; ignored for haiku)
+request_timeout = 120.0
+connector_tools = true           # expose list_connectors + sql_query (read-only queries only)
+api_tool = false                 # expose api_call (off — API endpoints may have side effects)
+allowed_connectors = []          # restrict which connectors the assistant may use; empty = all
+web_fetch_domains = []           # e.g. ["docs.example.com"]; empty = web_fetch disabled
+web_fetch_max_uses = 5

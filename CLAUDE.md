@@ -65,8 +65,9 @@ Full dep set pinned in `pyproject.toml`.
 Wired into `main.py` lifespan (`app.state.connectors`); `/info` reports loaded
 connector + pool names. 42 tests pass.
 
-**Phase 2 (Auth — internal users + OIDC) — DONE.** Lives in `liberty/auth/`.
-*(The AI half of Phase 2 — Anthropic tool-use loop — is still pending; see `docs/PLAN.md`.)*
+**Phase 2 (Auth + AI) — DONE.**
+
+*Auth* lives in `liberty/auth/`:
 - `models.py` — SQLAlchemy 2.0 ORM: `User`, `Role`, `user_roles` M2M (tables
   `ly2_users` / `ly2_roles` / `ly2_user_roles`). These are *app data*, not v1-style
   metadata tables. `Role.permissions` is a JSON list of strings (`"sql:liberty:read"`,
@@ -101,15 +102,41 @@ connector + pool names. 42 tests pass.
 - `liberty/config.py` — added `[auth]` + `[oidc]` settings; `${ENV_VAR}`
   substitution now applies to `app.toml` too (`substitute_env` moved here).
 - `liberty/main.py` — `create_app(settings=None)`; lifespan builds `auth_db`,
-  `token_service`, `oidc` on `app.state`; `SessionMiddleware` added iff OIDC
-  enabled; includes the auth router; `/info` reports `auth.pool` + `oidc_enabled`.
-110 tests pass. Deps added: `itsdangerous` (for `SessionMiddleware`), `aiosqlite`
-(dev, for SQL/auth tests). OIDC full-flow integration test: deferred (needs a fake IdP).
+  `token_service`, `oidc` (and `ai` — below) on `app.state`; `SessionMiddleware`
+  added iff OIDC enabled; includes the auth router; `/info` reports `auth.pool` +
+  `oidc_enabled` (and `ai`).
+OIDC full-flow integration test: deferred (needs a fake IdP).
 
-**Next: Phase 2 (AI) — Anthropic tool-use loop** ported from nomaubl
-`AiAssistant.java`: tools = decorated Python functions w/ type hints (the SQL/API
-connectors as the first tools), SSE token streaming, max-iteration cap,
-allowlisted `web_fetch`. Then Phase 3 (web layer). See `docs/PLAN.md`.
+*AI* lives in `liberty/ai/` — an async Anthropic Messages-API agentic loop
+(ported from nomaubl `AiAssistant.java`):
+- `tools.py` — `@tool` decorator turns a (sync/async) function into a `Tool`:
+  JSON `input_schema` derived from type hints, description + per-param descriptions
+  from a Google-style docstring `Args:` block; `ToolRegistry` dispatches by name
+  and returns `(content_str, is_error)`.
+- `connector_tools.py` — `build_connector_tools(registry, allowed, include_api)`:
+  `list_connectors` (discovery — tool *descriptions* stay byte-stable, the catalog
+  is in the *result*, prompt-cache friendly), `sql_query` (**read-only** — refuses
+  `writable` queries), `api_call` (off by default; API endpoints can mutate).
+- `assistant.py` — `AiAssistant.chat(messages)` is an async generator of
+  `ChatEvent` (`token` / `thinking` / `tool_call` / `tool_result` / `error` /
+  `done`): `AsyncAnthropic.messages.stream(...)`, surface text deltas, run local
+  tools, feed `tool_result` back, loop until non-`tool_use` stop reason or the
+  `max_iterations` cap; `pause_turn` → re-send; `system` block is `cache_control`-ed
+  (caches the stable tool list too); optional server-side `web_fetch_20260209`
+  restricted to `web_fetch_domains`. `build_assistant(settings.ai, connectors)` →
+  `AiAssistant | None` (None when disabled; client is None — calls fail fast — when
+  no API key). Model default `claude-opus-4-7` (operator-overridable); no
+  `temperature`/`top_p` (removed on 4.7); `thinking`/`effort` opt-in via config.
+- `routes.py` — `POST /ai/chat` streams SSE (`StreamingResponse`), `GET /ai/tools`
+  lists the catalog; both behind `require_permission("ai:chat")`. AI disabled → 404.
+- `liberty/config.py` — `[ai]` settings (`model`, `max_tokens`, `max_iterations`,
+  `thinking`, `effort`, `connector_tools`, `api_tool`, `allowed_connectors`,
+  `web_fetch_domains`, …). API key from `${ANTHROPIC_API_KEY}`.
+
+148 tests pass. Deps used: `anthropic` (already pinned), `itsdangerous` (auth's
+`SessionMiddleware`), `aiosqlite` (dev). Note: the `claude-api` skill (`/claude-api`)
+holds the live Anthropic-SDK guidance — re-consult it before changing the AI module
+or bumping the model. **Use `claude-opus-4-7` unless the user names another model.**
 
 ## Run it
 
@@ -118,6 +145,7 @@ allowlisted `web_fetch`. Then Phase 3 (web layer). See `docs/PLAN.md`.
 .venv/bin/liberty-v2              # dev server on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
 .venv/bin/liberty-admin init-db   # create auth tables + bootstrap admin (needs [auth] pool reachable)
+# AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
@@ -128,7 +156,8 @@ config/         app.toml, connectors.toml
 liberty/        main.py, config.py, cli.py, admin_cli.py
                 · connectors/{config,base,db,sql,api,registry}.py
                 · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
-                · ai/ web/ migrations/ (added per phase)
+                · ai/{tools,connector_tools,assistant,routes}.py
+                · web/ migrations/ (added per phase)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale
 ```
