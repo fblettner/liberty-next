@@ -193,10 +193,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `/auth/oidc/login`, `setTokens()` for the OIDC fragment hand-off.
 - `src/App.tsx` — `react-router-dom` v7; `/login`, `/oidc/callback`, and a `RequireAuth`
   `Layout` with children `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e`
-  (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link).
+  (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link). The route
+  components are `React.lazy`-split (each its own chunk — the heavy libs travel with them);
+  `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
 - `components/`: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
-  utility pill: EN/FR · dark/light · username · sign-out), `Sidebar` (collapsible nav rail,
-  lucide icons, react-router `NavLink`s + an external "API docs" link), `Connectors` (lists
+  utility pill: EN/FR · dark/light · username→profile · sign-out), `Sidebar` (collapsible nav
+  rail, lucide icons, react-router `NavLink`s + an external "API docs" link), `ProfileModal`
+  (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
+  self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
   `GET /api/connectors`, drills to queries/endpoints), `TableView` (param form from the query's
   `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
   client-side paging, sticky header — from `result.columns`; writable → `confirm` + `POST` +
@@ -214,12 +218,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `/info` reports `frontend`.
 - `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
   Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
-  prod build: `npm run build` → `dist/` → served automatically by the backend.
+  prod build: `npm run build` → `dist/` → served automatically by the backend (entry chunk
+  ~112 kB gz; TableView/Chat/Settings split off into their own route chunks).
   ⚠ Monaco loads from a CDN (jsdelivr) at runtime — `@monaco-editor/react`'s default loader,
   same as nomaubl (the app already CDN-loads DM Sans); air-gapped deployments would need it
-  bundled with a Vite Monaco plugin. Still TODO toward full nomaubl parity: a profile /
-  change-password modal, Vitest/RTL frontend tests, frontend build in CI, route-level code
-  splitting (the bundle is ~590 kB / ~184 kB gz). Reference app:
+  bundled with a Vite Monaco plugin. Still TODO toward full nomaubl parity: a self-service
+  change-password flow (needs a backend endpoint), `@tanstack/react-virtual` for huge result
+  grids, Vitest/RTL frontend tests, frontend build in CI. Reference app:
   `../../JavaProjects/nomaubl/src/web-react/`.
 
 **Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the

@@ -389,6 +389,9 @@ export const ModalHeader = styled.div`
 export const ModalBody = styled.div`
   padding: 20px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   font-size: ${fontSize.md};
   line-height: 1.6;
   color: ${colors.text.secondary};

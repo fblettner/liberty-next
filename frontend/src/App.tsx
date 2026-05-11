@@ -1,3 +1,4 @@
+import { lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "./auth";
@@ -5,11 +6,15 @@ import { Centered } from "./ui";
 import { Layout } from "./components/Layout";
 import { Login } from "./components/Login";
 import { OidcCallback } from "./components/OidcCallback";
-import { Connectors } from "./components/Connectors";
-import { TableView } from "./components/TableView";
-import { HttpRunner } from "./components/HttpRunner";
-import { Chat } from "./components/Chat";
-import { Settings } from "./components/Settings";
+
+// Route components are code-split — each becomes its own chunk, so the heavy
+// libs they pull in (react-table, react-markdown, the Monaco loader) only load
+// when their page is visited. The shell (Layout/Login/OidcCallback) stays eager.
+const Connectors = lazy(() => import("./components/Connectors").then((m) => ({ default: m.Connectors })));
+const TableView = lazy(() => import("./components/TableView").then((m) => ({ default: m.TableView })));
+const HttpRunner = lazy(() => import("./components/HttpRunner").then((m) => ({ default: m.HttpRunner })));
+const Chat = lazy(() => import("./components/Chat").then((m) => ({ default: m.Chat })));
+const Settings = lazy(() => import("./components/Settings").then((m) => ({ default: m.Settings })));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();

@@ -1,15 +1,17 @@
 // App shell — sidebar + workspace title + a floating top-right utility pill
-// (EN/FR, dark/light, user, sign-out). Page content renders through <Outlet/>.
-// Adapted from nomaubl's App layout.
-import { useEffect, useState } from 'react'
+// (EN/FR, dark/light, profile, sign-out). Page content renders through <Outlet/>
+// inside a <Suspense> boundary (routes are code-split). Adapted from nomaubl.
+import { Suspense, useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut } from 'lucide-react'
+import { Sun, Moon, LogOut, User } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth'
+import { Centered } from '../ui'
 import Sidebar from './Sidebar'
+import { ProfileModal } from './ProfileModal'
 
 const THEME_KEY = 'liberty.theme'
 
@@ -103,14 +105,23 @@ const Sep = styled.div`
   margin: 0 2px;
 `
 
-const UserName = styled.span`
+const UserName = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  border-radius: ${radius.md};
   font-size: ${fontSize.sm};
+  font-family: ${fonts.sans};
   color: ${colors.text.muted};
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 4px;
+  max-width: 180px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  & > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
 
 function readDark(): boolean {
@@ -126,6 +137,7 @@ export function Layout() {
   const { user, logout } = useAuth()
   const [dark, setDark] = useState(readDark)
   const [lang, setLang] = useState<Language>(i18n.language === 'fr' ? 'fr' : 'en')
+  const [profileOpen, setProfileOpen] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', !dark)
@@ -163,7 +175,9 @@ export function Layout() {
           </WorkspaceTitle>
         </WorkspaceHeader>
         <ContentArea>
-          <Outlet />
+          <Suspense fallback={<Centered />}>
+            <Outlet />
+          </Suspense>
         </ContentArea>
       </MainArea>
 
@@ -181,9 +195,12 @@ export function Layout() {
         {user && (
           <>
             <Sep />
-            <UserName title={user.username}>
-              {user.username}
-              {user.is_superuser ? ' · superuser' : ''}
+            <UserName onClick={() => setProfileOpen(true)} title={t('profile.title')}>
+              <User size={14} />
+              <span>
+                {user.username}
+                {user.is_superuser ? ' · superuser' : ''}
+              </span>
             </UserName>
             <UtilBtn onClick={logout} title={t('common.signOut')}>
               <LogOut size={14} />
@@ -191,6 +208,8 @@ export function Layout() {
           </>
         )}
       </UtilityBar>
+
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </Shell>
   )
 }

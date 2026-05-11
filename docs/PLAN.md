@@ -259,18 +259,21 @@ response_field = "data.0.name"
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off).
   `src/App.tsx` — `react-router-dom` v7: `/login`, `/oidc/callback`, `RequireAuth` `Layout`
   with `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e` (HttpRunner), `/chat`,
-  `/settings` (superuser).
+  `/settings` (superuser). The route components are `React.lazy`-split (the heavy libs ride
+  along — TableView/Chat/Settings each become their own chunk; entry chunk ~112 kB gz);
+  `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
 - `components/`: **Layout** (shell — `Sidebar` + workspace-title header + a fixed top-right
-  utility pill: EN/FR · dark/light · username · sign-out), **Sidebar** (collapsible nav rail,
-  lucide icons, react-router `NavLink`s + an external "API docs" link), **Connectors** (lists
-  `GET /api/connectors`, drills to queries/endpoints), **TableView** (param form from
-  `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
-  client-side paging, sticky header — whose columns come from `result.columns`; writable →
-  confirm + `POST`), **HttpRunner** (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
-  **Chat** (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles via `<Markdown>`,
-  + tool_call/tool_result lines + new-conversation), **Settings** (a Monaco editor — `ini`
-  highlighting, theme follows dark/light — over `GET/PUT /admin/config/connectors` + Save +
-  Reload), **Login** + **OidcCallback**.
+  utility pill: EN/FR · dark/light · username→profile · sign-out), **Sidebar** (collapsible nav
+  rail, lucide icons, react-router `NavLink`s + an external "API docs" link), **ProfileModal**
+  (read-only — username/email/provider/roles/permissions from the Principal; no self-service
+  password change yet — the backend has no endpoint), **Connectors** (lists `GET /api/connectors`,
+  drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
+  `GET` + a `@tanstack/react-table` grid — sortable columns, client-side paging, sticky header —
+  whose columns come from `result.columns`; writable → confirm + `POST`), **HttpRunner**
+  (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), **Chat** (consumes the `/ai/chat`
+  SSE — user bubbles plain, assistant bubbles via `<Markdown>`, + tool_call/tool_result lines +
+  new-conversation), **Settings** (a Monaco editor — `ini` highlighting, theme follows
+  dark/light — over `GET/PUT /admin/config/connectors` + Save + Reload), **Login** + **OidcCallback**.
 - Dev: `cd frontend && npm i && npm run dev` (Vite :5173, proxies the API to :8000); prod:
   `npm run build` → `dist/` → served by the backend. `frontend/.gitignore` excludes
   `node_modules/` + `dist/`; `package-lock.json` is committed.
@@ -279,9 +282,9 @@ response_field = "data.0.name"
   superuser-only, the `[oidc] frontend_redirect` setting). Frontend itself is tsc-checked at
   build time; no Vitest/RTL yet.
 - *Still TODO toward full nomaubl parity:* bundle Monaco with the app (a Vite Monaco plugin)
-  instead of the CDN loader, for air-gapped deploys; `@tanstack/react-virtual` to virtualise
-  very large result grids; route-level code splitting (the bundle is ~590 kB / ~184 kB gz);
-  a `ProfileModal`/change-password page; reusable `<FormView>`/`<Lookup>` (TableView covers
+  instead of the CDN loader, for air-gapped deploys; a self-service change-password flow
+  (needs a backend endpoint — ProfileModal is read-only for now); `@tanstack/react-virtual`
+  to virtualise very large result grids; reusable `<FormView>`/`<Lookup>` (TableView covers
   reads + writable "runs"; HttpRunner covers API endpoints); Vitest/RTL frontend tests;
   frontend build in CI.
 
