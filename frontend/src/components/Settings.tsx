@@ -2,32 +2,24 @@ import { useEffect, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { SlidersHorizontal, Save, RefreshCw } from 'lucide-react'
+import MonacoEditor from '@monaco-editor/react'
 import { api, ApiError } from '../api'
-import { PageLayout, Button, Banner, Centered, Row, Stack, SpinnerRing, Mono } from '../ui'
-import { colors, fontSize, fonts, radius } from '../theme'
+import { PageLayout, Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, useIsLight } from '../ui'
+import { colors, fontSize, radius } from '../theme'
 
 interface ConfigDoc {
   path: string
   content: string
 }
 
-const Editor = styled.textarea`
-  width: 100%;
-  min-height: 56vh;
-  resize: vertical;
-  padding: 12px 14px;
-  border-radius: ${radius.md};
+const EditorFrame = styled.div`
   border: 1px solid ${colors.border};
+  border-radius: ${radius.md};
+  overflow: hidden;
+  height: 58vh;
+  min-height: 320px;
+  /* Monaco paints its own background; keep it from clashing with the page card. */
   background: ${colors.bg.input};
-  color: ${colors.text.primary};
-  font-family: ${fonts.mono};
-  font-size: ${fontSize.base};
-  line-height: 1.5;
-  outline: none;
-  white-space: pre;
-  overflow: auto;
-  tab-size: 2;
-  &:focus { border-color: ${colors.blue.main}; }
 `
 
 const Hint = styled.p`
@@ -39,6 +31,7 @@ const Hint = styled.p`
 
 export function Settings() {
   const { t } = useTranslation()
+  const isLight = useIsLight()
   const [doc, setDoc] = useState<ConfigDoc | null>(null)
   const [content, setContent] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -108,15 +101,31 @@ export function Settings() {
   return (
     <PageLayout icon={<SlidersHorizontal size={18} />} title={t('settings.title')} description={<Mono>{doc.path}</Mono>}>
       <Stack gap={12}>
-        <Editor
-          spellCheck={false}
-          value={content}
-          onChange={(e) => {
-            setContent(e.target.value)
-            setDirty(e.target.value !== doc.content)
-            setStatus(null)
-          }}
-        />
+        <EditorFrame>
+          <MonacoEditor
+            height="100%"
+            language="ini"
+            theme={isLight ? 'light' : 'vs-dark'}
+            value={content}
+            loading={<Centered />}
+            onChange={(v) => {
+              const next = v ?? ''
+              setContent(next)
+              setDirty(next !== doc.content)
+              setStatus(null)
+            }}
+            options={{
+              fontSize: 13,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              tabSize: 2,
+              renderWhitespace: 'boundary',
+              wordWrap: 'on',
+              automaticLayout: true,
+            }}
+          />
+        </EditorFrame>
         <Row>
           <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />}

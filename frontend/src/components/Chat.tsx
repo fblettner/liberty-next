@@ -5,6 +5,7 @@ import { Sparkles, Send, ArrowRight, Check, X } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../api'
 import type { AiTool, ChatEvent, ChatMessage } from '../types'
 import { PageLayout, Button, Banner, LinkButton, SpinnerRing, Mono } from '../ui'
+import { Markdown } from './Markdown'
 import { colors, fontSize, fonts, radius } from '../theme'
 
 type Entry =
@@ -42,11 +43,11 @@ const Messages = styled.div`
 const Bubble = styled.div<{ $role: 'user' | 'assistant' }>`
   padding: 9px 12px;
   border-radius: ${radius.lg};
-  white-space: pre-wrap;
   word-break: break-word;
   font-size: ${fontSize.md};
   line-height: 1.55;
   max-width: 88%;
+  white-space: ${({ $role }) => ($role === 'user' ? 'pre-wrap' : 'normal')};
   ${({ $role }) =>
     $role === 'user'
       ? `align-self: flex-end; background: ${colors.blue.bg}; border: 1px solid ${colors.blue.border}; color: ${colors.text.primary};`
@@ -209,7 +210,15 @@ export function Chat() {
               </ToolLine>
             ) : (
               <Bubble key={i} $role={e.role}>
-                {e.text || <span style={{ color: colors.text.muted }}>…</span>}
+                {e.text ? (
+                  e.role === 'assistant' ? (
+                    <Markdown>{e.text}</Markdown>
+                  ) : (
+                    e.text
+                  )
+                ) : (
+                  <span style={{ color: colors.text.muted }}>…</span>
+                )}
               </Bubble>
             ),
           )}

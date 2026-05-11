@@ -246,11 +246,14 @@ response_field = "data.0.name"
 - **Look & feel** — adopted from **nomaubl's React app** (`../../JavaProjects/nomaubl/src/web-react/`):
   `@emotion/styled`, a "liquid-glass" palette, a dark default + light theme (CSS-var swap via a
   `.theme-light` class on `<html>`, preference persisted), `react-i18next` (EN/FR, persisted),
-  `lucide-react` icons, DM Sans (Google Fonts). `src/theme.ts` (tokens), `src/index.css` (the
-  `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar), `src/i18n.ts` +
-  `src/locales/{en,fr}.ts`, `src/ui.tsx` (shared emotion primitives: `Button`/`Card`/`Input`/
-  `Field`/`Tag`/`Banner`/`Pre`/`Mono`/`SpinnerRing`/`Centered`/`PageLayout`/`Modal*`/
-  `ConfirmModal`/`Stack`/`Row` — pages stay declarative on top of these).
+  `lucide-react` icons, DM Sans (Google Fonts), `@tanstack/react-table` (the SELECT grid),
+  `react-markdown` + `remark-gfm` (assistant replies), `@monaco-editor/react` (the connector-
+  config editor — loaded from a CDN at runtime, same as nomaubl). `src/theme.ts` (tokens),
+  `src/index.css` (the `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar),
+  `src/i18n.ts` + `src/locales/{en,fr}.ts`, `src/ui.tsx` (shared emotion primitives:
+  `Button`/`Card`/`Input`/`Field`/`Tag`/`Banner`/`Pre`/`Mono`/`SpinnerRing`/`Centered`/
+  `PageLayout`/`Modal*`/`ConfirmModal`/`Stack`/`Row` + `useIsLight()`), `components/Markdown.tsx`
+  (react-markdown with styled elements) — pages stay declarative on top of these.
 - `src/api.ts` — `fetch` wrapper (Bearer header, JSON, 401 → log-out hook), `streamSSE`.
   `src/auth.tsx` — `AuthProvider`/`useAuth()` (login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off).
@@ -261,12 +264,13 @@ response_field = "data.0.name"
   utility pill: EN/FR · dark/light · username · sign-out), **Sidebar** (collapsible nav rail,
   lucide icons, react-router `NavLink`s + an external "API docs" link), **Connectors** (lists
   `GET /api/connectors`, drills to queries/endpoints), **TableView** (param form from
-  `params`/`bind_params`; SELECT → `GET` + a client-side sorted/paged sticky-header table whose
-  columns come from `result.columns`; writable → confirm + `POST`), **HttpRunner**
-  (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), **Chat** (consumes the `/ai/chat`
-  SSE — message bubbles + tool_call/tool_result lines + new-conversation), **Settings**
-  (monospace `<textarea>` over `GET/PUT /admin/config/connectors` + Save + Reload),
-  **Login** + **OidcCallback**.
+  `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
+  client-side paging, sticky header — whose columns come from `result.columns`; writable →
+  confirm + `POST`), **HttpRunner** (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
+  **Chat** (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles via `<Markdown>`,
+  + tool_call/tool_result lines + new-conversation), **Settings** (a Monaco editor — `ini`
+  highlighting, theme follows dark/light — over `GET/PUT /admin/config/connectors` + Save +
+  Reload), **Login** + **OidcCallback**.
 - Dev: `cd frontend && npm i && npm run dev` (Vite :5173, proxies the API to :8000); prod:
   `npm run build` → `dist/` → served by the backend. `frontend/.gitignore` excludes
   `node_modules/` + `dist/`; `package-lock.json` is committed.
@@ -274,11 +278,12 @@ response_field = "data.0.name"
   shadowed; no-dir → not mounted —, `GET/PUT /admin/config/connectors` validate-then-write
   superuser-only, the `[oidc] frontend_redirect` setting). Frontend itself is tsc-checked at
   build time; no Vitest/RTL yet.
-- *Still TODO toward full nomaubl parity:* `@monaco-editor/react` for the connector-config
-  editor, `@tanstack/react-table` (+ `@tanstack/react-virtual`) for `TableView`, `react-markdown`
-  + `remark-gfm` for assistant replies; a `ProfileModal`/change-password page; reusable
-  `<FormView>`/`<Lookup>` (TableView covers reads + writable "runs"; HttpRunner covers API
-  endpoints); Vitest/RTL frontend tests; frontend build in CI.
+- *Still TODO toward full nomaubl parity:* bundle Monaco with the app (a Vite Monaco plugin)
+  instead of the CDN loader, for air-gapped deploys; `@tanstack/react-virtual` to virtualise
+  very large result grids; route-level code splitting (the bundle is ~590 kB / ~184 kB gz);
+  a `ProfileModal`/change-password page; reusable `<FormView>`/`<Lookup>` (TableView covers
+  reads + writable "runs"; HttpRunner covers API endpoints); Vitest/RTL frontend tests;
+  frontend build in CI.
 
 ### Phase 5 — Migration tools — 🚧 IN PROGRESS  (~4–6 wks)
 **Done so far** — `liberty/migrations/` + the `liberty-migrate` CLI, plus dialect-aware queries

@@ -172,7 +172,9 @@ hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE cover
 **Phase 4 (Frontend) — DONE.** `frontend/` — React 19 + Vite + TS, built `dist/` served
 as static by the backend. UI adopts **nomaubl's "liquid-glass" look**: `@emotion/styled`,
 a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persisted),
-`react-i18next` EN/FR (persisted), `lucide-react` icons, DM Sans (Google Fonts).
+`react-i18next` EN/FR (persisted), `lucide-react` icons, DM Sans (Google Fonts),
+`@tanstack/react-table` (the SELECT grid), `react-markdown` + `remark-gfm` (assistant
+replies), `@monaco-editor/react` (the connector-config editor).
 - `src/theme.ts` — design tokens (colours/fonts/radii/shadows/`glass` blur snippets), all via
   CSS vars. `src/index.css` — the `:root` (dark) + `.theme-light` var sets, the ambient
   gradient background, the thin scrollbar. `src/i18n.ts` + `src/locales/{en,fr}.ts` — i18next
@@ -181,7 +183,9 @@ a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persi
   `Input`/`Select`/`Textarea`/`Field`/`FieldLabel`, `Tag` (`$tone`), `Banner`, `Pre`, `Mono`,
   `SpinnerRing`, `Centered` (loading/error placeholder), `PageLayout` (the bordered "context
   bar" header + scrolling content area every page uses), `Overlay`/`Modal*`/`ConfirmModal`,
-  `Stack`/`Row`. Pages stay declarative on top of these (no per-page CSS).
+  `Stack`/`Row`, plus `useIsLight()` (observes the `.theme-light` class — used to pick Monaco's
+  theme). `components/Markdown.tsx` — `react-markdown` + `remark-gfm` with emotion-styled
+  elements. Pages stay declarative on top of these (no per-page CSS).
 - `src/api.ts` — `fetch` wrapper: attaches the Bearer token, parses JSON, 401 → calls the
   registered "log out" hook; `streamSSE(path, body, onEvent)` for `POST /ai/chat`.
 - `src/auth.tsx` — `AuthProvider` / `useAuth()`: login (`POST /auth/login`), token in
@@ -194,11 +198,13 @@ a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persi
   utility pill: EN/FR · dark/light · username · sign-out), `Sidebar` (collapsible nav rail,
   lucide icons, react-router `NavLink`s + an external "API docs" link), `Connectors` (lists
   `GET /api/connectors`, drills to queries/endpoints), `TableView` (param form from the query's
-  `params`/`bind_params`; SELECT → `GET` + a client-side sorted/paged sticky-header table from
-  `result.columns`; writable → `confirm` + `POST` + affected-rows banner), `HttpRunner`
-  (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), `Chat` (consumes the `/ai/chat` SSE
-  — message bubbles + `tool_call`/`tool_result` lines), `Settings` (a monospace `<textarea>`
-  over `GET/PUT /admin/config/connectors` + a Reload button), `Login` + `OidcCallback`.
+  `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
+  client-side paging, sticky header — from `result.columns`; writable → `confirm` + `POST` +
+  affected-rows banner), `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
+  `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
+  `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a Monaco editor — `language="ini"`,
+  theme follows dark/light — over `GET/PUT /admin/config/connectors` + Save + Reload),
+  `Login` + `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
   fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
   `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default
@@ -209,9 +215,12 @@ a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persi
 - `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
   Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
   prod build: `npm run build` → `dist/` → served automatically by the backend.
-  Still TODO toward full nomaubl parity: Monaco editor for the connector-config page,
-  `@tanstack/react-table` for `TableView`, `react-markdown` for assistant replies. Reference
-  app: `../../JavaProjects/nomaubl/src/web-react/`.
+  ⚠ Monaco loads from a CDN (jsdelivr) at runtime — `@monaco-editor/react`'s default loader,
+  same as nomaubl (the app already CDN-loads DM Sans); air-gapped deployments would need it
+  bundled with a Vite Monaco plugin. Still TODO toward full nomaubl parity: a profile /
+  change-password modal, Vitest/RTL frontend tests, frontend build in CI, route-level code
+  splitting (the bundle is ~590 kB / ~184 kB gz). Reference app:
+  `../../JavaProjects/nomaubl/src/web-react/`.
 
 **Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the
 `liberty-migrate` CLI — turn a v1 Liberty DB's `ly_*` metadata into v2 `connectors.toml`:

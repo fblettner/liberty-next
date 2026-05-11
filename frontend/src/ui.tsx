@@ -1,11 +1,27 @@
 // Shared UI primitives for Liberty's admin shell — emotion-styled, themed via
 // src/theme.ts. Adapted from nomaubl's `common/*` set, trimmed to what Liberty
 // uses. Keep visual choices here so pages stay declarative.
-import { type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { keyframes } from '@emotion/react'
 import { useTranslation } from 'react-i18next'
 import { colors, radius, fontSize, fonts, glass, shadow } from './theme'
+
+// ── Theme awareness ───────────────────────────────────────────────────────────
+
+/** True when the light theme is active (the `.theme-light` class on <html>).
+ *  Re-renders the caller when the Layout's toggle flips it — used e.g. to pick
+ *  Monaco's editor theme. */
+export function useIsLight(): boolean {
+  const [light, setLight] = useState(() => document.documentElement.classList.contains('theme-light'))
+  useEffect(() => {
+    const el = document.documentElement
+    const obs = new MutationObserver(() => setLight(el.classList.contains('theme-light')))
+    obs.observe(el, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
+  return light
+}
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
 

@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import {
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getPaginationRowModel,
+  flexRender,
+  type ColumnDef,
+  type SortingState,
+} from '@tanstack/react-table'
 import { Table as TableIcon, Play, ChevronLeft, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react'
 import { api, ApiError } from '../api'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../types'
@@ -9,6 +18,8 @@ import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Row, Sta
 import { colors, fontSize, fonts, radius } from '../theme'
 
 const PAGE_SIZE = 50
+
+type DataRow = Record<string, unknown>
 
 function cellText(v: unknown): { text: string; isNull: boolean } {
   if (v === null || v === undefined) return { text: 'null', isNull: true }
@@ -47,12 +58,12 @@ const DataTable = styled.table`
     padding: 6px 10px;
     border-bottom: 1px solid ${colors.border};
     border-right: 1px solid ${colors.border};
-    cursor: pointer;
     user-select: none;
     white-space: nowrap;
     font-weight: 600;
-    &:hover { color: ${colors.text.primary}; }
   }
+  th.sortable { cursor: pointer; }
+  th.sortable:hover { color: ${colors.text.primary}; }
   th .ix { display: inline-flex; vertical-align: middle; margin-left: 4px; color: ${colors.blue.main}; }
   td {
     padding: 4px 10px;
@@ -65,6 +76,102 @@ const DataTable = styled.table`
   tr:hover td { background: var(--hover-subtle); }
 `
 
+function ResultTable({ result }: { result: QueryResult }) {
+  const { t } = useTranslation()
+  const [sorting, setSorting] = useState<SortingState>([])
+
+  const data = useMemo<DataRow[]>(() => result.rows, [result])
+  const colType = useMemo(
+    () => Object.fromEntries(result.columns.map((c) => [c.name, c.type] as const)),
+    [result],
+  )
+  const columns = useMemo<ColumnDef<DataRow>[]>(
+    () =>
+      result.columns.map((c) => ({
+        id: c.name,
+        accessorFn: (r) => r[c.name],
+        header: c.name,
+        cell: (info) => {
+          const { text, isNull } = cellText(info.getValue())
+          return <span className={isNull ? 'null' : undefined}>{text}</span>
+        },
+      })),
+    [result],
+  )
+
+  const table = useReactTable({
+    data,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    initialState: { pagination: { pageSize: PAGE_SIZE } },
+  })
+
+  const { pageIndex } = table.getState().pagination
+  const pageCount = table.getPageCount()
+
+  return (
+    <>
+      <TableScroll>
+        <DataTable>
+          <thead>
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id}>
+                {hg.headers.map((header) => {
+                  const sorted = header.column.getIsSorted()
+                  return (
+                    <th
+                      key={header.id}
+                      className="sortable"
+                      title={colType[header.column.id] ?? undefined}
+                      onClick={header.column.getToggleSortingHandler()}
+                    >
+                      {flexRender(header.column.columnDef.header, header.getContext())}
+                      {sorted && (
+                        <span className="ix">{sorted === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}</span>
+                      )}
+                    </th>
+                  )
+                })}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id}>
+                {row.getVisibleCells().map((cell) => {
+                  const { isNull } = cellText(cell.getValue())
+                  return (
+                    <td key={cell.id} className={isNull ? 'null' : undefined}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+      </TableScroll>
+      {pageCount > 1 && (
+        <Row>
+          <Button $size="sm" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>
+            <ChevronLeft size={13} /> {t('common.prev')}
+          </Button>
+          <Meta>
+            {t('common.page')} {pageIndex + 1} {t('common.of')} {pageCount}
+          </Meta>
+          <Button $size="sm" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>
+            {t('common.next')} <ChevronRight size={13} />
+          </Button>
+        </Row>
+      )}
+    </>
+  )
+}
+
 export function TableView() {
   const { t } = useTranslation()
   const { connector = '', query = '' } = useParams()
@@ -74,8 +181,6 @@ export function TableView() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [runErr, setRunErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [sort, setSort] = useState<{ col: string; dir: 1 | -1 } | null>(null)
-  const [page, setPage] = useState(0)
 
   useEffect(() => {
     setMeta(null)
@@ -113,8 +218,6 @@ export function TableView() {
     if (meta.writable && !window.confirm(t('table.runWritableConfirm', { q: `${connector}.${query}` }))) return
     setBusy(true)
     setRunErr(null)
-    setSort(null)
-    setPage(0)
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
     try {
@@ -136,23 +239,6 @@ export function TableView() {
       setBusy(false)
     }
   }, [meta, params, connector, query, t])
-
-  const sortedRows = useMemo(() => {
-    if (!result) return []
-    if (!sort) return result.rows
-    const { col, dir } = sort
-    return [...result.rows].sort((a, b) => {
-      const av = a[col],
-        bv = b[col]
-      if (av === bv) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      return (av < bv ? -1 : 1) * dir
-    })
-  }, [result, sort])
-
-  const pageRows = sortedRows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
-  const pages = result ? Math.max(1, Math.ceil(result.rows.length / PAGE_SIZE)) : 1
 
   if (metaErr)
     return (
@@ -223,61 +309,7 @@ export function TableView() {
             {result.columns.length === 0 ? (
               <Meta>{t('table.noColumns')}</Meta>
             ) : (
-              <>
-                <TableScroll>
-                  <DataTable>
-                    <thead>
-                      <tr>
-                        {result.columns.map((c) => (
-                          <th
-                            key={c.name}
-                            title={c.type ?? undefined}
-                            onClick={() =>
-                              setSort((s) =>
-                                s && s.col === c.name
-                                  ? { col: c.name, dir: (s.dir * -1) as 1 | -1 }
-                                  : { col: c.name, dir: 1 },
-                              )
-                            }
-                          >
-                            {c.name}
-                            {sort?.col === c.name && (
-                              <span className="ix">{sort.dir === 1 ? <ArrowUp size={12} /> : <ArrowDown size={12} />}</span>
-                            )}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pageRows.map((row, i) => (
-                        <tr key={i}>
-                          {result.columns.map((c) => {
-                            const { text, isNull } = cellText(row[c.name])
-                            return (
-                              <td key={c.name} className={isNull ? 'null' : undefined}>
-                                {text}
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </DataTable>
-                </TableScroll>
-                {pages > 1 && (
-                  <Row>
-                    <Button $size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                      <ChevronLeft size={13} /> {t('common.prev')}
-                    </Button>
-                    <Meta>
-                      {t('common.page')} {page + 1} {t('common.of')} {pages}
-                    </Meta>
-                    <Button $size="sm" disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)}>
-                      {t('common.next')} <ChevronRight size={13} />
-                    </Button>
-                  </Row>
-                )}
-              </>
+              <ResultTable key={result.columns.map((c) => c.name).join('|')} result={result} />
             )}
           </Stack>
         )}
