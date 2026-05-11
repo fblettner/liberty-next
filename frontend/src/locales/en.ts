@@ -10,6 +10,10 @@ const en = {
     settings: 'Settings',
     apiDocs: 'API docs',
   },
+  workspace: {
+    app: 'Application',
+    allApps: '(all apps)',
+  },
   common: {
     loading: 'Loading…',
     run: 'Run',

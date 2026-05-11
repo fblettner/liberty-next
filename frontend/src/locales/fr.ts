@@ -12,6 +12,10 @@ const fr: Resources = {
     settings: 'Paramètres',
     apiDocs: 'Doc API',
   },
+  workspace: {
+    app: 'Application',
+    allApps: '(toutes les apps)',
+  },
   common: {
     loading: 'Chargement…',
     run: 'Exécuter',

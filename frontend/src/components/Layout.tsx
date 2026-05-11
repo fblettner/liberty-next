@@ -12,6 +12,7 @@ import { useAuth } from '../auth/AuthContext'
 import { Centered } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
+import WorkspaceSelect from './WorkspaceSelect'
 
 const THEME_KEY = 'liberty.theme'
 
@@ -182,6 +183,7 @@ export default function Layout() {
       </MainArea>
 
       <UtilityBar>
+        <WorkspaceSelect />
         <UtilBtn $active={lang === 'en'} onClick={() => switchLang('en')} title="English">
           EN
         </UtilBtn>

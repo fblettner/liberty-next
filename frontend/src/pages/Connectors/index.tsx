@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { LayoutGrid, Database, Globe } from 'lucide-react'
-import { api, ApiError } from '../../api/client'
-import type { ConnectorMeta } from '../../types/connectors'
 import { PageLayout, Card, Banner, Centered, Tag, Mono, Stack } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 const ConnHead = styled.div`
@@ -50,15 +49,12 @@ const ItemDesc = styled.span`
 
 export default function Connectors() {
   const { t } = useTranslation()
-  const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .get<{ connectors: ConnectorMeta[] }>('/api/connectors')
-      .then((r) => setConnectors(r.connectors))
-      .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
-  }, [])
+  const { connectors: all, error, currentApp } = useWorkspace()
+  // The header workspace picker scopes the list to one connector ("(all apps)" = no scope).
+  const connectors = useMemo(
+    () => (all == null ? null : currentApp ? all.filter((c) => c.name === currentApp) : all),
+    [all, currentApp],
+  )
 
   const body = error ? (
     <Banner $tone="error">{error}</Banner>
