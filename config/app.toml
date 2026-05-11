@@ -6,3 +6,31 @@ log_level = "info"
 
 [connectors]
 config_path = "config/connectors.toml"
+
+# Internal-user authentication. The auth tables (ly2_users / ly2_roles) live on
+# the connector pool named below; create them with `liberty-admin init-db`.
+# jwt_secret signs the access/refresh JWTs — set it via the environment; if left
+# empty an ephemeral key is generated at startup (dev only — tokens won't survive
+# a restart).
+[auth]
+pool = "default"
+jwt_secret = "${LIBERTY_JWT_SECRET}"
+jwt_algorithm = "HS256"
+jwt_issuer = "liberty-v2"
+access_token_ttl = 3600          # seconds
+refresh_token_ttl = 1209600      # seconds (14 days)
+
+# OpenID Connect (Keycloak-ready). Disabled until enabled=true and a discovery
+# URL is set; then /auth/oidc/login and /auth/oidc/callback become live and a
+# cookie session is enabled for the OAuth state/nonce.
+[oidc]
+enabled = false
+discovery_url = ""               # e.g. https://keycloak.example/realms/liberty/.well-known/openid-configuration
+client_id = ""
+client_secret = "${OIDC_CLIENT_SECRET}"
+scopes = "openid email profile"
+username_claim = "preferred_username"
+email_claim = "email"
+name_claim = "name"
+redirect_url = ""                # override the auto-derived /auth/oidc/callback URL behind a proxy
+session_secret = ""              # falls back to jwt_secret if empty

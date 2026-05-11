@@ -37,37 +37,17 @@ Example::
 
 from __future__ import annotations
 
-import os
-import re
 import tomllib
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# --------------------------------------------------------------------------- #
-# ${ENV_VAR} substitution
-# --------------------------------------------------------------------------- #
+from liberty.config import substitute_env
 
-_ENV_REF = re.compile(r"\$\{(\w+)\}")
-
-
-def _substitute_env(value: Any, *, env: dict[str, str] | None = None) -> Any:
-    """Recursively replace ``${NAME}`` references with environment values.
-
-    Connector auth configs must reference secrets, never inline them — an
-    unresolved ``${NAME}`` becomes the empty string so a missing secret fails
-    loudly at call time rather than silently using the literal text.
-    """
-    src = os.environ if env is None else env
-    if isinstance(value, str):
-        return _ENV_REF.sub(lambda m: src.get(m.group(1), ""), value)
-    if isinstance(value, dict):
-        return {k: _substitute_env(v, env=env) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_substitute_env(v, env=env) for v in value]
-    return value
-
+# Connector auth configs must reference secrets, never inline them — an
+# unresolved ``${NAME}`` becomes the empty string (see :func:`substitute_env`)
+# so a missing secret fails loudly at call time rather than using literal text.
 
 # --------------------------------------------------------------------------- #
 # Pools
@@ -199,7 +179,7 @@ class ConnectorsFile(BaseModel):
 
 def parse_connectors(data: dict[str, Any], *, env: dict[str, str] | None = None) -> ConnectorsFile:
     """Validate a raw TOML dict into a :class:`ConnectorsFile` (after env substitution)."""
-    return ConnectorsFile.model_validate(_substitute_env(data, env=env))
+    return ConnectorsFile.model_validate(substitute_env(data, env=env))
 
 
 def load_connectors_file(

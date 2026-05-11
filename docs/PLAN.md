@@ -55,7 +55,8 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Location | **Sibling directory** `../liberty-v2/`. |
 | Config format | **TOML** files on disk (nomaubl uses flat XML properties — the flat-config insight stands, TOML is the Python-idiomatic form). |
 | AI | **Anthropic SDK**, drop OpenAI. Port nomaubl's `AiAssistant.java` tool-use loop. |
-| Auth | Internal users (**argon2**) + **OIDC via authlib** (Keycloak-ready). |
+| Auth | Internal users (**argon2id**) + **OIDC via authlib** (Keycloak-ready); own JWTs (HS256). |
+| Users storage | **Dedicated ORM table** (`ly2_users`/`ly2_roles`) created via `liberty-admin init-db`, *not* SQLConnector queries — auth is infra, not a configurable screen; users are app data so the "no metadata tables" rule still holds. |
 
 ## 4. Phased plan
 
@@ -124,13 +125,52 @@ params = [{ name = "id" }]
 response_field = "data.0.name"
 ```
 
-### Phase 2 — Auth + AI — ⏳ NEXT  (~2 wks)
-- Internal users table (argon2 hashes), roles/permissions. Bootstrap an `admin`.
-- OIDC via `authlib` — Keycloak discovery URL, code flow, JWT validation.
-- JWT issuance/validation for internal logins.
+### Phase 2 — Auth + AI — 🚧 IN PROGRESS
+
+**2a — Auth (internal users + OIDC) — ✅ DONE.** `liberty/auth/`:
+- `models.py` — SQLAlchemy 2.0 ORM `User` / `Role` / `user_roles` (`ly2_*` tables).
+  Decided **with the user**: a dedicated ORM table (not SQLConnector queries) —
+  auth is foundational infra, not a user-configurable screen; users are app data,
+  so the "no metadata tables" rule still holds. `Role.permissions` = JSON list of
+  colon-segmented strings (`"sql:liberty:read"`, `"*"` wildcard); superuser bypasses.
+- `password.py` — Argon2id (`argon2-cffi`), with `needs_rehash` so logins upgrade
+  stale hashes transparently.
+- `tokens.py` — `TokenService`: HS256 JWTs, `access` (carries roles/perms/superuser
+  so handlers need no DB hit) + `refresh` (re-reads the user → role changes
+  propagate within a TTL). Secret from `[auth] jwt_secret` / `LIBERTY_JWT_SECRET`;
+  empty → ephemeral key + a warning.
+- `db.py` — `AuthDatabase`: lazy `async_sessionmaker` over a `PoolRegistry` pool
+  (`[auth] pool`, default `default`); `create_schema()` for `liberty-admin init-db`.
+- `principal.py` — `Principal` from JWT claims; `has_permission` glob match.
+- `service.py` — `AuthService`: `authenticate` (+rehash), CRUD, role ops,
+  `provision_oidc_user` (find-or-create by `(provider="oidc", sub)`).
+- `oidc.py` — Authlib Starlette `OAuth` client from a discovery URL (Keycloak-ready);
+  ID-token validation is Authlib's job; returns `None` when disabled.
+- `dependencies.py` — `get_current_principal` / `optional_principal`,
+  `require_permission` / `require_role` / `require_superuser`, `get_auth_service`,
+  `get_oidc`.
+- `routes.py` — `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me`,
+  `GET /auth/oidc/login` + `GET /auth/oidc/callback` (both 404 when OIDC off). Both
+  login paths mint *our* JWTs; the IdP's tokens aren't propagated downstream.
+- `liberty/admin_cli.py` (`liberty-admin`) — `init-db` (tables + bootstrap a
+  superuser `admin`/role `admin`/perm `*`; password explicit or generated-and-
+  printed), `create-user`, `set-password`, `set-active`, `list-users`, `create-role`.
+- `liberty/main.py` — `create_app(settings=None)`; lifespan builds `auth_db` /
+  `token_service` / `oidc` on `app.state`; `SessionMiddleware` only when OIDC on;
+  includes the auth router; `/info` reports `auth.pool` + `oidc_enabled`.
+- `liberty/config.py` — `[auth]` + `[oidc]` settings; `${ENV_VAR}` substitution now
+  also applied to `app.toml` (`substitute_env` lives here, reused by the connectors loader).
+- Deps added: `itsdangerous` (for `SessionMiddleware`). 68 new tests (110 total).
+- *Not done:* refresh-token rotation/denylist (no revocation yet — short TTLs only),
+  a full OIDC flow integration test (needs a fake IdP), an HTTP "admin users"
+  endpoint (CLI only for now).
+
+**2b — AI (Anthropic tool-use loop) — ⏳ NEXT.**
 - AI module: Anthropic SDK, tool-use loop ported from nomaubl `AiAssistant.java`
-  — tools = decorated Python functions w/ type hints; SSE token streaming;
-  max-iteration cap; optional `web_fetch` restricted to allowlisted domains.
+  — tools = decorated Python functions w/ type hints (JSON schema derived from the
+  signature); the SQL/API connectors are the first tools to expose; SSE token
+  streaming; max-iteration cap; optional `web_fetch` restricted to allowlisted
+  domains. Gate the chat endpoint behind `require_permission("ai:chat")` (or similar).
 
 ### Phase 3 — Web layer — (~2 wks)
 - `GET/POST /api/sql/{connector}/query/{name}` — params in querystring/body.
@@ -175,12 +215,17 @@ to validate against.
 - ~~Multipart/file upload story in APIConnector~~ — done in Phase 1 (line-based
   parts list, files read into memory; revisit streaming if a large-file PA needs it).
 - WebSocket vs SSE for live updates (v1 = Socket.IO).
-- Secrets handling — Phase 1 takes the **env-var** path: connector configs use
-  `${ENV_VAR}` references, substituted at load time (unset → empty string).
-  v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
+- Secrets handling — settled on the **env-var** path: `${ENV_VAR}` references in
+  `connectors.toml` *and* `app.toml`, substituted at load time (unset → empty
+  string). v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
+- Token revocation — refresh tokens are stateless (no denylist / rotation), so a
+  leaked refresh token is good until expiry. Add a `jti` denylist (or per-user
+  token version) if/when that matters; for now keep TTLs short.
 - Hot-reload trigger — `ConnectorRegistry` is rebuildable from a fresh
   `ConnectorsFile`, but nothing watches the file or exposes a reload endpoint yet
   (wire up in Phase 3 web layer / Phase 4 settings UI).
+- DB migrations — auth tables are created via `create_all` (`liberty-admin init-db`),
+  no Alembic. Fine while the schema is small; add Alembic before the schema churns.
 - Reporting/PDF — v1 has Excel export (`tbl_workbook`/`tbl_sheet`), nomaubl has
   XSLT→PDF via BI Publisher. Out of scope until a user asks.
 - JDE Julian date conversion — only if v2 needs to talk to JD Edwards data
@@ -190,8 +235,11 @@ to validate against.
 
 1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
 2. Read this file for the full picture.
-3. Phases 0–1 are done. Next is **Phase 2 — Auth + AI**: start with an internal
-   users table + argon2 hashing and an `admin` bootstrap, then OIDC via authlib,
-   then the Anthropic tool-use loop (port nomaubl `AiAssistant.java`). The AI
-   tools should be plain decorated Python functions — and the SQL/API connectors
-   from Phase 1 are the obvious first tools to expose to the model.
+3. Done: Phase 0, Phase 1 (connectors), Phase 2a (auth — internal users + OIDC).
+   Next is **Phase 2b — the Anthropic tool-use loop** (`liberty/ai/`): port
+   nomaubl `AiAssistant.java`. AI tools = plain decorated Python functions whose
+   JSON schema is derived from the type hints; the Phase 1 SQL/API connectors are
+   the obvious first tools to expose. SSE streaming, max-iteration cap, allowlisted
+   `web_fetch`. Gate the chat endpoint with `require_permission(...)` from
+   `liberty.auth.dependencies`. After that: Phase 3 (web layer — the connector
+   HTTP routes, themselves guarded by the auth deps).

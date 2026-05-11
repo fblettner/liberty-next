@@ -65,9 +65,51 @@ Full dep set pinned in `pyproject.toml`.
 Wired into `main.py` lifespan (`app.state.connectors`); `/info` reports loaded
 connector + pool names. 42 tests pass.
 
-**Next: Phase 2 — Auth + AI.** Internal users (argon2) + OIDC via authlib
-(Keycloak); JWT issuance/validation; Anthropic SDK tool-use loop ported from
-nomaubl `AiAssistant.java`. See `docs/PLAN.md`.
+**Phase 2 (Auth — internal users + OIDC) — DONE.** Lives in `liberty/auth/`.
+*(The AI half of Phase 2 — Anthropic tool-use loop — is still pending; see `docs/PLAN.md`.)*
+- `models.py` — SQLAlchemy 2.0 ORM: `User`, `Role`, `user_roles` M2M (tables
+  `ly2_users` / `ly2_roles` / `ly2_user_roles`). These are *app data*, not v1-style
+  metadata tables. `Role.permissions` is a JSON list of strings (`"sql:liberty:read"`,
+  `"*"`); superuser bypasses checks. Own `Base` → `create_all` scopes to auth tables.
+- `password.py` — Argon2id via `argon2-cffi` (`hash_password` / `verify_password` /
+  `needs_rehash`).
+- `tokens.py` — `TokenService` mints/verifies HS256 JWTs: `access` (carries
+  `roles`/`perms`/`sup` → no per-request DB hit) and `refresh` (re-reads the user).
+- `db.py` — `AuthDatabase`: lazy `async_sessionmaker` over a `PoolRegistry` pool
+  (`[auth] pool`, default `default`); `create_schema()` for `liberty-admin init-db`.
+  ⚠ async-ORM gotcha: assign `user.roles = [...]` explicitly (even `[]`) on new
+  rows — a freshly-flushed object's unloaded relationship lazy-loads on access,
+  which raises `MissingGreenlet` under async.
+- `principal.py` — `Principal` (built from JWT claims, no DB): `has_permission`
+  with colon-segment globs (`sql:*` ⊇ `sql:liberty:read`), `has_role`, superuser.
+- `service.py` — `AuthService` over an `AsyncSession`: `authenticate` (+ rehash),
+  `create_user`, `set_password`/`set_active`, role ops, `provision_oidc_user`
+  (find-or-create by `(provider="oidc", sub)`, username-collision suffixing).
+- `oidc.py` — `build_oidc(settings)` → Authlib Starlette `OAuth` client (Keycloak
+  discovery URL); `None` when disabled. ID-token validation is Authlib's job.
+- `dependencies.py` — `get_current_principal` / `optional_principal`,
+  `require_permission(perm)` / `require_role(role)` / `require_superuser`,
+  `get_auth_service` (session per request), `get_oidc` (404 if off). All read
+  `request.app.state`.
+- `routes.py` — `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me`,
+  `GET /auth/oidc/login`, `GET /auth/oidc/callback` (both 404 when OIDC is off).
+  Both login paths mint *our* JWTs; the IdP's tokens aren't propagated.
+- `liberty/admin_cli.py` (`liberty-admin` script) — `init-db` (create tables +
+  bootstrap a superuser `admin` with role `admin`/perm `*`; password from
+  `--password` / `--password-env` / generated-and-printed), `create-user`,
+  `set-password`, `set-active`, `list-users`, `create-role`.
+- `liberty/config.py` — added `[auth]` + `[oidc]` settings; `${ENV_VAR}`
+  substitution now applies to `app.toml` too (`substitute_env` moved here).
+- `liberty/main.py` — `create_app(settings=None)`; lifespan builds `auth_db`,
+  `token_service`, `oidc` on `app.state`; `SessionMiddleware` added iff OIDC
+  enabled; includes the auth router; `/info` reports `auth.pool` + `oidc_enabled`.
+110 tests pass. Deps added: `itsdangerous` (for `SessionMiddleware`), `aiosqlite`
+(dev, for SQL/auth tests). OIDC full-flow integration test: deferred (needs a fake IdP).
+
+**Next: Phase 2 (AI) — Anthropic tool-use loop** ported from nomaubl
+`AiAssistant.java`: tools = decorated Python functions w/ type hints (the SQL/API
+connectors as the first tools), SSE token streaming, max-iteration cap,
+allowlisted `web_fetch`. Then Phase 3 (web layer). See `docs/PLAN.md`.
 
 ## Run it
 
@@ -75,6 +117,7 @@ nomaubl `AiAssistant.java`. See `docs/PLAN.md`.
 .venv/bin/pytest -v               # tests
 .venv/bin/liberty-v2              # dev server on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
+.venv/bin/liberty-admin init-db   # create auth tables + bootstrap admin (needs [auth] pool reachable)
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
@@ -82,8 +125,10 @@ nomaubl `AiAssistant.java`. See `docs/PLAN.md`.
 
 ```
 config/         app.toml, connectors.toml
-liberty/        main.py, config.py, cli.py · connectors/{config,base,db,sql,api,registry}.py
-                · auth/ ai/ web/ migrations/ (added per phase)
+liberty/        main.py, config.py, cli.py, admin_cli.py
+                · connectors/{config,base,db,sql,api,registry}.py
+                · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
+                · ai/ web/ migrations/ (added per phase)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale
 ```
