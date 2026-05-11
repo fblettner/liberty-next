@@ -139,10 +139,13 @@ class QueryDef(BaseModel):
     columns: list[ColumnHint] = Field(default_factory=list)  # display hints; the schema is still from the query
     label: str | None = None
     description: str | None = None
-    # The name of a `writable` query on the same connector that updates one row of this query's
-    # result — set explicitly here, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
-    # naming convention the migration uses. Drives the TableView's inline-edit mode.
+    # Names of `writable` queries on the same connector that update / insert / delete a row of this
+    # query's result — set explicitly, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
+    # / `<base>_post` / `<base>_delete` naming convention the migration uses. Drive the TableView's
+    # batch edit mode (edit a row → its `_put`; "Add row" → `_post`; delete a row → `_delete`).
     update_query: str | None = None
+    insert_query: str | None = None
+    delete_query: str | None = None
 
     @field_validator("sql")
     @classmethod

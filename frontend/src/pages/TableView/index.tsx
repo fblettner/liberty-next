@@ -160,6 +160,8 @@ export default function TableView() {
                 connector={connector}
                 query={query}
                 updateQuery={meta.update_query}
+                insertQuery={meta.insert_query}
+                deleteQuery={meta.delete_query}
                 onSaved={run}
               />
             )}

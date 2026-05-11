@@ -299,21 +299,24 @@ async def test_unknown_query(pools: PoolRegistry) -> None:
         await conn.execute("nope")
 
 
-def test_describe_resolves_update_query(pools: PoolRegistry) -> None:
+def test_describe_resolves_companion_queries(pools: PoolRegistry) -> None:
     conn = _connector(
         pools,
         QueryDef(name="item_get", sql="SELECT id, name FROM item ORDER BY id"),
         QueryDef(name="item_put", sql="UPDATE item SET name = :name WHERE id = :id", writable=True),
-        QueryDef(name="readonly_get", sql="SELECT id FROM item"),                                # no _put sibling
-        QueryDef(name="lonely_get", sql="SELECT 1 AS x", update_query="item_put"),               # explicit override
-        QueryDef(name="bad_get", sql="SELECT 1 AS x", update_query="item_get"),                  # points at a non-writable query → ignored
+        QueryDef(name="item_post", sql="INSERT INTO item (id, name) VALUES (:id, :name)", writable=True),
+        QueryDef(name="readonly_get", sql="SELECT id FROM item"),                                  # no companions
+        QueryDef(name="lonely_get", sql="SELECT 1 AS x", update_query="item_put", delete_query="item_post"),  # explicit
+        QueryDef(name="bad_get", sql="SELECT 1 AS x", update_query="item_get"),                    # points at a non-writable query → ignored
     )
     by = {q["name"]: q for q in conn.describe()["queries"]}
-    assert by["item_get"]["update_query"] == "item_put"        # <base>_get → <base>_put convention
-    assert by["readonly_get"]["update_query"] is None          # no companion
-    assert by["lonely_get"]["update_query"] == "item_put"      # explicit
-    assert by["bad_get"]["update_query"] is None               # explicit target isn't writable
-    assert by["item_put"]["update_query"] is None              # not a _get query
+    assert (by["item_get"]["update_query"], by["item_get"]["insert_query"], by["item_get"]["delete_query"]) == (
+        "item_put", "item_post", None,                          # <base>_get → <base>_put / _post (no _delete defined)
+    )
+    assert (by["readonly_get"]["update_query"], by["readonly_get"]["insert_query"]) == (None, None)
+    assert (by["lonely_get"]["update_query"], by["lonely_get"]["delete_query"]) == ("item_put", "item_post")  # explicit
+    assert by["bad_get"]["update_query"] is None                # explicit target isn't writable
+    assert by["item_put"]["update_query"] is None               # not a _get query
 
 
 def test_describe_lists_metadata(pools: PoolRegistry) -> None:

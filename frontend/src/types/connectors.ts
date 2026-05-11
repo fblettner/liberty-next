@@ -11,8 +11,11 @@ export interface SqlQueryMeta {
   label: string | null
   description: string | null
   writable: boolean
-  /** the writable query that updates one row of this query's result (`<base>_put`), if any — enables inline edit */
+  /** writable companion queries — `<base>_put` / `<base>_post` / `<base>_delete` — that
+   *  update / insert / delete a row of this query's result. Drive the TableView's batch edit. */
   update_query: string | null
+  insert_query: string | null
+  delete_query: string | null
   statement_type: string
   params: ParamDef[]
   bind_params: string[]

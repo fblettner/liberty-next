@@ -176,20 +176,33 @@ class SQLConnector:
                 f"Available: {self.query_names or '(none)'}."
             ) from None
 
-    def update_query_for(self, qdef: QueryDef) -> str | None:
-        """The name of the ``writable`` query that updates one row of *qdef*'s result — the
-        explicit :attr:`QueryDef.update_query`, else the ``<base>_get`` → ``<base>_put`` companion
-        the migration emits (if it exists on this connector and is writable). ``None`` otherwise."""
-        if qdef.update_query is not None:
-            cand = self._queries.get(qdef.update_query)
-            return qdef.update_query if cand is not None and cand.writable else None
+    def _companion(self, qdef: QueryDef, suffix: str, explicit: str | None) -> str | None:
+        """The name of the ``writable`` companion query for *qdef* — the *explicit* value if set,
+        else the ``<base>_get`` → ``<base><suffix>`` query (if it exists on this connector and is
+        writable, the migration's convention). ``None`` otherwise."""
+        if explicit is not None:
+            cand = self._queries.get(explicit)
+            return explicit if cand is not None and cand.writable else None
         n = qdef.name
         if n[-4:].lower() == "_get":
-            cand_name = n[:-4] + "_put"
+            cand_name = n[:-4] + suffix
             cand = self._queries.get(cand_name)
             if cand is not None and cand.writable:
                 return cand_name
         return None
+
+    def update_query_for(self, qdef: QueryDef) -> str | None:
+        """The ``writable`` query that updates one row of *qdef*'s result (``QueryDef.update_query``
+        or the ``_get`` → ``_put`` companion)."""
+        return self._companion(qdef, "_put", qdef.update_query)
+
+    def insert_query_for(self, qdef: QueryDef) -> str | None:
+        """The ``writable`` query that inserts a row into *qdef*'s table (``_post`` companion)."""
+        return self._companion(qdef, "_post", qdef.insert_query)
+
+    def delete_query_for(self, qdef: QueryDef) -> str | None:
+        """The ``writable`` query that deletes one row of *qdef*'s result (``_delete`` companion)."""
+        return self._companion(qdef, "_delete", qdef.delete_query)
 
     def describe(self) -> dict[str, Any]:
         """Metadata only — no credentials, no pool URL. Feeds the CLI / settings UI / AI tool.
@@ -209,6 +222,8 @@ class SQLConnector:
                     "description": q.description,
                     "writable": q.writable,
                     "update_query": self.update_query_for(q),
+                    "insert_query": self.insert_query_for(q),
+                    "delete_query": self.delete_query_for(q),
                     "statement_type": detect_statement_type(q.default_sql),
                     "dialects": q.dialects,
                     "params": [
