@@ -199,14 +199,37 @@ response_field = "data.0.name"
   endpoint's `ai:chat`; the Anthropic `web_fetch_20260209` tool version is assumed
   GA (no beta header) — surfaces as an API error if a beta header turns out to be needed.
 
-### Phase 3 — Web layer — ⏳ NEXT  (~2 wks)
-- `GET/POST /api/sql/{connector}/query/{name}` — params in querystring/body.
-- `POST /api/api/{connector}/call/{endpoint}`.
-- SSE for AI streaming and long-running queries.
-- OpenAPI auto-doc replaces v1's hand-rolled "get screen metadata" endpoint.
-- WebSocket if needed for live updates (v1 uses Socket.IO; evaluate vs SSE).
+### Phase 3 — Web layer — ✅ DONE
+`liberty/web/`:
+- `connectors.py` — `GET /api/connectors` (+ `/{connector}`): list connectors filtered
+  to what the caller may use — **metadata only** (names/labels/params/`bind_params`/
+  `writable`/`statement_type` for SQL; method/path/params for API) — never the SQL text,
+  the pool, or any credential. `GET /api/sql/{c}/{q}` (SELECT-only — non-SELECT → 405; params
+  from the query string) and `POST /api/sql/{c}/{q}` (any allowed statement; body
+  `{"params": {…}}` or a flat `{name: value}`) → `QueryResult.to_dict()`. `POST /api/http/{c}/{e}`
+  → `ApiResult.to_dict()` (HTTP 200 even on upstream failure — caller inspects `success`).
+  Permission strings settled: `sql:{connector}:{query}` / `api:{connector}:{endpoint}`,
+  glob-aware (`sql:liberty:*`, `sql:*`, `*`). Permission is checked **before** the connector
+  lookup → no enumeration of names you lack access to. A mutating query needs *both* its
+  TOML `writable = true` and the caller's permission (two orthogonal gates).
+- `admin.py` — `POST /admin/reload` (superuser): rebuild `ConnectorRegistry` from
+  `connectors.toml`, swap `app.state.connectors`, re-point `app.state.auth_db`, dispose the
+  old registry. (The AI assistant's connector tools refresh on app restart, not on reload;
+  in-flight requests keep whichever registry they started with.)
+- `deps.py` — `get_connectors`, `require_permission(principal, perm)` (imperative — the perm
+  string is built from path params), `public_connector` (the SQL/credential-stripped view).
+- `errors.py` — `ConnectorError` → HTTP: not-found→404, statement/writable→422, other→400;
+  SQLAlchemy errors during execute → 502.
+- OpenAPI auto-doc at `/docs` (`/openapi.json`) replaces v1's hand-rolled "get screen
+  metadata" endpoint. SSE: AI streaming already done (`/ai/chat`); "SSE for long-running
+  queries" deferred (queries are fast — revisit with a job runner if a slow query appears).
+  WebSocket: not needed yet — SSE covers the live-update use case for now.
+- 24 new tests (172 total).
+- *Not done:* `?accessible=` filter is implicit (always filtered); a `/api/sql/{c}/{q}/schema`
+  shortcut (just run it and read `.columns`); a `POST /admin/reload` that also rebuilds the
+  AI assistant; `/admin/reload` is fire-and-forget — no in-flight-request draining.
 
-### Phase 4 — Frontend — (~3–4 wks)
+### Phase 4 — Frontend — ⏳ NEXT  (~3–4 wks)
 - Fresh `frontend/` — React 19 + Vite + TS. Built `dist/` served as static by
   FastAPI (mounted in `liberty/main.py`).
 - Login screen: internal form + "Sign in with OIDC" button.
@@ -241,16 +264,18 @@ to validate against.
 
 - ~~Multipart/file upload story in APIConnector~~ — done in Phase 1 (line-based
   parts list, files read into memory; revisit streaming if a large-file PA needs it).
-- WebSocket vs SSE for live updates (v1 = Socket.IO).
+- WebSocket vs SSE — SSE covers live updates for now (`/ai/chat`). Add WebSocket only
+  if a real bidirectional/low-latency need appears (v1 = Socket.IO).
 - Secrets handling — settled on the **env-var** path: `${ENV_VAR}` references in
   `connectors.toml` *and* `app.toml`, substituted at load time (unset → empty
   string). v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
 - Token revocation — refresh tokens are stateless (no denylist / rotation), so a
   leaked refresh token is good until expiry. Add a `jti` denylist (or per-user
   token version) if/when that matters; for now keep TTLs short.
-- Hot-reload trigger — `ConnectorRegistry` is rebuildable from a fresh
-  `ConnectorsFile`, but nothing watches the file or exposes a reload endpoint yet
-  (wire up in Phase 3 web layer / Phase 4 settings UI).
+- Hot-reload — `POST /admin/reload` rebuilds the `ConnectorRegistry` from disk and
+  re-points `app.state.auth_db` (Phase 3). Still missing: a file watcher, a Phase 4
+  settings UI to edit `connectors.toml` (write-back + reload), rebuilding the AI
+  assistant on reload, and draining in-flight requests before disposing the old registry.
 - DB migrations — auth tables are created via `create_all` (`liberty-admin init-db`),
   no Alembic. Fine while the schema is small; add Alembic before the schema churns.
 - AI prompt caching — only the system+tools prefix is `cache_control`-ed; growing
@@ -270,11 +295,12 @@ to validate against.
 
 1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
 2. Read this file for the full picture.
-3. Done: Phase 0, Phase 1 (connectors), Phase 2 (auth + AI).
-   Next is **Phase 3 — the web layer**: HTTP routes for the connectors —
-   `GET/POST /api/sql/{connector}/query/{name}`, `POST /api/api/{connector}/call/{endpoint}`
-   — guarded by `require_permission(...)` from `liberty.auth.dependencies` (settle the
-   permission-string scheme, e.g. `sql:{connector}:{query}:read`); OpenAPI auto-doc;
-   SSE for long-running queries; maybe a `POST /admin/reload` to rebuild the
-   `ConnectorRegistry`. The AI's `/ai/chat` (SSE) is already a working reference for
-   streaming responses, and `ConnectorRegistry.describe()` is the discovery surface.
+3. Done: Phase 0, Phase 1 (connectors), Phase 2 (auth + AI), Phase 3 (web layer).
+   Next is **Phase 4 — the frontend** (fresh `frontend/`, React 19 + Vite + TS, built
+   `dist/` served as static by `liberty/main.py`): login screen (internal form +
+   "Sign in with OIDC"), then schema-driven generic components — `<TableView>` over
+   `GET /api/sql/{c}/{q}` rendering columns from the response metadata, `<FormView>` /
+   `<Lookup>`, and a settings UI that CRUDs `connectors.toml` (write-back + `POST
+   /admin/reload`). The HTTP API (`GET /api/connectors`, `GET/POST /api/sql/...`,
+   `POST /api/http/...`, `/auth/login` + `/auth/me`, `POST /ai/chat` SSE) and its
+   OpenAPI doc at `/docs` are the backend contract the frontend builds against.

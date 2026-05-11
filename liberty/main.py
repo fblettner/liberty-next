@@ -16,6 +16,7 @@ from liberty.auth.routes import router as auth_router
 from liberty.auth.tokens import TokenConfig, TokenService
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
+from liberty.web import admin_router, connectors_router
 
 _log = logging.getLogger("liberty")
 
@@ -69,7 +70,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(auth_router)
+    app.include_router(connectors_router)
     app.include_router(ai_router)
+    app.include_router(admin_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

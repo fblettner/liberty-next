@@ -63,7 +63,7 @@ Full dep set pinned in `pyproject.toml`.
 - `liberty/cli.py` (`liberty-connectors` script) — `list` / `describe <c>` /
   `run <c> <query-or-endpoint> -p k=v`.
 Wired into `main.py` lifespan (`app.state.connectors`); `/info` reports loaded
-connector + pool names. 42 tests pass.
+connector + pool names.
 
 **Phase 2 (Auth + AI) — DONE.**
 
@@ -133,10 +133,34 @@ OIDC full-flow integration test: deferred (needs a fake IdP).
   `thinking`, `effort`, `connector_tools`, `api_tool`, `allowed_connectors`,
   `web_fetch_domains`, …). API key from `${ANTHROPIC_API_KEY}`.
 
-148 tests pass. Deps used: `anthropic` (already pinned), `itsdangerous` (auth's
-`SessionMiddleware`), `aiosqlite` (dev). Note: the `claude-api` skill (`/claude-api`)
-holds the live Anthropic-SDK guidance — re-consult it before changing the AI module
-or bumping the model. **Use `claude-opus-4-7` unless the user names another model.**
+Deps used: `anthropic` (already pinned), `itsdangerous` (auth's `SessionMiddleware`),
+`aiosqlite` (dev). Note: the `claude-api` skill (`/claude-api`) holds the live
+Anthropic-SDK guidance — re-consult it before changing the AI module or bumping
+the model. **Use `claude-opus-4-7` unless the user names another model.**
+
+**Phase 3 (Web layer) — DONE.** Lives in `liberty/web/`:
+- `connectors.py` — `GET /api/connectors` (+ `/{connector}`) lists connectors filtered
+  to what the caller may use — **metadata only: no SQL text, no credentials, no pool**;
+  `GET /api/sql/{c}/{q}` (SELECT-only, params from the query string) and
+  `POST /api/sql/{c}/{q}` (any allowed statement; body `{"params": {…}}` or a flat
+  `{name: value}`) execute a query → `QueryResult.to_dict()`; `POST /api/http/{c}/{e}`
+  calls an API endpoint → `ApiResult.to_dict()` (returned as HTTP 200 even on upstream
+  failure — inspect `success`/`status_code`/`error`). Permission strings: `sql:{c}:{q}`
+  / `api:{c}:{e}` (glob-aware — `sql:liberty:*`, `sql:*`, `*`). The permission is checked
+  *before* the connector is looked up, so callers can't enumerate names they lack access
+  to. A mutating query needs *both* its TOML `writable = true` and the caller's perm.
+- `admin.py` — `POST /admin/reload` (superuser): rebuild `ConnectorRegistry` from
+  `connectors.toml`, swap `app.state.connectors`, re-point `app.state.auth_db`, dispose
+  the old registry. (The AI assistant's connector tools refresh on restart, not on reload;
+  in-flight requests keep the registry they started with.)
+- `deps.py` — `get_connectors`, `require_permission(principal, perm)` (imperative — the
+  perm string depends on path params), `public_connector` (the SQL/credential-stripped view).
+- `errors.py` — `ConnectorError` → HTTP: not-found→404, statement/writable→422, other→400;
+  SQLAlchemy errors during execute → 502.
+OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
+hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
+
+172 tests pass.
 
 ## Run it
 
@@ -145,6 +169,7 @@ or bumping the model. **Use `claude-opus-4-7` unless the user names another mode
 .venv/bin/liberty-v2              # dev server on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
 .venv/bin/liberty-admin init-db   # create auth tables + bootstrap admin (needs [auth] pool reachable)
+# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
@@ -157,7 +182,8 @@ liberty/        main.py, config.py, cli.py, admin_cli.py
                 · connectors/{config,base,db,sql,api,registry}.py
                 · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
                 · ai/{tools,connector_tools,assistant,routes}.py
-                · web/ migrations/ (added per phase)
+                · web/{deps,errors,connectors,admin}.py
+                · migrations/ (Phase 5)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale
 ```
