@@ -185,27 +185,30 @@ def test_migrate_pools_prefix_and_overrides_stubs() -> None:
 # Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)
 # --------------------------------------------------------------------------- #
 
+# Shape mirrors source.read_column_hints (col_label/col_type often empty → ly_dictionary fallback).
 _TBL_COLS = [
-    {"query_id": 1, "col_target": "USR_ID", "col_label": None, "col_seq": 1, "col_visible": "Y", "col_type": "number", "col_id": 1, "dd_label": "User ID"},
-    {"query_id": 1, "col_target": "USR_NAME", "col_label": "User Name", "col_seq": 2, "col_visible": "Y", "col_type": "text", "col_id": 2, "dd_label": None},
-    {"query_id": 1, "col_target": "USR_PWD", "col_label": "Password", "col_seq": 3, "col_visible": "N", "col_type": "password", "col_id": 3, "dd_label": None},
-    {"query_id": 1, "col_target": "USR_NAME", "col_label": "OTHER WIDGET", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 9, "dd_label": None},  # 2nd widget → dedup, first wins
-    {"query_id": 3, "col_target": "F0101", "col_label": "F0101", "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1, "dd_label": None},  # label == target → dropped
+    {"query_id": 1, "col_target": "USR_ID", "col_label": None, "col_seq": 1, "col_visible": "Y", "col_type": "number", "col_id": 1, "dd_label": "User ID", "dd_type": "number"},
+    {"query_id": 1, "col_target": "USR_NAME", "col_label": "User Name", "col_seq": 2, "col_visible": "Y", "col_type": "text", "col_id": 2, "dd_label": None, "dd_type": "text"},
+    {"query_id": 1, "col_target": "USR_PWD", "col_label": "Password", "col_seq": 3, "col_visible": "N", "col_type": "password", "col_id": 3, "dd_label": None, "dd_type": "text"},
+    {"query_id": 1, "col_target": "USR_DT", "col_label": None, "col_seq": 4, "col_visible": "Y", "col_type": None, "col_id": 4, "dd_label": "Created", "dd_type": "date"},  # col_type empty → format from dd_type
+    {"query_id": 1, "col_target": "USR_NAME", "col_label": "OTHER WIDGET", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 9, "dd_label": None, "dd_type": None},  # 2nd widget → dedup, first wins
+    {"query_id": 3, "col_target": "F0101", "col_label": "F0101", "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1, "dd_label": None, "dd_type": "text"},  # label == target → dropped; "text" → no format
 ]
 _DLG_COLS = [
-    {"query_id": 2, "col_target": "USR_ID", "col_label": "Id", "col_seq": 1, "col_visible": "1", "col_type": "integer", "col_id": 1, "dd_label": None},
-    {"query_id": 1, "col_target": "USR_ID", "col_label": "FROM DLG", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 1, "dd_label": None},  # query 1 USR_ID already from tbl → ignored
+    {"query_id": 2, "col_target": "USR_ID", "col_label": "Id", "col_seq": 1, "col_visible": "1", "col_type": "integer", "col_id": 1, "dd_label": None, "dd_type": "number"},
+    {"query_id": 1, "col_target": "USR_ID", "col_label": "FROM DLG", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 1, "dd_label": None, "dd_type": "text"},  # query 1 USR_ID already from tbl → ignored
 ]
 
 
 def test_migrate_column_hints() -> None:
     hints = migrate_column_hints(_TBL_COLS, _DLG_COLS)
     assert set(hints) == {1, 2, 3}
-    assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD"]  # col_seq order; dedup'd; dlg ignored
+    assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD", "USR_DT"]  # col_seq order; dedup'd; dlg ignored
     assert hints[1][0] == {"name": "USR_ID", "label": "User ID", "format": "number"}  # dd_label fallback; col_type → format
     assert hints[1][1] == {"name": "USR_NAME", "label": "User Name"}  # col_label wins; "text" → no format
     assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N' → hidden
-    assert hints[3] == [{"name": "F0101"}]  # label == column name → no label
+    assert hints[1][3] == {"name": "USR_DT", "label": "Created", "format": "date"}  # col_type empty → format from dd_type
+    assert hints[3] == [{"name": "F0101"}]  # label == column name → no label; "text" dd_type → no format
     assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]  # only the form-field column
 
 
@@ -219,6 +222,28 @@ def test_migrate_sql_queries_with_column_hints() -> None:
     by_name = {q["name"]: q for q in out2["connectors"]["default"]["queries"]}
     assert "columns" not in by_name["delete_user_delete"]
     parse_connectors(tomllib.loads(render_toml(out)))  # round-trips through the v2 config loader
+
+
+def test_migrate_sql_queries_rest_crud_verbs() -> None:
+    # v1's query_crud is a REST verb: GET = read, POST/PUT/DELETE = write
+    queries = [{"query_id": 1, "query_label": "Things", "query_type": "TABLE"}]
+    sql_rows = [
+        {"query_id": 1, "query_dbtype": "generic", "query_crud": "GET", "query_pool": "app",
+         "query_sqlquery": "SELECT id, name FROM things", "query_orderby": "id"},
+        {"query_id": 1, "query_dbtype": "generic", "query_crud": "POST", "query_pool": "app",
+         "query_sqlquery": "INSERT INTO things (name) VALUES (:name)", "query_orderby": None},
+    ]
+    out = migrate_sql_queries(queries, sql_rows, column_hints={1: [{"name": "name", "label": "Name"}]})
+    by_name = {q["name"]: q for q in out["connectors"]["app"]["queries"]}
+    # GET → read: ORDER BY appended, no `writable`, gets the column hints
+    assert by_name["things_get"]["sql"].endswith("ORDER BY id")
+    assert "writable" not in by_name["things_get"]
+    assert by_name["things_get"]["columns"] == [{"name": "name", "label": "Name"}]
+    # POST → write: `writable = true`, no ORDER BY, no column hints
+    assert by_name["things_post"]["writable"] is True
+    assert "ORDER BY" not in by_name["things_post"]["sql"]
+    assert "columns" not in by_name["things_post"]
+    parse_connectors(tomllib.loads(render_toml(out)))
 
 
 _CONNS = [

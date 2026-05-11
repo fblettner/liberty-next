@@ -82,10 +82,14 @@ async def _build(args: argparse.Namespace) -> dict:
 def _summary(data: dict) -> str:
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
-    n_q = sum(len(c.get("queries") or []) for c in connectors.values() if c.get("type") == "sql")
-    n_e = sum(len(c.get("endpoints") or []) for c in connectors.values() if c.get("type") == "api")
+    queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]
+    n_q, n_e = len(queries), sum(len(c.get("endpoints") or []) for c in connectors.values() if c.get("type") == "api")
+    n_hinted = sum(1 for q in queries if q.get("columns"))
     blob = render_toml(data)
-    lines = [f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies), {n_e} endpoint(s)"]
+    lines = [
+        f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies)"
+        f"{f' ({n_hinted} with column hints)' if n_hinted else ''}, {n_e} endpoint(s)"
+    ]
     ph = _placeholders(data)
     if ph:
         lines.append("# fill in these placeholders before use: " + ", ".join(ph))

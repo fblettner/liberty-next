@@ -242,12 +242,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
 **Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the
 `liberty-migrate` CLI — turn a v1 Liberty DB's `ly_*` metadata into v2 `connectors.toml`:
 - `v1.py` — pure transforms over row dicts: `slugify`; `migrate_sql_queries(ly_query rows,
-  ly_qry_sql rows, dbtype=…, connector_prefix=…)` → one **SQL connector per `query_pool`**,
-  one query per `(query_id, query_crud)` — the per-`query_dbtype` SQL variants become a
-  `sql = { default = …, oracle = …, … }` dialect map (a single distinct statement collapses
-  to a plain string; `--dbtype` keeps just one variant; ORDER BY appended for SELECTs;
-  `writable=true` for INSERT/UPDATE/DELETE/MERGE; pool stubs `[pools.<name>] url =
-  "${LIBERTY_DB_URL_<NAME>}"`); `migrate_api(ly_api_conn, ly_api,
+  ly_qry_sql rows, dbtype=…, connector_prefix=…, column_hints=…)` → one **SQL connector per
+  `query_pool`**, one query per `(query_id, query_crud)` named `<label>_<crud>` — the
+  per-`query_dbtype` SQL variants become a `sql = { default = …, oracle = …, … }` dialect map
+  (a single distinct statement collapses to a plain string; `--dbtype` keeps just one variant).
+  v1's `query_crud` is a **REST verb** — `GET`/`SELECT` = read (gets `ORDER BY <query_orderby>`
+  and the `column_hints` for its `query_id`), `POST`/`PUT`/`PATCH`/`DELETE` = write (`writable =
+  true`). Pool stubs `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` (overridden by
+  `migrate_pools`). `migrate_api(ly_api_conn, ly_api,
   ly_api_header, ly_api_params, …)` → an **API connector per `ly_api_conn`** (`base_url=conn_url`,
   basic auth from `conn_user` + the v1 `conn_password` carried over **verbatim** — it's an
   `ENC:…` blob, and v2 decrypts it at runtime with the same key, see *Crypto* below) with
@@ -262,16 +264,17 @@ replies), `@monaco-editor/react` (the connector-config editor).
   — v2's `[pools.default]` is v2's own framework DB); `migrate_column_hints(ly_tbl_col rows,
   ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, label?
   (from col_label, else ly_dictionary.dd_label, when ≠ the column name), hidden? (col_visible
-  reads false), format? (a non-trivial col_type)}`; table-widget columns beat form-field
-  columns; first `(query, col)` wins → per-query list keeps `col_seq` order) — passed to
-  `migrate_sql_queries(column_hints=…)`, which attaches them as each SELECT's `columns`.
-  `merge_connectors(*)` (pools merged last → real `migrate_pools` URLs override
+  reads false), format? (col_type, else ly_dictionary.dd_type, when non-trivial)}`; table-widget
+  columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq`
+  order) — passed to `migrate_sql_queries(column_hints=…)`, which attaches them to each *read*
+  query's `columns`. `merge_connectors(*)` (pools merged last → real `migrate_pools` URLs override
   `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`). The `# migrated: …` header
-  notes the `${…}` placeholders + any `ENC:` secrets it carried over (set `LIBERTY_MASTER_KEY`).
+  notes the query/hint counts + the `${…}` placeholders + any `ENC:` secrets it carried over.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`,
-  each joined to `ly_dictionary` for the label) (SELECT-only; the last two tolerate missing tables
-  on old v1 schemas → `[]`; `make_engine(url)` accepts any async URL — `postgresql+asyncpg://…`).
+  each joined to `ly_dictionary` for the label/type) (SELECT-only; a missing table on an old v1
+  schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)` accepts any
+  async URL — `postgresql+asyncpg://…`).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column

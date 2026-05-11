@@ -308,13 +308,14 @@ Postgres *and* Oracle, etc.):
   `SQLConnector` picks `qdef.sql_for(pool_dialect)` per call (falling back to `default`);
   `describe()` reports `dialects`. An empty/undefined pool URL surfaces as `503` (`UnknownPoolError`).
 - `v1.py` — pure transforms over plain row dicts. `migrate_sql_queries(ly_query rows,
-  ly_qry_sql rows, dbtype=…, connector_prefix=…)`: groups by `query_pool` → **one SQL
-  connector per pool** (+ a `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` stub); **one
-  `[[connectors.<pool>.queries]]` per `(query_id, query_crud)`** — the per-`query_dbtype` SQL
-  rows become a dialect map (`generic` → `default`; `postgres` → `postgresql`; …; identical
-  variants collapse to a plain string; `dbtype=` keeps just one → plain string), `+ ORDER BY
-  query_orderby` for SELECTs, `writable=true` for INSERT/UPDATE/DELETE/MERGE, name = `query_label`
-  (or `q<id>`) + `_<crud>`. `migrate_api(ly_api_conn, ly_api, ly_api_header, ly_api_params, …)`:
+  ly_qry_sql rows, dbtype=…, connector_prefix=…, column_hints=…)`: groups by `query_pool` →
+  **one SQL connector per pool** (+ a `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` stub);
+  **one `[[connectors.<pool>.queries]]` per `(query_id, query_crud)`** named `<query_label>_<crud>`
+  — the per-`query_dbtype` SQL rows become a dialect map (`generic` → `default`; `postgres` →
+  `postgresql`; …; identical variants collapse to a plain string; `dbtype=` keeps just one). v1's
+  `query_crud` is a **REST verb**: `GET`/`SELECT` = read (gets `ORDER BY <query_orderby>` and the
+  `column_hints` for its `query_id`), `POST`/`PUT`/`PATCH`/`DELETE` = write (`writable = true`).
+  `migrate_api(ly_api_conn, ly_api, ly_api_header, ly_api_params, …)`:
   **one API connector per `ly_api_conn`** (`base_url = conn_url`, `auth_type=basic` + `auth_username`
   from `conn_user` + the v1 `conn_password` carried over **verbatim** — it's an `ENC:…` blob and v2
   decrypts it at runtime with `[crypto] master_key` = v1's `MASTER_KEY`; the `# migrated:` header
@@ -330,16 +331,18 @@ Postgres *and* Oracle, etc.):
   is **skipped** — v2's `[pools.default]` is v2's own framework DB (the `ly2_*` tables).
   `migrate_column_hints(ly_tbl_col rows, ly_dlg_col rows)`: `{query_id: [ColumnHint dict]}` —
   each `col_target` → `{name, label?` (from `col_label`, else `ly_dictionary.dd_label`, when it
-  differs from the column name)`, hidden?` (when `col_visible` reads false)`, format?` (a
-  non-trivial `col_type`)`}`; table-widget columns beat form-field columns, first `(query, col)`
-  wins so the per-query list keeps `col_seq` order — passed to `migrate_sql_queries(column_hints=…)`,
-  which attaches them as each SELECT query's `columns` (the result *schema* is still discovered
-  at run time — these hints only augment it). `merge_connectors(*)` — pools are merged with
-  `migrate_pools` *last*, so its real URLs override the `migrate_sql_queries` stubs. `render_toml(d)`.
+  differs from the column name)`, hidden?` (when `col_visible` reads false)`, format?` (from
+  `col_type`, else `ly_dictionary.dd_type`, when non-trivial)`}`; table-widget columns beat
+  form-field columns, first `(query, col)` wins so the per-query list keeps `col_seq` order —
+  passed to `migrate_sql_queries(column_hints=…)`, which attaches them to each *read* query's
+  `columns` (the result *schema* is still discovered at run time — these hints only augment it).
+  `merge_connectors(*)` — pools merged with `migrate_pools` *last*, so its real URLs override
+  the `migrate_sql_queries` stubs. `render_toml(d)`.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
   `read_column_hints(engine)` (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`,
-  each joined to `ly_dictionary` for the label) — SELECT-only; the last two tolerate missing tables
-  on old v1 schemas → `[]`; `make_engine(url)` takes any async URL (`postgresql+asyncpg://…/liberty`).
+  each joined to `ly_dictionary` for the label/type) — SELECT-only; a missing table on an old v1
+  schema → `[]` *with a logged warning* (not silently swallowed); `make_engine(url)` takes any
+  async URL (`postgresql+asyncpg://…/liberty`).
 - **`liberty/crypto.py`** — field-level encryption, byte-compatible with v1's `Encryption`
   (AES-256-GCM, PBKDF2-HMAC-SHA512 2145 iters / 32 bytes, `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)`).
   So migrated `ENC:` secrets work as-is, *and* the user's other scripts that read/write the same

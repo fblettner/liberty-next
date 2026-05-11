@@ -8,10 +8,13 @@ URL the deps can speak (``postgresql+asyncpg://…`` for a real v1 DB,
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+_log = logging.getLogger("liberty.migrations")
 
 # Only the columns the migration uses — keeps it resilient to v1 schema drift.
 _SQL_QUERIES = text("""
@@ -27,16 +30,19 @@ _APPLICATIONS = text("""
     FROM ly_applications ORDER BY apps_pool
 """)
 # Per-column display metadata: table-widget columns (ly_tbl_col ← ly_tables ← ly_query) and
-# form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query), each with the dictionary label fallback.
+# form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query), each with the ly_dictionary label
+# (col_label often empty) and type (col_type often empty) as fallbacks.
 _TBL_COLS = text("""
-    SELECT t.tbl_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible, c.col_type, c.col_id, d.dd_label
+    SELECT t.tbl_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible,
+           c.col_type, c.col_id, d.dd_label, d.dd_type
     FROM ly_tbl_col c JOIN ly_tables t ON t.tbl_id = c.tbl_id
     LEFT JOIN ly_dictionary d ON d.dd_id = c.col_dd_id
     WHERE t.tbl_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY t.tbl_query_id, c.tbl_id, c.col_seq, c.col_id
 """)
 _DLG_COLS = text("""
-    SELECT f.frm_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible, c.col_type, c.col_id, d.dd_label
+    SELECT f.frm_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible,
+           c.col_type, c.col_id, d.dd_label, d.dd_type
     FROM ly_dlg_col c JOIN ly_dlg_frm f ON f.frm_id = c.frm_id
     LEFT JOIN ly_dictionary d ON d.dd_id = c.col_dd_id
     WHERE f.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
@@ -63,25 +69,30 @@ async def read_sql_queries(engine: AsyncEngine) -> tuple[list[dict[str, Any]], l
     return await _rows(engine, _QUERIES), await _rows(engine, _SQL_QUERIES)
 
 
-async def _rows_or_empty(engine: AsyncEngine, stmt) -> list[dict[str, Any]]:
-    """Like :func:`_rows`, but a missing/renamed table on an old v1 schema → ``[]``."""
+async def _rows_or_empty(engine: AsyncEngine, stmt, *, what: str) -> list[dict[str, Any]]:
+    """Like :func:`_rows`, but a missing/renamed table on an old v1 schema → ``[]`` (logged,
+    not silently swallowed — so a real schema mismatch is at least visible)."""
     try:
         return await _rows(engine, stmt)
-    except Exception:  # noqa: BLE001 — best-effort: an absent table just means "nothing to migrate here"
+    except Exception as exc:  # noqa: BLE001 — best-effort: an absent table just means "nothing here"
+        _log.warning("migration: skipped %s — %s: %s", what, type(exc).__name__, exc)
         return []
 
 
 async def read_applications(engine: AsyncEngine) -> list[dict[str, Any]]:
     """Return ``ly_applications`` rows (one per v1 app/pool — connection details).
     Older v1 schemas may lack this table; treat that as "no pools to scaffold"."""
-    return await _rows_or_empty(engine, _APPLICATIONS)
+    return await _rows_or_empty(engine, _APPLICATIONS, what="ly_applications")
 
 
 async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (``ly_tbl_col`` rows, ``ly_dlg_col`` rows) — each joined to its query
     (via ``ly_tables`` / ``ly_dlg_frm``) and the ``ly_dictionary`` label. Feeds
     :func:`liberty.migrations.v1.migrate_column_hints`. Missing tables → empty lists."""
-    return await _rows_or_empty(engine, _TBL_COLS), await _rows_or_empty(engine, _DLG_COLS)
+    return (
+        await _rows_or_empty(engine, _TBL_COLS, what="ly_tbl_col → ly_tables column hints"),
+        await _rows_or_empty(engine, _DLG_COLS, what="ly_dlg_col → ly_dlg_frm column hints"),
+    )
 
 
 async def read_api(

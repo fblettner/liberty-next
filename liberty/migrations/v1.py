@@ -5,23 +5,27 @@ These are pure functions over plain row dicts — the DB reading lives in
 
 v1 → v2 mapping
 ---------------
-* ``ly_query`` (logical name/label) + ``ly_qry_sql`` (per dbtype × CRUD: pool,
-  SQL, ORDER BY) → one v2 **SQL connector per ``query_pool``**, each carrying the
-  queries that ran against that pool. A query becomes ``[[connectors.<pool>.queries]]``
-  with ``sql`` = ``query_sqlquery`` (+ ``ORDER BY <query_orderby>`` if set) and
-  ``writable = true`` when ``query_crud`` is INSERT/UPDATE/DELETE/MERGE. v1 has
-  per-dbtype SQL variants; v2 has one SQL per name, so when a ``(query_id, crud)``
-  has more than one dbtype the name gets a ``_<dbtype>`` suffix (or filter with
-  ``dbtype=``). The pool's connection isn't in these tables — a ``[pools.<name>]``
-  stub with a ``${...}`` URL placeholder is emitted for the operator to fill in.
-* ``ly_api_conn`` (base URL + creds) → a v2 **API connector**; ``ly_api`` rows
-  pointing at it (``api_conn_id``) → its ``[[connectors.<conn>.endpoints]]`` (method,
-  path = ``api_url`` — relative or absolute, v2 resolves both — body, headers from
-  ``ly_api_header``, params from ``ly_api_params``). ``ly_api`` rows with no
-  ``api_conn_id`` go into a single ``legacy_api`` connector (``base_url = ""``, so
-  the endpoint paths must be absolute URLs — which they were in v1). v1 stores
-  passwords encrypted; the migration emits ``auth_username`` plaintext and a
-  ``${...}`` placeholder for ``auth_password`` (the operator re-supplies the secret).
+* ``ly_query`` (logical name/label) + ``ly_qry_sql`` (per dbtype × CRUD: pool, SQL,
+  ORDER BY) → one v2 **SQL connector per ``query_pool``**, each carrying the queries
+  that ran against that pool. A query becomes ``[[connectors.<pool>.queries]]`` named
+  ``<query_label>_<crud>``, with ``sql`` = ``query_sqlquery`` (+ ``ORDER BY <query_orderby>``
+  for reads); v1's per-``query_dbtype`` SQL variants collapse to a ``sql = { default = …,
+  oracle = … }`` dialect map (one distinct statement → a plain string; ``--dbtype`` keeps one).
+  v1's ``query_crud`` is a REST verb — ``GET`` (read), ``POST``/``PUT``/``PATCH``/``DELETE``
+  (write); a non-read crud → ``writable = true``. ``ly_tbl_col`` (table widgets) / ``ly_dlg_col``
+  (form fields), via ``ly_tables.tbl_query_id`` / ``ly_dlg_frm.frm_query_id``, → each read
+  query's ``columns`` display hints (title from ``col_label``/``ly_dictionary.dd_label``,
+  ``hidden`` from ``col_visible``, ``format`` from ``col_type``). The pool's connection is
+  filled by :func:`migrate_pools` (from ``ly_applications``) or left as a ``${LIBERTY_DB_URL_…}`` stub.
+* ``ly_api_conn`` (base URL + creds) → a v2 **API connector**; ``ly_api`` rows pointing at it
+  (``api_conn_id``) → its ``[[connectors.<conn>.endpoints]]`` (method, path = ``api_url`` —
+  relative or absolute, v2 resolves both — body, headers from ``ly_api_header``, params from
+  ``ly_api_params``). ``ly_api`` rows with no ``api_conn_id`` go into a single ``legacy_api``
+  connector (``base_url = ""``, absolute-URL paths). v1's ``conn_password`` is an ``ENC:`` blob,
+  carried over **verbatim** — v2 decrypts it at runtime with ``[crypto] master_key``.
+* ``ly_applications`` → ``[pools.*]`` (one per ``apps_pool``) via :func:`migrate_pools` — a real
+  SQLAlchemy URL from ``apps_dbtype``/``apps_host``/``apps_port``/``apps_database`` (or ``apps_jdbc``),
+  the DB password a ``${MIGRATED_PW_<NAME>}`` placeholder; v1's reserved ``default`` pool is skipped.
 """
 
 from __future__ import annotations
@@ -30,7 +34,10 @@ import re
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote as _urlquote
 
-_WRITE_CRUD = {"INSERT", "UPDATE", "DELETE", "MERGE"}
+# v1's `query_crud` uses REST-style verbs — GET (read), POST/PUT/PATCH (write), DELETE; some
+# older rows use SQL keywords (SELECT/INSERT/UPDATE/MERGE). A query is a *read* iff its crud is
+# one of these (else it's treated as a mutation: `writable = true`, no display column hints).
+_READ_CRUD = {"GET", "SELECT", "READ"}
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -145,7 +152,7 @@ def migrate_sql_queries(
             # Stub pool — fill in the real URL (or set the named env var).
             pools.setdefault(conn_name, {"url": "${LIBERTY_DB_URL_" + conn_name.upper() + "}", "pool_pre_ping": True})
         orderby = (r.get("query_orderby") or "").strip()
-        if orderby and crud == "SELECT":
+        if orderby and crud in _READ_CRUD:
             sql = f"{sql}\nORDER BY {orderby}"
         key = (conn_name, qid, crud)
         if key not in groups:
@@ -155,14 +162,15 @@ def migrate_sql_queries(
 
     for key in order:
         conn_name, qid, crud = key
+        is_read = crud in _READ_CRUD
         label = labels.get(qid, "")
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
-        hints = (column_hints or {}).get(qid) if crud == "SELECT" else None  # display hints only make sense for result sets
+        hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
                 "label": label or None,
-                "writable": True if crud in _WRITE_CRUD else None,  # omit when false (default)
+                "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
                 "sql": _sql_value(groups[key]),
                 "columns": (hints or None),  # omit when empty
             })
@@ -196,13 +204,14 @@ def migrate_column_hints(
     ``{name, label?, hidden?, format?}`` (see :class:`~liberty.connectors.config.ColumnHint`):
     ``label`` from ``col_label`` (else the ``ly_dictionary`` ``dd_label``) when it differs from
     the column name; ``hidden`` when ``col_visible`` reads false; ``format`` from a non-trivial
-    ``col_type``. Table-widget columns take precedence over form-field columns; the first
-    occurrence of each ``(query_id, col_target)`` wins, so the per-query list keeps ``col_seq`` order.
+    ``col_type`` (else the dictionary's ``dd_type``). Table-widget columns take precedence over
+    form-field columns; the first occurrence of each ``(query_id, col_target)`` wins, so the
+    per-query list keeps ``col_seq`` order.
 
     Args:
         tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
             (``query_id``, ``col_target``, ``col_label``, ``col_seq``, ``col_visible``, ``col_type``,
-            ``dd_label``, …).
+            ``dd_label``, ``dd_type``, …).
     """
     out: dict[int, list[dict[str, Any]]] = {}
     seen: set[tuple[int, str]] = set()
@@ -222,7 +231,7 @@ def migrate_column_hints(
             hint["label"] = label
         if str(r.get("col_visible") or "").strip() in _HIDDEN_FLAGS:
             hint["hidden"] = True
-        fmt = _column_format(r.get("col_type"))
+        fmt = _column_format(r.get("col_type")) or _column_format(r.get("dd_type"))
         if fmt:
             hint["format"] = fmt
         out.setdefault(qid, []).append(hint)
