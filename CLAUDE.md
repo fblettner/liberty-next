@@ -179,12 +179,18 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   `sql:{c}:{q}` / `api:{c}:{e}` (glob-aware — `sql:liberty:*`, `sql:*`, `*`). The permission is
   checked *before* the connector is looked up, so callers can't enumerate names they lack access
   to. A mutating query needs *both* its TOML `writable = true` and the caller's perm.
+- `menus.py` — `GET /api/menus` (every accessible app's nav tree) and `GET /api/menus/{app}`;
+  the tree is the v2 form of v1's `ly_menus` (config: `liberty/menus/`, file: `config/menus.toml`),
+  resolved in the request's language and **pruned to what the caller may run** (a `query`/`endpoint`
+  leaf needs `sql:{c}:{target}` / `api:{c}:{target}` and to pass any `roles` filter; folders left
+  empty collapse away). Hot-reloaded with `connectors.toml`. The frontend renders it in the Sidebar.
 - `admin.py` — `POST /admin/reload` (superuser): rebuild `ConnectorRegistry` from
-  `connectors.toml` + `dictionary.toml`, swap `app.state.connectors`, re-point `app.state.auth_db`,
-  dispose the old registry. (The AI assistant's connector tools refresh on restart, not on reload;
-  in-flight requests keep the registry they started with.)
-- `deps.py` — `get_connectors`, `require_permission(principal, perm)` (imperative — the
-  perm string depends on path params), `public_connector` (the SQL/credential-stripped view).
+  `connectors.toml` + `dictionary.toml`, re-read `menus.toml`, swap `app.state.connectors`/`.menus`,
+  re-point `app.state.auth_db`, dispose the old registry. (The AI assistant's connector tools
+  refresh on restart, not on reload; in-flight requests keep the registry they started with.)
+- `deps.py` — `get_connectors` / `get_menus`, `require_permission(principal, perm)` (imperative — the
+  perm string depends on path params), `public_connector` (the SQL/credential-stripped view),
+  `request_language` (the `X-Liberty-Lang` header → first `Accept-Language` tag → `None`).
 - `errors.py` — `ConnectorError` → HTTP: not-found→404, statement/writable→422, other→400;
   SQLAlchemy errors during execute → 502.
 - Also (added in Phase 4): `GET /admin/config/connectors` (raw `connectors.toml` text) and
@@ -205,11 +211,12 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/workspace/`
   (`WorkspaceContext.tsx` — `WorkspaceProvider`/`useWorkspace()`: owns the one `GET /api/connectors`
-  fetch, holds `currentApp` — the connector the UI is scoped to, persisted, dropped if not in the
-  accessible list, and made to follow the route when you open a `/sql/<c>/…` or `/http/<c>/…` screen
-  — a pure-frontend soft filter; v2 auth is centralized so the v1 "pick an app at login" idea becomes
-  "which connector's screens am I looking at"), `src/types/`
-  (`connectors.ts`/`auth.ts`/`ai.ts` — backend response shapes, no React), `src/services/`
+  + `GET /api/menus` fetch, holds `currentApp` — the connector the UI is scoped to, persisted, dropped
+  if not in the accessible list, and made to follow the route when you open a `/sql/<c>/…` or
+  `/http/<c>/…` screen — plus `currentMenu` (the picked app's nav tree, or — with a single connector —
+  that one's, for the Sidebar). A pure-frontend soft filter; v2 auth is centralized so the v1 "pick an
+  app at login" idea becomes "which connector's screens am I looking at"), `src/types/`
+  (`connectors.ts`/`auth.ts`/`ai.ts`/`menus.ts` — backend response shapes, no React), `src/services/`
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`, `monaco.ts` (bundles
   Monaco + its worker, no CDN)), `src/common/` (shared theme-driven
   primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
@@ -218,7 +225,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   stays out of every page's chunk); `common/index.ts` barrels the rest, pages import
   `{ Button, ... } from '../../common'`), `src/pages/<Screen>/index.tsx` (one dir per page,
   splitting helpers alongside — e.g. `TableView/ResultTable.tsx` + `TableView/styled.ts`),
-  `src/components/` (app chrome: `Layout`, `Sidebar`, `ProfileModal`, `WorkspaceSelect`), `src/theme.ts`
+  `src/components/` (app chrome: `Layout`, `Sidebar`, `SidebarMenu`, `ProfileModal`, `WorkspaceSelect`), `src/theme.ts`
   (tokens — colours/fonts/`fontSize`/`radius`/`shadow`/`glass`, all via CSS vars), `src/index.css`
   (the `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar), `src/i18n.ts` +
   `src/locales/{en,fr}.ts`. **Rule: keep pages small (split helpers into `pages/<X>/`), reusable
@@ -232,7 +239,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
 - The pages: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
   utility pill: app-picker (`WorkspaceSelect` — shown when ≥2 connectors) · EN/FR · dark/light ·
   username→profile · sign-out), `Sidebar` (collapsible nav
-  rail, lucide icons, react-router `NavLink`s + an external "API docs" link), `ProfileModal`
+  rail — when an app is active it leads with that app's menu tree (`SidebarMenu` — collapsible
+  folders, leaf `NavLink`s to `/sql|/http`, from `GET /api/menus`) above a divider, then the
+  framework links (Connectors / Assistant / Settings) + an external "API docs" link), `ProfileModal`
   (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
   self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
   the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
@@ -250,8 +259,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default
   `frontend/dist` — absent on a fresh checkout → API-only, which is fine). New settings:
   `[app] static_dir`, `[oidc] frontend_redirect` (when set, `/auth/oidc/callback` redirects
-  there with `#access_token=…&refresh_token=…` instead of returning JSON — for SPAs).
-  `/info` reports `frontend`.
+  there with `#access_token=…&refresh_token=…` instead of returning JSON — for SPAs), `[menus] config_path`
+  (default `config/menus.toml`). `/info` reports `frontend` and `menus.{apps}`.
 - `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
   Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
   prod build: `npm run build` → `dist/` → served automatically by the backend (entry chunk
@@ -299,24 +308,37 @@ replies), `@monaco-editor/react` (the connector-config editor).
   → the `dictionary.toml` dict (one `[entries.<dd_id>]` per `ly_dictionary` row — `label`=`dd_label`,
   `format`=a non-trivial `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]`
   = `{lng_id: lng_label}` from `ly_dictionary_l`; `connector_name` nests them under
-  `[connectors.<name>.entries.*]`). `merge_connectors(*)` (pools merged last → real
+  `[connectors.<name>.entries.*]`). `migrate_menus(ly_menus rows, ly_menus_l rows, ly_tables rows,
+  ly_dlg_frm rows, ly_qry_sql⋈ly_query rows, *, app_name, app_label=None)` → the `menus.toml` dict
+  (`{"menus": {<app_name>: {label?, items}}}` — flat items in `menu_seq_ukid` order, linked by `parent`;
+  a query-backed `menu_component` → a `type="query"` leaf whose `target` is `menu_component_id` →
+  `ly_tables.tbl_id`/`ly_dlg_frm.frm_id` → `ly_query` → the exact name `migrate_sql_queries` gives that
+  query's read variant; an unresolvable component → a folder placeholder; `ly_menus_l` → `l`; v1's
+  `ly_menus_filters` not migrated yet). `merge_connectors(*)` (pools merged last → real
   `migrate_pools` URLs override `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`).
   The `# migrated: …` header notes the counts + the `${…}` placeholders + any `ENC:` secrets +
   a reminder to run `liberty-migrate dictionary` when there are column hints.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
   `read_dictionary(engine)` (→ `ly_dictionary` + `ly_dictionary_l` rows) /
+  `read_menus(engine)` (→ `ly_menus`, `ly_menus_l`, `ly_tables`, `ly_dlg_frm`, `ly_qry_sql⋈ly_query`) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
   — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) (SELECT-only; a missing
   table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
   accepts any async URL — `postgresql+asyncpg://…`).
-- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary`,
+- `liberty/menus/` — `config.py`: the `config/menus.toml` schema (`MenuItem`/`AppMenu`/`MenusFile`,
+  `extra="forbid"`; validates unique ids, parents exist & don't cycle, folder-vs-leaf shape),
+  `load_menus`/`parse_menus`, `build_menu_tree(app_menu, *, app, language, keep)` → nested dicts
+  (labels resolved in *language*, `keep(item, connector)` prunes leaves, empty folders collapse).
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
   hints (which reference the dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
   `dictionary [--default-language en] [--connector <app>]` migrates `ly_dictionary` (+ `ly_dictionary_l`)
   — `--connector` nests the entries under `[connectors.<app>.entries.*]` so several migrated apps don't
-  clash on a `dd_id`. Prepends a `# migrated: …` summary + the `${…}` placeholders the operator must fill
-  in (incl. each `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
+  clash on a `dd_id`; `menu --connector <app>` migrates `ly_menus` (+ `ly_menus_l`) → `config/menus.toml`
+  (one `[menus.<app>]` per app — run `sql`/`all` first so the menu's query targets exist). Prepends a
+  `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
+  `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
 v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
 fragment to review + merge into `config/connectors.toml` (the `dictionary` output → `config/dictionary.toml`).
 *Not yet done:* validate-by-diff against nomasx1's read paths; migrate the real apps
@@ -351,7 +373,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-229 tests pass.
+258 tests pass.
 
 ## Run it
 
@@ -364,9 +386,10 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
 .venv/bin/liberty-migrate all --source-url postgresql+asyncpg://…/libnsx1 -o migrated.toml   # v1 ly_* → connectors.toml fragment
 .venv/bin/liberty-migrate dictionary --source-url postgresql+asyncpg://…/libnsx1 -o config/dictionary.toml   # v1 ly_dictionary → shared field labels
+.venv/bin/liberty-migrate menu --source-url postgresql+asyncpg://…/libnsx1 --connector nomasx1 -o config/menus.toml   # v1 ly_menus → app nav tree
 .venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
-# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
+# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  GET /api/menus  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
@@ -395,15 +418,15 @@ or columns the user's other scripts touch) are decrypted at runtime with `[crypt
 ## Layout
 
 ```
-config/         app.toml, connectors.toml, dictionary.toml (optional — shared field labels/types)
+config/         app.toml, connectors.toml, dictionary.toml (shared field labels/types), menus.toml (app nav)
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py
                 · connectors/{config,base,db,sql,api,registry,dictionary}.py
-                · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
+                · menus/config.py · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
                 · ai/{tools,connector_tools,assistant,routes}.py
-                · web/{deps,errors,connectors,admin}.py
+                · web/{deps,errors,connectors,menus,admin}.py
                 · migrations/{v1,source}.py
 frontend/       Vite + React 19 + TS (emotion + react-i18next) — src/{App,main,theme,i18n}.* +
-                src/{api,auth,types,services,common,pages,components,locales}/* (nomaubl layout:
+                src/{api,auth,workspace,types,services,common,pages,components,locales}/* (nomaubl layout:
                 common/ = shared primitives, pages/<X>/ = screens, types/+services/ = no-React);
                 built dist/ served by liberty/main.py; gitignored
 start.sh        run/dev helper (serve | dev | api | build | frontend | init-db)

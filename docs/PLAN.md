@@ -61,6 +61,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Pool topology | A **`default`/framework pool** holds v2's own users/roles (`ly2_*`), shared across every app. Per-*app* pools (`nomasx1`, `nomajde`, …) carry that app's migrated queries against its business DB — mirrors v1's split between an app's "definition DB" (queries/users → now TOML + `ly2_*`) and its "data DB". |
 | Field encryption | **Reuse v1's scheme and key, byte for byte** — `liberty/crypto.py` is AES-256-GCM + PBKDF2-HMAC-SHA512(2145 iters, 32 bytes) with the `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)` layout, so v2 reads/writes the same encrypted columns the user's *other* scripts touch (`SETTINGS_APPLICATIONS.password`, …) without re-encrypting the DB. Key = `[crypto] master_key` (`${LIBERTY_MASTER_KEY}` = v1's `MASTER_KEY`). `APIConnector` decrypts `ENC:` auth secrets at runtime; `liberty-crypto` is the CLI. v1's Fernet/`secrets.json` plumbing is **not** ported — the key comes straight from an env var. |
 | Column display | The result **schema stays query-discovered** (no metadata tables) — but a query may carry an optional `columns` *overlay* (`ColumnHint`: `dd` ref / label / hidden / order / width / align / a UI `format`). `label`/`format` usually come from a **shared field dictionary** — `config/dictionary.toml`, the v2 form of v1's `ly_dictionary` (define a field once: label, type, per-language translations) — keyed by the hint's `dd`, or the column `name` when `dd` is unset; an inline `label`/`format` overrides. v1's dictionaries were **per-app**; v2 mirrors that with **per-connector sections** — `[connectors.<conn>.entries.*]` is consulted first, then the top-level `[entries.*]` (a shared/common pool), so two migrated apps don't clash on a `dd_id`. The SQL connector resolves it at result time in the request's language (`X-Liberty-Lang` header → `Accept-Language` → `default_language`); TableView honours it. v1's `ly_tbl_col`/`ly_dlg_col` → the hints, `ly_dictionary`/`ly_dictionary_l` → the dictionary (`liberty-migrate dictionary --connector <app>` nests under that connector). A hint matches its result column **case-insensitively** (the DB folds unquoted identifiers — Postgres→lower / Oracle→upper — while v1's hints are upper); the emitted column keeps the discovered case so it still lines up with the row keys. A hint for a column the query doesn't return is ignored. The form-side workflow/rules in v1's `ly_dlg_*` (and v1's `dd_rules`) are Phase 6, not this overlay. |
+| App navigation | v1's `ly_menus` (a per-app menu tree, `ly_menus_l` translations, `ly_menus_filters`) → `config/menus.toml` — one `[menus.<app>]` per connector, a *flat* list of items linked by `parent` (the backend builds the tree). A leaf points at a connector query (`type = "query"` → TableView) or endpoint (`type = "endpoint"` → HttpRunner), optionally with pinned `params` / a `roles` filter; a folder just groups. `GET /api/menus` resolves the labels in the request's language and prunes whatever the caller can't run (the leaf's `sql:<c>:<target>` / `api:<c>:<target>` permission + any `roles`), folders left empty collapse. The frontend renders the active app's tree in the Sidebar. `liberty-migrate menu --connector <app>` migrates it (a query-backed node's `target` is resolved through `ly_tables`/`ly_dlg_frm` → `ly_query` to the read query's v2 name; `ly_menus_filters` not migrated yet). |
 
 ## 4. Phased plan
 
@@ -216,9 +217,14 @@ response_field = "data.0.name"
   glob-aware (`sql:liberty:*`, `sql:*`, `*`). Permission is checked **before** the connector
   lookup → no enumeration of names you lack access to. A mutating query needs *both* its
   TOML `writable = true` and the caller's permission (two orthogonal gates).
+- `menus.py` — `GET /api/menus` (every accessible app's nav tree) / `GET /api/menus/{app}`:
+  the v2 form of v1's `ly_menus` (schema: `liberty/menus/`, file: `config/menus.toml`), resolved
+  in the request's language and pruned to what the caller may run (a `query`/`endpoint` leaf needs
+  `sql:{c}:{target}` / `api:{c}:{target}` + any `roles` filter; empty folders collapse). The frontend
+  renders it in the Sidebar. (language helper moved to `web/deps.request_language` — `X-Liberty-Lang` → `Accept-Language` → `None`.)
 - `admin.py` — `POST /admin/reload` (superuser): rebuild `ConnectorRegistry` from
-  `connectors.toml`, swap `app.state.connectors`, re-point `app.state.auth_db`, dispose the
-  old registry. (The AI assistant's connector tools refresh on app restart, not on reload;
+  `connectors.toml`, re-read `menus.toml`, swap `app.state.connectors`/`.menus`, re-point
+  `app.state.auth_db`, dispose the old registry. (The AI assistant's connector tools refresh on app restart, not on reload;
   in-flight requests keep whichever registry they started with.)
 - `deps.py` — `get_connectors`, `require_permission(principal, perm)` (imperative — the perm
   string is built from path params), `public_connector` (the SQL/credential-stripped view).
@@ -263,9 +269,10 @@ response_field = "data.0.name"
   `layout` `Stack`/`Row`, `useIsLight`, `Markdown`; `common/index.ts` barrels all but `Markdown`,
   which stays out so react-markdown doesn't leak into every page chunk); `src/pages/<Screen>/index.tsx`
   (one dir per page; sub-components and styled bits live alongside — e.g. `TableView/ResultTable.tsx`
-  + `TableView/styled.ts`); `src/components/` (app chrome — `Layout`, `Sidebar`, `ProfileModal`,
+  + `TableView/styled.ts`); `src/components/` (app chrome — `Layout`, `Sidebar`, `SidebarMenu`, `ProfileModal`,
   `WorkspaceSelect`); `src/workspace/WorkspaceContext.tsx` (`useWorkspace()` — the picked connector,
-  persisted + made to follow `/sql/<c>/…` & `/http/<c>/…` routes, plus the shared `GET /api/connectors` fetch).
+  persisted + made to follow `/sql/<c>/…` & `/http/<c>/…` routes; the shared `GET /api/connectors` + `GET /api/menus`
+  fetch; `currentMenu` = the active app's nav tree for the Sidebar).
   *Rule for future work:* keep pages small (split helpers into `pages/<X>/`), reusable bits go in
   `common/`, plain logic/shapes go in `services/`/`types/` (no React there), and every styled
   component pulls colours/sizes/radii/shadows from `theme.ts` — no hard-coded hex/rgba/font-px.
@@ -278,7 +285,9 @@ response_field = "data.0.name"
   utility pill: app-picker (`WorkspaceSelect`, shown when ≥2 connectors — v2 auth is centralized,
   so v1's "pick an app at login" becomes "which connector's screens am I scoped to", persisted,
   pure-frontend soft filter) · EN/FR · dark/light · username→profile · sign-out), **Sidebar** (collapsible nav
-  rail, lucide icons, react-router `NavLink`s + an external "API docs" link), **ProfileModal**
+  rail — when an app is active it leads with that app's menu tree (`SidebarMenu`: collapsible folders, leaf
+  `NavLink`s to `/sql|/http`, from `GET /api/menus`) above a divider, then the framework links (Connectors /
+  Assistant / Settings) + an external "API docs" link), **ProfileModal**
   (read-only — username/email/provider/roles/permissions from the Principal; no self-service
   password change yet — the backend has no endpoint), **Connectors** (the accessible connectors
   from `useWorkspace()`, scoped to the picked app — drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
@@ -344,10 +353,22 @@ Postgres *and* Oracle, etc.):
   → the `dictionary.toml` dict (one `[entries.<dd_id>]` per row — `label`=`dd_label`, `format`=a non-trivial
   `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]` = `{lng_id: lng_label}`
   from `ly_dictionary_l`); `connector_name` nests them under `[connectors.<name>.entries.*]` (v1's
-  dictionaries were per-app — keeps two apps from clashing on a `dd_id`). `merge_connectors(*)` — pools
+  dictionaries were per-app — keeps two apps from clashing on a `dd_id`). `migrate_menus(ly_menus rows,
+  ly_menus_l rows, ly_tables rows, ly_dlg_frm rows, ly_qry_sql⋈ly_query rows, *, app_name, app_label=None)`
+  → the `menus.toml` dict (`{"menus": {<app>: {label?, items}}}` — flat items in `menu_seq_ukid` order,
+  linked by `parent`; a query-backed `menu_component` → a `type="query"` leaf whose `target` comes from
+  `menu_component_id` → `ly_tables.tbl_id`/`ly_dlg_frm.frm_id` → `ly_query` → the exact name
+  `migrate_sql_queries` gives that query's read variant; an unresolvable component → a folder placeholder;
+  `ly_menus_l` → `l`; v1's `ly_menus_filters` not migrated yet). `merge_connectors(*)` — pools
   merged with `migrate_pools` *last*, so its real URLs override the `migrate_sql_queries` stubs. `render_toml(d)`.
+- `liberty/menus/config.py` — the `config/menus.toml` schema (`MenuItem`/`AppMenu`/`MenusFile`,
+  `extra="forbid"`; validates unique ids, parents exist & don't cycle, folder-vs-leaf shape),
+  `load_menus`/`parse_menus`, `build_menu_tree(app_menu, *, app, language, keep)` → nested dicts
+  (labels resolved in *language*, `keep(item, connector)` prunes leaves, empty folders collapse) —
+  used by `GET /api/menus` (Phase 3) which prunes to what the caller may run, and rendered in the Sidebar (Phase 4).
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
   `read_dictionary(engine)` (→ `ly_dictionary` + `ly_dictionary_l` rows) /
+  `read_menus(engine)` (→ `ly_menus`, `ly_menus_l`, `ly_tables`, `ly_dlg_frm`, `ly_qry_sql⋈ly_query`) /
   `read_column_hints(engine)` (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
   — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) — SELECT-only; a missing
   table on an old v1 schema → `[]` *with a logged warning* (not silently swallowed); `make_engine(url)`
@@ -361,20 +382,23 @@ Postgres *and* Oracle, etc.):
   at init (key threaded via `load_connectors(master_key=…)`; wrong/missing key → keep the blob + warn).
   `liberty-crypto` CLI (`encrypt`/`decrypt`/`is-encrypted`, stdin-friendly). v1's Fernet/`secrets.json`
   layer is *not* ported. Dep: `cryptography`.
-- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary`, `--source-url`,
-  `--dbtype`, `--prefix`, `--default-language`/`--connector` (dictionary), `-o out.toml` (else stdout);
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu`, `--source-url`,
+  `--dbtype`, `--prefix`, `--default-language`/`--connector` (dictionary/menu), `-o out.toml` (else stdout);
   `sql`/`all` also scaffold the `ly_applications` pools and carry over the `ly_tbl_col`/`ly_dlg_col` column
   hints (which reference the dictionary — so also run `liberty-migrate dictionary --connector <app> -o config/dictionary.toml`,
-  `--connector` nesting the entries under `[connectors.<app>.entries.*]`); prepends a `# migrated: …` summary
-  + the `${…}` placeholders the operator must fill in (incl. each `${MIGRATED_PW_*}`). Output is a fragment to
-  review + merge into `config/connectors.toml` (the `dictionary` output → `config/dictionary.toml`). v1
-  (`../liberty-framework/`) stays untouched (read-only SELECTs).
+  `--connector` nesting the entries under `[connectors.<app>.entries.*]`); `menu --connector <app>` migrates
+  `ly_menus` (+ `ly_menus_l`) → `config/menus.toml` (run `sql`/`all` first so its query targets exist).
+  Prepends a `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
+  `${MIGRATED_PW_*}`). Output is a fragment to review + merge into `config/connectors.toml` (the `dictionary`
+  output → `config/dictionary.toml`, the `menu` output → `config/menus.toml`). v1 (`../liberty-framework/`)
+  stays untouched (read-only SELECTs).
 - Tests: the transforms over hand-crafted v1 rows (incl. the dialect-map cases), the DB readers
   against a minimal v1 schema in SQLite, the CLI, dialect resolution in `SQLConnector` /
   `QueryDef` / `PoolRegistry.dialect`, and round-trips (emitted TOML re-parses cleanly via
-  `parse_connectors`). Deps added: `tomli-w`. **`config/connectors.toml` is now the real
-  deployment config** — the migrated **nomasx1** app (208 queries) on `[pools.nomasx1]`, with
-  `[pools.default]` as the shared framework/users pool.
+  `parse_connectors` / `parse_menus`). Deps added: `tomli-w`. **`config/connectors.toml` + `config/dictionary.toml`
+  + `config/menus.toml` are the real deployment config** — the migrated **nomasx1** app: 208 queries on
+  `[pools.nomasx1]`, 525 dictionary fields under `[connectors.nomasx1.entries.*]` (469 fr translations),
+  a 75-item nav menu under `[menus.nomasx1]` (57 screens); `[pools.default]` is the shared framework/users pool.
 
 **Still to do:**
 - Validate by running nomasx1's read paths against v2 and diffing results.
