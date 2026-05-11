@@ -1,17 +1,73 @@
 // The current app's navigation tree, rendered in the Sidebar. Folders are
 // collapsible — top-level ones open by default, deeper ones closed, and any
 // folder on the path to the screen you're currently on auto-opens. Leaves link
-// to the query (TableView) / endpoint (HttpRunner) screens. Permission pruning +
-// label localization happened server-side (GET /api/menus), so this is pure rendering.
-import { useMemo, useState } from 'react'
+// to the query (TableView) / endpoint (HttpRunner) screens. Each folder's
+// children are wrapped so their indent + a thin left "rail" come from the wrap
+// (rather than per-row padding) — the rail forms one continuous line under the
+// parent's chevron, the standard file-tree look.
+//
+// Permission pruning + label localization happened server-side (GET /api/menus);
+// this is pure rendering. A menu node's optional `icon` field is resolved against
+// a small lucide whitelist (so the bundle doesn't have to ship all 1500 icons).
+import { useMemo, useState, type ComponentType } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import styled from '@emotion/styled'
-import { ChevronRight, ChevronDown } from 'lucide-react'
+import {
+  ChevronRight,
+  ChevronDown,
+  // The icon whitelist — extend as more menus reference icons. Pick from
+  // https://lucide.dev/icons (the schema's `icon` field is the lucide name).
+  Activity,
+  AlertCircle,
+  BarChart3,
+  Bell,
+  Briefcase,
+  Building,
+  Calendar,
+  Clock,
+  Database,
+  FileText,
+  Filter,
+  Folder,
+  Globe,
+  Grid3x3,
+  Key,
+  Layers,
+  Link2,
+  Lock,
+  Mail,
+  Network,
+  Package,
+  Search,
+  Settings,
+  Shield,
+  Table,
+  Tag,
+  TrendingUp,
+  User,
+  UserCheck,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import type { AppMenuTree, MenuNode } from '../types/menus'
 
-const INDENT = 12 // px per nesting level
-const CHEVRON_W = 14 // a leaf is indented this much extra so its label lines up with folder labels
+const ICONS: Record<string, LucideIcon> = {
+  activity: Activity, alert: AlertCircle, barchart: BarChart3, bell: Bell,
+  briefcase: Briefcase, building: Building, calendar: Calendar, clock: Clock,
+  database: Database, file: FileText, filetext: FileText, filter: Filter,
+  folder: Folder, globe: Globe, grid: Grid3x3, key: Key,
+  layers: Layers, link: Link2, lock: Lock, mail: Mail,
+  network: Network, package: Package, search: Search, settings: Settings,
+  shield: Shield, table: Table, tag: Tag, trendingup: TrendingUp,
+  user: User, usercheck: UserCheck, users: Users,
+}
+function iconFor(name: string | undefined): LucideIcon | null {
+  return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null
+}
+
+const INDENT_PX = 14 // ChildrenWrap margin-left — places the rail under the parent's chevron
+const CHEVRON_W = 19 // a leaf's left padding past the row base — lines its label up with folder labels
 
 const SectionLabel = styled.div`
   font-size: ${fontSize.micro};
@@ -19,10 +75,11 @@ const SectionLabel = styled.div`
   text-transform: uppercase;
   letter-spacing: 0.09em;
   color: ${colors.text.muted};
-  padding: 6px 10px 6px;
+  padding: 6px 10px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 0;
 `
 
 const rowBase = `
@@ -40,34 +97,56 @@ const rowBase = `
   overflow: hidden;
   text-overflow: ellipsis;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
+  flex-shrink: 0;
 `
 
-const FolderRow = styled.button<{ $depth: number }>`
+const FolderRow = styled.button`
   ${rowBase}
   background: none;
   cursor: pointer;
   font-weight: 600;
   color: ${colors.text.secondary};
-  padding: 7px 8px 7px ${({ $depth }) => 8 + $depth * INDENT}px;
+  padding: 7px 8px;
   & svg { flex-shrink: 0; opacity: 0.6; }
   &:hover { color: ${colors.text.primary}; background: var(--hover-subtle); }
 `
 
-const Leaf = styled(NavLink)<{ $depth: number }>`
+const Leaf = styled(NavLink)`
   ${rowBase}
-  display: block; /* not flex — a single text run */
   color: ${colors.text.muted};
-  padding: 7px 8px 7px ${({ $depth }) => 8 + $depth * INDENT + CHEVRON_W}px;
+  padding: 7px 8px 7px ${CHEVRON_W + 8}px;
+  & svg { flex-shrink: 0; opacity: 0.65; }
   &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; text-decoration: none; }
-  &.active { background: ${colors.blue.bg}; border-color: ${colors.blue.border}; color: ${colors.text.primary}; font-weight: 500; }
+  &.active {
+    background: ${colors.blue.bg};
+    border-color: ${colors.blue.border};
+    color: ${colors.text.primary};
+    font-weight: 500;
+    & svg { opacity: 1; }
+  }
 `
 
-const DeadLeaf = styled.span<{ $depth: number }>`
+const DeadLeaf = styled.span`
   ${rowBase}
-  display: block;
   color: ${colors.text.muted};
-  opacity: 0.6;
-  padding: 7px 8px 7px ${({ $depth }) => 8 + $depth * INDENT + CHEVRON_W}px;
+  opacity: 0.55;
+  padding: 7px 8px 7px ${CHEVRON_W + 8}px;
+`
+
+// A folder's children get this wrap — the indent is its margin, the rail its border.
+const ChildrenWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: ${INDENT_PX}px;
+  border-left: 1px solid ${colors.border};
+  flex-shrink: 0;
+  min-height: 0;
+`
+
+const LeafLabel = styled.span`
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
 function leafPath(node: MenuNode): string | null {
@@ -95,28 +174,41 @@ function ancestorsOfActive(nodes: MenuNode[], activePath: string): Set<string> {
   return out
 }
 
+function NodeIcon({ node, fallback }: { node: MenuNode; fallback?: ComponentType<{ size?: number }> }) {
+  const Icon = iconFor(node.icon) ?? fallback
+  return Icon ? <Icon size={14} /> : null
+}
+
 function Node({ node, depth, openIds }: { node: MenuNode; depth: number; openIds: Set<string> }) {
   const [open, setOpen] = useState(() => depth === 0 || openIds.has(node.id))
   if (node.items) {
+    const Chev = open ? ChevronDown : ChevronRight
     return (
       <>
-        <FolderRow $depth={depth} onClick={() => setOpen((o) => !o)} title={node.label}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <FolderRow onClick={() => setOpen((o) => !o)} title={node.label}>
+          <Chev size={13} />
+          <NodeIcon node={node} />
           {node.label}
         </FolderRow>
-        {open && node.items.map((c) => <Node key={c.id} node={c} depth={depth + 1} openIds={openIds} />)}
+        {open && (
+          <ChildrenWrap>
+            {node.items.map((c) => <Node key={c.id} node={c} depth={depth + 1} openIds={openIds} />)}
+          </ChildrenWrap>
+        )}
       </>
     )
   }
   const to = leafPath(node)
+  const inner = (
+    <>
+      <NodeIcon node={node} />
+      <LeafLabel>{node.label}</LeafLabel>
+    </>
+  )
   return to ? (
-    <Leaf to={to} $depth={depth} title={node.label}>
-      {node.label}
-    </Leaf>
+    <Leaf to={to} title={node.label}>{inner}</Leaf>
   ) : (
-    <DeadLeaf $depth={depth} title={node.label}>
-      {node.label}
-    </DeadLeaf>
+    <DeadLeaf title={node.label}>{inner}</DeadLeaf>
   )
 }
 

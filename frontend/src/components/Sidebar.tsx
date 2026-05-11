@@ -119,11 +119,6 @@ const ExtItem = styled.a<{ $collapsed: boolean }>`
   &:hover { color: ${colors.text.secondary}; border-color: ${colors.border}; text-decoration: none; }
 `
 
-const SectionDivider = styled.div`
-  border-top: 1px solid ${colors.border};
-  margin: 10px 6px 8px;
-`
-
 const GroupLabel = styled.div`
   font-size: ${fontSize.micro};
   font-weight: 700;
@@ -131,6 +126,19 @@ const GroupLabel = styled.div`
   letter-spacing: 0.09em;
   color: ${colors.text.muted};
   padding: 0 10px 5px;
+  flex-shrink: 0;
+`
+
+// Pinned framework-link bar — Connectors / Assistant / Settings stay reachable
+// while the menu above scrolls. Only rendered when there's an app menu (else
+// the same links live at the top of <Items>).
+const FrameworkBar = styled.div`
+  padding: 8px 8px 0;
+  border-top: 1px solid ${colors.border};
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
 `
 
 const Bottom = styled.div`
@@ -156,6 +164,48 @@ const CollapseBtn = styled.button<{ $collapsed: boolean }>`
   transition: color 0.15s, border-color 0.15s;
   &:hover { color: ${colors.text.secondary}; border-color: ${colors.border}; }
 `
+
+// Connectors / Assistant / Settings / API-docs — the framework links. Rendered
+// either at the top of <Items> (no app menu) or in <FrameworkBar> (pinned below
+// a scrolling menu) by Sidebar() below.
+function FrameworkLinks({
+  collapsed, superuser, iconSize, t,
+}: {
+  collapsed: boolean
+  superuser: boolean
+  iconSize: number
+  t: (key: string) => string
+}) {
+  return (
+    <>
+      <Item to="/" end $collapsed={collapsed} title={collapsed ? t('nav.connectors') : undefined}>
+        <LayoutGrid size={iconSize} />
+        {!collapsed && t('nav.connectors')}
+      </Item>
+      <Item to="/chat" $collapsed={collapsed} title={collapsed ? t('nav.assistant') : undefined}>
+        <Sparkles size={iconSize} />
+        {!collapsed && t('nav.assistant')}
+      </Item>
+      {superuser && (
+        <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
+          <SlidersHorizontal size={iconSize} />
+          {!collapsed && t('nav.settings')}
+        </Item>
+      )}
+      <ExtItem
+        href="/docs"
+        target="_blank"
+        rel="noreferrer"
+        $collapsed={collapsed}
+        title={collapsed ? t('nav.apiDocs') : undefined}
+      >
+        <BookOpen size={iconSize} />
+        {!collapsed && t('nav.apiDocs')}
+      </ExtItem>
+    </>
+  )
+}
+
 
 export default function Sidebar() {
   const { t } = useTranslation()
@@ -189,38 +239,16 @@ export default function Sidebar() {
       </Brand>
 
       <Items>
-        {currentMenu && !collapsed && (
-          <>
-            <SidebarMenu menu={currentMenu} />
-            <SectionDivider />
-            <GroupLabel>{t('app.title')}</GroupLabel>
-          </>
-        )}
-        <Item to="/" end $collapsed={collapsed} title={collapsed ? t('nav.connectors') : undefined}>
-          <LayoutGrid size={iconSize} />
-          {!collapsed && t('nav.connectors')}
-        </Item>
-        <Item to="/chat" $collapsed={collapsed} title={collapsed ? t('nav.assistant') : undefined}>
-          <Sparkles size={iconSize} />
-          {!collapsed && t('nav.assistant')}
-        </Item>
-        {user?.is_superuser && (
-          <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
-            <SlidersHorizontal size={iconSize} />
-            {!collapsed && t('nav.settings')}
-          </Item>
-        )}
-        <ExtItem
-          href="/docs"
-          target="_blank"
-          rel="noreferrer"
-          $collapsed={collapsed}
-          title={collapsed ? t('nav.apiDocs') : undefined}
-        >
-          <BookOpen size={iconSize} />
-          {!collapsed && t('nav.apiDocs')}
-        </ExtItem>
+        {currentMenu && !collapsed
+          ? <SidebarMenu menu={currentMenu} />
+          : <FrameworkLinks collapsed={collapsed} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} />}
       </Items>
+      {currentMenu && !collapsed && (
+        <FrameworkBar>
+          <GroupLabel>{t('app.title')}</GroupLabel>
+          <FrameworkLinks collapsed={false} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} />
+        </FrameworkBar>
+      )}
 
       <Bottom>
         <CollapseBtn $collapsed={collapsed} onClick={toggle} title={collapsed ? t('common.expand') : undefined}>
