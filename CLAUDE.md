@@ -48,14 +48,22 @@ Full dep set pinned in `pyproject.toml`.
   `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
   `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
-  + `ly_dictionary_l`). `[entries.<key>]` (or `[connectors.<conn>.entries.<key>]` — per-connector,
-  since v1 dictionaries were per-app) = `{ label?, format?, rules?/rules_values?/default?` (carried
-  over from v1, not yet interpreted)`, [..l] { fr = "…", … }` (per-language labels) `}`, plus
-  `default_language`. A query's `columns` hints reference these; the SQL connector resolves the
-  label/format at result time, in the request's language — its own `[connectors.<conn>.entries.*]`
-  section first, then the shared top-level `[entries.*]`. `DictionaryFile.resolve(key, language,
-  *, connector=…)` → `(label, format)`. A missing file = an empty dictionary. `/info` reports
-  `dictionary.{entries, default_language}`.
+  + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
+  `[connectors.<conn>.entries.<key>]` — per-connector, since v1 dictionaries were per-app) =
+  `{ label?, format?, rules?/rules_values?/default?, [..l] { fr = "…", … }` (per-language labels) `}`,
+  plus `[enums.<id>]` (`{ label?, values: [{ value, label?, l? }, …] }` — v1's ly_enum + ly_enum_val
+  with translations) and `[lookups.<id>]` (`{ description?, connector?, query, value, label, group? }` —
+  a reference to a v2 query whose `value`/`label` columns resolve the cell; v1's ly_lookup), plus
+  `default_language`. A query's `columns` hints reference an entry; the SQL connector resolves
+  the label/format at result time in the request's language *and* the entry's display **rule**
+  (BOOLEAN / ENUM / LOOKUP — the v2 form of v1's `dd_rules`) — its own `[connectors.<conn>.…]`
+  section first, then the shared top-level. `DictionaryFile.find_entry(key, *, connector)` returns
+  the entry; `.resolve_rule(entry, *, connector, language)` returns a wire-ready
+  `{kind:"boolean", true_value}` / `{kind:"enum", values:[…]}` / `{kind:"lookup", connector, query, value, label}`
+  dict (None for form-layer rules — SEQUENCE/SYSDATE/LOGIN/PASSWORD/CURRENT_DATE — those wait for Phase 6).
+  `Column.rule` rides on the result so the frontend renders ✓/✗ for booleans, the enum label, or — via
+  `services/lookups.useLookupBatch` — the lookup label after a one-shot per-session fetch. A missing
+  file = an empty dictionary. `/info` reports `dictionary.{entries, default_language}`.
 - `base.py` — connector exceptions; `detect_statement_type` (resolves `WITH` CTE
   queries to their main statement keyword — `WITH … SELECT` → `SELECT`, `WITH … DELETE`
   → `DELETE` so the writable gate still applies; an unparseable CTE list → `"WITH"` →
@@ -217,7 +225,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   that one's, for the Sidebar). A pure-frontend soft filter; v2 auth is centralized so the v1 "pick an
   app at login" idea becomes "which connector's screens am I looking at"), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts`/`menus.ts` — backend response shapes, no React), `src/services/`
-  (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`, `monaco.ts` (bundles
+  (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`/`ruleCell` (the latter applies the
+  dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` — fetches each
+  LOOKUP-target query once, module-level session cache), `monaco.ts` (bundles
   Monaco + its worker, no CDN)), `src/common/` (shared theme-driven
   primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
@@ -248,7 +258,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `TableView` (param form from the query's
   `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
   client-side paging, sticky header — from `result.columns`, honouring their display hints
-  (label / hidden / width / align); writable → `confirm` + `POST` + affected-rows banner),
+  (label / hidden / width / align) and their `rule` — BOOLEAN → ✓ green / ✗ red, ENUM → the value's
+  label, LOOKUP → the resolved label (raw value italic-muted while fetching, raw value tooltipped
+  for both); sorts are on the raw value, so rule rendering is visual-only. Writable → `confirm` +
+  `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
   `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a Monaco editor — `language="ini"`,
@@ -304,11 +317,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   reads false), `format?` (only when an explicit `col_type` overrides the dictionary)`}`; table-widget
   columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq` order)
   — passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns`;
-  `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, *, default_language="en", connector_name=None)`
-  → the `dictionary.toml` dict (one `[entries.<dd_id>]` per `ly_dictionary` row — `label`=`dd_label`,
+  `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, enum_rows=(), enum_val_rows=(),
+  enum_val_l_rows=(), lookup_rows=(), sql_rows=(), *, default_language="en", connector_name=None)`
+  → the `dictionary.toml` dict — one `[entries.<dd_id>]` per `ly_dictionary` row (`label`=`dd_label`,
   `format`=a non-trivial `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]`
-  = `{lng_id: lng_label}` from `ly_dictionary_l`; `connector_name` nests them under
-  `[connectors.<name>.entries.*]`). `migrate_menus(ly_menus rows, ly_menus_l rows, ly_tables rows,
+  = `{lng_id: lng_label}` from `ly_dictionary_l`); plus `[enums.<enum_id>]` from `ly_enum` (+
+  `ly_enum_val` + `ly_enum_val_l` translations) and `[lookups.<lkp_id>]` from `ly_lookup` (its
+  `lkp_query_id` resolved via *sql_rows* to the matching read query's v2 name, same logic as
+  `migrate_menus`). `connector_name` nests all three sections under `[connectors.<name>.…]`. `migrate_menus(ly_menus rows, ly_menus_l rows, ly_tables rows,
   ly_dlg_frm rows, ly_qry_sql⋈ly_query rows, *, app_name, app_label=None)` → the `menus.toml` dict
   (`{"menus": {<app_name>: {label?, items}}}` — flat items in `menu_seq_ukid` order, linked by `parent`;
   a query-backed `menu_component` → a `type="query"` leaf whose `target` is `menu_component_id` →
@@ -320,6 +336,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   a reminder to run `liberty-migrate dictionary` when there are column hints.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
   `read_dictionary(engine)` (→ `ly_dictionary` + `ly_dictionary_l` rows) /
+  `read_dictionary_rules(engine)` (→ `ly_enum`, `ly_enum_val`, `ly_enum_val_l`, `ly_lookup`,
+  `ly_qry_sql⋈ly_query` — the data the dictionary's display rules reference) /
   `read_menus(engine)` (→ `ly_menus`, `ly_menus_l`, `ly_tables`, `ly_dlg_frm`, `ly_qry_sql⋈ly_query`) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
   — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) (SELECT-only; a missing
@@ -373,7 +391,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-258 tests pass.
+260 tests pass.
 
 ## Run it
 
