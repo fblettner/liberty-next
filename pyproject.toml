@@ -5,6 +5,7 @@ description = "Liberty v2 — connector-driven low-code framework"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "fastapi-cli>=0.0.7",  # the `fastapi dev` / `fastapi run` CLI
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "sqlalchemy[asyncio]>=2.0.36",
