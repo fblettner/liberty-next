@@ -175,28 +175,29 @@ a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persi
 `react-i18next` EN/FR (persisted), `lucide-react` icons, DM Sans (Google Fonts),
 `@tanstack/react-table` (the SELECT grid), `react-markdown` + `remark-gfm` (assistant
 replies), `@monaco-editor/react` (the connector-config editor).
-- `src/theme.ts` — design tokens (colours/fonts/radii/shadows/`glass` blur snippets), all via
-  CSS vars. `src/index.css` — the `:root` (dark) + `.theme-light` var sets, the ambient
-  gradient background, the thin scrollbar. `src/i18n.ts` + `src/locales/{en,fr}.ts` — i18next
-  bootstrap; the active language is switched from the Layout's utility bar.
-- `src/ui.tsx` — shared emotion primitives: `Button` (`$variant`/`$size`), `Card`/`CardTitle`,
-  `Input`/`Select`/`Textarea`/`Field`/`FieldLabel`, `Tag` (`$tone`), `Banner`, `Pre`, `Mono`,
-  `SpinnerRing`, `Centered` (loading/error placeholder), `PageLayout` (the bordered "context
-  bar" header + scrolling content area every page uses), `Overlay`/`Modal*`/`ConfirmModal`,
-  `Stack`/`Row`, plus `useIsLight()` (observes the `.theme-light` class — used to pick Monaco's
-  theme). `components/Markdown.tsx` — `react-markdown` + `remark-gfm` with emotion-styled
-  elements. Pages stay declarative on top of these (no per-page CSS).
-- `src/api.ts` — `fetch` wrapper: attaches the Bearer token, parses JSON, 401 → calls the
-  registered "log out" hook; `streamSSE(path, body, onEvent)` for `POST /ai/chat`.
-- `src/auth.tsx` — `AuthProvider` / `useAuth()`: login (`POST /auth/login`), token in
-  `localStorage`, validates on mount via `/auth/me`, `oidcLogin()` → navigates to
-  `/auth/oidc/login`, `setTokens()` for the OIDC fragment hand-off.
+- Layout (nomaubl-style): `src/api/client.ts` (the fetch wrapper + `streamSSE`), `src/auth/`
+  (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
+  `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/types/`
+  (`connectors.ts`/`auth.ts`/`ai.ts` — backend response shapes, no React), `src/services/`
+  (plain-TS helpers, e.g. `cells.ts`'s `cellText`), `src/common/` (shared theme-driven
+  primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
+  `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
+  `useIsLight`, plus `Markdown` (react-markdown — *not* re-exported by `common/index.ts` so it
+  stays out of every page's chunk); `common/index.ts` barrels the rest, pages import
+  `{ Button, ... } from '../../common'`), `src/pages/<Screen>/index.tsx` (one dir per page,
+  splitting helpers alongside — e.g. `TableView/ResultTable.tsx` + `TableView/styled.ts`),
+  `src/components/` (app chrome: `Layout`, `Sidebar`, `ProfileModal`), `src/theme.ts`
+  (tokens — colours/fonts/`fontSize`/`radius`/`shadow`/`glass`, all via CSS vars), `src/index.css`
+  (the `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar), `src/i18n.ts` +
+  `src/locales/{en,fr}.ts`. **Rule: keep pages small (split helpers into `pages/<X>/`), reusable
+  bits go in `common/`, plain logic/shapes go in `services/`/`types/` (no React), and styled
+  components pull every colour/size/radius/shadow from `theme.ts` — no hard-coded hex/rgba.**
 - `src/App.tsx` — `react-router-dom` v7; `/login`, `/oidc/callback`, and a `RequireAuth`
   `Layout` with children `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e`
-  (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link). The route
+  (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link). The page
   components are `React.lazy`-split (each its own chunk — the heavy libs travel with them);
   `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
-- `components/`: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
+- The pages: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
   utility pill: EN/FR · dark/light · username→profile · sign-out), `Sidebar` (collapsible nav
   rail, lucide icons, react-router `NavLink`s + an external "API docs" link), `ProfileModal`
   (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
@@ -333,9 +334,10 @@ liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,admin}.py
                 · migrations/{v1,source}.py
-frontend/       Vite + React 19 + TS — src/{api,auth,types,App,main,theme,i18n,ui}.* +
-                src/locales/{en,fr}.ts + src/components/*.tsx (emotion + react-i18next;
-                built dist/ served by liberty/main.py; gitignored)
+frontend/       Vite + React 19 + TS (emotion + react-i18next) — src/{App,main,theme,i18n}.* +
+                src/{api,auth,types,services,common,pages,components,locales}/* (nomaubl layout:
+                common/ = shared primitives, pages/<X>/ = screens, types/+services/ = no-React);
+                built dist/ served by liberty/main.py; gitignored
 start.sh        run/dev helper (serve | dev | api | build | frontend | init-db)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale

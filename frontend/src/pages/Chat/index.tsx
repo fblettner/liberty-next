@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Sparkles, Send, ArrowRight, Check, X } from 'lucide-react'
-import { ApiError, api, streamSSE } from '../api'
-import type { AiTool, ChatEvent, ChatMessage } from '../types'
-import { PageLayout, Button, Banner, LinkButton, SpinnerRing, Mono } from '../ui'
-import { Markdown } from './Markdown'
-import { colors, fontSize, fonts, radius } from '../theme'
+import { ApiError, api, streamSSE } from '../../api/client'
+import type { AiTool, ChatEvent, ChatMessage } from '../../types/ai'
+import { PageLayout, Button, Banner, LinkButton, SpinnerRing, Mono } from '../../common'
+import { Markdown } from '../../common/Markdown'
+import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Entry =
   | { kind: 'msg'; role: 'user' | 'assistant'; text: string }
@@ -96,7 +96,7 @@ const InputBox = styled.textarea`
   &::placeholder { color: ${colors.text.muted}; }
 `
 
-export function Chat() {
+export default function Chat() {
   const { t } = useTranslation()
   const [available, setAvailable] = useState<boolean | null>(null)
   const [model, setModel] = useState('')

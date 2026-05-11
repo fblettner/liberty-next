@@ -3,10 +3,10 @@ import type { FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '../auth'
-import { ApiError } from '../api'
-import { Button, Field, Input, Banner, SpinnerRing, Stack } from '../ui'
-import { colors, fontSize, fonts, radius, glass } from '../theme'
+import { useAuth } from '../../auth/AuthContext'
+import { ApiError } from '../../api/client'
+import { Button, Field, Input, Banner, SpinnerRing, Stack } from '../../common'
+import { colors, fontSize, fonts, radius, glass } from '../../theme'
 
 const Center = styled.div`
   display: flex;
@@ -45,7 +45,7 @@ const Hint = styled.div`
   code { font-family: ${fonts.mono}; }
 `
 
-export function Login() {
+export default function Login() {
   const { t } = useTranslation()
   const { user, ready, login, oidcLogin } = useAuth()
   const location = useLocation()

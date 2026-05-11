@@ -8,10 +8,10 @@ import { useTranslation } from 'react-i18next'
 import { Sun, Moon, LogOut, User } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { LANGUAGE_KEY, type Language } from '../i18n'
-import { useAuth } from '../auth'
-import { Centered } from '../ui'
+import { useAuth } from '../auth/AuthContext'
+import { Centered } from '../common'
 import Sidebar from './Sidebar'
-import { ProfileModal } from './ProfileModal'
+import ProfileModal from './ProfileModal'
 
 const THEME_KEY = 'liberty.theme'
 
@@ -132,7 +132,7 @@ function readDark(): boolean {
   }
 }
 
-export function Layout() {
+export default function Layout() {
   const { t, i18n } = useTranslation()
   const { user, logout } = useAuth()
   const [dark, setDark] = useState(readDark)

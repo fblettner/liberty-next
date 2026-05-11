@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, setAccessToken, setUnauthorizedHandler } from "./api";
-import type { Principal, TokenPair } from "./types";
+import { api, setAccessToken, setUnauthorizedHandler } from "../api/client";
+import type { Principal, TokenPair } from "../types/auth";
 
 const STORAGE_KEY = "liberty.tokens";
 

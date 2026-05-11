@@ -3,10 +3,10 @@ import { useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Globe, Play } from 'lucide-react'
-import { api, ApiError } from '../api'
-import type { ApiEndpointMeta, ApiResult, ConnectorMeta } from '../types'
-import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../ui'
-import { colors, fontSize, fonts } from '../theme'
+import { api, ApiError } from '../../api/client'
+import type { ApiEndpointMeta, ApiResult, ConnectorMeta } from '../../types/connectors'
+import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../../common'
+import { colors, fontSize, fonts } from '../../theme'
 
 const Title = styled.span`
   font-family: ${fonts.mono};
@@ -29,7 +29,7 @@ const ExtractCode = styled.code`
   word-break: break-all;
 `
 
-export function HttpRunner() {
+export default function HttpRunner() {
   const { t } = useTranslation()
   const { connector = '', endpoint = '' } = useParams()
   const [meta, setMeta] = useState<ApiEndpointMeta | null>(null)

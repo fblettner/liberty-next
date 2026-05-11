@@ -3,9 +3,9 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { SlidersHorizontal, Save, RefreshCw } from 'lucide-react'
 import MonacoEditor from '@monaco-editor/react'
-import { api, ApiError } from '../api'
-import { PageLayout, Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, useIsLight } from '../ui'
-import { colors, fontSize, radius } from '../theme'
+import { api, ApiError } from '../../api/client'
+import { PageLayout, Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, useIsLight } from '../../common'
+import { colors, fontSize, fonts, radius } from '../../theme'
 
 interface ConfigDoc {
   path: string
@@ -29,7 +29,7 @@ const Hint = styled.p`
   margin: 0;
 `
 
-export function Settings() {
+export default function Settings() {
   const { t } = useTranslation()
   const isLight = useIsLight()
   const [doc, setDoc] = useState<ConfigDoc | null>(null)
@@ -115,8 +115,8 @@ export function Settings() {
               setStatus(null)
             }}
             options={{
-              fontSize: 13,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              fontSize: parseInt(fontSize.base, 10),
+              fontFamily: fonts.mono,
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
               tabSize: 2,

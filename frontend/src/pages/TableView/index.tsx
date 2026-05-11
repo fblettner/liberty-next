@@ -1,178 +1,23 @@
+// Run a connector's named SQL query: a param form built from the query's
+// params/bind_params, then SELECT → a sortable/paged grid (ResultTable) or a
+// writable statement → confirm + affected-rows banner.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getPaginationRowModel,
-  flexRender,
-  type ColumnDef,
-  type SortingState,
-} from '@tanstack/react-table'
-import { Table as TableIcon, Play, ChevronLeft, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react'
-import { api, ApiError } from '../api'
-import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../types'
-import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Row, Stack, SpinnerRing } from '../ui'
-import { colors, fontSize, fonts, radius } from '../theme'
-
-const PAGE_SIZE = 50
-
-type DataRow = Record<string, unknown>
-
-function cellText(v: unknown): { text: string; isNull: boolean } {
-  if (v === null || v === undefined) return { text: 'null', isNull: true }
-  if (typeof v === 'object') return { text: JSON.stringify(v), isNull: false }
-  return { text: String(v), isNull: false }
-}
+import { Table as TableIcon, Play } from 'lucide-react'
+import { api, ApiError } from '../../api/client'
+import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
+import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Row, Stack, SpinnerRing } from '../../common'
+import { colors, fonts } from '../../theme'
+import { Meta } from './styled'
+import { ResultTable } from './ResultTable'
 
 const Title = styled.span`
   font-family: ${fonts.mono};
 `
 
-const Meta = styled.div`
-  font-size: ${fontSize.sm};
-  color: ${colors.text.muted};
-`
-
-const TableScroll = styled.div`
-  overflow: auto;
-  max-height: 58vh;
-  border: 1px solid ${colors.border};
-  border-radius: ${radius.md};
-`
-
-const DataTable = styled.table`
-  border-collapse: collapse;
-  width: 100%;
-  font-size: ${fontSize.base};
-  font-family: ${fonts.mono};
-
-  th {
-    position: sticky;
-    top: 0;
-    background: ${colors.bg.dropdown};
-    color: ${colors.text.secondary};
-    text-align: left;
-    padding: 6px 10px;
-    border-bottom: 1px solid ${colors.border};
-    border-right: 1px solid ${colors.border};
-    user-select: none;
-    white-space: nowrap;
-    font-weight: 600;
-  }
-  th.sortable { cursor: pointer; }
-  th.sortable:hover { color: ${colors.text.primary}; }
-  th .ix { display: inline-flex; vertical-align: middle; margin-left: 4px; color: ${colors.blue.main}; }
-  td {
-    padding: 4px 10px;
-    border-bottom: 1px solid ${colors.border};
-    border-right: 1px solid ${colors.border};
-    white-space: nowrap;
-    color: ${colors.text.secondary};
-  }
-  td.null { color: ${colors.text.muted}; font-style: italic; }
-  tr:hover td { background: var(--hover-subtle); }
-`
-
-function ResultTable({ result }: { result: QueryResult }) {
-  const { t } = useTranslation()
-  const [sorting, setSorting] = useState<SortingState>([])
-
-  const data = useMemo<DataRow[]>(() => result.rows, [result])
-  const colType = useMemo(
-    () => Object.fromEntries(result.columns.map((c) => [c.name, c.type] as const)),
-    [result],
-  )
-  const columns = useMemo<ColumnDef<DataRow>[]>(
-    () =>
-      result.columns.map((c) => ({
-        id: c.name,
-        accessorFn: (r) => r[c.name],
-        header: c.name,
-        cell: (info) => {
-          const { text, isNull } = cellText(info.getValue())
-          return <span className={isNull ? 'null' : undefined}>{text}</span>
-        },
-      })),
-    [result],
-  )
-
-  const table = useReactTable({
-    data,
-    columns,
-    state: { sorting },
-    onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: PAGE_SIZE } },
-  })
-
-  const { pageIndex } = table.getState().pagination
-  const pageCount = table.getPageCount()
-
-  return (
-    <>
-      <TableScroll>
-        <DataTable>
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
-                {hg.headers.map((header) => {
-                  const sorted = header.column.getIsSorted()
-                  return (
-                    <th
-                      key={header.id}
-                      className="sortable"
-                      title={colType[header.column.id] ?? undefined}
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                      {sorted && (
-                        <span className="ix">{sorted === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}</span>
-                      )}
-                    </th>
-                  )
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id}>
-                {row.getVisibleCells().map((cell) => {
-                  const { isNull } = cellText(cell.getValue())
-                  return (
-                    <td key={cell.id} className={isNull ? 'null' : undefined}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </DataTable>
-      </TableScroll>
-      {pageCount > 1 && (
-        <Row>
-          <Button $size="sm" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}>
-            <ChevronLeft size={13} /> {t('common.prev')}
-          </Button>
-          <Meta>
-            {t('common.page')} {pageIndex + 1} {t('common.of')} {pageCount}
-          </Meta>
-          <Button $size="sm" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}>
-            {t('common.next')} <ChevronRight size={13} />
-          </Button>
-        </Row>
-      )}
-    </>
-  )
-}
-
-export function TableView() {
+export default function TableView() {
   const { t } = useTranslation()
   const { connector = '', query = '' } = useParams()
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '../auth'
-import { Centered } from '../ui'
+import { useAuth } from '../../auth/AuthContext'
+import { Centered } from '../../common'
 
 /**
  * Landing route for the OIDC flow. The backend's /auth/oidc/callback redirects
@@ -10,7 +10,7 @@ import { Centered } from '../ui'
  * (`#access_token=…&refresh_token=…`) when `[oidc] frontend_redirect` points at
  * this path. We stash them via the auth context, then go to the app.
  */
-export function OidcCallback() {
+export default function OidcCallback() {
   const { t } = useTranslation()
   const { setTokens } = useAuth()
   const navigate = useNavigate()

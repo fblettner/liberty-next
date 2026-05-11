@@ -1,0 +1,59 @@
+import { type ReactNode } from 'react'
+import styled from '@emotion/styled'
+import { colors, radius, fontSize, fonts, shadow } from '../theme'
+
+const fieldBase = `
+  height: 32px;
+  padding: 0 10px;
+  border-radius: ${radius.md};
+  border: 1px solid ${colors.border};
+  background: ${colors.bg.input};
+  color: ${colors.text.primary};
+  font-size: ${fontSize.base};
+  font-family: ${fonts.sans};
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &:focus { border-color: ${colors.blue.main}; box-shadow: ${shadow.focus}; }
+  &::placeholder { color: ${colors.text.muted}; }
+`
+
+export const Input = styled.input`
+  ${fieldBase}
+  width: 100%;
+  &:read-only { background: var(--bg-readonly); color: ${colors.text.muted}; }
+`
+
+export const Select = styled.select`
+  ${fieldBase}
+  cursor: pointer;
+`
+
+export const Textarea = styled.textarea`
+  ${fieldBase}
+  height: auto;
+  min-height: 80px;
+  padding: 8px 10px;
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+`
+
+export const FieldLabel = styled.label`
+  display: block;
+  font-size: ${fontSize.micro};
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: ${colors.text.muted};
+  margin-bottom: 5px;
+`
+
+/** A labelled form field — the uppercase label above whatever control you pass. */
+export function Field({ label, children, htmlFor }: { label: string; children: ReactNode; htmlFor?: string }) {
+  return (
+    <div>
+      <FieldLabel htmlFor={htmlFor}>{label}</FieldLabel>
+      {children}
+    </div>
+  )
+}

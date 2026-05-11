@@ -5,8 +5,8 @@
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { LogOut } from 'lucide-react'
-import { useAuth } from '../auth'
-import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Button, Tag, FieldLabel } from '../ui'
+import { useAuth } from '../auth/AuthContext'
+import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Button, Tag, FieldLabel } from '../common'
 import { colors, fontSize, fonts } from '../theme'
 
 const Box = styled(Modal)`

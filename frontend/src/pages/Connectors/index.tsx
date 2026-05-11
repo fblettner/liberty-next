@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { LayoutGrid, Database, Globe } from 'lucide-react'
-import { api, ApiError } from '../api'
-import type { ConnectorMeta } from '../types'
-import { PageLayout, Card, Banner, Centered, Tag, Mono, Stack } from '../ui'
-import { colors, fontSize, fonts, radius } from '../theme'
+import { api, ApiError } from '../../api/client'
+import type { ConnectorMeta } from '../../types/connectors'
+import { PageLayout, Card, Banner, Centered, Tag, Mono, Stack } from '../../common'
+import { colors, fontSize, fonts, radius } from '../../theme'
 
 const ConnHead = styled.div`
   display: flex;
@@ -48,7 +48,7 @@ const ItemDesc = styled.span`
   color: ${colors.text.muted};
 `
 
-export function Connectors() {
+export default function Connectors() {
   const { t } = useTranslation()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [error, setError] = useState<string | null>(null)

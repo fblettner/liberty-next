@@ -1,6 +1,6 @@
 // Thin fetch wrapper: attaches the Bearer token, parses JSON, and surfaces a
-// typed error. On 401 it calls the registered onUnauthorized hook (auth.tsx wires
-// it to "log out"). SSE is exposed separately via `streamSSE`.
+// typed error. On 401 it calls the registered onUnauthorized hook (auth/AuthContext
+// wires it to "log out"). SSE is exposed separately via `streamSSE`.
 
 let accessToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;

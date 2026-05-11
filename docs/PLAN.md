@@ -248,21 +248,27 @@ response_field = "data.0.name"
   `.theme-light` class on `<html>`, preference persisted), `react-i18next` (EN/FR, persisted),
   `lucide-react` icons, DM Sans (Google Fonts), `@tanstack/react-table` (the SELECT grid),
   `react-markdown` + `remark-gfm` (assistant replies), `@monaco-editor/react` (the connector-
-  config editor — loaded from a CDN at runtime, same as nomaubl). `src/theme.ts` (tokens),
-  `src/index.css` (the `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar),
-  `src/i18n.ts` + `src/locales/{en,fr}.ts`, `src/ui.tsx` (shared emotion primitives:
-  `Button`/`Card`/`Input`/`Field`/`Tag`/`Banner`/`Pre`/`Mono`/`SpinnerRing`/`Centered`/
-  `PageLayout`/`Modal*`/`ConfirmModal`/`Stack`/`Row` + `useIsLight()`), `components/Markdown.tsx`
-  (react-markdown with styled elements) — pages stay declarative on top of these.
-- `src/api.ts` — `fetch` wrapper (Bearer header, JSON, 401 → log-out hook), `streamSSE`.
-  `src/auth.tsx` — `AuthProvider`/`useAuth()` (login → `POST /auth/login`, token in
-  `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off).
-  `src/App.tsx` — `react-router-dom` v7: `/login`, `/oidc/callback`, `RequireAuth` `Layout`
+  config editor — loaded from a CDN at runtime, same as nomaubl).
+- **Source layout** — also borrowed from nomaubl, to keep the project from sprawling into giant
+  files: `src/theme.ts` (tokens), `src/index.css` (the `:root`/`.theme-light` var sets + ambient
+  gradient bg + thin scrollbar), `src/i18n.ts` + `src/locales/{en,fr}.ts`; `src/api/client.ts`
+  (fetch wrapper + `streamSSE`); `src/auth/AuthContext.tsx`; `src/types/{connectors,auth,ai}.ts`
+  (backend response shapes — no React); `src/services/` (plain-TS helpers, e.g. `cells.ts`);
+  `src/common/` (shared theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Field`,
+  `Tag`/`Mono`, `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`,
+  `layout` `Stack`/`Row`, `useIsLight`, `Markdown`; `common/index.ts` barrels all but `Markdown`,
+  which stays out so react-markdown doesn't leak into every page chunk); `src/pages/<Screen>/index.tsx`
+  (one dir per page; sub-components and styled bits live alongside — e.g. `TableView/ResultTable.tsx`
+  + `TableView/styled.ts`); `src/components/` (app chrome — `Layout`, `Sidebar`, `ProfileModal`).
+  *Rule for future work:* keep pages small (split helpers into `pages/<X>/`), reusable bits go in
+  `common/`, plain logic/shapes go in `services/`/`types/` (no React there), and every styled
+  component pulls colours/sizes/radii/shadows from `theme.ts` — no hard-coded hex/rgba/font-px.
+- `src/App.tsx` — `react-router-dom` v7: `/login`, `/oidc/callback`, `RequireAuth` `Layout`
   with `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e` (HttpRunner), `/chat`,
-  `/settings` (superuser). The route components are `React.lazy`-split (the heavy libs ride
+  `/settings` (superuser). The page components are `React.lazy`-split (the heavy libs ride
   along — TableView/Chat/Settings each become their own chunk; entry chunk ~112 kB gz);
   `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
-- `components/`: **Layout** (shell — `Sidebar` + workspace-title header + a fixed top-right
+- The pages: **Layout** (shell — `Sidebar` + workspace-title header + a fixed top-right
   utility pill: EN/FR · dark/light · username→profile · sign-out), **Sidebar** (collapsible nav
   rail, lucide icons, react-router `NavLink`s + an external "API docs" link), **ProfileModal**
   (read-only — username/email/provider/roles/permissions from the Principal; no self-service

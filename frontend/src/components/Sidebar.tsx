@@ -6,7 +6,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { LayoutGrid, Sparkles, SlidersHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
-import { useAuth } from '../auth'
+import { useAuth } from '../auth/AuthContext'
 
 const COLLAPSE_KEY = 'liberty.sidebar.collapsed'
 
