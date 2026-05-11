@@ -127,6 +127,27 @@ async def test_disallowed_statement_rejected_before_connecting(pools: PoolRegist
 
 
 @pytest.mark.asyncio
+async def test_cte_select_runs(pools: PoolRegistry) -> None:
+    # A WITH ... SELECT resolves to SELECT — not rejected by the allow-list, runs as a read.
+    conn = _connector(pools, QueryDef(name="cte", sql="WITH on_items AS (SELECT id FROM item WHERE status = 'on') SELECT COUNT(*) AS n FROM on_items"))
+    result = await conn.execute("cte")
+    assert result.statement_type == "SELECT" and result.rows == [{"n": 2}]
+
+
+@pytest.mark.asyncio
+async def test_cte_write_requires_writable(pools: PoolRegistry) -> None:
+    # A WITH ... DELETE resolves to DELETE → still gated by `writable` (the writability
+    # check is the orthogonal gate, regardless of the CTE prefix).
+    sql = "WITH gone AS (SELECT id FROM item WHERE status = 'off') DELETE FROM item WHERE id IN (SELECT id FROM gone)"
+    with pytest.raises(WriteNotAllowedError):
+        await _connector(pools, QueryDef(name="cte_del", sql=sql)).execute("cte_del")
+    result = await _connector(pools, QueryDef(name="cte_del", sql=sql, writable=True)).execute("cte_del")
+    assert result.statement_type == "DELETE"  # (sqlite doesn't report rowcount for WITH-DML)
+    count = _connector(pools, QueryDef(name="n", sql="SELECT COUNT(*) AS n FROM item"))
+    assert (await count.execute("n")).rows == [{"n": 2}]  # the 'off' row was deleted
+
+
+@pytest.mark.asyncio
 async def test_unknown_query(pools: PoolRegistry) -> None:
     conn = _connector(pools, QueryDef(name="x", sql="SELECT 1"))
     with pytest.raises(QueryNotFoundError):

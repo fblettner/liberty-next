@@ -39,9 +39,11 @@ Full dep set pinned in `pyproject.toml`.
 - `config.py` — Pydantic schema for `config/connectors.toml` (`[pools.*]` plus
   discriminated `[connectors.*]` of type `sql`/`api`); `${ENV_VAR}` secret
   substitution at load time.
-- `base.py` — connector exceptions; `detect_statement_type` + `find_bind_params`
-  (SQL text scanner skipping literals/comments/`::` casts); `ALLOWED_STATEMENTS`
-  / `WRITE_STATEMENTS`.
+- `base.py` — connector exceptions; `detect_statement_type` (resolves `WITH` CTE
+  queries to their main statement keyword — `WITH … SELECT` → `SELECT`, `WITH … DELETE`
+  → `DELETE` so the writable gate still applies; an unparseable CTE list → `"WITH"` →
+  rejected) + `find_bind_params` (SQL text scanner skipping literals/comments/`::` casts);
+  `ALLOWED_STATEMENTS` / `WRITE_STATEMENTS`.
 - `db.py` — `PoolRegistry`: one SQLAlchemy async engine per named pool, created
   lazily (unreachable DB never blocks startup; tests inject their own engine).
 - `sql.py` — `SQLConnector`: named queries, `:param` binding via SQLAlchemy

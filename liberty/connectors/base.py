@@ -46,32 +46,125 @@ ALLOWED_STATEMENTS = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"}
 WRITE_STATEMENTS = frozenset({"INSERT", "UPDATE", "DELETE", "MERGE"})
 
 
-def detect_statement_type(sql: str) -> str:
-    """Return the upper-cased leading SQL keyword, skipping whitespace + comments.
-
-    Returns an empty string when no keyword can be found.
-    """
-    if not sql:
-        return ""
-    i, n = 0, len(sql)
+def _skip_ws_comments(sql: str, i: int) -> int:
+    n = len(sql)
     while i < n:
         c = sql[i]
         if c.isspace():
             i += 1
+        elif c == "-" and i + 1 < n and sql[i + 1] == "-":  # line comment
+            eol = sql.find("\n", i)
+            i = n if eol < 0 else eol + 1
+        elif c == "/" and i + 1 < n and sql[i + 1] == "*":  # block comment
+            end = sql.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        else:
+            break
+    return i
+
+
+def _read_word(sql: str, i: int) -> tuple[str, int]:
+    """Read a ``[A-Za-z_]\\w*`` identifier at *i*; return (UPPERCASED word, end). May be empty."""
+    n, start = len(sql), i
+    if i < n and (sql[i].isalpha() or sql[i] == "_"):
+        i += 1
+        while i < n and (sql[i].isalnum() or sql[i] == "_"):
+            i += 1
+    return sql[start:i].upper(), i
+
+
+def _skip_balanced_parens(sql: str, i: int) -> int:
+    """``sql[i]`` must be ``(``; return the index just after the matching ``)`` (or ``len(sql)``
+    if unbalanced). String literals, quoted identifiers, and comments are skipped while counting."""
+    n, depth = len(sql), 0
+    while i < n:
+        c = sql[i]
+        if c == "'":  # string literal, '' escapes
+            i += 1
+            while i < n:
+                if sql[i] == "'":
+                    if i + 1 < n and sql[i + 1] == "'":
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
             continue
-        if c == "-" and i + 1 < n and sql[i + 1] == "-":  # line comment
+        if c == '"':  # quoted identifier
+            j = sql.find('"', i + 1)
+            i = n if j < 0 else j + 1
+            continue
+        if c == "-" and i + 1 < n and sql[i + 1] == "-":
             eol = sql.find("\n", i)
             i = n if eol < 0 else eol + 1
             continue
-        if c == "/" and i + 1 < n and sql[i + 1] == "*":  # block comment
+        if c == "/" and i + 1 < n and sql[i + 1] == "*":
             end = sql.find("*/", i + 2)
             i = n if end < 0 else end + 2
             continue
-        end = i
-        while end < n and sql[end].isalpha():
-            end += 1
-        return sql[i:end].upper()
-    return ""
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            i += 1
+            if depth == 0:
+                return i
+            continue
+        i += 1
+    return n
+
+
+def detect_statement_type(sql: str) -> str:
+    """Return the upper-cased leading SQL keyword, skipping whitespace + comments.
+
+    For a ``WITH`` (common-table-expression) query, the CTE list is skipped and the
+    *main* statement keyword is returned — so ``WITH x AS (...) SELECT ...`` → ``SELECT``
+    and ``WITH x AS (...) DELETE FROM y`` → ``DELETE`` (the writable gate then applies
+    to the latter). Returns ``""`` when no keyword is found, or ``"WITH"`` if a CTE list
+    can't be parsed (which the allow-list then rejects — the safe default).
+    """
+    if not sql:
+        return ""
+    i = _skip_ws_comments(sql, 0)
+    word, j = _read_word(sql, i)
+    if word != "WITH":
+        return word
+
+    n = len(sql)
+    i = _skip_ws_comments(sql, j)
+    w, j2 = _read_word(sql, i)
+    if w == "RECURSIVE":
+        i = _skip_ws_comments(sql, j2)
+
+    # WITH [RECURSIVE] <name> [(cols)] AS [[NOT] MATERIALIZED] (<body>) [, ...] <main_stmt>
+    while i < n:
+        if i < n and sql[i] == '"':  # quoted CTE name
+            k = sql.find('"', i + 1)
+            i = n if k < 0 else k + 1
+        else:
+            _, i = _read_word(sql, i)
+        i = _skip_ws_comments(sql, i)
+        if i < n and sql[i] == "(":  # optional column list
+            i = _skip_balanced_parens(sql, i)
+            i = _skip_ws_comments(sql, i)
+        _, i = _read_word(sql, i)  # "AS"
+        i = _skip_ws_comments(sql, i)
+        w, j3 = _read_word(sql, i)  # optional NOT MATERIALIZED / MATERIALIZED
+        if w == "NOT":
+            i = _skip_ws_comments(sql, j3)
+            w, j3 = _read_word(sql, i)
+        if w == "MATERIALIZED":
+            i = _skip_ws_comments(sql, j3)
+        if not (i < n and sql[i] == "("):  # the CTE body must be here
+            return "WITH"
+        i = _skip_balanced_parens(sql, i)
+        i = _skip_ws_comments(sql, i)
+        if i < n and sql[i] == ",":  # another CTE follows
+            i = _skip_ws_comments(sql, i + 1)
+            continue
+        main, _ = _read_word(sql, i)  # the statement after the CTE list
+        return main or "WITH"
+    return "WITH"
 
 
 def find_bind_params(sql: str) -> list[str]:

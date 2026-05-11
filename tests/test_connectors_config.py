@@ -94,6 +94,17 @@ def test_extra_keys_rejected() -> None:
         ("merge into t ...", "MERGE"),
         ("drop table t", "DROP"),
         ("", ""),
+        # CTE queries → the *main* statement keyword
+        ("WITH a AS (SELECT 1) SELECT * FROM a", "SELECT"),
+        ("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t WHERE n<5) SELECT * FROM t", "SELECT"),
+        ("WITH a AS (SELECT id FROM x), b AS (SELECT id FROM y) SELECT * FROM a JOIN b USING(id)", "SELECT"),
+        ("WITH d AS (DELETE FROM old RETURNING *) INSERT INTO arch SELECT * FROM d", "INSERT"),
+        ("WITH x AS MATERIALIZED (SELECT 1) DELETE FROM t WHERE c IN (SELECT 1 FROM x)", "DELETE"),
+        ("WITH a AS NOT MATERIALIZED (SELECT 1) UPDATE t SET v = 1", "UPDATE"),
+        ("  -- c\n WITH a AS ( select 1 ) update t set v=1", "UPDATE"),
+        ("WITH a AS (SELECT '(' || ')' AS p) SELECT * FROM a", "SELECT"),  # parens inside a string literal
+        ('WITH "my cte" AS (SELECT 1) SELECT * FROM "my cte"', "SELECT"),  # quoted CTE name
+        ("WITH broken AS (SELECT 1", "WITH"),  # unbalanced parens → safe-reject (not allowed)
     ],
 )
 def test_detect_statement_type(sql: str, expected: str) -> None:
