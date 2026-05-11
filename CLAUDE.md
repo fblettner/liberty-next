@@ -32,27 +32,58 @@ authlib (OIDC/Keycloak) · argon2-cffi (passwords) · React 19 + Vite + TS
 ## Current status
 
 **Phase 0 (Foundation) — DONE.** Project skeleton, TOML config loader
-(`liberty/config.py`), FastAPI app (`liberty/main.py` with `/health`, `/info`),
-3 passing tests. Full dep set pinned in `pyproject.toml`.
+(`liberty/config.py`), FastAPI app (`liberty/main.py` with `/health`, `/info`).
+Full dep set pinned in `pyproject.toml`.
 
-**Next: Phase 1 — Connector core.** Build SQLConnector first (named queries,
-`:param` binding, runtime schema discovery), then APIConnector (pluggable auth,
-placeholder substitution, JSON-path extraction, token cache), then DBConnector
-(pool registry — v1's multi-tenant `apps_pool` concept). See `docs/PLAN.md`.
+**Phase 1 (Connector core) — DONE.** Lives in `liberty/connectors/`:
+- `config.py` — Pydantic schema for `config/connectors.toml` (`[pools.*]` plus
+  discriminated `[connectors.*]` of type `sql`/`api`); `${ENV_VAR}` secret
+  substitution at load time.
+- `base.py` — connector exceptions; `detect_statement_type` + `find_bind_params`
+  (SQL text scanner skipping literals/comments/`::` casts); `ALLOWED_STATEMENTS`
+  / `WRITE_STATEMENTS`.
+- `db.py` — `PoolRegistry`: one SQLAlchemy async engine per named pool, created
+  lazily (unreachable DB never blocks startup; tests inject their own engine).
+- `sql.py` — `SQLConnector`: named queries, `:param` binding via SQLAlchemy
+  `text()` (never string-substituted), statement-type allow-list, `writable`
+  gate for mutations, any `:name` the caller omits → SQL NULL, runtime schema
+  from `result.keys()` + best-effort `cursor.description` types, `max_rows` cap.
+  (JDE Julian date/time conversion from nomaubl `DynamicResultMapper`: deferred
+  to Phase 5, only if NOMAJDE migration needs it.)
+- `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
+  `api_key`/`oauth2` (OAuth2 = token-endpoint POST + dot-path token extraction +
+  TTL cache + one refresh on 401); `{{placeholder}}` substitution in
+  path/query/headers/body (built-ins `{{username}}`/`{{password}}`/`{{token}}`);
+  dot-path response extraction (`data.0.id` indexes lists) via `response_field`
+  and/or `response_map`; `multipart/form-data` bodies (`name=value` text parts,
+  `name=@path;filename=X;contentType=Y` file parts).
+- `registry.py` — `ConnectorRegistry`: builds connectors from `ConnectorsFile`,
+  owns the pool registry, `aclose()` disposes engines + HTTP clients. Rebuildable
+  → basis for hot-reload.
+- `liberty/cli.py` (`liberty-connectors` script) — `list` / `describe <c>` /
+  `run <c> <query-or-endpoint> -p k=v`.
+Wired into `main.py` lifespan (`app.state.connectors`); `/info` reports loaded
+connector + pool names. 42 tests pass.
+
+**Next: Phase 2 — Auth + AI.** Internal users (argon2) + OIDC via authlib
+(Keycloak); JWT issuance/validation; Anthropic SDK tool-use loop ported from
+nomaubl `AiAssistant.java`. See `docs/PLAN.md`.
 
 ## Run it
 
 ```bash
-.venv/bin/pytest -v          # tests
-.venv/bin/liberty-v2          # dev server on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
+.venv/bin/pytest -v               # tests
+.venv/bin/liberty-v2              # dev server on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
+.venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
 ## Layout
 
 ```
-config/         app.toml, connectors.toml (Phase 1)
-liberty/        main.py, config.py · connectors/ auth/ ai/ web/ migrations/ (added per phase)
+config/         app.toml, connectors.toml
+liberty/        main.py, config.py, cli.py · connectors/{config,base,db,sql,api,registry}.py
+                · auth/ ai/ web/ migrations/ (added per phase)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale
 ```

@@ -6,12 +6,18 @@ from fastapi import FastAPI
 
 from liberty import __version__
 from liberty.config import Settings, load_settings
+from liberty.connectors import ConnectorRegistry, load_connectors
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.settings = load_settings()
-    yield
+    settings = load_settings()
+    app.state.settings = settings
+    app.state.connectors = load_connectors(settings.connectors.config_path)
+    try:
+        yield
+    finally:
+        await app.state.connectors.aclose()
 
 
 def create_app() -> FastAPI:
@@ -24,10 +30,13 @@ def create_app() -> FastAPI:
     @app.get("/info")
     async def info() -> dict[str, object]:
         settings: Settings = app.state.settings
+        connectors: ConnectorRegistry = app.state.connectors
         return {
             "name": settings.app.name,
             "version": __version__,
-            "connectors_loaded": 0,
+            "connectors_loaded": len(connectors),
+            "connectors": connectors.names(),
+            "pools": connectors.pools.names(),
         }
 
     return app

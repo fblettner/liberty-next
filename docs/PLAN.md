@@ -66,34 +66,65 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 - `config/app.toml`, `config/connectors.toml` (placeholder).
 - `tests/test_health.py` — 3 passing tests.
 
-### Phase 1 — Connector core — ⏳ NEXT  (~3–4 wks)
-The heart of v2. Build in this order:
-1. **SQLConnector** — load named queries from TOML; execute with `:name` bound
-   params via SQLAlchemy `text()`; `writable` flag gates INSERT/UPDATE/DELETE;
-   validate statement type; map `cursor.description` → JSON schema + rows.
-   Handle the JDE date/time conversions nomaubl does (`DynamicResultMapper`) if
-   we'll touch JDE data — defer unless needed.
-2. **APIConnector** — generic HTTP via `httpx`; auth strategies (NONE / BASIC /
-   BEARER / API_KEY / OAUTH2 with token cache + auto-refresh on 401);
-   `{{placeholder}}` substitution from runtime params + secrets; response field
-   extraction by dot-path; multipart/form-data + file streaming.
-3. **DBConnector / pool registry** — named pools (engine per pool), referenced by
-   SQLConnectors. v1's `apps_pool`/`apps_dbtype` is the model.
-4. CLI to list/run connectors locally; tests for each.
+### Phase 1 — Connector core — ✅ DONE
+The heart of v2. Delivered in `liberty/connectors/`:
+1. **SQLConnector** (`sql.py`) — named queries from TOML; `:name` params bound via
+   SQLAlchemy `text()` (never string-substituted); `writable` gates
+   INSERT/UPDATE/DELETE/MERGE; statement-type allow-list rejects DROP/ALTER/… up
+   front; any `:name` the caller omits is bound to SQL NULL (optional filters);
+   result schema discovered at runtime from `result.keys()` + best-effort
+   `cursor.description` types; `max_rows` cap with `truncated` flag.
+   *JDE Julian date/time conversion (nomaubl `DynamicResultMapper`) deferred to
+   Phase 5 — only if the NOMAJDE migration needs to read JDE data directly.*
+2. **APIConnector** (`api.py`) — `httpx.AsyncClient`; auth `none`/`basic`/
+   `bearer`/`api_key`/`oauth2` (token endpoint POST + dot-path token extraction +
+   TTL cache + one refresh on 401); `{{placeholder}}` substitution in
+   path/query/headers/body (built-ins `{{username}}`/`{{password}}`/`{{token}}`);
+   dot-path response extraction (`data.0.id` indexes lists) via `response_field`
+   and `response_map`; `multipart/form-data` bodies (`name=value` /
+   `name=@path;filename=…;contentType=…`).
+3. **PoolRegistry** (`db.py`) — one async engine per named `[pools.*]` entry,
+   created lazily (unreachable DB never blocks startup; tests inject engines).
+   v1's `apps_pool`/`apps_dbtype` is the model.
+4. **ConnectorRegistry** (`registry.py`) owns pools + connectors and tears them
+   down; **`liberty/cli.py`** (`liberty-connectors`) exposes `list` / `describe` /
+   `run`; wired into `main.py` lifespan; `/info` reports loaded connectors/pools.
+5. Config validated by Pydantic in `connectors/config.py`; `${ENV_VAR}` secret
+   substitution at load time. 42 tests (config/SQL via sqlite/API via httpx mock/
+   CLI). `aiosqlite` added as a dev dep for the SQL tests.
 
-Config shape (target):
+Config shape (as shipped — see `config/connectors.toml`):
 ```toml
+[pools.default]
+url = "${LIBERTY_DB_URL}"   # secrets referenced, never inlined
+
 [connectors.liberty]
 type = "sql"
 pool = "default"
+max_rows = 1000
 
 [[connectors.liberty.queries]]
 name = "users_list"
-sql = "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status"
+sql = "SELECT usr_id, usr_name FROM ly_users WHERE (:status IS NULL OR usr_status = :status)"
 writable = false
+params = [{ name = "status", default = "ENABLED" }]
+
+[connectors.svc]
+type = "api"
+base_url = "https://api.example.test"
+auth_type = "bearer"
+auth_token = "${SVC_TOKEN}"
+default_headers = { Accept = "application/json" }
+
+[[connectors.svc.endpoints]]
+name = "get_thing"
+method = "GET"
+path = "/things/{{id}}"
+params = [{ name = "id" }]
+response_field = "data.0.name"
 ```
 
-### Phase 2 — Auth + AI — (~2 wks)
+### Phase 2 — Auth + AI — ⏳ NEXT  (~2 wks)
 - Internal users table (argon2 hashes), roles/permissions. Bootstrap an `admin`.
 - OIDC via `authlib` — Keycloak discovery URL, code flow, JWT validation.
 - JWT issuance/validation for internal logins.
@@ -141,10 +172,15 @@ to validate against.
 
 ## 5. Open questions / parking lot
 
-- Multipart/file upload story in APIConnector — port nomaubl's streaming approach.
+- ~~Multipart/file upload story in APIConnector~~ — done in Phase 1 (line-based
+  parts list, files read into memory; revisit streaming if a large-file PA needs it).
 - WebSocket vs SSE for live updates (v1 = Socket.IO).
-- Secrets handling — v1 uses Fernet + `secrets.json`. Decide: env vars, a secrets
-  file, or a vault. Connector auth configs must reference secrets, not inline them.
+- Secrets handling — Phase 1 takes the **env-var** path: connector configs use
+  `${ENV_VAR}` references, substituted at load time (unset → empty string).
+  v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
+- Hot-reload trigger — `ConnectorRegistry` is rebuildable from a fresh
+  `ConnectorsFile`, but nothing watches the file or exposes a reload endpoint yet
+  (wire up in Phase 3 web layer / Phase 4 settings UI).
 - Reporting/PDF — v1 has Excel export (`tbl_workbook`/`tbl_sheet`), nomaubl has
   XSLT→PDF via BI Publisher. Out of scope until a user asks.
 - JDE Julian date conversion — only if v2 needs to talk to JD Edwards data
@@ -154,5 +190,8 @@ to validate against.
 
 1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
 2. Read this file for the full picture.
-3. Phase 1 starts with `liberty/connectors/sql.py` + `liberty/connectors/base.py`
-   and a `[connectors.*]` schema in `config/connectors.toml`.
+3. Phases 0–1 are done. Next is **Phase 2 — Auth + AI**: start with an internal
+   users table + argon2 hashing and an `admin` bootstrap, then OIDC via authlib,
+   then the Anthropic tool-use loop (port nomaubl `AiAssistant.java`). The AI
+   tools should be plain decorated Python functions — and the SQL/API connectors
+   from Phase 1 are the obvious first tools to expose to the model.

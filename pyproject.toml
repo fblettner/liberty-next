@@ -20,10 +20,12 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "aiosqlite>=0.20",
 ]
 
 [project.scripts]
 liberty-v2 = "liberty.main:run"
+liberty-connectors = "liberty.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

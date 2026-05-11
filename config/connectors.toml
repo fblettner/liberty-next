@@ -1,2 +1,78 @@
-# Connector definitions populated in Phase 1.
-# Three connector types will live here: sql, api, db.
+# Liberty v2 — connector definitions (hot-reloadable).
+#
+# This file replaces v1's ly_qry_sql / ly_api / ly_api_conn metadata tables.
+# Result column schema is NOT stored here — it is discovered at query time from
+# cursor.description. Add a column to a query's SQL and it appears in the API
+# response and the UI with no edits to this file.
+#
+# Secrets must be referenced, never inlined: ${ENV_VAR} expands from the
+# environment at load time (an unset var becomes an empty string).
+#
+# Run `liberty-connectors list` (or `describe <name>` / `run <name> <query>`)
+# to exercise these without booting the web layer.
+
+# --------------------------------------------------------------------------- #
+# Database pools — one SQLAlchemy async engine per entry, created lazily.
+# --------------------------------------------------------------------------- #
+[pools.default]
+url = "${LIBERTY_DB_URL}"  # e.g. postgresql+asyncpg://liberty:liberty@localhost/liberty
+pool_size = 5
+max_overflow = 10
+pool_pre_ping = true
+
+# --------------------------------------------------------------------------- #
+# SQL connector — named queries with :param binding.
+#   • allowed statements: SELECT / INSERT / UPDATE / DELETE / MERGE
+#   • mutations additionally require `writable = true` on the query
+#   • a :name token the caller doesn't supply is bound to SQL NULL, so optional
+#     filters like `(:status IS NULL OR status = :status)` work with no param
+# --------------------------------------------------------------------------- #
+[connectors.liberty]
+type = "sql"
+pool = "default"
+max_rows = 1000
+
+[[connectors.liberty.queries]]
+name = "ping"
+label = "Connectivity check"
+description = "Returns 1 — used to verify the pool is reachable."
+sql = "SELECT 1 AS ok"
+writable = false
+
+[[connectors.liberty.queries]]
+name = "now"
+label = "Server time"
+sql = "SELECT now() AS server_time"
+writable = false
+
+# --------------------------------------------------------------------------- #
+# API connector — generic HTTP client.
+#   auth_type: none | basic | bearer | api_key | oauth2
+#   {{placeholder}} substitution in path / query_params / headers / body
+#   response_field / response_map extract values by dot-path (data.0.id indexes)
+# --------------------------------------------------------------------------- #
+[connectors.httpbin]
+type = "api"
+base_url = "https://httpbin.org"
+auth_type = "none"
+default_headers = { Accept = "application/json" }
+timeout = 30.0
+
+[[connectors.httpbin.endpoints]]
+name = "get"
+label = "Echo query string"
+method = "GET"
+path = "/get"
+query_params = { hello = "{{who}}" }
+params = [{ name = "who", default = "liberty" }]
+response_field = "args.hello"
+
+[[connectors.httpbin.endpoints]]
+name = "post_json"
+label = "Echo JSON body"
+method = "POST"
+path = "/post"
+content_type = "application/json"
+body = '{"message": "{{message}}"}'
+params = [{ name = "message", default = "hi" }]
+response_field = "json.message"
