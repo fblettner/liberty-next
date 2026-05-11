@@ -18,10 +18,10 @@ def test_info() -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["name"] == "Liberty v2"
-        # Connector count reflects config/connectors.toml (loaded in the lifespan).
+        # Reflects config/connectors.toml (loaded in the lifespan) — whatever it contains.
         assert body["connectors_loaded"] == len(body["connectors"])
-        assert "liberty" in body["connectors"]
-        assert "default" in body["pools"]
+        assert "default" in body["pools"]  # the framework pool is always there
+        assert body["auth"]["pool"] == "default"
 
 
 def test_config_load() -> None:

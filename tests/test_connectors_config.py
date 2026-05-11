@@ -18,10 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def test_shipped_config_parses() -> None:
     cfg = load_connectors_file(REPO_ROOT / "config" / "connectors.toml")
-    assert "default" in cfg.pools
-    assert isinstance(cfg.connectors["liberty"], SqlConnectorConfig)
-    assert isinstance(cfg.connectors["httpbin"], ApiConnectorConfig)
-    assert {q.name for q in cfg.connectors["liberty"].queries} == {"ping", "now"}
+    assert "default" in cfg.pools  # the framework pool
+    # whatever connectors the deployment config defines must be valid SQL/API connectors
+    for conn in cfg.connectors.values():
+        assert isinstance(conn, (SqlConnectorConfig, ApiConnectorConfig))
 
 
 def test_missing_file_is_empty() -> None:

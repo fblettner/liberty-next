@@ -239,14 +239,19 @@ nomasx1's read paths; migrate the real apps (nomasx1 → NOMAJDE → AIRFLOW). D
 `start.sh` (repo root): `serve` (default) | `dev` | `api [dev]` | `build` | `frontend` |
 `init-db` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py` works too.
 
-**DB / secrets:** `config/connectors.toml`'s `[pools.default]` is
-`${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}` — set `LIBERTY_DB_URL` for Postgres,
-else it uses a local `liberty.db` (gitignored). `substitute_env` supports
-`${NAME}` and `${NAME:-default}` (shell `:-` = unset *or* empty → default), in both
+**Pools / DB / secrets:** `config/connectors.toml` is the *deployment* config (it ships
+with a real example — currently the migrated **nomasx1** app). Convention: `[pools.default]`
+is the **framework pool** — it holds v2's own `ly2_users`/`ly2_roles`/`ly2_user_roles`
+(created by `liberty-admin init-db`), shared across every app; `[auth] pool` (in
+`config/app.toml`) points here. Per-*app* pools (`[pools.nomasx1]`, future `[pools.nomajde]`,
+…) carry that app's migrated queries against its business DB; mirrors the v1 split between an
+app's "definition DB" (queries/users/roles → now TOML + `ly2_*`) and its "data DB" (`pg_dump`
+that into the target). `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`
+(set `LIBERTY_DB_URL` for Postgres; SQLite `liberty.db` is gitignored). `substitute_env`
+supports `${NAME}` and `${NAME:-default}` (shell `:-` = unset *or* empty → default), in both
 `connectors.toml` and `app.toml`. An empty pool URL raises `UnknownPoolError`, and any
-`ConnectorError` that isn't caught per-route (e.g. an unconfigured DB on `/auth/login`)
-becomes a clean **503** via a global exception handler in `liberty/main.py`. `LIBERTY_JWT_SECRET`
-empty → ephemeral key + a warning (fine for dev; set it for prod).
+`ConnectorError` not caught per-route (e.g. an unconfigured DB on `/auth/login`) becomes a clean
+**503** via a global handler in `liberty/main.py`. `LIBERTY_JWT_SECRET` empty → ephemeral key + a warning.
 
 ## Layout
 
