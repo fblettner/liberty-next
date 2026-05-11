@@ -1,14 +1,14 @@
-"""``liberty-migrate`` — turn a v1 Liberty database's ``ly_*`` metadata into v2
-``connectors.toml``.
+"""``liberty-migrate`` — turn a v1 Liberty database's ``ly_*`` metadata into v2 config.
 
-    liberty-migrate sql  --source-url <v1-db-url> [--dbtype postgres] [--prefix v1_] [-o out.toml]
-    liberty-migrate api  --source-url <v1-db-url> [--prefix v1_] [-o out.toml]
-    liberty-migrate all  --source-url <v1-db-url> [--dbtype …] [--prefix …] [-o out.toml]
+    liberty-migrate sql        --source-url <v1-db-url> [--dbtype postgres] [--prefix v1_] [-o out.toml]
+    liberty-migrate api        --source-url <v1-db-url> [--prefix v1_] [-o out.toml]
+    liberty-migrate all        --source-url <v1-db-url> [--dbtype …] [--prefix …] [-o out.toml]
+    liberty-migrate dictionary --source-url <v1-db-url> [--default-language en] [-o dictionary.toml]
 
 ``--source-url`` is a SQLAlchemy *async* URL — e.g.
 ``postgresql+asyncpg://user:pw@host/liberty`` for a real v1 DB. v1 is read-only:
 this only ``SELECT``s. Output goes to ``--out`` (or stdout); review it, then merge
-it into ``config/connectors.toml``.
+it into ``config/connectors.toml`` (the ``dictionary`` output → ``config/dictionary.toml``).
 
 ``sql``/``all`` also scaffold ``[pools.*]`` from v1's ``ly_applications`` (one per
 ``apps_pool``, with a SQLAlchemy URL built from ``apps_host``/``apps_port``/``apps_database``
@@ -16,11 +16,11 @@ or a parseable ``apps_jdbc``); the DB password is a ``${MIGRATED_PW_<NAME>}`` pl
 (v1 keeps it ``ENC:``-encrypted in ``apps_password`` — set the env var, or recover it with
 ``liberty-crypto decrypt``). v1's reserved ``default`` pool is skipped: v2's ``[pools.default]``
 is v2's own framework DB (the ``ly2_*`` tables). They also carry over **column display hints**
-from v1's ``ly_tbl_col`` / ``ly_dlg_col`` (display title, visibility, order, a ``format``) onto
-each SELECT query's ``columns`` — the result *schema* is still discovered from the query, these
-just augment it. Migrated API connectors keep v1's ``conn_password`` verbatim as an ``ENC:``
-value — v2 decrypts it at runtime via ``[crypto] master_key`` (set ``LIBERTY_MASTER_KEY`` to your
-v1 ``MASTER_KEY``).
+from v1's ``ly_tbl_col`` / ``ly_dlg_col`` (each read query's ``columns`` — order, visibility, a
+per-column ``label``/``format`` override) — the labels/types themselves live in the shared
+dictionary, so run ``liberty-migrate dictionary`` too and put it at ``config/dictionary.toml``.
+Migrated API connectors keep v1's ``conn_password`` verbatim as an ``ENC:`` value — v2 decrypts it
+at runtime via ``[crypto] master_key`` (set ``LIBERTY_MASTER_KEY`` to your v1 ``MASTER_KEY``).
 """
 
 from __future__ import annotations
@@ -34,11 +34,13 @@ from liberty.migrations import (
     merge_connectors,
     migrate_api,
     migrate_column_hints,
+    migrate_dictionary,
     migrate_pools,
     migrate_sql_queries,
     read_api,
     read_applications,
     read_column_hints,
+    read_dictionary,
     read_sql_queries,
     render_toml,
 )
@@ -59,6 +61,8 @@ def _placeholders(data: dict) -> list[str]:
 async def _build(args: argparse.Namespace) -> dict:
     engine = make_engine(args.source_url)
     try:
+        if args.command == "dictionary":
+            return migrate_dictionary(*await read_dictionary(engine), default_language=args.default_language)
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -79,7 +83,13 @@ async def _build(args: argparse.Namespace) -> dict:
         await engine.dispose()
 
 
-def _summary(data: dict) -> str:
+def _summary(data: dict, *, command: str) -> str:
+    if command == "dictionary":
+        entries = data.get("entries") or {}
+        n_l = sum(len(e.get("l") or {}) for e in entries.values())
+        return (f"# migrated: {len(entries)} dictionary field(s), default language "
+                f"'{data.get('default_language', 'en')}'" + (f", {n_l} translation(s)" if n_l else "")
+                + " — put this at config/dictionary.toml")
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]
@@ -93,6 +103,9 @@ def _summary(data: dict) -> str:
     ph = _placeholders(data)
     if ph:
         lines.append("# fill in these placeholders before use: " + ", ".join(ph))
+    if n_hinted:
+        lines.append("# column hints reference the shared field dictionary — run `liberty-migrate dictionary")
+        lines.append("#   --source-url <same> -o config/dictionary.toml` for the labels/types")
     if any("MIGRATED_PW_" in str(p.get("url", "")) for p in pools.values()):
         lines.append("# pool URLs carry ${MIGRATED_PW_<NAME>} for the DB password — set the env var(s),")
         lines.append("#   or recover each from v1's ly_applications.apps_password: liberty-crypto decrypt 'ENC:…'")
@@ -105,14 +118,24 @@ def _summary(data: dict) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="liberty-migrate", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, help_ in [("sql", "migrate ly_query/ly_qry_sql + ly_applications pools"), ("api", "migrate ly_api/ly_api_conn"), ("all", "both")]:
+    for name, help_ in [
+        ("sql", "migrate ly_query/ly_qry_sql + ly_applications pools + ly_tbl_col/ly_dlg_col hints"),
+        ("api", "migrate ly_api/ly_api_conn"),
+        ("all", "sql + api"),
+        ("dictionary", "migrate ly_dictionary (+ ly_dictionary_l) → dictionary.toml"),
+    ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
-        p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
-        if name != "api":
-            p.add_argument("--dbtype", default=None, help="only migrate ly_qry_sql rows of this query_dbtype")
+        if name == "dictionary":
+            p.add_argument("--default-language", default="en", help="language of v1's ly_dictionary.dd_label (default: en)")
+            p.set_defaults(prefix="", dbtype=None)
         else:
-            p.set_defaults(dbtype=None)
+            p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
+            if name == "api":
+                p.set_defaults(dbtype=None)
+            else:
+                p.add_argument("--dbtype", default=None, help="only migrate ly_qry_sql rows of this query_dbtype")
+            p.set_defaults(default_language="en")
         p.add_argument("-o", "--out", help="write the TOML here (default: stdout)")
     return parser
 
@@ -120,12 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     data = asyncio.run(_build(args))
-    toml = render_toml(data)
-    text = f"{_summary(data)}\n\n{toml}"
+    summary = _summary(data, command=args.command)
+    text = f"{summary}\n\n{render_toml(data)}"
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(text)
-        print(_summary(data).replace("# ", ""), file=sys.stderr)
+        print(summary.replace("# ", ""), file=sys.stderr)
         print(f"wrote {args.out}", file=sys.stderr)
     else:
         sys.stdout.write(text)

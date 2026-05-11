@@ -89,20 +89,30 @@ class ColumnHint(BaseModel):
     """Optional *display* metadata for one result column. The column **schema**
     (names + types) is still discovered from the query at run time — these hints only
     augment it (a display title, visibility, column order, a width/alignment, and a
-    free-text ``format`` the UI may interpret). v1's ``ly_tbl_col`` / ``ly_dlg_col``
-    rows migrate to this shape; a hint for a column the query doesn't return is ignored.
-    The order of the ``columns`` list is the display order; columns with no hint keep
-    their discovery order and follow the hinted ones.
+    free-text ``format`` the UI may interpret). ``label``/``format`` may be left out and
+    pulled from the shared dictionary (``config/dictionary.toml``) instead: the entry
+    key is ``dd`` if set, else the column ``name``; an inline ``label``/``format`` here
+    still overrides the dictionary. v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows migrate to
+    this shape (``dd`` = v1's ``col_dd_id``). A hint for a column the query doesn't return
+    is ignored. The order of the ``columns`` list is the display order; columns with no
+    hint keep their discovery order and follow the hinted ones.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
+    dd: str | None = None      # dictionary-entry key for label/format; None → look it up under `name`
     label: str | None = None
     hidden: bool = False
     width: int | None = None
     align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
     format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted
+
+    @property
+    def dictionary_key(self) -> str:
+        """The dictionary entry to consult for an un-set ``label``/``format`` (``dd`` or, if
+        ``dd`` is the empty string, none — set ``dd = ""`` to opt a column out of the dictionary)."""
+        return self.name if self.dd is None else self.dd
 
 
 # --------------------------------------------------------------------------- #

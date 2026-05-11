@@ -30,24 +30,28 @@ _APPLICATIONS = text("""
     FROM ly_applications ORDER BY apps_pool
 """)
 # Per-column display metadata: table-widget columns (ly_tbl_col ← ly_tables ← ly_query) and
-# form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query), each with the ly_dictionary label
-# (col_label often empty) and type (col_type often empty) as fallbacks.
+# form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query). col_dd_id references a ly_dictionary
+# entry (the migrated hint emits `dd = col_dd_id`); col_label/col_type are per-column overrides.
 _TBL_COLS = text("""
-    SELECT t.tbl_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible,
-           c.col_type, c.col_id, d.dd_label, d.dd_type
+    SELECT t.tbl_query_id AS query_id, c.col_target, c.col_dd_id, c.col_label, c.col_seq,
+           c.col_visible, c.col_type, c.col_id
     FROM ly_tbl_col c JOIN ly_tables t ON t.tbl_id = c.tbl_id
-    LEFT JOIN ly_dictionary d ON d.dd_id = c.col_dd_id
     WHERE t.tbl_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY t.tbl_query_id, c.tbl_id, c.col_seq, c.col_id
 """)
 _DLG_COLS = text("""
-    SELECT f.frm_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible,
-           c.col_type, c.col_id, d.dd_label, d.dd_type
+    SELECT f.frm_query_id AS query_id, c.col_target, c.col_dd_id, c.col_label, c.col_seq,
+           c.col_visible, c.col_type, c.col_id
     FROM ly_dlg_col c JOIN ly_dlg_frm f ON f.frm_id = c.frm_id
-    LEFT JOIN ly_dictionary d ON d.dd_id = c.col_dd_id
     WHERE f.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY f.frm_query_id, c.frm_id, c.col_seq, c.col_id
 """)
+# The shared field dictionary (ly_dictionary) + its per-language labels (ly_dictionary_l).
+_DICTIONARY = text("""
+    SELECT dd_id, dd_label, dd_type, dd_rules, dd_rules_values, dd_default
+    FROM ly_dictionary ORDER BY dd_id
+""")
+_DICTIONARY_L = text("SELECT dd_id, lng_id, lng_label FROM ly_dictionary_l ORDER BY dd_id, lng_id")
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
 _APIS = text("SELECT api_id, api_label, api_source, api_method, api_url, api_user, api_password, api_body, api_conn_id FROM ly_api ORDER BY api_id")
 _API_HEADERS = text("SELECT api_id, hdr_id, hdr_key, hdr_value FROM ly_api_header ORDER BY api_id, hdr_id")
@@ -87,11 +91,21 @@ async def read_applications(engine: AsyncEngine) -> list[dict[str, Any]]:
 
 async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (``ly_tbl_col`` rows, ``ly_dlg_col`` rows) — each joined to its query
-    (via ``ly_tables`` / ``ly_dlg_frm``) and the ``ly_dictionary`` label. Feeds
-    :func:`liberty.migrations.v1.migrate_column_hints`. Missing tables → empty lists."""
+    (via ``ly_tables`` / ``ly_dlg_frm``). Feeds :func:`liberty.migrations.v1.migrate_column_hints`.
+    Missing tables → empty lists."""
     return (
         await _rows_or_empty(engine, _TBL_COLS, what="ly_tbl_col → ly_tables column hints"),
         await _rows_or_empty(engine, _DLG_COLS, what="ly_dlg_col → ly_dlg_frm column hints"),
+    )
+
+
+async def read_dictionary(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_dictionary`` rows, ``ly_dictionary_l`` rows) — the shared field dictionary
+    and its per-language labels. Feeds :func:`liberty.migrations.v1.migrate_dictionary`.
+    Missing tables → empty lists."""
+    return (
+        await _rows_or_empty(engine, _DICTIONARY, what="ly_dictionary"),
+        await _rows_or_empty(engine, _DICTIONARY_L, what="ly_dictionary_l translations"),
     )
 
 

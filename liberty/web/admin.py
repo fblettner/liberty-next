@@ -37,11 +37,20 @@ Superuser = Annotated[Principal, Depends(require_superuser)]
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
     old = request.app.state.connectors
-    new = load_connectors(settings.connectors.config_path, master_key=settings.crypto.master_key)
+    new = load_connectors(
+        settings.connectors.config_path,
+        dictionary_path=settings.connectors.dictionary_path,
+        master_key=settings.crypto.master_key,
+    )
     request.app.state.connectors = new
     request.app.state.auth_db = AuthDatabase(new.pools, settings.auth.pool)
     await old.aclose()
-    return {"reloaded": True, "connectors": new.names(), "pools": new.pools.names()}
+    return {
+        "reloaded": True,
+        "connectors": new.names(),
+        "pools": new.pools.names(),
+        "dictionary_entries": len(new.dictionary.entries),
+    }
 
 
 @router.get("/config/connectors")

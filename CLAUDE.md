@@ -41,11 +41,18 @@ Full dep set pinned in `pyproject.toml`.
   substitution at load time. A query's `sql` is a string *or* a per-dialect map
   (`sql = { default = "…", oracle = "…" }`, keyed by SQLAlchemy backend name; `default`
   required) — `QueryDef.sql_for(dialect)` / `.default_sql` / `.dialects` resolve it.
-  A query may also carry optional `columns` display hints (`ColumnHint`: `name`, `label?`,
-  `hidden?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
-  schema (display title / visibility / column order / a UI-interpreted `format`); a hint for
-  a column the query doesn't return is ignored. `[pools.*]` may carry an explicit `dialect`;
-  else it's derived from the URL.
+  A query may also carry optional `columns` display hints (`ColumnHint`: `name`, `dd?`,
+  `label?`, `hidden?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
+  schema (display title / visibility / column order / a UI-interpreted `format`); `label`/`format`
+  may be omitted and pulled from the shared dictionary (the entry key is `dd`, or `name` when
+  `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
+  `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
+- `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
+  + `ly_dictionary_l`). `[entries.<key>]` = `{ label?, format?, rules?/rules_values?/default?` (carried
+  over from v1, not yet interpreted)`, [entries.<key>.l] { fr = "…", … }` (per-language labels) `}`,
+  plus `default_language`. A query's `columns` hints reference these; the SQL connector resolves the
+  label/format at result time, in the request's language. `DictionaryFile.resolve(key, language)` →
+  `(label, format)`. A missing file = an empty dictionary. `/info` reports `dictionary.{entries, default_language}`.
 - `base.py` — connector exceptions; `detect_statement_type` (resolves `WITH` CTE
   queries to their main statement keyword — `WITH … SELECT` → `SELECT`, `WITH … DELETE`
   → `DELETE` so the writable gate still applies; an unparseable CTE list → `"WITH"` →
@@ -59,8 +66,10 @@ Full dep set pinned in `pyproject.toml`.
   selected per call, statement-type allow-list, `writable` gate for mutations, any `:name`
   the caller omits → SQL NULL, runtime schema from `result.keys()` + best-effort
   `cursor.description` types (then the query's `columns` hints overlaid — reorder + attach
-  label/hidden/width/align/format), `max_rows` cap; `QueryResult.to_dict()` carries the
-  per-column hints, `describe()` exposes the configured `columns`. (JDE Julian date/time
+  label/hidden/width/align/format, label & format resolved against the registry's shared
+  dictionary in `execute(query, params, *, language=…)`'s language — default: the dictionary's
+  `default_language`), `max_rows` cap; `QueryResult.to_dict()` carries the resolved per-column
+  hints, `describe()` exposes the `columns` resolved for the default language. (JDE Julian date/time
   conversion from nomaubl `DynamicResultMapper`: deferred to Phase 5, if NOMAJDE needs it.)
 - `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
   `api_key`/`oauth2` (OAuth2 = token-endpoint POST + dot-path token extraction +
@@ -70,8 +79,9 @@ Full dep set pinned in `pyproject.toml`.
   and/or `response_map`; `multipart/form-data` bodies (`name=value` text parts,
   `name=@path;filename=X;contentType=Y` file parts).
 - `registry.py` — `ConnectorRegistry`: builds connectors from `ConnectorsFile`,
-  owns the pool registry, `aclose()` disposes engines + HTTP clients. Rebuildable
-  → basis for hot-reload.
+  owns the pool registry + the shared `DictionaryFile` (passed to each SQL connector),
+  `aclose()` disposes engines + HTTP clients. `load_connectors(path, *, dictionary_path=…)`
+  also loads `dictionary.toml` (or one next to `connectors.toml`). Rebuildable → hot-reload.
 - `liberty/cli.py` (`liberty-connectors` script) — `list` / `describe <c>` /
   `run <c> <query-or-endpoint> -p k=v`.
 Wired into `main.py` lifespan (`app.state.connectors`); `/info` reports loaded
@@ -152,18 +162,20 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
 
 **Phase 3 (Web layer) — DONE.** Lives in `liberty/web/`:
 - `connectors.py` — `GET /api/connectors` (+ `/{connector}`) lists connectors filtered
-  to what the caller may use — **metadata only: no SQL text, no credentials, no pool**;
-  `GET /api/sql/{c}/{q}` (SELECT-only, params from the query string) and
-  `POST /api/sql/{c}/{q}` (any allowed statement; body `{"params": {…}}` or a flat
-  `{name: value}`) execute a query → `QueryResult.to_dict()`; `POST /api/http/{c}/{e}`
-  calls an API endpoint → `ApiResult.to_dict()` (returned as HTTP 200 even on upstream
-  failure — inspect `success`/`status_code`/`error`). Permission strings: `sql:{c}:{q}`
-  / `api:{c}:{e}` (glob-aware — `sql:liberty:*`, `sql:*`, `*`). The permission is checked
-  *before* the connector is looked up, so callers can't enumerate names they lack access
+  to what the caller may use — **metadata only: no SQL text, no credentials, no pool** (the
+  `columns` hints it shows are *resolved* for the dictionary's default language); `GET /api/sql/{c}/{q}`
+  (SELECT-only, params from the query string) and `POST /api/sql/{c}/{q}` (any allowed statement;
+  body `{"params": {…}}` or a flat `{name: value}`) execute a query → `QueryResult.to_dict()`
+  (its `columns` carry the display hints, labels/formats resolved in the request's language —
+  the `X-Liberty-Lang` header, else the first `Accept-Language` tag, else `default_language`);
+  `POST /api/http/{c}/{e}` calls an API endpoint → `ApiResult.to_dict()` (returned as HTTP 200
+  even on upstream failure — inspect `success`/`status_code`/`error`). Permission strings:
+  `sql:{c}:{q}` / `api:{c}:{e}` (glob-aware — `sql:liberty:*`, `sql:*`, `*`). The permission is
+  checked *before* the connector is looked up, so callers can't enumerate names they lack access
   to. A mutating query needs *both* its TOML `writable = true` and the caller's perm.
 - `admin.py` — `POST /admin/reload` (superuser): rebuild `ConnectorRegistry` from
-  `connectors.toml`, swap `app.state.connectors`, re-point `app.state.auth_db`, dispose
-  the old registry. (The AI assistant's connector tools refresh on restart, not on reload;
+  `connectors.toml` + `dictionary.toml`, swap `app.state.connectors`, re-point `app.state.auth_db`,
+  dispose the old registry. (The AI assistant's connector tools refresh on restart, not on reload;
   in-flight requests keep the registry they started with.)
 - `deps.py` — `get_connectors`, `require_permission(principal, perm)` (imperative — the
   perm string depends on path params), `public_connector` (the SQL/credential-stripped view).
@@ -181,7 +193,9 @@ a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persi
 `react-i18next` EN/FR (persisted), `lucide-react` icons, DM Sans (Google Fonts),
 `@tanstack/react-table` (the SELECT grid), `react-markdown` + `remark-gfm` (assistant
 replies), `@monaco-editor/react` (the connector-config editor).
-- Layout (nomaubl-style): `src/api/client.ts` (the fetch wrapper + `streamSSE`), `src/auth/`
+- Layout (nomaubl-style): `src/api/client.ts` (the fetch wrapper + `streamSSE`; every request
+  carries `X-Liberty-Lang` = the current i18n language, so query-result column labels come back
+  localized from the shared dictionary), `src/auth/`
   (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts` — backend response shapes, no React), `src/services/`
@@ -262,27 +276,36 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `pool_size` from `apps_pool_max`; the DB **password is never inlined** — `${MIGRATED_PW_<NAME>}`,
   v1 keeps it `ENC:`-encrypted in `apps_password`; v1's reserved `default` pool is **skipped**
   — v2's `[pools.default]` is v2's own framework DB); `migrate_column_hints(ly_tbl_col rows,
-  ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, label?
-  (from col_label, else ly_dictionary.dd_label, when ≠ the column name), hidden? (col_visible
-  reads false), format? (col_type, else ly_dictionary.dd_type, when non-trivial)}`; table-widget
-  columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq`
-  order) — passed to `migrate_sql_queries(column_hints=…)`, which attaches them to each *read*
-  query's `columns`. `merge_connectors(*)` (pools merged last → real `migrate_pools` URLs override
-  `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`). The `# migrated: …` header
-  notes the query/hint counts + the `${…}` placeholders + any `ENC:` secrets it carried over.
+  ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
+  `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
+  `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
+  reads false), `format?` (only when an explicit `col_type` overrides the dictionary)`}`; table-widget
+  columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq` order)
+  — passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns`;
+  `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, *, default_language="en")` → the
+  `dictionary.toml` dict (one `[entries.<dd_id>]` per `ly_dictionary` row — `label`=`dd_label`,
+  `format`=a non-trivial `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]`
+  = `{lng_id: lng_label}` from `ly_dictionary_l`). `merge_connectors(*)` (pools merged last → real
+  `migrate_pools` URLs override `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`).
+  The `# migrated: …` header notes the counts + the `${…}` placeholders + any `ENC:` secrets +
+  a reminder to run `liberty-migrate dictionary` when there are column hints.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
-  `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`,
-  each joined to `ly_dictionary` for the label/type) (SELECT-only; a missing table on an old v1
-  schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)` accepts any
-  async URL — `postgresql+asyncpg://…`).
-- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`,
+  `read_dictionary(engine)` (→ `ly_dictionary` + `ly_dictionary_l` rows) /
+  `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
+  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) (SELECT-only; a missing
+  table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
+  accepts any async URL — `postgresql+asyncpg://…`).
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
-  hints; prepends a `# migrated: …` summary + the `${…}` placeholders the operator must fill in
-  (incl. each `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
+  hints (which reference the dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
+  `dictionary --default-language en` migrates `ly_dictionary` (+ `ly_dictionary_l`). Prepends a
+  `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
+  `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
 v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
-fragment to review + merge into `config/connectors.toml`. *Not yet done:* validate-by-diff against
-nomasx1's read paths; migrate the real apps (nomasx1 → NOMAJDE → AIRFLOW). Deps: `tomli-w`.
+fragment to review + merge into `config/connectors.toml` (the `dictionary` output → `config/dictionary.toml`).
+*Not yet done:* validate-by-diff against nomasx1's read paths; migrate the real apps
+(nomasx1 → NOMAJDE → AIRFLOW). Deps: `tomli-w`.
 
 **Crypto (field-level secrets, v1-byte-compatible).** v1 stores some DB columns
 encrypted (e.g. `SETTINGS_APPLICATIONS.password`, `ly_api_conn.conn_password`) and the
@@ -324,7 +347,8 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 ./start.sh dev                    # same, with --reload   ·   ./start.sh frontend → Vite :5173 (HMR)   ·   ./start.sh help
 # by hand: .venv/bin/fastapi dev liberty/main.py   |   .venv/bin/uvicorn liberty.main:app --reload   |   .venv/bin/liberty-v2
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
-.venv/bin/liberty-migrate all --source-url postgresql+asyncpg://…/liberty -o migrated.toml   # v1 ly_* → v2 TOML
+.venv/bin/liberty-migrate all --source-url postgresql+asyncpg://…/libnsx1 -o migrated.toml   # v1 ly_* → connectors.toml fragment
+.venv/bin/liberty-migrate dictionary --source-url postgresql+asyncpg://…/libnsx1 -o config/dictionary.toml   # v1 ly_dictionary → shared field labels
 .venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
 # HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
@@ -356,9 +380,9 @@ or columns the user's other scripts touch) are decrypted at runtime with `[crypt
 ## Layout
 
 ```
-config/         app.toml, connectors.toml
+config/         app.toml, connectors.toml, dictionary.toml (optional — shared field labels/types)
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py
-                · connectors/{config,base,db,sql,api,registry}.py
+                · connectors/{config,base,db,sql,api,registry,dictionary}.py
                 · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,admin}.py

@@ -52,6 +52,9 @@ class AppSettings(BaseModel):
 
 class ConnectorSettings(BaseModel):
     config_path: Path = Path("config/connectors.toml")
+    # Shared field dictionary (labels/types referenced by query column hints). Empty → use
+    # `dictionary.toml` next to `config_path`. A missing file is fine (no shared entries).
+    dictionary_path: Path | None = None
 
 
 class AuthSettings(BaseModel):

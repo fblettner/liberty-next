@@ -180,12 +180,12 @@ def migrate_sql_queries(
 
 
 # --------------------------------------------------------------------------- #
-# Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)
+# Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)  + dictionary  (ly_dictionary → dictionary.toml)
 # --------------------------------------------------------------------------- #
 
 # v1's `col_visible` is a single char — these spellings mean "hidden".
 _HIDDEN_FLAGS = {"N", "n", "0", "F", "f", "FALSE", "false", "NO", "no", "OFF", "off"}
-# `col_type` values that carry no useful display information (the default) — drop them.
+# `col_type` / `dd_type` values that carry no useful display information (the default) — drop them.
 _FORMAT_NOOP = {"", "text", "varchar", "varchar2", "nvarchar", "string", "char", "clob"}
 
 
@@ -200,18 +200,20 @@ def migrate_column_hints(
 ) -> dict[int, list[dict[str, Any]]]:
     """Build ``{query_id: [column-hint dict]}`` from v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows.
 
-    Each row maps a query's result column (``col_target``) to a v2 hint —
-    ``{name, label?, hidden?, format?}`` (see :class:`~liberty.connectors.config.ColumnHint`):
-    ``label`` from ``col_label`` (else the ``ly_dictionary`` ``dd_label``) when it differs from
-    the column name; ``hidden`` when ``col_visible`` reads false; ``format`` from a non-trivial
-    ``col_type`` (else the dictionary's ``dd_type``). Table-widget columns take precedence over
-    form-field columns; the first occurrence of each ``(query_id, col_target)`` wins, so the
-    per-query list keeps ``col_seq`` order.
+    Each row maps a query's result column (``col_target``) to a v2 hint
+    (see :class:`~liberty.connectors.config.ColumnHint`): ``name`` = ``col_target``; ``dd`` =
+    ``col_dd_id`` *only when it differs from* ``name`` (when equal — the common case — it's omitted;
+    the connector looks the dictionary entry up under the column name); ``label`` only when an
+    explicit ``col_label`` overrides the dictionary; ``hidden`` when ``col_visible`` reads false;
+    ``format`` only when an explicit ``col_type`` overrides the dictionary. Table-widget columns
+    take precedence over form-field columns; the first occurrence of each ``(query_id, col_target)``
+    wins, so the per-query list keeps ``col_seq`` order. (Labels themselves live in the shared
+    dictionary — see :func:`migrate_dictionary`.)
 
     Args:
         tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
-            (``query_id``, ``col_target``, ``col_label``, ``col_seq``, ``col_visible``, ``col_type``,
-            ``dd_label``, ``dd_type``, …).
+            (``query_id``, ``col_target``, ``col_dd_id``, ``col_label``, ``col_seq``,
+            ``col_visible``, ``col_type``, ``col_id``).
     """
     out: dict[int, list[dict[str, Any]]] = {}
     seen: set[tuple[int, str]] = set()
@@ -225,17 +227,68 @@ def migrate_column_hints(
         if key in seen:
             continue
         seen.add(key)
-        label = str(r.get("col_label") or "").strip() or str(r.get("dd_label") or "").strip()
         hint: dict[str, Any] = {"name": target}
-        if label and label.lower() != target.lower():
-            hint["label"] = label
+        dd = str(r.get("col_dd_id") or "").strip()
+        if dd and dd != target:
+            hint["dd"] = dd
+        col_label = str(r.get("col_label") or "").strip()
+        if col_label and col_label.lower() != target.lower():
+            hint["label"] = col_label  # explicit per-column override of the dictionary
         if str(r.get("col_visible") or "").strip() in _HIDDEN_FLAGS:
             hint["hidden"] = True
-        fmt = _column_format(r.get("col_type")) or _column_format(r.get("dd_type"))
+        fmt = _column_format(r.get("col_type"))
         if fmt:
-            hint["format"] = fmt
+            hint["format"] = fmt  # explicit per-column override of the dictionary's format
         out.setdefault(qid, []).append(hint)
     return out
+
+
+def migrate_dictionary(
+    dictionary_rows: Iterable[Mapping[str, Any]],
+    dictionary_l_rows: Iterable[Mapping[str, Any]] = (),
+    *,
+    default_language: str = "en",
+) -> dict[str, Any]:
+    """Build the ``dictionary.toml`` dict from v1's ``ly_dictionary`` (+ ``ly_dictionary_l``).
+
+    One ``[entries.<dd_id>]`` per ``ly_dictionary`` row: ``label`` = ``dd_label``, ``format`` =
+    a non-trivial ``dd_type``, ``rules``/``rules_values``/``default`` carried over verbatim, and
+    ``[entries.<dd_id>.l]`` = ``{lng_id: lng_label}`` from the ``ly_dictionary_l`` rows.
+
+    Args:
+        dictionary_rows: rows from ``ly_dictionary`` (``dd_id``, ``dd_label``, ``dd_type``,
+            ``dd_rules``, ``dd_rules_values``, ``dd_default``).
+        dictionary_l_rows: rows from ``ly_dictionary_l`` (``dd_id``, ``lng_id``, ``lng_label``).
+        default_language: the language of ``ly_dictionary.dd_label`` (v1's base labels) — ``"en"``.
+    """
+    translations: dict[str, dict[str, str]] = {}
+    for r in dictionary_l_rows:
+        dd = str(r.get("dd_id") or "").strip()
+        lng = str(r.get("lng_id") or "").strip()
+        lbl = str(r.get("lng_label") or "").strip()
+        if dd and lng and lbl:
+            translations.setdefault(dd, {})[lng] = lbl
+
+    entries: dict[str, dict[str, Any]] = {}
+    for r in dictionary_rows:
+        dd = str(r.get("dd_id") or "").strip()
+        if not dd:
+            continue
+        entry = _drop_none({
+            "label": str(r.get("dd_label") or "").strip() or None,
+            "format": _column_format(r.get("dd_type")),
+            "rules": str(r.get("dd_rules") or "").strip() or None,
+            "rules_values": str(r.get("dd_rules_values") or "").strip() or None,
+            "default": str(r.get("dd_default") or "").strip() or None,
+        })
+        if dd in translations:
+            entry["l"] = translations[dd]
+        entries[dd] = entry
+    # entries that exist only as translations (no ly_dictionary row) — keep them too
+    for dd, l in translations.items():
+        if dd not in entries:
+            entries[dd] = {"l": l}
+    return {"default_language": default_language, "entries": entries}
 
 
 # --------------------------------------------------------------------------- #

@@ -1,6 +1,7 @@
-// Thin fetch wrapper: attaches the Bearer token, parses JSON, and surfaces a
-// typed error. On 401 it calls the registered onUnauthorized hook (auth/AuthContext
-// wires it to "log out"). SSE is exposed separately via `streamSSE`.
+// Thin fetch wrapper: attaches the Bearer token + the UI language, parses JSON, and
+// surfaces a typed error. On 401 it calls the registered onUnauthorized hook
+// (auth/AuthContext wires it to "log out"). SSE is exposed separately via `streamSSE`.
+import i18n from "../i18n";
 
 let accessToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
@@ -23,6 +24,9 @@ export class ApiError extends Error {
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...(extra ?? {}) };
   if (accessToken) h["Authorization"] = `Bearer ${accessToken}`;
+  // The server resolves query-result column labels in this language (the shared dictionary).
+  const lang = (i18n.language || "").split("-")[0];
+  if (lang) h["X-Liberty-Lang"] = lang;
   return h;
 }
 

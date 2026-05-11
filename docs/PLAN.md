@@ -60,7 +60,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Multi-DB queries | Queries must run on **Postgres and Oracle (and more later)** — like v1's per-`dbtype` SQL. v2: a `QueryDef.sql` can be a `{ default, oracle, postgresql, … }` map keyed by SQLAlchemy backend name; the connector picks the variant matching its pool's database (→ `default`). The v1 `query_dbtype` variants migrate to that shape; portable SQL stays a plain string. |
 | Pool topology | A **`default`/framework pool** holds v2's own users/roles (`ly2_*`), shared across every app. Per-*app* pools (`nomasx1`, `nomajde`, …) carry that app's migrated queries against its business DB — mirrors v1's split between an app's "definition DB" (queries/users → now TOML + `ly2_*`) and its "data DB". |
 | Field encryption | **Reuse v1's scheme and key, byte for byte** — `liberty/crypto.py` is AES-256-GCM + PBKDF2-HMAC-SHA512(2145 iters, 32 bytes) with the `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)` layout, so v2 reads/writes the same encrypted columns the user's *other* scripts touch (`SETTINGS_APPLICATIONS.password`, …) without re-encrypting the DB. Key = `[crypto] master_key` (`${LIBERTY_MASTER_KEY}` = v1's `MASTER_KEY`). `APIConnector` decrypts `ENC:` auth secrets at runtime; `liberty-crypto` is the CLI. v1's Fernet/`secrets.json` plumbing is **not** ported — the key comes straight from an env var. |
-| Column display | The result **schema stays query-discovered** (no metadata tables) — but a query may carry an optional `columns` *overlay* (`ColumnHint`: label / hidden / order / width / align / a UI `format`). v1's `ly_tbl_col`/`ly_dlg_col` migrate to that shape; the connector applies hints to `QueryResult` (reorder + attach), TableView honours them. A hint for a column the query doesn't return is ignored. The form-side workflow/rules in v1's `ly_dlg_*` are Phase 6, not this overlay. |
+| Column display | The result **schema stays query-discovered** (no metadata tables) — but a query may carry an optional `columns` *overlay* (`ColumnHint`: `dd` ref / label / hidden / order / width / align / a UI `format`). `label`/`format` usually come from a **shared field dictionary** — `config/dictionary.toml`, the v2 form of v1's `ly_dictionary` (define a field once: label, type, per-language translations) — keyed by the hint's `dd`, or the column `name` when `dd` is unset; an inline `label`/`format` overrides. The SQL connector resolves it at result time in the request's language (`X-Liberty-Lang` header → `Accept-Language` → `default_language`); TableView honours it. v1's `ly_tbl_col`/`ly_dlg_col` → the hints, `ly_dictionary`/`ly_dictionary_l` → the dictionary. A hint for a column the query doesn't return is ignored. The form-side workflow/rules in v1's `ly_dlg_*` (and v1's `dd_rules`) are Phase 6, not this overlay. |
 
 ## 4. Phased plan
 
@@ -330,19 +330,23 @@ Postgres *and* Oracle, etc.):
   `apps_password` — set the env var, or `liberty-crypto decrypt` it). v1's reserved `default` pool
   is **skipped** — v2's `[pools.default]` is v2's own framework DB (the `ly2_*` tables).
   `migrate_column_hints(ly_tbl_col rows, ly_dlg_col rows)`: `{query_id: [ColumnHint dict]}` —
-  each `col_target` → `{name, label?` (from `col_label`, else `ly_dictionary.dd_label`, when it
-  differs from the column name)`, hidden?` (when `col_visible` reads false)`, format?` (from
-  `col_type`, else `ly_dictionary.dd_type`, when non-trivial)`}`; table-widget columns beat
-  form-field columns, first `(query, col)` wins so the per-query list keeps `col_seq` order —
-  passed to `migrate_sql_queries(column_hints=…)`, which attaches them to each *read* query's
-  `columns` (the result *schema* is still discovered at run time — these hints only augment it).
-  `merge_connectors(*)` — pools merged with `migrate_pools` *last*, so its real URLs override
-  the `migrate_sql_queries` stubs. `render_toml(d)`.
+  each `col_target` → `{name, dd?` (= `col_dd_id`, only when ≠ `name`)`, label?` (only when an
+  explicit `col_label` overrides the dictionary)`, hidden?` (when `col_visible` reads false)`,
+  format?` (only when an explicit `col_type` overrides the dictionary)`}`; table-widget columns
+  beat form-field columns, first `(query, col)` wins so the per-query list keeps `col_seq` order —
+  passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns` (the
+  result *schema* is still discovered at run time — these hints only augment it).
+  `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, *, default_language="en")` → the
+  `dictionary.toml` dict (one `[entries.<dd_id>]` per row — `label`=`dd_label`, `format`=a non-trivial
+  `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]` = `{lng_id: lng_label}`
+  from `ly_dictionary_l`). `merge_connectors(*)` — pools merged with `migrate_pools` *last*, so its
+  real URLs override the `migrate_sql_queries` stubs. `render_toml(d)`.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
-  `read_column_hints(engine)` (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`,
-  each joined to `ly_dictionary` for the label/type) — SELECT-only; a missing table on an old v1
-  schema → `[]` *with a logged warning* (not silently swallowed); `make_engine(url)` takes any
-  async URL (`postgresql+asyncpg://…/liberty`).
+  `read_dictionary(engine)` (→ `ly_dictionary` + `ly_dictionary_l` rows) /
+  `read_column_hints(engine)` (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
+  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) — SELECT-only; a missing
+  table on an old v1 schema → `[]` *with a logged warning* (not silently swallowed); `make_engine(url)`
+  takes any async URL (`postgresql+asyncpg://…/liberty`).
 - **`liberty/crypto.py`** — field-level encryption, byte-compatible with v1's `Encryption`
   (AES-256-GCM, PBKDF2-HMAC-SHA512 2145 iters / 32 bytes, `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)`).
   So migrated `ENC:` secrets work as-is, *and* the user's other scripts that read/write the same
@@ -352,12 +356,13 @@ Postgres *and* Oracle, etc.):
   at init (key threaded via `load_connectors(master_key=…)`; wrong/missing key → keep the blob + warn).
   `liberty-crypto` CLI (`encrypt`/`decrypt`/`is-encrypted`, stdin-friendly). v1's Fernet/`secrets.json`
   layer is *not* ported. Dep: `cryptography`.
-- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`, `--source-url`,
-  `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all` also scaffold the
-  `ly_applications` pools and carry over the `ly_tbl_col`/`ly_dlg_col` column hints; prepends a
-  `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
-  `${MIGRATED_PW_*}`). Output is a fragment to review + merge into `config/connectors.toml`.
-  v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary`, `--source-url`,
+  `--dbtype`, `--prefix`, `--default-language` (dictionary), `-o out.toml` (else stdout); `sql`/`all`
+  also scaffold the `ly_applications` pools and carry over the `ly_tbl_col`/`ly_dlg_col` column hints
+  (which reference the dictionary — so also run `liberty-migrate dictionary -o config/dictionary.toml`);
+  prepends a `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
+  `${MIGRATED_PW_*}`). Output is a fragment to review + merge into `config/connectors.toml` (the
+  `dictionary` output → `config/dictionary.toml`). v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
 - Tests: the transforms over hand-crafted v1 rows (incl. the dialect-map cases), the DB readers
   against a minimal v1 schema in SQLite, the CLI, dialect resolution in `SQLConnector` /
   `QueryDef` / `PoolRegistry.dialect`, and round-trips (emitted TOML re-parses cleanly via

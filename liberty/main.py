@@ -67,7 +67,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.connectors = load_connectors(
-            settings.connectors.config_path, master_key=settings.crypto.master_key
+            settings.connectors.config_path,
+            dictionary_path=settings.connectors.dictionary_path,
+            master_key=settings.crypto.master_key,
         )
         app.state.auth_db = AuthDatabase(app.state.connectors.pools, settings.auth.pool)
         app.state.token_service = _build_token_service(settings.auth)
@@ -117,6 +119,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "connectors_loaded": len(connectors),
             "connectors": connectors.names(),
             "pools": connectors.pools.names(),
+            "dictionary": {
+                "entries": len(connectors.dictionary.entries),
+                "default_language": connectors.dictionary.default_language,
+            },
             "auth": {"pool": s.auth.pool, "oidc_enabled": app.state.oidc is not None},
             "ai": {
                 "enabled": ai is not None,

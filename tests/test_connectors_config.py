@@ -54,14 +54,41 @@ def test_querydef_column_hints() -> None:
     assert q.columns[0].label == "Alpha" and q.columns[0].format == "number" and q.columns[0].align == "right"
     assert q.columns[1].hidden is True
     assert q.columns[2].label is None and q.columns[2].hidden is False
+    # the dictionary key for an un-set label/format: `dd` if given, else `name`; `dd=""` opts out
+    assert ColumnHint(name="a").dictionary_key == "a"
+    assert ColumnHint(name="a", dd="ALPHA_DD").dictionary_key == "ALPHA_DD"
+    assert ColumnHint(name="a", dd="").dictionary_key == ""
     # extra keys on a hint are rejected
     with pytest.raises(Exception):
         ColumnHint(name="a", typo="x")  # type: ignore[call-arg]
     # round-trips through the config loader
     cfg = parse_connectors({"connectors": {"c1": {"type": "sql", "pool": "default",
-        "queries": [{"name": "q", "sql": "SELECT a FROM t", "columns": [{"name": "a", "label": "A"}]}]}}})
+        "queries": [{"name": "q", "sql": "SELECT a FROM t", "columns": [{"name": "a", "dd": "ALPHA"}]}]}}})
     assert isinstance(cfg.connectors["c1"], SqlConnectorConfig)
-    assert cfg.connectors["c1"].queries[0].columns[0].label == "A"
+    assert cfg.connectors["c1"].queries[0].columns[0].dd == "ALPHA"
+
+
+def test_dictionary(tmp_path) -> None:
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, load_dictionary, parse_dictionary
+
+    e = DictionaryEntry(label="User Name", format="text", rules="upper", l={"fr": "Nom"})
+    assert e.label_for("fr") == "Nom" and e.label_for("de") == "User Name" and e.label_for(None) == "User Name"
+    d = parse_dictionary({"default_language": "fr", "entries": {
+        "USR_NAME": {"label": "User Name", "format": "text", "l": {"fr": "Nom"}},
+        "USR_STATUS": {"label": "Status", "format": "boolean"},
+    }})
+    assert d.default_language == "fr"
+    assert d.resolve("USR_NAME", "fr") == ("Nom", "text")
+    assert d.resolve("USR_STATUS", "fr") == ("Status", "boolean")  # no fr → default label
+    assert d.resolve("MISSING", "fr") == (None, None)
+    # a missing dictionary.toml → an empty dictionary (default language "en")
+    empty = load_dictionary(tmp_path / "nope.toml")
+    assert empty.entries == {} and empty.default_language == "en"
+    # extra keys on an entry are rejected
+    with pytest.raises(Exception):
+        DictionaryEntry(label="x", bogus=1)  # type: ignore[call-arg]
+    with pytest.raises(Exception):
+        DictionaryFile(default_language="en", bogus={})  # type: ignore[call-arg]
 
 
 def test_pool_config_dialect_override_and_derivation() -> None:

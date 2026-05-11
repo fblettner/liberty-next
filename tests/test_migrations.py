@@ -13,11 +13,13 @@ from liberty.migrations import (
     merge_connectors,
     migrate_api,
     migrate_column_hints,
+    migrate_dictionary,
     migrate_pools,
     migrate_sql_queries,
     read_api,
     read_applications,
     read_column_hints,
+    read_dictionary,
     read_sql_queries,
     render_toml,
     slugify,
@@ -182,34 +184,65 @@ def test_migrate_pools_prefix_and_overrides_stubs() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)
+# Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)  +  dictionary  (ly_dictionary → dictionary.toml)
 # --------------------------------------------------------------------------- #
 
-# Shape mirrors source.read_column_hints (col_label/col_type often empty → ly_dictionary fallback).
+# Shape mirrors source.read_column_hints: col_dd_id references a ly_dictionary entry; col_label /
+# col_type are per-column overrides of it (usually empty → label/format come from the dictionary).
 _TBL_COLS = [
-    {"query_id": 1, "col_target": "USR_ID", "col_label": None, "col_seq": 1, "col_visible": "Y", "col_type": "number", "col_id": 1, "dd_label": "User ID", "dd_type": "number"},
-    {"query_id": 1, "col_target": "USR_NAME", "col_label": "User Name", "col_seq": 2, "col_visible": "Y", "col_type": "text", "col_id": 2, "dd_label": None, "dd_type": "text"},
-    {"query_id": 1, "col_target": "USR_PWD", "col_label": "Password", "col_seq": 3, "col_visible": "N", "col_type": "password", "col_id": 3, "dd_label": None, "dd_type": "text"},
-    {"query_id": 1, "col_target": "USR_DT", "col_label": None, "col_seq": 4, "col_visible": "Y", "col_type": None, "col_id": 4, "dd_label": "Created", "dd_type": "date"},  # col_type empty → format from dd_type
-    {"query_id": 1, "col_target": "USR_NAME", "col_label": "OTHER WIDGET", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 9, "dd_label": None, "dd_type": None},  # 2nd widget → dedup, first wins
-    {"query_id": 3, "col_target": "F0101", "col_label": "F0101", "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1, "dd_label": None, "dd_type": "text"},  # label == target → dropped; "text" → no format
+    {"query_id": 1, "col_target": "USR_ID", "col_dd_id": "USR_ID", "col_label": None, "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1},
+    {"query_id": 1, "col_target": "USR_NAME", "col_dd_id": "USR_NAME", "col_label": None, "col_seq": 2, "col_visible": "Y", "col_type": None, "col_id": 2},
+    {"query_id": 1, "col_target": "USR_PWD", "col_dd_id": "USR_PWD", "col_label": None, "col_seq": 3, "col_visible": "N", "col_type": None, "col_id": 3},  # col_visible 'N' → hidden
+    {"query_id": 1, "col_target": "USR_LBL", "col_dd_id": "SOME_DD", "col_label": "Per-column override", "col_seq": 4, "col_visible": "Y", "col_type": "currency", "col_id": 4},  # col_dd_id ≠ name → dd ref; col_label/col_type override
+    {"query_id": 1, "col_target": "USR_NAME", "col_dd_id": "USR_NAME", "col_label": "2nd widget", "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 9},  # 2nd widget → dedup, first wins
+    {"query_id": 3, "col_target": "F0101", "col_dd_id": "F0101", "col_label": None, "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1},
 ]
 _DLG_COLS = [
-    {"query_id": 2, "col_target": "USR_ID", "col_label": "Id", "col_seq": 1, "col_visible": "1", "col_type": "integer", "col_id": 1, "dd_label": None, "dd_type": "number"},
-    {"query_id": 1, "col_target": "USR_ID", "col_label": "FROM DLG", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 1, "dd_label": None, "dd_type": "text"},  # query 1 USR_ID already from tbl → ignored
+    {"query_id": 2, "col_target": "USR_ID", "col_dd_id": "USR_ID", "col_label": None, "col_seq": 1, "col_visible": "1", "col_type": None, "col_id": 1},
+    {"query_id": 1, "col_target": "USR_ID", "col_dd_id": "USR_ID", "col_label": "FROM DLG", "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1},  # query 1 USR_ID already from tbl → ignored
 ]
 
 
 def test_migrate_column_hints() -> None:
     hints = migrate_column_hints(_TBL_COLS, _DLG_COLS)
     assert set(hints) == {1, 2, 3}
-    assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD", "USR_DT"]  # col_seq order; dedup'd; dlg ignored
-    assert hints[1][0] == {"name": "USR_ID", "label": "User ID", "format": "number"}  # dd_label fallback; col_type → format
-    assert hints[1][1] == {"name": "USR_NAME", "label": "User Name"}  # col_label wins; "text" → no format
-    assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N' → hidden
-    assert hints[1][3] == {"name": "USR_DT", "label": "Created", "format": "date"}  # col_type empty → format from dd_type
-    assert hints[3] == [{"name": "F0101"}]  # label == column name → no label; "text" dd_type → no format
-    assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]  # only the form-field column
+    assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD", "USR_LBL"]  # col_seq order; dedup'd; dlg ignored
+    assert hints[1][0] == {"name": "USR_ID"}  # col_dd_id == name → no `dd`; label/format come from the dictionary
+    assert hints[1][1] == {"name": "USR_NAME"}
+    assert hints[1][2] == {"name": "USR_PWD", "hidden": True}  # col_visible 'N' → hidden
+    assert hints[1][3] == {"name": "USR_LBL", "dd": "SOME_DD", "label": "Per-column override", "format": "currency"}  # dd ≠ name; col_label/col_type override
+    assert hints[3] == [{"name": "F0101"}]
+    assert hints[2] == [{"name": "USR_ID"}]  # only the form-field column
+
+
+_DICTIONARY = [
+    {"dd_id": "USR_NAME", "dd_label": "User Name", "dd_type": "text", "dd_rules": None, "dd_rules_values": None, "dd_default": None},
+    {"dd_id": "USR_STATUS", "dd_label": "Status", "dd_type": "boolean", "dd_rules": "list", "dd_rules_values": "01,02", "dd_default": "01"},
+    {"dd_id": "USR_DT", "dd_label": "Created", "dd_type": "date", "dd_rules": None, "dd_rules_values": None, "dd_default": None},
+]
+_DICTIONARY_L = [
+    {"dd_id": "USR_NAME", "lng_id": "fr", "lng_label": "Nom d'utilisateur"},
+    {"dd_id": "USR_STATUS", "lng_id": "fr", "lng_label": "Statut"},
+    {"dd_id": "ONLY_TRANSLATED", "lng_id": "fr", "lng_label": "Que traduit"},  # no ly_dictionary row → kept as a translation-only entry
+    {"dd_id": "USR_NAME", "lng_id": "", "lng_label": ""},  # blank → ignored
+]
+
+
+def test_migrate_dictionary() -> None:
+    out = migrate_dictionary(_DICTIONARY, _DICTIONARY_L)
+    assert out["default_language"] == "en"
+    e = out["entries"]
+    assert set(e) == {"USR_NAME", "USR_STATUS", "USR_DT", "ONLY_TRANSLATED"}
+    assert e["USR_NAME"] == {"label": "User Name", "l": {"fr": "Nom d'utilisateur"}}  # "text" dd_type → no format
+    assert e["USR_STATUS"] == {"label": "Status", "format": "boolean", "rules": "list", "rules_values": "01,02", "default": "01", "l": {"fr": "Statut"}}
+    assert e["USR_DT"] == {"label": "Created", "format": "date"}  # no translation row
+    assert e["ONLY_TRANSLATED"] == {"l": {"fr": "Que traduit"}}  # translation-only
+    # round-trips through the v2 dictionary loader, and `dd`-ref hints resolve against it
+    from liberty.connectors.dictionary import parse_dictionary
+    d = parse_dictionary(tomllib.loads(render_toml(out)))
+    assert d.resolve("USR_NAME", "fr") == ("Nom d'utilisateur", None)
+    assert d.resolve("USR_STATUS", None) == ("Status", "boolean")
+    assert d.resolve("USR_DT", "fr") == ("Created", "date")  # no fr → falls back to the default label
 
 
 def test_migrate_sql_queries_with_column_hints() -> None:
@@ -314,7 +347,8 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY, query_label TEXT, query_type TEXT)",
     "CREATE TABLE ly_qry_sql (query_id INTEGER, query_dbtype TEXT, query_crud TEXT, query_pool TEXT, query_sqlquery TEXT, query_orderby TEXT)",
     "CREATE TABLE ly_applications (apps_name TEXT, apps_pool TEXT, apps_dbtype TEXT, apps_jdbc TEXT, apps_user TEXT, apps_password TEXT, apps_host TEXT, apps_port INTEGER, apps_database TEXT, apps_pool_min INTEGER, apps_pool_max INTEGER)",
-    "CREATE TABLE ly_dictionary (dd_id TEXT PRIMARY KEY, dd_label TEXT, dd_type TEXT)",
+    "CREATE TABLE ly_dictionary (dd_id TEXT PRIMARY KEY, dd_label TEXT, dd_type TEXT, dd_rules TEXT, dd_rules_values TEXT, dd_default TEXT)",
+    "CREATE TABLE ly_dictionary_l (dd_id TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT)",
     "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
@@ -353,8 +387,16 @@ async def _seed_v1(engine) -> None:
             ],
         )
         await conn.execute(
-            text("INSERT INTO ly_dictionary (dd_id, dd_label, dd_type) VALUES (:i, :l, :t)"),
-            [{"i": "USR_ID", "l": "User ID", "t": "number"}],
+            text("INSERT INTO ly_dictionary (dd_id, dd_label, dd_type, dd_rules, dd_rules_values, dd_default) VALUES (:i, :l, :t, :r, :rv, :d)"),
+            [
+                {"i": "USR_ID", "l": "User ID", "t": "number", "r": None, "rv": None, "d": None},
+                {"i": "USR_NAME", "l": "User Name", "t": "text", "r": None, "rv": None, "d": None},
+                {"i": "USR_PWD", "l": "Password", "t": "text", "r": None, "rv": None, "d": None},
+            ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_dictionary_l (dd_id, lng_id, lng_label) VALUES (:i, :lng, :lab)"),
+            [{"i": "USR_NAME", "lng": "fr", "lab": "Nom d'utilisateur"}],
         )
         await conn.execute(
             text("INSERT INTO ly_tables (tbl_id, tbl_query_id, tbl_label) VALUES (:i, :q, :l)"),
@@ -441,19 +483,32 @@ async def test_read_column_hints(v1_engine) -> None:
     assert {(r["query_id"], r["col_target"]) for r in dlg_cols} == {(2, "USR_ID")}
     hints = migrate_column_hints(tbl_cols, dlg_cols)
     assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD"]
-    assert hints[1][0] == {"name": "USR_ID", "label": "User ID", "format": "number"}  # dd_label fallback
-    assert hints[1][2]["hidden"] is True  # col_visible 'N'
+    assert hints[1][0] == {"name": "USR_ID", "format": "number"}  # col_dd_id == name → no `dd`
+    assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N'
     assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]
 
 
 @pytest.mark.asyncio
-async def test_read_applications_and_column_hints_missing_tables(tmp_path) -> None:
-    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_apps.db'}")
+async def test_read_dictionary(v1_engine) -> None:
+    dict_rows, dict_l_rows = await read_dictionary(v1_engine)
+    assert {r["dd_id"] for r in dict_rows} == {"USR_ID", "USR_NAME", "USR_PWD"}
+    assert {(r["dd_id"], r["lng_id"]) for r in dict_l_rows} == {("USR_NAME", "fr")}
+    out = migrate_dictionary(dict_rows, dict_l_rows)
+    from liberty.connectors.dictionary import parse_dictionary
+    d = parse_dictionary(tomllib.loads(render_toml(out)))
+    assert d.resolve("USR_NAME", "fr") == ("Nom d'utilisateur", None)
+    assert d.resolve("USR_ID", None) == ("User ID", "number")
+
+
+@pytest.mark.asyncio
+async def test_read_applications_column_hints_dictionary_missing_tables(tmp_path) -> None:
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_meta.db'}")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))
     try:
-        assert await read_applications(engine) == []  # no ly_applications → []
-        assert await read_column_hints(engine) == ([], [])  # no ly_tbl_col/ly_dlg_col → ([], [])
+        assert await read_applications(engine) == []          # no ly_applications → []
+        assert await read_column_hints(engine) == ([], [])    # no ly_tbl_col/ly_dlg_col → ([], [])
+        assert await read_dictionary(engine) == ([], [])      # no ly_dictionary/ly_dictionary_l → ([], [])
     finally:
         await engine.dispose()
 
@@ -504,6 +559,19 @@ def test_cli_all_to_stdout(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     assert "fill in these placeholders" in out  # the migrated pool/secret stubs
     assert "MIGRATED_PW_" in out  # the scaffolded pool's password placeholder
+    assert "liberty-migrate dictionary" in out  # column hints reference the shared dictionary
     cfg = parse_connectors(tomllib.loads(out))
     assert {"default", "acme"} <= set(cfg.connectors)
     assert "nomasx1" in cfg.pools
+
+
+def test_cli_dictionary(tmp_path) -> None:
+    url = _make_v1_db(tmp_path)
+    out = tmp_path / "dictionary.toml"
+    assert migrate_main(["dictionary", "--source-url", url, "-o", str(out)]) == 0
+    txt = out.read_text()
+    assert txt.startswith("# migrated:") and "dictionary field" in txt
+    from liberty.connectors.dictionary import parse_dictionary
+    d = parse_dictionary(tomllib.loads(txt))  # comments + TOML both parse
+    assert d.resolve("USR_NAME", "fr") == ("Nom d'utilisateur", None)
+    assert d.resolve("USR_ID", None) == ("User ID", "number")

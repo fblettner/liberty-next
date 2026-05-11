@@ -13,6 +13,7 @@ from liberty.connectors.base import (
 )
 from liberty.connectors.config import ColumnHint, ParamDef, PoolConfig, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
+from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile
 from liberty.connectors.sql import SQLConnector
 
 
@@ -93,6 +94,32 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
     qd = next(q for q in conn.describe()["queries"] if q["name"] == "all")
     assert {h["name"] for h in qd["columns"]} == {"name", "status", "zzz"}
     assert next(h for h in qd["columns"] if h["name"] == "status") == {"name": "status", "hidden": True}
+
+
+@pytest.mark.asyncio
+async def test_column_hints_resolve_from_dictionary(pools: PoolRegistry) -> None:
+    d = DictionaryFile(default_language="en", entries={
+        "name": DictionaryEntry(label="Item Name", format="text", l={"fr": "Nom"}),
+        "status": DictionaryEntry(label="Status", format="boolean"),
+    })
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(
+        name="all", sql="SELECT id, name, status FROM item ORDER BY id",
+        # bare hint → look up the dictionary under the column name; `dd` ref; inline `label` overrides
+        columns=[ColumnHint(name="name"), ColumnHint(name="status", dd="status", hidden=True), ColumnHint(name="id", label="ID")],
+    )])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    cols = {c.name: c for c in (await conn.execute("all")).columns}  # default language
+    assert cols["name"].label == "Item Name" and cols["name"].format == "text"
+    assert cols["status"].label == "Status" and cols["status"].hidden is True and cols["status"].format == "boolean"
+    assert cols["id"].label == "ID" and cols["id"].format is None  # inline label, no dict entry → no format
+    cols = {c.name: c for c in (await conn.execute("all", language="fr")).columns}
+    assert cols["name"].label == "Nom"     # translated
+    assert cols["status"].label == "Status"  # no fr translation → default label
+    # describe() resolves the *default* language; the `dd` ref shows through
+    by = {h["name"]: h for h in next(q for q in conn.describe()["queries"] if q["name"] == "all")["columns"]}
+    assert by["name"] == {"name": "name", "label": "Item Name", "format": "text"}
+    assert by["status"] == {"name": "status", "dd": "status", "label": "Status", "hidden": True, "format": "boolean"}
+    assert by["id"] == {"name": "id", "label": "ID"}
 
 
 @pytest.mark.asyncio
