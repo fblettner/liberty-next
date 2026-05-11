@@ -1,9 +1,10 @@
-// Generic data grid on TanStack Table v8 — ported from nomaubl's DataTable, trimmed to
-// client-side mode (the data is already in memory). Features: a global search box + a
-// per-column filter row, sortable + resizable columns, a column hide/reorder menu, CSV /
-// Excel export, page-size + page navigation, and localStorage persistence of column
-// visibility / order / sizes keyed by `tableId`. Theme-driven — every colour/size/radius
-// comes from theme.ts; headers are the uppercase muted style nomaubl uses.
+// Generic data grid on TanStack Table v8 — adapted from nomaubl's DataTable, trimmed to
+// client-side mode (the data is already in memory). Features: a global search box; a
+// per-column filter row whose control adapts to the column's type (text/number/date with
+// an operator, boolean/enum as a select — see DataTableFilter); sortable + resizable
+// columns; row grouping by one or more columns (expand/collapse); a column hide/reorder
+// menu; CSV / Excel export; page-size + page navigation; and localStorage persistence of
+// column visibility / order / sizes keyed by `tableId`. Theme-driven throughout.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
@@ -11,22 +12,27 @@ import {
   getCoreRowModel,
   getFilteredRowModel,
   getSortedRowModel,
+  getGroupedRowModel,
+  getExpandedRowModel,
   getPaginationRowModel,
   flexRender,
   type ColumnDef,
   type ColumnFiltersState,
   type ColumnOrderState,
   type ColumnSizingState,
+  type ExpandedState,
+  type GroupingState,
   type SortingState,
   type VisibilityState,
 } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, Columns3, Download, FileText, Table as TableIcon,
-  ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Check,
+  ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
+  Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
+import { ColumnFilterControl } from './DataTableFilter'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
 
@@ -60,7 +66,6 @@ const Wrap = styled.div`display: flex; flex-direction: column; min-height: 0;`
 const ToolbarRow = styled.div`display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1; min-width: 4px;`
 const ActionGroup = styled.div`display: flex; gap: 4px; align-items: center; flex-shrink: 0;`
-
 const SearchBox = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
@@ -117,9 +122,9 @@ const CheckBox = styled.span<{ $on: boolean }>`
   display: flex; align-items: center; justify-content: center; cursor: pointer; color: #fff;
   transition: background 0.12s, border-color 0.12s;
 `
+const MenuTitle = styled.div`padding: 4px 8px 6px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: ${colors.text.muted};`
 const TableScroll = styled.div`
-  overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
-  scrollbar-width: thin;
+  overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
 const Table = styled.table`width: 100%; border-collapse: collapse; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
 const Th = styled.th<{ $sortable?: boolean }>`
@@ -132,26 +137,25 @@ const Th = styled.th<{ $sortable?: boolean }>`
 `
 const ThInner = styled.div`display: flex; align-items: center; gap: 4px;`
 const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
+const GroupBadge = styled.span`display: inline-flex; align-items: center; color: ${colors.blue.main};`
 const ResizeHandle = styled.div<{ $resizing: boolean }>`
   position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; touch-action: none;
   background: ${({ $resizing }) => ($resizing ? colors.blue.main : 'transparent')};
   &:hover { background: ${colors.blue.border}; }
 `
 const FilterTh = styled.th`padding: 4px 8px; background: ${colors.bg.input}; border-bottom: 1px solid ${colors.border};`
-const FilterInput = styled.input`
-  width: 100%; box-sizing: border-box; background: transparent; border: 1px solid ${colors.border};
-  border-radius: ${radius.sm}; color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  padding: 2px 6px; outline: none;
-  &:focus { border-color: ${colors.blue.border}; }
-  &::placeholder { color: ${colors.text.muted}; }
-`
 const Tr = styled.tr`
   &:hover td { background: var(--hover-subtle); }
   &:not(:last-child) td { border-bottom: 1px solid ${colors.border}; }
 `
-const Td = styled.td`
-  padding: 5px 12px; color: ${colors.text.secondary}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+const GroupTr = styled.tr` td { background: ${colors.bg.card}; font-family: ${fonts.sans}; }`
+const Td = styled.td`padding: 5px 12px; color: ${colors.text.secondary}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`
+const GroupCellBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: none; cursor: pointer;
+  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
+  & svg { color: ${colors.text.muted}; }
 `
+const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
 const PaginationRow = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; flex-wrap: wrap;`
 const PagLeft = styled.div`display: flex; align-items: center; gap: 10px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
@@ -198,12 +202,16 @@ export function DataTable<T extends object>({
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
+  const [grouping, setGrouping] = useState<GroupingState>([])
+  const [expanded, setExpanded] = useState<ExpandedState>({})
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: initialPageSize })
 
   const [colOpen, setColOpen] = useState(false)
+  const [groupOpen, setGroupOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const colRef = useRef<HTMLDivElement>(null)
+  const groupRef = useRef<HTMLDivElement>(null)
   const exportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -211,32 +219,38 @@ export function DataTable<T extends object>({
   }, [tableId, columnVisibility, columnOrder, columnSizing])
 
   useEffect(() => {
-    if (!colOpen && !exportOpen) return
+    if (!colOpen && !groupOpen && !exportOpen) return
     const h = (e: MouseEvent) => {
       if (colOpen && colRef.current && !colRef.current.contains(e.target as Node)) setColOpen(false)
+      if (groupOpen && groupRef.current && !groupRef.current.contains(e.target as Node)) setGroupOpen(false)
       if (exportOpen && exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false)
     }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
-  }, [colOpen, exportOpen])
+  }, [colOpen, groupOpen, exportOpen])
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnVisibility, columnOrder, columnSizing, columnFilters, globalFilter, pagination },
+    state: { sorting, columnVisibility, columnOrder, columnSizing, columnFilters, globalFilter, grouping, expanded, pagination },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
     onColumnSizingChange: setColumnSizing,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
+    onGroupingChange: setGrouping,
+    onExpandedChange: setExpanded,
     onPaginationChange: setPagination,
     enableColumnResizing: true,
     columnResizeMode: 'onChange',
     globalFilterFn: 'includesString',
+    autoResetExpanded: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getGroupedRowModel: getGroupedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
   })
 
@@ -284,11 +298,13 @@ export function DataTable<T extends object>({
   }
 
   const { pageIndex, pageSize } = table.getState().pagination
-  const totalRows = table.getFilteredRowModel().rows.length
+  const totalRows = table.getRowModel().rows.length // post-filter, post-group flat-ish count for display
+  const filteredLeafCount = table.getFilteredRowModel().rows.length
   const totalPages = Math.max(1, table.getPageCount())
   const from = totalRows === 0 ? 0 : pageIndex * pageSize + 1
   const to = Math.min((pageIndex + 1) * pageSize, totalRows)
   const visibleColCount = table.getVisibleLeafColumns().length
+  const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
 
   return (
     <Wrap>
@@ -296,17 +312,41 @@ export function DataTable<T extends object>({
         {toolbar}
         <SearchBox>
           <Search size={13} />
-          <input
-            value={globalFilter}
-            onChange={(e) => table.setGlobalFilter(e.target.value)}
-            placeholder={t('table.search')}
-          />
+          <input value={globalFilter} onChange={(e) => table.setGlobalFilter(e.target.value)} placeholder={t('table.search')} />
         </SearchBox>
         <Spacer />
         <ActionGroup>
           <CtrlBtn $active={showFilters} onClick={() => setShowFilters((v) => !v)} title={t('table.filters')}>
             <Filter size={13} /> {t('table.filters')}
           </CtrlBtn>
+          {columnFilters.length > 0 && (
+            <CtrlBtn onClick={() => setColumnFilters([])} title={t('table.clearFilters')}>
+              <FilterX size={13} /> {t('table.clearFilters')}
+            </CtrlBtn>
+          )}
+          {groupableCols.length > 0 && (
+            <MenuWrap ref={groupRef}>
+              <CtrlBtn $active={grouping.length > 0} onClick={() => setGroupOpen((v) => !v)} title={t('table.group')}>
+                <Group size={13} /> {t('table.group')}{grouping.length ? ` (${grouping.length})` : ''}
+              </CtrlBtn>
+              {groupOpen && (
+                <ColMenu>
+                  <MenuTitle>{t('table.groupBy')}</MenuTitle>
+                  {effectiveOrder.map((colId) => {
+                    const col = table.getColumn(colId)
+                    if (!col || !col.getCanGroup()) return null
+                    const on = col.getIsGrouped()
+                    return (
+                      <ColRow key={colId} onClick={() => col.toggleGrouping()} style={{ cursor: 'pointer' }}>
+                        <CheckBox $on={on}>{on && <Check size={9} />}</CheckBox>
+                        <ColLabel>{colHeaderText(col)}</ColLabel>
+                      </ColRow>
+                    )
+                  })}
+                </ColMenu>
+              )}
+            </MenuWrap>
+          )}
           <MenuWrap ref={colRef}>
             <CtrlBtn onClick={() => setColOpen((v) => !v)} title={t('table.columns')}>
               <Columns3 size={13} /> {t('table.columns')}
@@ -318,15 +358,9 @@ export function DataTable<T extends object>({
                   if (!col) return null
                   return (
                     <ColRow key={colId}>
-                      <ArrowBtn onClick={() => moveColumn(idx, 'up')} disabled={idx === 0} title={t('common.up', 'Up')}>
-                        <ArrowUp size={10} />
-                      </ArrowBtn>
-                      <ArrowBtn onClick={() => moveColumn(idx, 'down')} disabled={idx === effectiveOrder.length - 1} title={t('common.down', 'Down')}>
-                        <ArrowDown size={10} />
-                      </ArrowBtn>
-                      <CheckBox $on={col.getIsVisible()} onClick={() => col.toggleVisibility()}>
-                        {col.getIsVisible() && <Check size={9} />}
-                      </CheckBox>
+                      <ArrowBtn onClick={() => moveColumn(idx, 'up')} disabled={idx === 0} title={t('common.up')}><ArrowUp size={10} /></ArrowBtn>
+                      <ArrowBtn onClick={() => moveColumn(idx, 'down')} disabled={idx === effectiveOrder.length - 1} title={t('common.down')}><ArrowDown size={10} /></ArrowBtn>
+                      <CheckBox $on={col.getIsVisible()} onClick={() => col.toggleVisibility()}>{col.getIsVisible() && <Check size={9} />}</CheckBox>
                       <ColLabel onClick={() => col.toggleVisibility()}>{colHeaderText(col)}</ColLabel>
                     </ColRow>
                   )
@@ -364,6 +398,7 @@ export function DataTable<T extends object>({
                       onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
                     >
                       <ThInner>
+                        {h.column.getIsGrouped() && <GroupBadge title={t('table.grouped', 'grouped')}><Group size={11} /></GroupBadge>}
                         {flexRender(h.column.columnDef.header, h.getContext())}
                         {canSort && (
                           <SortMark $active={!!sorted}>
@@ -386,14 +421,7 @@ export function DataTable<T extends object>({
               <tr>
                 {table.getHeaderGroups()[0]?.headers.map((h) => (
                   <FilterTh key={h.id}>
-                    {h.column.getCanFilter() && (
-                      <FilterInput
-                        value={String(h.column.getFilterValue() ?? '')}
-                        onChange={(e) => h.column.setFilterValue(e.target.value || undefined)}
-                        placeholder="…"
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    )}
+                    <ColumnFilterControl column={h.column} />
                   </FilterTh>
                 ))}
               </tr>
@@ -403,15 +431,33 @@ export function DataTable<T extends object>({
             {table.getRowModel().rows.length === 0 ? (
               <tr><td colSpan={visibleColCount}><Empty>{t('table.noResults')}</Empty></td></tr>
             ) : (
-              table.getRowModel().rows.map((row) => (
-                <Tr key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <Td key={cell.id} style={{ width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize ?? 56 }}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </Td>
-                  ))}
-                </Tr>
-              ))
+              table.getRowModel().rows.map((row) => {
+                const RowEl = row.getIsGrouped() ? GroupTr : Tr
+                return (
+                  <RowEl key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <Td
+                        key={cell.id}
+                        style={{
+                          width: cell.column.getSize(),
+                          minWidth: cell.column.columnDef.minSize ?? 56,
+                          paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
+                        }}
+                      >
+                        {cell.getIsGrouped() ? (
+                          <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
+                            {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            <GroupCount>({row.subRows.length})</GroupCount>
+                          </GroupCellBtn>
+                        ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
+                          flexRender(cell.column.columnDef.cell, cell.getContext())
+                        )}
+                      </Td>
+                    ))}
+                  </RowEl>
+                )
+              })
             )}
           </tbody>
         </Table>
@@ -423,10 +469,13 @@ export function DataTable<T extends object>({
           <PageSizeSelect value={pageSize} onChange={(e) => { table.setPageSize(+e.target.value); table.setPageIndex(0) }}>
             {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
           </PageSizeSelect>
-          <span>{t('table.showing', { from, to, total: totalRows })}</span>
+          <span>
+            {t('table.showing', { from, to, total: totalRows })}
+            {grouping.length > 0 ? ` · ${t('table.rowsTotal', { count: filteredLeafCount })}` : ''}
+          </span>
         </PagLeft>
         <PagRight>
-          <PagBtn onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()} title={t('common.first', 'First')}><ChevronsLeft size={13} /></PagBtn>
+          <PagBtn onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()} title={t('common.first')}><ChevronsLeft size={13} /></PagBtn>
           <PagBtn onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()} title={t('common.prev')}><ChevronLeft size={13} /></PagBtn>
           {pageNumbers(pageIndex + 1, totalPages).map((p, i) =>
             p === '…'
@@ -434,7 +483,7 @@ export function DataTable<T extends object>({
               : <PagBtn key={p} $active={p === pageIndex + 1} onClick={() => table.setPageIndex((p as number) - 1)}>{p}</PagBtn>,
           )}
           <PagBtn onClick={() => table.nextPage()} disabled={!table.getCanNextPage()} title={t('common.next')}><ChevronRight size={13} /></PagBtn>
-          <PagBtn onClick={() => table.setPageIndex(totalPages - 1)} disabled={!table.getCanNextPage()} title={t('common.last', 'Last')}><ChevronsRight size={13} /></PagBtn>
+          <PagBtn onClick={() => table.setPageIndex(totalPages - 1)} disabled={!table.getCanNextPage()} title={t('common.last')}><ChevronsRight size={13} /></PagBtn>
         </PagRight>
       </PaginationRow>
     </Wrap>
