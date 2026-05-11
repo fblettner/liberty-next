@@ -1,7 +1,7 @@
-// The current app's navigation tree, rendered in the Sidebar. Folders are
-// collapsible — top-level ones open by default, deeper ones closed, and any
-// folder on the path to the screen you're currently on auto-opens. Leaves link
-// to the query (TableView) / endpoint (HttpRunner) screens. Each folder's
+// The current app's navigation tree, rendered in the Sidebar. Folders start
+// collapsed (these menus can be large), except any on the path to the screen
+// you're currently on, which auto-open. Leaves link to the query (TableView) /
+// endpoint (HttpRunner) screens. Each folder's
 // children are wrapped so their indent + a thin left "rail" come from the wrap
 // (rather than per-row padding) — the rail forms one continuous line under the
 // parent's chevron, the standard file-tree look.
@@ -179,8 +179,8 @@ function NodeIcon({ node, fallback }: { node: MenuNode; fallback?: ComponentType
   return Icon ? <Icon size={14} /> : null
 }
 
-function Node({ node, depth, openIds }: { node: MenuNode; depth: number; openIds: Set<string> }) {
-  const [open, setOpen] = useState(() => depth === 0 || openIds.has(node.id))
+function Node({ node, openIds }: { node: MenuNode; openIds: Set<string> }) {
+  const [open, setOpen] = useState(() => openIds.has(node.id))  // collapsed by default; the path to the active screen auto-opens
   if (node.items) {
     const Chev = open ? ChevronDown : ChevronRight
     return (
@@ -192,7 +192,7 @@ function Node({ node, depth, openIds }: { node: MenuNode; depth: number; openIds
         </FolderRow>
         {open && (
           <ChildrenWrap>
-            {node.items.map((c) => <Node key={c.id} node={c} depth={depth + 1} openIds={openIds} />)}
+            {node.items.map((c) => <Node key={c.id} node={c} openIds={openIds} />)}
           </ChildrenWrap>
         )}
       </>
@@ -220,7 +220,7 @@ export default function SidebarMenu({ menu }: { menu: AppMenuTree }) {
     <>
       <SectionLabel title={menu.label}>{menu.label}</SectionLabel>
       {menu.items.map((node) => (
-        <Node key={node.id} node={node} depth={0} openIds={openIds} />
+        <Node key={node.id} node={node} openIds={openIds} />
       ))}
     </>
   )

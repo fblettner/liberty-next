@@ -154,7 +154,12 @@ export default function TableView() {
             {result.columns.length === 0 ? (
               <Meta>{t('table.noColumns')}</Meta>
             ) : (
-              <ResultTable key={result.columns.map((c) => c.name).join('|')} result={result} />
+              <ResultTable
+                key={result.columns.map((c) => c.name).join('|')}
+                result={result}
+                connector={connector}
+                query={query}
+              />
             )}
           </Stack>
         )}
