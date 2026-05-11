@@ -10,8 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "i18next": "^24.2.0",
+    "lucide-react": "^0.513.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-i18next": "^15.5.0",
     "react-router-dom": "^7.1.0"
   },
   "devDependencies": {

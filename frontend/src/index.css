@@ -1,0 +1,152 @@
+/* Global CSS — design-token vars (consumed by src/theme.ts), the dark default,
+   a `.theme-light` override, the ambient gradient background, and a thin
+   scrollbar. Adapted from nomaubl's React app. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Backgrounds */
+  --bg-base:        #07060e;
+  --bg-card:        rgba(255,255,255,0.06);
+  --bg-input:       rgba(255,255,255,0.04);
+  --bg-dropdown:    #1C2028;
+  --bg-modal:       rgba(30,32,42,0.82);
+  --bg-readonly:    rgba(255,255,255,0.02);
+
+  /* Borders */
+  --border:         rgba(255,255,255,0.10);
+
+  /* Text */
+  --text-primary:   #eef1ff;
+  --text-secondary: rgba(238,241,255,0.78);
+  --text-muted:     rgba(238,241,255,0.52);
+
+  /* Accent colours */
+  --blue-main:      #007AFF;
+  --blue-bg:        rgba(0,122,255,0.15);
+  --blue-bg-hover:  rgba(0,122,255,0.25);
+  --blue-border:    rgba(0,122,255,0.35);
+
+  --green-main:     #32D74B;
+  --green-bg:       rgba(50,215,75,0.10);
+  --green-border:   rgba(50,215,75,0.28);
+
+  --red-main:       #FF453A;
+  --red-bg:         rgba(255,69,58,0.10);
+  --red-border:     rgba(255,69,58,0.28);
+
+  --orange-main:    #FF9F0A;
+  --orange-bg:      rgba(255,159,10,0.10);
+  --orange-border:  rgba(255,159,10,0.28);
+
+  --purple-main:    #BF5AF2;
+  --purple-bg:      rgba(191,90,242,0.10);
+  --purple-border:  rgba(191,90,242,0.28);
+
+  --yellow-main:    #FFD60A;
+  --yellow-bg:      rgba(255,214,10,0.10);
+  --yellow-border:  rgba(255,214,10,0.28);
+
+  /* Shadows */
+  --shadow-sm:      0 1px 4px rgba(0,0,0,0.2);
+  --shadow-md:      0 4px 16px rgba(0,0,0,0.32);
+  --shadow-lg:      0 8px 24px rgba(0,0,0,0.4);
+  --shadow-xl:      0 12px 40px rgba(0,0,0,0.45);
+  --shadow-focus:   0 0 0 3px rgba(0,122,255,0.18);
+  --shadow-modal:   inset 0 1px 0 rgba(255,255,255,0.18), 0 12px 40px rgba(0,0,0,0.45);
+  --glass-specular: inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 16px rgba(0,0,0,0.32);
+
+  /* Ghost / hover states */
+  --ghost-bg:           rgba(255,255,255,0.04);
+  --ghost-border:       rgba(255,255,255,0.10);
+  --hover-subtle:       rgba(255,255,255,0.06);
+  --overlay:            rgba(0,0,0,0.55);
+
+  /* Scrollbar */
+  --scrollbar-thumb:       rgba(255,255,255,0.18);
+  --scrollbar-thumb-hover: rgba(255,255,255,0.32);
+}
+
+.theme-light {
+  --bg-base:        #f0f2f8;
+  --bg-card:        rgba(255,255,255,0.65);
+  --bg-input:       rgba(255,255,255,0.72);
+  --bg-dropdown:    rgba(255,255,255,0.95);
+  --bg-modal:       rgba(255,255,255,0.92);
+  --bg-readonly:    rgba(0,40,120,0.03);
+  --border:         rgba(0,0,0,0.08);
+  --text-primary:   #1a1a2e;
+  --text-secondary: rgba(26,26,46,0.72);
+  --text-muted:     rgba(26,26,46,0.48);
+  --blue-main:      #0062CC;
+  --blue-bg:        rgba(0,98,204,0.09);
+  --blue-bg-hover:  rgba(0,98,204,0.16);
+  --blue-border:    rgba(0,98,204,0.22);
+  --green-main:     #1a8a3a;
+  --green-bg:       rgba(26,138,58,0.09);
+  --green-border:   rgba(26,138,58,0.20);
+  --red-main:       #d32f2f;
+  --red-bg:         rgba(211,47,47,0.08);
+  --red-border:     rgba(211,47,47,0.20);
+  --orange-main:    #d47500;
+  --orange-bg:      rgba(212,117,0,0.08);
+  --orange-border:  rgba(212,117,0,0.20);
+  --purple-main:    #7c3aed;
+  --purple-bg:      rgba(124,58,237,0.08);
+  --purple-border:  rgba(124,58,237,0.20);
+  --yellow-main:    #b07d02;
+  --yellow-bg:      rgba(176,125,2,0.08);
+  --yellow-border:  rgba(176,125,2,0.20);
+  --shadow-sm:      0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03);
+  --shadow-md:      0 4px 12px rgba(0,40,120,0.07), 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-lg:      0 8px 24px rgba(0,40,120,0.08), 0 2px 6px rgba(0,0,0,0.03);
+  --shadow-xl:      0 12px 40px rgba(0,40,120,0.10), 0 4px 12px rgba(0,0,0,0.04);
+  --shadow-focus:   0 0 0 3px rgba(0,98,204,0.20);
+  --shadow-modal:   0 12px 48px rgba(0,40,120,0.12), 0 4px 12px rgba(0,0,0,0.06);
+  --glass-specular: inset 0 1px 0 rgba(255,255,255,0.60), 0 1px 4px rgba(0,40,120,0.06);
+  --ghost-bg:       rgba(255,255,255,0.50);
+  --ghost-border:   rgba(0,40,120,0.08);
+  --hover-subtle:   rgba(0,40,120,0.04);
+  --overlay:        rgba(0,20,60,0.18);
+  --scrollbar-thumb:       rgba(0,40,120,0.22);
+  --scrollbar-thumb-hover: rgba(0,40,120,0.40);
+}
+
+html, body, #root {
+  height: 100%;
+  color: var(--text-primary);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 15%  5%,  rgba(0,122,255,0.12)  0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 85% 25%,  rgba(191,90,242,0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 45% at 50% 95%,  rgba(50,215,75,0.05)  0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+.theme-light body {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 10%  0%,   rgba(0,98,204,0.07)   0%, transparent 55%),
+    radial-gradient(ellipse 60% 50% at 90% 20%,   rgba(124,58,237,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 45% at 50% 100%,  rgba(26,138,58,0.04)  0%, transparent 50%);
+}
+
+select option { background: var(--bg-dropdown); color: var(--text-primary); }
+
+button, input, select, textarea { font-family: inherit; }
+a { color: var(--blue-main); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }

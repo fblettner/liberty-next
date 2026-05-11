@@ -51,7 +51,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Rewrite vs in-place refactor | **Greenfield v2.** The metadata-table model *is* the disease; refactoring in place keeps it. |
 | Existing apps (nomasx1, NOMAJDE, AIRFLOW) | **Must keep running on v1.** v2 ships migration tools (Phase 5); apps move one at a time. v1 source untouched. |
 | Language | **Python** — keep the Liberty stack (FastAPI + SQLAlchemy async). Port nomaubl's *patterns*, not its Java. |
-| Frontend | **Fresh React 19 + Vite + TS** in `frontend/`, built `dist/` served as static by FastAPI (`SPAStaticFiles` mounted at `/` last). No shared libraries, no Tailwind/MUI/i18n/Monaco yet (hand-rolled CSS, plain textarea) — those are post-MVP. `react-router-dom` v7; `fetch` (no axios); Context for auth/state. |
+| Frontend | **Fresh React 19 + Vite + TS** in `frontend/`, built `dist/` served as static by FastAPI (`SPAStaticFiles` mounted at `/` last). No shared libraries with v1/nomaubl, but the *look* is ported from nomaubl: `@emotion/styled`, a dark default + light theme (CSS-var swap), `react-i18next` (EN/FR), `lucide-react` icons, DM Sans; shared primitives in `src/ui.tsx`. `react-router-dom` v7; `fetch` (no axios); Context for auth/state. Still post-MVP: Monaco config editor, `@tanstack/react-table`, `react-markdown`. |
 | Location | **Sibling directory** `../liberty-v2/`. |
 | Config format | **TOML** files on disk (nomaubl uses flat XML properties — the flat-config insight stands, TOML is the Python-idiomatic form). |
 | AI | **Anthropic SDK** (`AsyncAnthropic`), drop OpenAI. Default model `claude-opus-4-7` (operator-overridable). Own `@tool` decorator + manual streaming loop — the SDK's `@beta_tool`/`tool_runner` returns complete messages, can't per-token stream (the SSE endpoint needs it). The `claude-api` skill is the source of SDK truth. |
@@ -243,34 +243,42 @@ response_field = "data.0.name"
   `/auth/oidc/callback` redirects there with `#access_token=…&refresh_token=…` for SPAs;
   empty → returns JSON as before), `GET/PUT /admin/config/connectors` (superuser — read /
   validate-and-write `connectors.toml`; PUT does not auto-reload). `/info` reports `frontend`.
+- **Look & feel** — adopted from **nomaubl's React app** (`../../JavaProjects/nomaubl/src/web-react/`):
+  `@emotion/styled`, a "liquid-glass" palette, a dark default + light theme (CSS-var swap via a
+  `.theme-light` class on `<html>`, preference persisted), `react-i18next` (EN/FR, persisted),
+  `lucide-react` icons, DM Sans (Google Fonts). `src/theme.ts` (tokens), `src/index.css` (the
+  `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar), `src/i18n.ts` +
+  `src/locales/{en,fr}.ts`, `src/ui.tsx` (shared emotion primitives: `Button`/`Card`/`Input`/
+  `Field`/`Tag`/`Banner`/`Pre`/`Mono`/`SpinnerRing`/`Centered`/`PageLayout`/`Modal*`/
+  `ConfirmModal`/`Stack`/`Row` — pages stay declarative on top of these).
 - `src/api.ts` — `fetch` wrapper (Bearer header, JSON, 401 → log-out hook), `streamSSE`.
   `src/auth.tsx` — `AuthProvider`/`useAuth()` (login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off).
   `src/App.tsx` — `react-router-dom` v7: `/login`, `/oidc/callback`, `RequireAuth` `Layout`
   with `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e` (HttpRunner), `/chat`,
   `/settings` (superuser).
-- `components/`: **Connectors** (lists `GET /api/connectors`, drills to queries/endpoints),
-  **TableView** (param form from `params`/`bind_params`; SELECT → `GET` + a client-side
-  sorted/paged table whose columns come from `result.columns`; writable → confirm + `POST`),
-  **HttpRunner** (`POST /api/http/...` + pretty `ApiResult`), **Chat** (consumes the
-  `/ai/chat` SSE — tokens + tool_call/tool_result lines + new-conversation), **Settings**
-  (textarea over `GET/PUT /admin/config/connectors` + Save + Reload), **Login** + **OidcCallback**.
+- `components/`: **Layout** (shell — `Sidebar` + workspace-title header + a fixed top-right
+  utility pill: EN/FR · dark/light · username · sign-out), **Sidebar** (collapsible nav rail,
+  lucide icons, react-router `NavLink`s + an external "API docs" link), **Connectors** (lists
+  `GET /api/connectors`, drills to queries/endpoints), **TableView** (param form from
+  `params`/`bind_params`; SELECT → `GET` + a client-side sorted/paged sticky-header table whose
+  columns come from `result.columns`; writable → confirm + `POST`), **HttpRunner**
+  (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), **Chat** (consumes the `/ai/chat`
+  SSE — message bubbles + tool_call/tool_result lines + new-conversation), **Settings**
+  (monospace `<textarea>` over `GET/PUT /admin/config/connectors` + Save + Reload),
+  **Login** + **OidcCallback**.
 - Dev: `cd frontend && npm i && npm run dev` (Vite :5173, proxies the API to :8000); prod:
   `npm run build` → `dist/` → served by the backend. `frontend/.gitignore` excludes
   `node_modules/` + `dist/`; `package-lock.json` is committed.
-- 6 new tests (178 total): SPA static serving (index-fallback for client routes; API not
-  shadowed; no-dir → not mounted), `GET/PUT /admin/config/connectors` (validate-then-write,
-  superuser-only), the `[oidc] frontend_redirect` setting.
-- *Not done / TODO:* the current UI is a deliberately-minimal hand-rolled-CSS shell. The
-  intended look/feel is **nomaubl's React app** (`../../JavaProjects/nomaubl/src/web-react/`):
-  emotion (`@emotion/react`/`styled`) theming with a dark-mode toggle, a grouped left sidebar,
-  `react-i18next` + `i18next` (EN/FR), `lucide-react` icons, `@tanstack/react-table` +
-  `@tanstack/react-virtual` for the data grid, `@monaco-editor/react` for SQL/config editing,
-  `react-markdown` + `remark-gfm` for the assistant. Adopt that stack/structure (its `src/`
-  is `api/ auth/ common/ components/ i18n/ pages/…`) when polishing — the connector-driven
-  pages here are the v2 equivalent of nomaubl's per-screen pages. Also still TODO: reusable
+- 6 tests on the backend side (SPA static serving — index-fallback for client routes; API not
+  shadowed; no-dir → not mounted —, `GET/PUT /admin/config/connectors` validate-then-write
+  superuser-only, the `[oidc] frontend_redirect` setting). Frontend itself is tsc-checked at
+  build time; no Vitest/RTL yet.
+- *Still TODO toward full nomaubl parity:* `@monaco-editor/react` for the connector-config
+  editor, `@tanstack/react-table` (+ `@tanstack/react-virtual`) for `TableView`, `react-markdown`
+  + `remark-gfm` for assistant replies; a `ProfileModal`/change-password page; reusable
   `<FormView>`/`<Lookup>` (TableView covers reads + writable "runs"; HttpRunner covers API
-  endpoints), Vitest/RTL frontend tests, frontend build in CI.
+  endpoints); Vitest/RTL frontend tests; frontend build in CI.
 
 ### Phase 5 — Migration tools — 🚧 IN PROGRESS  (~4–6 wks)
 **Done so far** — `liberty/migrations/` + the `liberty-migrate` CLI, plus dialect-aware queries

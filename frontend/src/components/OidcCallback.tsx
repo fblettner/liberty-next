@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../auth";
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { useAuth } from '../auth'
+import { Centered } from '../ui'
 
 /**
  * Landing route for the OIDC flow. The backend's /auth/oidc/callback redirects
@@ -9,22 +11,23 @@ import { useAuth } from "../auth";
  * this path. We stash them via the auth context, then go to the app.
  */
 export function OidcCallback() {
-  const { setTokens } = useAuth();
-  const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
+  const { t } = useTranslation()
+  const { setTokens } = useAuth()
+  const navigate = useNavigate()
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    const access = hash.get("access_token");
-    const refresh = hash.get("refresh_token");
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const access = hash.get('access_token')
+    const refresh = hash.get('refresh_token')
     if (!access || !refresh) {
-      setError("OIDC callback did not include tokens. Check [oidc] frontend_redirect on the server.");
-      return;
+      setError(t('oidc.noTokens'))
+      return
     }
     setTokens({ access_token: access, refresh_token: refresh })
-      .then(() => navigate("/", { replace: true }))
-      .catch((e) => setError(String(e)));
-  }, [setTokens, navigate]);
+      .then(() => navigate('/', { replace: true }))
+      .catch((e) => setError(String(e)))
+  }, [setTokens, navigate, t])
 
-  return <div className="centered muted">{error ? <span className="err">{error}</span> : "Completing sign-in…"}</div>;
+  return <Centered error={!!error}>{error ?? t('oidc.completing')}</Centered>
 }

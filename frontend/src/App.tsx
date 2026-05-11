@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "./auth";
+import { Centered } from "./ui";
 import { Layout } from "./components/Layout";
 import { Login } from "./components/Login";
 import { OidcCallback } from "./components/OidcCallback";
@@ -13,7 +14,7 @@ import { Settings } from "./components/Settings";
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
   const location = useLocation();
-  if (!ready) return <div className="centered muted">Loading…</div>;
+  if (!ready) return <Centered />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }

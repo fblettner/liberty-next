@@ -170,8 +170,18 @@ OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1'
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
 **Phase 4 (Frontend) — DONE.** `frontend/` — React 19 + Vite + TS, built `dist/` served
-as static by the backend. (No Tailwind/MUI/i18n/Monaco yet — hand-rolled CSS, plain
-textarea for config; those are TODOs.)
+as static by the backend. UI adopts **nomaubl's "liquid-glass" look**: `@emotion/styled`,
+a dark default + light theme (CSS-var swap via `.theme-light` on `<html>`, persisted),
+`react-i18next` EN/FR (persisted), `lucide-react` icons, DM Sans (Google Fonts).
+- `src/theme.ts` — design tokens (colours/fonts/radii/shadows/`glass` blur snippets), all via
+  CSS vars. `src/index.css` — the `:root` (dark) + `.theme-light` var sets, the ambient
+  gradient background, the thin scrollbar. `src/i18n.ts` + `src/locales/{en,fr}.ts` — i18next
+  bootstrap; the active language is switched from the Layout's utility bar.
+- `src/ui.tsx` — shared emotion primitives: `Button` (`$variant`/`$size`), `Card`/`CardTitle`,
+  `Input`/`Select`/`Textarea`/`Field`/`FieldLabel`, `Tag` (`$tone`), `Banner`, `Pre`, `Mono`,
+  `SpinnerRing`, `Centered` (loading/error placeholder), `PageLayout` (the bordered "context
+  bar" header + scrolling content area every page uses), `Overlay`/`Modal*`/`ConfirmModal`,
+  `Stack`/`Row`. Pages stay declarative on top of these (no per-page CSS).
 - `src/api.ts` — `fetch` wrapper: attaches the Bearer token, parses JSON, 401 → calls the
   registered "log out" hook; `streamSSE(path, body, onEvent)` for `POST /ai/chat`.
 - `src/auth.tsx` — `AuthProvider` / `useAuth()`: login (`POST /auth/login`), token in
@@ -180,12 +190,15 @@ textarea for config; those are TODOs.)
 - `src/App.tsx` — `react-router-dom` v7; `/login`, `/oidc/callback`, and a `RequireAuth`
   `Layout` with children `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e`
   (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link).
-- `components/`: `Connectors` (lists `GET /api/connectors`, drills to queries/endpoints),
-  `TableView` (param form from the query's `params`/`bind_params`; SELECT → `GET` + a
-  client-side sorted/paged table rendering columns from `result.columns`; writable → confirm
-  + `POST` + affected-rows), `HttpRunner` (`POST /api/http/...` + pretty `ApiResult`),
-  `Chat` (consumes the `/ai/chat` SSE — tokens + tool_call/tool_result lines), `Settings`
-  (textarea over `GET/PUT /admin/config/connectors` + a Reload button), `Login` + `OidcCallback`.
+- `components/`: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
+  utility pill: EN/FR · dark/light · username · sign-out), `Sidebar` (collapsible nav rail,
+  lucide icons, react-router `NavLink`s + an external "API docs" link), `Connectors` (lists
+  `GET /api/connectors`, drills to queries/endpoints), `TableView` (param form from the query's
+  `params`/`bind_params`; SELECT → `GET` + a client-side sorted/paged sticky-header table from
+  `result.columns`; writable → `confirm` + `POST` + affected-rows banner), `HttpRunner`
+  (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), `Chat` (consumes the `/ai/chat` SSE
+  — message bubbles + `tool_call`/`tool_result` lines), `Settings` (a monospace `<textarea>`
+  over `GET/PUT /admin/config/connectors` + a Reload button), `Login` + `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
   fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
   `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default
@@ -196,9 +209,9 @@ textarea for config; those are TODOs.)
 - `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
   Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
   prod build: `npm run build` → `dist/` → served automatically by the backend.
-  ⚠ The current UI is a deliberately-minimal hand-rolled shell — the intended look/stack is
-  nomaubl's React app (emotion + dark mode, react-i18next EN/FR, lucide, @tanstack/react-table,
-  Monaco, react-markdown); adopt it from `../../JavaProjects/nomaubl/src/web-react/` when polishing.
+  Still TODO toward full nomaubl parity: Monaco editor for the connector-config page,
+  `@tanstack/react-table` for `TableView`, `react-markdown` for assistant replies. Reference
+  app: `../../JavaProjects/nomaubl/src/web-react/`.
 
 **Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the
 `liberty-migrate` CLI — turn a v1 Liberty DB's `ly_*` metadata into v2 `connectors.toml`:
@@ -306,8 +319,9 @@ liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,admin}.py
                 · migrations/{v1,source}.py
-frontend/       Vite + React 19 + TS — src/{api,auth,types,App,main}.tsx + src/components/*.tsx
-                (built dist/ served by liberty/main.py; gitignored)
+frontend/       Vite + React 19 + TS — src/{api,auth,types,App,main,theme,i18n,ui}.* +
+                src/locales/{en,fr}.ts + src/components/*.tsx (emotion + react-i18next;
+                built dist/ served by liberty/main.py; gitignored)
 start.sh        run/dev helper (serve | dev | api | build | frontend | init-db)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale
