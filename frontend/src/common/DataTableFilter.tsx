@@ -28,10 +28,16 @@ const OPS_BY_KIND: Record<'text' | 'number' | 'date', OpFilter['op'][]> = {
   number: ['equals', 'notEquals', 'lt', 'le', 'gt', 'ge', 'between', 'empty', 'notEmpty'],
   date: ['equals', 'notEquals', 'lt', 'le', 'gt', 'ge', 'between', 'empty', 'notEmpty'],
 }
-// Short symbols shown in the operator <select> (kept compact for the filter row).
-const OP_SYMBOL: Record<OpFilter['op'], string> = {
-  contains: '∋', equals: '=', notEquals: '≠', lt: '<', le: '≤', gt: '>', ge: '≥',
+// What the operator <select> shows (compact, but legible) + a `title` per option with the
+// full name. Plain ASCII-ish glyphs so they render in any font.
+const OP_LABEL: Record<OpFilter['op'], string> = {
+  contains: '~', equals: '=', notEquals: '≠', lt: '<', le: '≤', gt: '>', ge: '≥',
   between: '↔', empty: '∅', notEmpty: '≠∅',
+}
+const OP_NAME: Record<OpFilter['op'], string> = {
+  contains: 'contains', equals: 'equals', notEquals: 'not equals',
+  lt: 'less than', le: 'less than or equal', gt: 'greater than', ge: 'greater than or equal',
+  between: 'between', empty: 'is empty', notEmpty: 'is not empty',
 }
 const NEEDS_B = (op: OpFilter['op']) => op === 'between'
 const NEEDS_A = (op: OpFilter['op']) => op !== 'empty' && op !== 'notEmpty'
@@ -101,7 +107,7 @@ const Sel = styled.select`
   padding: 2px 4px; cursor: pointer; flex-shrink: 0; max-width: 100%;
   option { background: ${colors.bg.dropdown}; color: ${colors.text.secondary}; }
 `
-const OpSel = styled(Sel)`width: 44px; text-align: center;`
+const OpSel = styled(Sel)`width: 56px; flex-shrink: 0; text-align: center; text-align-last: center;`
 const Inp = styled.input`
   min-width: 0; flex: 1; box-sizing: border-box; background: transparent; border: 1px solid ${colors.border};
   border-radius: ${radius.sm}; color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -141,8 +147,16 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
   const set = (next: Partial<OpFilter>) => column.setFilterValue({ ...f, ...next })
   return (
     <Box onClick={(e) => e.stopPropagation()}>
-      <OpSel value={f.op} onChange={(e) => set({ op: e.target.value as OpFilter['op'] })} title={t('table.filterOp', 'Operator')}>
-        {OPS_BY_KIND[kind].map((op) => <option key={op} value={op}>{OP_SYMBOL[op]}</option>)}
+      <OpSel
+        value={f.op}
+        onChange={(e) => set({ op: e.target.value as OpFilter['op'] })}
+        title={`${t('table.filterOp', 'Operator')}: ${OP_NAME[f.op]}`}
+      >
+        {OPS_BY_KIND[kind].map((op) => (
+          <option key={op} value={op} title={OP_NAME[op]}>
+            {OP_LABEL[op]}
+          </option>
+        ))}
       </OpSel>
       {NEEDS_A(f.op) && (
         <Inp type={inputType(kind)} value={f.a ?? ''} onChange={(e) => set({ a: e.target.value })} placeholder="…" />

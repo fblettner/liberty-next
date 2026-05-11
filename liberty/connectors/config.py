@@ -139,6 +139,10 @@ class QueryDef(BaseModel):
     columns: list[ColumnHint] = Field(default_factory=list)  # display hints; the schema is still from the query
     label: str | None = None
     description: str | None = None
+    # The name of a `writable` query on the same connector that updates one row of this query's
+    # result — set explicitly here, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
+    # naming convention the migration uses. Drives the TableView's inline-edit mode.
+    update_query: str | None = None
 
     @field_validator("sql")
     @classmethod

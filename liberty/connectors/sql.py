@@ -176,6 +176,21 @@ class SQLConnector:
                 f"Available: {self.query_names or '(none)'}."
             ) from None
 
+    def update_query_for(self, qdef: QueryDef) -> str | None:
+        """The name of the ``writable`` query that updates one row of *qdef*'s result — the
+        explicit :attr:`QueryDef.update_query`, else the ``<base>_get`` → ``<base>_put`` companion
+        the migration emits (if it exists on this connector and is writable). ``None`` otherwise."""
+        if qdef.update_query is not None:
+            cand = self._queries.get(qdef.update_query)
+            return qdef.update_query if cand is not None and cand.writable else None
+        n = qdef.name
+        if n[-4:].lower() == "_get":
+            cand_name = n[:-4] + "_put"
+            cand = self._queries.get(cand_name)
+            if cand is not None and cand.writable:
+                return cand_name
+        return None
+
     def describe(self) -> dict[str, Any]:
         """Metadata only — no credentials, no pool URL. Feeds the CLI / settings UI / AI tool.
         Statement-type / bind-param introspection uses the dialect-independent (``default``)
@@ -193,6 +208,7 @@ class SQLConnector:
                     "label": q.label,
                     "description": q.description,
                     "writable": q.writable,
+                    "update_query": self.update_query_for(q),
                     "statement_type": detect_statement_type(q.default_sql),
                     "dialects": q.dialects,
                     "params": [
