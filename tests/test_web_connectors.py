@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
-from liberty.config import AISettings, AuthSettings, ConnectorSettings, Settings
+from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -79,6 +79,7 @@ def app(tmp_path):
     conn_toml.write_text(_connectors_toml(db_url))
     _seed(db_url)
     settings = Settings(
+        app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),

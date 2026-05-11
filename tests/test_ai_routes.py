@@ -12,7 +12,7 @@ from liberty.ai.assistant import AiAssistant
 from liberty.ai.tools import ToolRegistry, tool
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
-from liberty.config import AISettings, AuthSettings, ConnectorSettings, Settings
+from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -41,6 +41,7 @@ def _make_app(tmp_path, *, ai_enabled: bool = True):
     conn_toml.write_text(f'[pools.default]\nurl = "{db_url}"\n')
     _seed(db_url)
     settings = Settings(
+        app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=ai_enabled, api_key=""),  # no API key → "unconfigured"

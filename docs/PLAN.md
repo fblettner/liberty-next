@@ -51,7 +51,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Rewrite vs in-place refactor | **Greenfield v2.** The metadata-table model *is* the disease; refactoring in place keeps it. |
 | Existing apps (nomasx1, NOMAJDE, AIRFLOW) | **Must keep running on v1.** v2 ships migration tools (Phase 5); apps move one at a time. v1 source untouched. |
 | Language | **Python** — keep the Liberty stack (FastAPI + SQLAlchemy async). Port nomaubl's *patterns*, not its Java. |
-| Frontend | **Fresh React 19 + Vite + TS inside v2**, embedded as static. No shared libraries. |
+| Frontend | **Fresh React 19 + Vite + TS** in `frontend/`, built `dist/` served as static by FastAPI (`SPAStaticFiles` mounted at `/` last). No shared libraries, no Tailwind/MUI/i18n/Monaco yet (hand-rolled CSS, plain textarea) — those are post-MVP. `react-router-dom` v7; `fetch` (no axios); Context for auth/state. |
 | Location | **Sibling directory** `../liberty-v2/`. |
 | Config format | **TOML** files on disk (nomaubl uses flat XML properties — the flat-config insight stands, TOML is the Python-idiomatic form). |
 | AI | **Anthropic SDK** (`AsyncAnthropic`), drop OpenAI. Default model `claude-opus-4-7` (operator-overridable). Own `@tool` decorator + manual streaming loop — the SDK's `@beta_tool`/`tool_runner` returns complete messages, can't per-token stream (the SSE endpoint needs it). The `claude-api` skill is the source of SDK truth. |
@@ -228,20 +228,42 @@ response_field = "data.0.name"
 - *Not done:* `?accessible=` filter is implicit (always filtered); a `/api/sql/{c}/{q}/schema`
   shortcut (just run it and read `.columns`); a `POST /admin/reload` that also rebuilds the
   AI assistant; `/admin/reload` is fire-and-forget — no in-flight-request draining.
+  *(Phase 4 added `GET/PUT /admin/config/connectors` for the settings UI.)*
 
-### Phase 4 — Frontend — ⏳ NEXT  (~3–4 wks)
-- Fresh `frontend/` — React 19 + Vite + TS. Built `dist/` served as static by
-  FastAPI (mounted in `liberty/main.py`).
-- Login screen: internal form + "Sign in with OIDC" button.
-- Generic components driven by runtime-discovered schema:
-  - `<TableView connector queryName params>` — fetches, renders columns from the
-    response metadata, sorting/paging/filtering client-side or server-side.
-  - `<FormView connector queryName>` — CRUD against a connector's GET/POST/PUT/DELETE.
-  - `<Lookup connector queryName>` — dropdown backed by a SQL query.
-  - Settings UI: CRUD the connector TOML configs (write-back + hot-reload).
-- i18n (react-i18next), Monaco editor for SQL editing (like nomaubl).
+### Phase 4 — Frontend — ✅ DONE
+`frontend/` — React 19 + Vite + TS, built `dist/` served as static by the backend.
+- `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles + index.html fallback for client
+  routes) at `/` **last** — so it never shadows `/api`, `/auth`, `/ai`, `/admin`, `/health`,
+  `/info`, `/docs`; only mounted if `[app] static_dir` (default `frontend/dist`) exists, so a
+  fresh checkout with no frontend build runs API-only.
+- New backend bits: `[app] static_dir`, `[oidc] frontend_redirect` (when set,
+  `/auth/oidc/callback` redirects there with `#access_token=…&refresh_token=…` for SPAs;
+  empty → returns JSON as before), `GET/PUT /admin/config/connectors` (superuser — read /
+  validate-and-write `connectors.toml`; PUT does not auto-reload). `/info` reports `frontend`.
+- `src/api.ts` — `fetch` wrapper (Bearer header, JSON, 401 → log-out hook), `streamSSE`.
+  `src/auth.tsx` — `AuthProvider`/`useAuth()` (login → `POST /auth/login`, token in
+  `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off).
+  `src/App.tsx` — `react-router-dom` v7: `/login`, `/oidc/callback`, `RequireAuth` `Layout`
+  with `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e` (HttpRunner), `/chat`,
+  `/settings` (superuser).
+- `components/`: **Connectors** (lists `GET /api/connectors`, drills to queries/endpoints),
+  **TableView** (param form from `params`/`bind_params`; SELECT → `GET` + a client-side
+  sorted/paged table whose columns come from `result.columns`; writable → confirm + `POST`),
+  **HttpRunner** (`POST /api/http/...` + pretty `ApiResult`), **Chat** (consumes the
+  `/ai/chat` SSE — tokens + tool_call/tool_result lines + new-conversation), **Settings**
+  (textarea over `GET/PUT /admin/config/connectors` + Save + Reload), **Login** + **OidcCallback**.
+- Dev: `cd frontend && npm i && npm run dev` (Vite :5173, proxies the API to :8000); prod:
+  `npm run build` → `dist/` → served by the backend. `frontend/.gitignore` excludes
+  `node_modules/` + `dist/`; `package-lock.json` is committed.
+- 6 new tests (178 total): SPA static serving (index-fallback for client routes; API not
+  shadowed; no-dir → not mounted), `GET/PUT /admin/config/connectors` (validate-then-write,
+  superuser-only), the `[oidc] frontend_redirect` setting.
+- *Not done / TODO:* no i18n (react-i18next), no Monaco (plain `<textarea>` for the config),
+  no Tailwind/MUI (hand-rolled CSS), no reusable `<FormView>`/`<Lookup>` (TableView covers
+  both reads and writable "runs"; HttpRunner covers API endpoints), no Vitest/RTL frontend
+  tests yet, no frontend build in CI (the SPA mount is conditional on `dist/` existing).
 
-### Phase 5 — Migration tools — (~4–6 wks)
+### Phase 5 — Migration tools — ⏳ NEXT  (~4–6 wks)
 - Read v1's `ly_qry_sql` → emit SQLConnector TOML.
 - Read v1's `ly_api` + `ly_api_conn` → emit APIConnector TOML.
 - Map `ly_tbl_col`/`ly_dlg_col` labels → optional UI hint config (column titles,
@@ -273,9 +295,11 @@ to validate against.
   leaked refresh token is good until expiry. Add a `jti` denylist (or per-user
   token version) if/when that matters; for now keep TTLs short.
 - Hot-reload — `POST /admin/reload` rebuilds the `ConnectorRegistry` from disk and
-  re-points `app.state.auth_db` (Phase 3). Still missing: a file watcher, a Phase 4
-  settings UI to edit `connectors.toml` (write-back + reload), rebuilding the AI
-  assistant on reload, and draining in-flight requests before disposing the old registry.
+  re-points `app.state.auth_db` (Phase 3); the frontend Settings page edits `connectors.toml`
+  via `GET/PUT /admin/config/connectors` and then calls reload (Phase 4). Still missing: a
+  file watcher (auto-reload on change), rebuilding the AI assistant on reload, draining
+  in-flight requests before disposing the old registry, and config validation feedback in
+  the editor beyond the PUT 422.
 - DB migrations — auth tables are created via `create_all` (`liberty-admin init-db`),
   no Alembic. Fine while the schema is small; add Alembic before the schema churns.
 - AI prompt caching — only the system+tools prefix is `cache_control`-ed; growing
@@ -295,12 +319,12 @@ to validate against.
 
 1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
 2. Read this file for the full picture.
-3. Done: Phase 0, Phase 1 (connectors), Phase 2 (auth + AI), Phase 3 (web layer).
-   Next is **Phase 4 — the frontend** (fresh `frontend/`, React 19 + Vite + TS, built
-   `dist/` served as static by `liberty/main.py`): login screen (internal form +
-   "Sign in with OIDC"), then schema-driven generic components — `<TableView>` over
-   `GET /api/sql/{c}/{q}` rendering columns from the response metadata, `<FormView>` /
-   `<Lookup>`, and a settings UI that CRUDs `connectors.toml` (write-back + `POST
-   /admin/reload`). The HTTP API (`GET /api/connectors`, `GET/POST /api/sql/...`,
-   `POST /api/http/...`, `/auth/login` + `/auth/me`, `POST /ai/chat` SSE) and its
-   OpenAPI doc at `/docs` are the backend contract the frontend builds against.
+3. Done: Phase 0, Phase 1 (connectors), Phase 2 (auth + AI), Phase 3 (web layer),
+   Phase 4 (frontend). Next is **Phase 5 — migration tools** (`liberty/migrations/`,
+   CLI subcommands): read v1's `ly_qry_sql` → emit `[[connectors.X.queries]]` TOML; read
+   v1's `ly_api` + `ly_api_conn` → emit `[connectors.X]` (type api) TOML; map
+   `ly_tbl_col`/`ly_dlg_col` labels → optional column-title hints (the *schema* still comes
+   from the query). Then validate by running nomasx1's read paths against v2 and diffing
+   results, and migrate nomasx1 → NOMAJDE → AIRFLOW one at a time. v1 source is **read-only**
+   (`../liberty-framework/`) — the migration tools read its tables, never modify it. Polish
+   the frontend (i18n, Monaco, FormView/Lookup, Vitest) as needed alongside.

@@ -22,5 +22,5 @@ def http_for_connector_error(exc: ConnectorError) -> HTTPException:
     if isinstance(exc, _NOT_FOUND):
         return HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, _UNPROCESSABLE):
-        return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))

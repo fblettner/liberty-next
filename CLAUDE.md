@@ -157,18 +157,51 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   perm string depends on path params), `public_connector` (the SQL/credential-stripped view).
 - `errors.py` — `ConnectorError` → HTTP: not-found→404, statement/writable→422, other→400;
   SQLAlchemy errors during execute → 502.
+- Also (added in Phase 4): `GET /admin/config/connectors` (raw `connectors.toml` text) and
+  `PUT /admin/config/connectors` (validates the TOML against the schema, then writes — does
+  *not* reload; call `POST /admin/reload` after). Both superuser.
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
-172 tests pass.
+**Phase 4 (Frontend) — DONE.** `frontend/` — React 19 + Vite + TS, built `dist/` served
+as static by the backend. (No Tailwind/MUI/i18n/Monaco yet — hand-rolled CSS, plain
+textarea for config; those are TODOs.)
+- `src/api.ts` — `fetch` wrapper: attaches the Bearer token, parses JSON, 401 → calls the
+  registered "log out" hook; `streamSSE(path, body, onEvent)` for `POST /ai/chat`.
+- `src/auth.tsx` — `AuthProvider` / `useAuth()`: login (`POST /auth/login`), token in
+  `localStorage`, validates on mount via `/auth/me`, `oidcLogin()` → navigates to
+  `/auth/oidc/login`, `setTokens()` for the OIDC fragment hand-off.
+- `src/App.tsx` — `react-router-dom` v7; `/login`, `/oidc/callback`, and a `RequireAuth`
+  `Layout` with children `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e`
+  (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link).
+- `components/`: `Connectors` (lists `GET /api/connectors`, drills to queries/endpoints),
+  `TableView` (param form from the query's `params`/`bind_params`; SELECT → `GET` + a
+  client-side sorted/paged table rendering columns from `result.columns`; writable → confirm
+  + `POST` + affected-rows), `HttpRunner` (`POST /api/http/...` + pretty `ApiResult`),
+  `Chat` (consumes the `/ai/chat` SSE — tokens + tool_call/tool_result lines), `Settings`
+  (textarea over `GET/PUT /admin/config/connectors` + a Reload button), `Login` + `OidcCallback`.
+- Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
+  fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
+  `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default
+  `frontend/dist` — absent on a fresh checkout → API-only, which is fine). New settings:
+  `[app] static_dir`, `[oidc] frontend_redirect` (when set, `/auth/oidc/callback` redirects
+  there with `#access_token=…&refresh_token=…` instead of returning JSON — for SPAs).
+  `/info` reports `frontend`.
+- `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
+  Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
+  prod build: `npm run build` → `dist/` → served automatically by the backend.
+
+178 tests pass.
 
 ## Run it
 
 ```bash
 .venv/bin/pytest -v               # tests
-.venv/bin/liberty-v2              # dev server on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
+.venv/bin/liberty-v2              # backend on :8000  (or: .venv/bin/uvicorn liberty.main:app --reload)
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
 .venv/bin/liberty-admin init-db   # create auth tables + bootstrap admin (needs [auth] pool reachable)
+(cd frontend && npm install && npm run build)   # → frontend/dist, then the backend serves the SPA at /
+(cd frontend && npm run dev)                     # Vite dev server on :5173, proxying the API to :8000
 # HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
@@ -184,6 +217,8 @@ liberty/        main.py, config.py, cli.py, admin_cli.py
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,admin}.py
                 · migrations/ (Phase 5)
+frontend/       Vite + React 19 + TS — src/{api,auth,types,App,main}.tsx + src/components/*.tsx
+                (built dist/ served by liberty/main.py; gitignored)
 tests/
 docs/PLAN.md    full phased plan + design decisions + rationale
 ```

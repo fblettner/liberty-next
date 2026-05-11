@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.staticfiles import StaticFiles
 
 from liberty import __version__
 from liberty.ai.assistant import build_assistant
@@ -19,6 +22,21 @@ from liberty.connectors import ConnectorRegistry, load_connectors
 from liberty.web import admin_router, connectors_router
 
 _log = logging.getLogger("liberty")
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve a Vite build, falling back to ``index.html`` for client-side routes
+    (so a hard refresh on ``/connectors`` doesn't 404). Mounted at ``/`` *after*
+    the API routers, so it never shadows ``/api``, ``/auth``, ``/ai``, ``/admin``,
+    ``/health``, ``/info`` or ``/docs``."""
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
 
 
 def _build_token_service(cfg: AuthSettings) -> TokenService:
@@ -95,7 +113,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "available": ai.available if ai is not None else False,
                 "model": ai.settings.model if ai is not None else None,
             },
+            "frontend": getattr(app.state, "frontend_dir", None),
         }
+
+    # Serve the built frontend last, so API routes always win.
+    app.state.frontend_dir = None
+    if settings.app.static_dir:
+        dist = Path(settings.app.static_dir)
+        if (dist / "index.html").is_file():
+            app.state.frontend_dir = str(dist)
+            app.mount("/", SPAStaticFiles(directory=dist, html=True), name="spa")
 
     return app
 

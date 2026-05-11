@@ -37,6 +37,8 @@ class AppSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
+    # Built frontend (Vite `dist/`) served as static; empty or missing dir → not mounted.
+    static_dir: str = "frontend/dist"
 
 
 class ConnectorSettings(BaseModel):
@@ -66,6 +68,9 @@ class OIDCSettings(BaseModel):
     email_claim: str = "email"
     name_claim: str = "name"
     redirect_url: str = ""  # override the auto-derived /auth/oidc/callback URL (proxies)
+    # If set, /auth/oidc/callback redirects here with the JWTs in the URL fragment
+    # (#access_token=…&refresh_token=…) — for SPAs. Empty → the callback returns JSON.
+    frontend_redirect: str = ""
     # Cookie session used by the OAuth state/nonce dance; falls back to jwt_secret.
     session_secret: str = ""
 

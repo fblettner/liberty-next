@@ -11,7 +11,7 @@ from liberty.auth.db import AuthDatabase
 from liberty.auth.dependencies import require_permission, require_role
 from liberty.auth.service import AuthService
 from liberty.auth.tokens import TokenConfig, TokenService
-from liberty.config import AuthSettings, ConnectorSettings, Settings
+from liberty.config import AppSettings, AuthSettings, ConnectorSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -44,6 +44,7 @@ def app(tmp_path):
     conn_toml.write_text(f'[pools.default]\nurl = "{db_url}"\n')
     _seed(db_url)
     settings = Settings(
+        app=AppSettings(static_dir=""),  # no SPA mount — these tests add routes after create_app
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(jwt_secret=JWT_SECRET, jwt_issuer=ISSUER, pool="default"),
     )

@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from urllib.parse import urlencode
+
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from liberty.auth.dependencies import (
@@ -133,7 +136,7 @@ async def oidc_callback(
     oidc: Annotated[OIDCClient, Depends(get_oidc)],
     svc: Annotated[AuthService, Depends(get_auth_service)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
-) -> TokenPair:
+):
     try:
         token = await oidc.authorize_access_token(request)
     except OAuthError as exc:
@@ -150,4 +153,14 @@ async def oidc_callback(
     )
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is disabled")
-    return _issue_pair(tokens, user)
+    pair = _issue_pair(tokens, user)
+    if s.frontend_redirect:
+        # SPA flow: hand the tokens back via the URL fragment (never sent to the server).
+        fragment = urlencode({
+            "access_token": pair.access_token,
+            "refresh_token": pair.refresh_token,
+            "token_type": pair.token_type,
+            "expires_in": pair.expires_in,
+        })
+        return RedirectResponse(f"{s.frontend_redirect}#{fragment}", status_code=status.HTTP_303_SEE_OTHER)
+    return pair
