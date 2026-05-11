@@ -3,7 +3,7 @@
     liberty-migrate sql        --source-url <v1-db-url> [--dbtype postgres] [--prefix v1_] [-o out.toml]
     liberty-migrate api        --source-url <v1-db-url> [--prefix v1_] [-o out.toml]
     liberty-migrate all        --source-url <v1-db-url> [--dbtype …] [--prefix …] [-o out.toml]
-    liberty-migrate dictionary --source-url <v1-db-url> [--default-language en] [-o dictionary.toml]
+    liberty-migrate dictionary --source-url <v1-db-url> [--default-language en] [--connector <app>] [-o dictionary.toml]
 
 ``--source-url`` is a SQLAlchemy *async* URL — e.g.
 ``postgresql+asyncpg://user:pw@host/liberty`` for a real v1 DB. v1 is read-only:
@@ -18,9 +18,10 @@ or a parseable ``apps_jdbc``); the DB password is a ``${MIGRATED_PW_<NAME>}`` pl
 is v2's own framework DB (the ``ly2_*`` tables). They also carry over **column display hints**
 from v1's ``ly_tbl_col`` / ``ly_dlg_col`` (each read query's ``columns`` — order, visibility, a
 per-column ``label``/``format`` override) — the labels/types themselves live in the shared
-dictionary, so run ``liberty-migrate dictionary`` too and put it at ``config/dictionary.toml``.
-Migrated API connectors keep v1's ``conn_password`` verbatim as an ``ENC:`` value — v2 decrypts it
-at runtime via ``[crypto] master_key`` (set ``LIBERTY_MASTER_KEY`` to your v1 ``MASTER_KEY``).
+dictionary, so run ``liberty-migrate dictionary`` too (``--connector <app>`` nests its entries
+under ``[connectors.<app>.entries.*]`` so several migrated apps don't clash on a ``dd_id``) and
+put it at ``config/dictionary.toml``. Migrated API connectors keep v1's ``conn_password`` verbatim
+as an ``ENC:`` value — v2 decrypts it at runtime via ``[crypto] master_key``.
 """
 
 from __future__ import annotations
@@ -62,7 +63,9 @@ async def _build(args: argparse.Namespace) -> dict:
     engine = make_engine(args.source_url)
     try:
         if args.command == "dictionary":
-            return migrate_dictionary(*await read_dictionary(engine), default_language=args.default_language)
+            return migrate_dictionary(
+                *await read_dictionary(engine), default_language=args.default_language, connector_name=args.connector
+            )
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -85,9 +88,13 @@ async def _build(args: argparse.Namespace) -> dict:
 
 def _summary(data: dict, *, command: str) -> str:
     if command == "dictionary":
-        entries = data.get("entries") or {}
+        conns = data.get("connectors") or {}
+        scope, entries = (
+            (f"[connectors.{next(iter(conns))}]", next(iter(conns.values())).get("entries") or {})
+            if conns else ("top-level", data.get("entries") or {})
+        )
         n_l = sum(len(e.get("l") or {}) for e in entries.values())
-        return (f"# migrated: {len(entries)} dictionary field(s), default language "
+        return (f"# migrated: {len(entries)} {scope} dictionary field(s), default language "
                 f"'{data.get('default_language', 'en')}'" + (f", {n_l} translation(s)" if n_l else "")
                 + " — put this at config/dictionary.toml")
     pools = data.get("pools") or {}
@@ -128,6 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
         if name == "dictionary":
             p.add_argument("--default-language", default="en", help="language of v1's ly_dictionary.dd_label (default: en)")
+            p.add_argument("--connector", default=None,
+                           help="nest the entries under [connectors.<name>.entries.*] (v1 dictionaries were per-app); default: top-level")
             p.set_defaults(prefix="", dbtype=None)
         else:
             p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
@@ -135,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
                 p.set_defaults(dbtype=None)
             else:
                 p.add_argument("--dbtype", default=None, help="only migrate ly_qry_sql rows of this query_dbtype")
-            p.set_defaults(default_language="en")
+            p.set_defaults(default_language="en", connector=None)
         p.add_argument("-o", "--out", help="write the TOML here (default: stdout)")
     return parser
 

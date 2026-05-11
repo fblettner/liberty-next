@@ -194,7 +194,7 @@ class SQLConnector:
                         {"name": p.name, "label": p.label, "default": p.default}
                         for p in q.params
                     ],
-                    "columns": [_hint_to_dict(h, self._dict, lang) for h in q.columns],
+                    "columns": [_hint_to_dict(h, self._dict, lang, connector=self.name) for h in q.columns],
                     "bind_params": find_bind_params(q.default_sql),
                     "sql": q.sql,
                 }
@@ -253,7 +253,7 @@ class SQLConnector:
         if is_select:
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
-                columns = _apply_column_hints(_columns_from_result(result), qdef.columns, self._dict, lang)
+                columns = _apply_column_hints(_columns_from_result(result), qdef.columns, self._dict, lang, connector=self.name)
                 rows: list[dict[str, Any]] = []
                 truncated = False
                 for row in result.mappings():
@@ -286,13 +286,16 @@ class SQLConnector:
         )
 
 
-def _resolve_hint(h: ColumnHint, dictionary: DictionaryFile, language: str | None, *, type_: str | None = None) -> Column:
+def _resolve_hint(
+    h: ColumnHint, dictionary: DictionaryFile, language: str | None, *, connector: str | None = None, type_: str | None = None
+) -> Column:
     """A :class:`Column` from a hint: ``label``/``format`` come from the hint if set, else
-    from the shared dictionary entry (key = ``h.dd`` or, when unset, ``h.name``; ``dd = ""``
-    opts out) in *language*; ``hidden``/``width``/``align`` are always the hint's."""
+    from the dictionary entry (key = ``h.dd`` or, when unset, ``h.name``; ``dd = ""`` opts out)
+    in *language* — *connector*'s per-connector section first, then the shared top-level entries;
+    ``hidden``/``width``/``align`` are always the hint's."""
     label, fmt = h.label, h.format
     if (label is None or fmt is None) and h.dictionary_key:
-        dlabel, dfmt = dictionary.resolve(h.dictionary_key, language)
+        dlabel, dfmt = dictionary.resolve(h.dictionary_key, language, connector=connector)
         if label is None:
             label = dlabel
         if fmt is None:
@@ -300,10 +303,10 @@ def _resolve_hint(h: ColumnHint, dictionary: DictionaryFile, language: str | Non
     return Column(name=h.name, type=type_, label=label, hidden=h.hidden, width=h.width, align=h.align, format=fmt)
 
 
-def _hint_to_dict(h: ColumnHint, dictionary: DictionaryFile, language: str | None) -> dict[str, Any]:
+def _hint_to_dict(h: ColumnHint, dictionary: DictionaryFile, language: str | None, *, connector: str | None = None) -> dict[str, Any]:
     """A configured hint as a dict for ``describe()`` — name + the *resolved* label/format
     + any hidden/width/align + the ``dd`` ref (if set). No ``type`` (a hint isn't a result column)."""
-    d = _resolve_hint(h, dictionary, language).to_dict()
+    d = _resolve_hint(h, dictionary, language, connector=connector).to_dict()
     d.pop("type", None)
     if h.dd is not None:
         d["dd"] = h.dd
@@ -311,13 +314,14 @@ def _hint_to_dict(h: ColumnHint, dictionary: DictionaryFile, language: str | Non
 
 
 def _apply_column_hints(
-    discovered: list[Column], hints: list[ColumnHint], dictionary: DictionaryFile, language: str | None
+    discovered: list[Column], hints: list[ColumnHint], dictionary: DictionaryFile, language: str | None,
+    *, connector: str | None = None,
 ) -> list[Column]:
     """Overlay the query's ``columns`` hints on the discovered columns: reorder to the hint
-    order, attach label/hidden/width/align/format (label & format pulled from the shared
-    dictionary when not given inline — see :func:`_resolve_hint`). Columns with no hint keep
-    their discovery order and follow the hinted ones; a hint for a column the query didn't
-    return is ignored (a stale hint never fabricates a column)."""
+    order, attach label/hidden/width/align/format (label & format pulled from the dictionary —
+    *connector*'s section then the shared one — when not given inline; see :func:`_resolve_hint`).
+    Columns with no hint keep their discovery order and follow the hinted ones; a hint for a
+    column the query didn't return is ignored (a stale hint never fabricates a column)."""
     if not hints:
         return discovered
     remaining = {c.name: c for c in discovered}  # insertion-ordered → preserves discovery order
@@ -326,7 +330,7 @@ def _apply_column_hints(
         col = remaining.pop(h.name, None)
         if col is None:
             continue
-        ordered.append(_resolve_hint(h, dictionary, language, type_=col.type))
+        ordered.append(_resolve_hint(h, dictionary, language, connector=connector, type_=col.type))
     ordered.extend(remaining.values())
     return ordered
 

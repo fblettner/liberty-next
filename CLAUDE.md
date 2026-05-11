@@ -48,11 +48,14 @@ Full dep set pinned in `pyproject.toml`.
   `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
   `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
-  + `ly_dictionary_l`). `[entries.<key>]` = `{ label?, format?, rules?/rules_values?/default?` (carried
-  over from v1, not yet interpreted)`, [entries.<key>.l] { fr = "…", … }` (per-language labels) `}`,
-  plus `default_language`. A query's `columns` hints reference these; the SQL connector resolves the
-  label/format at result time, in the request's language. `DictionaryFile.resolve(key, language)` →
-  `(label, format)`. A missing file = an empty dictionary. `/info` reports `dictionary.{entries, default_language}`.
+  + `ly_dictionary_l`). `[entries.<key>]` (or `[connectors.<conn>.entries.<key>]` — per-connector,
+  since v1 dictionaries were per-app) = `{ label?, format?, rules?/rules_values?/default?` (carried
+  over from v1, not yet interpreted)`, [..l] { fr = "…", … }` (per-language labels) `}`, plus
+  `default_language`. A query's `columns` hints reference these; the SQL connector resolves the
+  label/format at result time, in the request's language — its own `[connectors.<conn>.entries.*]`
+  section first, then the shared top-level `[entries.*]`. `DictionaryFile.resolve(key, language,
+  *, connector=…)` → `(label, format)`. A missing file = an empty dictionary. `/info` reports
+  `dictionary.{entries, default_language}`.
 - `base.py` — connector exceptions; `detect_statement_type` (resolves `WITH` CTE
   queries to their main statement keyword — `WITH … SELECT` → `SELECT`, `WITH … DELETE`
   → `DELETE` so the writable gate still applies; an unparseable CTE list → `"WITH"` →
@@ -282,10 +285,11 @@ replies), `@monaco-editor/react` (the connector-config editor).
   reads false), `format?` (only when an explicit `col_type` overrides the dictionary)`}`; table-widget
   columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq` order)
   — passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns`;
-  `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, *, default_language="en")` → the
-  `dictionary.toml` dict (one `[entries.<dd_id>]` per `ly_dictionary` row — `label`=`dd_label`,
+  `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, *, default_language="en", connector_name=None)`
+  → the `dictionary.toml` dict (one `[entries.<dd_id>]` per `ly_dictionary` row — `label`=`dd_label`,
   `format`=a non-trivial `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]`
-  = `{lng_id: lng_label}` from `ly_dictionary_l`). `merge_connectors(*)` (pools merged last → real
+  = `{lng_id: lng_label}` from `ly_dictionary_l`; `connector_name` nests them under
+  `[connectors.<name>.entries.*]`). `merge_connectors(*)` (pools merged last → real
   `migrate_pools` URLs override `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`).
   The `# migrated: …` header notes the counts + the `${…}` placeholders + any `ENC:` secrets +
   a reminder to run `liberty-migrate dictionary` when there are column hints.
@@ -299,9 +303,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
   hints (which reference the dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
-  `dictionary --default-language en` migrates `ly_dictionary` (+ `ly_dictionary_l`). Prepends a
-  `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
-  `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
+  `dictionary [--default-language en] [--connector <app>]` migrates `ly_dictionary` (+ `ly_dictionary_l`)
+  — `--connector` nests the entries under `[connectors.<app>.entries.*]` so several migrated apps don't
+  clash on a `dd_id`. Prepends a `# migrated: …` summary + the `${…}` placeholders the operator must fill
+  in (incl. each `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
 v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
 fragment to review + merge into `config/connectors.toml` (the `dictionary` output → `config/dictionary.toml`).
 *Not yet done:* validate-by-diff against nomasx1's read paths; migrate the real apps

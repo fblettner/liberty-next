@@ -75,20 +75,29 @@ def test_dictionary(tmp_path) -> None:
     assert e.label_for("fr") == "Nom" and e.label_for("de") == "User Name" and e.label_for(None) == "User Name"
     d = parse_dictionary({"default_language": "fr", "entries": {
         "USR_NAME": {"label": "User Name", "format": "text", "l": {"fr": "Nom"}},
-        "USR_STATUS": {"label": "Status", "format": "boolean"},
+        "AUDIT_DATE": {"label": "Audit Date"},  # shared / common
+    }, "connectors": {
+        "nomasx1": {"entries": {"USR_NAME": {"label": "NomasX1 User", "format": "text"}}},  # overrides the shared one
+        "nomajde": {"entries": {"F0101": {"label": "Address Book"}}},
     }})
     assert d.default_language == "fr"
-    assert d.resolve("USR_NAME", "fr") == ("Nom", "text")
-    assert d.resolve("USR_STATUS", "fr") == ("Status", "boolean")  # no fr → default label
-    assert d.resolve("MISSING", "fr") == (None, None)
+    # per-connector section wins, then the shared top-level
+    assert d.resolve("USR_NAME", "fr", connector="nomasx1") == ("NomasX1 User", "text")
+    assert d.resolve("USR_NAME", "fr", connector="nomajde") == ("Nom", "text")          # nomajde has no USR_NAME → shared
+    assert d.resolve("USR_NAME", "fr") == ("Nom", "text")                                # no connector → shared
+    assert d.resolve("AUDIT_DATE", None, connector="nomasx1") == ("Audit Date", None)    # only shared
+    assert d.resolve("F0101", None, connector="nomajde") == ("Address Book", None)
+    assert d.resolve("MISSING", "fr", connector="nomasx1") == (None, None)
     # a missing dictionary.toml → an empty dictionary (default language "en")
     empty = load_dictionary(tmp_path / "nope.toml")
-    assert empty.entries == {} and empty.default_language == "en"
-    # extra keys on an entry are rejected
+    assert empty.entries == {} and empty.connectors == {} and empty.default_language == "en"
+    # extra keys are rejected
     with pytest.raises(Exception):
         DictionaryEntry(label="x", bogus=1)  # type: ignore[call-arg]
     with pytest.raises(Exception):
         DictionaryFile(default_language="en", bogus={})  # type: ignore[call-arg]
+    with pytest.raises(Exception):
+        parse_dictionary({"connectors": {"c": {"bogus": {}}}})  # DictionarySection only allows `entries`
 
 
 def test_pool_config_dialect_override_and_derivation() -> None:

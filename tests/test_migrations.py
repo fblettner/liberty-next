@@ -230,7 +230,7 @@ _DICTIONARY_L = [
 
 def test_migrate_dictionary() -> None:
     out = migrate_dictionary(_DICTIONARY, _DICTIONARY_L)
-    assert out["default_language"] == "en"
+    assert out["default_language"] == "en" and "connectors" not in out
     e = out["entries"]
     assert set(e) == {"USR_NAME", "USR_STATUS", "USR_DT", "ONLY_TRANSLATED"}
     assert e["USR_NAME"] == {"label": "User Name", "l": {"fr": "Nom d'utilisateur"}}  # "text" dd_type → no format
@@ -243,6 +243,12 @@ def test_migrate_dictionary() -> None:
     assert d.resolve("USR_NAME", "fr") == ("Nom d'utilisateur", None)
     assert d.resolve("USR_STATUS", None) == ("Status", "boolean")
     assert d.resolve("USR_DT", "fr") == ("Created", "date")  # no fr → falls back to the default label
+    # --connector → nested under [connectors.<name>.entries.*] (so apps don't clash on a dd_id)
+    out2 = migrate_dictionary(_DICTIONARY, _DICTIONARY_L, connector_name="nomasx1")
+    assert "entries" not in out2 and set(out2["connectors"]["nomasx1"]["entries"]) == set(e)
+    d2 = parse_dictionary(tomllib.loads(render_toml(out2)))
+    assert d2.resolve("USR_NAME", "fr", connector="nomasx1") == ("Nom d'utilisateur", None)
+    assert d2.resolve("USR_NAME", "fr") == (None, None)  # nothing at the top level
 
 
 def test_migrate_sql_queries_with_column_hints() -> None:
@@ -566,12 +572,20 @@ def test_cli_all_to_stdout(tmp_path, capsys) -> None:
 
 
 def test_cli_dictionary(tmp_path) -> None:
+    from liberty.connectors.dictionary import parse_dictionary
     url = _make_v1_db(tmp_path)
     out = tmp_path / "dictionary.toml"
     assert migrate_main(["dictionary", "--source-url", url, "-o", str(out)]) == 0
     txt = out.read_text()
-    assert txt.startswith("# migrated:") and "dictionary field" in txt
-    from liberty.connectors.dictionary import parse_dictionary
+    assert txt.startswith("# migrated:") and "top-level dictionary field" in txt
     d = parse_dictionary(tomllib.loads(txt))  # comments + TOML both parse
     assert d.resolve("USR_NAME", "fr") == ("Nom d'utilisateur", None)
     assert d.resolve("USR_ID", None) == ("User ID", "number")
+    # --connector nomasx1 → nested under [connectors.nomasx1.entries.*]
+    out2 = tmp_path / "dictionary_ns.toml"
+    assert migrate_main(["dictionary", "--source-url", url, "--connector", "nomasx1", "-o", str(out2)]) == 0
+    txt2 = out2.read_text()
+    assert "[connectors.nomasx1] dictionary field" in txt2
+    d2 = parse_dictionary(tomllib.loads(txt2))
+    assert d2.resolve("USR_NAME", "fr", connector="nomasx1") == ("Nom d'utilisateur", None)
+    assert d2.resolve("USR_NAME", "fr") == (None, None)  # nothing at the top level

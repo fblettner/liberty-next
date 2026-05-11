@@ -98,26 +98,31 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
 
 @pytest.mark.asyncio
 async def test_column_hints_resolve_from_dictionary(pools: PoolRegistry) -> None:
+    from liberty.connectors.dictionary import DictionarySection
     d = DictionaryFile(default_language="en", entries={
-        "name": DictionaryEntry(label="Item Name", format="text", l={"fr": "Nom"}),
+        "name": DictionaryEntry(label="Item Name", format="text", l={"fr": "Nom"}),  # shared / common
         "status": DictionaryEntry(label="Status", format="boolean"),
+    }, connectors={
+        # the "db" connector has its own `name` entry (entry-level — wins outright, not a field merge);
+        # it has no `status` entry → that one falls back to the shared one
+        "db": DictionarySection(entries={"name": DictionaryEntry(label="DB Item Name", format="text", l={"fr": "Article DB"})}),
     })
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(
         name="all", sql="SELECT id, name, status FROM item ORDER BY id",
-        # bare hint → look up the dictionary under the column name; `dd` ref; inline `label` overrides
+        # bare hint → look up under the column name; `dd` ref; inline `label` overrides everything
         columns=[ColumnHint(name="name"), ColumnHint(name="status", dd="status", hidden=True), ColumnHint(name="id", label="ID")],
     )])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     cols = {c.name: c for c in (await conn.execute("all")).columns}  # default language
-    assert cols["name"].label == "Item Name" and cols["name"].format == "text"
-    assert cols["status"].label == "Status" and cols["status"].hidden is True and cols["status"].format == "boolean"
+    assert cols["name"].label == "DB Item Name" and cols["name"].format == "text"  # the [connectors.db] entry
+    assert cols["status"].label == "Status" and cols["status"].hidden is True and cols["status"].format == "boolean"  # shared
     assert cols["id"].label == "ID" and cols["id"].format is None  # inline label, no dict entry → no format
     cols = {c.name: c for c in (await conn.execute("all", language="fr")).columns}
-    assert cols["name"].label == "Nom"     # translated
-    assert cols["status"].label == "Status"  # no fr translation → default label
+    assert cols["name"].label == "Article DB"  # the [connectors.db] translation
+    assert cols["status"].label == "Status"    # no fr translation → default label
     # describe() resolves the *default* language; the `dd` ref shows through
     by = {h["name"]: h for h in next(q for q in conn.describe()["queries"] if q["name"] == "all")["columns"]}
-    assert by["name"] == {"name": "name", "label": "Item Name", "format": "text"}
+    assert by["name"] == {"name": "name", "label": "DB Item Name", "format": "text"}
     assert by["status"] == {"name": "status", "dd": "status", "label": "Status", "hidden": True, "format": "boolean"}
     assert by["id"] == {"name": "id", "label": "ID"}
 

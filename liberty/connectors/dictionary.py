@@ -1,28 +1,36 @@
 """The shared **field dictionary** — ``config/dictionary.toml``.
 
 v1's ``ly_dictionary`` defined a field once (``dd_id`` → label, type, rules, default)
-and reused it across every table/form; ``ly_dictionary_l`` carried the per-language
-labels. v2 keeps that idea as a config file: a connector query's ``columns`` hints
-*reference* a dictionary entry (``{ name = "USR_NAME", dd = "USR_NAME" }`` — and a
-bare ``{ name = "USR_NAME" }`` looks the entry up under the column name), and the SQL
-connector resolves the label/format from the dictionary at result time (a per-column
-``label``/``format`` on the hint still overrides, like v1's ``col_label``/``col_type``).
-The migration emits this file from ``ly_dictionary`` (+ ``ly_dictionary_l``).
+and reused it across every table/form within an *app* (each app had its own); ``ly_dictionary_l``
+carried the per-language labels. v2 keeps that idea as a config file: a connector query's
+``columns`` hints *reference* a dictionary entry (``{ name = "USR_NAME", dd = "USR_NAME" }`` —
+and a bare ``{ name = "USR_NAME" }`` looks the entry up under the column name), and the SQL
+connector resolves the label/format at result time (a per-column ``label``/``format`` on the hint
+still overrides, like v1's ``col_label``/``col_type``). v1's per-app isolation maps to **per-connector
+sections** (``[connectors.<name>.entries.*]``) — a ``[connectors.nomasx1]`` query consults
+``[connectors.nomasx1.entries.*]`` first, then the top-level ``[entries.*]`` (a shared/common pool),
+so two migrated apps can't clash on a ``dd_id``. The migration emits this from ``ly_dictionary``
+(+ ``ly_dictionary_l``); ``liberty-migrate dictionary --connector <name>`` nests under that connector.
 
 Example::
 
     default_language = "en"
 
-    [entries.USR_NAME]
+    # shared — consulted by every connector as a fallback
+    [entries.AUDIT_DATE]
+    label = "Audit Date"
+
+    # the nomasx1 app's dictionary
+    [connectors.nomasx1.entries.USR_NAME]
     label  = "User Name"
     format = "text"
-    [entries.USR_NAME.l]
+    [connectors.nomasx1.entries.USR_NAME.l]
     fr = "Nom d'utilisateur"
 
-    [entries.USR_STATUS]
+    [connectors.nomasx1.entries.USR_STATUS]
     label  = "Status"
     format = "boolean"
-    [entries.USR_STATUS.l]
+    [connectors.nomasx1.entries.USR_STATUS.l]
     fr = "Statut"
 """
 
@@ -56,15 +64,29 @@ class DictionaryEntry(BaseModel):
         return self.label
 
 
+class DictionarySection(BaseModel):
+    """A per-connector group of entries (``[connectors.<name>.entries.*]``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entries: dict[str, DictionaryEntry] = Field(default_factory=dict)
+
+
 class DictionaryFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     default_language: str = "en"
-    entries: dict[str, DictionaryEntry] = Field(default_factory=dict)
+    entries: dict[str, DictionaryEntry] = Field(default_factory=dict)              # shared / common
+    connectors: dict[str, DictionarySection] = Field(default_factory=dict)          # per-connector
 
-    def resolve(self, key: str, language: str | None) -> tuple[str | None, str | None]:
-        """``(label, format)`` for *key* in *language* (``(None, None)`` if there's no such entry)."""
-        e = self.entries.get(key)
+    def resolve(self, key: str, language: str | None, *, connector: str | None = None) -> tuple[str | None, str | None]:
+        """``(label, format)`` for *key* in *language* — the entry from *connector*'s section if it
+        has one, else the top-level (shared) entry; ``(None, None)`` if neither exists."""
+        e: DictionaryEntry | None = None
+        if connector and connector in self.connectors:
+            e = self.connectors[connector].entries.get(key)
+        if e is None:
+            e = self.entries.get(key)
         if e is None:
             return None, None
         return e.label_for(language), e.format

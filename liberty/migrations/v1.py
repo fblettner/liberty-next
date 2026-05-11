@@ -248,18 +248,23 @@ def migrate_dictionary(
     dictionary_l_rows: Iterable[Mapping[str, Any]] = (),
     *,
     default_language: str = "en",
+    connector_name: str | None = None,
 ) -> dict[str, Any]:
     """Build the ``dictionary.toml`` dict from v1's ``ly_dictionary`` (+ ``ly_dictionary_l``).
 
     One ``[entries.<dd_id>]`` per ``ly_dictionary`` row: ``label`` = ``dd_label``, ``format`` =
     a non-trivial ``dd_type``, ``rules``/``rules_values``/``default`` carried over verbatim, and
-    ``[entries.<dd_id>.l]`` = ``{lng_id: lng_label}`` from the ``ly_dictionary_l`` rows.
+    ``[entries.<dd_id>.l]`` = ``{lng_id: lng_label}`` from the ``ly_dictionary_l`` rows. If
+    *connector_name* is given (v1 dictionaries were per-app), the entries are nested under
+    ``[connectors.<connector_name>.entries.*]`` instead of the top-level ``[entries.*]`` — so
+    several migrated apps don't clash on a ``dd_id``.
 
     Args:
         dictionary_rows: rows from ``ly_dictionary`` (``dd_id``, ``dd_label``, ``dd_type``,
             ``dd_rules``, ``dd_rules_values``, ``dd_default``).
         dictionary_l_rows: rows from ``ly_dictionary_l`` (``dd_id``, ``lng_id``, ``lng_label``).
         default_language: the language of ``ly_dictionary.dd_label`` (v1's base labels) — ``"en"``.
+        connector_name: nest the entries under this connector's section (default: top-level).
     """
     translations: dict[str, dict[str, str]] = {}
     for r in dictionary_l_rows:
@@ -288,6 +293,8 @@ def migrate_dictionary(
     for dd, l in translations.items():
         if dd not in entries:
             entries[dd] = {"l": l}
+    if connector_name:
+        return {"default_language": default_language, "connectors": {connector_name: {"entries": entries}}}
     return {"default_language": default_language, "entries": entries}
 
 

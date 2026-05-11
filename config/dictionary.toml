@@ -1,0 +1,3336 @@
+# migrated: 525 dictionary field(s), default language 'en', 469 translation(s) — put this at config/dictionary.toml
+
+default_language = "en"
+
+[entries.ACL_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.ACL_APPS_ID.l]
+fr = "Application ID"
+
+[entries.ACL_APPS_TYPE]
+label = "ACL Application Type"
+rules = "ENUM"
+rules_values = "5"
+
+[entries.ACL_APPS_TYPE.l]
+fr = "ACL Type d'application"
+
+[entries.ACL_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[entries.ACL_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.ACL_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[entries.ACL_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.ACL_COUNT]
+label = "Record count"
+
+[entries.ACL_COUNT.l]
+fr = "Nombre d'enregistrement"
+
+[entries.ACL_DT_TRANSACTION]
+label = "Transaction date"
+format = "date"
+
+[entries.ACL_DT_TRANSACTION.l]
+fr = "Date de transaction"
+
+[entries.ACL_NAME]
+label = "Name"
+
+[entries.ACL_NAME.l]
+fr = "Nom"
+
+[entries.ACL_OBJECT_ID]
+label = "Object"
+
+[entries.ACL_OBJECT_ID.l]
+fr = "Objet"
+
+[entries.ACL_RULE]
+label = "ACL Rule"
+rules = "ENUM"
+rules_values = "6"
+
+[entries.ACL_RULE.l]
+fr = "ACL Règle"
+
+[entries.ACL_SCHEMA]
+label = "Owner"
+
+[entries.ACL_SCHEMA.l]
+fr = "Schéma"
+
+[entries.ACL_TABLE_NAME]
+label = "Table Name"
+
+[entries.ACL_TABLE_NAME.l]
+fr = "Table"
+
+[entries.ACL_TYPE]
+label = "ACL Type"
+rules = "ENUM"
+rules_values = "4"
+
+[entries.ACL_TYPE.l]
+fr = "ACL Type"
+
+[entries.ACL_USER_ID]
+label = "User ID"
+
+[entries.ACL_USER_ID.l]
+fr = "Utilisateur"
+
+[entries.ACT1_NAME]
+label = "Activity 1"
+
+[entries.ACT1_NAME.l]
+fr = "Activité 1"
+
+[entries.ACT2_NAME]
+label = "Activity 2"
+
+[entries.ACT2_NAME.l]
+fr = "Activité 2"
+
+[entries.ACT_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.ACT_APPS_ID.l]
+fr = "Application ID"
+
+[entries.ACT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.ACT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.ACT_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.ACT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.ACT_ID]
+label = "Activity ID"
+rules = "LOOKUP"
+rules_values = "10"
+
+[entries.ACT_ID.l]
+fr = "Activité ID"
+
+[entries.ACTIVE_USERS_COUNT]
+label = "# Active Users"
+format = "number"
+
+[entries.ACTIVE_USERS_COUNT.l]
+fr = "# Utilisateurs actif"
+
+[entries.ACT_NAME]
+label = "Activity"
+
+[entries.ACT_NAME.l]
+fr = "Activité"
+
+[entries.ACT_NAME_2]
+label = "Activity 2 Name"
+
+[entries.ACT_NAME_2.l]
+fr = "Nom Activité 2"
+
+[entries.ACT_PROCESS_ID]
+label = "Process ID"
+
+[entries.ACT_PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.ACT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "2"
+
+[entries.ACT_UKID.l]
+fr = "UKID"
+
+[entries.APPS_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.APPS_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.APPS_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.APPS_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.APPS_CTRY_ID]
+label = "Country Code"
+
+[entries.APPS_CTRY_ID.l]
+fr = "Code Pays"
+
+[entries.APPS_DATABASE]
+label = "Database"
+
+[entries.APPS_DATABASE.l]
+fr = "Base de données"
+
+[entries.APPS_DBLINK]
+label = "DB-Link"
+
+[entries.APPS_DBLINK.l]
+fr = "DB-Link"
+
+[entries.APPS_DBTYPE]
+label = "Database"
+rules = "ENUM"
+rules_values = "2"
+
+[entries.APPS_DBTYPE.l]
+fr = "Base de données"
+
+[entries.APPS_DIRECTDB]
+label = "Direct connection"
+
+[entries.APPS_DIRECTDB.l]
+fr = "Connexion directe"
+
+[entries.APPS_HOST]
+label = "Host"
+
+[entries.APPS_HOST.l]
+fr = "Serveur"
+
+[entries.APPS_ID]
+label = "Application ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.APPS_ID.l]
+fr = "Application ID"
+
+[entries.APPS_JDBC]
+label = "JDBC"
+
+[entries.APPS_JDBC.l]
+fr = "JDBC"
+
+[entries.APPS_LICENSE]
+label = "Enable licenses (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.APPS_LICENSE.l]
+fr = "Activer licences (Y/N)"
+
+[entries.APPS_NAME]
+label = "Application Name"
+
+[entries.APPS_NAME.l]
+fr = "Nom de l'application"
+
+[entries.APPS_PASSWORD]
+label = "Password"
+rules = "PASSWORD"
+
+[entries.APPS_PASSWORD.l]
+fr = "Mot de passe"
+
+[entries.APPS_PERFORMANCE]
+label = "Enable performance (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.APPS_PERFORMANCE.l]
+fr = "Activer performance (Y/N)"
+
+[entries.APPS_POPULATE]
+label = "Auto populate (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.APPS_POPULATE.l]
+fr = "Chargement automatique (Y/N)"
+
+[entries.APPS_PORT]
+label = "Port"
+format = "number"
+
+[entries.APPS_PORT.l]
+fr = "Port"
+
+[entries.APPS_SECURITY]
+label = "Enable security (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.APPS_SECURITY.l]
+fr = "Activer sécurité (Y/N)"
+
+[entries.APPS_TYPE]
+label = "Appplication Type"
+rules = "ENUM"
+rules_values = "1"
+
+[entries.APPS_TYPE.l]
+fr = "Type d\\'application"
+
+[entries.APPS_USER]
+label = "User"
+
+[entries.APPS_USER.l]
+fr = "Utilisateur"
+
+[entries.APPS_VERSION]
+label = "Appplication version"
+
+[entries.APPS_VERSION.l]
+fr = "Version applicative"
+
+[entries.AUD_AFTER_VALUE]
+label = "After Value"
+
+[entries.AUD_AFTER_VALUE.l]
+fr = "Valeur après"
+
+[entries.AUD_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.AUD_APPS_ID.l]
+fr = "Application ID"
+
+[entries.AUD_AUDIT_DATE]
+label = "Refresh date"
+
+[entries.AUD_AUDIT_DATE.l]
+fr = "Date de mise à jour"
+
+[entries.AUD_AUDIT_USER]
+label = "User"
+
+[entries.AUD_AUDIT_USER.l]
+fr = "Utilisateur"
+
+[entries.AUD_BEFORE_VALUE]
+label = "Before Value"
+
+[entries.AUD_BEFORE_VALUE.l]
+fr = "Valeur avant"
+
+[entries.AUD_COUNT]
+label = "#Records"
+format = "number"
+
+[entries.AUD_DATABASE]
+label = "Database"
+
+[entries.AUD_DESCRIPTION]
+label = "Table description"
+
+[entries.AUD_DESCRIPTION.l]
+fr = "Description"
+
+[entries.AUD_DT_TRANSACTION]
+label = "Transaction date"
+format = "date"
+
+[entries.AUD_HOST]
+label = "Host"
+
+[entries.AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[entries.AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[entries.AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.AUD_LAST]
+label = "Last Timestamp"
+format = "date"
+
+[entries.AUD_MODULE]
+label = "Module"
+
+[entries.AUD_MODULE.l]
+fr = "Module"
+
+[entries.AUD_NAME]
+label = "Column"
+
+[entries.AUD_OPERATION]
+label = "Operation"
+
+[entries.AUD_PASSWORD]
+label = "Password"
+rules = "PASSWORD"
+
+[entries.AUD_PORT]
+label = "Port"
+format = "number"
+
+[entries.AUD_ROW_ID]
+label = "Row ID"
+format = "number"
+
+[entries.AUD_SCN]
+label = "Last SCN"
+format = "number"
+
+[entries.AUD_SEG_NAME]
+label = "Table Name"
+
+[entries.AUD_SEG_OWNER]
+label = "Schema"
+
+[entries.AUD_SEG_TYPE]
+label = "Object Type"
+
+[entries.AUD_SQL]
+label = "Query"
+format = "textarea"
+
+[entries.AUD_TABLE]
+label = "Module"
+
+[entries.AUD_TABLE.l]
+fr = "Module"
+
+[entries.AUD_TYPE]
+label = "Type"
+
+[entries.AUD_UNDO]
+label = "Undo Query"
+format = "textarea"
+
+[entries.AUD_USER]
+label = "User ID"
+
+[entries.AUD_USERNAME]
+label = "User"
+
+[entries.AUD_VAL_ID]
+label = "Value ID"
+format = "number"
+
+[entries.AUD_VALUE]
+label = "Value"
+
+[entries.CFD_ACT1_ID]
+label = "Activity 1"
+rules = "LOOKUP"
+rules_values = "10"
+
+[entries.CFD_ACT1_ID.l]
+fr = "Activité 1"
+
+[entries.CFD_ACT1_OBJECT]
+label = "Object 1"
+rules = "LOOKUP"
+rules_values = "11"
+
+[entries.CFD_ACT1_OBJECT.l]
+fr = "Programme 1"
+
+[entries.CFD_ACT2_ID]
+label = "Activity 2"
+rules = "LOOKUP"
+rules_values = "10"
+
+[entries.CFD_ACT2_ID.l]
+fr = "Activité 2"
+
+[entries.CFD_ACT2_OBJECT]
+label = "Object 2"
+rules = "LOOKUP"
+rules_values = "11"
+
+[entries.CFD_ACT2_OBJECT.l]
+fr = "Objet 2"
+
+[entries.CFD_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.CFD_APPS_ID.l]
+fr = "Application ID"
+
+[entries.CFD_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.CFD_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[entries.CFD_PROCESS_ID]
+label = "Process ID"
+
+[entries.CFD_PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.CFD_REFRESH]
+label = "Refresh Date"
+
+[entries.CFD_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.CFD_RISK_ID]
+label = "Risk ID"
+
+[entries.CFD_RISK_ID.l]
+fr = "Risque ID"
+
+[entries.CFD_ROLE1_ID]
+label = "Role 1"
+rules = "LOOKUP"
+rules_values = "7"
+
+[entries.CFD_ROLE1_ID.l]
+fr = "Rôle 1"
+
+[entries.CFD_ROLE2_ID]
+label = "Role 2"
+rules = "LOOKUP"
+rules_values = "7"
+
+[entries.CFD_ROLE2_ID.l]
+fr = "Rôle 2"
+
+[entries.CFD_UKID]
+label = "UKID"
+format = "number"
+
+[entries.CFD_UKID.l]
+fr = "UKID"
+
+[entries.CFD_USER_ID]
+label = "User ID"
+
+[entries.CFD_USER_ID.l]
+fr = "Utilisateur ID"
+
+[entries.CFS_ACT1_ID]
+label = "Activity 1 ID"
+
+[entries.CFS_ACT1_ID.l]
+fr = "Activité 1 ID"
+
+[entries.CFS_ACT2_ID]
+label = "Activity 2 ID"
+
+[entries.CFS_ACT2_ID.l]
+fr = "Activité 2 ID"
+
+[entries.CFS_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.CFS_APPS_ID.l]
+fr = "Application ID"
+
+[entries.CFS_COUNT]
+label = "Count"
+
+[entries.CFS_COUNT.l]
+fr = "Nombre"
+
+[entries.CFS_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.CFS_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[entries.CFS_PROCESS_ID]
+label = "Process ID"
+
+[entries.CFS_PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.CFS_REFRESH]
+label = "Refresh date"
+
+[entries.CFS_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.CFS_RISK_ID]
+label = "Risk ID"
+
+[entries.CFS_RISK_ID.l]
+fr = "Risque ID"
+
+[entries.CFS_UKID]
+label = "UKID"
+format = "number"
+
+[entries.CFS_UKID.l]
+fr = "UKID"
+
+[entries.COMPLIANCE]
+label = "# Compliance"
+format = "number"
+
+[entries.COMPLIANCE.l]
+fr = "# Conformité"
+
+[entries.CONFLICTS_COUNT]
+label = "# Conflicts"
+format = "number"
+
+[entries.CONFLICTS_COUNT.l]
+fr = "Nombre de conflits"
+
+[entries.CPT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.CPT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.CPT_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.CPT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.CPT_CATEGORY]
+label = "Category"
+
+[entries.CPT_CATEGORY.l]
+fr = "Catégorie"
+
+[entries.CPT_COMPONENT]
+label = "Component"
+
+[entries.CPT_COMPONENT.l]
+fr = "Composant"
+
+[entries.CPT_ID]
+label = "Component ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "2"
+
+[entries.CPT_ID.l]
+fr = "Composant ID"
+
+[entries.CPT_LISTS]
+label = "Price List"
+
+[entries.CPT_LISTS.l]
+fr = "Liste de prix"
+
+[entries.CPT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "13"
+
+[entries.CPT_UKID.l]
+fr = "UKID"
+
+[entries.CREATE_DBLINK]
+label = "Create DB LINK"
+
+[entries.CREATE_DBLINK.l]
+fr = "Créer un DB LINK"
+
+[entries.CSI_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.CSI_APPS_ID.l]
+fr = "Application ID"
+
+[entries.CSI_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.CSI_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.CSI_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.CSI_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.CSI_DESCRIPTION]
+label = "Description"
+
+[entries.CSI_DESCRIPTION.l]
+fr = "Description"
+
+[entries.CSI_FROM_DATE]
+label = "From Date"
+format = "date"
+
+[entries.CSI_FROM_DATE.l]
+fr = "Date Début"
+
+[entries.CSI_ID]
+label = "CSI Number"
+format = "number"
+rules = "LOOKUP"
+rules_values = "4"
+
+[entries.CSI_ID.l]
+fr = "N° CSI"
+
+[entries.CSI_STATUS]
+label = "Enabled (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+default = "Y"
+
+[entries.CSI_STATUS.l]
+fr = "Actif (Y/N)"
+
+[entries.CSI_TO_DATE]
+label = "To Date"
+format = "date"
+
+[entries.CSI_TO_DATE.l]
+fr = "Date Fin"
+
+[entries.FEA_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.FEA_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.FEA_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.FEA_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.FEA_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[entries.FEA_CPT_ID.l]
+fr = "Composant ID"
+
+[entries.FEA_DESCRIPTION]
+label = "Description"
+
+[entries.FEA_DESCRIPTION.l]
+fr = "Description"
+
+[entries.FEA_FEATURES]
+label = "Features"
+
+[entries.FEA_FEATURES.l]
+fr = "Fonctionnalités"
+
+[entries.FEA_ID]
+label = "Features ID"
+
+[entries.FEA_ID.l]
+fr = "Fonctions ID"
+
+[entries.FEA_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "12"
+
+[entries.FEA_UKID.l]
+fr = "UKID"
+
+[entries.JDE_ACTIVE_USERS]
+label = "Enabled Users"
+
+[entries.JDE_ACTIVE_USERS.l]
+fr = "Afficher les utilisateurs actifs"
+
+[entries.JDE_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[entries.JDE_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.JDE_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[entries.JDE_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.JDE_CO]
+label = "JDE CO"
+
+[entries.JDE_CO.l]
+fr = "JDE CO"
+
+[entries.JDE_CTL]
+label = "JDE CTL"
+
+[entries.JDE_CTL.l]
+fr = "JDE CTL"
+
+[entries.JDE_DTA]
+label = "JDE DTA"
+
+[entries.JDE_DTA.l]
+fr = "JDE DTA"
+
+[entries.JDE_E1COMPOSITE]
+label = "E1 Composite (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.JDE_E1COMPOSITE.l]
+fr = "E1 Composite (Y/N)"
+
+[entries.JDE_E1PAGES]
+label = "E1 Pages (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.JDE_E1PAGES.l]
+fr = "E1 Pages (Y/N)"
+
+[entries.JDE_F00950]
+label = "F00950"
+
+[entries.JDE_F00950.l]
+fr = "F00950"
+
+[entries.JDE_MENU_STANDARD]
+label = "Standard Menu (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.JDE_MENU_STANDARD.l]
+fr = "Menu standard (Y/N)"
+
+[entries.JDE_NOTRANSACTION_USERS]
+label = "Without Transactions"
+
+[entries.JDE_NOTRANSACTION_USERS.l]
+fr = "Sans Transactions"
+
+[entries.JDEO_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.JDEO_APPS_ID.l]
+fr = "Application ID"
+
+[entries.JDEO_DESCRIPTION]
+label = "Description"
+
+[entries.JDEO_DESCRIPTION.l]
+fr = "Description"
+
+[entries.JDE_OL]
+label = "JDE OL"
+
+[entries.JDE_OL.l]
+fr = "JDE OL"
+
+[entries.JDEO_OBJECT]
+label = "Object"
+rules = "LOOKUP"
+rules_values = "12"
+
+[entries.JDEO_OBJECT.l]
+fr = "Objet"
+
+[entries.JDEO_SY]
+label = "System Code"
+
+[entries.JDEO_TYPE]
+label = "Object Type"
+
+[entries.JDEO_TYPE.l]
+fr = "Type Objet"
+
+[entries.JDEO_UKID]
+label = "UKID"
+format = "number"
+
+[entries.JDE_OUT_PURGE]
+label = "Purge OUT (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.JDE_OUT_PURGE.l]
+fr = "Purge OUT"
+
+[entries.JDE_OUT_RETENTION]
+label = "OUT Retention Days"
+format = "number"
+rules_values = "Y"
+
+[entries.JDE_OUT_RETENTION.l]
+fr = "Jours Retention OUT"
+
+[entries.JDES_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.JDES_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.JDES_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.JDES_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.JDES_DESCRIPTION]
+label = "Description"
+
+[entries.JDES_DESCRIPTION.l]
+fr = "Description"
+
+[entries.JDES_OBJECT]
+label = "Object"
+
+[entries.JDES_OBJECT.l]
+fr = "Objet"
+
+[entries.JDES_SY]
+label = "System Code"
+rules = "LOOKUP"
+rules_values = "5"
+
+[entries.JDES_SY.l]
+fr = "Code système"
+
+[entries.JDES_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "9"
+
+[entries.JDES_UKID.l]
+fr = "UKID"
+
+[entries.JDE_SVM]
+label = "JDE SVM"
+
+[entries.JDE_SVM.l]
+fr = "JDE SVM"
+
+[entries.JDE_SY]
+label = "JDE SY"
+
+[entries.JDE_SY.l]
+fr = "JDE SY"
+
+[entries.JDE_TRANSACTION_NOUSERS]
+label = "Users not declared"
+
+[entries.JDE_TRANSACTION_NOUSERS.l]
+fr = "Utilisateurs non déclarés"
+
+[entries.JDE_TRANSACTION_USERS]
+label = "With Transactions"
+
+[entries.JDE_TRANSACTION_USERS.l]
+fr = "Avec Transactions"
+
+[entries.LAST_USAGE]
+label = "Last Usage"
+format = "date"
+
+[entries.LAST_USAGE.l]
+fr = "Dernière utilisation"
+
+[entries.LCA_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.LCA_APPS_ID.l]
+fr = "Application ID"
+
+[entries.LCA_CSI_ID]
+label = "CSI Number"
+format = "number"
+rules = "LOOKUP"
+rules_values = "4"
+
+[entries.LCA_CSI_ID.l]
+fr = "N° CSI"
+
+[entries.LCC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.LCC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.LCC_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.LCC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.LCC_CPT_ID]
+label = "Component ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "2"
+
+[entries.LCC_CSI_ID]
+label = "CSI Number"
+format = "number"
+rules = "LOOKUP"
+rules_values = "4"
+
+[entries.LCC_CSI_ID.l]
+fr = "N° CSI"
+
+[entries.LCC_MET_ID]
+label = "Metric ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "3"
+
+[entries.LCC_QUANTITY]
+label = "Quantity"
+format = "number"
+
+[entries.LCC_QUANTITY.l]
+fr = "Quantité"
+
+[entries.LCC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "19"
+
+[entries.LCC_UKID.l]
+fr = "UKID"
+
+[entries.LDAP_ACCOUNT]
+label = "SamAccountName"
+
+[entries.LDAP_ACCOUNT.l]
+fr = "SamAccountName"
+
+[entries.LDAP_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.LDAP_APPS_ID.l]
+fr = "Application ID"
+
+[entries.LDAP_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[entries.LDAP_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.LDAP_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[entries.LDAP_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.LDAP_CITY]
+label = "City"
+
+[entries.LDAP_CITY.l]
+fr = "City"
+
+[entries.LDAP_COMPANY]
+label = "Company"
+
+[entries.LDAP_COMPANY.l]
+fr = "Company"
+
+[entries.LDAP_CONTEXT]
+label = "LDAP Context"
+format = "textarea"
+
+[entries.LDAP_CONTEXT.l]
+fr = "Contexte LDAP"
+
+[entries.LDAP_CREATION]
+label = "WhenCreated"
+
+[entries.LDAP_CREATION.l]
+fr = "WhenCreated"
+
+[entries.LDAPD_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.LDAPD_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.LDAPD_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.LDAPD_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.LDAPD_DEPARTEMENT]
+label = "Départment"
+
+[entries.LDAPD_DEPARTEMENT.l]
+fr = "Département"
+
+[entries.LDAP_DEPARTMENT]
+label = "Department"
+
+[entries.LDAP_DEPARTMENT.l]
+fr = "Department"
+
+[entries.LDAP_DESCRIPTION]
+label = "Description"
+
+[entries.LDAP_DESCRIPTION.l]
+fr = "Description"
+
+[entries.LDAPD_GROUP]
+label = "Group"
+
+[entries.LDAPD_GROUP.l]
+fr = "Groupe"
+
+[entries.LDAP_DISPLAY_NAME]
+label = "DisplayName"
+
+[entries.LDAP_DISPLAY_NAME.l]
+fr = "DisplayName"
+
+[entries.LDAP_DN]
+label = "distinguishedName"
+
+[entries.LDAP_DN.l]
+fr = "distinguishedName"
+
+[entries.LDAPD_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "16"
+
+[entries.LDAPD_UKID.l]
+fr = "UKID"
+
+[entries.LDAP_EXCLUDE]
+label = "LDAP Exclude"
+format = "textarea"
+
+[entries.LDAP_EXCLUDE.l]
+fr = "Exclusion LDAP"
+
+[entries.LDAP_EXPIRES]
+label = "accountExpires"
+
+[entries.LDAP_EXPIRES.l]
+fr = "accountExpires"
+
+[entries.LDAP_FILTER]
+label = "LDAP Filter"
+format = "textarea"
+
+[entries.LDAP_FILTER.l]
+fr = "Filtre LDAP"
+
+[entries.LDAP_LOGON]
+label = "UserPrincipalName"
+
+[entries.LDAP_LOGON.l]
+fr = "UserPrincipalName"
+
+[entries.LDAP_MAIL]
+label = "Mail"
+
+[entries.LDAP_MAIL.l]
+fr = "Mail"
+
+[entries.LDAP_MANAGER]
+label = "Manager"
+
+[entries.LDAP_MANAGER.l]
+fr = "Manager"
+
+[entries.LDAP_MOBILE]
+label = "mobile"
+
+[entries.LDAP_MOBILE.l]
+fr = "mobile"
+
+[entries.LDAP_NAME]
+label = "Name"
+
+[entries.LDAP_NAME.l]
+fr = "Name"
+
+[entries.LDAP_NEVER_EXPIRES]
+label = "userAccountControl"
+
+[entries.LDAP_NEVER_EXPIRES.l]
+fr = "userAccountControl"
+
+[entries.LDAP_OFFICE]
+label = "physicalDeliveryOfficeName"
+
+[entries.LDAP_OFFICE.l]
+fr = "physicalDeliveryOfficeName"
+
+[entries.LDAP_REFRESH]
+label = "Refresh Date"
+
+[entries.LDAP_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.LDAP_TELEPHONE]
+label = "telephoneNumber"
+
+[entries.LDAP_TELEPHONE.l]
+fr = "telephoneNumber"
+
+[entries.LDAP_TITLE]
+label = "title"
+
+[entries.LDAP_TITLE.l]
+fr = "title"
+
+[entries.LDAP_UKID]
+label = "UKID"
+format = "number"
+
+[entries.LDAP_UKID.l]
+fr = "UKID"
+
+[entries.LEMP_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.LEMP_APPS_ID.l]
+fr = "Application ID"
+
+[entries.LEMP_COMPANY]
+label = "Company"
+
+[entries.LEMP_COMPANY.l]
+fr = "Société"
+
+[entries.LEMP_COUNT]
+label = "# Employees"
+format = "number"
+
+[entries.LEMP_COUNT.l]
+fr = "# Employés"
+
+[entries.LEMP_DT_EXTRACT]
+label = "Extract Date"
+format = "date"
+
+[entries.LEMP_DT_EXTRACT.l]
+fr = "Date de collecte"
+
+[entries.LEMP_DT_START]
+label = "Start Date"
+format = "date"
+
+[entries.LEMP_DT_START.l]
+fr = "Date de début"
+
+[entries.LEMP_DT_WORK]
+label = "Last work date"
+format = "date"
+
+[entries.LEMP_DT_WORK.l]
+fr = "Date de dernière activité"
+
+[entries.LEMP_GROUP]
+label = "Employees Group"
+
+[entries.LEMP_GROUP.l]
+fr = "Groupe Employés"
+
+[entries.LEMP_ID]
+label = "Employee ID"
+format = "number"
+
+[entries.LEMP_ID.l]
+fr = "Employé ID"
+
+[entries.LEMP_NAME]
+label = "Employee Name"
+
+[entries.LEMP_NAME.l]
+fr = "Nom Employé"
+
+[entries.LEMP_TYPE]
+label = "Employee Type"
+
+[entries.LEMP_TYPE.l]
+fr = "Type Employé"
+
+[entries.LEMP_TYPE_DESC]
+label = "Type"
+
+[entries.LEMP_TYPE_DESC.l]
+fr = "Type"
+
+[entries.LKP_ID]
+label = "Lookup ID"
+rules = "SEQUENCE"
+rules_values = "15"
+
+[entries.LKP_ID.l]
+fr = "Recherche ID"
+
+[entries.LOBJ_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.LOBJ_APPS_ID.l]
+fr = "Application ID"
+
+[entries.LOBJ_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.LOBJ_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.LOBJ_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.LOBJ_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.LOBJ_COMPONENT]
+label = "Component"
+
+[entries.LOBJ_COMPONENT.l]
+fr = "Composant"
+
+[entries.LOBJ_DESCRIPTION]
+label = "Description"
+
+[entries.LOBJ_DESCRIPTION.l]
+fr = "Description"
+
+[entries.LOBJ_OBJECT]
+label = "Object"
+
+[entries.LOBJ_OBJECT.l]
+fr = "Objet"
+
+[entries.LOBJ_PRODUCT]
+label = "Product"
+
+[entries.LOBJ_PRODUCT.l]
+fr = "Produit"
+
+[entries.LOBJ_SY]
+label = "System Code"
+
+[entries.LOBJ_SY.l]
+fr = "Code système"
+
+[entries.LOBJ_TYPE]
+label = "Type"
+
+[entries.LOBJ_TYPE.l]
+fr = "Type"
+
+[entries.LOBJ_UKID]
+label = "UKID"
+format = "number"
+
+[entries.LOBJ_UKID.l]
+fr = "UKID"
+
+[entries.LOUT_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.LOUT_APPS_ID.l]
+fr = "Application ID"
+
+[entries.LOUT_COUNT]
+label = "# Call"
+format = "number"
+
+[entries.LOUT_COUNT.l]
+fr = "# Appel"
+
+[entries.LOUT_ENV]
+label = "Environment"
+
+[entries.LOUT_ENV.l]
+fr = "Environnement"
+
+[entries.LOUT_OBJECT]
+label = "Object"
+
+[entries.LOUT_OBJECT.l]
+fr = "Objet"
+
+[entries.LOUT_ROLE]
+label = "Role ID"
+
+[entries.LOUT_ROLE.l]
+fr = "Rôle ID"
+
+[entries.LOUT_TYPE]
+label = "Object Type"
+
+[entries.LOUT_TYPE.l]
+fr = "Type Objet"
+
+[entries.LOUT_USAGE]
+label = "Tracking Date"
+format = "date"
+rules = "CURRENT_DATE"
+
+[entries.LOUT_USAGE.l]
+fr = "Date Utilisation"
+
+[entries.LOUT_USER]
+label = "User ID"
+
+[entries.LOUT_USER.l]
+fr = "Utilisateur ID"
+
+[entries.LOUT_VERSION]
+label = "Version"
+
+[entries.LOUT_VERSION.l]
+fr = "Version"
+
+[entries.LUSR_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.LUSR_APPS_ID.l]
+fr = "Application ID"
+
+[entries.LUSR_COUNT]
+label = "Record Count"
+
+[entries.LUSR_COUNT.l]
+fr = "Nombre de lignes"
+
+[entries.LUSR_DT_TRANSACTION]
+label = "Last transaction"
+format = "date"
+
+[entries.LUSR_DT_TRANSACTION.l]
+fr = "Dernière transaction"
+
+[entries.LUSR_LICENSE_COUNT]
+label = "Licenses used"
+
+[entries.LUSR_LICENSE_COUNT.l]
+fr = "Licences utilisées"
+
+[entries.LUSR_OBJECT]
+label = "Object"
+
+[entries.LUSR_OBJECT.l]
+fr = "Objet"
+
+[entries.LUSR_UKID]
+label = "UKID"
+format = "number"
+
+[entries.LUSR_UKID.l]
+fr = "UKID"
+
+[entries.LUSR_USER_ID]
+label = "User ID"
+
+[entries.LUSR_USER_ID.l]
+fr = "Utilisateur ID"
+
+[entries.MATRIX_ACT1_ID]
+label = "Activity 1 ID"
+rules = "LOOKUP"
+rules_values = "10"
+
+[entries.MATRIX_ACT1_ID.l]
+fr = "Activité 1 ID"
+
+[entries.MATRIX_ACT2_ID]
+label = "Activity 2 ID"
+rules = "LOOKUP"
+rules_values = "10"
+
+[entries.MATRIX_ACT2_ID.l]
+fr = "Activité 2 ID"
+
+[entries.MATRIX_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.MATRIX_APPS_ID.l]
+fr = "Application ID"
+
+[entries.MATRIX_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.MATRIX_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.MATRIX_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.MATRIX_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.MATRIX_PROCESS_ID]
+label = "Process ID"
+
+[entries.MATRIX_PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.MATRIX_RISK_ID]
+label = "Risk ID"
+
+[entries.MATRIX_RISK_ID.l]
+fr = "Risque ID"
+
+[entries.MATRIX_RISK_LEVEL]
+label = "Risk Level"
+
+[entries.MATRIX_RISK_LEVEL.l]
+fr = "Niveau de risque"
+
+[entries.MATRIX_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "4"
+
+[entries.MATRIX_UKID.l]
+fr = "UKID"
+
+[entries.MENU_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.MENU_APPS_ID.l]
+fr = "Application ID"
+
+[entries.MENU_CHILD_ID]
+label = "Child ID"
+
+[entries.MENU_CHILD_ID.l]
+fr = "Enfant ID"
+
+[entries.MENU_FORM]
+label = "Form"
+
+[entries.MENU_FORM.l]
+fr = "Ecran"
+
+[entries.MENU_ID]
+label = "Menu ID"
+
+[entries.MENU_ID.l]
+fr = "Menu ID"
+
+[entries.MENU_LANGUAGE]
+label = "Language"
+
+[entries.MENU_LANGUAGE.l]
+fr = "Langue"
+
+[entries.MENU_LEVEL]
+label = "Level"
+
+[entries.MENU_LEVEL.l]
+fr = "Niveau"
+
+[entries.MENU_LEVEL1]
+label = "Level 1"
+
+[entries.MENU_LEVEL1.l]
+fr = "Niveau 1"
+
+[entries.MENU_LEVEL10]
+label = "Level 10"
+
+[entries.MENU_LEVEL10.l]
+fr = "Niveau 10"
+
+[entries.MENU_LEVEL2]
+label = "Level 2"
+
+[entries.MENU_LEVEL2.l]
+fr = "Niveau 2"
+
+[entries.MENU_LEVEL3]
+label = "Level 3"
+
+[entries.MENU_LEVEL3.l]
+fr = "Niveau 3"
+
+[entries.MENU_LEVEL4]
+label = "Level 4"
+
+[entries.MENU_LEVEL4.l]
+fr = "Niveau 4"
+
+[entries.MENU_LEVEL5]
+label = "Level 5"
+
+[entries.MENU_LEVEL5.l]
+fr = "Niveau 5"
+
+[entries.MENU_LEVEL6]
+label = "Level 6"
+
+[entries.MENU_LEVEL6.l]
+fr = "Niveau 6"
+
+[entries.MENU_LEVEL7]
+label = "Level 7"
+
+[entries.MENU_LEVEL7.l]
+fr = "Niveau 7"
+
+[entries.MENU_LEVEL8]
+label = "Level 8"
+
+[entries.MENU_LEVEL8.l]
+fr = "Niveau 8"
+
+[entries.MENU_LEVEL9]
+label = "Level 9"
+
+[entries.MENU_LEVEL9.l]
+fr = "Niveau 9"
+
+[entries.MENU_OBJECT]
+label = "Object"
+
+[entries.MENU_OBJECT.l]
+fr = "Objet"
+
+[entries.MENU_PARENT_ID]
+label = "Parent ID"
+
+[entries.MENU_PARENT_ID.l]
+fr = "Parent ID"
+
+[entries.MENU_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[entries.MENU_REFRESH.l]
+fr = "Date de mise à jour"
+
+[entries.MENU_ROOT]
+label = "Root"
+
+[entries.MENU_ROOT.l]
+fr = "Racine"
+
+[entries.MENU_ROOT_ID]
+label = "Root ID"
+
+[entries.MENU_ROOT_ID.l]
+fr = "Racine ID"
+
+[entries.MENU_SEQ]
+label = "Sequence"
+
+[entries.MENU_SEQ.l]
+fr = "Séquence"
+
+[entries.MENU_SEQ_UKID]
+label = "Menu UKID"
+
+[entries.MENU_SEQ_UKID.l]
+fr = "Menu UKID"
+
+[entries.MENU_UKID]
+label = "UKID"
+format = "number"
+
+[entries.MENU_UKID.l]
+fr = "UKID"
+
+[entries.MENU_VERSION]
+label = "Version"
+
+[entries.MENU_VERSION.l]
+fr = "Version"
+
+[entries.MET_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.MET_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.MET_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.MET_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.MET_DESCRIPTION]
+label = "Metric"
+
+[entries.MET_DESCRIPTION.l]
+fr = "Métrique"
+
+[entries.MET_ID]
+label = "Metric ID"
+format = "number"
+rules = "LOOKUP"
+rules_values = "3"
+
+[entries.MET_ID.l]
+fr = "Métrique ID"
+
+[entries.MET_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "14"
+
+[entries.MET_UKID.l]
+fr = "MET_UKID"
+
+[entries.OBJECT1_NAME]
+label = "Object Name 1"
+
+[entries.OBJECT1_NAME.l]
+fr = "Nom Objet 1"
+
+[entries.OBJECT2_NAME]
+label = "Object Name 2"
+
+[entries.OBJECT2_NAME.l]
+fr = "Nom Objet 2"
+
+[entries.OBJECT_ACT_ID]
+label = "Activity ID"
+
+[entries.OBJECT_ACT_ID.l]
+fr = "Activité ID"
+
+[entries.OBJECT_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.OBJECT_APPS_ID.l]
+fr = "Application ID"
+
+[entries.OBJECT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.OBJECT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.OBJECT_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.OBJECT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.OBJECT_ID]
+label = "Object Code"
+
+[entries.OBJECT_ID.l]
+fr = "Code Objet"
+
+[entries.OBJECT_NAME]
+label = "Object Name"
+
+[entries.OBJECT_NAME.l]
+fr = "Objet"
+
+[entries.OBJECT_PROCESS_ID]
+label = "Process ID"
+
+[entries.OBJECT_PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.OBJECT_ROW_ID]
+label = "Object ID"
+
+[entries.OBJECT_ROW_ID.l]
+fr = "Objet ID"
+
+[entries.OBJECT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "5"
+
+[entries.OBJECT_UKID.l]
+fr = "UKID"
+
+[entries.OPAR_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.OPAR_APPS_ID.l]
+fr = "Application ID"
+
+[entries.OPAR_MIN_CREATED]
+label = "Create Date"
+format = "date"
+
+[entries.OPAR_MIN_LAST_DDL]
+label = "Last Date"
+format = "date"
+
+[entries.OPAR_MIN_LAST_DDL.l]
+fr = "Date d'utilisation"
+
+[entries.OPAR_OWNER]
+label = "User ID"
+
+[entries.OPAR_OWNER.l]
+fr = "User ID"
+
+[entries.OPAR_SEGMENT_NAME]
+label = "Segment Name"
+
+[entries.OPAR_SEGMENT_NAME.l]
+fr = "Nom du segment"
+
+[entries.OPAR_SEGMENT_TYPE]
+label = "Segment Type"
+
+[entries.OPAR_SEGMENT_TYPE.l]
+fr = "Type de segment"
+
+[entries.OPT_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.OPT_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.OPT_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.OPT_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.OPT_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[entries.OPT_CPT_ID.l]
+fr = "Composant ID"
+
+[entries.OPT_ID]
+label = "Option ID"
+
+[entries.OPT_ID.l]
+fr = "Option ID"
+
+[entries.OPT_OPTION]
+label = "Option"
+
+[entries.OPT_OPTION.l]
+fr = "Option"
+
+[entries.OPT_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "11"
+
+[entries.OPT_UKID.l]
+fr = "UKID"
+
+[entries.ORAF_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.ORAF_APPS_ID.l]
+fr = "Application ID"
+
+[entries.ORAF_FEATURE]
+label = "Feature"
+
+[entries.ORAF_FEATURE.l]
+fr = "Caractéristique"
+
+[entries.ORAF_FIRST_USAGE]
+label = "First Usage"
+
+[entries.ORAF_FIRST_USAGE.l]
+fr = "Première utilisation"
+
+[entries.ORAF_INST_ID]
+label = "Instance"
+
+[entries.ORAF_INST_ID.l]
+fr = "Instance"
+
+[entries.ORAF_LAST_USAGE]
+label = "Last Usage"
+
+[entries.ORAF_LAST_USAGE.l]
+fr = "Dernière Utilisation"
+
+[entries.ORAF_USAGE]
+label = "# Usage"
+
+[entries.ORAF_USAGE.l]
+fr = "# Utilisation"
+
+[entries.ORAL_USED]
+label = "Required License"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.ORAL_USED.l]
+fr = "Licence requise"
+
+[entries.ORAO_INST_ID]
+label = "Instance"
+
+[entries.ORAO_INST_ID.l]
+fr = "Instance"
+
+[entries.ORAO_PARAMETER]
+label = "Option"
+
+[entries.ORAO_PARAMETER.l]
+fr = "Option"
+
+[entries.ORAO_VALUE]
+label = "Enabled (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.ORAO_VALUE.l]
+fr = "Active (Y/N)"
+
+[entries.ORAP_ACTIVE_USERS]
+label = "# Active users"
+
+[entries.ORAP_ACTIVE_USERS.l]
+fr = "# Utilisateurs actifs"
+
+[entries.ORAP_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.ORAP_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.ORAP_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.ORAP_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.ORAP_COUNT_INST]
+label = "# Instance"
+
+[entries.ORAP_COUNT_INST.l]
+fr = "# Instance"
+
+[entries.ORAP_CPU]
+label = "CPU"
+
+[entries.ORAP_CPU.l]
+fr = "CPU"
+
+[entries.ORAP_DBID]
+label = "Id"
+
+[entries.ORAP_DBID.l]
+fr = "Id"
+
+[entries.ORAP_DG]
+label = "Data Guard (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.ORAP_DG.l]
+fr = "Data Guard (Y/N)"
+
+[entries.ORAP_FULL_VERSION]
+label = "Full Version"
+
+[entries.ORAP_FULL_VERSION.l]
+fr = "Version complète"
+
+[entries.ORAP_HOSTNAME]
+label = "Hostname"
+
+[entries.ORAP_HOSTNAME.l]
+fr = "Serveur"
+
+[entries.ORAP_NAME]
+label = "Name"
+
+[entries.ORAP_NAME.l]
+fr = "Nom"
+
+[entries.ORAP_PACK]
+label = "Pack OEM"
+
+[entries.ORAP_PACK.l]
+fr = "Pack OEM"
+
+[entries.ORAP_PRODUCT]
+label = "Component"
+
+[entries.ORAP_PRODUCT.l]
+fr = "Composant"
+
+[entries.ORAP_SIZE_GB]
+label = "Size GB"
+format = "number"
+
+[entries.ORAP_SIZE_GB.l]
+fr = "Taille Gb"
+
+[entries.ORAP_TECHNICAL_USERS]
+label = "# Technical Users"
+
+[entries.ORAP_TECHNICAL_USERS.l]
+fr = "# Utilisateurs Techniques"
+
+[entries.ORAP_TOTAL_USERS]
+label = "# Total users"
+
+[entries.ORAP_TOTAL_USERS.l]
+fr = "# Utilisateurs déclarés"
+
+[entries.ORAP_UKID]
+label = "UKID"
+format = "number"
+
+[entries.ORAP_UKID.l]
+fr = "UKID"
+
+[entries.ORAP_VERSION]
+label = "Version"
+
+[entries.ORAP_VERSION.l]
+fr = "Version"
+
+[entries.PRC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.PRC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.PRC_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.PRC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.PRC_COMPONENT_ID]
+label = "Component ID"
+
+[entries.PRC_COMPONENT_ID.l]
+fr = "Composant ID"
+
+[entries.PRC_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[entries.PRC_CPT_ID.l]
+fr = "UKID"
+
+[entries.PRC_ID]
+label = "ID"
+format = "number"
+
+[entries.PRC_ID.l]
+fr = "ID"
+
+[entries.PRC_MET_ID]
+label = "Metric ID"
+format = "number"
+
+[entries.PRC_MET_ID.l]
+fr = "UKID"
+
+[entries.PRC_METRIC_ID]
+label = "Metric ID"
+
+[entries.PRC_METRIC_ID.l]
+fr = "Métrique ID"
+
+[entries.PRC_MINIMUM]
+label = "Minimum"
+
+[entries.PRC_MINIMUM.l]
+fr = "Minimum"
+
+[entries.PRC_PRICE]
+label = "Price"
+format = "number"
+
+[entries.PRC_PRICE.l]
+fr = "Tarif"
+
+[entries.PRC_SUPPORT]
+label = "Support"
+format = "number"
+
+[entries.PRC_SUPPORT.l]
+fr = "Support"
+
+[entries.PRC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "15"
+
+[entries.PRC_UKID.l]
+fr = "UKID"
+
+[entries.PROCESS_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.PROCESS_APPS_ID.l]
+fr = "Application ID"
+
+[entries.PROCESS_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.PROCESS_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.PROCESS_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.PROCESS_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.PROCESS_ID]
+label = "Process ID"
+rules = "LOOKUP"
+rules_values = "8"
+
+[entries.PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.PROCESS_NAME]
+label = "Process"
+
+[entries.PROCESS_NAME.l]
+fr = "Process"
+
+[entries.PROCESS_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "1"
+
+[entries.PROCESS_UKID.l]
+fr = "UKID"
+
+[entries.PRQ_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.PRQ_APPS_ID.l]
+fr = "Application ID"
+
+[entries.PRQ_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.PRQ_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.PRQ_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.PRQ_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.PRQ_COMPONENT]
+label = "Component"
+
+[entries.PRQ_COMPONENT.l]
+fr = "Composant"
+
+[entries.PRQ_PREREQ]
+label = "Prerequisite"
+
+[entries.PRQ_PREREQ.l]
+fr = "Pré-requis"
+
+[entries.PRQ_PRODUCT]
+label = "Product"
+
+[entries.PRQ_PRODUCT.l]
+fr = "Produit"
+
+[entries.PRQ_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "7"
+
+[entries.PRQ_UKID.l]
+fr = "UKID"
+
+[entries.QUERY_CRUD]
+label = "Query Type"
+
+[entries.QUERY_CRUD.l]
+fr = "Type de requête"
+
+[entries.QUERY_ORDER]
+label = "Sort order"
+
+[entries.QUERY_ORDER.l]
+fr = "Ordre de tri"
+
+[entries.QUERY_PATH]
+label = "Query ID"
+
+[entries.QUERY_PATH.l]
+fr = "Identifiant de requête"
+
+[entries.QUERY_SQL]
+label = "SQL Query"
+
+[entries.QUERY_SQL.l]
+fr = "Requête SQL"
+
+[entries.RISK_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.RISK_APPS_ID.l]
+fr = "Application ID"
+
+[entries.RISK_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.RISK_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.RISK_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.RISK_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.RISK_ID]
+label = "Risk ID"
+rules = "LOOKUP"
+rules_values = "9"
+
+[entries.RISK_ID.l]
+fr = "Risque ID"
+
+[entries.RISK_LEVEL]
+label = "Critical Level"
+
+[entries.RISK_LEVEL.l]
+fr = "Niveau critique"
+
+[entries.RISK_NAME]
+label = "Risk"
+format = "textarea"
+
+[entries.RISK_NAME.l]
+fr = "Risque"
+
+[entries.RISK_PROCESS_ID]
+label = "Process ID"
+
+[entries.RISK_PROCESS_ID.l]
+fr = "Process ID"
+
+[entries.RISK_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "3"
+
+[entries.RISK_UKID.l]
+fr = "UKID"
+
+[entries.RLU_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.RLU_APPS_ID.l]
+fr = "Application ID"
+
+[entries.RLU_DT_EFFECTIVE]
+label = "Effective Date"
+format = "date"
+
+[entries.RLU_DT_EFFECTIVE.l]
+fr = "Date effective"
+
+[entries.RLU_DT_EXPIRATION]
+label = "Expiration Date"
+format = "date"
+
+[entries.RLU_DT_EXPIRATION.l]
+fr = "Date expiration"
+
+[entries.RLU_DT_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[entries.RLU_DT_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.RLU_ROLE_ID]
+label = "Role ID"
+
+[entries.RLU_ROLE_ID.l]
+fr = "Role ID"
+
+[entries.RLU_UKID]
+label = "UKID"
+format = "number"
+
+[entries.RLU_UKID.l]
+fr = "UKID"
+
+[entries.RLU_USER_ID]
+label = "User ID"
+
+[entries.RLU_USER_ID.l]
+fr = "Utilisateur ID"
+
+[entries.ROL1_NAME]
+label = "Role Name 1"
+
+[entries.ROL1_NAME.l]
+fr = "Nom du rôle 1"
+
+[entries.ROL2_NAME]
+label = "Role Name 2"
+
+[entries.ROL2_NAME.l]
+fr = "Nom du rôle 2"
+
+[entries.ROL_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.ROL_APPS_ID.l]
+fr = "Application ID"
+
+[entries.ROL_DT_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[entries.ROL_DT_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.ROL_ID]
+label = "Role ID"
+rules = "LOOKUP"
+rules_values = "7"
+
+[entries.ROL_ID.l]
+fr = "Role ID"
+
+[entries.ROL_NAME]
+label = "Role Name"
+
+[entries.ROL_NAME.l]
+fr = "Nom du rôle"
+
+[entries.ROL_NAME_2]
+label = "Role Name 2"
+
+[entries.ROL_NAME_2.l]
+fr = "Nom du rôle 2"
+
+[entries.ROL_SEQ]
+label = "Sequence"
+
+[entries.ROL_SEQ.l]
+fr = "Séquence"
+
+[entries.ROL_UKID]
+label = "UKID"
+format = "number"
+
+[entries.ROL_UKID.l]
+fr = "UKID"
+
+[entries.RTC_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.RTC_APPS_ID.l]
+fr = "Application ID"
+
+[entries.RTC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.RTC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.RTC_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.RTC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.RTC_COMPONENT]
+label = "Component"
+
+[entries.RTC_COMPONENT.l]
+fr = "Composant"
+
+[entries.RTC_PRODUCT]
+label = "Product"
+
+[entries.RTC_PRODUCT.l]
+fr = "Produit"
+
+[entries.RTC_RESTRICTION]
+label = "Restrictions"
+
+[entries.RTC_RESTRICTION.l]
+fr = "Restrictions"
+
+[entries.RTC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "8"
+
+[entries.RTC_UKID.l]
+fr = "UKID"
+
+[entries.SEC_DESCRIPTION]
+label = "Table description"
+
+[entries.SEC_DESCRIPTION.l]
+fr = "Description"
+
+[entries.SEC_LANGUAGE]
+label = "Language"
+
+[entries.SEC_LANGUAGE.l]
+fr = "Language"
+
+[entries.SEC_NAME]
+label = "Table name"
+
+[entries.SEC_NAME.l]
+fr = "Table"
+
+[entries.SEC_SEQUENCE]
+label = "Sequence"
+
+[entries.SEC_SEQUENCE.l]
+fr = "Séquence"
+
+[entries.SER_ADD]
+label = "A"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.SER_ADD.l]
+fr = "A"
+
+[entries.SER_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.SER_APPS_ID.l]
+fr = "Application ID"
+
+[entries.SER_CHG]
+label = "C"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.SER_CHG.l]
+fr = "M"
+
+[entries.SER_DEL]
+label = "D"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.SER_DEL.l]
+fr = "S"
+
+[entries.SERL_FORM]
+label = "Form"
+
+[entries.SERL_FORM.l]
+fr = "Ecran"
+
+[entries.SER_MENU_SEQUKID]
+label = "Menu ID"
+
+[entries.SER_MENU_SEQUKID.l]
+fr = "Menu ID"
+
+[entries.SER_OBJECT]
+label = "Object"
+
+[entries.SER_OBJECT.l]
+fr = "Objet"
+
+[entries.SER_REFRESH]
+label = "Refresh Date"
+
+[entries.SER_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.SER_ROLE_ACTION_ID]
+label = "Role Action ID"
+
+[entries.SER_ROLE_ACTION_ID.l]
+fr = "Role Action ID"
+
+[entries.SER_ROLE_ID]
+label = "Role ID"
+
+[entries.SER_ROLE_ID.l]
+fr = "Role ID"
+
+[entries.SER_ROOT_ID]
+label = "Root ID"
+
+[entries.SER_ROOT_ID.l]
+fr = "Racine ID"
+
+[entries.SER_RUN]
+label = "Run"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.SER_RUN.l]
+fr = "Exécuter"
+
+[entries.SER_UKID]
+label = "UKID"
+format = "number"
+
+[entries.SER_UKID.l]
+fr = "UKID"
+
+[entries.SER_USER_ID]
+label = "User ID"
+
+[entries.SER_USER_ID.l]
+fr = "Utilisateur ID"
+
+[entries.SER_VERSION]
+label = "Version"
+
+[entries.SER_VERSION.l]
+fr = "Version"
+
+[entries.SQL_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.SQL_APPS_ID.l]
+fr = "Application ID"
+
+[entries.SQL_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.SQL_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.SQL_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.SQL_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.SQL_BLOB]
+label = "Query"
+format = "textarea"
+
+[entries.SQL_BLOB.l]
+fr = "Requête"
+
+[entries.SQL_DEFAULT]
+label = "Embedded query"
+
+[entries.SQL_DEFAULT.l]
+fr = "Prédéfinie (Y/N)"
+
+[entries.SQL_JDBC]
+label = "JDBC"
+
+[entries.SQL_JDBC.l]
+fr = "JDBC"
+
+[entries.SQL_METHOD]
+label = "SQL Method"
+rules = "ENUM"
+rules_values = "3"
+
+[entries.SQL_METHOD.l]
+fr = "Nom de la méthode SQL"
+
+[entries.SQL_PASSWORD]
+label = "Password"
+rules = "PASSWORD"
+
+[entries.SQL_PASSWORD.l]
+fr = "Mot de passe"
+
+[entries.SQL_USER]
+label = "User"
+
+[entries.SQL_USER.l]
+fr = "Utilisateur"
+
+[entries.SUBSCRIBED]
+label = "# Subscribed"
+format = "number"
+
+[entries.SUBSCRIBED.l]
+fr = "Licences acquises"
+
+[entries.SYC_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.SYC_APPS_ID.l]
+fr = "Application ID"
+
+[entries.SYC_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.SYC_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.SYC_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.SYC_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.SYC_COMPONENT_E1]
+label = "E1 Component"
+
+[entries.SYC_COMPONENT_E1.l]
+fr = "Composant E1"
+
+[entries.SYC_COMPONENT_PRICING]
+label = "Pricing Component"
+
+[entries.SYC_COMPONENT_PRICING.l]
+fr = "Module prix"
+
+[entries.SYC_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[entries.SYC_CPT_ID.l]
+fr = "Composant ID"
+
+[entries.SYC_DESCRIPTION]
+label = "Description"
+
+[entries.SYC_DESCRIPTION.l]
+fr = "Description"
+
+[entries.SYC_ID]
+label = "Code"
+
+[entries.SYC_ID.l]
+fr = "Code"
+
+[entries.SYC_MODULE]
+label = "Module E1"
+
+[entries.SYC_MODULE.l]
+fr = "Module E1"
+
+[entries.SYC_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "6"
+
+[entries.SYC_UKID.l]
+fr = "UKID"
+
+[entries.TOTAL_COMPLIANCE]
+label = "Total Costs"
+format = "number"
+
+[entries.TOTAL_COMPLIANCE.l]
+fr = "Coût Total"
+
+[entries.TOTAL_PRICE]
+label = "Licenses Costs"
+format = "number"
+
+[entries.TOTAL_PRICE.l]
+fr = "Coût Licences"
+
+[entries.TOTAL_SUPPORT]
+label = "Support Costs"
+format = "number"
+
+[entries.TOTAL_SUPPORT.l]
+fr = "Coût Support"
+
+[entries.TV_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.TV_APPS_ID.l]
+fr = "Application ID"
+
+[entries.TV_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[entries.TV_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.TV_AUDIT_USER]
+label = "User (Audit)"
+rules = "LOGIN"
+
+[entries.TV_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.TV_SECURITY]
+label = "Collect Security (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.TV_SECURITY.l]
+fr = "Collecter la sécurité (Y/N)"
+
+[entries.TV_TASK_ID]
+label = "Task ID"
+
+[entries.TV_TASK_ID.l]
+fr = "Tâche ID"
+
+[entries.TV_TASK_NAME]
+label = "Task Name"
+
+[entries.TV_TASK_NAME.l]
+fr = "Nom Tâche"
+
+[entries.USERS_COUNT]
+label = "# Users"
+format = "number"
+
+[entries.USERS_COUNT.l]
+fr = "# Utilisateurs"
+
+[entries.USR_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.USR_APPS_ID.l]
+fr = "Application ID"
+
+[entries.USRD_ABAT1]
+label = "User Type"
+
+[entries.USRD_ABAT1.l]
+fr = "Type Utilisateur"
+
+[entries.USRD_ABAT1_DESC]
+label = "Type Description"
+
+[entries.USRD_ABAT1_DESC.l]
+fr = "Description Type"
+
+[entries.USRD_AC01]
+label = "Cat.1 Id"
+
+[entries.USRD_AC01.l]
+fr = "Cat.1 Id"
+
+[entries.USRD_AC01_DESC]
+label = "Cat.1"
+
+[entries.USRD_AC01_DESC.l]
+fr = "Cat.1"
+
+[entries.USRD_AC02]
+label = "Cat.2 Id"
+
+[entries.USRD_AC02.l]
+fr = "Cat.2 Id"
+
+[entries.USRD_AC02_DESC]
+label = "Cat.2"
+
+[entries.USRD_AC02_DESC.l]
+fr = "Cat.2"
+
+[entries.USRD_AC03]
+label = "Cat.3 Id"
+
+[entries.USRD_AC03.l]
+fr = "Cat.3 Id"
+
+[entries.USRD_AC03_DESC]
+label = "Cat.3"
+
+[entries.USRD_AC03_DESC.l]
+fr = "Cat.3"
+
+[entries.USRD_AC04]
+label = "Cat.4 Id"
+
+[entries.USRD_AC04.l]
+fr = "Cat.4 Id"
+
+[entries.USRD_AC04_DESC]
+label = "Cat.4"
+
+[entries.USRD_AC04_DESC.l]
+fr = "Cat.4"
+
+[entries.USRD_AC05]
+label = "Cat.5 Id"
+
+[entries.USRD_AC05.l]
+fr = "Cat.5 Id"
+
+[entries.USRD_AC05_DESC]
+label = "Cat.5"
+
+[entries.USRD_AC05_DESC.l]
+fr = "Cat.5"
+
+[entries.USRD_AC06]
+label = "Cat.6 Id"
+
+[entries.USRD_AC06_DESC]
+label = "Cat.6"
+
+[entries.USRD_AC07]
+label = "Cat.7 Id"
+
+[entries.USRD_AC07_DESC]
+label = "Cat.7"
+
+[entries.USRD_AC08]
+label = "Cat.8 Id"
+
+[entries.USRD_AC08_DESC]
+label = "Cat.8"
+
+[entries.USRD_AC09]
+label = "Cat.9 Id"
+
+[entries.USRD_AC09_DESC]
+label = "Cat.9"
+
+[entries.USRD_AC10]
+label = "Cat.10 Id"
+
+[entries.USRD_AC10_DESC]
+label = "Cat.10"
+
+[entries.USRD_AC11]
+label = "Cat.11 Id"
+
+[entries.USRD_AC11_DESC]
+label = "Cat.11"
+
+[entries.USRD_AC12]
+label = "Cat.12 Id"
+
+[entries.USRD_AC12_DESC]
+label = "Cat.12"
+
+[entries.USRD_AC13]
+label = "Cat.13 Id"
+
+[entries.USRD_AC13_DESC]
+label = "Cat.13"
+
+[entries.USRD_AC14]
+label = "Cat.14 Id"
+
+[entries.USRD_AC14_DESC]
+label = "Cat.14"
+
+[entries.USRD_AC15]
+label = "Cat.15 Id"
+
+[entries.USRD_AC15_DESC]
+label = "Cat.15"
+
+[entries.USRD_AC16]
+label = "Cat.16 Id"
+
+[entries.USRD_AC16_DESC]
+label = "Cat.16"
+
+[entries.USRD_AC17]
+label = "Cat.17 Id"
+
+[entries.USRD_AC17_DESC]
+label = "Cat.17"
+
+[entries.USRD_AC18]
+label = "Cat.18 Id"
+
+[entries.USRD_AC18_DESC]
+label = "Cat.18"
+
+[entries.USRD_AC19]
+label = "Cat.19 Id"
+
+[entries.USRD_AC19_DESC]
+label = "Cat.19"
+
+[entries.USRD_AC20]
+label = "Cat.20 Id"
+
+[entries.USRD_AC20_DESC]
+label = "Cat.20"
+
+[entries.USRD_AN8]
+label = "Address Number"
+
+[entries.USRD_AN8.l]
+fr = "Référence"
+
+[entries.USRD_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.USRD_APPS_ID.l]
+fr = "Application ID"
+
+[entries.USRD_EAEMAL]
+label = "Email"
+
+[entries.USRD_EAEMAL.l]
+fr = "Email"
+
+[entries.USRD_ID]
+label = "User ID"
+
+[entries.USRD_ID.l]
+fr = "Utilisateur ID"
+
+[entries.USRD_MCCO]
+label = "Company"
+
+[entries.USRD_MCCO.l]
+fr = "Société"
+
+[entries.USRD_MCMCU]
+label = "Business Unit"
+
+[entries.USRD_MCMCU.l]
+fr = "Centre de coût"
+
+[entries.USRD_MCRP08]
+label = "BU Code Cat 8"
+
+[entries.USRD_MCRP08.l]
+fr = "CC Code Cat 8"
+
+[entries.USRD_MCRP09]
+label = "BU Code Cat 9"
+
+[entries.USRD_MCRP09.l]
+fr = "CC Code Cat 9"
+
+[entries.USRD_REFRESH]
+label = "Refresh date"
+
+[entries.USRD_REFRESH.l]
+fr = "Refresh date"
+
+[entries.USR_DT_CREATION]
+label = "Creation Date"
+format = "date"
+
+[entries.USR_DT_CREATION.l]
+fr = "Date de création"
+
+[entries.USR_DT_LOGIN]
+label = "Login Date"
+format = "date"
+
+[entries.USR_DT_LOGIN.l]
+fr = "Date de connexion"
+
+[entries.USR_DT_REFRESH]
+label = "Refresh Date"
+format = "date"
+
+[entries.USR_DT_REFRESH.l]
+fr = "Date mise à jour"
+
+[entries.USR_DT_UPDATE]
+label = "Last Update"
+format = "date"
+
+[entries.USR_DT_UPDATE.l]
+fr = "Date MAJ"
+
+[entries.USRD_UKID]
+label = "UKID"
+format = "number"
+
+[entries.USRD_UKID.l]
+fr = "UKID"
+
+[entries.USRD_ULCTR]
+label = "Country"
+
+[entries.USRD_ULCTR.l]
+fr = "Pays"
+
+[entries.USRD_ULFRMT]
+label = "Format Date"
+
+[entries.USRD_ULFRMT.l]
+fr = "Format de date"
+
+[entries.USRD_ULLNGP]
+label = "Language"
+
+[entries.USRD_ULLNGP.l]
+fr = "Langue"
+
+[entries.USRD_ULLUSER]
+label = "Long User"
+
+[entries.USRD_ULLUSER.l]
+fr = "Utilisateur Long"
+
+[entries.USR_ID]
+label = "User ID"
+rules = "LOOKUP"
+rules_values = "6"
+
+[entries.USR_ID.l]
+fr = "Utilisateur ID"
+
+[entries.USR_NAME]
+label = "User Name"
+
+[entries.USR_NAME.l]
+fr = "Utilisateur"
+
+[entries.USRP_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.USRP_APPS_ID.l]
+fr = "Application ID"
+
+[entries.USRP_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+rules = "SYSDATE"
+
+[entries.USRP_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.USRP_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.USRP_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.USRP_GENERIC]
+label = "Generic (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.USRP_GENERIC.l]
+fr = "Générique (Y/N)"
+
+[entries.USRP_GENERIC_COUNT]
+label = "Generic count"
+format = "number"
+default = "0"
+
+[entries.USRP_GENERIC_COUNT.l]
+fr = "Générique nombre"
+
+[entries.USRP_ID]
+label = "User ID"
+
+[entries.USRP_ID.l]
+fr = "Utilisateur ID"
+
+[entries.USRP_ID_LINKED]
+label = "Linked User ID"
+
+[entries.USRP_ID_LINKED.l]
+fr = "Utilisateur lié"
+
+[entries.USRP_ID_PREVIOUS]
+label = "Previous User ID"
+
+[entries.USRP_ID_PREVIOUS.l]
+fr = "Utilisateur précédent"
+
+[entries.USRP_IS_LINKED]
+label = "Is Linked (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.USRP_IS_LINKED.l]
+fr = "Lié (Y/N)"
+
+[entries.USRP_IS_PREVIOUS]
+label = "Is renamed (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.USRP_IS_PREVIOUS.l]
+fr = "Renommé (Y/N)"
+
+[entries.USRP_NAME]
+label = "User Name"
+
+[entries.USRP_NAME.l]
+fr = "Utilisateur"
+
+[entries.USRP_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.USRP_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[entries.USR_PRIVILEGED]
+label = "Privileged (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.USR_PRIVILEGED.l]
+fr = "Privilèges (Y/N)"
+
+[entries.USRP_TECHNICAL]
+label = "Technical (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.USRP_TECHNICAL.l]
+fr = "Technique (Y/N)"
+
+[entries.USRP_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "17"
+
+[entries.USRP_UKID.l]
+fr = "UKID"
+
+[entries.USR_REGISTRATION]
+label = "Registration"
+
+[entries.USR_REGISTRATION.l]
+fr = "Matricule"
+
+[entries.USR_STATUS]
+label = "Status"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "01"
+
+[entries.USR_STATUS.l]
+fr = "Statut"
+
+[entries.USR_UKID]
+label = "UKID"
+format = "number"
+
+[entries.USR_UKID.l]
+fr = "UKID"
+
+[entries.VAL_ENUM]
+label = "Enum ID"
+
+[entries.VAL_ENUM.l]
+fr = "Enum ID"
+
+[entries.VAL_LABEL]
+label = "Description"
+
+[entries.VAL_LABEL.l]
+fr = "Description"
+
+[entries.VER_AUDIT_DATE]
+label = "Date (Audit)"
+format = "date"
+
+[entries.VER_AUDIT_DATE.l]
+fr = "Date (Audit)"
+
+[entries.VER_AUDIT_USER]
+label = "User (Audit)"
+
+[entries.VER_AUDIT_USER.l]
+fr = "Utilisateur (Audit)"
+
+[entries.VER_CPT_ID]
+label = "Component ID"
+format = "number"
+
+[entries.VER_CPT_ID.l]
+fr = "Composant ID"
+
+[entries.VER_ID]
+label = "Version ID"
+
+[entries.VER_ID.l]
+fr = "Version ID"
+
+[entries.VER_UKID]
+label = "UKID"
+format = "number"
+rules = "SEQUENCE"
+rules_values = "10"
+
+[entries.VER_UKID.l]
+fr = "UKID"
+
+[entries.VER_VERSION]
+label = "Version"
+
+[entries.VER_VERSION.l]
+fr = "Version"
+
+[entries.XREF_APPS_ID]
+label = "Application ID"
+format = "number"
+
+[entries.XREF_APPS_ID.l]
+fr = "Application ID"
+
+[entries.XREF_DESCRIPTION_FROM]
+label = "Description From"
+
+[entries.XREF_DESCRIPTION_FROM.l]
+fr = "Description From"
+
+[entries.XREF_DESCRIPTION_TO]
+label = "Description To"
+
+[entries.XREF_DESCRIPTION_TO.l]
+fr = "Description To"
+
+[entries.XREF_OBJECT_FROM]
+label = "Object From"
+
+[entries.XREF_OBJECT_FROM.l]
+fr = "Object From"
+
+[entries.XREF_OBJECT_TO]
+label = "Object To"
+
+[entries.XREF_OBJECT_TO.l]
+fr = "Object To"
+
+[entries.XREF_TYPE_FROM]
+label = "Type From"
+
+[entries.XREF_TYPE_FROM.l]
+fr = "Type From"
+
+[entries.XREF_TYPE_TO]
+label = "Type To"
+
+[entries.XREF_TYPE_TO.l]
+fr = "Type To"
+
+[entries.XREF_UKID]
+label = "UKID"
+format = "number"
+
+[entries.XREF_UKID.l]
+fr = "UKID"
