@@ -25,6 +25,7 @@ const en = {
     working: '…',
     cancel: 'Cancel',
     confirm: 'Confirm',
+    edit: 'Edit',
     back: 'back',
     send: 'Send',
     none: 'none',
@@ -100,6 +101,10 @@ const en = {
     idColumnSuffix: '(ID)',
     filterAny: '(any)',
     filterOp: 'Operator',
+    edit: 'Edit',
+    editTip: 'Edit rows in place ({{q}})',
+    editingHint: 'Editing a row — Save or Cancel.',
+    nullOption: '(null)',
   },
   http: {
     ok: 'OK',

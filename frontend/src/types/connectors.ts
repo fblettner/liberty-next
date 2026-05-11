@@ -11,6 +11,8 @@ export interface SqlQueryMeta {
   label: string | null
   description: string | null
   writable: boolean
+  /** the writable query that updates one row of this query's result (`<base>_put`), if any — enables inline edit */
+  update_query: string | null
   statement_type: string
   params: ParamDef[]
   bind_params: string[]

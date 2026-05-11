@@ -159,6 +159,8 @@ export default function TableView() {
                 result={result}
                 connector={connector}
                 query={query}
+                updateQuery={meta.update_query}
+                onSaved={run}
               />
             )}
           </Stack>

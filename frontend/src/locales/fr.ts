@@ -27,6 +27,7 @@ const fr: Resources = {
     working: '…',
     cancel: 'Annuler',
     confirm: 'Confirmer',
+    edit: 'Modifier',
     back: 'retour',
     send: 'Envoyer',
     none: 'aucun',
@@ -102,6 +103,10 @@ const fr: Resources = {
     idColumnSuffix: '(ID)',
     filterAny: '(tout)',
     filterOp: 'Opérateur',
+    edit: 'Modifier',
+    editTip: 'Modifier les lignes sur place ({{q}})',
+    editingHint: 'Modification d’une ligne — Enregistrer ou Annuler.',
+    nullOption: '(null)',
   },
   http: {
     ok: 'OK',

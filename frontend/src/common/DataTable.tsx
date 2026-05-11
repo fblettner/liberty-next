@@ -266,8 +266,9 @@ export function DataTable<T extends object>({
     setColumnOrder(next)
   }
 
+  const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as { internal?: boolean } | undefined)?.internal
   const exportRows = () => {
-    const cols = table.getVisibleLeafColumns()
+    const cols = table.getVisibleLeafColumns().filter((c) => !isInternal(c))
     const headers = cols.map((c) => colHeaderText(c))
     const rows = table.getFilteredRowModel().rows.map((row) =>
       cols.map((col) => {
@@ -355,7 +356,7 @@ export function DataTable<T extends object>({
               <ColMenu>
                 {effectiveOrder.map((colId, idx) => {
                   const col = table.getColumn(colId)
-                  if (!col) return null
+                  if (!col || isInternal(col)) return null
                   return (
                     <ColRow key={colId}>
                       <ArrowBtn onClick={() => moveColumn(idx, 'up')} disabled={idx === 0} title={t('common.up')}><ArrowUp size={10} /></ArrowBtn>
