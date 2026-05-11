@@ -18,6 +18,7 @@ by Python's ``json`` module. Features:
 from __future__ import annotations
 
 import base64
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,9 @@ import httpx
 
 from liberty.connectors.base import EndpointNotFoundError
 from liberty.connectors.config import ApiConnectorConfig, EndpointDef
+from liberty.crypto import decrypt_or_keep
+
+_log = logging.getLogger("liberty.connectors")
 
 
 @dataclass(slots=True)
@@ -102,6 +106,7 @@ class APIConnector:
         config: ApiConnectorConfig,
         *,
         client: httpx.AsyncClient | None = None,
+        master_key: str = "",
     ) -> None:
         self.name = name
         self.config = config
@@ -112,6 +117,17 @@ class APIConnector:
         )
         self._token: str | None = None
         self._token_expires_at: float = 0.0
+        # Auth secrets may be stored as v1 "ENC:" values — decrypt them now (best-effort:
+        # a missing/wrong master key leaves the value as-is and logs a warning).
+        self.auth_username = self._maybe_decrypt(config.auth_username or "", master_key, "auth_username")
+        self.auth_password = self._maybe_decrypt(config.auth_password or "", master_key, "auth_password")
+        self.auth_token = self._maybe_decrypt(config.auth_token or "", master_key, "auth_token")
+
+    def _maybe_decrypt(self, value: str, master_key: str, field_name: str) -> str:
+        plain, err = decrypt_or_keep(value, master_key)
+        if err:
+            _log.warning("connector %s: could not decrypt %s — %s", self.name, field_name, err)
+        return plain
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -169,10 +185,7 @@ class APIConnector:
         return self.config.base_url.rstrip("/") + "/" + path_or_url.lstrip("/")
 
     def _merge_params(self, endpoint: EndpointDef, params: dict[str, Any] | None) -> dict[str, Any]:
-        merged: dict[str, Any] = {
-            "username": self.config.auth_username or "",
-            "password": self.config.auth_password or "",
-        }
+        merged: dict[str, Any] = {"username": self.auth_username, "password": self.auth_password}
         for p in endpoint.params:
             if p.default is not None:
                 merged[p.name] = p.default
@@ -185,7 +198,7 @@ class APIConnector:
     async def _get_token(self, params: dict[str, Any], *, force: bool = False) -> str | None:
         auth = self.config.auth_type
         if auth in ("bearer", "api_key"):
-            return self.config.auth_token or None
+            return self.auth_token or None
         if auth != "oauth2":
             return None
         if not force and self._token and time.monotonic() < self._token_expires_at:
@@ -214,12 +227,12 @@ class APIConnector:
         elif is_form:
             kwargs["data"] = {
                 "grant_type": "client_credentials",
-                "client_id": cfg.auth_username or "",
-                "client_secret": cfg.auth_password or "",
+                "client_id": self.auth_username,
+                "client_secret": self.auth_password,
             }
             headers.pop("Content-Type", None)  # let httpx set the form content-type
         else:
-            kwargs["json"] = {"username": cfg.auth_username or "", "password": cfg.auth_password or ""}
+            kwargs["json"] = {"username": self.auth_username, "password": self.auth_password}
 
         resp = await self._client.post(url, **kwargs)
         if resp.status_code < 200 or resp.status_code >= 300:
@@ -239,7 +252,7 @@ class APIConnector:
     def _auth_headers(self, token: str | None) -> dict[str, str]:
         auth = self.config.auth_type
         if auth == "basic":
-            raw = f"{self.config.auth_username or ''}:{self.config.auth_password or ''}".encode()
+            raw = f"{self.auth_username}:{self.auth_password}".encode()
             return {"Authorization": "Basic " + base64.b64encode(raw).decode()}
         if auth in ("bearer", "oauth2") and token:
             return {"Authorization": "Bearer " + token}

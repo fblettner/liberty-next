@@ -37,7 +37,7 @@ Superuser = Annotated[Principal, Depends(require_superuser)]
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
     old = request.app.state.connectors
-    new = load_connectors(settings.connectors.config_path)
+    new = load_connectors(settings.connectors.config_path, master_key=settings.crypto.master_key)
     request.app.state.connectors = new
     request.app.state.auth_db = AuthDatabase(new.pools, settings.auth.pool)
     await old.aclose()

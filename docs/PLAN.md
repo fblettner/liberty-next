@@ -59,6 +59,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Users storage | **Dedicated ORM table** (`ly2_users`/`ly2_roles`) created via `liberty-admin init-db`, *not* SQLConnector queries — auth is infra, not a configurable screen; users are app data so the "no metadata tables" rule still holds. |
 | Multi-DB queries | Queries must run on **Postgres and Oracle (and more later)** — like v1's per-`dbtype` SQL. v2: a `QueryDef.sql` can be a `{ default, oracle, postgresql, … }` map keyed by SQLAlchemy backend name; the connector picks the variant matching its pool's database (→ `default`). The v1 `query_dbtype` variants migrate to that shape; portable SQL stays a plain string. |
 | Pool topology | A **`default`/framework pool** holds v2's own users/roles (`ly2_*`), shared across every app. Per-*app* pools (`nomasx1`, `nomajde`, …) carry that app's migrated queries against its business DB — mirrors v1's split between an app's "definition DB" (queries/users → now TOML + `ly2_*`) and its "data DB". |
+| Field encryption | **Reuse v1's scheme and key, byte for byte** — `liberty/crypto.py` is AES-256-GCM + PBKDF2-HMAC-SHA512(2145 iters, 32 bytes) with the `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)` layout, so v2 reads/writes the same encrypted columns the user's *other* scripts touch (`SETTINGS_APPLICATIONS.password`, …) without re-encrypting the DB. Key = `[crypto] master_key` (`${LIBERTY_MASTER_KEY}` = v1's `MASTER_KEY`). `APIConnector` decrypts `ENC:` auth secrets at runtime; `liberty-crypto` is the CLI. v1's Fernet/`secrets.json` plumbing is **not** ported — the key comes straight from an env var. |
 
 ## 4. Phased plan
 
@@ -292,9 +293,21 @@ Postgres *and* Oracle, etc.):
   from `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted password) with
   endpoints (method/path/body/headers/params) from the `ly_api` rows that point at it;
   connectionless `ly_api` rows → a single `legacy_api` connector (`base_url = ""`, absolute-URL
-  paths). `merge_connectors(*)`; `render_toml(d)` (via `tomli-w`).
+  paths). `merge_connectors(*)`; `render_toml(d)` (via `tomli-w`). The v1 `conn_password` is an
+  `ENC:…` blob — it's carried over **verbatim** (not turned into a `${…}` placeholder) and v2
+  decrypts it at runtime with `[crypto] master_key` (= v1's `MASTER_KEY`); the `# migrated:` header
+  flags that.
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` (SELECT-only;
   `make_engine(url)` takes any async URL — `postgresql+asyncpg://…/liberty` for a real v1 DB).
+- **`liberty/crypto.py`** — field-level encryption, byte-compatible with v1's `Encryption`
+  (AES-256-GCM, PBKDF2-HMAC-SHA512 2145 iters / 32 bytes, `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)`).
+  So migrated `ENC:` secrets work as-is, *and* the user's other scripts that read/write the same
+  encrypted columns stay interoperable — nothing in the DB gets re-encrypted. Key from
+  `[crypto] master_key` (`= "${LIBERTY_MASTER_KEY}"`, v1's `MASTER_KEY`); `Settings.crypto.master_key`;
+  `/info` → `crypto.configured`. `APIConnector` decrypts `ENC:` `auth_username`/`auth_password`/`auth_token`
+  at init (key threaded via `load_connectors(master_key=…)`; wrong/missing key → keep the blob + warn).
+  `liberty-crypto` CLI (`encrypt`/`decrypt`/`is-encrypted`, stdin-friendly). v1's Fernet/`secrets.json`
+  layer is *not* ported. Dep: `cryptography`.
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`, `--source-url`,
   `--dbtype`, `--prefix`, `-o out.toml` (else stdout); prepends a `# migrated: …` summary +
   the `${…}` placeholders the operator must fill in. Output is a fragment to review + merge
@@ -334,7 +347,10 @@ to validate against.
   references in `connectors.toml` *and* `app.toml`, substituted at load time (`:-` =
   shell semantics: unset *or* empty → default; bare `${NAME}` unset → ""). The shipped
   `[pools.default]` is `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}` so the app
-  runs out of the box. v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
+  runs out of the box. v1's Fernet + `secrets.json` plumbing not ported (the `MASTER_KEY` is just
+  an env var now); revisit a vault only if ops asks. **Field-level** `ENC:…` secrets *are* still
+  honoured — `liberty/crypto.py` is byte-compatible with v1's `Encryption`, keyed by `[crypto]
+  master_key` (`= "${LIBERTY_MASTER_KEY}"`); see the decisions table + Phase 5.
 - Token revocation — refresh tokens are stateless (no denylist / rotation), so a
   leaked refresh token is good until expiry. Add a `jti` denylist (or per-user
   token version) if/when that matters; for now keep TTLs short.

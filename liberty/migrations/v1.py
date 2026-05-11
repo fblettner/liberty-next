@@ -209,13 +209,15 @@ def migrate_api(
         name = _uniquify(f"{connector_prefix}{slugify(c.get('conn_label'), fallback=f'conn{cid}')}", taken_connector_names)
         conn_name_by_id[cid] = name
         user = (c.get("conn_user") or "").strip()
+        # v1 stores conn_password as an "ENC:" value — carry it over verbatim; v2 decrypts it
+        # at runtime via [crypto] master_key. (A plaintext legacy value is carried over as-is.)
+        password = (c.get("conn_password") or "").strip() or None
         connectors[name] = _drop_none({
             "type": "api",
             "base_url": (c.get("conn_url") or "").strip(),
-            "auth_type": "basic" if user else "none",
+            "auth_type": "basic" if (user or password) else "none",
             "auth_username": user or None,
-            # v1 stored the password encrypted; the operator re-supplies it via this env var.
-            "auth_password": ("${MIGRATED_SECRET_" + name.upper() + "}") if user else None,
+            "auth_password": password,
             "endpoints": [],
         })
         names_per_connector[name] = set()

@@ -8,11 +8,12 @@ import pytest
 from liberty.connectors.api import APIConnector, extract_path, substitute
 from liberty.connectors.base import EndpointNotFoundError
 from liberty.connectors.config import ApiConnectorConfig, EndpointDef, ParamDef
+from liberty.crypto import encrypt
 
 
-def _connector(cfg: ApiConnectorConfig, handler) -> APIConnector:
+def _connector(cfg: ApiConnectorConfig, handler, *, master_key: str = "") -> APIConnector:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return APIConnector("c", cfg, client=client)
+    return APIConnector("c", cfg, client=client, master_key=master_key)
 
 
 # --------------------------------------------------------------------------- #
@@ -234,3 +235,76 @@ def test_describe_excludes_credentials() -> None:
     assert "super-secret" not in json.dumps(desc)
     assert desc["auth_type"] == "bearer"
     assert desc["endpoints"][0]["name"] == "e"
+
+
+# --------------------------------------------------------------------------- #
+# ENC: auth secrets (v1-compatible decryption at load time)
+# --------------------------------------------------------------------------- #
+
+MK = "api-conn-master-key"
+
+
+@pytest.mark.asyncio
+async def test_basic_auth_with_encrypted_password() -> None:
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(200, json={})
+
+    cfg = ApiConnectorConfig(
+        type="api",
+        base_url="https://api.test",
+        auth_type="basic",
+        auth_username="svc",
+        auth_password=encrypt("real-pw", MK),  # an ENC:… value
+        endpoints=[EndpointDef(name="e", path="/x")],
+    )
+    conn = _connector(cfg, handler, master_key=MK)
+    try:
+        assert conn.auth_password == "real-pw"  # decrypted at init
+        await conn.call("e")
+        import base64
+
+        assert seen["auth"] == "Basic " + base64.b64encode(b"svc:real-pw").decode()
+    finally:
+        await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_bearer_token_decrypted() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"got": request.headers.get("authorization")})
+
+    cfg = ApiConnectorConfig(
+        type="api", base_url="https://api.test", auth_type="bearer",
+        auth_token=encrypt("tok-123", MK), endpoints=[EndpointDef(name="e", path="/x")],
+    )
+    conn = _connector(cfg, handler, master_key=MK)
+    try:
+        assert conn.auth_token == "tok-123"
+        assert (await conn.call("e")).json["got"] == "Bearer tok-123"
+    finally:
+        await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_wrong_or_missing_master_key_keeps_enc_value() -> None:
+    enc = encrypt("real-pw", MK)
+    cfg = ApiConnectorConfig(
+        type="api", base_url="https://api.test", auth_type="basic", auth_username="svc",
+        auth_password=enc, endpoints=[EndpointDef(name="e", path="/x")],
+    )
+    # wrong key → value left as the ENC: blob (a warning is logged)
+    c1 = APIConnector("c", cfg, master_key="not-the-key")
+    assert c1.auth_password == enc
+    await c1.aclose()
+    # no key configured → likewise unchanged
+    c2 = APIConnector("c", cfg)
+    assert c2.auth_password == enc
+    await c2.aclose()
+    # plaintext value is untouched regardless
+    cfg2 = cfg.model_copy(update={"auth_password": "plain-pw"})
+    c3 = APIConnector("c", cfg2, master_key=MK)
+    assert c3.auth_password == "plain-pw"
+    await c3.aclose()

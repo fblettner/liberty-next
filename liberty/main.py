@@ -66,7 +66,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
-        app.state.connectors = load_connectors(settings.connectors.config_path)
+        app.state.connectors = load_connectors(
+            settings.connectors.config_path, master_key=settings.crypto.master_key
+        )
         app.state.auth_db = AuthDatabase(app.state.connectors.pools, settings.auth.pool)
         app.state.token_service = _build_token_service(settings.auth)
         app.state.oidc = build_oidc(settings.oidc)
@@ -121,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "available": ai.available if ai is not None else False,
                 "model": ai.settings.model if ai is not None else None,
             },
+            "crypto": {"configured": bool(s.crypto.master_key)},
             "frontend": getattr(app.state, "frontend_dir", None),
         }
 

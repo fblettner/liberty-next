@@ -29,7 +29,13 @@ Connector = SQLConnector | APIConnector
 class ConnectorRegistry:
     """Holds every connector plus the shared :class:`PoolRegistry`."""
 
-    def __init__(self, config: ConnectorsFile, *, http_client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        config: ConnectorsFile,
+        *,
+        http_client: httpx.AsyncClient | None = None,
+        master_key: str = "",
+    ) -> None:
         self.pools = PoolRegistry(config.pools)
         self._http_client = http_client
         self._connectors: dict[str, Connector] = {}
@@ -37,7 +43,7 @@ class ConnectorRegistry:
             if isinstance(conn_cfg, SqlConnectorConfig):
                 self._connectors[name] = SQLConnector(name, conn_cfg, self.pools)
             elif isinstance(conn_cfg, ApiConnectorConfig):
-                self._connectors[name] = APIConnector(name, conn_cfg, client=http_client)
+                self._connectors[name] = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
             else:  # pragma: no cover - guarded by the discriminated union
                 raise TypeError(f"Unsupported connector config: {type(conn_cfg)!r}")
 
@@ -85,7 +91,11 @@ class ConnectorRegistry:
 
 
 def load_connectors(
-    path: Path | str, *, http_client: httpx.AsyncClient | None = None
+    path: Path | str, *, http_client: httpx.AsyncClient | None = None, master_key: str = ""
 ) -> ConnectorRegistry:
-    """Load ``connectors.toml`` at *path* and build a :class:`ConnectorRegistry`."""
-    return ConnectorRegistry(load_connectors_file(path), http_client=http_client)
+    """Load ``connectors.toml`` at *path* and build a :class:`ConnectorRegistry`.
+
+    *master_key* (see :mod:`liberty.crypto`) decrypts any ``ENC:`` auth secrets in API
+    connector configs.
+    """
+    return ConnectorRegistry(load_connectors_file(path), http_client=http_client, master_key=master_key)

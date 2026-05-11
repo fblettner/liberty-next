@@ -210,10 +210,12 @@ textarea for config; those are TODOs.)
   `writable=true` for INSERT/UPDATE/DELETE/MERGE; pool stubs `[pools.<name>] url =
   "${LIBERTY_DB_URL_<NAME>}"`); `migrate_api(ly_api_conn, ly_api,
   ly_api_header, ly_api_params, …)` → an **API connector per `ly_api_conn`** (`base_url=conn_url`,
-  basic auth from `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted
-  password) with endpoints from the `ly_api` rows; connectionless `ly_api` → a single
+  basic auth from `conn_user` + the v1 `conn_password` carried over **verbatim** — it's an
+  `ENC:…` blob, and v2 decrypts it at runtime with the same key, see *Crypto* below) with
+  endpoints from the `ly_api` rows; connectionless `ly_api` → a single
   `legacy_api` connector (`base_url=""`, absolute-URL paths); `merge_connectors(*)`;
-  `render_toml(d)` (via `tomli-w`).
+  `render_toml(d)` (via `tomli-w`). The `# migrated: …` header notes any `ENC:` secrets it
+  carried over (set `LIBERTY_MASTER_KEY` to v1's `MASTER_KEY`).
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` (SELECT-only;
   `make_engine(url)` accepts any async URL — `postgresql+asyncpg://…` for a real v1 DB).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`,
@@ -224,7 +226,34 @@ fragment to review + merge into `config/connectors.toml`. *Not yet done:* `ly_tb
 `ly_dlg_col` UI-hint mapping (needs a v2 column-hints concept first); validate-by-diff against
 nomasx1's read paths; migrate the real apps (nomasx1 → NOMAJDE → AIRFLOW). Deps: `tomli-w`.
 
-196 tests pass.
+**Crypto (field-level secrets, v1-byte-compatible).** v1 stores some DB columns
+encrypted (e.g. `SETTINGS_APPLICATIONS.password`, `ly_api_conn.conn_password`) and the
+user's other scripts read those — so v2 reuses **the exact same scheme and key**, it does
+*not* re-encrypt anything:
+- `liberty/crypto.py` — AES-256-GCM, key = PBKDF2-HMAC-SHA512(master_key, salt, 2145 iters,
+  32 bytes), wire format `"ENC:" + base64(salt[64] ‖ iv[16] ‖ tag[16] ‖ ciphertext)` — bit
+  for bit what v1's `Encryption` writes (a test round-trips against an independent v1
+  reimplementation, both directions). `encrypt`/`decrypt` (raise `CryptoError`),
+  `is_encrypted`, `encrypt`/`decrypt` are **idempotent on an `ENC:` value**,
+  `decrypt_if_needed`, `decrypt_or_keep` (never raises → `(value_or_plain, err_or_None)`).
+- The master key lives in `[crypto] master_key` in `config/app.toml`
+  (`= "${LIBERTY_MASTER_KEY}"`; v1's stock default is `"3zTvzr3p67VC61jmV54rIYu1545x4TlY"`,
+  but use whatever your v1 `secrets.json` `MASTER_KEY` actually is). `liberty/config.py` →
+  `Settings.crypto.master_key`; `/info` reports `crypto.configured` (bool, never the key).
+- `APIConnector` decrypts `ENC:` `auth_username`/`auth_password`/`auth_token` at init via
+  the `master_key` threaded through `load_connectors(master_key=…)` /
+  `ConnectorRegistry(master_key=…)` (from `settings.crypto.master_key` in `main.py`'s
+  lifespan and `POST /admin/reload`). Best-effort: a wrong/missing key → the value is left
+  as the `ENC:` blob and a warning is logged (the connector still loads). Plaintext values
+  pass through untouched. `describe()` still never exposes credentials.
+- `liberty/crypto_cli.py` (`liberty-crypto` script) — `encrypt <v>` / `decrypt <ENC:…>` /
+  `is-encrypted <v>` (exit 0/1); `--master-key` / `--config` overrides; reads stdin when no
+  value arg; key comes from `[crypto] master_key` otherwise. For poking at values / scripting.
+- v1's *other* crypto (the Fernet wrapper around `secrets.json` → `secrets.json.enc`) is
+  **not** ported — v2 takes the `MASTER_KEY` straight from an env var. Only the field-level
+  `ENC:` scheme above is shared.
+
+229 tests pass.
 
 ## Run it
 
@@ -236,6 +265,7 @@ nomasx1's read paths; migrate the real apps (nomasx1 → NOMAJDE → AIRFLOW). D
 # by hand: .venv/bin/fastapi dev liberty/main.py   |   .venv/bin/uvicorn liberty.main:app --reload   |   .venv/bin/liberty-v2
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
 .venv/bin/liberty-migrate all --source-url postgresql+asyncpg://…/liberty -o migrated.toml   # v1 ly_* → v2 TOML
+.venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
 # HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
@@ -258,12 +288,16 @@ supports `${NAME}` and `${NAME:-default}` (shell `:-` = unset *or* empty → def
 `connectors.toml` and `app.toml`. An empty pool URL raises `UnknownPoolError`, and any
 `ConnectorError` not caught per-route (e.g. an unconfigured DB on `/auth/login`) becomes a clean
 **503** via a global handler in `liberty/main.py`. `LIBERTY_JWT_SECRET` empty → ephemeral key + a warning.
+**Encrypted fields** (`ENC:…` values from v1 — e.g. a migrated API connector's `auth_password`,
+or columns the user's other scripts touch) are decrypted at runtime with `[crypto] master_key`
+(`= "${LIBERTY_MASTER_KEY}"` in `app.toml`) — same AES-256-GCM scheme and key as v1; set
+`LIBERTY_MASTER_KEY` to your v1 `MASTER_KEY`. See *Crypto* above; `liberty-crypto` is the CLI.
 
 ## Layout
 
 ```
 config/         app.toml, connectors.toml
-liberty/        main.py, config.py, cli.py, admin_cli.py, migrate_cli.py
+liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py
                 · connectors/{config,base,db,sql,api,registry}.py
                 · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
                 · ai/{tools,connector_tools,assistant,routes}.py

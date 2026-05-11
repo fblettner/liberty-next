@@ -114,7 +114,7 @@ def test_migrate_sql_queries_connector_prefix() -> None:
 
 
 _CONNS = [
-    {"conn_id": 10, "conn_label": "Acme API", "conn_url": "https://acme.example/api", "conn_user": "svc", "conn_password": "<encrypted>"},
+    {"conn_id": 10, "conn_label": "Acme API", "conn_url": "https://acme.example/api", "conn_user": "svc", "conn_password": "ENC:dGVzdA=="},
     {"conn_id": 11, "conn_label": "Public", "conn_url": "https://pub.example", "conn_user": None, "conn_password": None},
 ]
 _APIS = [
@@ -139,7 +139,7 @@ def test_migrate_api() -> None:
     acme = conns["acme_api"]
     assert acme["type"] == "api" and acme["base_url"] == "https://acme.example/api"
     assert acme["auth_type"] == "basic" and acme["auth_username"] == "svc"
-    assert acme["auth_password"] == "${MIGRATED_SECRET_ACME_API}"  # placeholder, not the v1-encrypted value
+    assert acme["auth_password"] == "ENC:dGVzdA=="  # the v1 ENC: value, carried over verbatim (v2 decrypts at runtime)
     eps = {e["name"]: e for e in acme["endpoints"]}
     assert eps["list_things"]["method"] == "GET" and eps["list_things"]["path"] == "/things"
     assert eps["list_things"]["headers"] == {"Accept": "application/json"}

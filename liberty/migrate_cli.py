@@ -61,12 +61,14 @@ def _summary(data: dict) -> str:
     connectors = data.get("connectors") or {}
     n_q = sum(len(c.get("queries") or []) for c in connectors.values() if c.get("type") == "sql")
     n_e = sum(len(c.get("endpoints") or []) for c in connectors.values() if c.get("type") == "api")
-    lines = [
-        f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies), {n_e} endpoint(s)",
-    ]
+    blob = render_toml(data)
+    lines = [f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies), {n_e} endpoint(s)"]
     ph = _placeholders(data)
     if ph:
         lines.append("# fill in these placeholders before use: " + ", ".join(ph))
+    if "ENC:" in blob:
+        lines.append("# contains ENC: secrets carried over from v1 — v2 decrypts them at runtime via")
+        lines.append("#   [crypto] master_key (set LIBERTY_MASTER_KEY to your v1 MASTER_KEY)")
     return "\n".join(lines)
 
 

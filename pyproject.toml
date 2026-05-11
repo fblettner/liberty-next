@@ -16,6 +16,7 @@ dependencies = [
     "itsdangerous>=2.1",
     "argon2-cffi>=23.1",
     "python-jose[cryptography]>=3.3",
+    "cryptography>=42",  # field-level AES-256-GCM (v1-compatible) — liberty.crypto
     "tomli-w>=1.0",  # write connectors.toml (migration tools)
 ]
 
@@ -31,6 +32,7 @@ liberty-v2 = "liberty.main:run"
 liberty-connectors = "liberty.cli:main"
 liberty-admin = "liberty.admin_cli:main"
 liberty-migrate = "liberty.migrate_cli:main"
+liberty-crypto = "liberty.crypto_cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

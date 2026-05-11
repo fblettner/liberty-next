@@ -105,12 +105,22 @@ class AISettings(BaseModel):
     web_fetch_max_uses: int = 5
 
 
+class CryptoSettings(BaseModel):
+    """Field-level encryption — must match v1's ``MASTER_KEY`` so v1-encrypted DB values
+    (e.g. ``SETTINGS_APPLICATIONS.password``, ``ly_api_conn.conn_password``) round-trip."""
+
+    # ${LIBERTY_MASTER_KEY}; the v1 stock default is "3zTvzr3p67VC61jmV54rIYu1545x4TlY"
+    # — set this to whatever your v1 secrets.json holds. Empty → crypto ops fail loudly.
+    master_key: str = ""
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)
+    crypto: CryptoSettings = Field(default_factory=CryptoSettings)
 
 
 def load_settings(
