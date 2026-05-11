@@ -43,16 +43,21 @@ _QUERIES = [
     {"query_id": 1, "query_label": "Users List", "query_type": "TABLE"},
     {"query_id": 2, "query_label": "Delete User", "query_type": "FORM"},
     {"query_id": 3, "query_label": "", "query_type": "TABLE"},
+    {"query_id": 4, "query_label": "Twins", "query_type": "TABLE"},
 ]
 _SQL_ROWS = [
-    {"query_id": 1, "query_dbtype": "postgres", "query_crud": "SELECT", "query_pool": "default",
+    # query 1: two distinct dbtype variants → a {default, oracle} dialect map
+    {"query_id": 1, "query_dbtype": "generic", "query_crud": "SELECT", "query_pool": "default",
      "query_sqlquery": "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status", "query_orderby": "usr_name"},
     {"query_id": 1, "query_dbtype": "oracle", "query_crud": "SELECT", "query_pool": "default",
-     "query_sqlquery": "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status", "query_orderby": "usr_name"},
+     "query_sqlquery": "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status FETCH FIRST 50 ROWS ONLY", "query_orderby": "usr_name"},
     {"query_id": 2, "query_dbtype": "postgres", "query_crud": "DELETE", "query_pool": "default",
      "query_sqlquery": "DELETE FROM ly_users WHERE usr_id = :id", "query_orderby": None},
     {"query_id": 3, "query_dbtype": "postgres", "query_crud": "SELECT", "query_pool": "nomasx1",
      "query_sqlquery": "SELECT * FROM f0101", "query_orderby": None},
+    # query 4: two dbtypes but identical SQL → collapses to a plain string
+    {"query_id": 4, "query_dbtype": "postgres", "query_crud": "SELECT", "query_pool": "default", "query_sqlquery": "SELECT 1 AS x", "query_orderby": None},
+    {"query_id": 4, "query_dbtype": "oracle", "query_crud": "SELECT", "query_pool": "default", "query_sqlquery": "SELECT 1 AS x", "query_orderby": None},
     {"query_id": 99, "query_dbtype": "postgres", "query_crud": "SELECT", "query_pool": "default", "query_sqlquery": "  ", "query_orderby": None},  # blank → skipped
 ]
 
@@ -66,33 +71,40 @@ def test_migrate_sql_queries() -> None:
     assert conns["default"]["type"] == "sql" and conns["default"]["pool"] == "default"
 
     by_name = {q["name"]: q for q in conns["default"]["queries"]}
-    # query 1 had two dbtypes for the same (id, crud) → names get a _<dbtype> suffix
-    assert {"users_list_select_postgres", "users_list_select_oracle"} <= set(by_name)
-    pg = by_name["users_list_select_postgres"]
-    assert pg["label"] == "Users List"
-    assert "writable" not in pg  # SELECT → omitted (defaults to false)
-    assert pg["sql"].endswith("ORDER BY usr_name")  # query_orderby appended for SELECT
-    # query 2 (DELETE) → single dbtype → no suffix, writable=true, no ORDER BY
+    # query 1: one v2 query (no _<dbtype> suffix); SQL is a {default, oracle} map
+    ul = by_name["users_list_select"]
+    assert ul["label"] == "Users List"
+    assert "writable" not in ul  # SELECT → omitted (defaults to false)
+    assert isinstance(ul["sql"], dict)
+    assert set(ul["sql"]) == {"default", "oracle"}
+    assert ul["sql"]["default"].endswith("ORDER BY usr_name")          # generic variant → default
+    assert "FETCH FIRST 50 ROWS ONLY" in ul["sql"]["oracle"]            # oracle variant kept distinct
+    # query 2 (DELETE) → single dbtype → plain-string sql, writable=true, no ORDER BY
     assert by_name["delete_user_delete"]["writable"] is True
-    assert "ORDER BY" not in by_name["delete_user_delete"]["sql"]
+    assert by_name["delete_user_delete"]["sql"] == "DELETE FROM ly_users WHERE usr_id = :id"
+    # query 4: two dbtypes but identical SQL → collapsed to a plain string
+    assert by_name["twins_select"]["sql"] == "SELECT 1 AS x"
     # blank-SQL row 99 skipped
     assert all("99" not in n for n in by_name)
     # unlabelled query 3 → name from id
     assert conns["nomasx1"]["queries"][0]["name"] == "q3_select"
 
-    # the migrated TOML round-trips through the v2 config loader
+    # the migrated TOML round-trips through the v2 config loader (incl. the dialect map)
     reparsed = parse_connectors(tomllib.loads(render_toml(out)))
     assert isinstance(reparsed.connectors["default"], SqlConnectorConfig)
-    assert {q.name for q in reparsed.connectors["default"].queries} >= {"delete_user_delete"}
-    assert reparsed.connectors["default"].queries  # all parsed
+    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
+    assert q1.dialects == ["default", "oracle"]
+    assert "FETCH FIRST 50 ROWS ONLY" in q1.sql_for("oracle")
+    assert q1.sql_for("postgresql") == q1.default_sql  # no postgres variant → default
     assert next(q for q in reparsed.connectors["default"].queries if q.name == "delete_user_delete").writable is True
 
 
 def test_migrate_sql_queries_dbtype_filter() -> None:
     out = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="oracle")
     names = [q["name"] for q in out["connectors"]["default"]["queries"]]
-    # only the oracle SELECT for query 1; no _oracle suffix now (only one dbtype after filtering)
-    assert names == ["users_list_select"]
+    # only the oracle variants survive the filter → plain-string SQL (one variant each)
+    assert names == ["users_list_select", "twins_select"]
+    assert isinstance(out["connectors"]["default"]["queries"][0]["sql"], str)
 
 
 def test_migrate_sql_queries_connector_prefix() -> None:

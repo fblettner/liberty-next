@@ -57,6 +57,8 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | AI | **Anthropic SDK** (`AsyncAnthropic`), drop OpenAI. Default model `claude-opus-4-7` (operator-overridable). Own `@tool` decorator + manual streaming loop — the SDK's `@beta_tool`/`tool_runner` returns complete messages, can't per-token stream (the SSE endpoint needs it). The `claude-api` skill is the source of SDK truth. |
 | Auth | Internal users (**argon2id**) + **OIDC via authlib** (Keycloak-ready); own JWTs (HS256). |
 | Users storage | **Dedicated ORM table** (`ly2_users`/`ly2_roles`) created via `liberty-admin init-db`, *not* SQLConnector queries — auth is infra, not a configurable screen; users are app data so the "no metadata tables" rule still holds. |
+| Multi-DB queries | Queries must run on **Postgres and Oracle (and more later)** — like v1's per-`dbtype` SQL. v2: a `QueryDef.sql` can be a `{ default, oracle, postgresql, … }` map keyed by SQLAlchemy backend name; the connector picks the variant matching its pool's database (→ `default`). The v1 `query_dbtype` variants migrate to that shape; portable SQL stays a plain string. |
+| Pool topology | A **`default`/framework pool** holds v2's own users/roles (`ly2_*`), shared across every app. Per-*app* pools (`nomasx1`, `nomajde`, …) carry that app's migrated queries against its business DB — mirrors v1's split between an app's "definition DB" (queries/users → now TOML + `ly2_*`) and its "data DB". |
 
 ## 4. Phased plan
 
@@ -270,29 +272,39 @@ response_field = "data.0.name"
   endpoints), Vitest/RTL frontend tests, frontend build in CI.
 
 ### Phase 5 — Migration tools — 🚧 IN PROGRESS  (~4–6 wks)
-**Done so far** — `liberty/migrations/` + the `liberty-migrate` CLI:
+**Done so far** — `liberty/migrations/` + the `liberty-migrate` CLI, plus dialect-aware queries
+in the connector model (so a migrated query that v1 had per-`dbtype` variants of works on
+Postgres *and* Oracle, etc.):
+- **Dialect-aware queries** (in `liberty/connectors/`): `QueryDef.sql` is a string *or* a
+  `{ default = …, oracle = …, postgresql = … }` map keyed by SQLAlchemy backend name (`default`
+  required). `[pools.*]` may set an explicit `dialect`; else it's derived from the URL.
+  `SQLConnector` picks `qdef.sql_for(pool_dialect)` per call (falling back to `default`);
+  `describe()` reports `dialects`. An empty/undefined pool URL surfaces as `503` (`UnknownPoolError`).
 - `v1.py` — pure transforms over plain row dicts. `migrate_sql_queries(ly_query rows,
   ly_qry_sql rows, dbtype=…, connector_prefix=…)`: groups by `query_pool` → **one SQL
-  connector per pool** (+ a `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` stub); one
-  `[[connectors.<pool>.queries]]` per `(query_id, query_crud)` — `sql` = `query_sqlquery`
-  (+ `ORDER BY query_orderby` for SELECTs), `writable=true` for INSERT/UPDATE/DELETE/MERGE,
-  name from `query_label` (or `q<id>`) + `_<crud>`, with a `_<dbtype>` suffix only when a
-  `(id, crud)` pair has more than one dbtype variant (or pass `dbtype=` to pick one).
-  `migrate_api(ly_api_conn, ly_api, ly_api_header, ly_api_params, …)`: **one API connector
-  per `ly_api_conn`** (`base_url = conn_url`, `auth_type=basic` + `auth_username` from
-  `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted password) with
+  connector per pool** (+ a `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` stub); **one
+  `[[connectors.<pool>.queries]]` per `(query_id, query_crud)`** — the per-`query_dbtype` SQL
+  rows become a dialect map (`generic` → `default`; `postgres` → `postgresql`; …; identical
+  variants collapse to a plain string; `dbtype=` keeps just one → plain string), `+ ORDER BY
+  query_orderby` for SELECTs, `writable=true` for INSERT/UPDATE/DELETE/MERGE, name = `query_label`
+  (or `q<id>`) + `_<crud>`. `migrate_api(ly_api_conn, ly_api, ly_api_header, ly_api_params, …)`:
+  **one API connector per `ly_api_conn`** (`base_url = conn_url`, `auth_type=basic` + `auth_username`
+  from `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted password) with
   endpoints (method/path/body/headers/params) from the `ly_api` rows that point at it;
-  connectionless `ly_api` rows → a single `legacy_api` connector (`base_url = ""`, absolute-
-  URL paths). `merge_connectors(*)`; `render_toml(d)` (via `tomli-w`).
+  connectionless `ly_api` rows → a single `legacy_api` connector (`base_url = ""`, absolute-URL
+  paths). `merge_connectors(*)`; `render_toml(d)` (via `tomli-w`).
 - `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` (SELECT-only;
   `make_engine(url)` takes any async URL — `postgresql+asyncpg://…/liberty` for a real v1 DB).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`, `--source-url`,
   `--dbtype`, `--prefix`, `-o out.toml` (else stdout); prepends a `# migrated: …` summary +
   the `${…}` placeholders the operator must fill in. Output is a fragment to review + merge
   into `config/connectors.toml`. v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
-- 18 new tests (196 total): the transforms over hand-crafted v1 rows, the DB readers against
-  a minimal v1 schema in SQLite, the CLI, and round-trips (emitted TOML re-parses cleanly via
-  `parse_connectors`). Dep added: `tomli-w`.
+- Tests: the transforms over hand-crafted v1 rows (incl. the dialect-map cases), the DB readers
+  against a minimal v1 schema in SQLite, the CLI, dialect resolution in `SQLConnector` /
+  `QueryDef` / `PoolRegistry.dialect`, and round-trips (emitted TOML re-parses cleanly via
+  `parse_connectors`). Deps added: `tomli-w`. **`config/connectors.toml` is now the real
+  deployment config** — the migrated **nomasx1** app (208 queries) on `[pools.nomasx1]`, with
+  `[pools.default]` as the shared framework/users pool.
 
 **Still to do:**
 - Map `ly_tbl_col`/`ly_dlg_col` labels → an optional UI-hint config (column titles, visibility) —

@@ -67,6 +67,36 @@ def _drop_none(d: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
+# v1 `query_dbtype` → SQLAlchemy backend name (`generic` becomes the v2 `default` variant).
+_DBTYPE_TO_DIALECT = {
+    "generic": "default",
+    "postgres": "postgresql", "postgresql": "postgresql", "pg": "postgresql",
+    "oracle": "oracle",
+    "mysql": "mysql", "mariadb": "mysql",
+    "sqlserver": "mssql", "mssql": "mssql", "sqlserveur": "mssql",
+    "sqlite": "sqlite",
+}
+
+
+def _dialect_name(dbtype: Any) -> str:
+    key = str(dbtype or "").strip().lower()
+    return _DBTYPE_TO_DIALECT.get(key, key or "default")
+
+
+def _sql_value(variants: dict[str, str]) -> str | dict[str, str]:
+    """Collapse a {dialect: sql} map to v2's `sql`: a plain string when there's one
+    distinct statement, else `{default: …, <dialect>: …}` (default = the v1 `generic`
+    variant, else `postgresql`, else the first; identical variants aren't repeated)."""
+    if len(variants) == 1:
+        return next(iter(variants.values()))
+    default_sql = variants.get("default") or variants.get("postgresql") or next(iter(variants.values()))
+    out: dict[str, str] = {"default": default_sql}
+    for dn, s in variants.items():
+        if dn != "default" and s != default_sql:
+            out[dn] = s
+    return out if len(out) > 1 else out["default"]  # all variants identical → a plain string
+
+
 def migrate_sql_queries(
     queries: Iterable[Mapping[str, Any]],
     sql_rows: Iterable[Mapping[str, Any]],
@@ -76,11 +106,14 @@ def migrate_sql_queries(
 ) -> dict[str, Any]:
     """Build the ``{pools, connectors}`` dict for the SQL side.
 
+    One v2 query per ``(query_pool, query_id, query_crud)``; the per-``query_dbtype`` SQL
+    variants become a dialect map (see :class:`~liberty.connectors.config.QueryDef`).
+
     Args:
         queries: rows from ``ly_query`` (``query_id``, ``query_label``, ``query_type``).
         sql_rows: rows from ``ly_qry_sql`` (``query_id``, ``query_dbtype``, ``query_crud``,
             ``query_pool``, ``query_sqlquery``, ``query_orderby``).
-        dbtype: if given, only migrate rows with this ``query_dbtype``.
+        dbtype: if given, only migrate rows with this ``query_dbtype`` (→ plain-string SQL).
         connector_prefix: prepended to the per-pool connector name (e.g. ``"v1_"``).
     """
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
@@ -88,15 +121,11 @@ def migrate_sql_queries(
     if dbtype:
         rows = [r for r in rows if (r.get("query_dbtype") or "").lower() == dbtype.lower()]
 
-    # How many dbtypes does each (query_id, crud) have? → only suffix when ambiguous.
-    dbtype_count: dict[tuple[int, str], set[str]] = {}
-    for r in rows:
-        key = (int(r["query_id"]), str(r.get("query_crud") or "").upper())
-        dbtype_count.setdefault(key, set()).add((r.get("query_dbtype") or "").lower())
-
     pools: dict[str, dict[str, Any]] = {}
     connectors: dict[str, dict[str, Any]] = {}
     names_per_connector: dict[str, set[str]] = {}
+    groups: dict[tuple[str, int, str], dict[str, str]] = {}  # (conn, query_id, crud) → {dialect: sql}
+    order: list[tuple[str, int, str]] = []
 
     for r in rows:
         sql = (r.get("query_sqlquery") or "").strip()
@@ -104,32 +133,32 @@ def migrate_sql_queries(
             continue
         qid = int(r["query_id"])
         crud = str(r.get("query_crud") or "SELECT").upper()
-        db = (r.get("query_dbtype") or "").lower()
         pool = str(r.get("query_pool") or "default").strip() or "default"
         conn_name = f"{connector_prefix}{slugify(pool, fallback='default')}"
-
         if conn_name not in connectors:
             connectors[conn_name] = {"type": "sql", "pool": conn_name, "queries": []}
             names_per_connector[conn_name] = set()
             # Stub pool — fill in the real URL (or set the named env var).
             pools.setdefault(conn_name, {"url": "${LIBERTY_DB_URL_" + conn_name.upper() + "}", "pool_pre_ping": True})
-
-        label = labels.get(qid, "")
-        base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
-        if len(dbtype_count.get((qid, crud), set())) > 1 and db:
-            base = f"{base}_{slugify(db)}"
-        name = _uniquify(base, names_per_connector[conn_name])
-
         orderby = (r.get("query_orderby") or "").strip()
         if orderby and crud == "SELECT":
             sql = f"{sql}\nORDER BY {orderby}"
+        key = (conn_name, qid, crud)
+        if key not in groups:
+            groups[key] = {}
+            order.append(key)
+        groups[key].setdefault(_dialect_name(r.get("query_dbtype")), sql)  # first row of a dialect wins
 
+    for key in order:
+        conn_name, qid, crud = key
+        label = labels.get(qid, "")
+        base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         connectors[conn_name]["queries"].append(
             _drop_none({
-                "name": name,
+                "name": _uniquify(base, names_per_connector[conn_name]),
                 "label": label or None,
                 "writable": True if crud in _WRITE_CRUD else None,  # omit when false (default)
-                "sql": sql,
+                "sql": _sql_value(groups[key]),
             })
         )
 

@@ -8,12 +8,48 @@ import pytest
 from liberty.connectors.base import detect_statement_type, find_bind_params
 from liberty.connectors.config import (
     ApiConnectorConfig,
+    PoolConfig,
+    QueryDef,
     SqlConnectorConfig,
     load_connectors_file,
     parse_connectors,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_querydef_plain_sql() -> None:
+    q = QueryDef(name="q", sql="SELECT 1")
+    assert q.sql_for("oracle") == "SELECT 1" and q.default_sql == "SELECT 1" and q.dialects == ["default"]
+
+
+def test_querydef_dialect_map() -> None:
+    q = QueryDef(name="q", sql={"default": "SELECT 1 LIMIT 10", "oracle": "SELECT 1 FETCH FIRST 10 ROWS ONLY"})
+    assert q.dialects == ["default", "oracle"]
+    assert q.sql_for("oracle").endswith("ROWS ONLY")
+    assert q.sql_for("postgresql") == "SELECT 1 LIMIT 10"  # no postgres variant → default
+    assert q.sql_for(None) == "SELECT 1 LIMIT 10"
+    assert q.default_sql == "SELECT 1 LIMIT 10"
+
+
+def test_querydef_dialect_map_requires_default() -> None:
+    with pytest.raises(Exception):
+        QueryDef(name="q", sql={"oracle": "SELECT 1"})  # no 'default'
+    with pytest.raises(Exception):
+        QueryDef(name="q", sql={"default": "  ", "oracle": "SELECT 1"})  # empty default
+
+
+def test_pool_config_dialect_override_and_derivation() -> None:
+    from liberty.connectors.db import PoolRegistry
+
+    reg = PoolRegistry({
+        "pg": PoolConfig(url="postgresql+asyncpg://u:p@h/db"),
+        "ora": PoolConfig(url="x", dialect="oracle"),  # explicit override (URL not even valid)
+        "lite": PoolConfig(url="sqlite+aiosqlite:///:memory:"),
+    })
+    assert reg.dialect("pg") == "postgresql"
+    assert reg.dialect("ora") == "oracle"
+    assert reg.dialect("lite") == "sqlite"
 
 
 def test_shipped_config_parses() -> None:

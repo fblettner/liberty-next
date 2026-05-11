@@ -38,20 +38,24 @@ Full dep set pinned in `pyproject.toml`.
 **Phase 1 (Connector core) — DONE.** Lives in `liberty/connectors/`:
 - `config.py` — Pydantic schema for `config/connectors.toml` (`[pools.*]` plus
   discriminated `[connectors.*]` of type `sql`/`api`); `${ENV_VAR}` secret
-  substitution at load time.
+  substitution at load time. A query's `sql` is a string *or* a per-dialect map
+  (`sql = { default = "…", oracle = "…" }`, keyed by SQLAlchemy backend name; `default`
+  required) — `QueryDef.sql_for(dialect)` / `.default_sql` / `.dialects` resolve it.
+  `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
 - `base.py` — connector exceptions; `detect_statement_type` (resolves `WITH` CTE
   queries to their main statement keyword — `WITH … SELECT` → `SELECT`, `WITH … DELETE`
   → `DELETE` so the writable gate still applies; an unparseable CTE list → `"WITH"` →
   rejected) + `find_bind_params` (SQL text scanner skipping literals/comments/`::` casts);
   `ALLOWED_STATEMENTS` / `WRITE_STATEMENTS`.
 - `db.py` — `PoolRegistry`: one SQLAlchemy async engine per named pool, created
-  lazily (unreachable DB never blocks startup; tests inject their own engine).
+  lazily (unreachable DB never blocks startup; tests inject their own engine); `dialect(name)`
+  → the pool's backend name (a live engine's own dialect / the explicit setting / the URL).
 - `sql.py` — `SQLConnector`: named queries, `:param` binding via SQLAlchemy
-  `text()` (never string-substituted), statement-type allow-list, `writable`
-  gate for mutations, any `:name` the caller omits → SQL NULL, runtime schema
-  from `result.keys()` + best-effort `cursor.description` types, `max_rows` cap.
-  (JDE Julian date/time conversion from nomaubl `DynamicResultMapper`: deferred
-  to Phase 5, only if NOMAJDE migration needs it.)
+  `text()` (never string-substituted), the SQL variant matching the pool's dialect is
+  selected per call, statement-type allow-list, `writable` gate for mutations, any `:name`
+  the caller omits → SQL NULL, runtime schema from `result.keys()` + best-effort
+  `cursor.description` types, `max_rows` cap. (JDE Julian date/time conversion from nomaubl
+  `DynamicResultMapper`: deferred to Phase 5, only if NOMAJDE migration needs it.)
 - `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
   `api_key`/`oauth2` (OAuth2 = token-endpoint POST + dot-path token extraction +
   TTL cache + one refresh on 401); `{{placeholder}}` substitution in
@@ -200,9 +204,11 @@ textarea for config; those are TODOs.)
 `liberty-migrate` CLI — turn a v1 Liberty DB's `ly_*` metadata into v2 `connectors.toml`:
 - `v1.py` — pure transforms over row dicts: `slugify`; `migrate_sql_queries(ly_query rows,
   ly_qry_sql rows, dbtype=…, connector_prefix=…)` → one **SQL connector per `query_pool`**,
-  one query per `(query_id, query_crud)` (name suffixed `_<dbtype>` only when a pair has >1
-  dbtype; ORDER BY appended for SELECTs; `writable=true` for INSERT/UPDATE/DELETE/MERGE; pool
-  stubs `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"`); `migrate_api(ly_api_conn, ly_api,
+  one query per `(query_id, query_crud)` — the per-`query_dbtype` SQL variants become a
+  `sql = { default = …, oracle = …, … }` dialect map (a single distinct statement collapses
+  to a plain string; `--dbtype` keeps just one variant; ORDER BY appended for SELECTs;
+  `writable=true` for INSERT/UPDATE/DELETE/MERGE; pool stubs `[pools.<name>] url =
+  "${LIBERTY_DB_URL_<NAME>}"`); `migrate_api(ly_api_conn, ly_api,
   ly_api_header, ly_api_params, …)` → an **API connector per `ly_api_conn`** (`base_url=conn_url`,
   basic auth from `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted
   password) with endpoints from the `ly_api` rows; connectionless `ly_api` → a single

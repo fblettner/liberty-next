@@ -127,6 +127,18 @@ async def test_disallowed_statement_rejected_before_connecting(pools: PoolRegist
 
 
 @pytest.mark.asyncio
+async def test_dialect_variant_selected(pools: PoolRegistry) -> None:
+    # The fixture pool is SQLite → a query carrying a `sqlite` variant resolves to it;
+    # one with only `default` + `oracle` falls back to `default`.
+    c1 = _connector(pools, QueryDef(name="v", sql={"default": "SELECT 1 AS x", "sqlite": "SELECT 2 AS x"}))
+    assert (await c1.execute("v")).rows == [{"x": 2}]
+    c2 = _connector(pools, QueryDef(name="v", sql={"default": "SELECT 9 AS x", "oracle": "SELECT 8 AS x"}))
+    assert (await c2.execute("v")).rows == [{"x": 9}]
+    # describe() surfaces the dialect list
+    assert c2.describe()["queries"][0]["dialects"] == ["default", "oracle"]
+
+
+@pytest.mark.asyncio
 async def test_cte_select_runs(pools: PoolRegistry) -> None:
     # A WITH ... SELECT resolves to SELECT — not rejected by the allow-list, runs as a read.
     conn = _connector(pools, QueryDef(name="cte", sql="WITH on_items AS (SELECT id FROM item WHERE status = 'on') SELECT COUNT(*) AS n FROM on_items"))

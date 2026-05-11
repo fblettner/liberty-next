@@ -41,7 +41,7 @@ import tomllib
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from liberty.config import substitute_env
 
@@ -60,6 +60,9 @@ class PoolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str
+    # SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty →
+    # derived from the URL. Used to pick a query's per-dialect SQL variant (see QueryDef.sql).
+    dialect: str = ""
     pool_size: int = 5
     max_overflow: int = 10
     pool_pre_ping: bool = True
@@ -88,16 +91,48 @@ class ParamDef(BaseModel):
 
 
 class QueryDef(BaseModel):
-    """A named SQL query with ``:name`` placeholders."""
+    """A named SQL query with ``:name`` placeholders.
+
+    ``sql`` is either a single statement (the common case) or a per-dialect map —
+    e.g. ``sql = { default = "…", oracle = "…" }`` — keyed by SQLAlchemy backend
+    name; the connector picks the variant matching its pool's database, falling
+    back to ``default`` (which is required when ``sql`` is a map). v1's per-``dbtype``
+    SQL variants migrate to this shape.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    sql: str
+    sql: str | dict[str, str]
     writable: bool = False
     params: list[ParamDef] = Field(default_factory=list)
     label: str | None = None
     description: str | None = None
+
+    @field_validator("sql")
+    @classmethod
+    def _require_default(cls, v: str | dict[str, str]) -> str | dict[str, str]:
+        if isinstance(v, dict):
+            if "default" not in v:
+                raise ValueError("a per-dialect sql map must include a 'default' key")
+            if not v.get("default", "").strip():
+                raise ValueError("the 'default' sql variant must not be empty")
+        return v
+
+    def sql_for(self, dialect: str | None) -> str:
+        """The SQL to run on a pool of *dialect* (falls back to ``default``)."""
+        if isinstance(self.sql, str):
+            return self.sql
+        return self.sql.get(dialect or "", self.sql["default"])
+
+    @property
+    def default_sql(self) -> str:
+        """The dialect-independent variant — used for statement-type / bind-param introspection."""
+        return self.sql if isinstance(self.sql, str) else self.sql["default"]
+
+    @property
+    def dialects(self) -> list[str]:
+        return ["default"] if isinstance(self.sql, str) else list(self.sql)
 
 
 class SqlConnectorConfig(BaseModel):

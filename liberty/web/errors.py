@@ -14,7 +14,7 @@ from liberty.connectors.base import (
     WriteNotAllowedError,
 )
 
-_NOT_FOUND = (UnknownConnectorError, QueryNotFoundError, EndpointNotFoundError, UnknownPoolError)
+_NOT_FOUND = (UnknownConnectorError, QueryNotFoundError, EndpointNotFoundError)
 _UNPROCESSABLE = (StatementNotAllowedError, WriteNotAllowedError)
 
 
@@ -23,4 +23,6 @@ def http_for_connector_error(exc: ConnectorError) -> HTTPException:
         return HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, _UNPROCESSABLE):
         return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
+    if isinstance(exc, UnknownPoolError):  # pool not defined / empty URL → service misconfigured
+        return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))

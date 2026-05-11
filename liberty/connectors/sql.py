@@ -124,6 +124,12 @@ class SQLConnector:
         self.max_rows = config.max_rows
         self._pools = pools
         self._queries: dict[str, QueryDef] = {q.name: q for q in config.queries}
+        self._dialect: str | None = None  # lazily resolved from the pool
+
+    def _resolve_dialect(self) -> str:
+        if self._dialect is None:
+            self._dialect = self._pools.dialect(self.pool_name)  # may raise UnknownPoolError
+        return self._dialect
 
     # -- introspection ----------------------------------------------------- #
 
@@ -141,7 +147,9 @@ class SQLConnector:
             ) from None
 
     def describe(self) -> dict[str, Any]:
-        """Metadata only — no credentials, no pool URL. Feeds the CLI / settings UI."""
+        """Metadata only — no credentials, no pool URL. Feeds the CLI / settings UI.
+        Statement-type / bind-param introspection uses the dialect-independent (``default``)
+        SQL variant; ``dialects`` lists which per-dialect variants the query carries."""
         return {
             "name": self.name,
             "type": "sql",
@@ -152,12 +160,13 @@ class SQLConnector:
                     "label": q.label,
                     "description": q.description,
                     "writable": q.writable,
-                    "statement_type": detect_statement_type(q.sql),
+                    "statement_type": detect_statement_type(q.default_sql),
+                    "dialects": q.dialects,
                     "params": [
                         {"name": p.name, "label": p.label, "default": p.default}
                         for p in q.params
                     ],
-                    "bind_params": find_bind_params(q.sql),
+                    "bind_params": find_bind_params(q.default_sql),
                     "sql": q.sql,
                 }
                 for q in self._queries.values()
@@ -166,12 +175,12 @@ class SQLConnector:
 
     # -- execution --------------------------------------------------------- #
 
-    def _build_params(self, qdef: QueryDef, params: dict[str, Any] | None) -> dict[str, Any]:
+    def _build_params(self, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None) -> dict[str, Any]:
         merged: dict[str, Any] = {p.name: p.default for p in qdef.params if p.default is not None}
         if params:
             merged.update(params)
         # Bind every :name token the caller didn't supply to SQL NULL.
-        bound = {name: merged.get(name) for name in find_bind_params(qdef.sql)}
+        bound = {name: merged.get(name) for name in find_bind_params(sql_text)}
         # Keep explicitly declared params too (a default for a token referenced
         # only inside a string literal would otherwise be dropped — harmless,
         # SQLAlchemy ignores binds it doesn't see).
@@ -184,12 +193,14 @@ class SQLConnector:
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
-        Raises :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`, or
-        :class:`WriteNotAllowedError` for configuration / authorisation problems;
-        database errors propagate as the underlying SQLAlchemy exception.
+        The SQL variant matching the pool's database is selected (``QueryDef.sql_for``).
+        Raises :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`,
+        :class:`WriteNotAllowedError`, or :class:`UnknownPoolError`; database errors
+        propagate as the underlying SQLAlchemy exception.
         """
         qdef = self.get_query(query_name)
-        stmt_type = detect_statement_type(qdef.sql)
+        sql_text = qdef.sql_for(self._resolve_dialect())
+        stmt_type = detect_statement_type(sql_text)
         if stmt_type not in ALLOWED_STATEMENTS:
             raise StatementNotAllowedError(
                 f"{self.name}.{query_name}: statement type "
@@ -203,8 +214,8 @@ class SQLConnector:
             )
 
         engine: AsyncEngine = self._pools.engine(self.pool_name)
-        bound = self._build_params(qdef, params)
-        stmt = text(qdef.sql)
+        bound = self._build_params(sql_text, qdef, params)
+        stmt = text(sql_text)
         is_select = stmt_type == "SELECT"
 
         started = time.perf_counter()
