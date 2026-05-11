@@ -15,7 +15,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
-import { Pencil, Check, X, Plus } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import { Pencil, Check, X, Plus, Copy, Upload } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import { api, ApiError } from '../../api/client'
 import { Banner } from '../../common'
@@ -158,12 +159,55 @@ export function ResultTable({
   useEffect(() => { resetEdit() }, [result, resetEdit])
 
   const dirtyCount = dirtyRows.size + newRows.length + [...deleted].filter((r) => !newRows.includes(r)).length
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  const addRow = useCallback(() => setNewRows((p) => [...p, {}]), [])
+  // append blank/seeded new rows; `seeds` carries each row's initial field values
+  const appendNewRows = useCallback((seeds: Record<string, unknown>[]) => {
+    if (seeds.length === 0) return
+    const fresh = seeds.map((s) => {
+      const row: DataRow = {}
+      editsRef.current.set(row, { ...s })
+      return row
+    })
+    setNewRows((p) => [...p, ...fresh])
+  }, [])
+  const addRow = useCallback(() => appendNewRows([{}]), [appendNewRows])
+  const duplicateRow = useCallback((row: DataRow) => appendNewRows([{ ...row, ...editsRef.current.get(row) }]), [appendNewRows])
   const toggleDelete = useCallback((row: DataRow, isNew: boolean) => {
     if (isNew) { setNewRows((p) => p.filter((r) => r !== row)); editsRef.current.delete(row); return }
     setDeleted((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
   }, [])
+
+  // Import rows from an Excel/CSV file — the first sheet's header row is matched against the
+  // result's column names / labels (and the "(ID)" suffix on lookup columns), case-insensitively;
+  // every matched row becomes a new row to insert.
+  const importFile = useCallback(async (file: File) => {
+    setSaveErrors([])
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      if (!ws) return
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
+      const idTag = t('table.idColumnSuffix')
+      const byHeader = new Map<string, string>() // normalized header → column name
+      for (const c of result.columns) {
+        const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
+        add(c.name); add(c.label); add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+      }
+      const seeds = rows.map((r) => {
+        const out: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(r)) {
+          const col = byHeader.get(k.trim().toLowerCase())
+          if (col) out[col] = v
+        }
+        return out
+      }).filter((s) => Object.keys(s).length > 0)
+      if (seeds.length === 0) setSaveErrors([t('table.importNoMatch', { file: file.name })])
+      else { if (!editMode) setEditMode(true); appendNewRows(seeds) }
+    } catch (e) {
+      setSaveErrors([e instanceof Error ? e.message : String(e)])
+    }
+  }, [appendNewRows, editMode, result.columns, t])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
@@ -260,7 +304,10 @@ export function ResultTable({
                 : isDel ? <StatusMark $tone="deleted" title={t('table.rowDeleted')}>−</StatusMark>
                 : isDirty ? <StatusMark $tone="dirty" title={t('table.rowEdited')}>●</StatusMark>
                 : <span style={{ width: 7 }} />}
-              <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo', 'Undo') : t('table.deleteRow', 'Delete row')}>
+              {insertQuery && !isDel && (
+                <RowXBtn onClick={() => duplicateRow(row)} title={t('table.duplicateRow')}><Copy size={11} /></RowXBtn>
+              )}
+              <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
                 <X size={11} />
               </RowXBtn>
             </StatusCell>
@@ -331,7 +378,7 @@ export function ResultTable({
     }
     return out
     // editsRef is a ref — typing into an edit input doesn't churn this memo.
-  }, [result.columns, enumMaps, lookupMaps, t, editMode, dirtyRows, newRows, deleted, toggleDelete])
+  }, [result.columns, enumMaps, lookupMaps, t, editMode, dirtyRows, newRows, deleted, toggleDelete, duplicateRow, insertQuery])
 
   const initialVisibility = useMemo<VisibilityState>(() => {
     const v: VisibilityState = {}
@@ -343,6 +390,19 @@ export function ResultTable({
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
       {editMode && saveErrors.length === 0 && <Banner $tone="info">{t('table.editingHint')}</Banner>}
+      {insertQuery && (
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void importFile(f)
+            e.target.value = '' // allow re-importing the same file
+          }}
+        />
+      )}
       <DataTable<DataRow>
         columns={columns}
         data={data}
@@ -351,9 +411,16 @@ export function ResultTable({
         initialColumnVisibility={initialVisibility}
         toolbar={
           !canEdit ? undefined : !editMode ? (
-            <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
-              <Pencil size={13} /> {t('table.edit')}
-            </TbBtn>
+            <>
+              <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
+                <Pencil size={13} /> {t('table.edit')}
+              </TbBtn>
+              {insertQuery && (
+                <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
+                  <Upload size={13} /> {t('table.import')}
+                </TbBtn>
+              )}
+            </>
           ) : (
             <>
               <TbBtn $tone="primary" onClick={save} disabled={saving || dirtyCount === 0} title={t('common.save')}>
@@ -363,9 +430,14 @@ export function ResultTable({
                 <X size={13} /> {t('common.cancel')}
               </TbBtn>
               {insertQuery && (
-                <TbBtn onClick={addRow} disabled={saving} title={t('table.addRow')}>
-                  <Plus size={13} /> {t('table.addRow')}
-                </TbBtn>
+                <>
+                  <TbBtn onClick={addRow} disabled={saving} title={t('table.addRow')}>
+                    <Plus size={13} /> {t('table.addRow')}
+                  </TbBtn>
+                  <TbBtn onClick={() => fileRef.current?.click()} disabled={saving} title={t('table.import')}>
+                    <Upload size={13} /> {t('table.import')}
+                  </TbBtn>
+                </>
               )}
             </>
           )
