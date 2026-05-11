@@ -248,7 +248,10 @@ response_field = "data.0.name"
   `.theme-light` class on `<html>`, preference persisted), `react-i18next` (EN/FR, persisted),
   `lucide-react` icons, DM Sans (Google Fonts), `@tanstack/react-table` (the SELECT grid),
   `react-markdown` + `remark-gfm` (assistant replies), `@monaco-editor/react` (the connector-
-  config editor — loaded from a CDN at runtime, same as nomaubl).
+  config editor — Monaco is *bundled*, not CDN-loaded: `src/services/monaco.ts` imports the
+  editor API + the `ini` language only, wires the worker via Vite's `?worker`, `loader.config({
+  monaco })`, and is side-effect-imported from the Settings page so it stays in that lazy chunk;
+  the app works offline — only the DM Sans webfont is still CDN, with a system-font fallback).
 - **Source layout** — also borrowed from nomaubl, to keep the project from sprawling into giant
   files: `src/theme.ts` (tokens), `src/index.css` (the `:root`/`.theme-light` var sets + ambient
   gradient bg + thin scrollbar), `src/i18n.ts` + `src/locales/{en,fr}.ts`; `src/api/client.ts`
@@ -287,10 +290,9 @@ response_field = "data.0.name"
   shadowed; no-dir → not mounted —, `GET/PUT /admin/config/connectors` validate-then-write
   superuser-only, the `[oidc] frontend_redirect` setting). Frontend itself is tsc-checked at
   build time; no Vitest/RTL yet.
-- *Still TODO toward full nomaubl parity:* bundle Monaco with the app (a Vite Monaco plugin)
-  instead of the CDN loader, for air-gapped deploys; a self-service change-password flow
-  (needs a backend endpoint — ProfileModal is read-only for now); `@tanstack/react-virtual`
-  to virtualise very large result grids; reusable `<FormView>`/`<Lookup>` (TableView covers
+- *Still TODO toward full nomaubl parity:* a self-service change-password flow (needs a
+  backend endpoint — ProfileModal is read-only for now); `@tanstack/react-virtual` to
+  virtualise very large result grids; reusable `<FormView>`/`<Lookup>` (TableView covers
   reads + writable "runs"; HttpRunner covers API endpoints); Vitest/RTL frontend tests;
   frontend build in CI.
 

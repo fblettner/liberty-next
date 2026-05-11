@@ -179,7 +179,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts` — backend response shapes, no React), `src/services/`
-  (plain-TS helpers, e.g. `cells.ts`'s `cellText`), `src/common/` (shared theme-driven
+  (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`, `monaco.ts` (bundles
+  Monaco + its worker, no CDN)), `src/common/` (shared theme-driven
   primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `Markdown` (react-markdown — *not* re-exported by `common/index.ts` so it
@@ -220,12 +221,15 @@ replies), `@monaco-editor/react` (the connector-config editor).
 - `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
   Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
   prod build: `npm run build` → `dist/` → served automatically by the backend (entry chunk
-  ~112 kB gz; TableView/Chat/Settings split off into their own route chunks).
-  ⚠ Monaco loads from a CDN (jsdelivr) at runtime — `@monaco-editor/react`'s default loader,
-  same as nomaubl (the app already CDN-loads DM Sans); air-gapped deployments would need it
-  bundled with a Vite Monaco plugin. Still TODO toward full nomaubl parity: a self-service
-  change-password flow (needs a backend endpoint), `@tanstack/react-virtual` for huge result
-  grids, Vitest/RTL frontend tests, frontend build in CI. Reference app:
+  ~112 kB gz; TableView/Chat/Settings split off into their own route chunks; Monaco is
+  bundled — see below — so the Settings chunk is heavy but lazy, ~600 kB gz).
+  Monaco is **bundled, not CDN-loaded** — `src/services/monaco.ts` imports the editor API +
+  the `ini` basic language only, wires the editor worker via Vite's `?worker`, and calls
+  `loader.config({ monaco })`; it's `import`-ed (side-effect) from the Settings page so it
+  rides in that lazy chunk. So the app works offline (the only remaining CDN dep is the DM
+  Sans webfont, which just falls back to system fonts). Still TODO toward full nomaubl parity:
+  a self-service change-password flow (needs a backend endpoint), `@tanstack/react-virtual`
+  for huge result grids, Vitest/RTL frontend tests, frontend build in CI. Reference app:
   `../../JavaProjects/nomaubl/src/web-react/`.
 
 **Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the

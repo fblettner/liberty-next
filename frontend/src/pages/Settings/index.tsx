@@ -1,3 +1,4 @@
+import '../../services/monaco' // side effect: bundle Monaco locally + configure its worker (no CDN)
 import { useEffect, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
