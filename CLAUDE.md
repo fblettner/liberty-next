@@ -200,7 +200,11 @@ replies), `@monaco-editor/react` (the connector-config editor).
   carries `X-Liberty-Lang` = the current i18n language, so query-result column labels come back
   localized from the shared dictionary), `src/auth/`
   (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
-  `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/types/`
+  `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/workspace/`
+  (`WorkspaceContext.tsx` — `WorkspaceProvider`/`useWorkspace()`: owns the one `GET /api/connectors`
+  fetch, holds `currentApp` — the connector the UI is scoped to, persisted, dropped if not in the
+  accessible list — a pure-frontend soft filter; v2 auth is centralized so the v1 "pick an app at
+  login" idea becomes "which connector's screens am I looking at"), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts` — backend response shapes, no React), `src/services/`
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`, `monaco.ts` (bundles
   Monaco + its worker, no CDN)), `src/common/` (shared theme-driven
@@ -210,7 +214,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   stays out of every page's chunk); `common/index.ts` barrels the rest, pages import
   `{ Button, ... } from '../../common'`), `src/pages/<Screen>/index.tsx` (one dir per page,
   splitting helpers alongside — e.g. `TableView/ResultTable.tsx` + `TableView/styled.ts`),
-  `src/components/` (app chrome: `Layout`, `Sidebar`, `ProfileModal`), `src/theme.ts`
+  `src/components/` (app chrome: `Layout`, `Sidebar`, `ProfileModal`, `WorkspaceSelect`), `src/theme.ts`
   (tokens — colours/fonts/`fontSize`/`radius`/`shadow`/`glass`, all via CSS vars), `src/index.css`
   (the `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar), `src/i18n.ts` +
   `src/locales/{en,fr}.ts`. **Rule: keep pages small (split helpers into `pages/<X>/`), reusable
@@ -222,11 +226,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   components are `React.lazy`-split (each its own chunk — the heavy libs travel with them);
   `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
 - The pages: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
-  utility pill: EN/FR · dark/light · username→profile · sign-out), `Sidebar` (collapsible nav
+  utility pill: app-picker (`WorkspaceSelect` — shown when ≥2 connectors) · EN/FR · dark/light ·
+  username→profile · sign-out), `Sidebar` (collapsible nav
   rail, lucide icons, react-router `NavLink`s + an external "API docs" link), `ProfileModal`
   (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
   self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
-  `GET /api/connectors`, drills to queries/endpoints), `TableView` (param form from the query's
+  the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
+  `TableView` (param form from the query's
   `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
   client-side paging, sticky header — from `result.columns`, honouring their display hints
   (label / hidden / width / align); writable → `confirm` + `POST` + affected-rows banner),

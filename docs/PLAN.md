@@ -263,7 +263,9 @@ response_field = "data.0.name"
   `layout` `Stack`/`Row`, `useIsLight`, `Markdown`; `common/index.ts` barrels all but `Markdown`,
   which stays out so react-markdown doesn't leak into every page chunk); `src/pages/<Screen>/index.tsx`
   (one dir per page; sub-components and styled bits live alongside — e.g. `TableView/ResultTable.tsx`
-  + `TableView/styled.ts`); `src/components/` (app chrome — `Layout`, `Sidebar`, `ProfileModal`).
+  + `TableView/styled.ts`); `src/components/` (app chrome — `Layout`, `Sidebar`, `ProfileModal`,
+  `WorkspaceSelect`); `src/workspace/WorkspaceContext.tsx` (`useWorkspace()` — the picked connector +
+  the shared `GET /api/connectors` fetch).
   *Rule for future work:* keep pages small (split helpers into `pages/<X>/`), reusable bits go in
   `common/`, plain logic/shapes go in `services/`/`types/` (no React there), and every styled
   component pulls colours/sizes/radii/shadows from `theme.ts` — no hard-coded hex/rgba/font-px.
@@ -273,11 +275,13 @@ response_field = "data.0.name"
   along — TableView/Chat/Settings each become their own chunk; entry chunk ~112 kB gz);
   `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
 - The pages: **Layout** (shell — `Sidebar` + workspace-title header + a fixed top-right
-  utility pill: EN/FR · dark/light · username→profile · sign-out), **Sidebar** (collapsible nav
+  utility pill: app-picker (`WorkspaceSelect`, shown when ≥2 connectors — v2 auth is centralized,
+  so v1's "pick an app at login" becomes "which connector's screens am I scoped to", persisted,
+  pure-frontend soft filter) · EN/FR · dark/light · username→profile · sign-out), **Sidebar** (collapsible nav
   rail, lucide icons, react-router `NavLink`s + an external "API docs" link), **ProfileModal**
   (read-only — username/email/provider/roles/permissions from the Principal; no self-service
-  password change yet — the backend has no endpoint), **Connectors** (lists `GET /api/connectors`,
-  drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
+  password change yet — the backend has no endpoint), **Connectors** (the accessible connectors
+  from `useWorkspace()`, scoped to the picked app — drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
   `GET` + a `@tanstack/react-table` grid — sortable columns, client-side paging, sticky header —
   whose columns come from `result.columns`, honouring their display hints (label/hidden/width/align);
   writable → confirm + `POST`), **HttpRunner**
