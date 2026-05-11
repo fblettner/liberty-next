@@ -12,10 +12,12 @@ from liberty.migrations import (
     make_engine,
     merge_connectors,
     migrate_api,
+    migrate_column_hints,
     migrate_pools,
     migrate_sql_queries,
     read_api,
     read_applications,
+    read_column_hints,
     read_sql_queries,
     render_toml,
     slugify,
@@ -179,6 +181,46 @@ def test_migrate_pools_prefix_and_overrides_stubs() -> None:
     parse_connectors(tomllib.loads(render_toml(merged)))
 
 
+# --------------------------------------------------------------------------- #
+# Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)
+# --------------------------------------------------------------------------- #
+
+_TBL_COLS = [
+    {"query_id": 1, "col_target": "USR_ID", "col_label": None, "col_seq": 1, "col_visible": "Y", "col_type": "number", "col_id": 1, "dd_label": "User ID"},
+    {"query_id": 1, "col_target": "USR_NAME", "col_label": "User Name", "col_seq": 2, "col_visible": "Y", "col_type": "text", "col_id": 2, "dd_label": None},
+    {"query_id": 1, "col_target": "USR_PWD", "col_label": "Password", "col_seq": 3, "col_visible": "N", "col_type": "password", "col_id": 3, "dd_label": None},
+    {"query_id": 1, "col_target": "USR_NAME", "col_label": "OTHER WIDGET", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 9, "dd_label": None},  # 2nd widget → dedup, first wins
+    {"query_id": 3, "col_target": "F0101", "col_label": "F0101", "col_seq": 1, "col_visible": "Y", "col_type": None, "col_id": 1, "dd_label": None},  # label == target → dropped
+]
+_DLG_COLS = [
+    {"query_id": 2, "col_target": "USR_ID", "col_label": "Id", "col_seq": 1, "col_visible": "1", "col_type": "integer", "col_id": 1, "dd_label": None},
+    {"query_id": 1, "col_target": "USR_ID", "col_label": "FROM DLG", "col_seq": 1, "col_visible": "Y", "col_type": "text", "col_id": 1, "dd_label": None},  # query 1 USR_ID already from tbl → ignored
+]
+
+
+def test_migrate_column_hints() -> None:
+    hints = migrate_column_hints(_TBL_COLS, _DLG_COLS)
+    assert set(hints) == {1, 2, 3}
+    assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD"]  # col_seq order; dedup'd; dlg ignored
+    assert hints[1][0] == {"name": "USR_ID", "label": "User ID", "format": "number"}  # dd_label fallback; col_type → format
+    assert hints[1][1] == {"name": "USR_NAME", "label": "User Name"}  # col_label wins; "text" → no format
+    assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N' → hidden
+    assert hints[3] == [{"name": "F0101"}]  # label == column name → no label
+    assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]  # only the form-field column
+
+
+def test_migrate_sql_queries_with_column_hints() -> None:
+    out = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres",
+                              column_hints={3: [{"name": "F0101", "label": "Address Book"}]})
+    q3 = out["connectors"]["nomasx1"]["queries"][0]  # query 3 lives on the nomasx1 connector
+    assert q3["columns"] == [{"name": "F0101", "label": "Address Book"}]
+    # a DELETE query gets no hints even if passed — display hints only apply to result sets
+    out2 = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres", column_hints={2: [{"name": "X"}]})
+    by_name = {q["name"]: q for q in out2["connectors"]["default"]["queries"]}
+    assert "columns" not in by_name["delete_user_delete"]
+    parse_connectors(tomllib.loads(render_toml(out)))  # round-trips through the v2 config loader
+
+
 _CONNS = [
     {"conn_id": 10, "conn_label": "Acme API", "conn_url": "https://acme.example/api", "conn_user": "svc", "conn_password": "ENC:dGVzdA=="},
     {"conn_id": 11, "conn_label": "Public", "conn_url": "https://pub.example", "conn_user": None, "conn_password": None},
@@ -247,6 +289,11 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY, query_label TEXT, query_type TEXT)",
     "CREATE TABLE ly_qry_sql (query_id INTEGER, query_dbtype TEXT, query_crud TEXT, query_pool TEXT, query_sqlquery TEXT, query_orderby TEXT)",
     "CREATE TABLE ly_applications (apps_name TEXT, apps_pool TEXT, apps_dbtype TEXT, apps_jdbc TEXT, apps_user TEXT, apps_password TEXT, apps_host TEXT, apps_port INTEGER, apps_database TEXT, apps_pool_min INTEGER, apps_pool_max INTEGER)",
+    "CREATE TABLE ly_dictionary (dd_id TEXT PRIMARY KEY, dd_label TEXT, dd_type TEXT)",
+    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT)",
+    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
+    "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
+    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
     "CREATE TABLE ly_api_conn (conn_id INTEGER PRIMARY KEY, conn_label TEXT, conn_url TEXT, conn_user TEXT, conn_password TEXT)",
     "CREATE TABLE ly_api (api_id INTEGER PRIMARY KEY, api_label TEXT, api_source TEXT, api_method TEXT, api_url TEXT, api_user TEXT, api_password TEXT, api_body TEXT, api_conn_id INTEGER)",
     "CREATE TABLE ly_api_header (api_id INTEGER, hdr_id INTEGER, hdr_key TEXT, hdr_value TEXT)",
@@ -279,6 +326,32 @@ async def _seed_v1(engine) -> None:
                 {"n": "Framework", "p": "default", "db": "postgres", "j": None, "u": "liberty", "pw": "ENC:fw", "h": "fw.example", "port": 5432, "d": "libnsx1", "mn": 1, "mx": 10},
                 {"n": "NOMASX1", "p": "nomasx1", "db": "postgres", "j": None, "u": "nomasx1", "pw": "ENC:nx", "h": "db.example", "port": 5432, "d": "nomasx1", "mn": 2, "mx": 20},
             ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_dictionary (dd_id, dd_label, dd_type) VALUES (:i, :l, :t)"),
+            [{"i": "USR_ID", "l": "User ID", "t": "number"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_tables (tbl_id, tbl_query_id, tbl_label) VALUES (:i, :q, :l)"),
+            [{"i": 5, "q": 1, "l": "Users"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible)"
+                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v)"),
+            [
+                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y"},
+                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y"},
+                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N"},
+            ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_dlg_frm (frm_id, dlg_id, frm_query_id, frm_label) VALUES (:i, :d, :q, :l)"),
+            [{"i": 7, "d": 1, "q": 2, "l": "Delete Form"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_component, col_dd_id, col_label, col_target, col_type, col_visible)"
+                 " VALUES (:f, :c, :ta, :s, :cm, :dd, :lab, :tgt, :ty, :v)"),
+            [{"f": 7, "c": 1, "ta": 1, "s": 1, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y"}],
         )
         await conn.execute(
             text("INSERT INTO ly_api_conn (conn_id, conn_label, conn_url, conn_user, conn_password) VALUES (:i, :l, :u, :usr, :p)"),
@@ -337,12 +410,25 @@ async def test_read_applications(v1_engine) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_applications_missing_table(tmp_path) -> None:
+async def test_read_column_hints(v1_engine) -> None:
+    tbl_cols, dlg_cols = await read_column_hints(v1_engine)
+    assert {(r["query_id"], r["col_target"]) for r in tbl_cols} == {(1, "USR_ID"), (1, "USR_NAME"), (1, "USR_PWD")}
+    assert {(r["query_id"], r["col_target"]) for r in dlg_cols} == {(2, "USR_ID")}
+    hints = migrate_column_hints(tbl_cols, dlg_cols)
+    assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD"]
+    assert hints[1][0] == {"name": "USR_ID", "label": "User ID", "format": "number"}  # dd_label fallback
+    assert hints[1][2]["hidden"] is True  # col_visible 'N'
+    assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]
+
+
+@pytest.mark.asyncio
+async def test_read_applications_and_column_hints_missing_tables(tmp_path) -> None:
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_apps.db'}")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))
     try:
         assert await read_applications(engine) == []  # no ly_applications → []
+        assert await read_column_hints(engine) == ([], [])  # no ly_tbl_col/ly_dlg_col → ([], [])
     finally:
         await engine.dispose()
 
@@ -379,6 +465,12 @@ def test_cli_sql_to_file(tmp_path) -> None:
     assert "nomasx1" in cfg.pools
     assert "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1" in text_out
     assert "${LIBERTY_DB_URL_DEFAULT}" in text_out  # the default pool kept its env-var stub
+    # ly_tbl_col → the migrated SELECT carries column display hints
+    sql_conn = cfg.connectors["default"]
+    assert isinstance(sql_conn, SqlConnectorConfig)
+    q1 = next(q for q in sql_conn.queries if q.name == "users_list_select")
+    assert [c.name for c in q1.columns] == ["USR_ID", "USR_NAME", "USR_PWD"]
+    assert q1.columns[2].hidden is True and q1.columns[1].label == "User Name"
 
 
 def test_cli_all_to_stdout(tmp_path, capsys) -> None:

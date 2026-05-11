@@ -36,7 +36,7 @@ from liberty.connectors.base import (
     detect_statement_type,
     find_bind_params,
 )
-from liberty.connectors.config import QueryDef, SqlConnectorConfig
+from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
 
 # A best-effort PostgreSQL OID → type-name map. ``cursor.description`` exposes the
@@ -66,10 +66,31 @@ _PG_OID_NAMES: dict[int, str] = {
 
 @dataclass(slots=True)
 class Column:
-    """One result column: its name and a best-effort type label (may be ``None``)."""
+    """One result column: its name and a best-effort type label (may be ``None``),
+    plus optional display hints carried over from the query's ``columns`` config
+    (label/hidden/width/align/format — see :class:`~liberty.connectors.config.ColumnHint`)."""
 
     name: str
     type: str | None = None
+    label: str | None = None
+    hidden: bool = False
+    width: int | None = None
+    align: str | None = None
+    format: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"name": self.name, "type": self.type}
+        if self.label is not None:
+            d["label"] = self.label
+        if self.hidden:
+            d["hidden"] = True
+        if self.width is not None:
+            d["width"] = self.width
+        if self.align is not None:
+            d["align"] = self.align
+        if self.format is not None:
+            d["format"] = self.format
+        return d
 
 
 @dataclass(slots=True)
@@ -100,7 +121,7 @@ class QueryResult:
             "connector": self.connector,
             "query": self.query,
             "statement_type": self.statement_type,
-            "columns": [{"name": c.name, "type": c.type} for c in self.columns],
+            "columns": [c.to_dict() for c in self.columns],
             "rows": self.rows,
             "row_count": self.row_count,
             "rowcount": self.rowcount,
@@ -166,6 +187,7 @@ class SQLConnector:
                         {"name": p.name, "label": p.label, "default": p.default}
                         for p in q.params
                     ],
+                    "columns": [c.model_dump(exclude_defaults=True) for c in q.columns],
                     "bind_params": find_bind_params(q.default_sql),
                     "sql": q.sql,
                 }
@@ -222,7 +244,7 @@ class SQLConnector:
         if is_select:
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
-                columns = _columns_from_result(result)
+                columns = _apply_column_hints(_columns_from_result(result), qdef.columns)
                 rows: list[dict[str, Any]] = []
                 truncated = False
                 for row in result.mappings():
@@ -253,6 +275,27 @@ class SQLConnector:
             rowcount=rowcount,
             duration_ms=duration_ms,
         )
+
+
+def _apply_column_hints(discovered: list[Column], hints: list[ColumnHint]) -> list[Column]:
+    """Overlay the query's ``columns`` hints on the discovered columns: reorder to the
+    hint order, attach label/hidden/width/align/format. Columns with no hint keep their
+    discovery order and follow the hinted ones; a hint for a column the query didn't
+    return is ignored (a stale hint never fabricates a column)."""
+    if not hints:
+        return discovered
+    remaining = {c.name: c for c in discovered}  # insertion-ordered → preserves discovery order
+    ordered: list[Column] = []
+    for h in hints:
+        col = remaining.pop(h.name, None)
+        if col is None:
+            continue
+        ordered.append(
+            Column(name=col.name, type=col.type, label=h.label, hidden=h.hidden,
+                   width=h.width, align=h.align, format=h.format)
+        )
+    ordered.extend(remaining.values())
+    return ordered
 
 
 def _columns_from_result(result: Any) -> list[Column]:

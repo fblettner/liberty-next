@@ -44,6 +44,12 @@ export type ConnectorMeta = SqlConnectorMeta | ApiConnectorMeta
 export interface Column {
   name: string
   type: string | null
+  /** Optional display hints from the query's `columns` config (see ColumnHint on the backend). */
+  label?: string
+  hidden?: boolean
+  width?: number
+  align?: 'left' | 'right' | 'center' | string
+  format?: string
 }
 
 export interface QueryResult {

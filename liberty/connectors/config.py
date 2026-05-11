@@ -85,6 +85,26 @@ class ParamDef(BaseModel):
     default: str | None = None
 
 
+class ColumnHint(BaseModel):
+    """Optional *display* metadata for one result column. The column **schema**
+    (names + types) is still discovered from the query at run time — these hints only
+    augment it (a display title, visibility, column order, a width/alignment, and a
+    free-text ``format`` the UI may interpret). v1's ``ly_tbl_col`` / ``ly_dlg_col``
+    rows migrate to this shape; a hint for a column the query doesn't return is ignored.
+    The order of the ``columns`` list is the display order; columns with no hint keep
+    their discovery order and follow the hinted ones.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    label: str | None = None
+    hidden: bool = False
+    width: int | None = None
+    align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
+    format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted
+
+
 # --------------------------------------------------------------------------- #
 # SQL connector
 # --------------------------------------------------------------------------- #
@@ -106,6 +126,7 @@ class QueryDef(BaseModel):
     sql: str | dict[str, str]
     writable: bool = False
     params: list[ParamDef] = Field(default_factory=list)
+    columns: list[ColumnHint] = Field(default_factory=list)  # display hints; the schema is still from the query
     label: str | None = None
     description: str | None = None
 

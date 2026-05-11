@@ -15,9 +15,12 @@ it into ``config/connectors.toml``.
 or a parseable ``apps_jdbc``); the DB password is a ``${MIGRATED_PW_<NAME>}`` placeholder
 (v1 keeps it ``ENC:``-encrypted in ``apps_password`` — set the env var, or recover it with
 ``liberty-crypto decrypt``). v1's reserved ``default`` pool is skipped: v2's ``[pools.default]``
-is v2's own framework DB (the ``ly2_*`` tables). Migrated API connectors keep v1's
-``conn_password`` verbatim as an ``ENC:`` value — v2 decrypts it at runtime via
-``[crypto] master_key`` (set ``LIBERTY_MASTER_KEY`` to your v1 ``MASTER_KEY``).
+is v2's own framework DB (the ``ly2_*`` tables). They also carry over **column display hints**
+from v1's ``ly_tbl_col`` / ``ly_dlg_col`` (display title, visibility, order, a ``format``) onto
+each SELECT query's ``columns`` — the result *schema* is still discovered from the query, these
+just augment it. Migrated API connectors keep v1's ``conn_password`` verbatim as an ``ENC:``
+value — v2 decrypts it at runtime via ``[crypto] master_key`` (set ``LIBERTY_MASTER_KEY`` to your
+v1 ``MASTER_KEY``).
 """
 
 from __future__ import annotations
@@ -30,10 +33,12 @@ from liberty.migrations import (
     make_engine,
     merge_connectors,
     migrate_api,
+    migrate_column_hints,
     migrate_pools,
     migrate_sql_queries,
     read_api,
     read_applications,
+    read_column_hints,
     read_sql_queries,
     render_toml,
 )
@@ -57,7 +62,11 @@ async def _build(args: argparse.Namespace) -> dict:
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
-            parts.append(migrate_sql_queries(queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix))
+            tbl_cols, dlg_cols = await read_column_hints(engine)
+            parts.append(migrate_sql_queries(
+                queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
+                column_hints=migrate_column_hints(tbl_cols, dlg_cols),
+            ))
         if args.command in ("api", "all"):
             conns, apis, headers, params = await read_api(engine)
             parts.append(migrate_api(conns, apis, headers, params, connector_prefix=args.prefix))

@@ -41,7 +41,11 @@ Full dep set pinned in `pyproject.toml`.
   substitution at load time. A query's `sql` is a string *or* a per-dialect map
   (`sql = { default = "…", oracle = "…" }`, keyed by SQLAlchemy backend name; `default`
   required) — `QueryDef.sql_for(dialect)` / `.default_sql` / `.dialects` resolve it.
-  `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
+  A query may also carry optional `columns` display hints (`ColumnHint`: `name`, `label?`,
+  `hidden?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
+  schema (display title / visibility / column order / a UI-interpreted `format`); a hint for
+  a column the query doesn't return is ignored. `[pools.*]` may carry an explicit `dialect`;
+  else it's derived from the URL.
 - `base.py` — connector exceptions; `detect_statement_type` (resolves `WITH` CTE
   queries to their main statement keyword — `WITH … SELECT` → `SELECT`, `WITH … DELETE`
   → `DELETE` so the writable gate still applies; an unparseable CTE list → `"WITH"` →
@@ -54,8 +58,10 @@ Full dep set pinned in `pyproject.toml`.
   `text()` (never string-substituted), the SQL variant matching the pool's dialect is
   selected per call, statement-type allow-list, `writable` gate for mutations, any `:name`
   the caller omits → SQL NULL, runtime schema from `result.keys()` + best-effort
-  `cursor.description` types, `max_rows` cap. (JDE Julian date/time conversion from nomaubl
-  `DynamicResultMapper`: deferred to Phase 5, only if NOMAJDE migration needs it.)
+  `cursor.description` types (then the query's `columns` hints overlaid — reorder + attach
+  label/hidden/width/align/format), `max_rows` cap; `QueryResult.to_dict()` carries the
+  per-column hints, `describe()` exposes the configured `columns`. (JDE Julian date/time
+  conversion from nomaubl `DynamicResultMapper`: deferred to Phase 5, if NOMAJDE needs it.)
 - `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
   `api_key`/`oauth2` (OAuth2 = token-endpoint POST + dot-path token extraction +
   TTL cache + one refresh on 401); `{{placeholder}}` substitution in
@@ -205,8 +211,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
   `GET /api/connectors`, drills to queries/endpoints), `TableView` (param form from the query's
   `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
-  client-side paging, sticky header — from `result.columns`; writable → `confirm` + `POST` +
-  affected-rows banner), `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
+  client-side paging, sticky header — from `result.columns`, honouring their display hints
+  (label / hidden / width / align); writable → `confirm` + `POST` + affected-rows banner),
+  `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
   `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a Monaco editor — `language="ini"`,
   theme follows dark/light — over `GET/PUT /admin/config/connectors` + Save + Reload),
@@ -252,21 +259,26 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}` stub; `dialect` from `apps_dbtype`,
   `pool_size` from `apps_pool_max`; the DB **password is never inlined** — `${MIGRATED_PW_<NAME>}`,
   v1 keeps it `ENC:`-encrypted in `apps_password`; v1's reserved `default` pool is **skipped**
-  — v2's `[pools.default]` is v2's own framework DB). `merge_connectors(*)` (pools merged last
-  → real `migrate_pools` URLs override `migrate_sql_queries`'s stubs); `render_toml(d)` (via
-  `tomli-w`). The `# migrated: …` header notes the `${…}` placeholders + any `ENC:` secrets it
-  carried over (set `LIBERTY_MASTER_KEY` to v1's `MASTER_KEY`).
-- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)`
-  (SELECT-only; the last tolerates a missing `ly_applications` on old v1 schemas → `[]`;
-  `make_engine(url)` accepts any async URL — `postgresql+asyncpg://…` for a real v1 DB).
+  — v2's `[pools.default]` is v2's own framework DB); `migrate_column_hints(ly_tbl_col rows,
+  ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, label?
+  (from col_label, else ly_dictionary.dd_label, when ≠ the column name), hidden? (col_visible
+  reads false), format? (a non-trivial col_type)}`; table-widget columns beat form-field
+  columns; first `(query, col)` wins → per-query list keeps `col_seq` order) — passed to
+  `migrate_sql_queries(column_hints=…)`, which attaches them as each SELECT's `columns`.
+  `merge_connectors(*)` (pools merged last → real `migrate_pools` URLs override
+  `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`). The `# migrated: …` header
+  notes the `${…}` placeholders + any `ENC:` secrets it carried over (set `LIBERTY_MASTER_KEY`).
+- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
+  `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`,
+  each joined to `ly_dictionary` for the label) (SELECT-only; the last two tolerate missing tables
+  on old v1 schemas → `[]`; `make_engine(url)` accepts any async URL — `postgresql+asyncpg://…`).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
-  also scaffold the `ly_applications` pools; prepends a `# migrated: …` summary + the `${…}`
-  placeholders the operator must fill in (incl. each `${MIGRATED_PW_*}` — recover from
-  `ly_applications.apps_password` with `liberty-crypto decrypt`).
+  also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
+  hints; prepends a `# migrated: …` summary + the `${…}` placeholders the operator must fill in
+  (incl. each `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
 v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
-fragment to review + merge into `config/connectors.toml`. *Not yet done:* `ly_tbl_col` /
-`ly_dlg_col` UI-hint mapping (needs a v2 column-hints concept first); validate-by-diff against
+fragment to review + merge into `config/connectors.toml`. *Not yet done:* validate-by-diff against
 nomasx1's read paths; migrate the real apps (nomasx1 → NOMAJDE → AIRFLOW). Deps: `tomli-w`.
 
 **Crypto (field-level secrets, v1-byte-compatible).** v1 stores some DB columns

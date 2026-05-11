@@ -60,6 +60,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Multi-DB queries | Queries must run on **Postgres and Oracle (and more later)** — like v1's per-`dbtype` SQL. v2: a `QueryDef.sql` can be a `{ default, oracle, postgresql, … }` map keyed by SQLAlchemy backend name; the connector picks the variant matching its pool's database (→ `default`). The v1 `query_dbtype` variants migrate to that shape; portable SQL stays a plain string. |
 | Pool topology | A **`default`/framework pool** holds v2's own users/roles (`ly2_*`), shared across every app. Per-*app* pools (`nomasx1`, `nomajde`, …) carry that app's migrated queries against its business DB — mirrors v1's split between an app's "definition DB" (queries/users → now TOML + `ly2_*`) and its "data DB". |
 | Field encryption | **Reuse v1's scheme and key, byte for byte** — `liberty/crypto.py` is AES-256-GCM + PBKDF2-HMAC-SHA512(2145 iters, 32 bytes) with the `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)` layout, so v2 reads/writes the same encrypted columns the user's *other* scripts touch (`SETTINGS_APPLICATIONS.password`, …) without re-encrypting the DB. Key = `[crypto] master_key` (`${LIBERTY_MASTER_KEY}` = v1's `MASTER_KEY`). `APIConnector` decrypts `ENC:` auth secrets at runtime; `liberty-crypto` is the CLI. v1's Fernet/`secrets.json` plumbing is **not** ported — the key comes straight from an env var. |
+| Column display | The result **schema stays query-discovered** (no metadata tables) — but a query may carry an optional `columns` *overlay* (`ColumnHint`: label / hidden / order / width / align / a UI `format`). v1's `ly_tbl_col`/`ly_dlg_col` migrate to that shape; the connector applies hints to `QueryResult` (reorder + attach), TableView honours them. A hint for a column the query doesn't return is ignored. The form-side workflow/rules in v1's `ly_dlg_*` are Phase 6, not this overlay. |
 
 ## 4. Phased plan
 
@@ -278,7 +279,8 @@ response_field = "data.0.name"
   password change yet — the backend has no endpoint), **Connectors** (lists `GET /api/connectors`,
   drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
   `GET` + a `@tanstack/react-table` grid — sortable columns, client-side paging, sticky header —
-  whose columns come from `result.columns`; writable → confirm + `POST`), **HttpRunner**
+  whose columns come from `result.columns`, honouring their display hints (label/hidden/width/align);
+  writable → confirm + `POST`), **HttpRunner**
   (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), **Chat** (consumes the `/ai/chat`
   SSE — user bubbles plain, assistant bubbles via `<Markdown>`, + tool_call/tool_result lines +
   new-conversation), **Settings** (a Monaco editor — `ini` highlighting, theme follows
@@ -326,11 +328,18 @@ Postgres *and* Oracle, etc.):
   inlined** — it's a `${MIGRATED_PW_<NAME>}` placeholder (v1 keeps it `ENC:`-encrypted in
   `apps_password` — set the env var, or `liberty-crypto decrypt` it). v1's reserved `default` pool
   is **skipped** — v2's `[pools.default]` is v2's own framework DB (the `ly2_*` tables).
-  `merge_connectors(*)` — pools are merged with `migrate_pools` *last*, so its real URLs override
-  the `migrate_sql_queries` stubs for referenced pools. `render_toml(d)` (via `tomli-w`).
-- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)`
-  (SELECT-only; the last tolerates a missing `ly_applications` on old v1 schemas → `[]`;
-  `make_engine(url)` takes any async URL — `postgresql+asyncpg://…/liberty` for a real v1 DB).
+  `migrate_column_hints(ly_tbl_col rows, ly_dlg_col rows)`: `{query_id: [ColumnHint dict]}` —
+  each `col_target` → `{name, label?` (from `col_label`, else `ly_dictionary.dd_label`, when it
+  differs from the column name)`, hidden?` (when `col_visible` reads false)`, format?` (a
+  non-trivial `col_type`)`}`; table-widget columns beat form-field columns, first `(query, col)`
+  wins so the per-query list keeps `col_seq` order — passed to `migrate_sql_queries(column_hints=…)`,
+  which attaches them as each SELECT query's `columns` (the result *schema* is still discovered
+  at run time — these hints only augment it). `merge_connectors(*)` — pools are merged with
+  `migrate_pools` *last*, so its real URLs override the `migrate_sql_queries` stubs. `render_toml(d)`.
+- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)` /
+  `read_column_hints(engine)` (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`,
+  each joined to `ly_dictionary` for the label) — SELECT-only; the last two tolerate missing tables
+  on old v1 schemas → `[]`; `make_engine(url)` takes any async URL (`postgresql+asyncpg://…/liberty`).
 - **`liberty/crypto.py`** — field-level encryption, byte-compatible with v1's `Encryption`
   (AES-256-GCM, PBKDF2-HMAC-SHA512 2145 iters / 32 bytes, `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)`).
   So migrated `ENC:` secrets work as-is, *and* the user's other scripts that read/write the same
@@ -342,9 +351,10 @@ Postgres *and* Oracle, etc.):
   layer is *not* ported. Dep: `cryptography`.
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`, `--source-url`,
   `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all` also scaffold the
-  `ly_applications` pools; prepends a `# migrated: …` summary + the `${…}` placeholders the
-  operator must fill in (incl. each `${MIGRATED_PW_*}`). Output is a fragment to review + merge
-  into `config/connectors.toml`. v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
+  `ly_applications` pools and carry over the `ly_tbl_col`/`ly_dlg_col` column hints; prepends a
+  `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
+  `${MIGRATED_PW_*}`). Output is a fragment to review + merge into `config/connectors.toml`.
+  v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
 - Tests: the transforms over hand-crafted v1 rows (incl. the dialect-map cases), the DB readers
   against a minimal v1 schema in SQLite, the CLI, dialect resolution in `SQLConnector` /
   `QueryDef` / `PoolRegistry.dialect`, and round-trips (emitted TOML re-parses cleanly via
@@ -353,11 +363,11 @@ Postgres *and* Oracle, etc.):
   `[pools.default]` as the shared framework/users pool.
 
 **Still to do:**
-- Map `ly_tbl_col`/`ly_dlg_col` labels → an optional UI-hint config (column titles, visibility) —
-  *needs a v2 column-hints concept first* (the connector schema has nowhere to put them yet);
-  the *schema* still comes from the query, not these tables.
 - Validate by running nomasx1's read paths against v2 and diffing results.
 - Migrate nomasx1 first (read-heavy, lower risk), then NOMAJDE, then AIRFLOW.
+- (Possible later) richer column hints — lookups / format strings / per-column filters — and the
+  form side (v1's `ly_dlg_*` field rules/conditions) once a v2 form concept exists; `ly_tbl_col`/
+  `ly_dlg_col`'s *display* metadata is migrated, the workflow/rules part isn't (that's Phase 6).
 
 ### Phase 6 — Custom form logic — (deferred, decide after Phases 1–3)
 v1 solves field rules + custom actions via `ly_actions` / `ly_act_tasks` /

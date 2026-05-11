@@ -1,7 +1,8 @@
 // The SELECT result grid — @tanstack/react-table: sortable columns (header
 // click), client-side paging, sticky header. Columns are derived from
-// `result.columns`; cells go through services/cells.cellText.
-import { useMemo, useState } from 'react'
+// `result.columns`, which may carry display hints (label / hidden / width /
+// align — see ColumnHint on the backend); cells go through services/cells.cellText.
+import { useMemo, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   useReactTable,
@@ -13,7 +14,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { ChevronLeft, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react'
-import type { QueryResult } from '../../types/connectors'
+import type { Column, QueryResult } from '../../types/connectors'
 import { Button, Row } from '../../common'
 import { cellText } from '../../services/cells'
 import { Meta, TableScroll, DataTable } from './styled'
@@ -22,24 +23,48 @@ const PAGE_SIZE = 50
 
 type DataRow = Record<string, unknown>
 
+function colTitle(c: Column): string {
+  return c.label ?? c.name
+}
+function colTip(c: Column): string | undefined {
+  // tooltip = the raw column name (when a label hides it) + the discovered/format type
+  const bits = [c.label ? c.name : null, c.format ?? c.type].filter(Boolean)
+  return bits.length ? bits.join(' · ') : undefined
+}
+function cellAlign(c: Column): CSSProperties['textAlign'] | undefined {
+  return c.align === 'right' || c.align === 'center' || c.align === 'left' ? c.align : undefined
+}
+
 export function ResultTable({ result }: { result: QueryResult }) {
   const { t } = useTranslation()
   const [sorting, setSorting] = useState<SortingState>([])
 
+  // Hidden columns (a `hidden` hint) are dropped entirely; the rest keep the
+  // server-supplied order (the backend already applied the `columns` hint order).
+  const visibleCols = useMemo(() => result.columns.filter((c) => !c.hidden), [result])
+  const tipByName = useMemo(() => new Map(visibleCols.map((c) => [c.name, colTip(c)])), [visibleCols])
+
   const data = useMemo<DataRow[]>(() => result.rows, [result])
-  const colType = useMemo(() => Object.fromEntries(result.columns.map((c) => [c.name, c.type] as const)), [result])
   const columns = useMemo<ColumnDef<DataRow>[]>(
     () =>
-      result.columns.map((c) => ({
-        id: c.name,
-        accessorFn: (r) => r[c.name],
-        header: c.name,
-        cell: (info) => {
-          const { text, isNull } = cellText(info.getValue())
-          return <span className={isNull ? 'null' : undefined}>{text}</span>
-        },
-      })),
-    [result],
+      visibleCols.map((c) => {
+        const align = cellAlign(c)
+        return {
+          id: c.name,
+          accessorFn: (r) => r[c.name],
+          header: colTitle(c),
+          size: c.width ?? undefined,
+          cell: (info) => {
+            const { text, isNull } = cellText(info.getValue())
+            return (
+              <span className={isNull ? 'null' : undefined} style={align ? { display: 'block', textAlign: align } : undefined}>
+                {text}
+              </span>
+            )
+          },
+        }
+      }),
+    [visibleCols],
   )
 
   const table = useReactTable({
@@ -69,7 +94,7 @@ export function ResultTable({ result }: { result: QueryResult }) {
                     <th
                       key={header.id}
                       className="sortable"
-                      title={colType[header.column.id] ?? undefined}
+                      title={tipByName.get(header.column.id)}
                       onClick={header.column.getToggleSortingHandler()}
                     >
                       {flexRender(header.column.columnDef.header, header.getContext())}

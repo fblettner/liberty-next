@@ -26,6 +26,22 @@ _APPLICATIONS = text("""
            apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max
     FROM ly_applications ORDER BY apps_pool
 """)
+# Per-column display metadata: table-widget columns (ly_tbl_col ← ly_tables ← ly_query) and
+# form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query), each with the dictionary label fallback.
+_TBL_COLS = text("""
+    SELECT t.tbl_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible, c.col_type, c.col_id, d.dd_label
+    FROM ly_tbl_col c JOIN ly_tables t ON t.tbl_id = c.tbl_id
+    LEFT JOIN ly_dictionary d ON d.dd_id = c.col_dd_id
+    WHERE t.tbl_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
+    ORDER BY t.tbl_query_id, c.tbl_id, c.col_seq, c.col_id
+""")
+_DLG_COLS = text("""
+    SELECT f.frm_query_id AS query_id, c.col_target, c.col_label, c.col_seq, c.col_visible, c.col_type, c.col_id, d.dd_label
+    FROM ly_dlg_col c JOIN ly_dlg_frm f ON f.frm_id = c.frm_id
+    LEFT JOIN ly_dictionary d ON d.dd_id = c.col_dd_id
+    WHERE f.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
+    ORDER BY f.frm_query_id, c.frm_id, c.col_seq, c.col_id
+""")
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
 _APIS = text("SELECT api_id, api_label, api_source, api_method, api_url, api_user, api_password, api_body, api_conn_id FROM ly_api ORDER BY api_id")
 _API_HEADERS = text("SELECT api_id, hdr_id, hdr_key, hdr_value FROM ly_api_header ORDER BY api_id, hdr_id")
@@ -47,15 +63,25 @@ async def read_sql_queries(engine: AsyncEngine) -> tuple[list[dict[str, Any]], l
     return await _rows(engine, _QUERIES), await _rows(engine, _SQL_QUERIES)
 
 
+async def _rows_or_empty(engine: AsyncEngine, stmt) -> list[dict[str, Any]]:
+    """Like :func:`_rows`, but a missing/renamed table on an old v1 schema → ``[]``."""
+    try:
+        return await _rows(engine, stmt)
+    except Exception:  # noqa: BLE001 — best-effort: an absent table just means "nothing to migrate here"
+        return []
+
+
 async def read_applications(engine: AsyncEngine) -> list[dict[str, Any]]:
     """Return ``ly_applications`` rows (one per v1 app/pool — connection details).
+    Older v1 schemas may lack this table; treat that as "no pools to scaffold"."""
+    return await _rows_or_empty(engine, _APPLICATIONS)
 
-    Older v1 schemas may lack this table; treat that as "no pools to scaffold".
-    """
-    try:
-        return await _rows(engine, _APPLICATIONS)
-    except Exception:  # noqa: BLE001 — missing/renamed table on an old v1 → just skip pool scaffolding
-        return []
+
+async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_tbl_col`` rows, ``ly_dlg_col`` rows) — each joined to its query
+    (via ``ly_tables`` / ``ly_dlg_frm``) and the ``ly_dictionary`` label. Feeds
+    :func:`liberty.migrations.v1.migrate_column_hints`. Missing tables → empty lists."""
+    return await _rows_or_empty(engine, _TBL_COLS), await _rows_or_empty(engine, _DLG_COLS)
 
 
 async def read_api(

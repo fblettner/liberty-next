@@ -104,6 +104,7 @@ def migrate_sql_queries(
     *,
     dbtype: str | None = None,
     connector_prefix: str = "",
+    column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Build the ``{pools, connectors}`` dict for the SQL side.
 
@@ -116,6 +117,8 @@ def migrate_sql_queries(
             ``query_pool``, ``query_sqlquery``, ``query_orderby``).
         dbtype: if given, only migrate rows with this ``query_dbtype`` (→ plain-string SQL).
         connector_prefix: prepended to the per-pool connector name (e.g. ``"v1_"``).
+        column_hints: ``{query_id: [column-hint dict]}`` (from :func:`migrate_column_hints`) —
+            attached to each emitted query as its ``columns`` display hints.
     """
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
     rows = [dict(r) for r in sql_rows]
@@ -154,16 +157,76 @@ def migrate_sql_queries(
         conn_name, qid, crud = key
         label = labels.get(qid, "")
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
+        hints = (column_hints or {}).get(qid) if crud == "SELECT" else None  # display hints only make sense for result sets
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
                 "label": label or None,
                 "writable": True if crud in _WRITE_CRUD else None,  # omit when false (default)
                 "sql": _sql_value(groups[key]),
+                "columns": (hints or None),  # omit when empty
             })
         )
 
     return {"pools": pools, "connectors": connectors}
+
+
+# --------------------------------------------------------------------------- #
+# Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)
+# --------------------------------------------------------------------------- #
+
+# v1's `col_visible` is a single char — these spellings mean "hidden".
+_HIDDEN_FLAGS = {"N", "n", "0", "F", "f", "FALSE", "false", "NO", "no", "OFF", "off"}
+# `col_type` values that carry no useful display information (the default) — drop them.
+_FORMAT_NOOP = {"", "text", "varchar", "varchar2", "nvarchar", "string", "char", "clob"}
+
+
+def _column_format(col_type: Any) -> str | None:
+    t = str(col_type or "").strip().lower()
+    return t if t and t not in _FORMAT_NOOP else None
+
+
+def migrate_column_hints(
+    tbl_col_rows: Iterable[Mapping[str, Any]],
+    dlg_col_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, list[dict[str, Any]]]:
+    """Build ``{query_id: [column-hint dict]}`` from v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows.
+
+    Each row maps a query's result column (``col_target``) to a v2 hint —
+    ``{name, label?, hidden?, format?}`` (see :class:`~liberty.connectors.config.ColumnHint`):
+    ``label`` from ``col_label`` (else the ``ly_dictionary`` ``dd_label``) when it differs from
+    the column name; ``hidden`` when ``col_visible`` reads false; ``format`` from a non-trivial
+    ``col_type``. Table-widget columns take precedence over form-field columns; the first
+    occurrence of each ``(query_id, col_target)`` wins, so the per-query list keeps ``col_seq`` order.
+
+    Args:
+        tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
+            (``query_id``, ``col_target``, ``col_label``, ``col_seq``, ``col_visible``, ``col_type``,
+            ``dd_label``, …).
+    """
+    out: dict[int, list[dict[str, Any]]] = {}
+    seen: set[tuple[int, str]] = set()
+    for r in (*tbl_col_rows, *dlg_col_rows):
+        qid_raw = r.get("query_id")
+        target = str(r.get("col_target") or "").strip()
+        if qid_raw is None or not target:
+            continue
+        qid = int(qid_raw)
+        key = (qid, target.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        label = str(r.get("col_label") or "").strip() or str(r.get("dd_label") or "").strip()
+        hint: dict[str, Any] = {"name": target}
+        if label and label.lower() != target.lower():
+            hint["label"] = label
+        if str(r.get("col_visible") or "").strip() in _HIDDEN_FLAGS:
+            hint["hidden"] = True
+        fmt = _column_format(r.get("col_type"))
+        if fmt:
+            hint["format"] = fmt
+        out.setdefault(qid, []).append(hint)
+    return out
 
 
 # --------------------------------------------------------------------------- #
