@@ -71,7 +71,10 @@ Full dep set pinned in `pyproject.toml`.
   `cursor.description` types (then the query's `columns` hints overlaid — reorder + attach
   label/hidden/width/align/format, label & format resolved against the registry's shared
   dictionary in `execute(query, params, *, language=…)`'s language — default: the dictionary's
-  `default_language`), `max_rows` cap; `QueryResult.to_dict()` carries the resolved per-column
+  `default_language`; a hint matches a result column **case-insensitively** — the DB folds
+  unquoted identifiers, Postgres→lower / Oracle→upper, v1's hints are upper — and the emitted
+  column keeps the *discovered* case so it lines up with the row dict's keys), `max_rows` cap;
+  `QueryResult.to_dict()` carries the resolved per-column
   hints, `describe()` exposes the `columns` resolved for the default language. (JDE Julian date/time
   conversion from nomaubl `DynamicResultMapper`: deferred to Phase 5, if NOMAJDE needs it.)
 - `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
@@ -203,8 +206,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/workspace/`
   (`WorkspaceContext.tsx` — `WorkspaceProvider`/`useWorkspace()`: owns the one `GET /api/connectors`
   fetch, holds `currentApp` — the connector the UI is scoped to, persisted, dropped if not in the
-  accessible list — a pure-frontend soft filter; v2 auth is centralized so the v1 "pick an app at
-  login" idea becomes "which connector's screens am I looking at"), `src/types/`
+  accessible list, and made to follow the route when you open a `/sql/<c>/…` or `/http/<c>/…` screen
+  — a pure-frontend soft filter; v2 auth is centralized so the v1 "pick an app at login" idea becomes
+  "which connector's screens am I looking at"), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts` — backend response shapes, no React), `src/services/`
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`, `monaco.ts` (bundles
   Monaco + its worker, no CDN)), `src/common/` (shared theme-driven

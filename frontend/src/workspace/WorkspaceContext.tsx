@@ -16,11 +16,14 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import { useAuth } from '../auth/AuthContext'
 
 const APP_KEY = 'liberty.app'
+// Routes that "belong to" a connector — opening one makes the workspace follow it.
+const CONNECTOR_ROUTE = /^\/(?:sql|http)\/([^/]+)\//
 
 interface WorkspaceState {
   connectors: ConnectorMeta[] | null // null while loading / signed out
@@ -52,6 +55,7 @@ function writeApp(name: string | null): void {
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth()
+  const { pathname } = useLocation()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [currentApp, setCurrentAppState] = useState<string | null>(readApp)
@@ -85,6 +89,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       writeApp(null)
     }
   }, [connectors, currentApp])
+
+  // Deep-linking into a connector's screen (/sql/<c>/<q>, /http/<c>/<e>) makes the
+  // workspace follow it — so "back to Connectors" stays scoped to that app.
+  useEffect(() => {
+    const m = CONNECTOR_ROUTE.exec(pathname)
+    if (!m) return
+    const name = decodeURIComponent(m[1])
+    setCurrentAppState((cur) => (cur === name ? cur : name))
+    writeApp(name)
+  }, [pathname])
 
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)

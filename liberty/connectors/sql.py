@@ -287,12 +287,14 @@ class SQLConnector:
 
 
 def _resolve_hint(
-    h: ColumnHint, dictionary: DictionaryFile, language: str | None, *, connector: str | None = None, type_: str | None = None
+    h: ColumnHint, dictionary: DictionaryFile, language: str | None, *,
+    connector: str | None = None, type_: str | None = None, name: str | None = None,
 ) -> Column:
     """A :class:`Column` from a hint: ``label``/``format`` come from the hint if set, else
     from the dictionary entry (key = ``h.dd`` or, when unset, ``h.name``; ``dd = ""`` opts out)
     in *language* — *connector*'s per-connector section first, then the shared top-level entries;
-    ``hidden``/``width``/``align`` are always the hint's."""
+    ``hidden``/``width``/``align`` are always the hint's. *name* overrides the column name (used
+    when the result reports a different case than the hint — see :func:`_apply_column_hints`)."""
     label, fmt = h.label, h.format
     if (label is None or fmt is None) and h.dictionary_key:
         dlabel, dfmt = dictionary.resolve(h.dictionary_key, language, connector=connector)
@@ -300,7 +302,7 @@ def _resolve_hint(
             label = dlabel
         if fmt is None:
             fmt = dfmt
-    return Column(name=h.name, type=type_, label=label, hidden=h.hidden, width=h.width, align=h.align, format=fmt)
+    return Column(name=name or h.name, type=type_, label=label, hidden=h.hidden, width=h.width, align=h.align, format=fmt)
 
 
 def _hint_to_dict(h: ColumnHint, dictionary: DictionaryFile, language: str | None, *, connector: str | None = None) -> dict[str, Any]:
@@ -321,16 +323,23 @@ def _apply_column_hints(
     order, attach label/hidden/width/align/format (label & format pulled from the dictionary —
     *connector*'s section then the shared one — when not given inline; see :func:`_resolve_hint`).
     Columns with no hint keep their discovery order and follow the hinted ones; a hint for a
-    column the query didn't return is ignored (a stale hint never fabricates a column)."""
+    column the query didn't return is ignored (a stale hint never fabricates a column).
+
+    A hint matches a result column **case-insensitively** — the database folds unquoted
+    identifiers (PostgreSQL → lowercase, Oracle → uppercase), while v1's migrated hints are
+    uppercase. The emitted column keeps the *discovered* name so it still lines up with the
+    keys in each result row."""
     if not hints:
         return discovered
-    remaining = {c.name: c for c in discovered}  # insertion-ordered → preserves discovery order
+    remaining = {c.name: c for c in discovered}        # insertion-ordered → preserves discovery order
+    by_lower = {c.name.lower(): c for c in discovered}  # case-insensitive hint → column lookup
     ordered: list[Column] = []
     for h in hints:
-        col = remaining.pop(h.name, None)
-        if col is None:
+        col = by_lower.get(h.name.lower())
+        if col is None or col.name not in remaining:    # stale hint, or already consumed
             continue
-        ordered.append(_resolve_hint(h, dictionary, language, connector=connector, type_=col.type))
+        del remaining[col.name]
+        ordered.append(_resolve_hint(h, dictionary, language, connector=connector, type_=col.type, name=col.name))
     ordered.extend(remaining.values())
     return ordered
 

@@ -128,6 +128,33 @@ async def test_column_hints_resolve_from_dictionary(pools: PoolRegistry) -> None
 
 
 @pytest.mark.asyncio
+async def test_column_hints_match_case_insensitively(pools: PoolRegistry) -> None:
+    # The database may report column names in a different case than the hints use
+    # (Postgres folds unquoted identifiers to lowercase; v1's migrated col_target/dd are
+    # uppercase) — hints still match, and the emitted column keeps the *discovered* case
+    # so it lines up with the row dict's keys.
+    conn = _connector(
+        pools,
+        QueryDef(
+            name="all",
+            sql='SELECT id AS "ID", name AS "Name", status AS "STATUS" FROM item ORDER BY id',
+            columns=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ],
+        ),
+    )
+    result = await conn.execute("all")
+    assert [c.name for c in result.columns] == ["Name", "ID", "STATUS"]   # discovered case, hint order
+    by = {c.name: c for c in result.columns}
+    assert by["Name"].label == "Item Name"
+    assert by["ID"].label == "Identifier"
+    assert by["STATUS"].hidden is True
+    assert result.rows[0] == {"ID": 1, "Name": "a", "STATUS": "on"}        # row keys = discovered case
+
+
+@pytest.mark.asyncio
 async def test_named_params_and_missing_param_binds_null(pools: PoolRegistry) -> None:
     conn = _connector(
         pools,
