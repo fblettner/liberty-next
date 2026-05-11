@@ -252,6 +252,9 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 - v1's *other* crypto (the Fernet wrapper around `secrets.json` → `secrets.json.enc`) is
   **not** ported — v2 takes the `MASTER_KEY` straight from an env var. Only the field-level
   `ENC:` scheme above is shared.
+- Operator runbook (when you need the key, how to set it, `liberty-crypto` recipes):
+  `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
+  unaffected by the master key.)
 
 229 tests pass.
 
