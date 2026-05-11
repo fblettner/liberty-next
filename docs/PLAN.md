@@ -258,16 +258,46 @@ response_field = "data.0.name"
 - 6 new tests (178 total): SPA static serving (index-fallback for client routes; API not
   shadowed; no-dir → not mounted), `GET/PUT /admin/config/connectors` (validate-then-write,
   superuser-only), the `[oidc] frontend_redirect` setting.
-- *Not done / TODO:* no i18n (react-i18next), no Monaco (plain `<textarea>` for the config),
-  no Tailwind/MUI (hand-rolled CSS), no reusable `<FormView>`/`<Lookup>` (TableView covers
-  both reads and writable "runs"; HttpRunner covers API endpoints), no Vitest/RTL frontend
-  tests yet, no frontend build in CI (the SPA mount is conditional on `dist/` existing).
+- *Not done / TODO:* the current UI is a deliberately-minimal hand-rolled-CSS shell. The
+  intended look/feel is **nomaubl's React app** (`../../JavaProjects/nomaubl/src/web-react/`):
+  emotion (`@emotion/react`/`styled`) theming with a dark-mode toggle, a grouped left sidebar,
+  `react-i18next` + `i18next` (EN/FR), `lucide-react` icons, `@tanstack/react-table` +
+  `@tanstack/react-virtual` for the data grid, `@monaco-editor/react` for SQL/config editing,
+  `react-markdown` + `remark-gfm` for the assistant. Adopt that stack/structure (its `src/`
+  is `api/ auth/ common/ components/ i18n/ pages/…`) when polishing — the connector-driven
+  pages here are the v2 equivalent of nomaubl's per-screen pages. Also still TODO: reusable
+  `<FormView>`/`<Lookup>` (TableView covers reads + writable "runs"; HttpRunner covers API
+  endpoints), Vitest/RTL frontend tests, frontend build in CI.
 
-### Phase 5 — Migration tools — ⏳ NEXT  (~4–6 wks)
-- Read v1's `ly_qry_sql` → emit SQLConnector TOML.
-- Read v1's `ly_api` + `ly_api_conn` → emit APIConnector TOML.
-- Map `ly_tbl_col`/`ly_dlg_col` labels → optional UI hint config (column titles,
-  visibility) — but the *schema* comes from the query, not these tables.
+### Phase 5 — Migration tools — 🚧 IN PROGRESS  (~4–6 wks)
+**Done so far** — `liberty/migrations/` + the `liberty-migrate` CLI:
+- `v1.py` — pure transforms over plain row dicts. `migrate_sql_queries(ly_query rows,
+  ly_qry_sql rows, dbtype=…, connector_prefix=…)`: groups by `query_pool` → **one SQL
+  connector per pool** (+ a `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` stub); one
+  `[[connectors.<pool>.queries]]` per `(query_id, query_crud)` — `sql` = `query_sqlquery`
+  (+ `ORDER BY query_orderby` for SELECTs), `writable=true` for INSERT/UPDATE/DELETE/MERGE,
+  name from `query_label` (or `q<id>`) + `_<crud>`, with a `_<dbtype>` suffix only when a
+  `(id, crud)` pair has more than one dbtype variant (or pass `dbtype=` to pick one).
+  `migrate_api(ly_api_conn, ly_api, ly_api_header, ly_api_params, …)`: **one API connector
+  per `ly_api_conn`** (`base_url = conn_url`, `auth_type=basic` + `auth_username` from
+  `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted password) with
+  endpoints (method/path/body/headers/params) from the `ly_api` rows that point at it;
+  connectionless `ly_api` rows → a single `legacy_api` connector (`base_url = ""`, absolute-
+  URL paths). `merge_connectors(*)`; `render_toml(d)` (via `tomli-w`).
+- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` (SELECT-only;
+  `make_engine(url)` takes any async URL — `postgresql+asyncpg://…/liberty` for a real v1 DB).
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`, `--source-url`,
+  `--dbtype`, `--prefix`, `-o out.toml` (else stdout); prepends a `# migrated: …` summary +
+  the `${…}` placeholders the operator must fill in. Output is a fragment to review + merge
+  into `config/connectors.toml`. v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
+- 18 new tests (196 total): the transforms over hand-crafted v1 rows, the DB readers against
+  a minimal v1 schema in SQLite, the CLI, and round-trips (emitted TOML re-parses cleanly via
+  `parse_connectors`). Dep added: `tomli-w`.
+
+**Still to do:**
+- Map `ly_tbl_col`/`ly_dlg_col` labels → an optional UI-hint config (column titles, visibility) —
+  *needs a v2 column-hints concept first* (the connector schema has nowhere to put them yet);
+  the *schema* still comes from the query, not these tables.
 - Validate by running nomasx1's read paths against v2 and diffing results.
 - Migrate nomasx1 first (read-heavy, lower risk), then NOMAJDE, then AIRFLOW.
 
@@ -321,12 +351,11 @@ to validate against.
 
 1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
 2. Read this file for the full picture.
-3. Done: Phase 0, Phase 1 (connectors), Phase 2 (auth + AI), Phase 3 (web layer),
-   Phase 4 (frontend). Next is **Phase 5 — migration tools** (`liberty/migrations/`,
-   CLI subcommands): read v1's `ly_qry_sql` → emit `[[connectors.X.queries]]` TOML; read
-   v1's `ly_api` + `ly_api_conn` → emit `[connectors.X]` (type api) TOML; map
-   `ly_tbl_col`/`ly_dlg_col` labels → optional column-title hints (the *schema* still comes
-   from the query). Then validate by running nomasx1's read paths against v2 and diffing
-   results, and migrate nomasx1 → NOMAJDE → AIRFLOW one at a time. v1 source is **read-only**
-   (`../liberty-framework/`) — the migration tools read its tables, never modify it. Polish
-   the frontend (i18n, Monaco, FormView/Lookup, Vitest) as needed alongside.
+3. Done: Phases 0–4; Phase 5 in progress — `liberty/migrations/` + `liberty-migrate` does the
+   `ly_query`/`ly_qry_sql` → SQL-connector and `ly_api*` → API-connector TOML emission. Still
+   to do in Phase 5: the `ly_tbl_col`/`ly_dlg_col` → UI-hints mapping (blocked on a v2 column-
+   hints concept), validate-by-diff against nomasx1's read paths, and the actual app migrations
+   (nomasx1 → NOMAJDE → AIRFLOW, one at a time — v1 stays read-only). Then **Phase 6** (custom
+   form logic — defer designing until real screens exist). Alongside: polish the frontend to
+   nomaubl's UI stack (see the Phase 4 *Not done* note + the `feedback_frontend_nomaubl_style`
+   memory) — emotion theming/dark mode, react-i18next, Monaco, @tanstack/react-table, lucide.

@@ -190,8 +190,33 @@ textarea for config; those are TODOs.)
 - `frontend/.gitignore` excludes `node_modules/` and `dist/`; `package-lock.json` is committed.
   Dev: `cd frontend && npm install && npm run dev` (proxies the API paths to `:8000`);
   prod build: `npm run build` → `dist/` → served automatically by the backend.
+  ⚠ The current UI is a deliberately-minimal hand-rolled shell — the intended look/stack is
+  nomaubl's React app (emotion + dark mode, react-i18next EN/FR, lucide, @tanstack/react-table,
+  Monaco, react-markdown); adopt it from `../../JavaProjects/nomaubl/src/web-react/` when polishing.
 
-178 tests pass.
+**Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the
+`liberty-migrate` CLI — turn a v1 Liberty DB's `ly_*` metadata into v2 `connectors.toml`:
+- `v1.py` — pure transforms over row dicts: `slugify`; `migrate_sql_queries(ly_query rows,
+  ly_qry_sql rows, dbtype=…, connector_prefix=…)` → one **SQL connector per `query_pool`**,
+  one query per `(query_id, query_crud)` (name suffixed `_<dbtype>` only when a pair has >1
+  dbtype; ORDER BY appended for SELECTs; `writable=true` for INSERT/UPDATE/DELETE/MERGE; pool
+  stubs `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"`); `migrate_api(ly_api_conn, ly_api,
+  ly_api_header, ly_api_params, …)` → an **API connector per `ly_api_conn`** (`base_url=conn_url`,
+  basic auth from `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted
+  password) with endpoints from the `ly_api` rows; connectionless `ly_api` → a single
+  `legacy_api` connector (`base_url=""`, absolute-URL paths); `merge_connectors(*)`;
+  `render_toml(d)` (via `tomli-w`).
+- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` (SELECT-only;
+  `make_engine(url)` accepts any async URL — `postgresql+asyncpg://…` for a real v1 DB).
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`,
+  `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); prepends a
+  `# migrated: …` summary + the `${…}` placeholders the operator must fill in.
+v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
+fragment to review + merge into `config/connectors.toml`. *Not yet done:* `ly_tbl_col` /
+`ly_dlg_col` UI-hint mapping (needs a v2 column-hints concept first); validate-by-diff against
+nomasx1's read paths; migrate the real apps (nomasx1 → NOMAJDE → AIRFLOW). Deps: `tomli-w`.
+
+196 tests pass.
 
 ## Run it
 
@@ -202,6 +227,7 @@ textarea for config; those are TODOs.)
 ./start.sh dev                    # same, with --reload   ·   ./start.sh frontend → Vite :5173 (HMR)   ·   ./start.sh help
 # by hand: .venv/bin/fastapi dev liberty/main.py   |   .venv/bin/uvicorn liberty.main:app --reload   |   .venv/bin/liberty-v2
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
+.venv/bin/liberty-migrate all --source-url postgresql+asyncpg://…/liberty -o migrated.toml   # v1 ly_* → v2 TOML
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
 # HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
@@ -224,12 +250,12 @@ empty → ephemeral key + a warning (fine for dev; set it for prod).
 
 ```
 config/         app.toml, connectors.toml
-liberty/        main.py, config.py, cli.py, admin_cli.py
+liberty/        main.py, config.py, cli.py, admin_cli.py, migrate_cli.py
                 · connectors/{config,base,db,sql,api,registry}.py
                 · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,admin}.py
-                · migrations/ (Phase 5)
+                · migrations/{v1,source}.py
 frontend/       Vite + React 19 + TS — src/{api,auth,types,App,main}.tsx + src/components/*.tsx
                 (built dist/ served by liberty/main.py; gitignored)
 start.sh        run/dev helper (serve | dev | api | build | frontend | init-db)
