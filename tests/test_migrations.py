@@ -12,8 +12,10 @@ from liberty.migrations import (
     make_engine,
     merge_connectors,
     migrate_api,
+    migrate_pools,
     migrate_sql_queries,
     read_api,
+    read_applications,
     read_sql_queries,
     render_toml,
     slugify,
@@ -113,6 +115,70 @@ def test_migrate_sql_queries_connector_prefix() -> None:
     assert "v1_default" in out["pools"]
 
 
+# --------------------------------------------------------------------------- #
+# Pools  (ly_applications → [pools.*])
+# --------------------------------------------------------------------------- #
+
+_APPLICATIONS = [
+    {"apps_name": "Framework", "apps_pool": "default", "apps_dbtype": "postgres", "apps_jdbc": None,
+     "apps_user": "liberty", "apps_password": "ENC:fw", "apps_host": "fw.example", "apps_port": 5432,
+     "apps_database": "libnsx1", "apps_pool_min": 1, "apps_pool_max": 10},
+    {"apps_name": "NOMASX1", "apps_pool": "nomasx1", "apps_dbtype": "postgres", "apps_jdbc": None,
+     "apps_user": "nomasx1", "apps_password": "ENC:nx", "apps_host": "db.example", "apps_port": 5432,
+     "apps_database": "nomasx1", "apps_pool_min": 2, "apps_pool_max": 20},
+    {"apps_name": "NOMAJDE", "apps_pool": "nomajde", "apps_dbtype": "oracle", "apps_jdbc": None,
+     "apps_user": "jde", "apps_password": None, "apps_host": "ora.example", "apps_port": 1521,
+     "apps_database": "JDEPROD", "apps_pool_min": None, "apps_pool_max": None},
+    {"apps_name": "ViaJdbc", "apps_pool": "viajdbc", "apps_dbtype": "postgres",
+     "apps_jdbc": "jdbc:postgresql://jdbc-host:5444/jdbcdb", "apps_user": "u", "apps_password": "ENC:z",
+     "apps_host": None, "apps_port": None, "apps_database": None, "apps_pool_min": None, "apps_pool_max": None},
+    {"apps_name": "Incomplete", "apps_pool": "incomplete", "apps_dbtype": None, "apps_jdbc": None,
+     "apps_user": "u", "apps_password": None, "apps_host": None, "apps_port": None, "apps_database": None,
+     "apps_pool_min": None, "apps_pool_max": None},
+]
+
+
+def test_migrate_pools() -> None:
+    out = migrate_pools(_APPLICATIONS)["pools"]
+    # v1's `default` pool is skipped — v2 reserves [pools.default] for its own framework DB
+    assert "default" not in out
+    assert set(out) == {"nomasx1", "nomajde", "viajdbc", "incomplete"}
+
+    nx = out["nomasx1"]
+    assert nx["url"] == "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1"
+    assert nx["dialect"] == "postgresql"
+    assert nx["pool_pre_ping"] is True
+    assert nx["pool_size"] == 20  # from apps_pool_max
+
+    jde = out["nomajde"]
+    assert jde["url"] == "oracle+oracledb://jde:${MIGRATED_PW_NOMAJDE}@ora.example:1521/?service_name=JDEPROD"
+    assert jde["dialect"] == "oracle"
+    assert "pool_size" not in jde  # apps_pool_max was None
+
+    # apps_jdbc fallback when host/port/database aren't on the row
+    assert out["viajdbc"]["url"] == "postgresql+asyncpg://u:${MIGRATED_PW_VIAJDBC}@jdbc-host:5444/jdbcdb"
+
+    # nothing usable → keep the env-var stub, no explicit dialect
+    assert out["incomplete"]["url"] == "${LIBERTY_DB_URL_INCOMPLETE}"
+    assert "dialect" not in out["incomplete"]
+
+    # round-trips through the v2 config loader
+    parse_connectors(tomllib.loads(render_toml({"pools": out, "connectors": {}})))
+
+
+def test_migrate_pools_prefix_and_overrides_stubs() -> None:
+    out = migrate_pools([_APPLICATIONS[1]], connector_prefix="v1_")["pools"]
+    assert "v1_nomasx1" in out and "${MIGRATED_PW_V1_NOMASX1}" in out["v1_nomasx1"]["url"]
+
+    # merged after migrate_sql_queries → the real pool URL replaces the ${LIBERTY_DB_URL_*} stub
+    sql_part = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres")  # leaves [pools.nomasx1] a stub
+    assert sql_part["pools"]["nomasx1"]["url"] == "${LIBERTY_DB_URL_NOMASX1}"
+    merged = merge_connectors(sql_part, migrate_pools(_APPLICATIONS))
+    assert merged["pools"]["nomasx1"]["url"].startswith("postgresql+asyncpg://")    # real one wins
+    assert merged["pools"]["default"]["url"] == "${LIBERTY_DB_URL_DEFAULT}"          # default-pool stub kept (skipped by migrate_pools)
+    parse_connectors(tomllib.loads(render_toml(merged)))
+
+
 _CONNS = [
     {"conn_id": 10, "conn_label": "Acme API", "conn_url": "https://acme.example/api", "conn_user": "svc", "conn_password": "ENC:dGVzdA=="},
     {"conn_id": 11, "conn_label": "Public", "conn_url": "https://pub.example", "conn_user": None, "conn_password": None},
@@ -180,6 +246,7 @@ def test_merge_connectors() -> None:
 _V1_SCHEMA = [
     "CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY, query_label TEXT, query_type TEXT)",
     "CREATE TABLE ly_qry_sql (query_id INTEGER, query_dbtype TEXT, query_crud TEXT, query_pool TEXT, query_sqlquery TEXT, query_orderby TEXT)",
+    "CREATE TABLE ly_applications (apps_name TEXT, apps_pool TEXT, apps_dbtype TEXT, apps_jdbc TEXT, apps_user TEXT, apps_password TEXT, apps_host TEXT, apps_port INTEGER, apps_database TEXT, apps_pool_min INTEGER, apps_pool_max INTEGER)",
     "CREATE TABLE ly_api_conn (conn_id INTEGER PRIMARY KEY, conn_label TEXT, conn_url TEXT, conn_user TEXT, conn_password TEXT)",
     "CREATE TABLE ly_api (api_id INTEGER PRIMARY KEY, api_label TEXT, api_source TEXT, api_method TEXT, api_url TEXT, api_user TEXT, api_password TEXT, api_body TEXT, api_conn_id INTEGER)",
     "CREATE TABLE ly_api_header (api_id INTEGER, hdr_id INTEGER, hdr_key TEXT, hdr_value TEXT)",
@@ -203,6 +270,14 @@ async def _seed_v1(engine) -> None:
             [
                 {"qid": 1, "db": "postgres", "crud": "SELECT", "pool": "default", "sql": "SELECT * FROM ly_users", "ob": "usr_name"},
                 {"qid": 2, "db": "postgres", "crud": "DELETE", "pool": "default", "sql": "DELETE FROM ly_users WHERE usr_id = :id", "ob": None},
+            ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_applications (apps_name, apps_pool, apps_dbtype, apps_jdbc, apps_user, apps_password, apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max)"
+                 " VALUES (:n, :p, :db, :j, :u, :pw, :h, :port, :d, :mn, :mx)"),
+            [
+                {"n": "Framework", "p": "default", "db": "postgres", "j": None, "u": "liberty", "pw": "ENC:fw", "h": "fw.example", "port": 5432, "d": "libnsx1", "mn": 1, "mx": 10},
+                {"n": "NOMASX1", "p": "nomasx1", "db": "postgres", "j": None, "u": "nomasx1", "pw": "ENC:nx", "h": "db.example", "port": 5432, "d": "nomasx1", "mn": 2, "mx": 20},
             ],
         )
         await conn.execute(
@@ -252,6 +327,26 @@ async def test_read_api(v1_engine) -> None:
     parse_connectors(tomllib.loads(render_toml(out)))
 
 
+@pytest.mark.asyncio
+async def test_read_applications(v1_engine) -> None:
+    apps = await read_applications(v1_engine)
+    assert {a["apps_pool"] for a in apps} == {"default", "nomasx1"}
+    pools = migrate_pools(apps)["pools"]
+    assert "default" not in pools  # v2 reserves [pools.default]
+    assert pools["nomasx1"]["url"] == "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1"
+
+
+@pytest.mark.asyncio
+async def test_read_applications_missing_table(tmp_path) -> None:
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_apps.db'}")
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))
+    try:
+        assert await read_applications(engine) == []  # no ly_applications → []
+    finally:
+        await engine.dispose()
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
@@ -279,6 +374,11 @@ def test_cli_sql_to_file(tmp_path) -> None:
     assert text_out.startswith("# migrated:")
     cfg = parse_connectors(tomllib.loads(text_out))  # comments + TOML both parse
     assert "default" in cfg.connectors and "default" in cfg.pools
+    # ly_applications scaffolded [pools.nomasx1] with a real URL + a password placeholder;
+    # v1's `default` pool was skipped, so [pools.default] is still the env-var stub.
+    assert "nomasx1" in cfg.pools
+    assert "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1" in text_out
+    assert "${LIBERTY_DB_URL_DEFAULT}" in text_out  # the default pool kept its env-var stub
 
 
 def test_cli_all_to_stdout(tmp_path, capsys) -> None:
@@ -286,5 +386,7 @@ def test_cli_all_to_stdout(tmp_path, capsys) -> None:
     assert migrate_main(["all", "--source-url", url]) == 0
     out = capsys.readouterr().out
     assert "fill in these placeholders" in out  # the migrated pool/secret stubs
+    assert "MIGRATED_PW_" in out  # the scaffolded pool's password placeholder
     cfg = parse_connectors(tomllib.loads(out))
     assert {"default", "acme"} <= set(cfg.connectors)
+    assert "nomasx1" in cfg.pools

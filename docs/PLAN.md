@@ -314,14 +314,22 @@ Postgres *and* Oracle, etc.):
   query_orderby` for SELECTs, `writable=true` for INSERT/UPDATE/DELETE/MERGE, name = `query_label`
   (or `q<id>`) + `_<crud>`. `migrate_api(ly_api_conn, ly_api, ly_api_header, ly_api_params, …)`:
   **one API connector per `ly_api_conn`** (`base_url = conn_url`, `auth_type=basic` + `auth_username`
-  from `conn_user` + a `${MIGRATED_SECRET_…}` placeholder for the v1-encrypted password) with
-  endpoints (method/path/body/headers/params) from the `ly_api` rows that point at it;
-  connectionless `ly_api` rows → a single `legacy_api` connector (`base_url = ""`, absolute-URL
-  paths). `merge_connectors(*)`; `render_toml(d)` (via `tomli-w`). The v1 `conn_password` is an
-  `ENC:…` blob — it's carried over **verbatim** (not turned into a `${…}` placeholder) and v2
-  decrypts it at runtime with `[crypto] master_key` (= v1's `MASTER_KEY`); the `# migrated:` header
-  flags that.
-- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` (SELECT-only;
+  from `conn_user` + the v1 `conn_password` carried over **verbatim** — it's an `ENC:…` blob and v2
+  decrypts it at runtime with `[crypto] master_key` = v1's `MASTER_KEY`; the `# migrated:` header
+  flags that) with endpoints (method/path/body/headers/params) from the `ly_api` rows that point
+  at it; connectionless `ly_api` rows → a single `legacy_api` connector (`base_url = ""`,
+  absolute-URL paths). `migrate_pools(ly_applications rows, connector_prefix=…)`: real
+  **`[pools.*]` from `ly_applications`** — one per `apps_pool`, `url` = a SQLAlchemy async URL
+  built from `apps_dbtype`/`apps_host`/`apps_port`/`apps_database` (`postgresql+asyncpg://…` /
+  `oracle+oracledb://…/?service_name=…`) or a parseable `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}`
+  stub; `dialect` from `apps_dbtype`, `pool_size` from `apps_pool_max`; the DB **password is never
+  inlined** — it's a `${MIGRATED_PW_<NAME>}` placeholder (v1 keeps it `ENC:`-encrypted in
+  `apps_password` — set the env var, or `liberty-crypto decrypt` it). v1's reserved `default` pool
+  is **skipped** — v2's `[pools.default]` is v2's own framework DB (the `ly2_*` tables).
+  `merge_connectors(*)` — pools are merged with `migrate_pools` *last*, so its real URLs override
+  the `migrate_sql_queries` stubs for referenced pools. `render_toml(d)` (via `tomli-w`).
+- `source.py` — async `read_sql_queries(engine)` / `read_api(engine)` / `read_applications(engine)`
+  (SELECT-only; the last tolerates a missing `ly_applications` on old v1 schemas → `[]`;
   `make_engine(url)` takes any async URL — `postgresql+asyncpg://…/liberty` for a real v1 DB).
 - **`liberty/crypto.py`** — field-level encryption, byte-compatible with v1's `Encryption`
   (AES-256-GCM, PBKDF2-HMAC-SHA512 2145 iters / 32 bytes, `"ENC:" + base64(salt[64]‖iv[16]‖tag[16]‖ct)`).
@@ -333,8 +341,9 @@ Postgres *and* Oracle, etc.):
   `liberty-crypto` CLI (`encrypt`/`decrypt`/`is-encrypted`, stdin-friendly). v1's Fernet/`secrets.json`
   layer is *not* ported. Dep: `cryptography`.
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all`, `--source-url`,
-  `--dbtype`, `--prefix`, `-o out.toml` (else stdout); prepends a `# migrated: …` summary +
-  the `${…}` placeholders the operator must fill in. Output is a fragment to review + merge
+  `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all` also scaffold the
+  `ly_applications` pools; prepends a `# migrated: …` summary + the `${…}` placeholders the
+  operator must fill in (incl. each `${MIGRATED_PW_*}`). Output is a fragment to review + merge
   into `config/connectors.toml`. v1 (`../liberty-framework/`) stays untouched (read-only SELECTs).
 - Tests: the transforms over hand-crafted v1 rows (incl. the dialect-map cases), the DB readers
   against a minimal v1 schema in SQLite, the CLI, dialect resolution in `SQLConnector` /

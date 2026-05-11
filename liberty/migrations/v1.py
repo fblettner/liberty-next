@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Iterable, Mapping
+from urllib.parse import quote as _urlquote
 
 _WRITE_CRUD = {"INSERT", "UPDATE", "DELETE", "MERGE"}
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -163,6 +164,114 @@ def migrate_sql_queries(
         )
 
     return {"pools": pools, "connectors": connectors}
+
+
+# --------------------------------------------------------------------------- #
+# Pools  (ly_applications → [pools.*])
+# --------------------------------------------------------------------------- #
+
+_DEFAULT_PORT = {"postgresql": 5432, "oracle": 1521, "mysql": 3306, "mssql": 1433}
+# v1 only ever talks Postgres or Oracle; the mysql/mssql rows are here for completeness.
+_DRIVER = {
+    "postgresql": "postgresql+asyncpg",
+    "oracle": "oracle+oracledb",
+    "mysql": "mysql+asyncmy",
+    "mssql": "mssql+aioodbc",
+}
+_JDBC_PATTERNS = (
+    re.compile(r"jdbc:postgresql://(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<db>[^?;]+)", re.I),
+    re.compile(r"jdbc:oracle:thin:@//?(?P<host>[^:/]+):(?P<port>\d+)/(?P<db>[^?;]+)", re.I),  # service-name form
+    re.compile(r"jdbc:oracle:thin:@(?P<host>[^:/]+):(?P<port>\d+):(?P<db>[^?;]+)", re.I),     # SID form
+)
+
+
+def _pw_placeholder(pool_name: str) -> str:
+    """`${MIGRATED_PW_<POOL>}` — the DB password is never inlined into connectors.toml;
+    the operator sets the env var (or recovers it: `liberty-crypto decrypt <apps_password>`)."""
+    return "${MIGRATED_PW_" + pool_name.upper() + "}"
+
+
+def _db_url(dialect: str, user: str, host: str, port: int, database: str, pool_name: str) -> str | None:
+    driver = _DRIVER.get(dialect)
+    if not driver:
+        return None
+    auth = f"{_urlquote(user, safe='')}:{_pw_placeholder(pool_name)}"
+    if dialect == "oracle":
+        return f"{driver}://{auth}@{host}:{port}/?service_name={database}"
+    return f"{driver}://{auth}@{host}:{port}/{database}"
+
+
+def _parse_jdbc(jdbc: str) -> tuple[str, int, str] | None:
+    """Best-effort: pull (host, port, database/service) out of a v1 ``apps_jdbc`` string."""
+    for rx in _JDBC_PATTERNS:
+        m = rx.search(jdbc or "")
+        if m:
+            return m["host"], int(m["port"]) if m["port"] else 0, m["db"].strip()
+    return None
+
+
+def migrate_pools(
+    applications: Iterable[Mapping[str, Any]],
+    *,
+    connector_prefix: str = "",
+) -> dict[str, Any]:
+    """Build the ``{pools}`` dict from v1's ``ly_applications`` rows — one
+    ``[pools.<slug-of-apps_pool>]`` per app with a real SQLAlchemy async URL when the
+    connection details are known (``apps_host``/``apps_port``/``apps_database`` or a
+    parseable ``apps_jdbc``), else the ``${LIBERTY_DB_URL_<NAME>}`` env-var stub.
+
+    The DB password is **never inlined** — the URL carries a ``${MIGRATED_PW_<NAME>}``
+    placeholder (v1 keeps it ``ENC:``-encrypted in ``apps_password``; the operator sets the
+    env var, or recovers it with ``liberty-crypto decrypt``). v1's reserved ``default`` pool
+    — its framework/definition DB — is **skipped**: v2 reserves ``[pools.default]`` for v2's
+    own framework DB (the ``ly2_*`` tables). When several apps share a pool name, the first
+    wins. ``apps_dbtype`` becomes the pool's explicit ``dialect`` (so v2 picks the right
+    per-dialect SQL variant); ``apps_pool_max`` becomes ``pool_size`` when sensible.
+
+    Args:
+        applications: rows from ``ly_applications`` (``apps_name``, ``apps_pool``,
+            ``apps_dbtype``, ``apps_jdbc``, ``apps_user``, ``apps_host``, ``apps_port``,
+            ``apps_database``, ``apps_pool_max``, …).
+        connector_prefix: prepended to the pool name (e.g. ``"v1_"``).
+    """
+    pools: dict[str, dict[str, Any]] = {}
+    for a in applications:
+        name = f"{connector_prefix}{slugify(a.get('apps_pool'), fallback='')}"
+        if not name or name == "default":  # v2 reserves [pools.default] for its own framework DB
+            continue
+        if name in pools:  # several apps can map to the same pool name → first wins
+            continue
+        dialect = _dialect_name(a.get("apps_dbtype"))
+        if dialect == "default":  # no apps_dbtype on the row → leave dialect unset (v2 derives it from the URL)
+            dialect = ""
+        user = str(a.get("apps_user") or "").strip()
+        host = str(a.get("apps_host") or "").strip()
+        database = str(a.get("apps_database") or "").strip()
+
+        url: str | None = None
+        if user and host and database:
+            try:
+                port = int(a.get("apps_port") or 0) or _DEFAULT_PORT.get(dialect or "postgresql", 5432)
+            except (TypeError, ValueError):
+                port = _DEFAULT_PORT.get(dialect or "postgresql", 5432)
+            url = _db_url(dialect or "postgresql", user, host, port, database, name)
+        if url is None and user:
+            parsed = _parse_jdbc(str(a.get("apps_jdbc") or ""))
+            if parsed:
+                h, p, d = parsed
+                url = _db_url(dialect or "postgresql", user, h, p or _DEFAULT_PORT.get(dialect or "postgresql", 5432), d, name)
+
+        entry: dict[str, Any] = {"url": url or ("${LIBERTY_DB_URL_" + name.upper() + "}"), "pool_pre_ping": True}
+        if dialect:
+            entry["dialect"] = dialect
+        try:
+            pool_max = int(a.get("apps_pool_max") or 0)
+            if 0 < pool_max <= 100:
+                entry["pool_size"] = pool_max
+        except (TypeError, ValueError):
+            pass
+        pools[name] = entry
+    return {"pools": pools}
 
 
 # --------------------------------------------------------------------------- #

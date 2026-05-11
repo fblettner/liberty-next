@@ -8,8 +8,16 @@
 ``--source-url`` is a SQLAlchemy *async* URL — e.g.
 ``postgresql+asyncpg://user:pw@host/liberty`` for a real v1 DB. v1 is read-only:
 this only ``SELECT``s. Output goes to ``--out`` (or stdout); review it, then merge
-it into ``config/connectors.toml`` (fill in the ``${LIBERTY_DB_URL_…}`` pool URLs
-and any ``${MIGRATED_SECRET_…}`` placeholders — v1 stored API passwords encrypted).
+it into ``config/connectors.toml``.
+
+``sql``/``all`` also scaffold ``[pools.*]`` from v1's ``ly_applications`` (one per
+``apps_pool``, with a SQLAlchemy URL built from ``apps_host``/``apps_port``/``apps_database``
+or a parseable ``apps_jdbc``); the DB password is a ``${MIGRATED_PW_<NAME>}`` placeholder
+(v1 keeps it ``ENC:``-encrypted in ``apps_password`` — set the env var, or recover it with
+``liberty-crypto decrypt``). v1's reserved ``default`` pool is skipped: v2's ``[pools.default]``
+is v2's own framework DB (the ``ly2_*`` tables). Migrated API connectors keep v1's
+``conn_password`` verbatim as an ``ENC:`` value — v2 decrypts it at runtime via
+``[crypto] master_key`` (set ``LIBERTY_MASTER_KEY`` to your v1 ``MASTER_KEY``).
 """
 
 from __future__ import annotations
@@ -22,8 +30,10 @@ from liberty.migrations import (
     make_engine,
     merge_connectors,
     migrate_api,
+    migrate_pools,
     migrate_sql_queries,
     read_api,
+    read_applications,
     read_sql_queries,
     render_toml,
 )
@@ -51,6 +61,10 @@ async def _build(args: argparse.Namespace) -> dict:
         if args.command in ("api", "all"):
             conns, apis, headers, params = await read_api(engine)
             parts.append(migrate_api(conns, apis, headers, params, connector_prefix=args.prefix))
+        if args.command in ("sql", "all"):
+            # Real [pools.*] from ly_applications — appended last so it overrides the
+            # ${LIBERTY_DB_URL_*} stubs that migrate_sql_queries left for referenced pools.
+            parts.append(migrate_pools(await read_applications(engine), connector_prefix=args.prefix))
         return merge_connectors(*parts)
     finally:
         await engine.dispose()
@@ -66,6 +80,9 @@ def _summary(data: dict) -> str:
     ph = _placeholders(data)
     if ph:
         lines.append("# fill in these placeholders before use: " + ", ".join(ph))
+    if any("MIGRATED_PW_" in str(p.get("url", "")) for p in pools.values()):
+        lines.append("# pool URLs carry ${MIGRATED_PW_<NAME>} for the DB password — set the env var(s),")
+        lines.append("#   or recover each from v1's ly_applications.apps_password: liberty-crypto decrypt 'ENC:…'")
     if "ENC:" in blob:
         lines.append("# contains ENC: secrets carried over from v1 — v2 decrypts them at runtime via")
         lines.append("#   [crypto] master_key (set LIBERTY_MASTER_KEY to your v1 MASTER_KEY)")
@@ -75,10 +92,10 @@ def _summary(data: dict) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="liberty-migrate", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, help_ in [("sql", "migrate ly_query/ly_qry_sql"), ("api", "migrate ly_api/ly_api_conn"), ("all", "both")]:
+    for name, help_ in [("sql", "migrate ly_query/ly_qry_sql + ly_applications pools"), ("api", "migrate ly_api/ly_api_conn"), ("all", "both")]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
-        p.add_argument("--prefix", default="", help="prepend to migrated connector names (e.g. v1_)")
+        p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
         if name != "api":
             p.add_argument("--dbtype", default=None, help="only migrate ly_qry_sql rows of this query_dbtype")
         else:
