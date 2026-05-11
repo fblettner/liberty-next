@@ -5,7 +5,8 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
@@ -19,6 +20,7 @@ from liberty.auth.routes import router as auth_router
 from liberty.auth.tokens import TokenConfig, TokenService
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
+from liberty.connectors.base import ConnectorError
 from liberty.web import admin_router, connectors_router
 
 _log = logging.getLogger("liberty")
@@ -86,6 +88,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(
             SessionMiddleware, secret_key=session_secret, same_site="lax", https_only=False
         )
+
+    @app.exception_handler(ConnectorError)
+    async def _connector_error_handler(_request: Request, exc: ConnectorError) -> JSONResponse:
+        # Safety net for connector problems that aren't caught per-route (e.g. an
+        # unconfigured DB pool surfacing on /auth/login) — a clean 503, not a stack trace.
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     app.include_router(auth_router)
     app.include_router(connectors_router)

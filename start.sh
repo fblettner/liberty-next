@@ -57,6 +57,8 @@ maybe_build_frontend() {
 run_api() {  # $1 = "dev" → enable --reload
   local extra=()
   [ "${1:-}" = "dev" ] && extra=(--reload)
+  [ -n "${LIBERTY_DB_URL:-}" ] || echo "==> LIBERTY_DB_URL unset → using SQLite (./liberty.db). First time? run: ./start.sh init-db"
+  [ -n "${LIBERTY_JWT_SECRET:-}" ] || echo "==> LIBERTY_JWT_SECRET unset → ephemeral JWT key (tokens won't survive a restart)"
   echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs)"
   exec "$PY" -m uvicorn liberty.main:app --host "$HOST" --port "$PORT" "${extra[@]}"
 }

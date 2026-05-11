@@ -38,6 +38,11 @@ class PoolRegistry:
             raise UnknownPoolError(
                 f"Unknown pool {name!r}. Defined: {sorted(self._configs) or '(none)'}."
             )
+        if not cfg.url.strip():
+            raise UnknownPoolError(
+                f"Pool {name!r} has an empty url — set the referenced env var "
+                "(e.g. LIBERTY_DB_URL) or edit config/connectors.toml."
+            )
         kwargs: dict[str, object] = {
             "echo": cfg.echo,
             "pool_pre_ping": cfg.pool_pre_ping,

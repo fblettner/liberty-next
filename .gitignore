@@ -10,3 +10,10 @@ build/
 dist/
 .DS_Store
 config/local.toml
+# local dev SQLite (the default [pools.default] when LIBERTY_DB_URL is unset)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

@@ -52,6 +52,26 @@ def test_env_substitution() -> None:
     assert cfg2.connectors["api"].auth_token == ""
 
 
+def test_env_substitution_default_value() -> None:
+    raw = tomllib.loads(
+        """
+        [pools.default]
+        url = "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
+
+        [pools.other]
+        url = "${OTHER_URL:-}"
+        """
+    )
+    # unset → default
+    assert parse_connectors(raw, env={}).pools["default"].url == "sqlite+aiosqlite:///./liberty.db"
+    # empty → default (shell `:-` semantics)
+    assert parse_connectors(raw, env={"LIBERTY_DB_URL": ""}).pools["default"].url == "sqlite+aiosqlite:///./liberty.db"
+    # set → the value wins
+    assert parse_connectors(raw, env={"LIBERTY_DB_URL": "postgresql+asyncpg://x/y"}).pools["default"].url == "postgresql+asyncpg://x/y"
+    # empty default
+    assert parse_connectors(raw, env={}).pools["other"].url == ""
+
+
 def test_unknown_type_rejected() -> None:
     with pytest.raises(Exception):
         parse_connectors({"connectors": {"x": {"type": "ftp"}}})

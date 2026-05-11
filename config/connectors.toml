@@ -13,9 +13,12 @@
 
 # --------------------------------------------------------------------------- #
 # Database pools — one SQLAlchemy async engine per entry, created lazily.
+#   ${NAME:-default} = use $NAME if set & non-empty, else the default.
 # --------------------------------------------------------------------------- #
 [pools.default]
-url = "${LIBERTY_DB_URL}"  # e.g. postgresql+asyncpg://liberty:liberty@localhost/liberty
+# Set LIBERTY_DB_URL for Postgres (e.g. postgresql+asyncpg://liberty:liberty@localhost/liberty);
+# otherwise this falls back to a local SQLite file so the app runs out of the box.
+url = "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
 pool_size = 5
 max_overflow = 10
 pool_pre_ping = true

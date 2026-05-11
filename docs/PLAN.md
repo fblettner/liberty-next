@@ -288,9 +288,11 @@ to validate against.
   parts list, files read into memory; revisit streaming if a large-file PA needs it).
 - WebSocket vs SSE — SSE covers live updates for now (`/ai/chat`). Add WebSocket only
   if a real bidirectional/low-latency need appears (v1 = Socket.IO).
-- Secrets handling — settled on the **env-var** path: `${ENV_VAR}` references in
-  `connectors.toml` *and* `app.toml`, substituted at load time (unset → empty
-  string). v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
+- Secrets / config — settled on the **env-var** path: `${NAME}` and `${NAME:-default}`
+  references in `connectors.toml` *and* `app.toml`, substituted at load time (`:-` =
+  shell semantics: unset *or* empty → default; bare `${NAME}` unset → ""). The shipped
+  `[pools.default]` is `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}` so the app
+  runs out of the box. v1's Fernet + `secrets.json` not ported; revisit a vault only if ops asks.
 - Token revocation — refresh tokens are stateless (no denylist / rotation), so a
   leaked refresh token is good until expiry. Add a `jti` denylist (or per-user
   token version) if/when that matters; for now keep TTLs short.

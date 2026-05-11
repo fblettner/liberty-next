@@ -17,14 +17,23 @@ from pydantic import BaseModel, Field
 
 DEFAULT_APP_CONFIG = Path("config/app.toml")
 
-_ENV_REF = re.compile(r"\$\{(\w+)\}")
+# ${NAME}  or  ${NAME:-default}  (shell semantics: the default is used when NAME is
+# unset *or* empty). The default may contain anything except '}'.
+_ENV_REF = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
 
 
 def substitute_env(value: Any, *, env: dict[str, str] | None = None) -> Any:
-    """Recursively replace ``${NAME}`` references with environment values."""
+    """Recursively replace ``${NAME}`` / ``${NAME:-default}`` references with env values."""
     src = os.environ if env is None else env
+
+    def _repl(m: re.Match[str]) -> str:
+        v = src.get(m.group(1))
+        if v:
+            return v
+        return m.group(2) if m.group(2) is not None else ""
+
     if isinstance(value, str):
-        return _ENV_REF.sub(lambda m: src.get(m.group(1), ""), value)
+        return _ENV_REF.sub(_repl, value)
     if isinstance(value, dict):
         return {k: substitute_env(v, env=env) for k, v in value.items()}
     if isinstance(value, list):

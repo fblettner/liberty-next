@@ -8,11 +8,20 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from liberty.connectors.base import (
     QueryNotFoundError,
     StatementNotAllowedError,
+    UnknownPoolError,
     WriteNotAllowedError,
 )
-from liberty.connectors.config import ParamDef, QueryDef, SqlConnectorConfig
+from liberty.connectors.config import ParamDef, PoolConfig, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.sql import SQLConnector
+
+
+def test_pool_registry_unknown_and_empty_url() -> None:
+    pools = PoolRegistry({"blank": PoolConfig(url="   ")})
+    with pytest.raises(UnknownPoolError, match="empty url"):
+        pools.engine("blank")
+    with pytest.raises(UnknownPoolError, match="Unknown pool"):
+        pools.engine("nope")
 
 
 def _connector(pools: PoolRegistry, *queries: QueryDef, max_rows: int = 1000) -> SQLConnector:

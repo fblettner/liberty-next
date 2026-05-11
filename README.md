@@ -15,11 +15,10 @@ python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest -v                       # the test suite
 
-# one process — FastAPI serving the React SPA at / and the API at /api/…
-./start.sh                                # builds frontend/dist if stale, then serves on :8000
+./start.sh init-db                        # FIRST RUN: create the auth tables + an `admin` user (prints the password)
+./start.sh                                # builds frontend/dist if stale, then runs FastAPI: SPA at / and API at /api/… on :8000
 ./start.sh dev                            # same, with auto-reload (backend)
 ./start.sh frontend                       # Vite dev server on :5173 (HMR) — pair with `./start.sh api dev`
-./start.sh init-db                        # bootstrap the auth tables + an `admin` user (needs a DB)
 ./start.sh help                           # all commands
 
 # or, by hand:
@@ -32,8 +31,13 @@ python3.12 -m venv .venv
 The backend serves the built frontend (`frontend/dist`) at `/` automatically — no
 copy step. Set `[app] static_dir` in `config/app.toml` to serve it from elsewhere; if
 the directory doesn't exist (e.g. a fresh checkout with no `npm run build`), the app
-runs API-only. Set `ANTHROPIC_API_KEY` to enable the assistant; `LIBERTY_DB_URL` /
-`LIBERTY_JWT_SECRET` for the DB pool and JWT signing (see `config/app.toml` / `config/connectors.toml`).
+runs API-only.
+
+Out of the box the `default` DB pool is a local SQLite file (`liberty.db`, gitignored);
+set `LIBERTY_DB_URL` for Postgres (e.g. `postgresql+asyncpg://liberty:liberty@localhost/liberty`).
+Set `LIBERTY_JWT_SECRET` (else an ephemeral key is generated each start) and
+`ANTHROPIC_API_KEY` (to enable the assistant). Config files support `${NAME}` and
+`${NAME:-default}` references. See `config/app.toml` and `config/connectors.toml`.
 
 ## Status
 

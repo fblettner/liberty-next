@@ -197,21 +197,28 @@ textarea for config; those are TODOs.)
 
 ```bash
 .venv/bin/pytest -v               # tests
+./start.sh init-db                # FIRST RUN: create the auth tables + an `admin` user (prints the password)
 ./start.sh                        # builds frontend/dist if stale, then runs FastAPI serving the SPA + API on :8000
-./start.sh dev                    # same, with --reload   ·   ./start.sh frontend → Vite :5173 (HMR)
-./start.sh init-db                # → liberty-admin init-db   ·   ./start.sh help → all commands
+./start.sh dev                    # same, with --reload   ·   ./start.sh frontend → Vite :5173 (HMR)   ·   ./start.sh help
 # by hand: .venv/bin/fastapi dev liberty/main.py   |   .venv/bin/uvicorn liberty.main:app --reload   |   .venv/bin/liberty-v2
 .venv/bin/liberty-connectors list # poke at config/connectors.toml without the web layer
-.venv/bin/liberty-admin init-db   # create auth tables + bootstrap admin (needs [auth] pool reachable)
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
 # HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
-`start.sh` lives at the repo root: `serve` (default) | `dev` | `api [dev]` | `build` |
-`frontend` | `init-db` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py`
-also works (their old-v1 muscle-memory equivalent).
+`start.sh` (repo root): `serve` (default) | `dev` | `api [dev]` | `build` | `frontend` |
+`init-db` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py` works too.
+
+**DB / secrets:** `config/connectors.toml`'s `[pools.default]` is
+`${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}` — set `LIBERTY_DB_URL` for Postgres,
+else it uses a local `liberty.db` (gitignored). `substitute_env` supports
+`${NAME}` and `${NAME:-default}` (shell `:-` = unset *or* empty → default), in both
+`connectors.toml` and `app.toml`. An empty pool URL raises `UnknownPoolError`, and any
+`ConnectorError` that isn't caught per-route (e.g. an unconfigured DB on `/auth/login`)
+becomes a clean **503** via a global exception handler in `liberty/main.py`. `LIBERTY_JWT_SECRET`
+empty → ephemeral key + a warning (fine for dev; set it for prod).
 
 ## Layout
 
