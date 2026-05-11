@@ -83,7 +83,9 @@ Full dep set pinned in `pyproject.toml`.
   unquoted identifiers, Postgres→lower / Oracle→upper, v1's hints are upper — and the emitted
   column keeps the *discovered* case so it lines up with the row dict's keys), `max_rows` cap;
   `QueryResult.to_dict()` carries the resolved per-column
-  hints, `describe()` exposes the `columns` resolved for the default language. (JDE Julian date/time
+  hints, `describe()` exposes the `columns` resolved for the default language plus `update_query` per
+  query (the explicit `QueryDef.update_query`, else the `<base>_get` → `<base>_put` companion if it
+  exists & is writable — the frontend's inline-edit hook). (JDE Julian date/time
   conversion from nomaubl `DynamicResultMapper`: deferred to Phase 5, if NOMAJDE needs it.)
 - `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
   `api_key`/`oauth2` (OAuth2 = token-endpoint POST + dot-path token extraction +
@@ -228,11 +230,15 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`/`ruleCell` (the latter applies the
   dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` — fetches each
   LOOKUP-target query once, module-level session cache), `monaco.ts` (bundles
-  Monaco + its worker, no CDN)), `src/common/` (shared theme-driven
-  primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
+  Monaco + its worker, no CDN), `lookups.ts`'s `useLookupBatch` listed above)), `src/common/` (shared
+  theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
-  `useIsLight`, plus `Markdown` (react-markdown — *not* re-exported by `common/index.ts` so it
-  stays out of every page's chunk); `common/index.ts` barrels the rest, pages import
+  `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
+  global search, a type-aware per-column filter row (text/number/date with an operator; boolean/enum as a select)
+  + clear-all, sort, column resize/hide/reorder, row grouping, CSV/Excel export via `xlsx`, paging, localStorage
+  persistence per `tableId`; ported from nomaubl — *not* barrelled, it pulls in `xlsx`) and `Markdown`
+  (react-markdown — also *not* re-exported by `common/index.ts`, so each rides only its lazy page chunk);
+  `common/index.ts` barrels the rest, pages import
   `{ Button, ... } from '../../common'`), `src/pages/<Screen>/index.tsx` (one dir per page,
   splitting helpers alongside — e.g. `TableView/ResultTable.tsx` + `TableView/styled.ts`),
   `src/components/` (app chrome: `Layout`, `Sidebar`, `SidebarMenu`, `ProfileModal`, `WorkspaceSelect`), `src/theme.ts`
@@ -255,13 +261,15 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
   self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
   the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
-  `TableView` (param form from the query's
-  `params`/`bind_params`; SELECT → `GET` + a `@tanstack/react-table` grid — sortable columns,
-  client-side paging, sticky header — from `result.columns`, honouring their display hints
-  (label / hidden / width / align) and their `rule` — BOOLEAN → ✓ green / ✗ red, ENUM → the value's
-  label, LOOKUP → the resolved label (raw value italic-muted while fetching, raw value tooltipped
-  for both); sorts are on the raw value, so rule rendering is visual-only. Writable → `confirm` +
-  `POST` + affected-rows banner),
+  `TableView` (param form from the query's `params`/`bind_params`; SELECT → `GET` + the `DataTable`
+  grid built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
+  — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
+  + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
+  run on the displayed value, rule rendering is visual-only. When the query has an `update_query` companion,
+  an **Edit** toggle appears → a per-row pencil starts inline editing (one row at a time): cells become
+  inputs (date/number/select-for-enum/text), **Save** POSTs the merged row to `/api/sql/<c>/<update_query>`
+  (both as-is + UPPERCASE keys — PG lowercases the read columns, v1's `_put` queries use uppercase) and
+  refetches, **Cancel** reverts. A non-SELECT query → `confirm` + `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
   `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a Monaco editor — `language="ini"`,
@@ -391,7 +399,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-260 tests pass.
+261 tests pass.
 
 ## Run it
 

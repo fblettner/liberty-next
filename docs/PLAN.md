@@ -291,9 +291,14 @@ response_field = "data.0.name"
   (read-only — username/email/provider/roles/permissions from the Principal; no self-service
   password change yet — the backend has no endpoint), **Connectors** (the accessible connectors
   from `useWorkspace()`, scoped to the picked app — drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
-  `GET` + a `@tanstack/react-table` grid — sortable columns, client-side paging, sticky header —
-  whose columns come from `result.columns`, honouring their display hints (label/hidden/width/align);
-  writable → confirm + `POST`), **HttpRunner**
+  `GET` + the `DataTable` grid (`common/DataTable.tsx` — ported from nomaubl: uppercase themed headers,
+  global search + a type-aware per-column filter row (text/number/date with an operator; boolean/enum as a
+  select) + clear-all, sort, column resize/hide/reorder, row grouping, CSV/Excel export, paging, localStorage
+  persistence) built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
+  (BOOLEAN ✓/✗, ENUM label, LOOKUP split into a "(ID)" + a resolved-label column); when the query has an
+  `update_query` companion, an **Edit** toggle → per-row inline editing (cells become inputs; Save POSTs the row
+  to `/api/sql/<c>/<update_query>` and refetches). A non-SELECT query → confirm + `POST`. (Modal-form edit is
+  the form layer — Phase 6.) **HttpRunner**
   (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), **Chat** (consumes the `/ai/chat`
   SSE — user bubbles plain, assistant bubbles via `<Markdown>`, + tool_call/tool_result lines +
   new-conversation), **Settings** (a Monaco editor — `ini` highlighting, theme follows
