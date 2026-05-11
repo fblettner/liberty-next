@@ -67,10 +67,16 @@ const BrandName = styled.span`
 const Items = styled.div`
   padding: 0 8px;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Without this, a long menu's rows get flex-shrunk to fit instead of scrolling,
+     which clips their text — keep every row at its natural height and let the rail scroll. */
+  & > * {
+    flex-shrink: 0;
+  }
 `
 
 const Item = styled(NavLink)<{ $collapsed: boolean }>`
