@@ -1,10 +1,11 @@
 // Generic data grid on TanStack Table v8 — adapted from nomaubl's DataTable, trimmed to
-// client-side mode (the data is already in memory). Features: a global search box; a
-// per-column filter row whose control adapts to the column's type (text/number/date with
-// an operator, boolean/enum as a select — see DataTableFilter); sortable + resizable
-// columns; row grouping by one or more columns (expand/collapse); a column hide/reorder
-// menu; CSV / Excel export; page-size + page navigation; and localStorage persistence of
-// column visibility / order / sizes keyed by `tableId`. Theme-driven throughout.
+// client-side mode (the data is already in memory). Features: a global search box (searches
+// every column — see `getColumnCanGlobalFilter` below); a per-column filter row whose control
+// adapts to the column's type (text/number/date with an operator, boolean/enum as a select —
+// see DataTableFilter); multi-column sort; row grouping (expand/collapse); a column hide/reorder
+// menu (columns aren't user-resizable — `table-layout: auto` lets the browser content-size them);
+// CSV / Excel export; page-size + page navigation; and localStorage persistence of column
+// visibility + order keyed by `tableId`. Theme-driven throughout.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
@@ -19,7 +20,6 @@ import {
   type ColumnDef,
   type ColumnFiltersState,
   type ColumnOrderState,
-  type ColumnSizingState,
   type ExpandedState,
   type GroupingState,
   type SortingState,
@@ -54,7 +54,6 @@ export interface DataTableProps<T extends object> {
 interface SavedGrid {
   visibility: VisibilityState
   order: ColumnOrderState
-  sizes: ColumnSizingState
 }
 function loadGrid(id: string): Partial<SavedGrid> {
   try { return JSON.parse(localStorage.getItem(`dt-${id}`) ?? '{}') } catch { return {} }
@@ -134,17 +133,17 @@ const MiniLink = styled.button`
 const TableScroll = styled.div`
   overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
-// `table-layout: fixed` + an explicit table width = the sum of the column sizes: this makes the
-// per-cell `width` styles authoritative (with the default `auto` layout the browser ignores them
-// when content needs more room, so column resizing did nothing). `min-width: 100%` keeps the table
-// filling the viewport when the columns are narrow; it scrolls horizontally when they overflow.
-const Table = styled.table`border-collapse: collapse; table-layout: fixed; min-width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
+// `table-layout: auto` (the default): the browser sizes columns to their content — the best fit in
+// practice. (Column *resizing* was tried with `table-layout: fixed`, but that forced widths the
+// content didn't suit and interfered with header drag-reorder, so it was dropped — columns aren't
+// user-resizable; hide the column or let the content breathe.)
+const Table = styled.table`border-collapse: collapse; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
 const Th = styled.th<{ $sortable?: boolean; $dropTarget?: boolean }>`
   text-align: left; padding: 8px 18px 8px 12px; position: sticky; top: 0; z-index: 2;
   background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
   border-left: 2px solid ${({ $dropTarget }) => ($dropTarget ? colors.blue.main : 'transparent')};
   font-size: ${fontSize.micro}; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-  color: ${colors.text.muted}; white-space: nowrap; user-select: none; overflow: hidden;
+  color: ${colors.text.muted}; white-space: nowrap; user-select: none;
   cursor: ${({ $sortable }) => ($sortable ? 'pointer' : 'default')};
   ${({ $sortable }) => $sortable && `&:hover { color: ${colors.text.secondary}; }`}
 `
@@ -152,11 +151,6 @@ const ThInner = styled.div`display: flex; align-items: center; gap: 4px;`
 const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; align-items: center; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
 const SortIx = styled.sup`font-size: 8px; color: ${colors.blue.main}; margin-left: 1px;`
 const GroupBadge = styled.span`display: inline-flex; align-items: center; color: ${colors.blue.main};`
-const ResizeHandle = styled.div<{ $resizing: boolean }>`
-  position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; touch-action: none;
-  background: ${({ $resizing }) => ($resizing ? colors.blue.main : 'transparent')};
-  &:hover { background: ${colors.blue.border}; }
-`
 const FilterTh = styled.th`padding: 4px 8px; background: ${colors.bg.input}; border-bottom: 1px solid ${colors.border};`
 const Tr = styled.tr`
   &:hover td { background: var(--hover-subtle); }
@@ -218,7 +212,6 @@ export function DataTable<T extends object>({
   // existed, while still letting the user un-hide a column and have that stick.
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => ({ ...(initialColumnVisibility ?? {}), ...(saved.visibility ?? {}) }))
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(saved.order ?? [])
-  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(saved.sizes ?? {})
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
@@ -237,8 +230,8 @@ export function DataTable<T extends object>({
   const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder, sizes: columnSizing })
-  }, [tableId, columnVisibility, columnOrder, columnSizing])
+    if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder })
+  }, [tableId, columnVisibility, columnOrder])
 
   useEffect(() => {
     if (!colOpen && !groupOpen && !exportOpen) return
@@ -270,24 +263,25 @@ export function DataTable<T extends object>({
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnSizing, columnFilters, globalFilter, grouping, expanded, pagination },
+    state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnFilters, globalFilter, grouping, expanded, pagination },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: (updater) => {
       const next = typeof updater === 'function' ? updater(tableColumnOrder) : updater
       setColumnOrder(next.filter((id) => !internalIds.includes(id)))
     },
-    onColumnSizingChange: setColumnSizing,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     onGroupingChange: setGrouping,
     onExpandedChange: setExpanded,
     onPaginationChange: setPagination,
-    enableColumnResizing: true,
-    columnResizeMode: 'onChange',
+    enableColumnResizing: false,
     enableMultiSort: true, // shift-click a header adds it to the sort
     isMultiSortEvent: (e) => (e as MouseEvent).shiftKey,
     globalFilterFn: 'includesString',
+    // search every column, even ones whose first row happens to be null (TanStack's default would
+    // exclude such a column from the global filter — that's why the search "missed" some columns)
+    getColumnCanGlobalFilter: (col) => !((col.columnDef.meta as { internal?: boolean } | undefined)?.internal),
     autoResetExpanded: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -455,12 +449,12 @@ export function DataTable<T extends object>({
                       key={h.id}
                       $sortable={canSort}
                       $dropTarget={reorderable && dragOverId === h.column.id}
-                      style={{ minWidth: h.column.columnDef.minSize ?? 56, width: h.getSize() }}
+                      // only constrain a column that asked for a width (a `width` display hint, or the
+                      // narrow internal select/status columns); the rest auto-size to content
+                      style={h.column.columnDef.size != null ? { width: h.getSize(), minWidth: h.column.columnDef.minSize } : undefined}
                       onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
                       draggable={reorderable}
                       onDragStart={(e) => {
-                        // a drag that began on the resize handle isn't a reorder — let it resize
-                        if ((e.target as HTMLElement).dataset.resize) { e.preventDefault(); return }
                         dragColRef.current = h.column.id
                         e.dataTransfer.effectAllowed = 'move'
                       }}
@@ -489,16 +483,6 @@ export function DataTable<T extends object>({
                           </SortMark>
                         )}
                       </ThInner>
-                      {/* drag this 5px strip = resize the column (TanStack's resize handler); `data-resize`
-                          lets onDragStart above tell it apart from a column-reorder drag, and the onClick
-                          stopPropagation keeps the mouseup from toggling the header's sort */}
-                      <ResizeHandle
-                        $resizing={h.column.getIsResizing()}
-                        data-resize="1"
-                        onMouseDown={h.getResizeHandler()}
-                        onTouchStart={h.getResizeHandler()}
-                        onClick={(e) => e.stopPropagation()}
-                      />
                     </Th>
                   )
                 })}
@@ -527,8 +511,7 @@ export function DataTable<T extends object>({
                       <Td
                         key={cell.id}
                         style={{
-                          width: cell.column.getSize(),
-                          minWidth: cell.column.columnDef.minSize ?? 56,
+                          ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
                           paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
                         }}
                       >

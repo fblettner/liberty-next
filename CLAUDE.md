@@ -243,11 +243,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
-  global search, a type-aware per-column filter row (text/number/date with an operator picked from a small
-  labelled popover — `OpPicker`; boolean/enum as a select) + clear-all, sort (shift-click = multi), column
-  resize (the `<table>` is `table-layout: fixed`, width = `getTotalSize()`, so the per-cell widths are
-  authoritative)/drag-reorder/hide (the Columns menu has All/None), row grouping, CSV/Excel export via `xlsx`, paging, localStorage
-  persistence per `tableId`; ported from nomaubl — *not* barrelled, it pulls in `xlsx`) and `Markdown`
+  global search (over *every* column — `getColumnCanGlobalFilter` is overridden so a column whose first row
+  is `null` isn't excluded), a type-aware per-column filter row (text/number/date with an operator picked
+  from a small labelled popover — `OpPicker`; boolean/enum as a select) + clear-all, sort (shift-click =
+  multi), column drag-reorder/hide (the Columns menu has All/None) — columns are *not* user-resizable
+  (`table-layout: auto`, so the browser content-sizes them; a `width` display hint or the narrow internal
+  columns still pin a width), row grouping, CSV/Excel export via `xlsx`, paging, localStorage
+  persistence per `tableId` (column visibility + order); ported from nomaubl — *not* barrelled, it pulls in `xlsx`) and `Markdown`
   (react-markdown — also *not* re-exported by `common/index.ts`, so each rides only its lazy page chunk);
   `common/index.ts` barrels the rest, pages import
   `{ Button, ... } from '../../common'`), `src/pages/<Screen>/index.tsx` (one dir per page,
