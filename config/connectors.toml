@@ -93,8 +93,8 @@ key_columns = [
 sql = "SELECT\n    RLU_APPS_ID,\n    RLU_USER_ID,\n    RLU_ROLE_ID,\n    RLU_DT_EFFECTIVE,\n    RLU_DT_EXPIRATION,\n    RLU_DT_REFRESH,\n    RLU_UKID\nFROM\n    SECURITY_ASSIGNMENTS\nINNER JOIN\n    SECURITY_USERS\n    ON USR_APPS_ID = RLU_APPS_ID AND USR_ID = RLU_USER_ID\nWHERE\n    USR_STATUS='01'\nORDER BY RLU_APPS_ID,RLU_USER_ID, RLU_ROLE_ID"
 columns = [
     { name = "RLU_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "RLU_USER_ID", dd = "USR_ID" },
-    { name = "RLU_ROLE_ID", dd = "ROL_ID" },
+    { name = "RLU_USER_ID", dd = "USR_ID", filter_from = [{ source = "RLU_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "RLU_ROLE_ID", dd = "ROL_ID", filter_from = [{ source = "RLU_APPS_ID", column = "ROL_APPS_ID" }] },
     { name = "RLU_DT_EFFECTIVE" },
     { name = "RLU_DT_EXPIRATION" },
     { name = "RLU_DT_REFRESH", hidden = true },
@@ -109,7 +109,7 @@ auto_load = true
 sql = "SELECT\n    APPS_ID,\n    ROL_ID\nFROM\n    SECURITY_ROLES\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = ROL_APPS_ID\nLEFT JOIN\n    SECURITY_ASSIGNMENTS\n    ON RLU_APPS_ID = ROL_APPS_ID AND RLU_ROLE_ID = ROL_ID\nWHERE\n    RLU_ROLE_ID IS NULL\nORDER BY APPS_ID,ROL_ID"
 columns = [
     { name = "APPS_ID" },
-    { name = "ROL_ID" },
+    { name = "ROL_ID", filter_from = [{ source = "APPS_ID", column = "ROL_APPS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -120,7 +120,7 @@ auto_load = true
 sql = "SELECT\n    APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    USR_DT_CREATION ,\n    USR_DT_LOGIN\nFROM\n    SECURITY_USERS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = USR_APPS_ID\nLEFT JOIN\n    SECURITY_ASSIGNMENTS\n    ON RLU_APPS_ID = USR_APPS_ID AND RLU_USER_ID = USR_ID\nWHERE\n    RLU_USER_ID IS NULL\n    AND USR_STATUS = '01'\nORDER BY APPS_ID, USR_ID"
 columns = [
     { name = "APPS_ID" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter_from = [{ source = "APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
     { name = "USR_DT_LOGIN" },
@@ -136,7 +136,7 @@ columns = [
     { name = "APPS_ID" },
     { name = "USERS_COUNT" },
     { name = "RLU_ROLE_ID" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter_from = [{ source = "APPS_ID", column = "USR_APPS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -281,8 +281,8 @@ description = "Rights - Users"
 sql = "SELECT * FROM (\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL AND SER_RUN = 'Y'\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:SER_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) = CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) <> CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_USER_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_USER_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_USER_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) = CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) <> CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_OBJECT AS VARCHAR(4000)) IS NULL OR CAST(:SER_OBJECT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_OBJECT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) = CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) <> CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)))))\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_RUN" },
@@ -299,8 +299,8 @@ description = "Rights - Roles"
 sql = "SELECT * FROM (\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_USER_ID = '*ROLE'\n    AND SER_RUN = 'Y'\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:SER_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) = CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) <> CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_ROLE_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_ROLE_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_ROLE_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_ROLE_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_ROLE_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_ROLE_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_ROLE_ID AS VARCHAR(4000)) = CAST(:SER_ROLE_ID AS VARCHAR(4000))) OR (CAST(:SER_ROLE_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_ROLE_ID AS VARCHAR(4000)) <> CAST(:SER_ROLE_ID AS VARCHAR(4000))) OR (CAST(:SER_ROLE_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_ROLE_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_ROLE_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_ROLE_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_ROLE_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_ROLE_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_OBJECT AS VARCHAR(4000)) IS NULL OR CAST(:SER_OBJECT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_OBJECT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) = CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) <> CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)))))\nORDER BY SER_APPS_ID,SER_ROLE_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID", filter = true },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_RUN" },
@@ -317,11 +317,11 @@ description = "Rights - Users by roles"
 sql = "SELECT * FROM (\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:SER_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) = CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) <> CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_USER_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_USER_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_USER_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) = CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) <> CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_OBJECT AS VARCHAR(4000)) IS NULL OR CAST(:SER_OBJECT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_OBJECT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) = CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) <> CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)))))\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID" },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter_from = [{ source = "SER_APPS_ID", column = "ROL_APPS_ID" }] },
     { name = "SER_RUN" },
     { name = "SER_ROLE_ACTION_ID" },
     { name = "SER_ADD" },
@@ -336,11 +336,11 @@ description = "Rights - Users by menus"
 sql = "SELECT * FROM (\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n        SECURITY_MENUS\n        ON MENU_APPS_ID = SER_APPS_ID\n        AND MENU_SEQ_UKID = SER_MENU_SEQUKID\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:SER_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) = CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) <> CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_USER_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_USER_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_USER_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) = CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) <> CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_OBJECT AS VARCHAR(4000)) IS NULL OR CAST(:SER_OBJECT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_OBJECT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) = CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) <> CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)))))\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID" },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter_from = [{ source = "SER_APPS_ID", column = "ROL_APPS_ID" }] },
     { name = "SER_RUN" },
     { name = "SER_ROLE_ACTION_ID" },
     { name = "SER_ADD" },
@@ -361,8 +361,8 @@ sql = "SELECT * FROM (\nWITH component as (\nSELECT\n  JDEO_APPS_ID,\n  JDEO_OBJ
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
     { name = "CPT_ID", filter = true },
-    { name = "SER_ROLE_ID", dd = "ROL_ID", filter = true },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_RUN" },
@@ -392,8 +392,8 @@ auto_load = true
 sql = "SELECT\n    CFS_APPS_ID,\n    CFS_PROCESS_ID,\n    CFS_RISK_ID,\n    CFS_COUNT,\n    CFS_REFRESH\nFROM\n(\nSELECT\n    CFS_APPS_ID,\n    CFS_PROCESS_ID,\n    CFS_RISK_ID,\n    SUM(CFS_COUNT) CFS_COUNT,\n    CFS_REFRESH\nFROM\n    SOD_CONFLICT_SUMMARY\nWHERE\n    CFS_COUNT> 0\nGROUP BY CFS_APPS_ID,CFS_PROCESS_ID,CFS_RISK_ID,CFS_REFRESH\n) SOD_SUMMARY\nORDER BY CFS_APPS_ID,CFS_PROCESS_ID,CFS_RISK_ID"
 columns = [
     { name = "CFS_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFS_PROCESS_ID", dd = "PROCESS_ID" },
-    { name = "CFS_RISK_ID", dd = "RISK_ID" },
+    { name = "CFS_PROCESS_ID", dd = "PROCESS_ID", filter_from = [{ source = "CFS_APPS_ID", column = "PROCESS_APPS_ID" }] },
+    { name = "CFS_RISK_ID", dd = "RISK_ID", filter_from = [{ source = "CFS_APPS_ID", column = "RISK_APPS_ID" }, { source = "CFS_PROCESS_ID", column = "RISK_PROCESS_ID" }] },
     { name = "CFS_COUNT" },
     { name = "CFS_REFRESH" },
 ]
@@ -405,15 +405,15 @@ description = "SOD - Details"
 sql = "SELECT * FROM (\nSELECT\n    CFD_APPS_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:CFD_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000)) = CAST(:CFD_APPS_ID AS VARCHAR(4000))) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000)) <> CAST(:CFD_APPS_ID AS VARCHAR(4000))) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000)) = CAST(:CFD_PROCESS_ID AS VARCHAR(4000))) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000)) <> CAST(:CFD_PROCESS_ID AS VARCHAR(4000))) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_PROCESS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:CFD_RISK_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_RISK_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_RISK_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_RISK_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000)) = CAST(:CFD_RISK_ID AS VARCHAR(4000))) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000)) <> CAST(:CFD_RISK_ID AS VARCHAR(4000))) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_RISK_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_RISK_ID AS VARCHAR(4000)))))\n  AND ((CAST(:CFD_USER_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_USER_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_USER_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_USER_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_USER_ID AS VARCHAR(4000)) = CAST(:CFD_USER_ID AS VARCHAR(4000))) OR (CAST(:CFD_USER_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_USER_ID AS VARCHAR(4000)) <> CAST(:CFD_USER_ID AS VARCHAR(4000))) OR (CAST(:CFD_USER_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_USER_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_USER_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_USER_ID AS VARCHAR(4000)))))\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter = true },
-    { name = "CFD_RISK_ID", dd = "RISK_ID", filter = true },
-    { name = "CFD_USER_ID", dd = "USR_ID", filter = true },
-    { name = "CFD_ACT1_ID" },
-    { name = "CFD_ACT1_OBJECT" },
-    { name = "CFD_ROLE1_ID" },
-    { name = "CFD_ACT2_ID" },
-    { name = "CFD_ACT2_OBJECT" },
-    { name = "CFD_ROLE2_ID" },
+    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter = true, filter_from = [{ source = "CFD_APPS_ID", column = "PROCESS_APPS_ID" }] },
+    { name = "CFD_RISK_ID", dd = "RISK_ID", filter = true, filter_from = [{ source = "CFD_APPS_ID", column = "RISK_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "RISK_PROCESS_ID" }] },
+    { name = "CFD_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "CFD_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "CFD_ACT1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ACT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "CFD_ACT1_OBJECT", filter_from = [{ source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_ACT1_ID", column = "OBJECT_ACT_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }] },
+    { name = "CFD_ROLE1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "CFD_ACT2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ACT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "CFD_ACT2_OBJECT", filter_from = [{ source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }, { source = "CFD_ACT2_ID", column = "OBJECT_ACT_ID" }] },
+    { name = "CFD_ROLE2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -423,15 +423,15 @@ description = "SOD - Proven"
 sql = "SELECT * FROM (\nWITH  Activity AS\n( SELECT  DISTINCT\n    ACL_APPS_ID,\n    TRIM(ACL_USER_ID) ACL_USER_ID,\n    ACL_TABLE_NAME\n    FROM\n        SECURITY_ACTIVITY_LOG\n)\nSELECT DISTINCT\n    CFD_APPS_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nINNER JOIN\n    SECURITY_XREF G  ON G.XREF_APPS_ID = CFD_APPS_ID AND G.XREF_OBJECT_FROM = CFD_ACT1_OBJECT\nINNER JOIN\n    SECURITY_XREF H  ON H.XREF_APPS_ID = CFD_APPS_ID AND H.XREF_OBJECT_FROM = CFD_ACT2_OBJECT AND H.XREF_OBJECT_FROM <> G.XREF_OBJECT_FROM\nINNER JOIN  Activity I  ON I.ACL_APPS_ID = CFD_APPS_ID AND I.ACL_USER_ID = CFD_USER_ID AND I.ACL_TABLE_NAME = G.XREF_OBJECT_TO\nINNER JOIN  Activity J  ON J.ACL_APPS_ID = CFD_APPS_ID AND J.ACL_USER_ID = CFD_USER_ID AND J.ACL_TABLE_NAME = H.XREF_OBJECT_TO\nWHERE\n    I.ACL_TABLE_NAME <> J.ACL_TABLE_NAME\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:CFD_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000)) = CAST(:CFD_APPS_ID AS VARCHAR(4000))) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000)) <> CAST(:CFD_APPS_ID AS VARCHAR(4000))) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000)) = CAST(:CFD_PROCESS_ID AS VARCHAR(4000))) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000)) <> CAST(:CFD_PROCESS_ID AS VARCHAR(4000))) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_PROCESS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_PROCESS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_PROCESS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_PROCESS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:CFD_RISK_ID AS VARCHAR(4000)) IS NULL OR CAST(:CFD_RISK_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:CFD_RISK_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_RISK_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000)) = CAST(:CFD_RISK_ID AS VARCHAR(4000))) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000)) <> CAST(:CFD_RISK_ID AS VARCHAR(4000))) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:CFD_RISK_ID AS VARCHAR(4000)) || '%')) OR (CAST(:CFD_RISK_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.CFD_RISK_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:CFD_RISK_ID AS VARCHAR(4000)))))\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter = true },
-    { name = "CFD_RISK_ID", dd = "RISK_ID", filter = true },
-    { name = "CFD_USER_ID", dd = "USR_ID" },
-    { name = "CFD_ACT1_ID" },
-    { name = "CFD_ACT1_OBJECT" },
-    { name = "CFD_ROLE1_ID" },
-    { name = "CFD_ACT2_ID" },
-    { name = "CFD_ACT2_OBJECT" },
-    { name = "CFD_ROLE2_ID" },
+    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter = true, filter_from = [{ source = "CFD_APPS_ID", column = "PROCESS_APPS_ID" }] },
+    { name = "CFD_RISK_ID", dd = "RISK_ID", filter = true, filter_from = [{ source = "CFD_APPS_ID", column = "RISK_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "RISK_PROCESS_ID" }] },
+    { name = "CFD_USER_ID", dd = "USR_ID", filter_from = [{ source = "CFD_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "CFD_ACT1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ACT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "CFD_ACT1_OBJECT", filter_from = [{ source = "CFD_ACT1_ID", column = "OBJECT_ACT_ID" }, { source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }] },
+    { name = "CFD_ROLE1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "CFD_ACT2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ACT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "CFD_ACT2_OBJECT", filter_from = [{ source = "CFD_ACT2_ID", column = "OBJECT_ACT_ID" }, { source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }] },
+    { name = "CFD_ROLE2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -456,8 +456,8 @@ auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_ROLE1_ID,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_ROLE1_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_ROLE1_ID" },
-    { name = "CFD_ROLE2_ID" },
+    { name = "CFD_ROLE1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "CFD_ROLE2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -728,7 +728,7 @@ key_columns = [
 sql = "SELECT\n    ACT_APPS_ID,\n    ACT_PROCESS_ID,\n    ACT_ID,\n    ACT_NAME,\n    ACT_UKID\nFROM\n    SOD_ACTIVITIES\nORDER BY ACT_APPS_ID,ACT_PROCESS_ID,ACT_ID"
 columns = [
     { name = "ACT_APPS_ID", dd = "APPS_ID" },
-    { name = "ACT_PROCESS_ID", dd = "PROCESS_ID" },
+    { name = "ACT_PROCESS_ID", dd = "PROCESS_ID", filter_from = [{ source = "ACT_APPS_ID", column = "PROCESS_APPS_ID" }] },
     { name = "ACT_ID" },
     { name = "ACT_NAME" },
     { name = "ACT_AUDIT_USER", dd = "AUDIT_USER", hidden = true },
@@ -761,7 +761,7 @@ key_columns = [
 sql = "SELECT\n    RISK_APPS_ID,\n    RISK_PROCESS_ID,\n    RISK_ID,\n    RISK_NAME,\n    RISK_LEVEL,\n    RISK_UKID\nFROM\n    SOD_RISKS\nORDER BY RISK_APPS_ID,RISK_PROCESS_ID,RISK_ID"
 columns = [
     { name = "RISK_APPS_ID", dd = "APPS_ID" },
-    { name = "RISK_PROCESS_ID", dd = "PROCESS_ID" },
+    { name = "RISK_PROCESS_ID", dd = "PROCESS_ID", filter_from = [{ source = "RISK_APPS_ID", column = "PROCESS_APPS_ID" }] },
     { name = "RISK_ID" },
     { name = "RISK_NAME" },
     { name = "RISK_LEVEL" },
@@ -796,10 +796,10 @@ key_columns = [
 sql = "SELECT\n    MATRIX_APPS_ID ,\n    MATRIX_PROCESS_ID ,\n    MATRIX_ACT1_ID ,\n    MATRIX_ACT2_ID ,\n    MATRIX_RISK_ID ,\n    MATRIX_RISK_LEVEL,\n    MATRIX_AUDIT_USER,\n    MATRIX_AUDIT_DATE,\n    MATRIX_UKID\nFROM\n    SOD_MATRIX\nORDER BY MATRIX_APPS_ID,MATRIX_PROCESS_ID,MATRIX_ACT1_ID,MATRIX_ACT2_ID"
 columns = [
     { name = "MATRIX_APPS_ID", dd = "APPS_ID" },
-    { name = "MATRIX_PROCESS_ID", dd = "PROCESS_ID" },
-    { name = "MATRIX_ACT1_ID" },
-    { name = "MATRIX_ACT2_ID" },
-    { name = "MATRIX_RISK_ID", dd = "RISK_ID" },
+    { name = "MATRIX_PROCESS_ID", dd = "PROCESS_ID", filter_from = [{ source = "MATRIX_APPS_ID", column = "PROCESS_APPS_ID" }] },
+    { name = "MATRIX_ACT1_ID", filter_from = [{ source = "MATRIX_APPS_ID", column = "ACT_APPS_ID" }, { source = "MATRIX_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "MATRIX_ACT2_ID", filter_from = [{ source = "MATRIX_APPS_ID", column = "ACT_APPS_ID" }, { source = "MATRIX_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "MATRIX_RISK_ID", dd = "RISK_ID", filter_from = [{ source = "MATRIX_APPS_ID", column = "RISK_APPS_ID" }, { source = "MATRIX_PROCESS_ID", column = "RISK_PROCESS_ID" }] },
     { name = "MATRIX_RISK_LEVEL" },
     { name = "MATRIX_AUDIT_USER", dd = "AUDIT_USER", hidden = true },
     { name = "MATRIX_AUDIT_DATE", dd = "AUDIT_DATE", hidden = true },
@@ -832,8 +832,8 @@ key_columns = [
 sql = "SELECT\n    OBJECT_APPS_ID ,\n    OBJECT_PROCESS_ID ,\n    OBJECT_ACT_ID ,\n    OBJECT_ROW_ID ,\n    OBJECT_ID ,\n    OBJECT_NAME,\n    OBJECT_AUDIT_USER,\n    OBJECT_AUDIT_DATE,\n    OBJECT_UKID\nFROM\n    SOD_OBJECTS\nORDER BY OBJECT_APPS_ID,OBJECT_PROCESS_ID,OBJECT_ACT_ID,OBJECT_ROW_ID"
 columns = [
     { name = "OBJECT_APPS_ID", dd = "APPS_ID" },
-    { name = "OBJECT_PROCESS_ID", dd = "PROCESS_ID" },
-    { name = "OBJECT_ACT_ID", dd = "ACT_ID" },
+    { name = "OBJECT_PROCESS_ID", dd = "PROCESS_ID", filter_from = [{ source = "OBJECT_APPS_ID", column = "PROCESS_APPS_ID" }] },
+    { name = "OBJECT_ACT_ID", dd = "ACT_ID", filter_from = [{ source = "OBJECT_APPS_ID", column = "ACT_APPS_ID" }, { source = "OBJECT_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
     { name = "OBJECT_ROW_ID" },
     { name = "OBJECT_ID" },
     { name = "OBJECT_NAME" },
@@ -872,7 +872,7 @@ key_columns = [
 sql = "SELECT\n    USR_APPS_ID USRP_APPS_ID,\n    APPS_NAME,\n    USR_ID USRP_ID,\n    USR_NAME USRP_NAME,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_GENERIC_COUNT,\n    USRP_IS_LINKED,\n    USRP_ID_LINKED,\n    USRP_IS_PREVIOUS,\n    USRP_ID_PREVIOUS\nFROM\n    SECURITY_USERS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = USR_APPS_ID\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON  USR_APPS_ID = USRP_APPS_ID AND USR_ID = USRP_ID\nORDER BY USRP_APPS_ID,USRP_ID"
 columns = [
     { name = "USRP_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USRP_ID", dd = "USR_ID" },
+    { name = "USRP_ID", dd = "USR_ID", filter_from = [{ source = "USRP_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USRP_NAME", hidden = true },
     { name = "USRP_TECHNICAL" },
     { name = "USRP_GENERIC" },
@@ -1208,7 +1208,7 @@ columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
     { name = "SER_USER_ID" },
     { name = "SER_ROLE_ID" },
-    { name = "MENU_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "MENU_OBJECT", dd = "JDEO_OBJECT", filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "MENU_FORM" },
     { name = "MENU_VERSION" },
     { name = "SER_ROLE_ACTION_ID" },
@@ -1302,7 +1302,7 @@ sql = "SELECT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    MENU_OBJECT,\n    MENU_FO
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
     { name = "SER_ROLE_ID" },
-    { name = "MENU_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "MENU_OBJECT", dd = "JDEO_OBJECT", filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "MENU_FORM" },
     { name = "MENU_VERSION" },
     { name = "SER_ROLE_ACTION_ID" },
@@ -1348,7 +1348,7 @@ auto_load = true
 sql = "SELECT\n    DISTINCT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_ID_LINKED,\n    SER_MENU_SEQUKID\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n    SECURITY_USERS\n    ON USR_APPS_ID = SER_APPS_ID\n    AND USR_ID = SER_USER_ID\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nWHERE\n    SER_RUN = 'Y'\n    AND USR_STATUS = '01'\nORDER BY USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter_from = [{ source = "USR_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
     { name = "USR_DT_LOGIN" },
@@ -1368,7 +1368,7 @@ auto_load = true
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_MENU_SEQUKID\nFROM\n    SECURITY_RIGHTS\nWHERE\n    SER_RUN ='Y' AND SER_USER_ID = '*ROLE'\nORDER BY SER_ROLE_ID"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID" },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter_from = [{ source = "SER_APPS_ID", column = "ROL_APPS_ID" }] },
     { name = "SER_MENU_SEQUKID", hidden = true },
 ]
 
@@ -1380,7 +1380,7 @@ auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_USER_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USR_PRIVILEGED,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nINNER JOIN\n    SECURITY_USERS ON USR_APPS_ID = CFD_APPS_ID AND USR_ID = CFD_USER_ID\nORDER BY CFD_USER_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_USER_ID", dd = "USR_ID" },
+    { name = "CFD_USER_ID", dd = "USR_ID", filter_from = [{ source = "CFD_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
     { name = "USR_DT_LOGIN" },
@@ -1397,8 +1397,8 @@ auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_ROLE1_ID,\n    CFD_ROLE2_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_ROLE1_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_ROLE1_ID" },
-    { name = "CFD_ROLE2_ID" },
+    { name = "CFD_ROLE1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "CFD_ROLE2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
     { name = "CFD_PROCESS_ID", hidden = true },
     { name = "CFD_RISK_ID", hidden = true },
 ]
@@ -1411,8 +1411,8 @@ auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_ACT1_OBJECT,CFD_ACT2_OBJECT"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_ACT1_OBJECT" },
-    { name = "CFD_ACT2_OBJECT" },
+    { name = "CFD_ACT1_OBJECT", filter_from = [{ source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }, { source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_ACT1_ID", column = "OBJECT_ACT_ID" }] },
+    { name = "CFD_ACT2_OBJECT", filter_from = [{ source = "CFD_ACT2_ID", column = "OBJECT_ACT_ID" }, { source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }] },
     { name = "CFD_PROCESS_ID", hidden = true },
     { name = "CFD_RISK_ID", hidden = true },
     { name = "CFD_ACT1_ID", hidden = true },
@@ -1427,15 +1427,15 @@ auto_load = true
 sql = "SELECT\n    CFD_APPS_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID ,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_USER_ID", dd = "USR_ID" },
-    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID" },
-    { name = "CFD_ACT1_ID" },
-    { name = "CFD_ACT1_OBJECT" },
-    { name = "CFD_ROLE1_ID" },
-    { name = "CFD_ACT2_ID" },
-    { name = "CFD_ACT2_OBJECT" },
-    { name = "CFD_ROLE2_ID" },
-    { name = "CFD_RISK_ID", dd = "RISK_ID", hidden = true },
+    { name = "CFD_USER_ID", dd = "USR_ID", filter_from = [{ source = "CFD_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter_from = [{ source = "CFD_APPS_ID", column = "PROCESS_APPS_ID" }] },
+    { name = "CFD_ACT1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ACT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "CFD_ACT1_OBJECT", filter_from = [{ source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_ACT1_ID", column = "OBJECT_ACT_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }] },
+    { name = "CFD_ROLE1_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "CFD_ACT2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ACT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "ACT_PROCESS_ID" }] },
+    { name = "CFD_ACT2_OBJECT", filter_from = [{ source = "CFD_ACT2_ID", column = "OBJECT_ACT_ID" }, { source = "CFD_APPS_ID", column = "OBJECT_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "OBJECT_PROCESS_ID" }] },
+    { name = "CFD_ROLE2_ID", filter_from = [{ source = "CFD_APPS_ID", column = "ROL_APPS_ID" }] },
+    { name = "CFD_RISK_ID", dd = "RISK_ID", hidden = true, filter_from = [{ source = "CFD_APPS_ID", column = "RISK_APPS_ID" }, { source = "CFD_PROCESS_ID", column = "RISK_PROCESS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -1566,7 +1566,7 @@ auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    TO_CHAR(USR_DT_CREATION,'yyyy-MM-dd') USR_DT_CREATION,\n    TO_CHAR(USR_DT_LOGIN,'yyyy-MM-dd') USR_DT_LOGIN,\n    COALESCE(USRP_TECHNICAL,'N') USRP_TECHNICAL,\n    COALESCE(USRP_GENERIC,'N') USRP_GENERIC,\n    USRP_ID_LINKED\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nWHERE\n    USR_STATUS IN ('01','Y')\n AND USR_ID IN (SELECT RLU_USER_ID FROM SECURITY_ASSIGNMENTS WHERE RLU_APPS_ID = USR_APPS_ID)\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter_from = [{ source = "USR_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
     { name = "USR_DT_LOGIN" },
@@ -1583,7 +1583,7 @@ auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    LUSR_DT_TRANSACTION\nFROM\n(\nSELECT DISTINCT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    TO_CHAR(MAX(LUSR_DT_TRANSACTION),'yyyy-MM-dd') LUSR_DT_TRANSACTION\nFROM\n    SECURITY_USERS\nINNER JOIN\n    LICENSE_JDE_USERS\n    ON LUSR_APPS_ID = USR_APPS_ID\n    AND TRIM(LUSR_USER_ID) = USR_ID\nWHERE\n    USR_STATUS = '01'\n    AND LUSR_DT_TRANSACTION  >= CURRENT_DATE  - 90\nGROUP BY\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS\n) USERS_TRANSACTIONS\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter_from = [{ source = "USR_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "LUSR_DT_TRANSACTION" },
 ]
@@ -1596,7 +1596,7 @@ auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_ID_LINKED\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    LICENSE_JDE_USERS\n    ON LUSR_APPS_ID = USR_APPS_ID\n    AND TRIM(LUSR_USER_ID) = USR_ID\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nWHERE\n    USR_STATUS = '01'\n    AND LUSR_USER_ID IS NULL\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter_from = [{ source = "USR_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
     { name = "USR_DT_LOGIN" },
@@ -1651,8 +1651,8 @@ sql = "SELECT * FROM (\nWITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDE
 columns = [
     { name = "LUSR_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
     { name = "CPT_ID", filter = true },
-    { name = "LUSR_USER_ID", dd = "USR_ID", filter = true },
-    { name = "LUSR_TABLE_NAME", dd = "JDEO_OBJECT", filter = true },
+    { name = "LUSR_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "LUSR_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "LUSR_TABLE_NAME", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "LUSR_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "LUSR_DT_TRANSACTION" },
 ]
 
@@ -1664,10 +1664,10 @@ sql = "SELECT * FROM (\nWITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDE
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
     { name = "CPT_ID", filter = true },
-    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USRP_TECHNICAL", format = "boolean" },
     { name = "USRP_IS_LINKED" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -1894,7 +1894,7 @@ key_columns = [
 sql = "SELECT * FROM (\nSELECT\n  ACL_APPS_ID,\n  TRIM(ACL_USER_ID) ACL_USER_ID,\n  ACL_SCHEMA,\n  ACL_TABLE_NAME,\n  ACL_DT_TRANSACTION,\n  ACL_COUNT,\n  ACL_OBJECT_ID\nFROM\n  SECURITY_ACTIVITY_LOG\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:ACL_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:ACL_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:ACL_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.ACL_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:ACL_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:ACL_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.ACL_APPS_ID AS VARCHAR(4000)) = CAST(:ACL_APPS_ID AS VARCHAR(4000))) OR (CAST(:ACL_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.ACL_APPS_ID AS VARCHAR(4000)) <> CAST(:ACL_APPS_ID AS VARCHAR(4000))) OR (CAST(:ACL_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.ACL_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:ACL_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:ACL_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.ACL_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:ACL_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:ACL_USER_ID AS VARCHAR(4000)) IS NULL OR CAST(:ACL_USER_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:ACL_USER_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.ACL_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:ACL_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:ACL_USER_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.ACL_USER_ID AS VARCHAR(4000)) = CAST(:ACL_USER_ID AS VARCHAR(4000))) OR (CAST(:ACL_USER_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.ACL_USER_ID AS VARCHAR(4000)) <> CAST(:ACL_USER_ID AS VARCHAR(4000))) OR (CAST(:ACL_USER_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.ACL_USER_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:ACL_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:ACL_USER_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.ACL_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:ACL_USER_ID AS VARCHAR(4000)))))\n  AND ((CAST(:ACL_TABLE_NAME AS VARCHAR(4000)) IS NULL OR CAST(:ACL_TABLE_NAME AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:ACL_TABLE_NAME_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.ACL_TABLE_NAME AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:ACL_TABLE_NAME AS VARCHAR(4000)) || '%')) OR (CAST(:ACL_TABLE_NAME_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.ACL_TABLE_NAME AS VARCHAR(4000)) = CAST(:ACL_TABLE_NAME AS VARCHAR(4000))) OR (CAST(:ACL_TABLE_NAME_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.ACL_TABLE_NAME AS VARCHAR(4000)) <> CAST(:ACL_TABLE_NAME AS VARCHAR(4000))) OR (CAST(:ACL_TABLE_NAME_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.ACL_TABLE_NAME AS VARCHAR(4000))) LIKE LOWER(CAST(:ACL_TABLE_NAME AS VARCHAR(4000)) || '%')) OR (CAST(:ACL_TABLE_NAME_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.ACL_TABLE_NAME AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:ACL_TABLE_NAME AS VARCHAR(4000)))))\nORDER BY ACL_APPS_ID, ACL_USER_ID, ACL_TABLE_NAME"
 columns = [
     { name = "ACL_APPS_ID", dd = "APPS_ID", filter = true },
-    { name = "ACL_USER_ID", dd = "USR_ID", filter = true },
+    { name = "ACL_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "ACL_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "ACL_SCHEMA" },
     { name = "ACL_TABLE_NAME", filter = true },
     { name = "ACL_DT_TRANSACTION" },
@@ -1928,7 +1928,7 @@ sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID\n
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
     { name = "CPT_ID", hidden = true },
-    { name = "LOUT_USER", dd = "USR_ID" },
+    { name = "LOUT_USER", dd = "USR_ID", filter_from = [{ source = "LOUT_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
     { name = "USR_DT_LOGIN" },
@@ -1959,7 +1959,7 @@ sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  JDEO_DES
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
     { name = "CPT_ID", hidden = true },
-    { name = "LOUT_USER", dd = "USR_ID" },
+    { name = "LOUT_USER", dd = "USR_ID", filter_from = [{ source = "LOUT_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "JDEO_OBJECT" },
     { name = "JDEO_DESCRIPTION" },
     { name = "LAST_USAGE" },
@@ -1973,7 +1973,7 @@ sql = "SELECT * FROM (\nWITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OB
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
     { name = "CPT_ID", hidden = true },
-    { name = "LOUT_USER", dd = "USR_ID", filter = true },
+    { name = "LOUT_USER", dd = "USR_ID", filter = true, filter_from = [{ source = "LOUT_APPS_ID", column = "USR_APPS_ID" }] },
     { name = "LOUT_OBJECT", filter = true },
     { name = "LOUT_VERSION" },
     { name = "JDEO_DESCRIPTION" },
@@ -1987,11 +1987,11 @@ description = "Rights / OUT - Users by roles"
 sql = "SELECT * FROM (\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nUNION ALL\nSELECT \n  LOUT_APPS_ID,\n  '*ALL' SER_ROLE_ID,\n  LOUT_USER SER_USER_ID,\n  LOUT_OBJECT SER_OBJECT,\n  '*ALL' SERL_FORM,\n  LOUT_VERSION SER_VERSION,\n  'Y' SER_RUN,\n  '*DEFAULT' SER_ROLE_ACTION_ID,\n  'Y' SER_ADD,\n  'Y' SER_CHG,\n  'Y' SER_DEL  \nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  JDE_OBJECTS\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:SER_APPS_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_APPS_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_APPS_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) = CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000)) <> CAST(:SER_APPS_ID AS VARCHAR(4000))) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_APPS_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_APPS_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_APPS_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_APPS_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_USER_ID AS VARCHAR(4000)) IS NULL OR CAST(:SER_USER_ID AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_USER_ID_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) = CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_USER_ID AS VARCHAR(4000)) <> CAST(:SER_USER_ID AS VARCHAR(4000))) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_USER_ID AS VARCHAR(4000)) || '%')) OR (CAST(:SER_USER_ID_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_USER_ID AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_USER_ID AS VARCHAR(4000)))))\n  AND ((CAST(:SER_OBJECT AS VARCHAR(4000)) IS NULL OR CAST(:SER_OBJECT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SER_OBJECT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) = CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SER_OBJECT AS VARCHAR(4000)) <> CAST(:SER_OBJECT AS VARCHAR(4000))) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER(CAST(:SER_OBJECT AS VARCHAR(4000)) || '%')) OR (CAST(:SER_OBJECT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SER_OBJECT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SER_OBJECT AS VARCHAR(4000)))))\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "USR_APPS_ID" }] },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true, filter_from = [{ source = "SER_APPS_ID", column = "JDEO_APPS_ID" }] },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID" },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter_from = [{ source = "SER_APPS_ID", column = "ROL_APPS_ID" }] },
     { name = "SER_RUN" },
     { name = "SER_ROLE_ACTION_ID" },
     { name = "SER_ADD" },
@@ -2585,7 +2585,7 @@ key_columns = [
 sql = "SELECT * FROM (\nSELECT \n    TRIM(DRSY) DRSY,\n    TRIM(DRRT) DRRT,\n    DRKY,\n    DRDL01,\n    DRDL02,\n    DRSPHD,\n    DRUDCO,\n    DRHRDC,\n    DRUSER,\n    DRPID,\n    DRUPMJ,\n    DRJOBN,\n    DRUPMT \nFROM \n  #SCHEMA.CTL#.F0005\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:DRSY AS VARCHAR(4000)) IS NULL OR CAST(:DRSY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DRSY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.DRSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRSY AS VARCHAR(4000)) || '%')) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.DRSY AS VARCHAR(4000)) = CAST(:DRSY AS VARCHAR(4000))) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.DRSY AS VARCHAR(4000)) <> CAST(:DRSY AS VARCHAR(4000))) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.DRSY AS VARCHAR(4000))) LIKE LOWER(CAST(:DRSY AS VARCHAR(4000)) || '%')) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.DRSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRSY AS VARCHAR(4000)))))\n  AND ((CAST(:DRRT AS VARCHAR(4000)) IS NULL OR CAST(:DRRT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DRRT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.DRRT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRRT AS VARCHAR(4000)) || '%')) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.DRRT AS VARCHAR(4000)) = CAST(:DRRT AS VARCHAR(4000))) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.DRRT AS VARCHAR(4000)) <> CAST(:DRRT AS VARCHAR(4000))) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.DRRT AS VARCHAR(4000))) LIKE LOWER(CAST(:DRRT AS VARCHAR(4000)) || '%')) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.DRRT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRRT AS VARCHAR(4000)))))\nORDER BY DRSY, DRRT, DRKY"
 columns = [
     { name = "DRSY", dd = "SY", filter = true },
-    { name = "DRRT", dd = "RT", filter = true },
+    { name = "DRRT", dd = "RT", filter = true, filter_from = [{ source = "DRSY", column = "SY" }] },
     { name = "DRKY", dd = "KY" },
     { name = "DRDL01", dd = "DL01" },
     { name = "DRDL02", dd = "DL02" },
@@ -2628,7 +2628,7 @@ key_columns = [
 sql = "SELECT * FROM (\nSELECT \n    TRIM(DTSY) DTSY,\n    TRIM(DTRT) DTRT,\n    DTDL01,\n    DTUSEQ,\n    DTUCD1,\n    DTCDL,\n    DTLN2,\n    DTCNUM,\n    DTMRCT,\n    DTMRTY,\n    DTUSER,\n    DTPID,\n    DTUPMJ,\n    DTJOBN,\n    DTUPMT \nFROM \n  #SCHEMA.CTL#.F0004\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:DTSY AS VARCHAR(4000)) IS NULL OR CAST(:DTSY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DTSY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.DTSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DTSY AS VARCHAR(4000)) || '%')) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.DTSY AS VARCHAR(4000)) = CAST(:DTSY AS VARCHAR(4000))) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.DTSY AS VARCHAR(4000)) <> CAST(:DTSY AS VARCHAR(4000))) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.DTSY AS VARCHAR(4000))) LIKE LOWER(CAST(:DTSY AS VARCHAR(4000)) || '%')) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.DTSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DTSY AS VARCHAR(4000)))))"
 columns = [
     { name = "DTSY", dd = "SY", filter = true },
-    { name = "DTRT", dd = "RT" },
+    { name = "DTRT", dd = "RT", filter_from = [{ source = "DTSY", column = "SY" }] },
     { name = "DTDL01", dd = "DL01" },
     { name = "DTUSEQ", dd = "USEQ", hidden = true },
     { name = "DTUCD1", dd = "UCD1", hidden = true },
@@ -2952,11 +2952,11 @@ key_columns = [
 sql = "SELECT * FROM (\nWITH userRole AS\n(\nSELECT \n  ABALPH ALPH,\n  ULUSER USER_ROLE\nFROM\n  #SCHEMA.SY#.F0092\nLEFT JOIN\n  #SCHEMA.DTA#.F0101\n  ON ABAN8 = ULAN8\nWHERE\n  ULUGRP <> '*GROUP'\nUNION ALL\nSELECT \n    AUROLEDESC ALPH,\n    AUUSER USER_ROLE\nFROM\n  #SCHEMA.SY#.F00926\n)\nSELECT \n    TRIM(FSSETY) FSSETY,\n    CASE \n      WHEN TRIM(FSSETY) IN ('1', '3', '5', '9') THEN 'OBJECTS'\n      WHEN TRIM(FSSETY) IN ('2', '4', 'B') THEN 'ALIAS'\n      WHEN TRIM(FSSETY) NOT IN ('1', '3', '5', '9', '2', '4', 'B') THEN 'OTHERS'\n    END SEC_TYPE,\n    FSUSER,\n    ALPH,\n    TRIM(FSOBNM) FSOBNM ,\n    TRIM(FSDTAI) FSDTAI ,\n    TRIM(FSFRDV) FSFRDV ,\n    TRIM(FSSY) FSSY,\n    FSOWDI,\n    FSFMNM,\n    FSFUNO,\n    FSINSL,\n    FSRUN,\n    FSVWYN,\n    FSA,\n    FSCHNG,\n    FSDLT,\n    FSTHDV,\n    FSOBID,\n    FSADDC,\n    FSIOK,\n    FSICPY,\n    FSIUPT,\n    FSATN1,\n    FSATN2,\n    FSATN3,\n    FSMUSE,\n    FSPID,\n    FSJOBN,\n    FSUPMJ,\n    FSUPMT,\n    FSEXITID,\n    FSTABID,\n    FSTEXTID,\n    FSPTH \nFROM \n  #SCHEMA.SY#.F00950\nLEFT JOIN\n  userRole\n  ON FSUSER = USER_ROLE\n) lib_flt\nWHERE 1=1\n  AND ((CAST(:SEC_TYPE AS VARCHAR(4000)) IS NULL OR CAST(:SEC_TYPE AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SEC_TYPE_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.SEC_TYPE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SEC_TYPE AS VARCHAR(4000)) || '%')) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.SEC_TYPE AS VARCHAR(4000)) = CAST(:SEC_TYPE AS VARCHAR(4000))) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.SEC_TYPE AS VARCHAR(4000)) <> CAST(:SEC_TYPE AS VARCHAR(4000))) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.SEC_TYPE AS VARCHAR(4000))) LIKE LOWER(CAST(:SEC_TYPE AS VARCHAR(4000)) || '%')) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.SEC_TYPE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SEC_TYPE AS VARCHAR(4000)))))\n  AND ((CAST(:FSSETY AS VARCHAR(4000)) IS NULL OR CAST(:FSSETY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:FSSETY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.FSSETY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSSETY AS VARCHAR(4000)) || '%')) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.FSSETY AS VARCHAR(4000)) = CAST(:FSSETY AS VARCHAR(4000))) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.FSSETY AS VARCHAR(4000)) <> CAST(:FSSETY AS VARCHAR(4000))) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.FSSETY AS VARCHAR(4000))) LIKE LOWER(CAST(:FSSETY AS VARCHAR(4000)) || '%')) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.FSSETY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSSETY AS VARCHAR(4000)))))\n  AND ((CAST(:FSUSER AS VARCHAR(4000)) IS NULL OR CAST(:FSUSER AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:FSUSER_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(lib_flt.FSUSER AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSUSER AS VARCHAR(4000)) || '%')) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'equals'     AND CAST(lib_flt.FSUSER AS VARCHAR(4000)) = CAST(:FSUSER AS VARCHAR(4000))) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(lib_flt.FSUSER AS VARCHAR(4000)) <> CAST(:FSUSER AS VARCHAR(4000))) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(lib_flt.FSUSER AS VARCHAR(4000))) LIKE LOWER(CAST(:FSUSER AS VARCHAR(4000)) || '%')) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(lib_flt.FSUSER AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSUSER AS VARCHAR(4000)))))\nORDER BY FSUSER, SEC_TYPE, FSSETY"
 columns = [
     { name = "SEC_TYPE", filter = true },
-    { name = "FSSETY", dd = "SETY", filter = true },
+    { name = "FSSETY", dd = "SETY", filter = true, filter_from = [{ source = "SEC_TYPE", column = "SEC_TYPE" }] },
     { name = "FSUSER", dd = "USER", filter = true },
     { name = "ALPH" },
-    { name = "FSOBNM", dd = "OBNM" },
-    { name = "FSDTAI", dd = "DTAI" },
+    { name = "FSOBNM", dd = "OBNM", filter_from = [{ source = "FSSY", column = "SY" }] },
+    { name = "FSDTAI", dd = "DTAI", filter_from = [{ source = "FSOWDI", column = "OWDI" }] },
     { name = "FSFRDV", dd = "FRDV" },
     { name = "FSSY", dd = "SY", hidden = true },
     { name = "FSOWDI", dd = "OWDI", hidden = true },
@@ -3029,7 +3029,7 @@ sql = "SELECT \n    LLUSER,\n    LLLL,\n    LLSEQ,\n    LLMNI,\n    CASE WHEN EX
 columns = [
     { name = "LLUSER", dd = "USER_ROLE" },
     { name = "LLLL", dd = "LL" },
-    { name = "LLSEQ", dd = "SEQ", format = "number" },
+    { name = "LLSEQ", dd = "SEQ", format = "number", filter_from = [{ source = "LLUSER", column = "USER_ROLE" }] },
     { name = "LLMNI", dd = "MNI", hidden = true },
     { name = "IS_PARENT", format = "boolean" },
 ]
