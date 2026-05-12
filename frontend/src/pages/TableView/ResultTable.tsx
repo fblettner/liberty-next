@@ -456,6 +456,7 @@ export function ResultTable({
         tableId={`sql:${connector}:${query}`}
         exportFilename={query}
         initialColumnVisibility={initialVisibility}
+        rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : undefined)}
         toolbar={
           !canEdit ? undefined : !editMode ? (
             <>

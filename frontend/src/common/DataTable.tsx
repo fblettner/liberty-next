@@ -47,6 +47,8 @@ export interface DataTableProps<T extends object> {
   initialPageSize?: number
   /** Columns hidden by default (e.g. from a `hidden` display hint) — a saved choice still wins. */
   initialColumnVisibility?: VisibilityState
+  /** Per-row CSS class on the `<tr>` — e.g. `dt-row-new` / `dt-row-deleted` to tint edited rows. */
+  rowClassName?: (row: T) => string | undefined
 }
 
 interface SavedGrid {
@@ -127,16 +129,18 @@ const TableScroll = styled.div`
   overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
 const Table = styled.table`width: 100%; border-collapse: collapse; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
-const Th = styled.th<{ $sortable?: boolean }>`
+const Th = styled.th<{ $sortable?: boolean; $dropTarget?: boolean }>`
   text-align: left; padding: 8px 18px 8px 12px; position: sticky; top: 0; z-index: 2;
   background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
+  border-left: 2px solid ${({ $dropTarget }) => ($dropTarget ? colors.blue.main : 'transparent')};
   font-size: ${fontSize.micro}; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
   color: ${colors.text.muted}; white-space: nowrap; user-select: none; overflow: hidden;
   cursor: ${({ $sortable }) => ($sortable ? 'pointer' : 'default')};
   ${({ $sortable }) => $sortable && `&:hover { color: ${colors.text.secondary}; }`}
 `
 const ThInner = styled.div`display: flex; align-items: center; gap: 4px;`
-const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
+const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; align-items: center; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
+const SortIx = styled.sup`font-size: 8px; color: ${colors.blue.main}; margin-left: 1px;`
 const GroupBadge = styled.span`display: inline-flex; align-items: center; color: ${colors.blue.main};`
 const ResizeHandle = styled.div<{ $resizing: boolean }>`
   position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; touch-action: none;
@@ -147,6 +151,8 @@ const FilterTh = styled.th`padding: 4px 8px; background: ${colors.bg.input}; bor
 const Tr = styled.tr`
   &:hover td { background: var(--hover-subtle); }
   &:not(:last-child) td { border-bottom: 1px solid ${colors.border}; }
+  &.dt-row-new td { background: ${colors.green.bg}; box-shadow: inset 3px 0 0 ${colors.green.main}; }
+  &.dt-row-deleted td { background: ${colors.red.bg}; }
 `
 const GroupTr = styled.tr` td { background: ${colors.bg.card}; font-family: ${fonts.sans}; }`
 const Td = styled.td`padding: 5px 12px; color: ${colors.text.secondary}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`
@@ -191,7 +197,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility,
+  columns, data, tableId, toolbar, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -213,6 +219,8 @@ export function DataTable<T extends object>({
   const colRef = useRef<HTMLDivElement>(null)
   const groupRef = useRef<HTMLDivElement>(null)
   const exportRef = useRef<HTMLDivElement>(null)
+  const dragColRef = useRef<string | null>(null) // header drag-reorder: the column id being dragged
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   useEffect(() => {
     if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder, sizes: columnSizing })
@@ -244,6 +252,8 @@ export function DataTable<T extends object>({
     onPaginationChange: setPagination,
     enableColumnResizing: true,
     columnResizeMode: 'onChange',
+    enableMultiSort: true, // shift-click a header adds it to the sort
+    isMultiSortEvent: (e) => (e as MouseEvent).shiftKey,
     globalFilterFn: 'includesString',
     autoResetExpanded: false,
     getCoreRowModel: getCoreRowModel(),
@@ -264,6 +274,15 @@ export function DataTable<T extends object>({
     if (swap < 0 || swap >= next.length) return
     ;[next[idx], next[swap]] = [next[swap], next[idx]]
     setColumnOrder(next)
+  }
+  // header drag-reorder: move `draggedId` to where `targetId` sits
+  const dropColumn = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return
+    const ids = effectiveOrder.filter((id) => id !== draggedId)
+    const at = ids.indexOf(targetId)
+    if (at < 0) return
+    ids.splice(at, 0, draggedId)
+    setColumnOrder(ids)
   }
 
   const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as { internal?: boolean } | undefined)?.internal
@@ -391,12 +410,37 @@ export function DataTable<T extends object>({
                 {hg.headers.map((h) => {
                   const canSort = h.column.getCanSort()
                   const sorted = h.column.getIsSorted()
+                  const sortIx = h.column.getSortIndex()
+                  const internal = isInternal(h.column)
+                  const reorderable = !internal && h.column.getCanHide() !== false // a real column
                   return (
                     <Th
                       key={h.id}
                       $sortable={canSort}
+                      $dropTarget={reorderable && dragOverId === h.column.id}
                       style={{ minWidth: h.column.columnDef.minSize ?? 56, width: h.getSize() }}
                       onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
+                      draggable={reorderable}
+                      onDragStart={(e) => {
+                        // a drag that began on the resize handle isn't a reorder — let it resize
+                        if ((e.target as HTMLElement).dataset.resize) { e.preventDefault(); return }
+                        dragColRef.current = h.column.id
+                        e.dataTransfer.effectAllowed = 'move'
+                      }}
+                      onDragOver={(e) => {
+                        if (!reorderable || !dragColRef.current || dragColRef.current === h.column.id) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dragOverId !== h.column.id) setDragOverId(h.column.id)
+                      }}
+                      onDragLeave={() => { if (dragOverId === h.column.id) setDragOverId(null) }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        if (reorderable && dragColRef.current) dropColumn(dragColRef.current, h.column.id)
+                        dragColRef.current = null
+                        setDragOverId(null)
+                      }}
+                      onDragEnd={() => { dragColRef.current = null; setDragOverId(null) }}
                     >
                       <ThInner>
                         {h.column.getIsGrouped() && <GroupBadge title={t('table.grouped', 'grouped')}><Group size={11} /></GroupBadge>}
@@ -404,11 +448,13 @@ export function DataTable<T extends object>({
                         {canSort && (
                           <SortMark $active={!!sorted}>
                             {sorted === 'asc' ? <ArrowUp size={11} /> : sorted === 'desc' ? <ArrowDown size={11} /> : <ChevronsUpDown size={11} />}
+                            {sorted && sorting.length > 1 && <SortIx>{sortIx + 1}</SortIx>}
                           </SortMark>
                         )}
                       </ThInner>
                       <ResizeHandle
                         $resizing={h.column.getIsResizing()}
+                        data-resize="1"
                         onMouseDown={h.getResizeHandler()}
                         onTouchStart={h.getResizeHandler()}
                         onClick={(e) => e.stopPropagation()}
@@ -434,8 +480,9 @@ export function DataTable<T extends object>({
             ) : (
               table.getRowModel().rows.map((row) => {
                 const RowEl = row.getIsGrouped() ? GroupTr : Tr
+                const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
                 return (
-                  <RowEl key={row.id}>
+                  <RowEl key={row.id} className={cls}>
                     {row.getVisibleCells().map((cell) => (
                       <Td
                         key={cell.id}

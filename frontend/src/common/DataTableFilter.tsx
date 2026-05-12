@@ -94,9 +94,12 @@ export const genericFilterFn: FilterFn<any> = (row, columnId, value) => {
     default: return true
   }
 }
+// Only drop the filter when there's no operator at all — *not* when the operand is still
+// empty: that lets you pick an operator first and type the value afterwards (an empty operand
+// just means the filter matches everything for now).
 genericFilterFn.autoRemove = (value) => {
   const f = value as OpFilter | undefined
-  return !f || !f.op || (NEEDS_A(f.op) && (f.a == null || f.a === ''))
+  return !f || !f.op
 }
 
 // ── controls ────────────────────────────────────────────────────────────────
