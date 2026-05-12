@@ -553,6 +553,15 @@ nomaubl's `LicenseVerifier`; **same JWT shape and key-pair as nomaubl**). v2 onl
 
 303 tests pass.
 
+**Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
+nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
+the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
+contextual menus — the `visible_when`/`filter_from` work is its table-side first slice; design it
+against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell over the
+Pydantic config, not raw TOML — pools→queries→dictionary→menus→API connectors; + git-backed config-file
+versioning + frontend tests/CI) → **Phase 8** charts & dashboards → **Phase 9** notifications / reporting
+/ backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs & scheduling).
+
 ## Run it
 
 ```bash

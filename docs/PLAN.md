@@ -49,7 +49,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Question | Decision |
 |---|---|
 | Rewrite vs in-place refactor | **Greenfield v2.** The metadata-table model *is* the disease; refactoring in place keeps it. |
-| Existing apps (nomasx1, NOMAJDE, AIRFLOW) | **Must keep running on v1.** v2 ships migration tools (Phase 5); apps move one at a time. v1 source untouched. |
+| Existing apps (nomasx1, NOMAJDE) | **Must keep running on v1.** v2 ships migration tools (Phase 5); apps move one at a time. v1 source untouched. (The `AIRFLOW` app was never finalized — not migrated; but its *Python/Spark jobs* live in nomasx1/nomaubl and get a home in v2 — see Phase 10.) |
 | Language | **Python** — keep the Liberty stack (FastAPI + SQLAlchemy async). Port nomaubl's *patterns*, not its Java. |
 | Frontend | **Fresh React 19 + Vite + TS** in `frontend/`, built `dist/` served as static by FastAPI (`SPAStaticFiles` mounted at `/` last). No shared libraries with v1/nomaubl, but the *look* is ported from nomaubl: `@emotion/styled`, a dark default + light theme (CSS-var swap), `react-i18next` (EN/FR), `lucide-react` icons, DM Sans; shared primitives in `src/ui.tsx`. `react-router-dom` v7; `fetch` (no axios); Context for auth/state. Still post-MVP: Monaco config editor, `@tanstack/react-table`, `react-markdown`. |
 | Location | **Sibling directory** `../liberty-v2/`. |
@@ -419,21 +419,97 @@ Postgres *and* Oracle, etc.):
 
 **Still to do:**
 - Validate by running nomasx1's read paths against v2 and diffing results.
-- Migrate nomasx1 first (read-heavy, lower risk), then NOMAJDE, then AIRFLOW.
-- (Possible later) richer column hints — lookups / format strings / per-column filters — and the
-  form side (v1's `ly_dlg_*` field rules/conditions) once a v2 form concept exists; `ly_tbl_col`/
-  `ly_dlg_col`'s *display* metadata is migrated, the workflow/rules part isn't (that's Phase 6).
+- Migrate **nomasx1** first (read-heavy, lower risk) for real, then **NOMAJDE**. (`AIRFLOW` is *not*
+  migrated — it was never finalized; its Python/Spark jobs are handled in Phase 10.) The write-heavy
+  screens can only fully run on v2 once the form/screen engine exists (Phase 6) — so the cutover
+  interleaves with Phase 6.
+- Migrate the **`AUD_<table>` audit trail** (v1's "Enable Audit") — a hard requirement; see Phase 6's
+  audit bullet (it's a write-path feature of the SQL connector).
+- Done since this section was written (see `CLAUDE.md` for the live detail): the `ly_tbl_col`/`ly_dlg_col`
+  → column-hints mapping (incl. `filter` / `key_columns`), `ly_tbl_filters` → `filter_from` (cascading
+  filter dropdowns), `ly_tbl_col_cdn`/`ly_cdn_params` → `visible_when` (conditional columns), `ly_tables`/
+  `ly_dlg_frm` → `description`/`auto_load`, `ly_db_schema` → `#SCHEMA.<NAME>#` pool maps, `_put`-WHERE →
+  `:<col>_ORIGINAL` rewrite + upsert→INSERT/UPDATE collapse, real `[pools.*]` from `ly_applications`
+  (url / dialect / pool sizing / `ENC:` password / schemas), and the `config/*.toml` files moved out of
+  git (per-deployment / licensed-app config — see CLAUDE.md). Still missing on the *form* side: v1's
+  `ly_dlg_*` field rules / `ly_actions`/`ly_act_tasks`/`ly_act_branch` workflow — that's Phase 6.
 
-### Phase 6 — Custom form logic — (deferred, decide after Phases 1–3)
-v1 solves field rules + custom actions via `ly_actions` / `ly_act_tasks` /
-`ly_cdn_params` / `ly_act_branch` — a workflow DSL stored in the DB. nomaubl has
-no strong equivalent. Options to compare once real screens exist:
-- **Python plugins** — hook functions registered per form/field event. Most power, needs deploys.
-- **Declarative rules** (YAML/TOML) — `when field X = Y, require Z` / `disable on edit` — covers 80%, no deploy.
-- **Embedded JS hooks** — like v1's `ly_function`, evaluated client-side. Flexible, harder to test.
-Likely a mix: declarative rules for common cases + a Python plugin escape hatch.
-**Do not design this in the abstract** — wait for Phases 1–3 to produce screens
-to validate against.
+### Phase 6 — Form/screen engine (dialogs, conditions, actions, events) — 📋 PLANNED  (the next big one — start once the nomasx1/NOMAJDE cutover begins)
+The runtime side of v1's `ly_dlg_*` + `ly_actions`/`ly_act_tasks`/`ly_cdn_params`/`ly_act_branch`
+workflow DSL. **Don't design it in the abstract** — start it only once at least one v1 write-heavy app
+is being migrated for real (Phase 5), so there's something to validate against. The table-side first
+slices already shipped (these are the same machinery, narrowed to tables): a column's `visible_when`
+(conditional rendering, v1's `cdn_*`), `filter_from` (cascading filter dropdowns, v1's `ly_tbl_filters`),
+the writable-companion batch-edit model, server-side filters. The form/dialog version extends them:
+- **Dialogs/forms** — `config/dialogs.toml` (or `forms.toml`): tabs, fields, layout; v1's `ly_dlg_frm`/
+  `ly_dlg_tab`/`ly_dlg_col`. The *field* schema follows the same "discover from the query, augment with
+  hints" rule as tables (no metadata-table re-traversal).
+- **Conditions / rules** — extend the `{field, value}` rule shape (`visible_when`, cascading) to
+  per-field `visible_when` / `required_when` / `disabled_when` / `default_when` (the v1 `ly_cdn_params`
+  cases). Declarative for the 80%; a Python-plugin escape hatch for the rest. (Don't port v1's
+  `ly_function` embedded-JS approach unless something forces it.)
+- **Actions & events** — a small action vocabulary fired on events (`on_load` / `on_save` / `on_change` /
+  a toolbar button / a row's contextual menu): `run_query`, `call_api` (a connector endpoint — this is
+  what "API from actions/events" means), `navigate`, `set_field`, `confirm`, `notify`, `refresh`, plus
+  branching (v1's `ly_act_branch`). v1's `ly_actions`/`ly_act_tasks` migrate to this.
+- **Contextual menus for tables** — right-click a row → a menu of actions/navigations bound to that row
+  (v1's `ly_menus`-on-a-table). Small; depends on the action vocabulary above.
+- **AUD audit trail** (hard requirement — migrate v1's "Enable Audit") — a query/table flagged for audit:
+  on each `writable` execute, also write old/new values + user + timestamp to `AUD_<table>` (create the
+  shadow table if absent). It's a write-path add to `SQLConnector` + a config flag; can land before the
+  rest of Phase 6.
+
+### Phase 7 — Config builders (the UI that builds the framework) — 📋 PLANNED
+Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
+builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
+surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one
+component that, given a config section's JSON schema (FastAPI exposes the Pydantic models'
+`model_json_schema()`), renders list / add / edit / delete with typed fields, enum dropdowns, nested
+objects and inline validation against the same schema the backend enforces; each config type then =
+"point it at its schema + slot in the 1–2 custom widgets the generic shell can't do" (the SQL editor
+for queries, the tree-with-DnD for menus, the layout canvas for dialogs). Goal: ~70% generated / 30%
+bespoke, so this stays maintainable instead of a treadmill (the bespoke-per-type approach is what made
+v1's builder — and the abandoned `liberty-core` `FormsDialogBuilder` — unfinishable). **Timebox a thin
+vertical slice ("edit `[pools.*]` end-to-end via the UI") as the proof-of-concept before committing to
+the rest** — if the generic shell needs as much custom code as a bespoke one, drop it.
+Order: **pools → SQL queries → dictionary → menus → API connectors** (nomaubl's connector UIs are a
+direct reference for the last one), then *much later* a **visual query builder** (defer hard — a good
+SQL editor + a "test run" preview gets ~90% for ~10% of the effort; a DbVisualizer-grade visual builder
+is a deep hole). The **dialog / view / action / event builders** come *after* Phase 6 — building a
+builder for the form model before the model is stable is the trap that sank `liberty-core`.
+Lands with this phase: **config-file versioning** — the config is on-disk TOML, so make it **git-backed**:
+each "Save" commits with `author = the logged-in user` → free history / diff / rollback / blame; fallback
+for non-git deployments = a `config/_history/` ring of timestamped snapshots. And **frontend tests + CI**
+(Vitest/RTL + a GitHub Actions workflow running `pytest` / `tsc --noEmit` / `vite build`) — once builders
+multiply the config surface, regressions get expensive; this is the cheapest insurance there is.
+
+### Phase 8 — Charts & dashboards — 📋 PLANNED
+Composition on top of everything: chart widgets (bar/line/pie/…) over a query result, and dashboards =
+a layout of widgets (a table, a chart, a metric card, …) — `config/dashboards.toml`, surfaced through the
+menu system like any other screen. v1's chart components + dashboards; mostly frontend once the data
+(queries) and screen plumbing exist. (`liberty-core` has `charts/` — reference, not reuse.)
+
+### Phase 9 — Backports & standalone features — 📋 PLANNED
+No hard ordering — slot in whenever:
+- **Notifications** — in-app (and optionally email) notifications; benefits from Phase 6's events existing
+  first (something has to fire them). nomaubl has a notification system to reference.
+- **Remaining nomaubl API-connector bits** (if any beyond what Phase 1 ported — e.g. pagination helpers,
+  retry/rate-limit policies, inbound webhooks, a "test connection" affordance in the builder).
+- **Reporting / templated export** — v1's `tbl_workbook`/`tbl_sheet` (templated Excel, beyond the
+  grid's plain CSV/Excel export); nomaubl's XSLT→PDF. Only when a user asks.
+- (Config-file versioning is folded into Phase 7; file *attachments* with versions, if ever needed, are a
+  separate `files` service — out of scope until asked.)
+
+### Phase 10 — Data pipelines / jobs (the Airflow replacement) — 📋 PLANNED
+Today the user runs scheduling, table replication and data transforms via **Airflow**, driven by Python
+scripts + plugins that live inside nomasx1 / nomaubl — but only **Python and (local, cluster-less) Spark**
+are actually used, so Airflow is overkill. Integrate these directly into v2: a lightweight job/scheduler
+layer (cron-style schedules + on-demand runs + run history/logs, surfaced in the UI like a connector),
+job types for **SQL/table replication** (pool→pool copy/sync — v1's "AIRFLOW" app concept), **data
+transforms** (run a Python step / a local PySpark job), and **arbitrary Python tasks** (a registered
+plugin function). The existing scripts/plugins port over largely as-is (they're already Python). Build
+on `apscheduler` or similar — *not* a distributed orchestrator (no cluster). This is the last planned
+phase; it makes v2 self-sufficient for what those apps actually need.
 
 ## 5. Open questions / parking lot
 
@@ -452,14 +528,23 @@ to validate against.
 - Token revocation — refresh tokens are stateless (no denylist / rotation), so a
   leaked refresh token is good until expiry. Add a `jti` denylist (or per-user
   token version) if/when that matters; for now keep TTLs short.
-- Hot-reload — `POST /admin/reload` rebuilds the `ConnectorRegistry` from disk and
-  re-points `app.state.auth_db` (Phase 3); the frontend Settings page edits `connectors.toml`
-  via `GET/PUT /admin/config/connectors` and then calls reload (Phase 4). Still missing: a
-  file watcher (auto-reload on change), rebuilding the AI assistant on reload, draining
+- Hot-reload — `POST /admin/reload` rebuilds the `ConnectorRegistry` (+ re-verifies the license)
+  from disk and re-points `app.state.auth_db` (Phase 3); the frontend Settings page edits
+  `connectors.toml` via `GET/PUT /admin/config/connectors` and then calls reload (Phase 4). Still
+  missing: a file watcher (auto-reload on change), rebuilding the AI assistant on reload, draining
   in-flight requests before disposing the old registry, and config validation feedback in
-  the editor beyond the PUT 422.
+  the editor beyond the PUT 422. (The structured builders + config-file versioning land in Phase 7.)
+- Config-file versioning — *decided* (Phase 7): git-backed (commit on each Save, author = the
+  logged-in user → free history / diff / rollback); fallback for non-git deployments = a
+  `config/_history/` ring of timestamped snapshots. ("files versioning" in the user's roadmap notes.)
 - DB migrations — auth tables are created via `create_all` (`liberty-admin init-db`),
   no Alembic. Fine while the schema is small; add Alembic before the schema churns.
+- Audit trail — *decided* (a requirement, lands in Phase 6): migrate v1's "Enable Audit" → on each
+  `writable` execute against an audit-flagged query/table, also write old/new + user + timestamp to
+  `AUD_<table>` (create the shadow table if absent). A write-path add to `SQLConnector` + a config flag.
+- Frontend tests + CI — none yet (no Vitest/RTL, no GitHub Actions). Lands with Phase 7 (a workflow
+  running `pytest` / `tsc --noEmit` / `vite build`, + a Vitest baseline) — cheap insurance once the
+  config-builder UI multiplies the surface.
 - AI prompt caching — only the system+tools prefix is `cache_control`-ed; growing
   message history (incl. tool-loop turns) isn't cached. Add a moving message
   breakpoint (or top-level auto-cache) if cost on long conversations matters.
@@ -475,13 +560,17 @@ to validate against.
 
 ## 6. How to pick up the work
 
-1. Read `CLAUDE.md` (project root) — it has the current status + run commands.
-2. Read this file for the full picture.
-3. Done: Phases 0–4; Phase 5 in progress — `liberty/migrations/` + `liberty-migrate` does the
-   `ly_query`/`ly_qry_sql` → SQL-connector and `ly_api*` → API-connector TOML emission. Still
-   to do in Phase 5: the `ly_tbl_col`/`ly_dlg_col` → UI-hints mapping (blocked on a v2 column-
-   hints concept), validate-by-diff against nomasx1's read paths, and the actual app migrations
-   (nomasx1 → NOMAJDE → AIRFLOW, one at a time — v1 stays read-only). Then **Phase 6** (custom
-   form logic — defer designing until real screens exist). Alongside: polish the frontend to
-   nomaubl's UI stack (see the Phase 4 *Not done* note + the `feedback_frontend_nomaubl_style`
-   memory) — emotion theming/dark mode, react-i18next, Monaco, @tanstack/react-table, lucide.
+1. Read `CLAUDE.md` (project root) — it has the **current** status + run commands (this file's
+   Phase-5 prose predates a lot of recent work; CLAUDE.md is the live detail).
+2. Read this file for the full picture / roadmap.
+3. **Done:** Phases 0–4, the frontend polished to nomaubl's stack, plus a license layer and the
+   `config/*.toml` files moved out of git (per-deployment / licensed-app config). Phase 5 nearly
+   complete on the *tooling* side — `liberty/migrations/` + `liberty-migrate` emit SQL/API connectors,
+   pools, column hints (incl. `filter`/`key_columns`/`filter_from`/`visible_when`), dictionary, menus;
+   nomasx1's config is migrated. **Still open:** validate-by-diff against nomasx1's read paths; the
+   `AUD_<table>` audit migration (Phase 6 bullet); the real cutover (**nomasx1** then **NOMAJDE** —
+   `AIRFLOW` is *not* migrated, never finalized — v1 stays read-only), which interleaves with **Phase 6**
+   (the form/screen engine — design it only against real migrated screens). Then **Phase 7** (the
+   schema-driven config builders + config-file versioning + frontend tests/CI), **Phase 8** (charts &
+   dashboards), **Phase 9** (notifications / reporting / leftover backports), **Phase 10** (the
+   Airflow-replacement: Python/Spark jobs & scheduling, in-project).
