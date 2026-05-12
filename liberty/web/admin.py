@@ -27,6 +27,7 @@ from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.connectors import load_connectors
 from liberty.connectors.config import parse_connectors
+from liberty.licensing import verify_license
 from liberty.menus import load_menus
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -38,11 +39,14 @@ Superuser = Annotated[Principal, Depends(require_superuser)]
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
     old = request.app.state.connectors
+    license_result = verify_license(settings.license.key)
     new = load_connectors(
         settings.connectors.config_path,
         dictionary_path=settings.connectors.dictionary_path,
         master_key=settings.crypto.master_key,
+        license=license_result,
     )
+    request.app.state.license = license_result
     request.app.state.connectors = new
     request.app.state.menus = load_menus(settings.menus.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
@@ -53,6 +57,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "pools": new.pools.names(),
         "dictionary_entries": len(new.dictionary.entries),
         "menu_apps": list(request.app.state.menus.menus),
+        "license_mode": license_result.mode,
     }
 
 

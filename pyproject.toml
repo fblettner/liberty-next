@@ -34,6 +34,7 @@ liberty-connectors = "liberty.cli:main"
 liberty-admin = "liberty.admin_cli:main"
 liberty-migrate = "liberty.migrate_cli:main"
 liberty-crypto = "liberty.crypto_cli:main"
+liberty-license = "liberty.license_cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -41,6 +42,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["liberty*"]
+
+[tool.setuptools.package-data]
+"liberty.licensing" = ["public.pem"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

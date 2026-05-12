@@ -54,6 +54,13 @@ session_secret = ""              # falls back to jwt_secret if empty
 [crypto]
 master_key = "${LIBERTY_MASTER_KEY}"
 
+# License — unlocks connectors marked `licensed = true` in connectors.toml (e.g. nomasx1 / nomajde).
+# An RS256 JWT signed by the vendor; the public half is embedded in the build (liberty/licensing/).
+# Empty (the open framework) → "restricted" mode: those connectors aren't loaded. Supply via the
+# env var, never hard-code. Inspect a key with `liberty-license verify <key>`; status at GET /api/license.
+[license]
+key = "${LIBERTY_LICENSE_KEY}"
+
 # AI assistant — Anthropic Messages API with an agentic tool-use loop.
 # POST /ai/chat streams Server-Sent Events; gated behind the `ai:chat` permission.
 # Set api_key via the environment; if empty the endpoint exists but reports it

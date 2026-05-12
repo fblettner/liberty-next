@@ -21,8 +21,9 @@ from liberty.auth.tokens import TokenConfig, TokenService
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
 from liberty.connectors.base import ConnectorError
+from liberty.licensing import verify_license
 from liberty.menus import load_menus
-from liberty.web import admin_router, connectors_router, menus_router
+from liberty.web import admin_router, connectors_router, license_router, menus_router
 
 _log = logging.getLogger("liberty")
 
@@ -67,10 +68,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
+        app.state.license = verify_license(settings.license.key)
+        if app.state.license.error and settings.license.key.strip():
+            logging.getLogger("liberty.licensing").warning("license: %s", app.state.license.error)
         app.state.connectors = load_connectors(
             settings.connectors.config_path,
             dictionary_path=settings.connectors.dictionary_path,
             master_key=settings.crypto.master_key,
+            license=app.state.license,
         )
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
@@ -104,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(connectors_router)
     app.include_router(menus_router)
+    app.include_router(license_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
 
@@ -138,6 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "model": ai.settings.model if ai is not None else None,
             },
             "crypto": {"configured": bool(s.crypto.master_key)},
+            "license": {"mode": app.state.license.mode},
             "frontend": getattr(app.state, "frontend_dir", None),
         }
 

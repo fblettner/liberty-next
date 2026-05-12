@@ -70,6 +70,14 @@ const en = {
     noRoles: '(no roles)',
     noPermissions: '(no permissions)',
     superuser: 'superuser',
+    license: 'License',
+  },
+  license: {
+    licensed: 'Licensed',
+    open: 'Open framework',
+    restricted: 'Restricted',
+    expires: 'expires {{date}}',
+    banner: 'Licensed apps are disabled — {{error}}.',
   },
   connectors: {
     title: 'Connectors',

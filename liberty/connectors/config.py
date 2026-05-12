@@ -252,6 +252,9 @@ class SqlConnectorConfig(BaseModel):
 
     type: Literal["sql"]
     pool: str = "default"
+    # `licensed = true` → this connector is only loaded when a valid [license] key covers it (see
+    # liberty.licensing). Without one (the open framework) it's silently dropped at registry build.
+    licensed: bool = False
     # Default row cap for this connector's SELECTs. `None` → fall back to the pool's `max_rows`, then 1000.
     # A query's `max_rows`, or a per-request override, take precedence. See SQLConnector.execute.
     max_rows: int | None = None
@@ -288,6 +291,7 @@ class ApiConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["api"]
+    licensed: bool = False   # gated behind [license] — see SqlConnectorConfig.licensed
     base_url: str
     auth_type: AuthType = "none"
     auth_username: str | None = None

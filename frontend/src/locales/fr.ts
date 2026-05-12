@@ -72,6 +72,14 @@ const fr: Resources = {
     noRoles: '(aucun rôle)',
     noPermissions: '(aucune permission)',
     superuser: 'superutilisateur',
+    license: 'Licence',
+  },
+  license: {
+    licensed: 'Sous licence',
+    open: 'Framework ouvert',
+    restricted: 'Restreint',
+    expires: 'expire le {{date}}',
+    banner: 'Les applications sous licence sont désactivées — {{error}}.',
   },
   connectors: {
     title: 'Connecteurs',

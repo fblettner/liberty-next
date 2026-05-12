@@ -43,6 +43,12 @@ def test_no_static_dir_means_no_mount(tmp_path) -> None:
         assert client.get("/info").json()["frontend"] is None
 
 
+def test_license_endpoints_default_restricted(tmp_path) -> None:
+    with TestClient(_app(tmp_path, static_dir="")) as client:
+        assert client.get("/info").json()["license"] == {"mode": "restricted"}  # no [license] key configured
+        assert client.get("/api/license").status_code == 401  # the full status needs auth, not 404
+
+
 def test_missing_static_dir_means_no_mount(tmp_path) -> None:
     with TestClient(_app(tmp_path, static_dir=str(tmp_path / "does-not-exist"))) as client:
         assert client.get("/").status_code == 404

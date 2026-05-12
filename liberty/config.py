@@ -133,6 +133,14 @@ class CryptoSettings(BaseModel):
     master_key: str = ""
 
 
+class LicenseSettings(BaseModel):
+    """The license key that unlocks ``licensed = true`` connectors (an RS256 JWT — see
+    :mod:`liberty.licensing`). Empty → restricted (the open framework; licensed connectors
+    aren't loaded). Supply it via the env var, not hard-coded."""
+
+    key: str = ""   # ${LIBERTY_LICENSE_KEY}
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
@@ -141,6 +149,7 @@ class Settings(BaseModel):
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
+    license: LicenseSettings = Field(default_factory=LicenseSettings)
 
 
 def load_settings(

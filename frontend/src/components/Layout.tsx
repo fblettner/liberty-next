@@ -9,7 +9,8 @@ import { Sun, Moon, LogOut, User } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
-import { Centered } from '../common'
+import { useWorkspace } from '../workspace/WorkspaceContext'
+import { Banner, Centered } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import WorkspaceSelect from './WorkspaceSelect'
@@ -116,6 +117,10 @@ function readDark(): boolean {
 export default function Layout() {
   const { t, i18n } = useTranslation()
   const { user, logout } = useAuth()
+  const { license } = useWorkspace()
+  // a configured-but-broken key (expired / bad signature) is worth flagging; "no key" isn't (the open framework)
+  const licenseBanner = license.mode === 'restricted' && license.error && !/no license key/i.test(license.error)
+    ? license.error : null
   const [dark, setDark] = useState(readDark)
   const [lang, setLang] = useState<Language>(i18n.language === 'fr' ? 'fr' : 'en')
   const [profileOpen, setProfileOpen] = useState(false)
@@ -159,6 +164,9 @@ export default function Layout() {
       <MainArea>
         <TabStrip />
         <ContentArea>
+          {licenseBanner && (
+            <Banner $tone="error" style={{ margin: '12px 16px 0' }}>{t('license.banner', { error: licenseBanner })}</Banner>
+          )}
           <Suspense fallback={<Centered />}>
             {/* Outlet renders the framework page (Connectors / Chat / Settings); on a tab route it
                 renders the TabRoute marker (null) and TabHost below does the rendering. */}

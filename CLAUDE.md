@@ -257,8 +257,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   localized from the shared dictionary), `src/auth/`
   (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/workspace/`
-  (`WorkspaceContext.tsx` — `WorkspaceProvider`/`useWorkspace()`: owns the one `GET /api/connectors`
-  + `GET /api/menus` fetch; exposes `connectors` (all accessible) and `apps` (the subset that have a
+  (`WorkspaceContext.tsx` — `WorkspaceProvider`/`useWorkspace()`: owns the post-login `GET /api/connectors`
+  + `GET /api/menus` + `GET /api/license` fetch; exposes `license` (the `LicenseInfo` — mode + claims;
+  shown in the ProfileModal, and a Layout banner when a *configured* key is broken), `connectors` (all accessible) and `apps` (the subset that have a
   menu — one v1 app can map to several v2 connectors, so "app" ≠ "connector"; with no menus defined,
   every connector is an app); holds `currentApp` — the picked app, persisted, dropped if it's no
   longer an app, made to follow the route when you open a `/sql/<c>/…` or `/http/<c>/…` screen *only*
@@ -266,7 +267,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   picker over) — plus `currentMenu` (the picked app's nav tree, or — with a single app — that one's,
   for the Sidebar). A pure-frontend soft filter; v2 auth is centralized so the v1 "pick an app at
   login" idea becomes "which app's screens am I looking at"), `src/types/`
-  (`connectors.ts`/`auth.ts`/`ai.ts`/`menus.ts` — backend response shapes, no React), `src/services/`
+  (`connectors.ts`/`auth.ts`/`ai.ts`/`menus.ts`/`license.ts` — backend response shapes, no React), `src/services/`
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`/`ruleCell` (the latter applies the
   dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` → value→label maps for the
   grid; `useLookupTables` → the richer `LookupData` (raw rows too) for the FilterPanel's cascading dropdowns;
@@ -528,7 +529,27 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-288 tests pass.
+**License (gates the licensed apps).** The open framework is free; connectors marked `licensed = true`
+in `connectors.toml` (nomasx1 / nomajde do — they're sold together, one key) are unlocked by a license
+key — an RS256-signed JWT the vendor signs with a private key (a separate key-gen tool, ported from
+nomaubl's `LicenseVerifier`; **same JWT shape and key-pair as nomaubl**). v2 only *verifies*:
+- `liberty/licensing/__init__.py` — `verify_license(key, *, public_key_pem=None)` → a frozen `LicenseResult`
+  (`mode` "full"|"restricted", `customer`/`email`/`plan`/`apps`/`expires_at`/`error`, `.valid`,
+  `.covers(connector_name)`, `.public_dict()`). RS256 verified with the embedded `liberty/licensing/public.pem`
+  (a public key — safe to commit; replace it if you regenerate the key-pair) via `cryptography` (already a dep —
+  no JWT library); checks the signature + `exp`; never raises. Claims: `customer`/`email`/`plan` (informational),
+  `apps` (optional list of connector names this key covers — absent ⇒ covers every `licensed` connector), `exp`
+  (epoch seconds — absent ⇒ no expiry). An empty key → restricted (the normal open-framework state).
+- `[license] key` in `app.toml` (`= "${LIBERTY_LICENSE_KEY}"` — always via env var). `Settings.license.key`.
+- `main.py` lifespan verifies it once → `app.state.license`; `load_connectors(…, license=…)` drops any
+  `licensed = true` connector the key doesn't cover (logged) — so a fresh open checkout simply doesn't load
+  nomasx1/nomajde. `POST /admin/reload` re-verifies. `/info` reports `license.{mode}`; `GET /api/license`
+  (auth required) returns the full `public_dict()`; the frontend (`WorkspaceContext.license`) shows it in the
+  ProfileModal and a banner when a *configured* key is broken (expired / bad signature — not for "no key").
+- `liberty/license_cli.py` (`liberty-license` script) — `verify [<key>]` / `status` → JSON status (exit 0 if
+  full, 1 if restricted); reads the key from the arg / stdin / `[license] key`; `--public-key PATH` overrides.
+
+303 tests pass.
 
 ## Run it
 
@@ -543,8 +564,9 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 .venv/bin/liberty-migrate dictionary --source-url postgresql+asyncpg://…/libnsx1 -o config/dictionary.toml   # v1 ly_dictionary → shared field labels
 .venv/bin/liberty-migrate menu --source-url postgresql+asyncpg://…/libnsx1 --connector nomasx1 -o config/menus.toml   # v1 ly_menus → app nav tree
 .venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
+.venv/bin/liberty-license verify "$LIBERTY_LICENSE_KEY"   # inspect a license key → JSON status (exit 0=full, 1=restricted); `status` checks the configured one
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
-# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  GET /api/menus  ·  /docs (OpenAPI)
+# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  GET /api/menus  ·  GET /api/license  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
 ./start.sh init-config            # copy config/{connectors,dictionary,menus}.toml.example → the real (uncommitted) files (serve/dev do this too)
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"  (then ./start.sh init-config, or run liberty-migrate)
@@ -592,12 +614,13 @@ or columns the user's other scripts touch) are decrypted at runtime with `[crypt
 config/         app.toml (committed — framework config) · connectors.toml / dictionary.toml / menus.toml (NOT committed —
                 per-deployment / licensed-app config; only *.toml.example templates are committed; `./start.sh init-config` copies them) ·
                 auth.toml (the TOML auth store — users/roles, password hashes; gitignored, created by `liberty-admin init-db`)
-liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py
+liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py, license_cli.py
                 · connectors/{config,base,db,sql,api,registry,dictionary}.py
+                · licensing/{__init__.py (verify_license), public.pem}   (RS256 license-key verification — the embedded public key)
                 · menus/config.py · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
                   (authstore = the TOML/DB backend abstraction + config/auth.toml schema; models/db/service = the DB backend's internals)
                 · ai/{tools,connector_tools,assistant,routes}.py
-                · web/{deps,errors,connectors,menus,admin}.py
+                · web/{deps,errors,connectors,menus,license,admin}.py
                 · migrations/{v1,source}.py
 frontend/       Vite + React 19 + TS (emotion + react-i18next) — src/{App,main,theme,i18n}.* +
                 src/{api,auth,workspace,types,services,common,pages,components,locales}/* (nomaubl layout:

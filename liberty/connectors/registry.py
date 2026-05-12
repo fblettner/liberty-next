@@ -8,6 +8,7 @@ rebuilt from a fresh :class:`ConnectorsFile` is the basis for hot-reload.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import httpx
@@ -23,6 +24,9 @@ from liberty.connectors.config import (
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryFile, load_dictionary
 from liberty.connectors.sql import SQLConnector
+from liberty.licensing import LicenseResult
+
+_log = logging.getLogger(__name__)
 
 Connector = SQLConnector | APIConnector
 
@@ -106,16 +110,31 @@ def load_connectors(
     dictionary_path: Path | str | None = None,
     http_client: httpx.AsyncClient | None = None,
     master_key: str = "",
+    license: LicenseResult | None = None,
 ) -> ConnectorRegistry:
     """Load ``connectors.toml`` at *path* (and the shared ``dictionary.toml`` — *dictionary_path*,
     or ``dictionary.toml`` next to *path* — a missing file is fine) and build a :class:`ConnectorRegistry`.
 
     *master_key* (see :mod:`liberty.crypto`) decrypts any ``ENC:`` auth secrets in API connector configs.
+    *license* (see :mod:`liberty.licensing`): connectors with ``licensed = true`` that this key doesn't
+    cover are dropped (logged) — without a key, the open framework simply doesn't load them.
     """
     path = Path(path)
     dict_path = Path(dictionary_path) if dictionary_path else path.with_name("dictionary.toml")
+    cfg = load_connectors_file(path)
+    gated = {
+        name for name, c in cfg.connectors.items()
+        if getattr(c, "licensed", False) and not (license is not None and license.covers(name))
+    }
+    if gated:
+        _log.warning(
+            "license: not loading licensed connector(s) %s — %s",
+            ", ".join(sorted(gated)),
+            "no valid license key" if license is None or not license.valid else "not covered by the license key",
+        )
+        cfg = cfg.model_copy(update={"connectors": {n: c for n, c in cfg.connectors.items() if n not in gated}})
     return ConnectorRegistry(
-        load_connectors_file(path),
+        cfg,
         dictionary=load_dictionary(dict_path),
         http_client=http_client,
         master_key=master_key,

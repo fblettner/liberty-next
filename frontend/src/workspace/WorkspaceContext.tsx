@@ -22,6 +22,7 @@ import { useLocation } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
+import { type LicenseInfo, RESTRICTED } from '../types/license'
 import { useAuth } from '../auth/AuthContext'
 
 const APP_KEY = 'liberty.app'
@@ -34,6 +35,7 @@ interface WorkspaceState {
   connectors: ConnectorMeta[] | null // every accessible connector (null while loading / signed out)
   apps: ConnectorMeta[] | null // the subset that are "apps" (have a menu) — what the header picker offers
   menus: MenusByApp | null // app → its (permission-pruned, localized) menu tree
+  license: LicenseInfo // `full` (licensed connectors loaded) or `restricted` (they weren't); defaults restricted
   error: string | null
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
   currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
@@ -66,6 +68,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
+  const [license, setLicense] = useState<LicenseInfo>(RESTRICTED)
   const [error, setError] = useState<string | null>(null)
   const [currentApp, setCurrentAppState] = useState<string | null>(readApp)
   const [nonce, setNonce] = useState(0)
@@ -74,11 +77,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!ready || !user) {
       setConnectors(null)
       setMenus(null)
+      setLicense(RESTRICTED)
       setError(null)
       return
     }
     let cancelled = false
     setError(null)
+    // the license is best-effort — a failure there shouldn't blank the workspace
+    api.get<LicenseInfo>('/api/license').then((l) => { if (!cancelled) setLicense(l) }).catch(() => { if (!cancelled) setLicense(RESTRICTED) })
     Promise.all([
       api.get<{ connectors: ConnectorMeta[] }>('/api/connectors'),
       api.get<{ menus: MenusByApp }>('/api/menus'),
@@ -139,8 +145,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [menus, apps, currentApp])
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, error, currentApp, currentMenu, setCurrentApp, refresh }),
-    [connectors, apps, menus, error, currentApp, currentMenu, setCurrentApp, refresh],
+    () => ({ connectors, apps, menus, license, error, currentApp, currentMenu, setCurrentApp, refresh }),
+    [connectors, apps, menus, license, error, currentApp, currentMenu, setCurrentApp, refresh],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }
