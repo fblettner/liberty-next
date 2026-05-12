@@ -42,11 +42,13 @@ Full dep set pinned in `pyproject.toml`.
   (`sql = { default = "…", oracle = "…" }`, keyed by SQLAlchemy backend name; `default`
   required) — `QueryDef.sql_for(dialect)` / `.default_sql` / `.dialects` resolve it.
   A query may also carry optional `columns` display hints (`ColumnHint`: `name`, `dd?`,
-  `label?`, `hidden?`, `filter?`, `filter_from?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
+  `label?`, `hidden?`, `filter?`, `filter_from?`, `visible_when?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
   schema (display title / visibility / column order / a `filter` flag — v1's `col_filter` — / `filter_from` —
   v1's `ly_tbl_filters` — a list of `{source, column}` cascading-filter deps for the TableView panel: when the
   `source` filter has a value this column's LOOKUP options narrow to the lookup rows whose `column` matches it /
-  a UI-interpreted `format`); `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
+  `visible_when = {field, value}` — v1's `cdn_*` — drops the whole column from the grid unless the `field`
+  server-filter's current value is `value` (or one of `value` when it's a list) / a UI-interpreted `format`);
+  `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
   `name` when `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
   A query may also carry `label`/`description` (display names — the frontend titles the TableView with
   `description`, else `label`, else the menu label; the menu label rides on the tab), `auto_load = true`
@@ -326,7 +328,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   in-grid TanStack filters then refine the loaded page; those `:<col>`/`:<col>_op` binds are kept out of the
   param form). SELECT → `GET` + the `DataTable`
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align — `hidden` takes
-  effect on first load and survives a stale saved grid state) and `rule`
+  effect on first load and survives a stale saved grid state; a `visible_when` column is dropped from the
+  grid entirely unless its `field` server-filter matches — recomputed live as you change the FilterPanel) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
   run on the displayed value, rule rendering is visual-only. When the query has writable companions, an

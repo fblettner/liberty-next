@@ -142,8 +142,18 @@ function EditCell({ ctrl, column, defaultText, onChange }: {
   )
 }
 
+// A column with a `visible_when` hint (v1's cdn_*) is shown only while the named server-filter's
+// current value matches — otherwise the whole column drops out of the grid.
+function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boolean {
+  const vw = c.visible_when
+  if (!vw) return true
+  const v = activeFilters[vw.field]
+  if (v == null || v === '') return false
+  return Array.isArray(vw.value) ? vw.value.includes(v) : v === vw.value
+}
+
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters,
 }: {
   result: QueryResult
   connector: string
@@ -155,9 +165,13 @@ export function ResultTable({
   onSaved?: () => void
   runControl?: React.ReactNode    // the Run button — sits just right of the grid's search box
   maxRowsControl?: React.ReactNode  // the Max-rows input — sits at the far right, before the Filters button
+  activeFilters?: Record<string, string>  // current server-filter values — drives `visible_when` columns
 }) {
   const { t } = useTranslation()
   const canEdit = !!(updateQuery || insertQuery)
+  // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
+  // (TableView passes a memoized `activeFilters`, so this stays referentially stable across re-renders).
+  const shownColumns = useMemo(() => result.columns.filter((c) => columnVisibleNow(c, activeFilters ?? {})), [result.columns, activeFilters])
 
   // ── batch-edit state ──
   const [editMode, setEditMode] = useState(false)
@@ -364,7 +378,7 @@ export function ResultTable({
       return <EditCell ctrl={editCtrlOf(c)} column={c} defaultText={v === null || v === undefined ? '' : String(v)} onChange={(nv) => editChange(row, c.name, nv)} />
     }
     const out: ColumnDef<DataRow, unknown>[] = []
-    for (const c of result.columns) {
+    for (const c of shownColumns) {
       const align = cellAlign(c)
 
       if (c.rule?.kind === 'lookup') {
@@ -424,7 +438,7 @@ export function ResultTable({
       })
     }
     return out
-  }, [result.columns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span])
+  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span])
 
   // the leftmost select + status columns — rebuild freely on edit-state changes; they hold no
   // <input>, only checkboxes/markers/buttons, so remounting them is harmless.

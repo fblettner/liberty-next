@@ -115,6 +115,7 @@ class Column:
     hidden: bool = False
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
+    visible_when: dict[str, Any] | None = None
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -130,6 +131,8 @@ class Column:
             d["filter"] = True
         if self.filter_from:
             d["filter_from"] = self.filter_from
+        if self.visible_when is not None:
+            d["visible_when"] = self.visible_when
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -413,6 +416,7 @@ def _resolve_hint(
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, filter=h.filter,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
+        visible_when=({"field": h.visible_when.field, "value": h.visible_when.value} if h.visible_when else None),
         width=h.width, align=h.align, format=fmt, rule=rule,
     )
 

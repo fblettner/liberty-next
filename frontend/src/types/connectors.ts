@@ -70,6 +70,9 @@ export interface Column {
   /** cascading-filter deps (v1's ly_tbl_filters): when the `source` filter has a value, this
    *  column's LOOKUP options are narrowed to the rows whose `column` matches it. */
   filter_from?: { source: string; column: string }[]
+  /** conditional visibility (v1's cdn_*): the column is dropped from the grid unless the named
+   *  `field` server-filter's current value is `value` (or one of `value` when it's an array). */
+  visible_when?: { field: string; value: string | string[] }
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string

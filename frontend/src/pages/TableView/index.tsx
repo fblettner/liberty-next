@@ -83,6 +83,12 @@ export default function TableView({ connector, query }: { connector: string; que
     return s
   }, [filterCols])
 
+  // the set/non-empty server filters as {col: value} — drives the grid's `visible_when` columns
+  const activeFilters = useMemo(
+    () => Object.fromEntries(Object.entries(filters).filter(([, f]) => f.val !== '').map(([k, f]) => [k, f.val])),
+    [filters],
+  )
+
   const paramNames = useMemo(() => {
     if (!meta) return [] as string[]
     const seen = new Set<string>()
@@ -251,6 +257,7 @@ export default function TableView({ connector, query }: { connector: string; que
                 onSaved={run}
                 runControl={runBtn}
                 maxRowsControl={maxRowsField}
+                activeFilters={activeFilters}
               />
             )}
           </Stack>

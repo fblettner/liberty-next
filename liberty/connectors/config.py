@@ -116,13 +116,29 @@ class FilterDep(BaseModel):
     column: str   # a result column of *this* column's lookup query to match the source's value against
 
 
+class VisibleWhen(BaseModel):
+    """Make a result column conditionally visible in the TableView grid (v1's ``ly_tbl_col.cdn_*``).
+    The column is shown **only when** the named ``field`` server-filter's current value is ``value``
+    (or one of ``value`` when it's a list) — otherwise the *whole column* is dropped from the grid.
+    (A table has no per-row "current value", so this is the table form of v1's conditional rendering;
+    forms/dialogs get the per-record version in the form phase.) ``field`` should be a ``filter``-flagged
+    column on the same query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    value: str | list[str]
+
+
 class ColumnHint(BaseModel):
     """Optional *display* metadata for one result column. The column **schema**
     (names + types) is still discovered from the query at run time — these hints only
     augment it (a display title, visibility, column order, a width/alignment, a
     free-text ``format`` the UI may interpret, a ``filter`` flag — v1's ``col_filter`` —
-    that surfaces the column in the TableView filter panel, and ``filter_from`` — v1's
-    ``ly_tbl_filters`` — cascading-filter dependencies for that panel). ``label``/``format``
+    that surfaces the column in the TableView filter panel, ``filter_from`` — v1's ``ly_tbl_filters`` —
+    cascading-filter dependencies for that panel, and ``visible_when`` — v1's ``ly_tbl_col.cdn_*`` —
+    a condition that drops the whole column from the grid unless a server-filter has a given value).
+    ``label``/``format``
     may be left out and pulled from the shared dictionary (``config/dictionary.toml``) instead:
     the entry key is ``dd`` if set, else the column ``name``; an inline ``label``/``format`` here
     still overrides the dictionary. v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows migrate to
@@ -139,6 +155,7 @@ class ColumnHint(BaseModel):
     hidden: bool = False
     filter: bool = False       # surface this column in the TableView filter panel (v1's col_filter)
     filter_from: list[FilterDep] = Field(default_factory=list)  # cascading-filter deps (v1's ly_tbl_filters)
+    visible_when: VisibleWhen | None = None  # drop the column from the grid unless a filter matches (v1's cdn_*)
     width: int | None = None
     align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
     format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted
