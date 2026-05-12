@@ -370,7 +370,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   URL = SQLAlchemy async URL built from `apps_dbtype`/`apps_host`/`apps_port`/`apps_database`
   — `postgresql+asyncpg://…` / `oracle+oracledb://…/?service_name=…` — or a parseable
   `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}` stub; `dialect` from `apps_dbtype`,
-  `pool_size` from `apps_pool_max`, `max_rows` from `apps_limit`; the DB password is the pool's separate
+  `pool_size`/`max_overflow` from `apps_pool_min`/`apps_pool_max`, `max_rows` from `apps_limit`; the DB password is the pool's separate
   `password` field — **never inlined into the URL** (so URL-special chars don't break parsing): v1's
   `apps_password` `ENC:` value carried over **verbatim** (v2 decrypts it at runtime via the crypto master key,
   exactly as v1 reads it from the table), else a `${MIGRATED_PW_<NAME>}` env-var stub; v1's reserved `default`
@@ -509,16 +509,19 @@ nomasx1's fields nested under `[connectors.nomasx1.*]` and NOMAJDE's at the top 
 `connector = "jdedwards"` where the screen runs against that connector). Convention: `[pools.default]`
 is the **framework pool** — it holds v2's own `ly2_users`/`ly2_roles`/`ly2_user_roles`
 (created by `liberty-admin init-db`), shared across every app; `[auth] pool` (in
-`config/app.toml`) points here. Per-*app* pools (`[pools.nomasx1]`, `[pools.jdedwards]`, `[pools.nomajde]`,
-…) carry that app's migrated queries against its business DB; mirrors the v1 split between an
-app's "definition DB" (queries/users/roles → now TOML + `ly2_*`) and its "data DB" (`pg_dump`
-that into the target). `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`
-(set `LIBERTY_DB_URL` for Postgres; SQLite `liberty.db` is gitignored). `substitute_env`
-supports `${NAME}` and `${NAME:-default}` (shell `:-` = unset *or* empty → default), in both
-`connectors.toml` and `app.toml`. An empty pool URL raises `UnknownPoolError`, and any
+`config/app.toml`) points here, and it's the **only pool needed at startup**. Every other `[pools.X]`
+is an *app* pool — `nomasx1`, `jdedwards`, `nomajde`, … — migrated straight from v1's `ly_applications`
+(`url` + `dialect` + `pool_size`/`max_overflow` + `max_rows` + an `ENC:` `password`), opened **lazily**
+on first query; mirrors the v1 split between an app's "definition DB" (queries/users/roles → now TOML +
+`ly2_*`) and its "data DB". `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`
+(set `LIBERTY_DB_URL` for Postgres; SQLite `liberty.db` is gitignored); the app pools' URLs are v1's
+literal `apps_host`/`apps_port`/`apps_database` (so a docker `@pg:5432` host etc. — edit the `url` line if
+your deployment's host differs), and `LIBERTY_MASTER_KEY` must equal v1's `MASTER_KEY` so v2 can decrypt
+their `password`. `substitute_env` supports `${NAME}` and `${NAME:-default}` (shell `:-` = unset *or* empty
+→ default), in both `connectors.toml` and `app.toml`. An empty pool URL raises `UnknownPoolError`, and any
 `ConnectorError` not caught per-route (e.g. an unconfigured DB on `/auth/login`) becomes a clean
 **503** via a global handler in `liberty/main.py`. `LIBERTY_JWT_SECRET` empty → ephemeral key + a warning.
-**Encrypted fields** (`ENC:…` values from v1 — e.g. a migrated API connector's `auth_password`,
+**Encrypted fields** (`ENC:…` values from v1 — pool `password`s, a migrated API connector's `auth_password`,
 or columns the user's other scripts touch) are decrypted at runtime with `[crypto] master_key`
 (`= "${LIBERTY_MASTER_KEY}"` in `app.toml`) — same AES-256-GCM scheme and key as v1; set
 `LIBERTY_MASTER_KEY` to your v1 `MASTER_KEY`. See *Crypto* above; `liberty-crypto` is the CLI.

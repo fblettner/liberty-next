@@ -319,14 +319,14 @@ def test_migrate_pools() -> None:
     assert nx["password"] == "ENC:nx"  # = apps_password
     assert nx["dialect"] == "postgresql"
     assert nx["pool_pre_ping"] is True
-    assert nx["pool_size"] == 20  # from apps_pool_max
+    assert nx["pool_size"] == 2 and nx["max_overflow"] == 18  # apps_pool_min=2 / apps_pool_max=20 → 2 + 18 burst
     assert nx["max_rows"] == 5000  # from apps_limit
 
     jde = out["nomajde"]
     assert jde["url"] == "oracle+oracledb://jde@ora.example:1521/?service_name=JDEPROD"
     assert jde["password"] == "${MIGRATED_PW_NOMAJDE}"  # apps_password was None → env-var stub
     assert jde["dialect"] == "oracle"
-    assert "pool_size" not in jde  # apps_pool_max was None
+    assert "pool_size" not in jde and "max_overflow" not in jde  # apps_pool_min/max were None
     assert "max_rows" not in jde  # apps_limit was None
     assert "max_rows" not in out["viajdbc"]  # apps_limit was 0 → not set
 

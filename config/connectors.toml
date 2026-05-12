@@ -2,12 +2,13 @@
 #
 # [pools.default] is the FRAMEWORK pool: it holds v2's own users/roles
 # (ly2_users / ly2_roles / ly2_user_roles — created by `liberty-admin init-db`),
-# shared across every app. Point it at a dedicated database — e.g. the old v1
-# "libnsx1"/framework DB, or a fresh one. `[auth] pool` in config/app.toml points here.
+# shared across every app; it's the ONLY pool needed at startup. Point it at a dedicated database
+# — e.g. the old v1 "libnsx1"/framework DB, or a fresh one. `[auth] pool` in config/app.toml points here.
 #
-# Per-app pools (one per business database) carry that app's queries. To add another v1
-# app:  liberty-migrate sql --source-url <app-definition-db> -o migrated_<app>.toml
-# then append its [pools.<app>] + [connectors.<app>] below and `POST /admin/reload`.
+# Every other [pools.X] is an *app* pool — opened lazily on first query — migrated straight from v1's
+# ly_applications (url + dialect + pool_size/max_overflow + max_rows + an ENC: `password`). Set
+# LIBERTY_MASTER_KEY to v1's MASTER_KEY so v2 can decrypt the passwords; edit a pool's `url` host/port
+# if your deployment differs from v1's (the migrated values are v1's, e.g. the docker `@pg:5432` host).
 
 [pools.default]
 # Set LIBERTY_DB_URL to the framework/users DB (e.g. postgresql+asyncpg://user:pw@host/libnsx1);
@@ -16,13 +17,17 @@ url = "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
 pool_pre_ping = true
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-# App: nomasx1 — "Rights, licenses and SOD". Set LIBERTY_DB_URL_NOMASX1 to its data DB
-# (postgresql+asyncpg://user:pw@host/nomasx1). 208 queries migrated from the v1 libnsx1 DB.
-# Query permission strings: sql:nomasx1:<query_name>  (or sql:nomasx1:* / sql:* / *).
+# App: nomasx1 — "Rights, licenses and SOD" (migrated from the v1 libnsx1 DB; 208 queries).
+# Permission strings: sql:nomasx1:<query_name>  (or sql:nomasx1:* / sql:* / *).
 # ─────────────────────────────────────────────────────────────────────────────────────
 [pools.nomasx1]
-url = "${LIBERTY_DB_URL_NOMASX1}"
+url = "postgresql+asyncpg://nomasx1@pg:5432/nomasx1"
 pool_pre_ping = true
+password = "ENC:EEyxwyF0A3w+rmDqdem/xCW3kW7qtskHZvAvlYpM6WG/n7oeRS67cQyFQYqDxsv7tIA3vR2vg/9LS7eHQZtSVYDYv5OYia0dGJL30vsqCqD3HEuaBZ7Qd0ikcD0axKT9asEJVQFqHx6MVYFxA4FWfq/Yfck="
+dialect = "postgresql"
+pool_size = 10
+max_overflow = 0
+max_rows = 15000
 
 [connectors.nomasx1]
 type = "sql"
@@ -2525,17 +2530,17 @@ writable = true
 sql = "UPDATE\n    LICENSE_JDE_OUT_OBJECTS\nSET\n    LOUT_TYPE = :LOUT_TYPE,\n    LOUT_COUNT = :LOUT_COUNT\nWHERE\n    LOUT_APPS_ID = :LOUT_APPS_ID_ORIGINAL\n    AND LOUT_OBJECT = :LOUT_OBJECT_ORIGINAL\n    AND LOUT_VERSION = :LOUT_VERSION_ORIGINAL\n    AND LOUT_USAGE = :LOUT_USAGE_ORIGINAL"
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-# Apps migrated from the v1 libnjde DB (NOMAJDE) — pools: jdedwards (Oracle JDE business DB),
-# nomajde (Postgres app DB), session (stub). Pool passwords are v1's ENC: values (set
-# LIBERTY_MASTER_KEY to v1's MASTER_KEY so v2 can decrypt them). Permission strings:
-# sql:<connector>:<query_name>, api:ais_connection:<ep>.
+# App: NOMAJDE (migrated from the v1 libnjde DB) — three SQL connectors: jdedwards (the
+# Oracle JDE business DB), nomajde (its Postgres app DB), session (a stub) — plus the
+# ais_connection API connector. Permission strings: sql:<connector>:<query_name>, api:ais_connection:<ep>.
 # ─────────────────────────────────────────────────────────────────────────────────────
 [pools.jdedwards]
 url = "oracle+oracledb://system@79.72.70.64:1521/?service_name=JDEORCL"
 pool_pre_ping = true
 password = "ENC:cuJFYdv0IgIGbZ5ru3ulVmGW03JCjFzDXKrkKsGT48W0N6z3U9SR6jrtSre5UnuGWeLuLCiJJQ14/qE5eYsGttifJdTL5eoAZZ0ruS4d3jfm1k2YY9UxDg0Nb8UmLiBW/ec08i0fmz23MPjN"
 dialect = "oracle"
-pool_size = 10
+pool_size = 1
+max_overflow = 9
 max_rows = 10000
 
 [pools.nomajde]
@@ -2543,7 +2548,8 @@ url = "postgresql+asyncpg://nomajde@pg:5432/nomajde"
 pool_pre_ping = true
 password = "ENC:mmMDSPZJ3lEF4HAG7pVPhkxZzxOC5Ks+V2n6b4NBArswYbs31PDOXpF9LiIjSfuap5Rs5ivPJxBjxho0cObLxIQ9RW2pvaufZuWiCMAl3IR6I0fCTiE93TSF7ZVXwTO1hah+OBSr/foGycd4MyH0UZ4HFPo="
 dialect = "postgresql"
-pool_size = 10
+pool_size = 1
+max_overflow = 9
 max_rows = 100000
 
 [pools.session]

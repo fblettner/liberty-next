@@ -810,8 +810,9 @@ def migrate_pools(
     reserved ``default`` pool — its framework/definition DB — is **skipped**: v2 reserves
     ``[pools.default]`` for v2's own framework DB (the ``ly2_*`` tables). When several apps share a
     pool name, the first wins. ``apps_dbtype`` becomes the pool's explicit ``dialect`` (so v2 picks
-    the right per-dialect SQL variant); ``apps_pool_max`` becomes ``pool_size`` when sensible;
-    ``apps_limit`` becomes ``max_rows`` (the pool's default SELECT row cap).
+    the right per-dialect SQL variant); ``apps_pool_min`` / ``apps_pool_max`` become ``pool_size`` /
+    ``max_overflow`` (the burst above ``pool_size``); ``apps_limit`` becomes ``max_rows`` (the pool's
+    default SELECT row cap).
 
     Args:
         applications: rows from ``ly_applications`` (``apps_name``, ``apps_pool``,
@@ -855,18 +856,22 @@ def migrate_pools(
             entry["password"] = apw if apw.startswith("ENC:") else _pw_placeholder(name)
         if dialect:
             entry["dialect"] = dialect
-        try:
-            pool_max = int(a.get("apps_pool_max") or 0)
-            if 0 < pool_max <= 100:
-                entry["pool_size"] = pool_max
-        except (TypeError, ValueError):
-            pass
-        try:
-            limit = int(a.get("apps_limit") or 0)
-            if limit > 0:
-                entry["max_rows"] = limit  # v1's per-app row cap → the pool's default `max_rows`
-        except (TypeError, ValueError):
-            pass
+        # v1's apps_pool_min / apps_pool_max → SQLAlchemy's pool_size (kept-open connections) and
+        # max_overflow (burst above that). Either may be missing; clamp to sane bounds.
+        def _int(v: Any) -> int | None:
+            try:
+                return int(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+        pmin, pmax = _int(a.get("apps_pool_min")), _int(a.get("apps_pool_max"))
+        if pmin is not None and 0 < pmin <= 100:
+            entry["pool_size"] = pmin
+        if pmax is not None and 0 < pmax <= 1000:
+            base = entry.get("pool_size", 5)  # SQLAlchemy's default pool_size
+            entry["max_overflow"] = max(0, pmax - base)
+        limit = _int(a.get("apps_limit"))
+        if limit is not None and limit > 0:
+            entry["max_rows"] = limit  # v1's per-app row cap → the pool's default `max_rows`
         pools[name] = entry
     return {"pools": pools}
 
