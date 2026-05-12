@@ -1,18 +1,16 @@
-import { lazy } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { lazy, useEffect } from "react";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { Centered } from "./common";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import OidcCallback from "./pages/OidcCallback";
+import { useTabs, type TabKind } from "./tabs/TabsContext";
 
-// Page components are code-split — each becomes its own chunk, so the heavy libs
-// they pull in (react-table, react-markdown, the Monaco loader) only load when
-// their page is visited. The shell (Layout/Login/OidcCallback) stays eager.
+// Framework pages are code-split; the SQL/HTTP screens aren't routed directly — they live as
+// tabs (see components/TabHost), and these route components just open/activate the matching tab.
 const Connectors = lazy(() => import("./pages/Connectors"));
-const TableView = lazy(() => import("./pages/TableView"));
-const HttpRunner = lazy(() => import("./pages/HttpRunner"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Settings = lazy(() => import("./pages/Settings"));
 
@@ -22,6 +20,17 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (!ready) return <Centered />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
+}
+
+// A `/sql/:connector/:target` or `/http/:connector/:target` route — just opens/activates the
+// tab for it; the TabHost (in Layout) does the actual rendering.
+function TabRoute({ kind }: { kind: TabKind }) {
+  const { connector = "", target = "" } = useParams();
+  const { openOrActivate } = useTabs();
+  useEffect(() => {
+    if (connector && target) openOrActivate({ kind, connector, target });
+  }, [kind, connector, target, openOrActivate]);
+  return null;
 }
 
 export default function App() {
@@ -38,8 +47,8 @@ export default function App() {
         }
       >
         <Route index element={<Connectors />} />
-        <Route path="sql/:connector/:query" element={<TableView />} />
-        <Route path="http/:connector/:endpoint" element={<HttpRunner />} />
+        <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
+        <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="chat" element={<Chat />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

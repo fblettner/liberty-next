@@ -1,8 +1,8 @@
 // Run a connector's named SQL query: a param form built from the query's
 // params/bind_params, then SELECT → a sortable/paged grid (ResultTable) or a
-// writable statement → confirm + affected-rows banner.
+// writable statement → confirm + affected-rows banner. Rendered inside a tab
+// (see components/TabHost) — `connector`/`query` come in as props, not route params.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Table as TableIcon, Play } from 'lucide-react'
@@ -17,9 +17,8 @@ const Title = styled.span`
   font-family: ${fonts.mono};
 `
 
-export default function TableView() {
+export default function TableView({ connector, query }: { connector: string; query: string }) {
   const { t } = useTranslation()
-  const { connector = '', query = '' } = useParams()
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})

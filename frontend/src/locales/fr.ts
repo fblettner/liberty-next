@@ -16,6 +16,9 @@ const fr: Resources = {
     app: 'Application',
     allApps: '(toutes les apps)',
   },
+  tabs: {
+    close: 'Fermer l’onglet',
+  },
   common: {
     loading: 'Chargement…',
     run: 'Exécuter',

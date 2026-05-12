@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { WorkspaceProvider } from "./workspace/WorkspaceContext";
+import { TabsProvider } from "./tabs/TabsContext";
 import App from "./App";
 import "./i18n";
 import "./index.css";
@@ -12,7 +13,9 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <AuthProvider>
         <WorkspaceProvider>
-          <App />
+          <TabsProvider>
+            <App />
+          </TabsProvider>
         </WorkspaceProvider>
       </AuthProvider>
     </BrowserRouter>

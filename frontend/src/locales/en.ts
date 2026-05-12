@@ -14,6 +14,9 @@ const en = {
     app: 'Application',
     allApps: '(all apps)',
   },
+  tabs: {
+    close: 'Close tab',
+  },
   common: {
     loading: 'Loading…',
     run: 'Run',

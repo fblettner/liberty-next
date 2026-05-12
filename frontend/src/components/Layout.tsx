@@ -2,7 +2,7 @@
 // (EN/FR, dark/light, profile, sign-out). Page content renders through <Outlet/>
 // inside a <Suspense> boundary (routes are code-split). Adapted from nomaubl.
 import { Suspense, useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useMatch } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Sun, Moon, LogOut, User } from 'lucide-react'
@@ -13,6 +13,8 @@ import { Centered } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import WorkspaceSelect from './WorkspaceSelect'
+import TabStrip from './TabStrip'
+import TabHost from './TabHost'
 
 const THEME_KEY = 'liberty.theme'
 
@@ -31,28 +33,6 @@ const MainArea = styled.main`
   display: flex;
   flex-direction: column;
   overflow: hidden;
-`
-
-const WorkspaceHeader = styled.div`
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 14px 20px 8px;
-  flex-shrink: 0;
-`
-
-const WorkspaceTitle = styled.h1`
-  font-size: ${fontSize['2xl']};
-  font-weight: 700;
-  letter-spacing: -0.3px;
-  line-height: 1;
-  margin: 0;
-`
-const Accent = styled.span`color: ${colors.blue.main};`
-const Sub = styled.span`
-  font-size: ${fontSize.base};
-  font-weight: 400;
-  color: ${colors.text.muted};
 `
 
 const ContentArea = styled.div`
@@ -166,18 +146,24 @@ export default function Layout() {
     setLang(l)
   }
 
+  // a `/sql/...` or `/http/...` route → show the tab host (and the matching tab is active); a
+  // framework route → show its page through <Outlet/>, with the tab host hidden underneath.
+  // (both useMatch calls must run unconditionally — Rules of Hooks)
+  const sqlMatch = useMatch('/sql/:connector/:target')
+  const httpMatch = useMatch('/http/:connector/:target')
+  const onTabRoute = !!(sqlMatch || httpMatch)
+
   return (
     <Shell>
       <Sidebar />
       <MainArea>
-        <WorkspaceHeader>
-          <WorkspaceTitle>
-            <Accent>{t('app.title')}</Accent> <Sub>{t('app.subtitle')}</Sub>
-          </WorkspaceTitle>
-        </WorkspaceHeader>
+        <TabStrip />
         <ContentArea>
           <Suspense fallback={<Centered />}>
+            {/* Outlet renders the framework page (Connectors / Chat / Settings); on a tab route it
+                renders the TabRoute marker (null) and TabHost below does the rendering. */}
             <Outlet />
+            <TabHost hidden={!onTabRoute} />
           </Suspense>
         </ContentArea>
       </MainArea>

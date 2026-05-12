@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Globe, Play } from 'lucide-react'
@@ -29,9 +28,8 @@ const ExtractCode = styled.code`
   word-break: break-all;
 `
 
-export default function HttpRunner() {
+export default function HttpRunner({ connector, endpoint }: { connector: string; endpoint: string }) {
   const { t } = useTranslation()
-  const { connector = '', endpoint = '' } = useParams()
   const [meta, setMeta] = useState<ApiEndpointMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
