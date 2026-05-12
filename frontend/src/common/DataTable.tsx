@@ -134,8 +134,11 @@ const MiniLink = styled.button`
   cursor: pointer; padding: 2px 4px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.05em;
   &:hover { background: var(--hover-subtle); }
 `
+// Cap at the space the table actually has below the page chrome (header + the run/toolbar rows +
+// the result-meta line + the pager) — `100dvh - ~14rem` — so a result that fits doesn't get a
+// (clipped) inner scrollbar, and a bigger one scrolls inside the box with its last row fully visible.
 const TableScroll = styled.div`
-  overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
+  overflow: auto; max-height: calc(100dvh - 14rem); border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
 // `table-layout: auto` (the default): the browser sizes columns to their content — the best fit in
 // practice. (Column *resizing* was tried with `table-layout: fixed`, but that forced widths the

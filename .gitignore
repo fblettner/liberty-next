@@ -6,6 +6,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# pytest --html report (pytest-html, --self-contained-html); coverage HTML
+test-report.html
+htmlcov/
 build/
 dist/
 .DS_Store

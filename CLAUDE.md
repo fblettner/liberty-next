@@ -554,7 +554,7 @@ nomaubl's `LicenseVerifier`; **same JWT shape and key-pair as nomaubl**). v2 onl
 ## Run it
 
 ```bash
-.venv/bin/pytest -v               # tests
+.venv/bin/pytest -v               # tests   ·   pytest --html=test-report.html --self-contained-html → a browsable HTML report (pytest-html, like Playwright's)
 ./start.sh init-db                # FIRST RUN: bootstrap the auth store + an `admin` user (prints the password) — default backend = "toml" → writes config/auth.toml; backend = "db" → creates the ly2_* tables
 ./start.sh                        # builds frontend/dist if stale, then runs FastAPI serving the SPA + API on :8000
 ./start.sh dev                    # same, with --reload   ·   ./start.sh frontend → Vite :5173 (HMR)   ·   ./start.sh help
