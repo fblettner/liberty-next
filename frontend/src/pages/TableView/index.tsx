@@ -221,6 +221,7 @@ export default function TableView({ connector, query }: { connector: string; que
                 updateQuery={meta.update_query}
                 insertQuery={meta.insert_query}
                 deleteQuery={meta.delete_query}
+                keyColumns={meta.key_columns}
                 onSaved={run}
               />
             )}

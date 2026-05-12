@@ -38,6 +38,8 @@ import re
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote as _urlquote
 
+from liberty.connectors.base import find_bind_params
+
 # v1's `query_crud` uses REST-style verbs — GET (read), POST/PUT/PATCH (write), DELETE; some
 # older rows use SQL keywords (SELECT/INSERT/UPDATE/MERGE). A query is a *read* iff its crud is
 # one of these (else it's treated as a mutation: `writable = true`, no display column hints).
@@ -131,20 +133,22 @@ def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "defaul
     return f"SELECT * FROM (\n{base_sql}\n) _flt\nWHERE 1=1\n{preds}"
 
 
-def _rewrite_put_where(sql: str, key_cols: list[str]) -> str:
-    """In an `UPDATE … SET … WHERE …` statement, rebind each key column in the **WHERE clause**
-    from `:<col>` to `:<col>_ORIGINAL` (the SET clause keeps `:<col>` for the new value). The
-    TableView sends the row's pre-edit values under those keys, so editing a key column still
-    matches the right row. v1's `_put` queries reuse `:<col>` in both SET and WHERE; this only
-    touches what comes after the first `WHERE`. No `WHERE`, or no key columns → returned unchanged."""
-    if not key_cols:
-        return sql
+def _rewrite_put_where(sql: str) -> str:
+    """In an `UPDATE … SET … WHERE …` statement, rebind **every** parameter in the WHERE clause
+    from `:<col>` to `:<col>_ORIGINAL` (the SET clause is untouched — it keeps `:<col>` for the new
+    value). v1's `_put` queries reuse `:<col>` in both SET and WHERE, so editing a column the WHERE
+    matches on (typically the key) would otherwise look for the *new* value and find nothing; the
+    TableView sends the row's pre-edit values under `:<col>_ORIGINAL`, so the WHERE now matches the
+    right row. Only what comes after the first `WHERE` is rewritten; no `WHERE`, no `:params` there,
+    or already rewritten → returned unchanged."""
     m = re.search(r"\bWHERE\b", sql, re.IGNORECASE)
     if not m:
         return sql
     head, where = sql[: m.start()], sql[m.start():]
-    for kc in key_cols:
-        where = re.sub(rf"(?<!:):{re.escape(kc)}\b", f":{kc}_ORIGINAL", where)
+    for p in find_bind_params(where):
+        if p.endswith("_ORIGINAL"):
+            continue  # idempotent — don't `_ORIGINAL`-suffix twice
+        where = re.sub(rf"(?<!:):{re.escape(p)}\b", f":{p}_ORIGINAL", where)
     return head + where
 
 
@@ -192,8 +196,9 @@ def migrate_sql_queries(
             the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
             ``auto_load``.
         key_columns: ``{query_id: [col, …]}`` (from :func:`migrate_key_columns`) — the row-key columns
-            (v1's ``col_key``); for an UPDATE-type write query they're rebound to ``:<col>_ORIGINAL``
-            in the WHERE so editing a key still updates the right row.
+            (v1's ``col_key``); attached to the read query as ``key_columns`` (the TableView's Excel
+            import uses them to decide update-vs-insert). (The ``_put`` query's WHERE is rewritten to
+            ``:<col>_ORIGINAL`` for **every** parameter it references, automatically — not just keys.)
     """
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
     tmeta = {int(k): dict(v) for k, v in (table_meta or {}).items()}
@@ -237,18 +242,18 @@ def migrate_sql_queries(
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
         tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
+        kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
-        # an UPDATE-type write query: rebind its key columns in the WHERE to :<col>_ORIGINAL
-        upd_keys = (key_columns or {}).get(qid, []) if crud in _UPDATE_CRUD else []
+        is_update = crud in _UPDATE_CRUD
         # build each dialect variant: a read query with filter columns is wrapped in
-        # `SELECT * FROM (…) _flt WHERE <filters>`; an update query's WHERE is rewritten; then
-        # ORDER BY is appended (to the outer query, when the read query was wrapped).
+        # `SELECT * FROM (…) _flt WHERE <filters>`; an UPDATE query's WHERE is rewritten to
+        # `:<col>_ORIGINAL`; then ORDER BY is appended (to the outer query, when the read was wrapped).
         ob = orderbys.get(key, "")
         def _variant(raw: str, dia: str) -> str:
             if filter_cols:
                 s = _wrap_with_filters(raw, filter_cols, dialect=dia)
-            elif upd_keys:
-                s = _rewrite_put_where(raw, upd_keys)
+            elif is_update:
+                s = _rewrite_put_where(raw)
             else:
                 s = raw
             return f"{s}\nORDER BY {ob}" if ob else s
@@ -259,6 +264,7 @@ def migrate_sql_queries(
                 "label": label or None,
                 "description": (tm or {}).get("description") or None,
                 "auto_load": True if (tm or {}).get("auto_load") else None,
+                "key_columns": (kcs or None),  # omit when empty — used by the Excel-import match-by-key
                 "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
                 "sql": _sql_value(variants),
                 "columns": (hints or None),  # omit when empty

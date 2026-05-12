@@ -24,6 +24,9 @@ export interface SqlQueryMeta {
   /** resolved display hints from the query's `columns` config (label/format/hidden/filter/width/align/rule);
    *  `filter: true` ones are surfaced as server-filter fields in TableView. */
   columns: Column[]
+  /** result columns that identify a row (v1's `col_key`) — the Excel import matches imported rows
+   *  against the loaded ones on these to decide update (→ `update_query`) vs insert (→ `insert_query`). */
+  key_columns: string[]
 }
 
 export interface ApiEndpointMeta {

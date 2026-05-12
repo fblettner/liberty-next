@@ -152,6 +152,9 @@ class QueryDef(BaseModel):
     # Per-query override of the row cap (else the connector's, then the pool's, then 1000); a
     # per-request override beats this. See SQLConnector.execute.
     max_rows: int | None = None
+    # Result columns that identify a row (v1's `col_key`) — surfaced in `describe()`; the TableView's
+    # Excel import matches imported rows against the loaded ones on these to decide update vs insert.
+    key_columns: list[str] = Field(default_factory=list)
     # Names of `writable` queries on the same connector that update / insert / delete a row of this
     # query's result — set explicitly, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
     # / `<base>_post` / `<base>_delete` naming convention the migration uses. Drive the TableView's

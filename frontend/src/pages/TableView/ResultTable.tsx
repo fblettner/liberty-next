@@ -143,7 +143,7 @@ function EditCell({ ctrl, column, defaultText, onChange }: {
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, onSaved,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved,
 }: {
   result: QueryResult
   connector: string
@@ -151,6 +151,7 @@ export function ResultTable({
   updateQuery?: string | null
   insertQuery?: string | null
   deleteQuery?: string | null
+  keyColumns?: string[]  // result columns that identify a row (v1's col_key) — used by the Excel import to match
   onSaved?: () => void
 }) {
   const { t } = useTranslation()
@@ -223,6 +224,11 @@ export function ResultTable({
   // its display `label`, and the "(ID)" suffixed forms (a lookup column shows as "<label> (ID)" in
   // the grid, so that's a natural header to round-trip). `sheet_to_json` already gives each row as
   // {headerText → value} (the first sheet row is the header), so we just look each header up.
+  //
+  // Then, if the query has `keyColumns`, each imported row is matched against the *loaded* rows on
+  // those columns: a match becomes an **edit** of that row (→ `update_query` on Save), the rest are
+  // **new** rows (→ `insert_query`). That's the v2 replacement for v1's MERGE/UPSERT `_post` queries:
+  // update-or-insert is decided here, in the batch-edit model, instead of in one SQL statement.
   const importFile = useCallback(async (file: File) => {
     setSaveErrors([])
     try {
@@ -244,12 +250,34 @@ export function ResultTable({
         }
         return out
       }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
-      if (seeds.length === 0) setSaveErrors([t('table.importNoMatch', { file: file.name })])
-      else { if (!editMode) setEditMode(true); prependNewRows(seeds) }
+      if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return }
+      if (!editMode) setEditMode(true)
+
+      const keys = (keyColumns ?? []).filter(Boolean)
+      const newSeeds: Record<string, unknown>[] = []
+      const matched: DataRow[] = []
+      if (keys.length > 0) {
+        const keyOf = (o: Record<string, unknown>) => keys.map((k) => String(o[k] ?? '')).join(' ')
+        const byKey = new Map<string, DataRow>()
+        for (const row of result.rows) byKey.set(keyOf(row), row)
+        for (const seed of seeds) {
+          const match = keys.every((k) => k in seed) ? byKey.get(keyOf(seed)) : undefined
+          if (match) {  // overlay the imported fields onto the existing row as pending edits
+            editsRef.current.set(match, { ...editsRef.current.get(match), ...seed })
+            matched.push(match)
+          } else {
+            newSeeds.push(seed)
+          }
+        }
+      } else {
+        newSeeds.push(...seeds)
+      }
+      if (matched.length) setDirtyRows((s) => { const n = new Set(s); for (const r of matched) n.add(r); return n })
+      if (newSeeds.length) prependNewRows(newSeeds)
     } catch (e) {
       setSaveErrors([e instanceof Error ? e.message : String(e)])
     }
-  }, [prependNewRows, editMode, result.columns, t])
+  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, t])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])

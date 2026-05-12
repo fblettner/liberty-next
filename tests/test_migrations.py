@@ -155,6 +155,8 @@ def test_migrate_sql_queries_put_where_rewrite() -> None:
     assert "WHERE USR_APPS_ID = :USR_APPS_ID_ORIGINAL AND USR_ID = :USR_ID_ORIGINAL" in put_sql
     # the read query is untouched
     assert by_name["users_get"]["sql"] == "SELECT USR_APPS_ID, USR_ID, USR_NAME FROM SECURITY_USERS"
+    assert by_name["users_get"]["key_columns"] == ["USR_APPS_ID", "USR_ID"]  # surfaced for the import match-by-key
+    assert "key_columns" not in by_name["users_put"]  # only the read query carries it
     from liberty.connectors.base import find_bind_params
     binds = set(find_bind_params(put_sql))
     assert {"USR_NAME", "USR_ID", "USR_APPS_ID_ORIGINAL", "USR_ID_ORIGINAL"} <= binds

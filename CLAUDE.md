@@ -49,9 +49,11 @@ Full dep set pinned in `pyproject.toml`.
   A query may also carry `label`/`description` (display names — the frontend titles the TableView with
   `description`, else `label`, else the menu label; the menu label rides on the tab), `auto_load = true`
   (v1's per-table auto-load — the TableView runs a SELECT immediately on open instead of waiting for a Run click),
-  and `max_rows` (the SELECT row cap for this query — overrides the connector's, then the pool's, then 1000;
-  a per-request override beats it). `[pools.*]` may carry an explicit `dialect` (else derived from the URL) and a
-  `max_rows` (the pool's default row cap — v1's per-app `apps_limit`); `[connectors.*]` (sql) a `max_rows` too.
+  `max_rows` (the SELECT row cap for this query — overrides the connector's, then the pool's, then 1000;
+  a per-request override beats it), and `key_columns` (the result columns that identify a row — v1's `col_key` —
+  surfaced in `describe()` for the TableView's Excel-import update-vs-insert match). `[pools.*]` may carry an
+  explicit `dialect` (else derived from the URL) and a `max_rows` (the pool's default row cap — v1's per-app
+  `apps_limit`); `[connectors.*]` (sql) a `max_rows` too.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
   + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
   `[connectors.<conn>.entries.<key>]` — per-connector, since v1 dictionaries were per-app) =
@@ -299,14 +301,16 @@ replies), `@monaco-editor/react` (the connector-config editor).
   run on the displayed value, rule rendering is visual-only. When the query has writable companions, an
   **Edit** toggle puts the *whole grid* into edit mode (v1's FormsTable batch model): every cell editable,
   "+ Add row" / per-row "duplicate" / **Import** (.xlsx/.csv → headers matched to *result columns by header
-  text* — name / label / "(ID)"-suffixed, case-insensitive — so the sheet's column order doesn't matter) /
+  text* — name / label / "(ID)"-suffixed, case-insensitive — so the sheet's column order doesn't matter; an
+  imported row whose `key_columns` match a *loaded* row becomes an **edit** of that row (→ `update_query`),
+  the rest are **new** rows (→ `insert_query`) — that replaces v1's MERGE/UPSERT `_post` queries) /
   multi-row copy-paste (a selection checkbox column → Copy → Paste) → new rows (added at the *top*); a per-row
   × marks an existing row for deletion (a status column shows +/●/− marks); **Save**
-  fires the lot — edited rows → `update_query` (the merged new values, plus the row's original values under
-  `:<NAME>_ORIGINAL` so a key-aware WHERE can use them — the verbatim-migrated `_put`s don't yet), new rows →
-  `insert_query`, deleted → `delete_query` (params sent both as-is + UPPERCASE — PG lowercases the read columns,
-  v1's `_put`/`_post`/`_delete` use uppercase; `text()` binds only what it references) — then refetches;
-  **Cancel** discards. (Modal-form edit
+  fires the lot — edited rows → `update_query` (the merged new values, plus the row's pre-edit values under
+  `:<NAME>_ORIGINAL` — the migration rewrites each `_put`'s WHERE to bind those, so editing a key column still
+  updates the right row), new rows → `insert_query`, deleted → `delete_query` (params sent both as-is + UPPERCASE
+  — PG lowercases the read columns, v1's `_put`/`_post`/`_delete` use uppercase; `text()` binds only what it
+  references) — then refetches; **Cancel** discards. (Modal-form edit
   = the form layer, Phase 6.) A non-SELECT query → `confirm` + `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
@@ -366,10 +370,12 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `{query_id: {description?, auto_load?}}` (the table/form friendly label `tbl_label`/`frm_label` → the read
   query's `description`, `tbl_auto_load = 'Y'` → `auto_load = true`; a table widget beats a form) — passed to
   `migrate_sql_queries(table_meta=…)`; `migrate_key_columns(ly_tbl_col rows, ly_dlg_col rows)` → `{query_id:
-  [col, …]}` (the `col_key = 'Y'` columns) — passed as `key_columns=…`; for an UPDATE-crud write query
-  `migrate_sql_queries` rebinds those columns in the `_put`'s **WHERE** from `:<col>` to `:<col>_ORIGINAL`
-  (the SET clause keeps `:<col>` — the new value), so editing a key column still updates the right row (the
-  TableView sends the row's pre-edit values under `:<col>_ORIGINAL`); `migrate_column_hints(ly_tbl_col rows,
+  [col, …]}` (the `col_key = 'Y'` columns) — passed as `key_columns=…`, attached to the **read** query as
+  `key_columns` (the TableView's Excel import matches imported rows against the loaded ones on these to decide
+  update vs insert). Separately, `migrate_sql_queries` rewrites **every** `_put`'s WHERE clause — every `:<col>`
+  it references → `:<col>_ORIGINAL` (the SET clause untouched — the new value), automatically — so editing a
+  column the WHERE matches on (typically the key) still updates the right row (the TableView sends the row's
+  pre-edit values under `:<col>_ORIGINAL`); `migrate_column_hints(ly_tbl_col rows,
   ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
   `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
   `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
