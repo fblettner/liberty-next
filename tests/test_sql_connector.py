@@ -140,13 +140,13 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
     assert by_name["name"].filter_from == [{"source": "status", "column": "ST"}]
     assert by_name["status"].hidden is True
     assert by_name["id"].label is None and by_name["id"].hidden is False
-    assert by_name["id"].visible_when == {"field": "status", "value": ["on", "off"]}
+    assert by_name["id"].visible_when == [{"field": "status", "value": ["on", "off"]}]  # normalized to a list
     # the hints surface in to_dict() (only when non-default)
     cols = {c["name"]: c for c in result.to_dict()["columns"]}
     assert cols["name"]["label"] == "Item Name" and cols["name"]["align"] == "left"
     assert cols["name"]["filter_from"] == [{"source": "status", "column": "ST"}]
     assert cols["status"]["hidden"] is True
-    assert cols["id"]["visible_when"] == {"field": "status", "value": ["on", "off"]}
+    assert cols["id"]["visible_when"] == [{"field": "status", "value": ["on", "off"]}]
     assert "label" not in cols["id"] and "hidden" not in cols["id"] and "filter_from" not in cols["id"]
     # rows are unaffected — every column's data is still present
     assert result.rows[0] == {"id": 1, "name": "a", "status": "on"}
@@ -155,7 +155,7 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
     assert {h["name"] for h in qd["columns"]} == {"name", "status", "id", "zzz"}
     assert next(h for h in qd["columns"] if h["name"] == "status") == {"name": "status", "hidden": True}
     assert next(h for h in qd["columns"] if h["name"] == "name")["filter_from"] == [{"source": "status", "column": "ST"}]
-    assert next(h for h in qd["columns"] if h["name"] == "id") == {"name": "id", "visible_when": {"field": "status", "value": ["on", "off"]}}
+    assert next(h for h in qd["columns"] if h["name"] == "id") == {"name": "id", "visible_when": [{"field": "status", "value": ["on", "off"]}]}
 
 
 @pytest.mark.asyncio

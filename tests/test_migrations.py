@@ -14,6 +14,7 @@ from liberty.migrations import (
     merge_connectors,
     migrate_api,
     migrate_column_hints,
+    migrate_column_visibility,
     migrate_dictionary,
     migrate_menus,
     migrate_pools,
@@ -26,6 +27,7 @@ from liberty.migrations import (
     read_column_hints,
     read_dictionary,
     read_menus,
+    read_column_conditions,
     read_sql_queries,
     read_table_filters,
     render_toml,
@@ -310,6 +312,51 @@ def test_migrate_sql_queries_filter_from() -> None:
     assert "delete_user_delete" in by_name  # write query unaffected
 
 
+def test_migrate_column_visibility() -> None:
+    tbl_cols = [
+        {"query_id": 1, "col_target": "SY_COL", "col_dd_id": "SY", "col_cdn_id": None},  # no cdn — also provides the SY→SY_COL field index
+        {"query_id": 1, "col_target": "A", "col_dd_id": "A", "col_cdn_id": 10},   # one field, EQUAL + EMPTY
+        {"query_id": 1, "col_target": "B", "col_dd_id": "B", "col_cdn_id": 11},   # two fields → both emitted, AND-ed
+        {"query_id": 1, "col_target": "C", "col_dd_id": "C", "col_cdn_id": 13},   # bad operator → skipped
+        {"query_id": 1, "col_target": "D", "col_dd_id": "D", "col_cdn_id": 14},   # cdn has only EMPTY → no conds
+        {"query_id": 1, "col_target": "E", "col_dd_id": "E", "col_cdn_id": None},  # no cdn → absent
+    ]
+    params = [
+        {"cdn_id": 10, "cdn_dd_id": "SY", "cdn_operator": "EQUAL", "cdn_value": "OBJECTS"},
+        {"cdn_id": 10, "cdn_dd_id": "SY", "cdn_operator": "EMPTY", "cdn_value": None},
+        {"cdn_id": 11, "cdn_dd_id": "SY", "cdn_operator": "EQUAL", "cdn_value": "ALIAS"},
+        {"cdn_id": 11, "cdn_dd_id": "SY", "cdn_operator": "EQUAL", "cdn_value": "OTHERS"},
+        {"cdn_id": 11, "cdn_dd_id": "RT", "cdn_operator": "EQUAL", "cdn_value": "1"},
+        {"cdn_id": 11, "cdn_dd_id": "RT", "cdn_operator": "EMPTY", "cdn_value": None},
+        {"cdn_id": 13, "cdn_dd_id": "X", "cdn_operator": "NOT_EQUAL", "cdn_value": "9"},  # unsupported op → cdn 13 "bad"
+        {"cdn_id": 14, "cdn_dd_id": "RT", "cdn_operator": "EMPTY", "cdn_value": None},
+    ]
+    out = migrate_column_visibility(tbl_cols, (), params)
+    # A: SY resolves via the col_dd_id index → screen column SY_COL
+    assert out[1]["A"] == [{"field": "SY_COL", "value": ["OBJECTS"]}]
+    # B: two AND-ed conditions, in predicate order; RT has no matching col_dd_id → stays "RT"
+    assert out[1]["B"] == [{"field": "SY_COL", "value": ["ALIAS", "OTHERS"]}, {"field": "RT", "value": ["1"]}]
+    # C skipped (bad op), D has only an EMPTY predicate → no conds, E never had a cdn
+    assert "C" not in out[1] and "D" not in out[1] and "E" not in out[1]
+
+
+def test_migrate_sql_queries_visible_when() -> None:
+    out = migrate_sql_queries(
+        _QUERIES, _SQL_ROWS,
+        column_hints={1: [{"name": "USR_ID"}, {"name": "USR_NAME"}]},
+        column_visibility={1: {"USR_NAME": [{"field": "USR_ID", "value": ["42"]}]},
+                           2: {"USR_ID": [{"field": "X", "value": ["y"]}]}},  # write query → no-op
+    )
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    cols = {c["name"]: c for c in by_name["users_list_select"]["columns"]}
+    assert cols["USR_NAME"]["visible_when"] == [{"field": "USR_ID", "value": ["42"]}]
+    assert "visible_when" not in cols["USR_ID"]
+    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
+    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
+    un = next(c for c in q1.columns if c.name == "USR_NAME")
+    assert [r.as_dict() for r in un.visible_when_rules] == [{"field": "USR_ID", "value": ["42"]}]
+
+
 def test_migrate_sql_queries_with_table_meta() -> None:
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
@@ -585,11 +632,12 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_enum_val_l (enum_id INTEGER, val_enum TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_lookup (lkp_id INTEGER PRIMARY KEY, lkp_description TEXT, lkp_query_id INTEGER, lkp_dd_id TEXT, lkp_dd_label TEXT, lkp_dd_group TEXT)",
     "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT)",
-    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT, col_key TEXT)",
+    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT, col_key TEXT, col_cdn_id INTEGER)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
-    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_key TEXT)",
+    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_key TEXT, col_cdn_id INTEGER)",
     "CREATE TABLE ly_tbl_filters (tbl_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_dlg_filters (frm_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
+    "CREATE TABLE ly_cdn_params (cdn_id INTEGER, cdn_params_id INTEGER, cdn_seq INTEGER, cdn_dd_id TEXT, cdn_operator TEXT, cdn_value TEXT, cdn_logical TEXT, cdn_group INTEGER)",
     "CREATE TABLE ly_menus (menu_seq_ukid TEXT PRIMARY KEY, menu_parent_id TEXT, menu_child_id TEXT, menu_component TEXT, menu_component_id INTEGER, menu_label TEXT, menu_level INTEGER)",
     "CREATE TABLE ly_menus_l (lng_id TEXT, lng_seq_ukid TEXT, lng_label TEXT)",
     "CREATE TABLE ly_api_conn (conn_id INTEGER PRIMARY KEY, conn_label TEXT, conn_url TEXT, conn_user TEXT, conn_password TEXT)",
@@ -668,12 +716,12 @@ async def _seed_v1(engine) -> None:
             [{"i": 5, "q": 1, "l": "Users", "al": "Y"}],
         )
         await conn.execute(
-            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible, col_filter, col_key)"
-                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v, :f, :k)"),
+            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible, col_filter, col_key, col_cdn_id)"
+                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v, :f, :k, :cdn)"),
             [
-                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y", "f": "Y", "k": "Y"},
-                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y", "f": "N", "k": None},
-                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N", "f": None, "k": "N"},
+                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y", "f": "Y", "k": "Y", "cdn": None},
+                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y", "f": "N", "k": None, "cdn": 1},  # → ly_cdn_params cdn_id 1
+                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N", "f": None, "k": "N", "cdn": None},
             ],
         )
         await conn.execute(
@@ -681,6 +729,15 @@ async def _seed_v1(engine) -> None:
                  " VALUES (:t, :c, :i, :ty, :src, :tgt, :v)"),
             # USR_NAME's filter dropdown cascades from USR_ID (its lookup-result column UN_REF matches it)
             [{"t": 5, "c": 2, "i": 1, "ty": "DD", "src": "USR_ID", "tgt": "UN_REF", "v": None}],
+        )
+        # conditional rendering: USR_NAME (col 2, col_cdn_id = 1) shows only when the USR_ID filter is unset or == '42'
+        await conn.execute(
+            text("INSERT INTO ly_cdn_params (cdn_id, cdn_params_id, cdn_seq, cdn_dd_id, cdn_operator, cdn_value, cdn_logical, cdn_group)"
+                 " VALUES (:i, :p, :s, :dd, :op, :v, :lg, :g)"),
+            [
+                {"i": 1, "p": 1, "s": 1, "dd": "USR_ID", "op": "EQUAL", "v": "42", "lg": "OR", "g": 0},
+                {"i": 1, "p": 2, "s": 2, "dd": "USR_ID", "op": "EMPTY", "v": None, "lg": "OR", "g": 0},
+            ],
         )
         await conn.execute(
             text("INSERT INTO ly_dlg_frm (frm_id, dlg_id, frm_query_id, frm_label) VALUES (:i, :d, :q, :l)"),
@@ -783,6 +840,16 @@ async def test_read_table_filters(v1_engine) -> None:
         == [{"query_id": 1, "col_target": "USR_NAME", "src": "USR_ID", "tgt": "UN_REF"}]
     assert dlg_flt == []
     assert migrate_table_filters(tbl_flt, dlg_flt) == {1: {"USR_NAME": [{"source": "USR_ID", "column": "UN_REF"}]}}
+
+
+@pytest.mark.asyncio
+async def test_read_column_conditions(v1_engine) -> None:
+    from liberty.migrations import read_column_hints
+    tbl_cols, dlg_cols = await read_column_hints(v1_engine)
+    params = await read_column_conditions(v1_engine)
+    assert {(r["cdn_id"], r["cdn_operator"]) for r in params} == {(1, "EQUAL"), (1, "EMPTY")}
+    # USR_NAME (col_cdn_id 1) → distils to: shows unless USR_ID is filtered to something ≠ '42'
+    assert migrate_column_visibility(tbl_cols, dlg_cols, params) == {1: {"USR_NAME": [{"field": "USR_ID", "value": ["42"]}]}}
 
 
 @pytest.mark.asyncio
@@ -917,6 +984,8 @@ def test_cli_sql_to_file(tmp_path) -> None:
     assert q1.columns[2].hidden is True and q1.columns[1].label == "User Name"
     # ly_tbl_filters → the USR_NAME column's filter dropdown cascades from USR_ID
     assert [{"source": d.source, "column": d.column} for d in q1.columns[1].filter_from] == [{"source": "USR_ID", "column": "UN_REF"}]
+    # ly_tbl_col_cdn → USR_NAME shows unless the USR_ID filter is set to something other than '42'
+    assert [r.as_dict() for r in q1.columns[1].visible_when_rules] == [{"field": "USR_ID", "value": ["42"]}]
 
 
 def test_cli_all_to_stdout(tmp_path, capsys) -> None:

@@ -117,17 +117,21 @@ class FilterDep(BaseModel):
 
 
 class VisibleWhen(BaseModel):
-    """Make a result column conditionally visible in the TableView grid (v1's ``ly_tbl_col.cdn_*``).
-    The column is shown **only when** the named ``field`` server-filter's current value is ``value``
-    (or one of ``value`` when it's a list) — otherwise the *whole column* is dropped from the grid.
-    (A table has no per-row "current value", so this is the table form of v1's conditional rendering;
-    forms/dialogs get the per-record version in the form phase.) ``field`` should be a ``filter``-flagged
-    column on the same query."""
+    """One conditional-visibility rule for a TableView grid column (v1's ``ly_tbl_col.cdn_*``).
+    A column may carry a single rule or a list of them (``ColumnHint.visible_when``) — *all* must
+    hold for the column to appear, and a rule holds when the named ``field`` server-filter is unset
+    or its value is ``value`` (or one of ``value`` when it's a list). So setting ``field`` to a value
+    outside the allowed set drops the *whole column* from the grid. (A table has no per-row "current
+    value", so this is the table form of v1's conditional rendering; forms/dialogs get the per-record
+    version in the form phase.) ``field`` should be a ``filter``-flagged column on the same query."""
 
     model_config = ConfigDict(extra="forbid")
 
     field: str
     value: str | list[str]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"field": self.field, "value": self.value}
 
 
 class ColumnHint(BaseModel):
@@ -155,10 +159,18 @@ class ColumnHint(BaseModel):
     hidden: bool = False
     filter: bool = False       # surface this column in the TableView filter panel (v1's col_filter)
     filter_from: list[FilterDep] = Field(default_factory=list)  # cascading-filter deps (v1's ly_tbl_filters)
-    visible_when: VisibleWhen | None = None  # drop the column from the grid unless a filter matches (v1's cdn_*)
+    # conditional visibility (v1's cdn_*): one rule or a list — all must hold; see VisibleWhen
+    visible_when: VisibleWhen | list[VisibleWhen] | None = None
     width: int | None = None
     align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
     format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted
+
+    @property
+    def visible_when_rules(self) -> list[VisibleWhen]:
+        """``visible_when`` normalised to a list (a single rule → ``[rule]``; unset → ``[]``)."""
+        if self.visible_when is None:
+            return []
+        return [self.visible_when] if isinstance(self.visible_when, VisibleWhen) else list(self.visible_when)
 
     @property
     def dictionary_key(self) -> str:

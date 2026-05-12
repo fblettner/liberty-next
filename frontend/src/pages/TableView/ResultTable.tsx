@@ -142,14 +142,20 @@ function EditCell({ ctrl, column, defaultText, onChange }: {
   )
 }
 
-// A column with a `visible_when` hint (v1's cdn_*) is shown only while the named server-filter's
-// current value matches — otherwise the whole column drops out of the grid.
+// A column with a `visible_when` hint (v1's cdn_*) drops out of the grid when a server-filter is
+// set to a value outside its allowed set. `visible_when` is a list of `{field, value}` conditions,
+// ALL of which must hold; a condition holds when its `field` filter is unset OR its value is the
+// (one allowed) `value` / one of the `value` list — i.e. it only ever *hides* on an explicit
+// mismatch, never on "no filter". (Accepts a bare `{field, value}` too — treated as a one-item list.)
 function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boolean {
   const vw = c.visible_when
   if (!vw) return true
-  const v = activeFilters[vw.field]
-  if (v == null || v === '') return false
-  return Array.isArray(vw.value) ? vw.value.includes(v) : v === vw.value
+  const conds = Array.isArray(vw) ? vw : [vw]
+  return conds.every(({ field, value }) => {
+    const v = activeFilters[field]
+    if (v == null || v === '') return true
+    return Array.isArray(value) ? value.includes(v) : v === value
+  })
 }
 
 export function ResultTable({

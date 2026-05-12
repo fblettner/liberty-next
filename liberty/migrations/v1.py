@@ -34,11 +34,14 @@ v1 → v2 mapping
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Iterable, Mapping
 from urllib.parse import quote as _urlquote
 
 from liberty.connectors.base import find_bind_params
+
+_log = logging.getLogger(__name__)
 
 # v1's `query_crud` uses REST-style verbs — GET (read), POST/PUT/PATCH (write), DELETE; some
 # older rows use SQL keywords (SELECT/INSERT/UPDATE/MERGE). A query is a *read* iff its crud is
@@ -227,6 +230,7 @@ def migrate_sql_queries(
     connector_prefix: str = "",
     column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
     column_filters: Mapping[int, Mapping[str, list[dict[str, str]]]] | None = None,
+    column_visibility: Mapping[int, Mapping[str, list[dict[str, Any]]]] | None = None,
     table_meta: Mapping[int, Mapping[str, Any]] | None = None,
     key_columns: Mapping[int, list[str]] | None = None,
 ) -> dict[str, Any]:
@@ -249,6 +253,9 @@ def migrate_sql_queries(
         column_filters: ``{query_id: {col_name: [{"source", "column"}, …]}}`` (from
             :func:`migrate_table_filters`) — cascading-filter dependencies, merged onto the matching
             column hint as ``filter_from`` (v1's ``ly_tbl_filters``).
+        column_visibility: ``{query_id: {col_name: [{"field", "value"}, …]}}`` (from
+            :func:`migrate_column_visibility`) — conditional-rendering rules, merged onto the matching
+            column hint as ``visible_when`` (v1's ``cdn_*``).
         table_meta: ``{query_id: {"description"?, "auto_load"?}}`` (from :func:`migrate_table_meta`) —
             the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
             ``auto_load``.
@@ -304,11 +311,15 @@ def migrate_sql_queries(
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
         cfilters = (column_filters or {}).get(qid) if is_read else None  # cascading-filter deps per column (v1 ly_tbl_filters)
-        if hints and cfilters:
+        cvis = (column_visibility or {}).get(qid) if is_read else None     # conditional-render rules per column (v1 cdn_*)
+        if hints and (cfilters or cvis):
             for h in hints:
-                deps = cfilters.get(h["name"])
+                deps = (cfilters or {}).get(h["name"])
                 if deps:
                     h["filter_from"] = [dict(d) for d in deps]
+                rules = (cvis or {}).get(h["name"])
+                if rules:
+                    h["visible_when"] = [dict(r) for r in rules]
         tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
@@ -475,6 +486,95 @@ def migrate_table_filters(
             if is_table:
                 seen_cols.add((qid, target.lower()))
             out.setdefault(qid, {}).setdefault(target, []).append({"source": source, "column": column})
+    return out
+
+
+_CDN_EQUAL_OPS = {"EQUAL", "EQ", "=", "=="}              # operators the migration distils into a value set
+_CDN_EMPTY_OPS = {"EMPTY", "ISNULL", "IS NULL", "NULL", "BLANK", ""}  # "or unset" — v2's default, no constraint
+
+
+def migrate_column_visibility(
+    tbl_col_rows: Iterable[Mapping[str, Any]],
+    dlg_col_rows: Iterable[Mapping[str, Any]] = (),
+    cdn_param_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, dict[str, list[dict[str, Any]]]]:
+    """Distil v1's conditional column rendering (``ly_tbl_col.col_cdn_id`` / ``ly_dlg_col.col_cdn_id``
+    → ``ly_cdn_params`` predicates) into ``{query_id: {col_target: [{"field", "value"}, …]}}`` — the
+    v2 ``ColumnHint.visible_when`` shape.
+
+    v1's condition graph is a general predicate engine (AND/OR groups, EQUAL/EMPTY/… operators).
+    v2's ``visible_when`` is the much simpler "this set of filter values keeps the column" — so this
+    is **best-effort**, biased toward keeping the column visible:
+
+    * a column has one condition (its ``col_cdn_id``); its predicates group by field. (v1's
+      ``ly_tbl_col_cdn`` / ``ly_dlg_col_cdn`` link tables — extra OR branches — aren't read: in the
+      shipped apps they only carry redundant/no-op mappings v2 can't represent.)
+    * a predicate ``<field> EQUAL <v>`` contributes ``<v>`` to that field's allowed set;
+      ``<field> EMPTY`` (or ``EQUAL ''``) contributes nothing (v2 already keeps a column when the
+      filter is unset). Any *other* operator (NOT_EQUAL, LIKE, GREATER, …) → the whole column is
+      skipped (left always-visible) — a wrong hide is worse than no hide. The emitted conditions are
+      AND-ed; a field with no ``EQUAL`` value → not emitted.
+    * the predicate's ``cdn_dd_id`` is resolved to a screen-filter column name via the column whose
+      ``col_dd_id`` equals it on the same query, else ``cdn_dd_id`` verbatim.
+
+    Args:
+        tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
+            (they carry ``col_target``, ``col_dd_id``, ``col_cdn_id``, ``query_id``).
+        cdn_param_rows: rows from :func:`liberty.migrations.source.read_column_conditions`
+            (``ly_cdn_params``: ``cdn_id``, ``cdn_dd_id``, ``cdn_operator``, ``cdn_value``).
+    """
+    # 1. per cdn_id → {field(upper): set_of_EQUAL_values, in first-seen order}; unsupported op → "bad"
+    cdn_fields: dict[int, dict[str, set[str]]] = {}
+    cdn_order: dict[int, list[str]] = {}     # field order within a cdn (= predicate order)
+    cdn_bad: set[int] = set()
+    for r in cdn_param_rows:
+        cid_raw, dd = r.get("cdn_id"), str(r.get("cdn_dd_id") or "").strip()
+        if cid_raw is None or not dd:
+            continue
+        cid = int(cid_raw); fld = dd.upper()
+        if fld not in cdn_fields.setdefault(cid, {}):
+            cdn_fields[cid][fld] = set()
+            cdn_order.setdefault(cid, []).append(fld)
+        op = str(r.get("cdn_operator") or "").strip().upper()
+        val = r.get("cdn_value")
+        sval = "" if val is None else str(val).strip()
+        if op in _CDN_EQUAL_OPS:
+            if sval:                       # EQUAL '' ≈ EMPTY → contributes nothing
+                cdn_fields[cid][fld].add(sval)
+        elif op in _CDN_EMPTY_OPS:
+            pass                            # "or unset" — already v2's default for an absent filter
+        else:
+            cdn_bad.add(cid)                # NOT_EQUAL / LIKE / range / … — we don't model these
+    # 2. per query: {col_dd_id(upper): col_target} (for resolving a predicate's field to a screen column)
+    dd_index: dict[int, dict[str, str]] = {}
+    cols: list[tuple[int, str, int | None]] = []   # (query_id, col_target, col_cdn_id)
+    for r in (*tbl_col_rows, *dlg_col_rows):
+        q_raw, tgt = r.get("query_id"), str(r.get("col_target") or "").strip()
+        if q_raw is None or not tgt:
+            continue
+        q = int(q_raw)
+        cdd = str(r.get("col_dd_id") or "").strip()
+        if cdd:
+            dd_index.setdefault(q, {}).setdefault(cdd.upper(), tgt)
+        cid = r.get("col_cdn_id")
+        cols.append((q, tgt, int(cid) if cid is not None else None))
+    # 3. resolve each column with a condition
+    out: dict[int, dict[str, list[dict[str, Any]]]] = {}
+    for q, tgt, cid in cols:
+        if cid is None:
+            continue
+        if cid in cdn_bad:
+            _log.warning("migration: column %s.%s uses a condition operator v2 can't model — left always-visible", q, tgt)
+            continue
+        conds: list[dict[str, Any]] = []
+        for fld in cdn_order.get(cid, []):
+            vals = cdn_fields.get(cid, {}).get(fld) or set()
+            if not vals:                    # EMPTY-only field → no constraint
+                continue
+            field = dd_index.get(q, {}).get(fld) or fld
+            conds.append({"field": field, "value": sorted(vals)})
+        if conds:
+            out.setdefault(q, {}).setdefault(tgt, conds)
     return out
 
 

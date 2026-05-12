@@ -37,7 +37,7 @@ _DB_SCHEMAS = text("SELECT sch_pool, sch_name, sch_target FROM ly_db_schema ORDE
 # col_key flags the row-identifying columns (→ the migrated `_put` WHERE binds them as :<col>_ORIGINAL).
 _TBL_COLS = text("""
     SELECT t.tbl_query_id AS query_id, c.col_target, c.col_dd_id, c.col_label, c.col_seq,
-           c.col_visible, c.col_type, c.col_filter, c.col_key, c.col_id
+           c.col_visible, c.col_type, c.col_filter, c.col_key, c.col_cdn_id, c.col_id
     FROM ly_tbl_col c JOIN ly_tables t ON t.tbl_id = c.tbl_id
     WHERE t.tbl_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY t.tbl_query_id, c.tbl_id, c.col_seq, c.col_id
@@ -45,11 +45,20 @@ _TBL_COLS = text("""
 # ly_dlg_col has no col_filter — alias NULL so the migration sees the same shape.
 _DLG_COLS = text("""
     SELECT f.frm_query_id AS query_id, c.col_target, c.col_dd_id, c.col_label, c.col_seq,
-           c.col_visible, c.col_type, NULL AS col_filter, c.col_key, c.col_id
+           c.col_visible, c.col_type, NULL AS col_filter, c.col_key, c.col_cdn_id, c.col_id
     FROM ly_dlg_col c JOIN ly_dlg_frm f ON f.frm_id = c.frm_id
     WHERE f.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY f.frm_query_id, c.frm_id, c.col_seq, c.col_id
 """)
+# Conditional column rendering: a column's `col_cdn_id` (ly_tbl_col / ly_dlg_col) points at a
+# condition in ly_cdn_params (a set of `cdn_dd_id <op> cdn_value` predicates). The migration distils
+# the common shape (a field EQUAL one of a set of values, "+ EMPTY" = "or unset") into v2's
+# ColumnHint.visible_when. (v1's ly_tbl_col_cdn / ly_dlg_col_cdn link tables aren't used — in the
+# shipped apps they only carry redundant/no-op OR-branch mappings v2 can't represent anyway.)
+_CDN_PARAMS = text(
+    "SELECT cdn_id, cdn_dd_id, cdn_operator, cdn_value, cdn_group FROM ly_cdn_params "
+    "WHERE cdn_dd_id IS NOT NULL ORDER BY cdn_id, cdn_seq"
+)
 # Cascading-filter rules: ly_tbl_filters (table widgets ← ly_tbl_col ← ly_tables) and
 # ly_dlg_filters (form fields ← ly_dlg_col ← ly_dlg_frm). Each row says "for column <col_target>'s
 # filter dropdown, when the <flt_source> filter has a value, narrow this dropdown's options to the
@@ -156,6 +165,14 @@ async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], 
         await _rows_or_empty(engine, _TBL_COLS, what="ly_tbl_col → ly_tables column hints"),
         await _rows_or_empty(engine, _DLG_COLS, what="ly_dlg_col → ly_dlg_frm column hints"),
     )
+
+
+async def read_column_conditions(engine: AsyncEngine) -> list[dict[str, Any]]:
+    """Return the ``ly_cdn_params`` rows (the conditional-rendering predicates referenced by columns'
+    ``col_cdn_id``). Feeds :func:`liberty.migrations.v1.migrate_column_visibility` (together with the
+    ``ly_tbl_col`` / ``ly_dlg_col`` rows from :func:`read_column_hints`, which carry ``col_cdn_id`` /
+    ``col_dd_id``). Missing table → ``[]``."""
+    return await _rows_or_empty(engine, _CDN_PARAMS, what="ly_cdn_params (column-condition predicates)")
 
 
 async def read_table_filters(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

@@ -46,8 +46,9 @@ Full dep set pinned in `pyproject.toml`.
   schema (display title / visibility / column order / a `filter` flag — v1's `col_filter` — / `filter_from` —
   v1's `ly_tbl_filters` — a list of `{source, column}` cascading-filter deps for the TableView panel: when the
   `source` filter has a value this column's LOOKUP options narrow to the lookup rows whose `column` matches it /
-  `visible_when = {field, value}` — v1's `cdn_*` — drops the whole column from the grid unless the `field`
-  server-filter's current value is `value` (or one of `value` when it's a list) / a UI-interpreted `format`);
+  `visible_when` — v1's `cdn_*` — a `{field, value}` rule (or a list of them, all AND-ed): a rule passes
+  when its `field` server-filter is unset or its value matches `value` (or is in `value` when a list), and
+  a column whose rules don't all pass is dropped from the grid entirely / a UI-interpreted `format`);
   `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
   `name` when `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
   A query may also carry `label`/`description` (display names — the frontend titles the TableView with
@@ -329,7 +330,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   param form). SELECT → `GET` + the `DataTable`
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align — `hidden` takes
   effect on first load and survives a stale saved grid state; a `visible_when` column is dropped from the
-  grid entirely unless its `field` server-filter matches — recomputed live as you change the FilterPanel) and `rule`
+  grid entirely when a `field` server-filter is set to a value outside its allowed set — recomputed live as you change the FilterPanel) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
   run on the displayed value, rule rendering is visual-only. When the query has writable companions, an
@@ -429,6 +430,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (v1's `flt_source` → `source`, `flt_target` → `column`; table-widget rows beat form rows per `(query, col)`,
   dup `(source, column)` dropped) — passed to `migrate_sql_queries(column_filters=…)`, merged onto the matching
   column hint as `filter_from`;
+  `migrate_column_visibility(ly_tbl_col rows, ly_dlg_col rows, ly_cdn_params rows)` → `{query_id: {col_target:
+  [{field, value}]}}` — best-effort distillation of v1's conditional rendering: each column's `col_cdn_id` →
+  the `ly_cdn_params` predicates for that condition; `<field> EQUAL <v>` predicates collapse to a `{field, value:[…]}`
+  rule (the field name resolved via the column whose `col_dd_id` = it), `EMPTY` predicates are dropped ("or unset"
+  is v2's default), rules AND-ed; a condition using any other operator → the column is left always-visible (a wrong
+  hide is worse). v1's `ly_tbl_col_cdn`/`ly_dlg_col_cdn` link tables (extra OR branches v2 can't represent) aren't
+  read. Passed to `migrate_sql_queries(column_visibility=…)`, merged onto the matching column hint as `visible_when`;
   `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, enum_rows=(), enum_val_rows=(),
   enum_val_l_rows=(), lookup_rows=(), sql_rows=(), *, default_language="en", connector_name=None)`
   → the `dictionary.toml` dict — one `[entries.<dd_id>]` per `ly_dictionary` row (`label`=`dd_label`,
@@ -459,10 +467,12 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `frm_query_id`/`frm_label`) /
   `read_db_schemas(engine)` (→ `ly_db_schema` `sch_pool`/`sch_name`/`sch_target` — the `#SCHEMA.<NAME>#` maps) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
-  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter`/`col_key` — `ly_dlg_col` has
-  no `col_filter`, so it's aliased NULL; these rows feed both `migrate_column_hints` and `migrate_key_columns`) /
+  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter`/`col_key`/`col_cdn_id` — `ly_dlg_col` has
+  no `col_filter`, so it's aliased NULL; these rows feed `migrate_column_hints`, `migrate_key_columns` and `migrate_column_visibility`) /
   `read_table_filters(engine)` (→ `ly_tbl_filters`←`ly_tbl_col`←`ly_tables`, `ly_dlg_filters`←`ly_dlg_col`←`ly_dlg_frm`
-  — `query_id`/`col_target`/`flt_source`/`flt_target` per cascading-filter rule; feeds `migrate_table_filters`)
+  — `query_id`/`col_target`/`flt_source`/`flt_target` per cascading-filter rule; feeds `migrate_table_filters`) /
+  `read_column_conditions(engine)` (→ `ly_cdn_params` rows — `cdn_id`/`cdn_dd_id`/`cdn_operator`/`cdn_value`, the
+  predicates a column's `col_cdn_id` points at; feeds `migrate_column_visibility`)
   (SELECT-only; a missing table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
   accepts any async URL — `postgresql+asyncpg://…`).
 - `liberty/menus/` — `config.py`: the `config/menus.toml` schema (`MenuItem`/`AppMenu`/`MenusFile`,
@@ -472,7 +482,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
-  hints + `ly_tbl_filters`/`ly_dlg_filters` cascading-filter deps + the `ly_tables`/`ly_dlg_frm`
+  hints + `ly_tbl_filters`/`ly_dlg_filters` cascading-filter deps + `ly_cdn_params` conditional-render
+  rules (`visible_when`) + the `ly_tables`/`ly_dlg_frm`
   screen labels & auto-load flags (the hints reference the
   dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
   `dictionary [--default-language en] [--connector <app>]` migrates `ly_dictionary` (+ `ly_dictionary_l`)
@@ -517,7 +528,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-285 tests pass.
+288 tests pass.
 
 ## Run it
 
