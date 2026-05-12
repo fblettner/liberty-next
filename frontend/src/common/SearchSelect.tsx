@@ -6,14 +6,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, Search, Check } from 'lucide-react'
+import { ChevronDown, Check } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export interface SearchSelectOption { value: string; label: string }
 
+// Everything inside the panel shares the same 12px left inset so the trigger label, the search
+// input and the list items line up vertically.
+const PAD_X = '12px'
+
 const Wrap = styled.div`position: relative; flex: 1; min-width: 0;`
 const Trigger = styled.button<{ $open: boolean; $placeholder: boolean }>`
-  display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; padding: 0 8px 0 10px;
+  display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; padding: 0 8px 0 ${PAD_X};
   border: 1px solid ${({ $open }) => ($open ? colors.blue.border : colors.border)};
   border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
   color: ${({ $placeholder }) => ($placeholder ? colors.text.muted : colors.text.primary)};
@@ -29,18 +33,17 @@ const Panel = styled.div`
   box-shadow: ${shadow.lg}; overflow: hidden; display: flex; flex-direction: column;
 `
 const SearchRow = styled.div`
-  display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-bottom: 1px solid ${colors.border};
-  color: ${colors.text.muted};
+  padding: 8px ${PAD_X}; border-bottom: 1px solid ${colors.border};
   & input {
-    flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+    display: block; width: 100%; box-sizing: border-box; border: none; background: transparent; outline: none;
     color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
     &::placeholder { color: ${colors.text.muted}; }
   }
 `
-const List = styled.div`max-height: 264px; overflow-y: auto; padding: 4px;`
+const List = styled.div`max-height: 264px; overflow-y: auto; padding: 4px 0;`
 const Item = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
-  border: none; border-radius: ${radius.md}; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px ${PAD_X};
+  border: none; cursor: pointer; text-align: left;
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
   font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -48,7 +51,7 @@ const Item = styled.button<{ $active?: boolean }>`
   & svg { flex-shrink: 0; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const Empty = styled.div`padding: 10px 8px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
+const Empty = styled.div`padding: 10px ${PAD_X}; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
 
 export function SearchSelect({
   value, onChange, options, placeholder, anyLabel, loading, disabled,
@@ -96,7 +99,6 @@ export function SearchSelect({
       {open && (
         <Panel>
           <SearchRow>
-            <Search size={13} />
             <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('table.search')} />
           </SearchRow>
           <List>
