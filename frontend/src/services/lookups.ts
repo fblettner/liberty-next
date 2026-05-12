@@ -34,10 +34,15 @@ function fetchLookup(spec: LookupSpec): Promise<Map<string, string>> {
     p = api
       .get<QueryResult>(`/api/sql/${encodeURIComponent(spec.connector)}/${encodeURIComponent(spec.query)}`)
       .then((r) => {
+        // v1's lkp_dd_id / lkp_dd_label are uppercase, but the DB may report the lookup query's
+        // columns in another case (Postgres → lowercase) — resolve them against the result's columns.
+        const byLower = new Map(r.columns.map((c) => [c.name.toLowerCase(), c.name]))
+        const vKey = byLower.get(spec.value.toLowerCase()) ?? spec.value
+        const lKey = byLower.get(spec.label.toLowerCase()) ?? spec.label
         const m = new Map<string, string>()
         for (const row of r.rows) {
-          const v = row[spec.value]
-          const l = row[spec.label]
+          const v = row[vKey]
+          const l = row[lKey]
           if (v === null || v === undefined) continue
           m.set(String(v), l === null || l === undefined ? String(v) : String(l))
         }

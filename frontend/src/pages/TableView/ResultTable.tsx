@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Pencil, Check, X, Plus, Copy, Upload } from 'lucide-react'
+import { Pencil, Check, X, Plus, Copy, ClipboardPaste, Upload } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import { api, ApiError } from '../../api/client'
 import { Banner } from '../../common'
@@ -82,6 +82,13 @@ const EditSelect = styled.select`
   &:focus { border-color: ${colors.blue.border}; }
   option { background: ${colors.bg.dropdown}; color: ${colors.text.secondary}; }
 `
+const CheckBox = styled.span<{ $on: boolean }>`
+  width: 14px; height: 14px; flex-shrink: 0; border-radius: 3px;
+  border: 1.5px solid ${({ $on }) => ($on ? colors.blue.main : colors.border)};
+  background: ${({ $on }) => ($on ? colors.blue.main : 'transparent')};
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: #fff;
+  transition: background 0.12s, border-color 0.12s;
+`
 const StatusCell = styled.div`display: inline-flex; align-items: center; gap: 5px; font-size: ${fontSize.micro};`
 const StatusMark = styled.span<{ $tone: 'new' | 'dirty' | 'deleted' }>`
   font-weight: 700;
@@ -145,38 +152,52 @@ export function ResultTable({
   // ── batch-edit state ──
   const [editMode, setEditMode] = useState(false)
   const [dirtyRows, setDirtyRows] = useState<Set<DataRow>>(new Set())   // existing rows that were edited (markers + Save count)
-  const [newRows, setNewRows] = useState<DataRow[]>([])                  // blank rows added by "+ Add row"
+  const [newRows, setNewRows] = useState<DataRow[]>([])                  // rows to insert — shown at the top, newest first
   const [deleted, setDeleted] = useState<Set<DataRow>>(new Set())        // existing rows marked for deletion
+  const [selected, setSelected] = useState<Set<DataRow>>(new Set())      // rows ticked for copy
+  const [clipboard, setClipboard] = useState<Record<string, unknown>[]>([])  // copied row snapshots (current values)
   const [saving, setSaving] = useState(false)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const editsRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())  // row → edited fields (uncontrolled inputs write here)
 
   const resetEdit = useCallback(() => {
-    setEditMode(false); setDirtyRows(new Set()); setNewRows([]); setDeleted(new Set()); setSaveErrors([])
+    setEditMode(false); setDirtyRows(new Set()); setNewRows([]); setDeleted(new Set()); setSelected(new Set()); setSaveErrors([])
     editsRef.current = new Map()
   }, [])
-  // a refetch (or a query change) ends any in-progress batch edit
+  // a refetch (or a query change) ends any in-progress batch edit (the clipboard survives — it's just data)
   useEffect(() => { resetEdit() }, [result, resetEdit])
 
   const dirtyCount = dirtyRows.size + newRows.length + [...deleted].filter((r) => !newRows.includes(r)).length
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // append blank/seeded new rows; `seeds` carries each row's initial field values
-  const appendNewRows = useCallback((seeds: Record<string, unknown>[]) => {
+  // current values of a row (its original fields overlaid with any pending edits)
+  const valuesOf = useCallback((row: DataRow): Record<string, unknown> => ({ ...row, ...editsRef.current.get(row) }), [])
+  // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values
+  const prependNewRows = useCallback((seeds: Record<string, unknown>[]) => {
     if (seeds.length === 0) return
     const fresh = seeds.map((s) => {
       const row: DataRow = {}
       editsRef.current.set(row, { ...s })
       return row
     })
-    setNewRows((p) => [...p, ...fresh])
-  }, [])
-  const addRow = useCallback(() => appendNewRows([{}]), [appendNewRows])
-  const duplicateRow = useCallback((row: DataRow) => appendNewRows([{ ...row, ...editsRef.current.get(row) }]), [appendNewRows])
+    setNewRows((p) => [...fresh, ...p])
+    if (!editMode) setEditMode(true)
+  }, [editMode])
+  const addRow = useCallback(() => prependNewRows([{}]), [prependNewRows])
+  const duplicateRow = useCallback((row: DataRow) => prependNewRows([valuesOf(row)]), [prependNewRows, valuesOf])
   const toggleDelete = useCallback((row: DataRow, isNew: boolean) => {
-    if (isNew) { setNewRows((p) => p.filter((r) => r !== row)); editsRef.current.delete(row); return }
+    if (isNew) {
+      setNewRows((p) => p.filter((r) => r !== row)); editsRef.current.delete(row)
+      setSelected((s) => { if (!s.has(row)) return s; const n = new Set(s); n.delete(row); return n })
+      return
+    }
     setDeleted((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
   }, [])
+  const toggleSelected = useCallback((row: DataRow) => {
+    setSelected((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
+  }, [])
+  const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
+  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
   // Import rows from an Excel/CSV file — the first sheet's header row is matched against the
   // result's column names / labels (and the "(ID)" suffix on lookup columns), case-insensitively;
@@ -203,11 +224,11 @@ export function ResultTable({
         return out
       }).filter((s) => Object.keys(s).length > 0)
       if (seeds.length === 0) setSaveErrors([t('table.importNoMatch', { file: file.name })])
-      else { if (!editMode) setEditMode(true); appendNewRows(seeds) }
+      else { if (!editMode) setEditMode(true); prependNewRows(seeds) }
     } catch (e) {
       setSaveErrors([e instanceof Error ? e.message : String(e)])
     }
-  }, [appendNewRows, editMode, result.columns, t])
+  }, [prependNewRows, editMode, result.columns, t])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
@@ -255,7 +276,8 @@ export function ResultTable({
   )
   const lookupMaps = useLookupBatch(lookupSpecs)
 
-  const data = useMemo<DataRow[]>(() => (editMode ? [...result.rows, ...newRows] : result.rows), [result.rows, editMode, newRows])
+  // new rows show at the TOP of the grid (newest first — `newRows` already keeps that order)
+  const data = useMemo<DataRow[]>(() => (editMode ? [...newRows, ...result.rows] : result.rows), [result.rows, editMode, newRows])
 
   // ── column definitions ──
   const columns = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
@@ -286,6 +308,31 @@ export function ResultTable({
     const out: ColumnDef<DataRow, unknown>[] = []
 
     if (editMode) {
+      // ── selection checkbox (for Copy) ──
+      out.push({
+        id: '__select',
+        header: ({ table }) => {
+          // "select all" = every row matching the current filter (across all pages), not just this page
+          const rows = table.getFilteredRowModel().rows.filter((r) => !r.getIsGrouped?.()).map((r) => r.original as DataRow)
+          const allOn = rows.length > 0 && rows.every((r) => selected.has(r))
+          return (
+            <CheckBox
+              $on={allOn}
+              onClick={() => setSelected(() => (allOn ? new Set() : new Set(rows)))}
+              title={allOn ? t('table.selectNone', 'Select none') : t('table.selectAll', 'Select all')}
+            >{allOn && <Check size={9} />}</CheckBox>
+          )
+        },
+        size: 34, minSize: 34,
+        enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
+        meta: { internal: true },
+        cell: (info) => {
+          if (isGroupRow(info)) return null
+          const row = info.row.original as DataRow
+          return <CheckBox $on={selected.has(row)} onClick={() => toggleSelected(row)} title={t('table.selectRow', 'Select row')}>{selected.has(row) && <Check size={9} />}</CheckBox>
+        },
+      })
+      // ── status + row actions ──
       out.push({
         id: '__status',
         header: () => null,
@@ -378,7 +425,7 @@ export function ResultTable({
     }
     return out
     // editsRef is a ref — typing into an edit input doesn't churn this memo.
-  }, [result.columns, enumMaps, lookupMaps, t, editMode, dirtyRows, newRows, deleted, toggleDelete, duplicateRow, insertQuery])
+  }, [result.columns, enumMaps, lookupMaps, t, editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, insertQuery])
 
   const initialVisibility = useMemo<VisibilityState>(() => {
     const v: VisibilityState = {}
@@ -438,6 +485,14 @@ export function ResultTable({
                     <Upload size={13} /> {t('table.import')}
                   </TbBtn>
                 </>
+              )}
+              <TbBtn onClick={copySelected} disabled={saving || selected.size === 0} title={t('table.copyRows')}>
+                <Copy size={13} /> {t('table.copyRows')}{selected.size ? ` (${selected.size})` : ''}
+              </TbBtn>
+              {insertQuery && (
+                <TbBtn onClick={pasteRows} disabled={saving || clipboard.length === 0} title={t('table.pasteRows')}>
+                  <ClipboardPaste size={13} /> {t('table.pasteRows')}{clipboard.length ? ` (${clipboard.length})` : ''}
+                </TbBtn>
               )}
             </>
           )
