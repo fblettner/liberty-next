@@ -3,10 +3,12 @@
 // control (ColumnFilterControl) and — for text/number/date — a single operator-based
 // FilterFn (genericFilterFn). Boolean / enum columns just use TanStack's built-in
 // "equals" (the control is a <select>). All theme-driven.
+import { useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { Check } from 'lucide-react'
 import type { Column, FilterFn } from '@tanstack/react-table'
-import { colors, radius, fontSize, fonts } from '../theme'
+import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum'
 
@@ -110,7 +112,33 @@ const Sel = styled.select`
   padding: 2px 4px; cursor: pointer; flex-shrink: 0; max-width: 100%;
   option { background: ${colors.bg.dropdown}; color: ${colors.text.secondary}; }
 `
-const OpSel = styled(Sel)`width: 56px; flex-shrink: 0; text-align: center; text-align-last: center;`
+// The operator picker: a compact glyph button that opens a labelled menu (the native <select>
+// could only show the glyph or the name, not both, and styled badly next to the rest of the UI).
+const OpWrap = styled.div`position: relative; flex-shrink: 0;`
+const OpBtn = styled.button<{ $open?: boolean }>`
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 24px;
+  border: 1px solid ${({ $open }) => ($open ? colors.blue.border : colors.border)}; border-radius: ${radius.sm};
+  background: ${({ $open }) => ($open ? colors.blue.bg : 'transparent')};
+  color: ${({ $open }) => ($open ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.base}; font-family: ${fonts.sans}; cursor: pointer; line-height: 1; padding: 0;
+  &:hover { border-color: ${colors.blue.border}; color: ${colors.text.primary}; }
+`
+const OpMenu = styled.div`
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 200; min-width: 168px;
+  background: ${colors.bg.dropdown}; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
+  padding: 4px; box-shadow: ${shadow.lg};
+`
+const OpItem = styled.button<{ $active?: boolean }>`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px;
+  border: none; border-radius: ${radius.md}; cursor: pointer; text-align: left;
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  & .g { width: 16px; text-align: center; flex-shrink: 0; font-family: ${fonts.sans}; color: ${colors.text.muted}; }
+  & .n { flex: 1; }
+  & svg { flex-shrink: 0; }
+`
 const Inp = styled.input`
   min-width: 0; flex: 1; box-sizing: border-box; background: transparent; border: 1px solid ${colors.border};
   border-radius: ${radius.sm}; color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -121,6 +149,37 @@ const Inp = styled.input`
 
 function inputType(kind: FilterKind): string {
   return kind === 'date' ? 'date' : kind === 'number' ? 'number' : 'text'
+}
+
+/** The operator picker — a glyph button that opens a labelled menu of the operators valid for `kind`. */
+function OpPicker({ kind, value, onChange }: { kind: 'text' | 'number' | 'date'; value: OpFilter['op']; onChange: (op: OpFilter['op']) => void }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  return (
+    <OpWrap ref={ref}>
+      <OpBtn type="button" $open={open} onClick={() => setOpen((v) => !v)} title={`${t('table.filterOp', 'Operator')}: ${OP_NAME[value]}`}>
+        {OP_LABEL[value]}
+      </OpBtn>
+      {open && (
+        <OpMenu>
+          {OPS_BY_KIND[kind].map((op) => (
+            <OpItem key={op} type="button" $active={op === value} onClick={() => { onChange(op); setOpen(false) }}>
+              <span className="g">{OP_LABEL[op]}</span>
+              <span className="n">{t(`table.op_${op}`, OP_NAME[op])}</span>
+              {op === value && <Check size={12} />}
+            </OpItem>
+          ))}
+        </OpMenu>
+      )}
+    </OpWrap>
+  )
 }
 
 /** Renders the right filter control for `column`, reading `column.columnDef.meta.filter`.
@@ -150,17 +209,7 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
   const set = (next: Partial<OpFilter>) => column.setFilterValue({ ...f, ...next })
   return (
     <Box onClick={(e) => e.stopPropagation()}>
-      <OpSel
-        value={f.op}
-        onChange={(e) => set({ op: e.target.value as OpFilter['op'] })}
-        title={`${t('table.filterOp', 'Operator')}: ${OP_NAME[f.op]}`}
-      >
-        {OPS_BY_KIND[kind].map((op) => (
-          <option key={op} value={op} title={OP_NAME[op]}>
-            {OP_LABEL[op]}
-          </option>
-        ))}
-      </OpSel>
+      <OpPicker kind={kind} value={f.op} onChange={(op) => set({ op })} />
       {NEEDS_A(f.op) && (
         <Inp type={inputType(kind)} value={f.a ?? ''} onChange={(e) => set({ a: e.target.value })} placeholder="…" />
       )}

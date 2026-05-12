@@ -47,6 +47,7 @@ from liberty.migrations import (
     migrate_menus,
     migrate_pools,
     migrate_sql_queries,
+    migrate_table_meta,
     read_api,
     read_applications,
     read_column_hints,
@@ -54,6 +55,7 @@ from liberty.migrations import (
     read_dictionary_rules,
     read_menus,
     read_sql_queries,
+    read_table_meta,
     render_toml,
 )
 
@@ -86,9 +88,11 @@ async def _build(args: argparse.Namespace) -> dict:
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
             tbl_cols, dlg_cols = await read_column_hints(engine)
+            tbl_meta, frm_meta = await read_table_meta(engine)
             parts.append(migrate_sql_queries(
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
                 column_hints=migrate_column_hints(tbl_cols, dlg_cols),
+                table_meta=migrate_table_meta(tbl_meta, frm_meta),
             ))
         if args.command in ("api", "all"):
             conns, apis, headers, params = await read_api(engine)

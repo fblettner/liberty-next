@@ -116,6 +116,7 @@ def migrate_sql_queries(
     dbtype: str | None = None,
     connector_prefix: str = "",
     column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
+    table_meta: Mapping[int, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the ``{pools, connectors}`` dict for the SQL side.
 
@@ -130,8 +131,12 @@ def migrate_sql_queries(
         connector_prefix: prepended to the per-pool connector name (e.g. ``"v1_"``).
         column_hints: ``{query_id: [column-hint dict]}`` (from :func:`migrate_column_hints`) —
             attached to each emitted query as its ``columns`` display hints.
+        table_meta: ``{query_id: {"description"?, "auto_load"?}}`` (from :func:`migrate_table_meta`) —
+            the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
+            ``auto_load``.
     """
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
+    tmeta = {int(k): dict(v) for k, v in (table_meta or {}).items()}
     rows = [dict(r) for r in sql_rows]
     if dbtype:
         rows = [r for r in rows if (r.get("query_dbtype") or "").lower() == dbtype.lower()]
@@ -170,10 +175,13 @@ def migrate_sql_queries(
         label = labels.get(qid, "")
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
+        tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
                 "label": label or None,
+                "description": (tm or {}).get("description") or None,
+                "auto_load": True if (tm or {}).get("auto_load") else None,
                 "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
                 "sql": _sql_value(groups[key]),
                 "columns": (hints or None),  # omit when empty
@@ -244,6 +252,48 @@ def migrate_column_hints(
         if fmt:
             hint["format"] = fmt  # explicit per-column override of the dictionary's format
         out.setdefault(qid, []).append(hint)
+    return out
+
+
+# v1 single-char "yes" spellings (the inverse of `_HIDDEN_FLAGS`).
+_YES_FLAGS = {"Y", "y", "1", "T", "t", "TRUE", "true", "YES", "yes", "ON", "on"}
+
+
+def migrate_table_meta(
+    tables_rows: Iterable[Mapping[str, Any]],
+    dlg_frm_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, dict[str, Any]]:
+    """Build ``{query_id: {"description"?: str, "auto_load"?: bool}}`` from v1's ``ly_tables`` /
+    ``ly_dlg_frm`` rows — the table/form's friendly label (``tbl_label`` / ``frm_label``) becomes the
+    v2 query's ``description`` (shown as the screen title instead of the technical query name) and
+    ``tbl_auto_load = 'Y'`` becomes ``auto_load = true`` (the TableView runs it on open). A table
+    widget wins over a form for the same ``query_id``; the first row for a query wins.
+
+    Args:
+        tables_rows: rows from ``ly_tables`` (``tbl_query_id``, ``tbl_label``, ``tbl_auto_load``).
+        dlg_frm_rows: rows from ``ly_dlg_frm`` (``frm_query_id``, ``frm_label``).
+    """
+    out: dict[int, dict[str, Any]] = {}
+    for r in dlg_frm_rows:  # forms first so a table widget can overwrite
+        qid_raw = r.get("frm_query_id")
+        if qid_raw is None:
+            continue
+        label = str(r.get("frm_label") or "").strip()
+        if label:
+            out[int(qid_raw)] = {"description": label}
+    for r in tables_rows:
+        qid_raw = r.get("tbl_query_id")
+        if qid_raw is None:
+            continue
+        qid = int(qid_raw)
+        entry: dict[str, Any] = {}
+        label = str(r.get("tbl_label") or "").strip()
+        if label:
+            entry["description"] = label
+        if str(r.get("tbl_auto_load") or "").strip() in _YES_FLAGS:
+            entry["auto_load"] = True
+        if entry:
+            out[qid] = entry  # table widget wins; an empty row leaves any form label in place
     return out
 
 

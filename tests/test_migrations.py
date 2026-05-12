@@ -18,6 +18,7 @@ from liberty.migrations import (
     migrate_menus,
     migrate_pools,
     migrate_sql_queries,
+    migrate_table_meta,
     read_api,
     read_applications,
     read_column_hints,
@@ -120,6 +121,43 @@ def test_migrate_sql_queries_connector_prefix() -> None:
     out = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres", connector_prefix="v1_")
     assert "v1_default" in out["connectors"] and out["connectors"]["v1_default"]["pool"] == "v1_default"
     assert "v1_default" in out["pools"]
+
+
+def test_migrate_table_meta() -> None:
+    meta = migrate_table_meta(
+        tables_rows=[
+            {"tbl_query_id": 1, "tbl_label": "Security - Users", "tbl_auto_load": "Y"},
+            {"tbl_query_id": 4, "tbl_label": "Twin Table", "tbl_auto_load": "N"},
+            {"tbl_query_id": 7, "tbl_label": "", "tbl_auto_load": "Y"},  # no label, still auto-load
+            {"tbl_query_id": None, "tbl_label": "Orphan", "tbl_auto_load": "Y"},  # no query → skipped
+        ],
+        dlg_frm_rows=[
+            {"frm_query_id": 2, "frm_label": "Delete User"},
+            {"frm_query_id": 1, "frm_label": "User Properties"},  # a table widget for q1 overrides this
+        ],
+    )
+    assert meta[1] == {"description": "Security - Users", "auto_load": True}
+    assert meta[4] == {"description": "Twin Table"}            # auto_load N → omitted
+    assert meta[7] == {"auto_load": True}                       # label-less, flag only
+    assert meta[2] == {"description": "Delete User"}            # form-only
+    assert None not in meta
+
+
+def test_migrate_sql_queries_with_table_meta() -> None:
+    out = migrate_sql_queries(
+        _QUERIES, _SQL_ROWS,
+        table_meta={1: {"description": "Users List Screen", "auto_load": True}, 2: {"description": "Should be ignored — write query"}},
+    )
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    assert by_name["users_list_select"]["description"] == "Users List Screen"
+    assert by_name["users_list_select"]["auto_load"] is True
+    # a write query (DELETE) gets no description/auto_load even if a table_meta entry exists
+    assert "description" not in by_name["delete_user_delete"]
+    assert "auto_load" not in by_name["delete_user_delete"]
+    # round-trips through the v2 loader
+    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
+    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
+    assert q1.description == "Users List Screen" and q1.auto_load is True
 
 
 # --------------------------------------------------------------------------- #

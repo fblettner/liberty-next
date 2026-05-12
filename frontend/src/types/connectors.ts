@@ -10,6 +10,8 @@ export interface SqlQueryMeta {
   name: string
   label: string | null
   description: string | null
+  /** run the query immediately when the screen opens (no "Run" click) — v1's per-table auto-load flag. */
+  auto_load: boolean
   writable: boolean
   /** writable companion queries — `<base>_put` / `<base>_post` / `<base>_delete` — that
    *  update / insert / delete a row of this query's result. Drive the TableView's batch edit. */

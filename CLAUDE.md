@@ -46,6 +46,9 @@ Full dep set pinned in `pyproject.toml`.
   schema (display title / visibility / column order / a UI-interpreted `format`); `label`/`format`
   may be omitted and pulled from the shared dictionary (the entry key is `dd`, or `name` when
   `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
+  A query may also carry `label`/`description` (display names — the frontend titles the screen with
+  the *menu* label if it has one, else `description`/`label`) and `auto_load = true` (v1's per-table
+  auto-load — the TableView runs a SELECT immediately on open instead of waiting for a Run click).
   `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
   + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
@@ -235,8 +238,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
-  global search, a type-aware per-column filter row (text/number/date with an operator; boolean/enum as a select)
-  + clear-all, sort, column resize/hide/reorder, row grouping, CSV/Excel export via `xlsx`, paging, localStorage
+  global search, a type-aware per-column filter row (text/number/date with an operator picked from a small
+  labelled popover — `OpPicker`; boolean/enum as a select) + clear-all, sort (shift-click = multi), column
+  resize/drag-reorder/hide (the Columns menu has All/None), row grouping, CSV/Excel export via `xlsx`, paging, localStorage
   persistence per `tableId`; ported from nomaubl — *not* barrelled, it pulls in `xlsx`) and `Markdown`
   (react-markdown — also *not* re-exported by `common/index.ts`, so each rides only its lazy page chunk);
   `common/index.ts` barrels the rest, pages import
@@ -267,7 +271,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
   self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
   the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
-  `TableView` (param form from the query's `params`/`bind_params`; SELECT → `GET` + the `DataTable`
+  `TableView` (titled with the screen's *menu* label — `services/menuLabels.findMenuLabel` walks the
+  `GET /api/menus` trees — else the query's `description`/`label`, the technical `connector.query` as a
+  mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params`;
+  SELECT → `GET` + the `DataTable`
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
@@ -328,7 +335,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}` stub; `dialect` from `apps_dbtype`,
   `pool_size` from `apps_pool_max`; the DB **password is never inlined** — `${MIGRATED_PW_<NAME>}`,
   v1 keeps it `ENC:`-encrypted in `apps_password`; v1's reserved `default` pool is **skipped**
-  — v2's `[pools.default]` is v2's own framework DB); `migrate_column_hints(ly_tbl_col rows,
+  — v2's `[pools.default]` is v2's own framework DB); `migrate_table_meta(ly_tables rows, ly_dlg_frm rows)` →
+  `{query_id: {description?, auto_load?}}` (the table/form friendly label `tbl_label`/`frm_label` → the read
+  query's `description`, `tbl_auto_load = 'Y'` → `auto_load = true`; a table widget beats a form) — passed to
+  `migrate_sql_queries(table_meta=…)`; `migrate_column_hints(ly_tbl_col rows,
   ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
   `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
   `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
@@ -357,6 +367,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `read_dictionary_rules(engine)` (→ `ly_enum`, `ly_enum_val`, `ly_enum_val_l`, `ly_lookup`,
   `ly_qry_sql⋈ly_query` — the data the dictionary's display rules reference) /
   `read_menus(engine)` (→ `ly_menus`, `ly_menus_l`, `ly_tables`, `ly_dlg_frm`, `ly_qry_sql⋈ly_query`) /
+  `read_table_meta(engine)` (→ `ly_tables` `tbl_query_id`/`tbl_label`/`tbl_auto_load` + `ly_dlg_frm`
+  `frm_query_id`/`frm_label`) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
   — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) (SELECT-only; a missing
   table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
@@ -368,7 +380,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
-  hints (which reference the dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
+  hints + the `ly_tables`/`ly_dlg_frm` screen labels & auto-load flags (the hints reference the
+  dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
   `dictionary [--default-language en] [--connector <app>]` migrates `ly_dictionary` (+ `ly_dictionary_l`)
   — `--connector` nests the entries under `[connectors.<app>.entries.*]` so several migrated apps don't
   clash on a `dd_id`; `menu --connector <app>` migrates `ly_menus` (+ `ly_menus_l`) → `config/menus.toml`
@@ -409,7 +422,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-261 tests pass.
+263 tests pass.
 
 ## Run it
 

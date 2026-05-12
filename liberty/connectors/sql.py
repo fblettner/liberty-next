@@ -220,6 +220,7 @@ class SQLConnector:
                     "name": q.name,
                     "label": q.label,
                     "description": q.description,
+                    "auto_load": q.auto_load,
                     "writable": q.writable,
                     "update_query": self.update_query_for(q),
                     "insert_query": self.insert_query_for(q),

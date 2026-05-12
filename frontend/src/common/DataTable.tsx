@@ -125,6 +125,12 @@ const CheckBox = styled.span<{ $on: boolean }>`
   transition: background 0.12s, border-color 0.12s;
 `
 const MenuTitle = styled.div`padding: 4px 8px 6px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: ${colors.text.muted};`
+const MenuHead = styled.div`display: flex; align-items: center; gap: 6px; padding: 0 2px 2px; border-bottom: 1px solid ${colors.border}; margin-bottom: 4px;`
+const MiniLink = styled.button`
+  border: none; background: transparent; color: ${colors.blue.main}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
+  cursor: pointer; padding: 2px 4px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.05em;
+  &:hover { background: var(--hover-subtle); }
+`
 const TableScroll = styled.div`
   overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
@@ -391,6 +397,12 @@ export function DataTable<T extends object>({
             </CtrlBtn>
             {colOpen && (
               <ColMenu>
+                <MenuHead>
+                  <MenuTitle>{t('table.columns')}</MenuTitle>
+                  <Spacer />
+                  <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll', 'All')}</MiniLink>
+                  <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone', 'None')}</MiniLink>
+                </MenuHead>
                 {effectiveOrder.map((colId, idx) => {
                   const col = table.getColumn(colId)
                   if (!col || isInternal(col)) return null

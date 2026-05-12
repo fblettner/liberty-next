@@ -74,6 +74,9 @@ _MENUS = text("""
 _MENUS_L = text("SELECT lng_id, lng_seq_ukid, lng_label FROM ly_menus_l ORDER BY lng_seq_ukid, lng_id")
 _TABLES = text("SELECT tbl_id, tbl_query_id FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id")
 _DLG_FRM = text("SELECT frm_id, frm_query_id FROM ly_dlg_frm WHERE frm_query_id IS NOT NULL ORDER BY frm_id")
+# table/form *display* metadata: friendly label → v2 query.description ; auto-load flag → query.auto_load
+_TABLE_META = text("SELECT tbl_query_id, tbl_label, tbl_auto_load FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id")
+_DLG_FRM_META = text("SELECT frm_query_id, frm_label FROM ly_dlg_frm WHERE frm_query_id IS NOT NULL ORDER BY frm_id")
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
 _APIS = text("SELECT api_id, api_label, api_source, api_method, api_url, api_user, api_password, api_body, api_conn_id FROM ly_api ORDER BY api_id")
 _API_HEADERS = text("SELECT api_id, hdr_id, hdr_key, hdr_value FROM ly_api_header ORDER BY api_id, hdr_id")
@@ -118,6 +121,16 @@ async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], 
     return (
         await _rows_or_empty(engine, _TBL_COLS, what="ly_tbl_col → ly_tables column hints"),
         await _rows_or_empty(engine, _DLG_COLS, what="ly_dlg_col → ly_dlg_frm column hints"),
+    )
+
+
+async def read_table_meta(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_tables`` rows, ``ly_dlg_frm`` rows) carrying display metadata — the table/form
+    friendly label and ``tbl_auto_load`` flag, keyed by query id. Feeds
+    :func:`liberty.migrations.v1.migrate_table_meta`. Missing tables → empty lists."""
+    return (
+        await _rows_or_empty(engine, _TABLE_META, what="ly_tables (label / auto-load)"),
+        await _rows_or_empty(engine, _DLG_FRM_META, what="ly_dlg_frm (label)"),
     )
 
 

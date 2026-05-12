@@ -2,23 +2,26 @@
 // params/bind_params, then SELECT → a sortable/paged grid (ResultTable) or a
 // writable statement → confirm + affected-rows banner. Rendered inside a tab
 // (see components/TabHost) — `connector`/`query` come in as props, not route params.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Table as TableIcon, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
-import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Row, Stack, SpinnerRing } from '../../common'
-import { colors, fonts } from '../../theme'
+import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
+import { colors } from '../../theme'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { findMenuLabel } from '../../services/menuLabels'
 import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
 
-const Title = styled.span`
-  font-family: ${fonts.mono};
+const Sub = styled.span`
+  display: inline-flex; align-items: center; gap: 8px;
 `
 
 export default function TableView({ connector, query }: { connector: string; query: string }) {
   const { t } = useTranslation()
+  const { menus } = useWorkspace()
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
@@ -84,15 +87,28 @@ export default function TableView({ connector, query }: { connector: string; que
     }
   }, [meta, params, connector, query, t])
 
+  // Auto-load: run a SELECT immediately when the screen opens, once, if the query asks for it.
+  const autoRan = useRef(false)
+  useEffect(() => { autoRan.current = false }, [connector, query])
+  useEffect(() => {
+    if (meta?.auto_load && meta.statement_type === 'SELECT' && !autoRan.current && !result && !busy) {
+      autoRan.current = true
+      run()
+    }
+  }, [meta, result, busy, run])
+
+  const menuLabel = findMenuLabel(menus, { kind: 'sql', connector, target: query })
+  const friendlyName = menuLabel || meta?.label || meta?.description || `${connector}.${query}`
+
   if (metaErr)
     return (
-      <PageLayout icon={<TableIcon size={18} />} title={`${connector}.${query}`}>
+      <PageLayout icon={<TableIcon size={18} />} title={friendlyName}>
         <Banner $tone="error">{metaErr}</Banner>
       </PageLayout>
     )
   if (!meta)
     return (
-      <PageLayout icon={<TableIcon size={18} />} title={`${connector}.${query}`}>
+      <PageLayout icon={<TableIcon size={18} />} title={friendlyName}>
         <Centered />
       </PageLayout>
     )
@@ -102,14 +118,17 @@ export default function TableView({ connector, query }: { connector: string; que
       icon={<TableIcon size={18} />}
       title={
         <>
-          <Title>
-            {connector}.{query}
-          </Title>
+          {friendlyName}
           <Tag $tone="blue">{meta.statement_type}</Tag>
           {meta.writable && <Tag $tone="orange">{t('table.writable')}</Tag>}
         </>
       }
-      description={meta.label || meta.description || undefined}
+      description={
+        <Sub>
+          <Mono>{connector}.{query}</Mono>
+          {meta.description && meta.description !== friendlyName ? <span>· {meta.description}</span> : null}
+        </Sub>
+      }
     >
       <Stack gap={14}>
         <Card>

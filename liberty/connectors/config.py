@@ -139,6 +139,10 @@ class QueryDef(BaseModel):
     columns: list[ColumnHint] = Field(default_factory=list)  # display hints; the schema is still from the query
     label: str | None = None
     description: str | None = None
+    # When true the TableView runs this query immediately on open (no "Run" click) — v1's
+    # per-table "auto load" flag. A query with required-feeling params is still safe: every
+    # `:name` the caller omits becomes SQL NULL.
+    auto_load: bool = False
     # Names of `writable` queries on the same connector that update / insert / delete a row of this
     # query's result — set explicitly, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
     # / `<base>_post` / `<base>_delete` naming convention the migration uses. Drive the TableView's

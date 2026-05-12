@@ -9,6 +9,8 @@ import { useTranslation } from 'react-i18next'
 import { Table as TableIcon, Globe, X } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
+import { useWorkspace } from '../workspace/WorkspaceContext'
+import { findMenuLabel } from '../services/menuLabels'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
@@ -42,6 +44,7 @@ const CloseX = styled.span`
 export default function TabStrip() {
   const { t } = useTranslation()
   const { tabs, activeId, setActive, close } = useTabs()
+  const { menus } = useWorkspace()
   const navigate = useNavigate()
 
   if (tabs.length === 0) {
@@ -73,10 +76,11 @@ export default function TabStrip() {
     <Bar>
       {tabs.map((tab) => {
         const Icon = tab.kind === 'http' ? Globe : TableIcon
+        const label = findMenuLabel(menus, tab) ?? tab.target
         return (
-          <TabBtn key={tab.id} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${tab.connector}.${tab.target}`}>
+          <TabBtn key={tab.id} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${label} — ${tab.connector}.${tab.target}`}>
             <Icon className="tic" size={13} />
-            <span className="label">{tab.target}</span>
+            <span className="label">{label}</span>
             <CloseX onClick={(e) => onClose(e, tab)} title={t('tabs.close')}><X size={12} /></CloseX>
           </TabBtn>
         )

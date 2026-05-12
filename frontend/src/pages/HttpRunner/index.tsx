@@ -6,10 +6,10 @@ import { api, ApiError } from '../../api/client'
 import type { ApiEndpointMeta, ApiResult, ConnectorMeta } from '../../types/connectors'
 import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../../common'
 import { colors, fontSize, fonts } from '../../theme'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { findMenuLabel } from '../../services/menuLabels'
 
-const Title = styled.span`
-  font-family: ${fonts.mono};
-`
+const Sub = styled.span`display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;`
 const Meta = styled.div`
   font-size: ${fontSize.sm};
   display: flex;
@@ -30,6 +30,7 @@ const ExtractCode = styled.code`
 
 export default function HttpRunner({ connector, endpoint }: { connector: string; endpoint: string }) {
   const { t } = useTranslation()
+  const { menus } = useWorkspace()
   const [meta, setMeta] = useState<ApiEndpointMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
@@ -73,15 +74,18 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
     }
   }, [params, connector, endpoint])
 
+  const menuLabel = findMenuLabel(menus, { kind: 'http', connector, target: endpoint })
+  const friendlyName = menuLabel || meta?.label || meta?.description || `${connector}.${endpoint}`
+
   if (metaErr)
     return (
-      <PageLayout icon={<Globe size={18} />} title={`${connector}.${endpoint}`}>
+      <PageLayout icon={<Globe size={18} />} title={friendlyName}>
         <Banner $tone="error">{metaErr}</Banner>
       </PageLayout>
     )
   if (!meta)
     return (
-      <PageLayout icon={<Globe size={18} />} title={`${connector}.${endpoint}`}>
+      <PageLayout icon={<Globe size={18} />} title={friendlyName}>
         <Centered />
       </PageLayout>
     )
@@ -91,14 +95,17 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
       icon={<Globe size={18} />}
       title={
         <>
-          <Title>
-            {connector}.{endpoint}
-          </Title>
+          {friendlyName}
           <Tag $tone="blue">{meta.method}</Tag>
           <Mono>{meta.path}</Mono>
         </>
       }
-      description={meta.label || meta.description || undefined}
+      description={
+        <Sub>
+          <Mono>{connector}.{endpoint}</Mono>
+          {meta.description && meta.description !== friendlyName ? <span>· {meta.description}</span> : null}
+        </Sub>
+      }
     >
       <Stack gap={14}>
         <Card>
