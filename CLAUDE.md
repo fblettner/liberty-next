@@ -240,9 +240,15 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   `request_language` (the `X-Liberty-Lang` header → first `Accept-Language` tag → `None`).
 - `errors.py` — `ConnectorError` → HTTP: not-found→404, statement/writable→422, other→400;
   SQLAlchemy errors during execute → 502.
-- Also (added in Phase 4): `GET /admin/config/connectors` (raw `connectors.toml` text) and
-  `PUT /admin/config/connectors` (validates the TOML against the schema, then writes — does
-  *not* reload; call `POST /admin/reload` after). Both superuser.
+- Also (config editing — superuser): `GET /admin/config/connectors` (raw `connectors.toml` text) +
+  `PUT /admin/config/connectors` (validates the TOML against the schema, then writes — does *not*
+  reload; call `POST /admin/reload` after). And the **structured config builders** (Phase 7, first
+  slice): `GET /admin/config/schema` → `{pool: PoolConfig.model_json_schema()}` (the UI renders its
+  forms from this) ; `GET /admin/config/pools` → `{path, pools: {name: PoolConfig dict}}` ;
+  `PUT /admin/config/pools` (body `{pools: {name: dict}}`) — validates each against `PoolConfig`,
+  drops default-valued keys, then **surgically rewrites only the `[pools.*]` tables** in
+  `connectors.toml` via `tomlkit` (the comments + the `[connectors.*]` tables + the file's formatting
+  are left intact); does *not* reload. (Dep: `tomlkit` — comment/format-preserving TOML edits.)
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
@@ -274,7 +280,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `lookupOptions` narrows a table to `{value,label}[]`; fetches each LOOKUP-target query once, module-level
   session cache), `monaco.ts` (bundles Monaco + its worker, no CDN))), `src/common/` (shared
   theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `SearchSelect`
-  (a searchable single-select pop-over — themed replacement for a long native `<select>`), `Tag`/`Mono`,
+  (a searchable single-select pop-over — themed replacement for a long native `<select>`), `SchemaForm`
+  (renders an editing form from a JSON Schema — string/number/bool/string-map/enum/optional; the
+  Phase-7 config-builder shell, used by `Settings/PoolsBuilder`), `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
   global search (over *every* column — `getColumnCanGlobalFilter` is overridden so a column whose first row
@@ -353,8 +361,11 @@ replies), `@monaco-editor/react` (the connector-config editor).
   = the form layer, Phase 6.) A non-SELECT query → `confirm` + `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
-  `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a Monaco editor — `language="ini"`,
-  theme follows dark/light — over `GET/PUT /admin/config/connectors` + Save + Reload),
+  `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a tab switcher over the config editors —
+  `Settings/PoolsBuilder` = the structured `[pools.*]` editor (a left list + a `SchemaForm` driven by
+  `GET /admin/config/schema`'s `PoolConfig` JSON Schema → `PUT /admin/config/pools` + Reload — the
+  Phase-7 builder slice; no rename yet) and `Settings/RawEditor` = the Monaco `connectors.toml` editor
+  (`language="ini"`, theme-aware, over `GET/PUT /admin/config/connectors` + Reload — the escape hatch)),
   `Login` + `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
   fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
@@ -551,16 +562,18 @@ nomaubl's `LicenseVerifier`; **same JWT shape and key-pair as nomaubl**). v2 onl
 - `liberty/license_cli.py` (`liberty-license` script) — `verify [<key>]` / `status` → JSON status (exit 0 if
   full, 1 if restricted); reads the key from the arg / stdin / `[license] key`; `--public-key PATH` overrides.
 
-303 tests pass.
+305 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
 the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
 contextual menus — the `visible_when`/`filter_from` work is its table-side first slice; design it
 against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell over the
-Pydantic config, not raw TOML — pools→queries→dictionary→menus→API connectors; + git-backed config-file
-versioning + frontend tests/CI) → **Phase 8** charts & dashboards → **Phase 9** notifications / reporting
-/ backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs & scheduling).
+Pydantic config, not raw TOML — **started**: the `[pools.*]` builder slice (`SchemaForm` +
+`GET /admin/config/schema`/`GET-PUT /admin/config/pools`); next: connectors→queries→dictionary→menus→API
+connectors; + git-backed config-file versioning + frontend tests/CI) → **Phase 8** charts & dashboards →
+**Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement (in-project
+Python/local-Spark jobs & scheduling).
 
 ## Run it
 

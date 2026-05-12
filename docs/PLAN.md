@@ -459,7 +459,16 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   shadow table if absent). It's a write-path add to `SQLConnector` + a config flag; can land before the
   rest of Phase 6.
 
-### Phase 7 — Config builders (the UI that builds the framework) — 📋 PLANNED
+### Phase 7 — Config builders (the UI that builds the framework) — 🚧 IN PROGRESS
+**Done so far — the proof-of-concept slice:** the `[pools.*]` builder. Backend: `GET /admin/config/schema`
+(→ `PoolConfig.model_json_schema()`), `GET /admin/config/pools`, `PUT /admin/config/pools` (validate each
+against `PoolConfig`, drop default-valued keys, then **surgically rewrite only the `[pools.*]` tables** of
+`connectors.toml` via `tomlkit` — comments / the `[connectors.*]` tables / formatting all preserved; no
+auto-reload). Frontend: `common/SchemaForm` (a generic JSON-Schema→form renderer — string/number/bool/
+string-map/enum/optional), `Settings/PoolsBuilder` (a left list + a `SchemaForm` per pool, add/delete,
+Save → PUT + `/admin/reload`), and the Settings page split into tabs (`PoolsBuilder` | the raw `RawEditor`).
+Verdict on the schema-driven approach: **promising** — the pool form is ~entirely generated; the bespoke
+parts so far are just the list/nav + the save/reload wiring (~150 lines, reusable). Keep going.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
 surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one

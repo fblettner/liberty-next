@@ -19,6 +19,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     "cryptography>=42",  # field-level AES-256-GCM (v1-compatible) — liberty.crypto
     "tomli-w>=1.0",  # write connectors.toml (migration tools)
+    "tomlkit>=0.13",  # comment/format-preserving TOML edits — the config builders (POST/PUT /admin/config/*)
 ]
 
 [project.optional-dependencies]

@@ -169,7 +169,7 @@ const fr: Resources = {
     noResponse: '(pas de réponse)',
   },
   settings: {
-    title: 'Configuration des connecteurs',
+    title: 'Configuration',
     save: 'Enregistrer',
     reload: 'Recharger',
     unsaved: 'modifications non enregistrées',
@@ -177,6 +177,18 @@ const fr: Resources = {
     reloaded: 'Rechargé. Connecteurs : {{connectors}} · Pools : {{pools}}',
     superuserRequired: 'Superutilisateur requis',
     hint: "Enregistrer valide le TOML avant écriture — une configuration invalide est rejetée. Recharger reconstruit le registre des connecteurs ; si la nouvelle configuration échoue, l'ancienne reste active.",
+    tabs: { pools: 'Pools', raw: 'connectors.toml (brut)' },
+    pools: {
+      add: 'Ajouter un pool',
+      delete: 'Supprimer le pool',
+      namePrompt: 'Nom du nouveau pool :',
+      confirmDelete: 'Supprimer le pool « {{name}} » ?',
+      empty: 'Aucun pool. Ajoutez-en un — au minimum une URL de base de données.',
+      pickOne: 'Choisissez un pool à gauche.',
+      reloadFromDisk: 'Recharger depuis le disque',
+      saved: 'Enregistré et rechargé. Pools : {{pools}}',
+      hint: "Enregistrer valide chaque pool, réécrit uniquement les tables [pools.*] de connectors.toml (les commentaires et les connecteurs restent intacts), puis recharge. Les valeurs par défaut sont omises ; relisez le fichier dans git.",
+    },
   },
   oidc: {
     completing: 'Finalisation de la connexion…',

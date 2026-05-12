@@ -167,7 +167,7 @@ const en = {
     noResponse: '(no response)',
   },
   settings: {
-    title: 'Connector config',
+    title: 'Configuration',
     save: 'Save',
     reload: 'Reload',
     unsaved: 'unsaved changes',
@@ -175,6 +175,18 @@ const en = {
     reloaded: 'Reloaded. Connectors: {{connectors}} · Pools: {{pools}}',
     superuserRequired: 'Superuser required',
     hint: 'Save validates the TOML before writing — invalid config is rejected. Reload rebuilds the connector registry; if the new config fails to load the previous one stays active.',
+    tabs: { pools: 'Pools', raw: 'connectors.toml (raw)' },
+    pools: {
+      add: 'Add pool',
+      delete: 'Delete pool',
+      namePrompt: 'New pool name:',
+      confirmDelete: 'Delete pool “{{name}}”?',
+      empty: 'No pools yet. Add one — at minimum a database URL.',
+      pickOne: 'Pick a pool on the left.',
+      reloadFromDisk: 'Reload from disk',
+      saved: 'Saved & reloaded. Pools: {{pools}}',
+      hint: 'Save validates each pool against the schema, rewrites only the [pools.*] tables in connectors.toml (comments and the connectors are left intact), then reloads. Default values are written back as omitted; review the file in git.',
+    },
   },
   oidc: {
     completing: 'Completing sign-in…',

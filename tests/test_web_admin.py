@@ -140,6 +140,43 @@ def test_config_put_validates_then_writes(env) -> None:
         assert set(client.post("/admin/reload", headers=h).json()["connectors"]) == {"db", "db2"}
 
 
+def test_config_schema_and_pools_get(env) -> None:
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        # schema (the builder UI's source of truth)
+        assert client.get("/admin/config/schema").status_code == 401
+        assert client.get("/admin/config/schema", headers=_h(client, "reader")).status_code == 403
+        sch = client.get("/admin/config/schema", headers=_h(client, "admin")).json()
+        assert "url" in sch["pool"]["properties"] and sch["pool"]["required"] == ["url"]
+        # the structured pools view
+        body = client.get("/admin/config/pools", headers=_h(client, "admin")).json()
+        assert body["path"] == str(conn_toml)
+        assert set(body["pools"]) == {"default"}
+        assert body["pools"]["default"]["url"].startswith("sqlite+aiosqlite:///") and body["pools"]["default"]["pool_size"] == 5
+
+
+def test_config_pools_put(env) -> None:
+    app, conn_toml, db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        assert client.put("/admin/config/pools", json={"pools": {}}, headers=_h(client, "reader")).status_code == 403
+        # an invalid pool (no `url`) is rejected before anything is written
+        assert client.put("/admin/config/pools", json={"pools": {"x": {"pool_size": 3}}}, headers=h).status_code == 422
+        # valid: tweak `default` + add a `cache` pool; only the [pools.*] tables change, [connectors.db] survives
+        new = {
+            "default": {"url": db_url, "pool_size": 12, "schemas": {"PROD": "myprod"}},
+            "cache": {"url": "sqlite+aiosqlite://"},
+        }
+        assert client.put("/admin/config/pools", json={"pools": new}, headers=h).json()["saved"] is True
+        txt = conn_toml.read_text()
+        assert "[connectors.db]" in txt and 'name = "answer"' in txt          # the connectors side is untouched
+        assert "pool_size = 12" in txt and "[pools.cache]" in txt and "[pools.default.schemas]" in txt
+        # GET reflects it, and Reload makes the new pool live
+        after = client.get("/admin/config/pools", headers=h).json()["pools"]
+        assert set(after) == {"default", "cache"} and after["default"]["pool_size"] == 12
+        assert set(client.post("/admin/reload", headers=h).json()["pools"]) == {"default", "cache"}
+
+
 def test_oidc_callback_fragment_redirect() -> None:
     from liberty.config import OIDCSettings
 

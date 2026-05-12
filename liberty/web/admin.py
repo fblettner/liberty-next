@@ -11,22 +11,30 @@
 * ``PUT /admin/config/connectors`` validates the submitted TOML (parsed against
   the connector schema) and, only if it's valid, writes it back to disk. It does
   *not* reload — call ``POST /admin/reload`` afterwards to apply.
+* ``GET /admin/config/schema`` returns the JSON Schema of the structured-config
+  models (currently ``pool``) — the config-builder UI renders its forms from it.
+* ``GET/PUT /admin/config/pools`` — the structured ``[pools.*]`` view: GET returns
+  ``{name: PoolConfig dict}``; PUT validates each against ``PoolConfig`` and surgically
+  rewrites only the ``[pools.*]`` tables in ``connectors.toml`` (comments/formatting of the
+  rest preserved, via ``tomlkit``). PUT does *not* reload — call ``POST /admin/reload`` after.
+  (First slice of the Phase-7 config builders — the same shape will grow to connectors, queries, …)
 """
 
 from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
+import tomlkit
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from liberty.auth.authstore import build_auth_backend
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.connectors import load_connectors
-from liberty.connectors.config import parse_connectors
+from liberty.connectors.config import PoolConfig, load_connectors_file, parse_connectors
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
 
@@ -86,4 +94,60 @@ async def put_connectors_config(body: ConfigBody, request: Request, _: Superuser
     path = Path(request.app.state.settings.connectors.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body.content, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+# ── structured config: the Phase-7 builders (pools first) ──────────────────────────────────
+@router.get("/config/schema")
+async def get_config_schema(_: Superuser) -> dict[str, Any]:
+    """JSON Schema of the structured-config models — the builder UI renders forms from it."""
+    return {"pool": PoolConfig.model_json_schema()}
+
+
+@router.get("/config/pools")
+async def get_pools_config(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``[pools.*]`` as ``{name: PoolConfig dict}`` (a missing file → no pools)."""
+    path = Path(request.app.state.settings.connectors.config_path)
+    cfg = load_connectors_file(path)
+    return {"path": str(path), "pools": {name: p.model_dump() for name, p in cfg.pools.items()}}
+
+
+class PoolsBody(BaseModel):
+    pools: dict[str, dict[str, Any]]
+
+
+@router.put("/config/pools")
+async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate each pool against :class:`PoolConfig`, then rewrite *only* the ``[pools.*]`` tables
+    of ``connectors.toml`` (everything else — comments, the ``[connectors.*]`` tables, formatting —
+    is left byte-for-byte intact via ``tomlkit``). Does not reload — call ``POST /admin/reload``."""
+    # validate + normalise (drop default-valued keys so the file stays terse)
+    new_pools: dict[str, dict[str, Any]] = {}
+    for name, raw in body.pools.items():
+        try:
+            new_pools[name] = PoolConfig.model_validate(raw).model_dump(exclude_defaults=True)
+        except ValidationError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"pool {name!r}: {exc}") from exc
+
+    path = Path(request.app.state.settings.connectors.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    pools = doc.get("pools")
+    if pools is None:
+        pools = tomlkit.table(is_super_table=True)
+        doc["pools"] = pools
+    for stale in [n for n in list(pools.keys()) if n not in new_pools]:
+        del pools[stale]
+    for name, vals in new_pools.items():
+        if name in pools:                       # update in place — preserve any comments on the table
+            existing = pools[name]
+            for k in [k for k in list(existing.keys()) if k not in vals]:
+                del existing[k]
+            for k, v in vals.items():
+                existing[k] = v
+        else:
+            pools[name] = vals                  # tomlkit renders a fresh [pools.<name>] table
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return {"saved": True, "path": str(path)}
