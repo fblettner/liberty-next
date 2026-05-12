@@ -13,6 +13,12 @@ config/local.toml
 # the TOML auth store (Argon2 password hashes — a per-deployment secret); created by `liberty-admin init-db`
 config/auth.toml
 config/auth.toml.tmp
+# per-deployment / licensed-app config — NOT committed; the open framework ships only the *.example
+# templates (copy them, or run liberty-migrate). nomasx1 / nomajde etc. ship these files separately.
+config/connectors.toml
+config/connectors.toml.tmp
+config/dictionary.toml
+config/menus.toml
 # local dev SQLite (the default [pools.default] when LIBERTY_DB_URL is unset)
 *.db
 *.db-journal

@@ -546,19 +546,24 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
 # HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  GET /api/menus  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
-# fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+./start.sh init-config            # copy config/{connectors,dictionary,menus}.toml.example → the real (uncommitted) files (serve/dev do this too)
+# fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"  (then ./start.sh init-config, or run liberty-migrate)
 ```
 
 `start.sh` (repo root): `serve` (default) | `dev` | `api [dev]` | `build` | `frontend` |
-`init-db` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py` works too.
+`init-db` | `init-config` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py` works too.
 
-**Pools / DB / secrets:** `config/connectors.toml` is the *deployment* config (it ships with real
-examples — the migrated **nomasx1** app (Postgres) plus the **NOMAJDE** app, whose v1 DB spans
-three v2 connectors: `jdedwards` (the Oracle JDE business DB), `nomajde` (its Postgres app DB),
-`session` (a stub) — and the `ais_connection` API connector. `config/dictionary.toml` carries
-nomasx1's fields nested under `[connectors.nomasx1.*]` and NOMAJDE's at the top level (shared);
-`config/menus.toml` has `[menus.nomasx1]` + `[menus.nomajde]` — the latter's leaves spell out
-`connector = "jdedwards"` where the screen runs against that connector). Convention: `[pools.default]`
+**Pools / DB / secrets:** `config/connectors.toml`, `config/dictionary.toml`, `config/menus.toml` are
+the *per-deployment* config and are **not committed** — the open framework ships only `*.toml.example`
+templates (copy them with `./start.sh init-config`, or fill them with `liberty-migrate`); licensed
+apps (**nomasx1**, **NOMAJDE**) ship these files separately. A fresh checkout with none of them runs
+API-only (just `[pools.default]`). (Reference shape — what nomasx1/NOMAJDE put there: the migrated
+nomasx1 app (Postgres) plus the NOMAJDE app, whose v1 DB spans three v2 connectors: `jdedwards` (the
+Oracle JDE business DB), `nomajde` (its Postgres app DB), `session` (a stub) — and the `ais_connection`
+API connector; nomasx1's dictionary entries nested under `[connectors.nomasx1.*]`, NOMAJDE's at the
+top level (shared); `[menus.nomasx1]` + `[menus.nomajde]`, the latter's leaves spelling out
+`connector = "jdedwards"` where the screen runs against that connector. The `nomasx1`/`nomajde`
+connectors carry `licensed = true` — gated behind `[license]`, see *License* below.) Convention: `[pools.default]`
 is the **framework pool** — historically it held v2's own users/roles, but with the default
 `[auth] backend = "toml"` those live in `config/auth.toml` instead, so **no pool is needed at
 startup at all** (the framework opens connections lazily, on the first query against a pool);
@@ -584,7 +589,8 @@ or columns the user's other scripts touch) are decrypted at runtime with `[crypt
 ## Layout
 
 ```
-config/         app.toml, connectors.toml, dictionary.toml (shared field labels/types), menus.toml (app nav),
+config/         app.toml (committed — framework config) · connectors.toml / dictionary.toml / menus.toml (NOT committed —
+                per-deployment / licensed-app config; only *.toml.example templates are committed; `./start.sh init-config` copies them) ·
                 auth.toml (the TOML auth store — users/roles, password hashes; gitignored, created by `liberty-admin init-db`)
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py
                 · connectors/{config,base,db,sql,api,registry,dictionary}.py

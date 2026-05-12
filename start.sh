@@ -14,6 +14,10 @@
 #   ./start.sh init-db    bootstrap the auth store + an `admin` user (creates config/auth.toml with
 #                         the default `[auth] backend = "toml"`; with `backend = "db"` it creates the
 #                         ly2_* tables on the configured pool instead — needs that DB reachable).
+#   ./start.sh init-config  copy config/{connectors,dictionary,menus}.toml.example → the real files
+#                         if they don't exist (these aren't committed — per-deployment / licensed-app
+#                         config; run `liberty-migrate` to fill them from a v1 DB). `serve`/`dev` do
+#                         this automatically too.
 #
 # The built React app lives in frontend/dist and is served by FastAPI (liberty/main.py),
 # which mounts it at "/" after the API routes — no copying to a "public" folder needed.
@@ -56,9 +60,22 @@ maybe_build_frontend() {
   if frontend_stale; then build_frontend; else echo "==> frontend/dist is up to date"; fi
 }
 
+init_config() {  # copy the *.example templates to the real (uncommitted) config files when absent
+  local f changed=0
+  for f in connectors dictionary menus; do
+    if [ ! -f "config/$f.toml" ] && [ -f "config/$f.toml.example" ]; then
+      cp "config/$f.toml.example" "config/$f.toml"
+      echo "==> created config/$f.toml from the template (edit it, or run liberty-migrate to fill it)"
+      changed=1
+    fi
+  done
+  [ "$changed" = 1 ] || true
+}
+
 run_api() {  # $1 = "dev" → enable --reload
   local extra=()
   [ "${1:-}" = "dev" ] && extra=(--reload)
+  init_config
   [ -f config/auth.toml ] || echo "==> config/auth.toml missing — no users yet. Run: ./start.sh init-db   (bootstraps an 'admin')"
   [ -n "${LIBERTY_JWT_SECRET:-}" ] || echo "==> LIBERTY_JWT_SECRET unset → ephemeral JWT key (tokens won't survive a restart)"
   echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs)"
@@ -79,10 +96,11 @@ case "$cmd" in
     exec npm run dev
     ;;
   init-db)            shift; exec "$VENV/bin/liberty-admin" init-db "$@" ;;
+  init-config)        init_config; echo "done." ;;
   -h|--help|help)
     grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *)
-    die "unknown command '$cmd' — try: serve | dev | api | build | frontend | init-db | help"
+    die "unknown command '$cmd' — try: serve | dev | api | build | frontend | init-db | init-config | help"
     ;;
 esac

@@ -1,0 +1,63 @@
+# Liberty v2 — connector definitions  (TEMPLATE — copy to `config/connectors.toml`)
+#
+# The real `config/connectors.toml` is *not* committed: it's per-deployment, and licensed apps
+# (e.g. nomasx1 / nomajde) ship it separately. A fresh checkout has none → the framework runs
+# API-only (just the framework pool below). To populate it:
+#   • copy this file:   cp config/connectors.toml.example config/connectors.toml
+#   • or migrate a v1 DB:  liberty-migrate all --source-url postgresql+asyncpg://… -o /tmp/m.toml
+#                          (review /tmp/m.toml, then merge it into config/connectors.toml)
+#
+# Hot-reloadable; `${NAME}` / `${NAME:-default}` expand from the environment. `${ENC:…}` field
+# values are decrypted at runtime via `[crypto] master_key` (see config/app.toml + docs/crypto.md).
+
+# [pools.default] is the FRAMEWORK pool — the fallback pool for a connector that doesn't name one
+# (and the home of the ly2_* auth tables when [auth] backend = "db"). With the default
+# [auth] backend = "toml" no DB connection is needed at startup; this just falls back to a local
+# SQLite file so the app runs out of the box. Set LIBERTY_DB_URL to point it at Postgres.
+[pools.default]
+url = "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
+pool_pre_ping = true
+
+# ── example: a Postgres app pool + its SQL connector ──────────────────────────────────
+# [pools.myapp]
+# url = "postgresql+asyncpg://myapp@db:5432/myapp"
+# password = "ENC:…"            # v1-style ENC: blob, or a ${MYAPP_PW} env ref, or plaintext
+# pool_size = 10
+# max_rows = 5000               # default SELECT row cap for this pool
+# # [pools.myapp.schemas]       # #SCHEMA.<NAME># placeholders in queries → real schema names
+# # PROD = "myapp_prod"
+#
+# [connectors.myapp]
+# type = "sql"
+# pool = "myapp"
+# # licensed = true             # gate this connector behind [license] (see config/app.toml)
+#
+# [[connectors.myapp.queries]]
+# name = "users_get"
+# label = "Users"
+# description = "Application users"
+# auto_load = true              # run a SELECT on screen open instead of waiting for "Run"
+# sql = "SELECT id, name, status FROM users ORDER BY name"
+# # sql = { default = "…", oracle = "…" }   # per-dialect map (key = SQLAlchemy backend name)
+# columns = [
+#     { name = "id", filter = true },
+#     { name = "name" },
+#     { name = "status", dd = "USER_STATUS" },   # `dd` → a config/dictionary.toml entry (label/format/rule)
+# ]
+#
+# [[connectors.myapp.queries]]
+# name = "users_put"
+# writable = true               # non-SELECT statements need this *and* the caller's sql:myapp:users_put perm
+# sql = "UPDATE users SET name = :name WHERE id = :id_ORIGINAL"
+
+# ── example: an API connector ─────────────────────────────────────────────────────────
+# [connectors.myservice]
+# type = "api"
+# base_url = "https://api.example.com"
+# auth = "bearer"
+# auth_token = "ENC:…"          # or a ${MYSERVICE_TOKEN} env ref
+#
+# [[connectors.myservice.endpoints]]
+# name = "ping"
+# method = "GET"
+# path = "/health"

@@ -1,0 +1,39 @@
+# Liberty v2 — shared field dictionary  (TEMPLATE — copy to `config/dictionary.toml`)
+#
+# The real `config/dictionary.toml` is *not* committed (per-deployment / licensed-app data). A
+# missing file = an empty dictionary, which is fine. To populate it:
+#   • copy this file:  cp config/dictionary.toml.example config/dictionary.toml
+#   • or migrate a v1 DB:  liberty-migrate dictionary --source-url postgresql+asyncpg://… -o config/dictionary.toml
+#
+# It maps a `dd` key (referenced from a query column's `columns` hint, or the column name) to a
+# label / format / display rule, with per-language labels. v1's ly_dictionary (+ ly_dictionary_l,
+# ly_enum/ly_enum_val, ly_lookup) migrates here. Sections may be top-level (shared) or nested under
+# [connectors.<name>.…] (per-connector, since v1 dictionaries were per-app).
+
+default_language = "en"
+
+# ── example entries ───────────────────────────────────────────────────────────────────
+# [entries.USER_STATUS]
+# label = "Status"
+# rules = "ENUM"            # BOOLEAN / ENUM / LOOKUP — the v2 form of v1's dd_rules
+# rules_values = "1"        # → [enums.1] below (the rule's argument: true-value / enum id / lookup id)
+# [entries.USER_STATUS.l]
+# fr = "Statut"
+#
+# [entries.CREATED_AT]
+# label = "Created"
+# format = "datetime"
+#
+# [enums.1]
+# label = "User status"
+# values = [
+#     { value = "01", label = "Active",   l = { fr = "Actif" } },
+#     { value = "N",  label = "Inactive", l = { fr = "Inactif" } },
+# ]
+#
+# [lookups.1]
+# description = "Resolve a department code to its name"
+# connector = "myapp"      # the connector the lookup query lives on (omit → the asking connector)
+# query = "departments_get"
+# value = "DEPT_ID"        # result column matching the cell value
+# label = "DEPT_NAME"      # result column to display instead

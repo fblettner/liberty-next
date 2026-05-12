@@ -1,0 +1,28 @@
+# Liberty v2 — per-app navigation trees  (TEMPLATE — copy to `config/menus.toml`)
+#
+# The real `config/menus.toml` is *not* committed (per-deployment / licensed-app data). A missing
+# file = no menus, which is fine — every accessible connector then shows as its own "app". To populate:
+#   • copy this file:  cp config/menus.toml.example config/menus.toml
+#   • or migrate a v1 DB:  liberty-migrate menu --source-url postgresql+asyncpg://… --connector myapp -o config/menus.toml
+#
+# Each [menus.<app>] is a flat list of items linked by `parent`; a leaf carries `type` ("query" or
+# "endpoint"), `target` (the query/endpoint name), an optional `connector` (when it lives on a
+# different connector than the app), and `params`. Pruned per-caller to what they may run.
+
+# ── example ───────────────────────────────────────────────────────────────────────────
+# [menus.myapp]
+# label = "My Application"
+#
+# [[menus.myapp.items]]
+# id = "admin"
+# label = "Administration"
+# [menus.myapp.items.l]
+# fr = "Administration"
+#
+# [[menus.myapp.items]]
+# id = "users"
+# parent = "admin"
+# label = "Users"
+# type = "query"
+# target = "users_get"
+# # connector = "otherconn"   # only if the screen runs against a different connector
