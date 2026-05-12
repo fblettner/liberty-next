@@ -314,25 +314,29 @@ def test_migrate_pools() -> None:
     assert set(out) == {"nomasx1", "nomajde", "viajdbc", "incomplete"}
 
     nx = out["nomasx1"]
-    assert nx["url"] == "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1"
+    # the password is a separate field (kept out of the URL); v1's `ENC:` value carried over verbatim
+    assert nx["url"] == "postgresql+asyncpg://nomasx1@db.example:5432/nomasx1"
+    assert nx["password"] == "ENC:nx"  # = apps_password
     assert nx["dialect"] == "postgresql"
     assert nx["pool_pre_ping"] is True
     assert nx["pool_size"] == 20  # from apps_pool_max
     assert nx["max_rows"] == 5000  # from apps_limit
 
     jde = out["nomajde"]
-    assert jde["url"] == "oracle+oracledb://jde:${MIGRATED_PW_NOMAJDE}@ora.example:1521/?service_name=JDEPROD"
+    assert jde["url"] == "oracle+oracledb://jde@ora.example:1521/?service_name=JDEPROD"
+    assert jde["password"] == "${MIGRATED_PW_NOMAJDE}"  # apps_password was None → env-var stub
     assert jde["dialect"] == "oracle"
     assert "pool_size" not in jde  # apps_pool_max was None
     assert "max_rows" not in jde  # apps_limit was None
     assert "max_rows" not in out["viajdbc"]  # apps_limit was 0 → not set
 
     # apps_jdbc fallback when host/port/database aren't on the row
-    assert out["viajdbc"]["url"] == "postgresql+asyncpg://u:${MIGRATED_PW_VIAJDBC}@jdbc-host:5444/jdbcdb"
+    assert out["viajdbc"]["url"] == "postgresql+asyncpg://u@jdbc-host:5444/jdbcdb"
+    assert out["viajdbc"]["password"] == "ENC:z"
 
-    # nothing usable → keep the env-var stub, no explicit dialect
+    # nothing usable → keep the env-var stub, no explicit dialect, no separate password
     assert out["incomplete"]["url"] == "${LIBERTY_DB_URL_INCOMPLETE}"
-    assert "dialect" not in out["incomplete"]
+    assert "dialect" not in out["incomplete"] and "password" not in out["incomplete"]
 
     # round-trips through the v2 config loader
     parse_connectors(tomllib.loads(render_toml({"pools": out, "connectors": {}})))
@@ -340,7 +344,8 @@ def test_migrate_pools() -> None:
 
 def test_migrate_pools_prefix_and_overrides_stubs() -> None:
     out = migrate_pools([_APPLICATIONS[1]], connector_prefix="v1_")["pools"]
-    assert "v1_nomasx1" in out and "${MIGRATED_PW_V1_NOMASX1}" in out["v1_nomasx1"]["url"]
+    assert "v1_nomasx1" in out and out["v1_nomasx1"]["url"].startswith("postgresql+asyncpg://nomasx1@")
+    assert out["v1_nomasx1"]["password"] == "ENC:nx"
 
     # merged after migrate_sql_queries → the real pool URL replaces the ${LIBERTY_DB_URL_*} stub
     sql_part = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres")  # leaves [pools.nomasx1] a stub
@@ -694,7 +699,8 @@ async def test_read_applications(v1_engine) -> None:
     assert {a["apps_pool"] for a in apps} == {"default", "nomasx1"}
     pools = migrate_pools(apps)["pools"]
     assert "default" not in pools  # v2 reserves [pools.default]
-    assert pools["nomasx1"]["url"] == "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1"
+    assert pools["nomasx1"]["url"] == "postgresql+asyncpg://nomasx1@db.example:5432/nomasx1"
+    assert pools["nomasx1"]["password"] == "ENC:nx"  # apps_password carried over verbatim
 
 
 @pytest.mark.asyncio
@@ -825,10 +831,12 @@ def test_cli_sql_to_file(tmp_path) -> None:
     assert text_out.startswith("# migrated:")
     cfg = parse_connectors(tomllib.loads(text_out))  # comments + TOML both parse
     assert "default" in cfg.connectors and "default" in cfg.pools
-    # ly_applications scaffolded [pools.nomasx1] with a real URL + a password placeholder;
-    # v1's `default` pool was skipped, so [pools.default] is still the env-var stub.
+    # ly_applications scaffolded [pools.nomasx1] with a real URL (no password in it) + a separate
+    # `password` field (v1's ENC: value carried over); v1's `default` pool was skipped, so
+    # [pools.default] is still the env-var stub.
     assert "nomasx1" in cfg.pools
-    assert "postgresql+asyncpg://nomasx1:${MIGRATED_PW_NOMASX1}@db.example:5432/nomasx1" in text_out
+    assert "postgresql+asyncpg://nomasx1@db.example:5432/nomasx1" in text_out
+    assert 'password = "ENC:nx"' in text_out  # carried over from apps_password, kept out of the URL
     assert "${LIBERTY_DB_URL_DEFAULT}" in text_out  # the default pool kept its env-var stub
     # ly_tbl_col → the migrated SELECT carries column display hints
     sql_conn = cfg.connectors["default"]
@@ -842,8 +850,8 @@ def test_cli_all_to_stdout(tmp_path, capsys) -> None:
     url = _make_v1_db(tmp_path)
     assert migrate_main(["all", "--source-url", url]) == 0
     out = capsys.readouterr().out
-    assert "fill in these placeholders" in out  # the migrated pool/secret stubs
-    assert "MIGRATED_PW_" in out  # the scaffolded pool's password placeholder
+    assert "fill in these placeholders" in out  # ${LIBERTY_DB_URL_DEFAULT} (the framework pool stub)
+    assert "ENC:" in out  # the migrated pool's password (apps_password ENC: value, kept out of the URL)
     assert "liberty-migrate dictionary" in out  # column hints reference the shared dictionary
     cfg = parse_connectors(tomllib.loads(out))
     assert {"default", "acme"} <= set(cfg.connectors)

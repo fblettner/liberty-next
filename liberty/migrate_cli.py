@@ -20,9 +20,10 @@ menu belongs to. v1's ``ly_menus_filters`` (per-node role/param filters) isn't m
 
 ``sql``/``all`` also scaffold ``[pools.*]`` from v1's ``ly_applications`` (one per
 ``apps_pool``, with a SQLAlchemy URL built from ``apps_host``/``apps_port``/``apps_database``
-or a parseable ``apps_jdbc``); the DB password is a ``${MIGRATED_PW_<NAME>}`` placeholder
-(v1 keeps it ``ENC:``-encrypted in ``apps_password`` — set the env var, or recover it with
-``liberty-crypto decrypt``). v1's reserved ``default`` pool is skipped: v2's ``[pools.default]``
+or a parseable ``apps_jdbc``); the DB password goes in the pool's separate ``password`` field
+(v1's ``apps_password`` ``ENC:`` value is carried over verbatim — v2 decrypts it at runtime with
+the crypto master key — else a ``${MIGRATED_PW_<NAME>}`` env-var stub). v1's reserved ``default``
+pool is skipped: v2's ``[pools.default]``
 is v2's own framework DB (the ``ly2_*`` tables). They also carry over **column display hints**
 from v1's ``ly_tbl_col`` / ``ly_dlg_col`` (each read query's ``columns`` — order, visibility, a
 per-column ``label``/``format`` override) — the labels/types themselves live in the shared
@@ -158,9 +159,9 @@ def _summary(data: dict, *, command: str) -> str:
     if n_hinted:
         lines.append("# column hints reference the shared field dictionary — run `liberty-migrate dictionary")
         lines.append("#   --source-url <same> -o config/dictionary.toml` for the labels/types")
-    if any("MIGRATED_PW_" in str(p.get("url", "")) for p in pools.values()):
-        lines.append("# pool URLs carry ${MIGRATED_PW_<NAME>} for the DB password — set the env var(s),")
-        lines.append("#   or recover each from v1's ly_applications.apps_password: liberty-crypto decrypt 'ENC:…'")
+    if any("MIGRATED_PW_" in f"{p.get('url', '')}{p.get('password', '')}" for p in pools.values()):
+        lines.append("# some pool `password`s are ${MIGRATED_PW_<NAME>} stubs (v1's apps_password wasn't ENC:) —")
+        lines.append("#   set the env var(s), or recover each from v1's ly_applications.apps_password")
     if "ENC:" in blob:
         lines.append("# contains ENC: secrets carried over from v1 — v2 decrypts them at runtime via")
         lines.append("#   [crypto] master_key (set LIBERTY_MASTER_KEY to your v1 MASTER_KEY)")

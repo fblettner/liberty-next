@@ -60,6 +60,12 @@ class PoolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str
+    # Optional DB password kept *out of the URL* — substituted into it (escaped) when the engine is
+    # built. May be an ``ENC:`` value (decrypted at runtime via the crypto master key, like v1 reads
+    # ``ly_applications.apps_password``) or plaintext / a ``${ENV}`` ref. Use this when the password
+    # has URL-special characters (``@``, ``/``, ``:`` …) that would break parsing if inlined. When
+    # unset, the URL is used as-is (but an ``ENC:`` password embedded in the URL is still decrypted).
+    password: str | None = None
     # SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty →
     # derived from the URL. Used to pick a query's per-dialect SQL variant (see QueryDef.sql).
     dialect: str = ""

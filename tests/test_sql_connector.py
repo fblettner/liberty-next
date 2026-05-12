@@ -25,6 +25,29 @@ def test_pool_registry_unknown_and_empty_url() -> None:
         pools.engine("nope")
 
 
+def test_pool_registry_resolves_password() -> None:
+    from liberty.crypto import encrypt
+    mk = "pool-pw-test-key"
+    cfgs = {
+        # a separate `password` field — ENC: gets decrypted; URL-special chars are escaped, not mangled
+        "enc": PoolConfig(url="postgresql+asyncpg://u@h:5432/db", password=encrypt("p@ss/w:rd", mk)),
+        "plain": PoolConfig(url="postgresql+asyncpg://u@h:5432/db", password="p@ss/w:rd"),
+        # an ENC: password embedded in the URL is still decrypted (legacy form)
+        "url_enc": PoolConfig(url=f"oracle+oracledb://system:{encrypt('hunter2', mk)}@h:1521/?service_name=X"),
+        # no password to touch → URL passed through unchanged
+        "asis": PoolConfig(url="postgresql+asyncpg://u:plainpw@h:5432/db"),
+    }
+    reg = PoolRegistry(cfgs, master_key=mk)
+    assert reg._resolved_url("enc", cfgs["enc"]).password == "p@ss/w:rd"
+    assert reg._resolved_url("plain", cfgs["plain"]).password == "p@ss/w:rd"
+    assert reg._resolved_url("url_enc", cfgs["url_enc"]).password == "hunter2"
+    u = reg._resolved_url("asis", cfgs["asis"])
+    assert u.password == "plainpw" and u.username == "u"
+    # a wrong/missing key leaves the ENC: value as-is (logged warning, not a crash)
+    bad = PoolRegistry(cfgs, master_key="wrong")
+    assert bad._resolved_url("enc", cfgs["enc"]).password == cfgs["enc"].password  # still the ENC:… string
+
+
 def _connector(pools: PoolRegistry, *queries: QueryDef, max_rows: int = 1000) -> SQLConnector:
     cfg = SqlConnectorConfig(type="sql", pool="test", max_rows=max_rows, queries=list(queries))
     return SQLConnector("db", cfg, pools)

@@ -767,16 +767,18 @@ _JDBC_PATTERNS = (
 
 
 def _pw_placeholder(pool_name: str) -> str:
-    """`${MIGRATED_PW_<POOL>}` — the DB password is never inlined into connectors.toml;
-    the operator sets the env var (or recovers it: `liberty-crypto decrypt <apps_password>`)."""
+    """`${MIGRATED_PW_<POOL>}` — used as the pool's ``password`` when v1's ``apps_password`` isn't an
+    ``ENC:`` value to carry over; the operator sets the env var (or recovers it via the v1 secret)."""
     return "${MIGRATED_PW_" + pool_name.upper() + "}"
 
 
-def _db_url(dialect: str, user: str, host: str, port: int, database: str, pool_name: str) -> str | None:
+def _db_url(dialect: str, user: str, host: str, port: int, database: str) -> str | None:
+    """A SQLAlchemy async URL **without a password** — the password is emitted as the pool's separate
+    ``password`` field (so URL-special chars in it never break parsing; see :class:`PoolConfig`)."""
     driver = _DRIVER.get(dialect)
     if not driver:
         return None
-    auth = f"{_urlquote(user, safe='')}:{_pw_placeholder(pool_name)}"
+    auth = _urlquote(user, safe="")
     if dialect == "oracle":
         return f"{driver}://{auth}@{host}:{port}/?service_name={database}"
     return f"{driver}://{auth}@{host}:{port}/{database}"
@@ -801,13 +803,14 @@ def migrate_pools(
     connection details are known (``apps_host``/``apps_port``/``apps_database`` or a
     parseable ``apps_jdbc``), else the ``${LIBERTY_DB_URL_<NAME>}`` env-var stub.
 
-    The DB password is **never inlined** — the URL carries a ``${MIGRATED_PW_<NAME>}``
-    placeholder (v1 keeps it ``ENC:``-encrypted in ``apps_password``; the operator sets the
-    env var, or recovers it with ``liberty-crypto decrypt``). v1's reserved ``default`` pool
-    — its framework/definition DB — is **skipped**: v2 reserves ``[pools.default]`` for v2's
-    own framework DB (the ``ly2_*`` tables). When several apps share a pool name, the first
-    wins. ``apps_dbtype`` becomes the pool's explicit ``dialect`` (so v2 picks the right
-    per-dialect SQL variant); ``apps_pool_max`` becomes ``pool_size`` when sensible;
+    The DB password is emitted as the pool's separate ``password`` field (kept out of the URL, so
+    URL-special chars in it never break parsing — see :class:`PoolConfig`): v1's ``apps_password``
+    ``ENC:`` value is carried over **verbatim** (v2 decrypts it at runtime with the crypto master
+    key, exactly as v1 reads it from the table), else a ``${MIGRATED_PW_<NAME>}`` env-var stub. v1's
+    reserved ``default`` pool — its framework/definition DB — is **skipped**: v2 reserves
+    ``[pools.default]`` for v2's own framework DB (the ``ly2_*`` tables). When several apps share a
+    pool name, the first wins. ``apps_dbtype`` becomes the pool's explicit ``dialect`` (so v2 picks
+    the right per-dialect SQL variant); ``apps_pool_max`` becomes ``pool_size`` when sensible;
     ``apps_limit`` becomes ``max_rows`` (the pool's default SELECT row cap).
 
     Args:
@@ -836,14 +839,20 @@ def migrate_pools(
                 port = int(a.get("apps_port") or 0) or _DEFAULT_PORT.get(dialect or "postgresql", 5432)
             except (TypeError, ValueError):
                 port = _DEFAULT_PORT.get(dialect or "postgresql", 5432)
-            url = _db_url(dialect or "postgresql", user, host, port, database, name)
+            url = _db_url(dialect or "postgresql", user, host, port, database)
         if url is None and user:
             parsed = _parse_jdbc(str(a.get("apps_jdbc") or ""))
             if parsed:
                 h, p, d = parsed
-                url = _db_url(dialect or "postgresql", user, h, p or _DEFAULT_PORT.get(dialect or "postgresql", 5432), d, name)
+                url = _db_url(dialect or "postgresql", user, h, p or _DEFAULT_PORT.get(dialect or "postgresql", 5432), d)
 
         entry: dict[str, Any] = {"url": url or ("${LIBERTY_DB_URL_" + name.upper() + "}"), "pool_pre_ping": True}
+        if url is not None:
+            # the DB password as a separate field (kept out of the URL): carry v1's `ENC:` value
+            # verbatim — v2 decrypts it at runtime via the crypto master key, exactly as v1 reads it
+            # from `apps_password` — else (plaintext / blank) leave a `${MIGRATED_PW_<NAME>}` stub.
+            apw = str(a.get("apps_password") or "").strip()
+            entry["password"] = apw if apw.startswith("ENC:") else _pw_placeholder(name)
         if dialect:
             entry["dialect"] = dialect
         try:

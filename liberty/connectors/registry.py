@@ -40,7 +40,7 @@ class ConnectorRegistry:
         http_client: httpx.AsyncClient | None = None,
         master_key: str = "",
     ) -> None:
-        self.pools = PoolRegistry(config.pools)
+        self.pools = PoolRegistry(config.pools, master_key=master_key)
         self.dictionary = dictionary or DictionaryFile()
         self._http_client = http_client
         self._connectors: dict[str, Connector] = {}

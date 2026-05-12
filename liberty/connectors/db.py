@@ -9,19 +9,25 @@ name; the registry owns their lifecycle.
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from liberty.connectors.base import UnknownPoolError
 from liberty.connectors.config import PoolConfig
+from liberty.crypto import decrypt_or_keep, is_encrypted
+
+_log = logging.getLogger(__name__)
 
 
 class PoolRegistry:
     """Holds pool configs and lazily materialises one engine per pool."""
 
-    def __init__(self, configs: dict[str, PoolConfig] | None = None) -> None:
+    def __init__(self, configs: dict[str, PoolConfig] | None = None, *, master_key: str = "") -> None:
         self._configs: dict[str, PoolConfig] = dict(configs or {})
         self._engines: dict[str, AsyncEngine] = {}
+        self._master_key = master_key
 
     def names(self) -> list[str]:
         return list(self._configs)
@@ -52,22 +58,38 @@ class PoolRegistry:
             return cfg.dialect
         return make_url(cfg.url).get_backend_name()
 
+    def _resolved_url(self, name: str, cfg: PoolConfig):
+        """The pool's URL with its password resolved: a separate ``password`` (or an ``ENC:``
+        password embedded in the URL) is decrypted via the crypto master key and re-set on the URL
+        object (which escapes it properly — so ``@`` / ``/`` / ``:`` in the password are safe). A
+        wrong/missing key leaves the ``ENC:`` value as-is (a logged warning, not a crash — the
+        connection will then fail loudly with bad credentials, like v1)."""
+        url = make_url(cfg.url)
+        raw_pw = cfg.password if cfg.password is not None else url.password
+        if raw_pw is None or not is_encrypted(raw_pw) and cfg.password is None:
+            return url  # nothing to substitute (URL used as-is)
+        pw, err = decrypt_or_keep(raw_pw, self._master_key)
+        if err:
+            _log.warning("pool %r: %s — connecting with the configured value as-is", name, err)
+        return url.set(password=pw)
+
     def engine(self, name: str) -> AsyncEngine:
         """Return (creating on first call) the engine for pool *name*."""
         engine = self._engines.get(name)
         if engine is not None:
             return engine
         cfg = self._config(name)
+        url = self._resolved_url(name, cfg)
         kwargs: dict[str, object] = {
             "echo": cfg.echo,
             "pool_pre_ping": cfg.pool_pre_ping,
             "pool_recycle": cfg.pool_recycle,
         }
         # SQLite uses StaticPool/NullPool, which reject QueuePool sizing args.
-        if not cfg.url.startswith("sqlite"):
+        if url.get_backend_name() != "sqlite":
             kwargs["pool_size"] = cfg.pool_size
             kwargs["max_overflow"] = cfg.max_overflow
-        engine = create_async_engine(cfg.url, **kwargs)
+        engine = create_async_engine(url, **kwargs)
         self._engines[name] = engine
         return engine
 

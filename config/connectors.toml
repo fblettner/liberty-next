@@ -2526,19 +2526,22 @@ sql = "UPDATE\n    LICENSE_JDE_OUT_OBJECTS\nSET\n    LOUT_TYPE = :LOUT_TYPE,\n  
 
 # ─────────────────────────────────────────────────────────────────────────────────────
 # Apps migrated from the v1 libnjde DB (NOMAJDE) — pools: jdedwards (Oracle JDE business DB),
-# nomajde (Postgres app DB), session (stub). Set the ${MIGRATED_PW_*} / ${LIBERTY_DB_URL_*}
-# env vars before use. Permission strings: sql:<connector>:<query_name>, api:ais_connection:<ep>.
+# nomajde (Postgres app DB), session (stub). Pool passwords are v1's ENC: values (set
+# LIBERTY_MASTER_KEY to v1's MASTER_KEY so v2 can decrypt them). Permission strings:
+# sql:<connector>:<query_name>, api:ais_connection:<ep>.
 # ─────────────────────────────────────────────────────────────────────────────────────
 [pools.jdedwards]
-url = "oracle+oracledb://system:${MIGRATED_PW_JDEDWARDS}@79.72.70.64:1521/?service_name=JDEORCL"
+url = "oracle+oracledb://system@79.72.70.64:1521/?service_name=JDEORCL"
 pool_pre_ping = true
+password = "ENC:cuJFYdv0IgIGbZ5ru3ulVmGW03JCjFzDXKrkKsGT48W0N6z3U9SR6jrtSre5UnuGWeLuLCiJJQ14/qE5eYsGttifJdTL5eoAZZ0ruS4d3jfm1k2YY9UxDg0Nb8UmLiBW/ec08i0fmz23MPjN"
 dialect = "oracle"
 pool_size = 10
 max_rows = 10000
 
 [pools.nomajde]
-url = "postgresql+asyncpg://nomajde:${MIGRATED_PW_NOMAJDE}@pg:5432/nomajde"
+url = "postgresql+asyncpg://nomajde@pg:5432/nomajde"
 pool_pre_ping = true
+password = "ENC:mmMDSPZJ3lEF4HAG7pVPhkxZzxOC5Ks+V2n6b4NBArswYbs31PDOXpF9LiIjSfuap5Rs5ivPJxBjxho0cObLxIQ9RW2pvaufZuWiCMAl3IR6I0fCTiE93TSF7ZVXwTO1hah+OBSr/foGycd4MyH0UZ4HFPo="
 dialect = "postgresql"
 pool_size = 10
 max_rows = 100000

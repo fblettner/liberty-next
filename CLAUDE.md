@@ -52,8 +52,10 @@ Full dep set pinned in `pyproject.toml`.
   `max_rows` (the SELECT row cap for this query — overrides the connector's, then the pool's, then 1000;
   a per-request override beats it), and `key_columns` (the result columns that identify a row — v1's `col_key` —
   surfaced in `describe()` for the TableView's Excel-import update-vs-insert match). `[pools.*]` may carry an
-  explicit `dialect` (else derived from the URL) and a `max_rows` (the pool's default row cap — v1's per-app
-  `apps_limit`); `[connectors.*]` (sql) a `max_rows` too.
+  explicit `dialect` (else derived from the URL), a `max_rows` (the pool's default row cap — v1's per-app
+  `apps_limit`), and a `password` (kept out of the URL — substituted in, escaped, when the engine is built;
+  may be an `ENC:` value decrypted via the crypto master key — how v1's `apps_password` reads — or plaintext /
+  a `${ENV}` ref; an `ENC:` password embedded in the URL is also decrypted); `[connectors.*]` (sql) a `max_rows` too.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
   + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
   `[connectors.<conn>.entries.<key>]` — per-connector, since v1 dictionaries were per-app) =
@@ -78,7 +80,10 @@ Full dep set pinned in `pyproject.toml`.
   `ALLOWED_STATEMENTS` / `WRITE_STATEMENTS`.
 - `db.py` — `PoolRegistry`: one SQLAlchemy async engine per named pool, created
   lazily (unreachable DB never blocks startup; tests inject their own engine); `dialect(name)`
-  → the pool's backend name (a live engine's own dialect / the explicit setting / the URL).
+  → the pool's backend name (a live engine's own dialect / the explicit setting / the URL); when
+  building the engine it resolves the pool's `password` (or an `ENC:` password in the URL) — decrypts
+  an `ENC:` value via the `master_key` it's given (wrong/missing key → kept as-is + a logged warning,
+  like the API connector) and re-sets it on the URL object so URL-special chars are escaped properly.
 - `sql.py` — `SQLConnector`: named queries, `:param` binding via SQLAlchemy
   `text()` (never string-substituted), the SQL variant matching the pool's dialect is
   selected per call, statement-type allow-list, `writable` gate for mutations, any `:name`
@@ -365,9 +370,11 @@ replies), `@monaco-editor/react` (the connector-config editor).
   URL = SQLAlchemy async URL built from `apps_dbtype`/`apps_host`/`apps_port`/`apps_database`
   — `postgresql+asyncpg://…` / `oracle+oracledb://…/?service_name=…` — or a parseable
   `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}` stub; `dialect` from `apps_dbtype`,
-  `pool_size` from `apps_pool_max`, `max_rows` from `apps_limit`; the DB **password is never inlined** — `${MIGRATED_PW_<NAME>}`,
-  v1 keeps it `ENC:`-encrypted in `apps_password`; v1's reserved `default` pool is **skipped**
-  — v2's `[pools.default]` is v2's own framework DB); `migrate_table_meta(ly_tables rows, ly_dlg_frm rows)` →
+  `pool_size` from `apps_pool_max`, `max_rows` from `apps_limit`; the DB password is the pool's separate
+  `password` field — **never inlined into the URL** (so URL-special chars don't break parsing): v1's
+  `apps_password` `ENC:` value carried over **verbatim** (v2 decrypts it at runtime via the crypto master key,
+  exactly as v1 reads it from the table), else a `${MIGRATED_PW_<NAME>}` env-var stub; v1's reserved `default`
+  pool is **skipped** — v2's `[pools.default]` is v2's own framework DB); `migrate_table_meta(ly_tables rows, ly_dlg_frm rows)` →
   `{query_id: {description?, auto_load?}}` (the table/form friendly label `tbl_label`/`frm_label` → the read
   query's `description`, `tbl_auto_load = 'Y'` → `auto_load = true`; a table widget beats a form) — passed to
   `migrate_sql_queries(table_meta=…)`; `migrate_key_columns(ly_tbl_col rows, ly_dlg_col rows)` → `{query_id:
@@ -451,12 +458,14 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 - The master key lives in `[crypto] master_key` in `config/app.toml` (`= "${LIBERTY_MASTER_KEY}"` —
   always supplied via the env var, never hard-coded; it's the `MASTER_KEY` from v1's `secrets.json`).
   `liberty/config.py` → `Settings.crypto.master_key`; `/info` reports `crypto.configured` (bool, never the key).
-- `APIConnector` decrypts `ENC:` `auth_username`/`auth_password`/`auth_token` at init via
-  the `master_key` threaded through `load_connectors(master_key=…)` /
-  `ConnectorRegistry(master_key=…)` (from `settings.crypto.master_key` in `main.py`'s
-  lifespan and `POST /admin/reload`). Best-effort: a wrong/missing key → the value is left
-  as the `ENC:` blob and a warning is logged (the connector still loads). Plaintext values
-  pass through untouched. `describe()` still never exposes credentials.
+- `APIConnector` decrypts `ENC:` `auth_username`/`auth_password`/`auth_token` at init, and
+  `PoolRegistry` decrypts a pool's `password` (or an `ENC:` password embedded in its URL) when it
+  builds the engine — both via the `master_key` threaded through `load_connectors(master_key=…)` /
+  `ConnectorRegistry(master_key=…)` → `PoolRegistry(master_key=…)` (from `settings.crypto.master_key`
+  in `main.py`'s lifespan and `POST /admin/reload`). Best-effort: a wrong/missing key → the value is
+  left as the `ENC:` blob and a warning is logged (the connector / pool still loads — the connection
+  then fails loudly with bad credentials, like v1 with the wrong key). Plaintext values pass through
+  untouched. `describe()` still never exposes credentials.
 - `liberty/crypto_cli.py` (`liberty-crypto` script) — `encrypt <v>` / `decrypt <ENC:…>` /
   `is-encrypted <v>` (exit 0/1); `--master-key` / `--config` overrides; reads stdin when no
   value arg; key comes from `[crypto] master_key` otherwise. For poking at values / scripting.
@@ -467,7 +476,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-269 tests pass.
+271 tests pass.
 
 ## Run it
 
