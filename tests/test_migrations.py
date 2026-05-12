@@ -136,6 +136,7 @@ def test_migrate_sql_queries_filter_wrap() -> None:
     assert sql["default"].startswith("SELECT * FROM (\n" + inner)
     assert "WHERE 1=1" in sql["default"]
     assert "CAST(:USR_ID AS VARCHAR(4000)) IS NULL" in sql["default"] and ":USR_ID_op" in sql["default"]
+    assert "CAST(:USR_ID AS VARCHAR2(4000))" in sql["oracle"]  # the oracle variant uses VARCHAR2
     assert sql["default"].rstrip().endswith("ORDER BY usr_name")  # ORDER BY moved onto the outer query
     # a query with no filter columns is left alone (no wrapper)
     assert by_name["twins_select"]["sql"] == "SELECT 1 AS x"
@@ -668,8 +669,8 @@ async def test_read_menus(v1_engine) -> None:
     assert items["security"].get("type") is None and "parent" not in items["security"]  # top-level folder
     assert items["users"] == {
         "id": "users", "label": "Users", "parent": "security",
-        "type": "query", "target": "users_list_select", "l": {"fr": "Utilisateurs"},
-    }  # FormsTable → ly_tables 5 → query 1 (SELECT) → the name migrate_sql_queries gives it; connector defaults to the app
+        "type": "query", "target": "users_list_select", "connector": "default", "l": {"fr": "Utilisateurs"},
+    }  # FormsTable → ly_tables 5 → query 1 (SELECT, pool 'default') → its migrated name + connector ('default' ≠ app 'nomasx1')
     assert items["overview"].get("type") is None  # Dashboard → unresolved → folder placeholder
     # the menu target lines up with what migrate_sql_queries actually emits
     queries, sql_q = await read_sql_queries(v1_engine)

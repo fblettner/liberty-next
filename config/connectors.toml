@@ -2346,3 +2346,647 @@ name = "license_jde_out_objects_put"
 label = "LICENSE_JDE_OUT_OBJECTS"
 writable = true
 sql = "UPDATE\n    LICENSE_JDE_OUT_OBJECTS\nSET\n    LOUT_TYPE = :LOUT_TYPE,\n    LOUT_COUNT = :LOUT_COUNT\nWHERE\n    LOUT_APPS_ID = :LOUT_APPS_ID\n    AND LOUT_OBJECT = :LOUT_OBJECT\n    AND LOUT_VERSION = :LOUT_VERSION\n    AND LOUT_USAGE = :LOUT_USAGE"
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# Apps migrated from the v1 libnjde DB (NOMAJDE) — pools: jdedwards (Oracle JDE business DB),
+# nomajde (Postgres app DB), session (stub). Set the ${MIGRATED_PW_*} / ${LIBERTY_DB_URL_*}
+# env vars before use. Permission strings: sql:<connector>:<query_name>, api:ais_connection:<ep>.
+# ─────────────────────────────────────────────────────────────────────────────────────
+[pools.jdedwards]
+url = "oracle+oracledb://system:${MIGRATED_PW_JDEDWARDS}@79.72.70.64:1521/?service_name=JDEORCL"
+pool_pre_ping = true
+dialect = "oracle"
+pool_size = 10
+
+[pools.nomajde]
+url = "postgresql+asyncpg://nomajde:${MIGRATED_PW_NOMAJDE}@pg:5432/nomajde"
+pool_pre_ping = true
+dialect = "postgresql"
+pool_size = 10
+
+[pools.session]
+url = "${LIBERTY_DB_URL_SESSION}"
+pool_pre_ping = true
+
+[connectors.jdedwards]
+type = "sql"
+pool = "jdedwards"
+
+[[connectors.jdedwards.queries]]
+name = "f0005_delete"
+label = "F0005"
+writable = true
+sql = "DELETE FROM\n    F0005\nWHERE\n    DRSY = :DRSY\n    AND DRRT = :DRRT\n    AND DRKY = :DRKY"
+
+[[connectors.jdedwards.queries]]
+name = "f0005_get"
+label = "F0005"
+description = "User Defined Code"
+sql = "SELECT * FROM (\nSELECT \n    TRIM(DRSY) DRSY,\n    TRIM(DRRT) DRRT,\n    DRKY,\n    DRDL01,\n    DRDL02,\n    DRSPHD,\n    DRUDCO,\n    DRHRDC,\n    DRUSER,\n    DRPID,\n    DRUPMJ,\n    DRJOBN,\n    DRUPMT \nFROM \n  #SCHEMA.CTL#.F0005\n) _flt\nWHERE 1=1\n  AND ((CAST(:DRSY AS VARCHAR(4000)) IS NULL OR CAST(:DRSY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DRSY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.DRSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRSY AS VARCHAR(4000)) || '%')) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.DRSY AS VARCHAR(4000)) = CAST(:DRSY AS VARCHAR(4000))) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.DRSY AS VARCHAR(4000)) <> CAST(:DRSY AS VARCHAR(4000))) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.DRSY AS VARCHAR(4000))) LIKE LOWER(CAST(:DRSY AS VARCHAR(4000)) || '%')) OR (CAST(:DRSY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.DRSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRSY AS VARCHAR(4000)))))\n  AND ((CAST(:DRRT AS VARCHAR(4000)) IS NULL OR CAST(:DRRT AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DRRT_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.DRRT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRRT AS VARCHAR(4000)) || '%')) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.DRRT AS VARCHAR(4000)) = CAST(:DRRT AS VARCHAR(4000))) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.DRRT AS VARCHAR(4000)) <> CAST(:DRRT AS VARCHAR(4000))) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.DRRT AS VARCHAR(4000))) LIKE LOWER(CAST(:DRRT AS VARCHAR(4000)) || '%')) OR (CAST(:DRRT_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.DRRT AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DRRT AS VARCHAR(4000)))))\nORDER BY DRSY, DRRT, DRKY"
+columns = [
+    { name = "DRSY", dd = "SY", filter = true },
+    { name = "DRRT", dd = "RT", filter = true },
+    { name = "DRKY", dd = "KY" },
+    { name = "DRDL01", dd = "DL01" },
+    { name = "DRDL02", dd = "DL02" },
+    { name = "DRSPHD", dd = "SPHD" },
+    { name = "DRUDCO", dd = "UDCO", hidden = true },
+    { name = "DRHRDC", dd = "HRDC" },
+    { name = "DRUSER", dd = "USER", hidden = true },
+    { name = "DRPID", dd = "PID", hidden = true },
+    { name = "DRUPMJ", dd = "UPMJ" },
+    { name = "DRJOBN", dd = "JOBN", hidden = true },
+    { name = "DRUPMT", dd = "UPMT", hidden = true },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f0005_post"
+label = "F0005"
+writable = true
+sql = "INSERT INTO\n    F0005\n(\n    DRSY,\n    DRRT,\n    DRKY,\n    DRDL01,\n    DRDL02,\n    DRSPHD,\n    DRUDCO,\n    DRHRDC,\n    DRUSER,\n    DRPID,\n    DRUPMJ,\n    DRJOBN,\n    DRUPMT\n)\nVALUES (\n    :DRSY,\n    :DRRT,\n    :DRKY,\n    :DRDL01,\n    :DRDL02,\n    :DRSPHD,\n    :DRUDCO,\n    :DRHRDC,\n    :DRUSER,\n    :DRPID,\n    :DRUPMJ,\n    :DRJOBN,\n    :DRUPMT\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f0005_put"
+label = "F0005"
+writable = true
+sql = "UPDATE\n    F0005\nSET\n    DRDL01 = :DRDL01,\n    DRDL02 = :DRDL02,\n    DRSPHD = :DRSPHD,\n    DRUDCO = :DRUDCO,\n    DRHRDC = :DRHRDC,\n    DRUSER = :DRUSER,\n    DRPID = :DRPID,\n    DRUPMJ = :DRUPMJ,\n    DRJOBN = :DRJOBN,\n    DRUPMT = :DRUPMT\nWHERE\n    DRSY = :DRSY\n    AND DRRT = :DRRT\n    AND DRKY = :DRKY"
+
+[[connectors.jdedwards.queries]]
+name = "f0004_delete"
+label = "F0004"
+writable = true
+sql = "DELETE FROM\n    F0004\nWHERE\n    DTSY = :DTSY\n    AND DTRT = :DTRT"
+
+[[connectors.jdedwards.queries]]
+name = "f0004_get"
+label = "F0004"
+description = "User Defined Code Types"
+sql = "SELECT * FROM (\nSELECT \n    TRIM(DTSY) DTSY,\n    TRIM(DTRT) DTRT,\n    DTDL01,\n    DTUSEQ,\n    DTUCD1,\n    DTCDL,\n    DTLN2,\n    DTCNUM,\n    DTMRCT,\n    DTMRTY,\n    DTUSER,\n    DTPID,\n    DTUPMJ,\n    DTJOBN,\n    DTUPMT \nFROM \n  #SCHEMA.CTL#.F0004\n) _flt\nWHERE 1=1\n  AND ((CAST(:DTSY AS VARCHAR(4000)) IS NULL OR CAST(:DTSY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DTSY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.DTSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DTSY AS VARCHAR(4000)) || '%')) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.DTSY AS VARCHAR(4000)) = CAST(:DTSY AS VARCHAR(4000))) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.DTSY AS VARCHAR(4000)) <> CAST(:DTSY AS VARCHAR(4000))) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.DTSY AS VARCHAR(4000))) LIKE LOWER(CAST(:DTSY AS VARCHAR(4000)) || '%')) OR (CAST(:DTSY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.DTSY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DTSY AS VARCHAR(4000)))))"
+columns = [
+    { name = "DTSY", dd = "SY", filter = true },
+    { name = "DTRT", dd = "RT" },
+    { name = "DTDL01", dd = "DL01" },
+    { name = "DTUSEQ", dd = "USEQ", hidden = true },
+    { name = "DTUCD1", dd = "UCD1", hidden = true },
+    { name = "DTCDL", dd = "CDL", hidden = true },
+    { name = "DTLN2", dd = "LN2", hidden = true },
+    { name = "DTCNUM", dd = "CNUM", hidden = true },
+    { name = "DTMRCT", dd = "MRCT", hidden = true },
+    { name = "DTMRTY", dd = "MRTY", hidden = true },
+    { name = "DTUSER", dd = "USER", hidden = true },
+    { name = "DTPID", dd = "PID", hidden = true },
+    { name = "DTUPMJ", dd = "UPMJ", hidden = true, format = "number" },
+    { name = "DTJOBN", dd = "JOBN", hidden = true },
+    { name = "DTUPMT", dd = "UPMT", hidden = true },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f0004_post"
+label = "F0004"
+writable = true
+sql = "INSERT INTO\n    F0004\n(\n    DTSY,\n    DTRT,\n    DTDL01,\n    DTUSEQ,\n    DTUCD1,\n    DTCDL,\n    DTLN2,\n    DTCNUM,\n    DTMRCT,\n    DTMRTY,\n    DTUSER,\n    DTPID,\n    DTUPMJ,\n    DTJOBN,\n    DTUPMT\n)\nVALUES (\n    :DTSY,\n    :DTRT,\n    :DTDL01,\n    :DTUSEQ,\n    :DTUCD1,\n    :DTCDL,\n    :DTLN2,\n    :DTCNUM,\n    :DTMRCT,\n    :DTMRTY,\n    :DTUSER,\n    :DTPID,\n    :DTUPMJ,\n    :DTJOBN,\n    :DTUPMT\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f0004_put"
+label = "F0004"
+writable = true
+sql = "UPDATE\n    F0004\nSET\n    DTDL01 = :DTDL01,\n    DTUSEQ = :DTUSEQ,\n    DTUCD1 = :DTUCD1,\n    DTCDL = :DTCDL,\n    DTLN2 = :DTLN2,\n    DTCNUM = :DTCNUM,\n    DTMRCT = :DTMRCT,\n    DTMRTY = :DTMRTY,\n    DTUSER = :DTUSER,\n    DTPID = :DTPID,\n    DTUPMJ = :DTUPMJ,\n    DTJOBN = :DTJOBN,\n    DTUPMT = :DTUPMT\nWHERE\n    DTSY = :DTSY\n    AND DTRT = :DTRT"
+
+[[connectors.jdedwards.queries]]
+name = "f0004_delete_2"
+label = "F0004"
+writable = true
+sql = "DELETE FROM\n    F0004\nWHERE\n    DTSY = :DTSY\n    AND DTRT = :DTRT"
+
+[[connectors.jdedwards.queries]]
+name = "f0004_get_2"
+label = "F0004"
+description = "UDC Types Search&Select"
+sql = "SELECT * FROM (\nSELECT \n    DRSY DTSY,\n    DRRT DTRT,\n    TRIM(DRKY) KY,\n    DRDL01 DTDL01 \nFROM \n  #SCHEMA.CTL#.F0005\nWHERE \n  DRSY = '98' \n  AND DRRT = 'SY' \n  AND TRIM(SUBSTR(DRKY, 7,1)) IS NOT NULL\n) _flt\nWHERE 1=1\n  AND ((CAST(:KY AS VARCHAR(4000)) IS NULL OR CAST(:KY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:KY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.KY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:KY AS VARCHAR(4000)) || '%')) OR (CAST(:KY_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.KY AS VARCHAR(4000)) = CAST(:KY AS VARCHAR(4000))) OR (CAST(:KY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.KY AS VARCHAR(4000)) <> CAST(:KY AS VARCHAR(4000))) OR (CAST(:KY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.KY AS VARCHAR(4000))) LIKE LOWER(CAST(:KY AS VARCHAR(4000)) || '%')) OR (CAST(:KY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.KY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:KY AS VARCHAR(4000)))))\n  AND ((CAST(:DTDL01 AS VARCHAR(4000)) IS NULL OR CAST(:DTDL01 AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:DTDL01_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.DTDL01 AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DTDL01 AS VARCHAR(4000)) || '%')) OR (CAST(:DTDL01_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.DTDL01 AS VARCHAR(4000)) = CAST(:DTDL01 AS VARCHAR(4000))) OR (CAST(:DTDL01_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.DTDL01 AS VARCHAR(4000)) <> CAST(:DTDL01 AS VARCHAR(4000))) OR (CAST(:DTDL01_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.DTDL01 AS VARCHAR(4000))) LIKE LOWER(CAST(:DTDL01 AS VARCHAR(4000)) || '%')) OR (CAST(:DTDL01_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.DTDL01 AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:DTDL01 AS VARCHAR(4000)))))"
+columns = [
+    { name = "DTSY", dd = "SY", hidden = true },
+    { name = "DTRT", dd = "RT", hidden = true },
+    { name = "KY", filter = true },
+    { name = "DTDL01", dd = "DL01", filter = true },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f0004_post_2"
+label = "F0004"
+writable = true
+sql = "INSERT INTO\n    F0004\n(\n    DTSY,\n    DTRT,\n    DTDL01\n)\nVALUES (\n    :DTSY,\n    :DTRT,\n    :DTDL01\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f0004_put_2"
+label = "F0004"
+writable = true
+sql = "UPDATE\n    F0004\nSET\n    DTDL01 = :DTDL01\nWHERE\n    DTSY = :DTSY\n    AND DTRT = :DTRT"
+
+[[connectors.jdedwards.queries]]
+name = "f0092_delete"
+label = "F0092"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F0092\nWHERE\n    ULUSER = :ULUSER"
+
+[[connectors.jdedwards.queries]]
+name = "f0092_get"
+label = "F0092"
+description = "Users / Roles"
+auto_load = true
+sql = "SELECT \n    TRIM(A.ULUSER) ULUSER,\n    ULMNI,\n    ULOUTQ,\n    ULJOBQ,\n    ULJSP,\n    ULOUTP,\n    ULLLVL,\n    ULLSEV,\n    ULLMSG,\n    ULPRTL,\n    ULUL01,\n    ULUL02,\n    ULUL03,\n    ULUL04,\n    ULUL05,\n    ULUL06,\n    ULUL07,\n    ULUL08,\n    ULUL09,\n    ULUL10,\n    ULUL11,\n    ULUL12,\n    ULUL13,\n    ULUL14,\n    ULUL15,\n    ULUL16,\n    ULUL17,\n    ULUL18,\n    ULUL19,\n    ULUL20,\n    ULUL21,\n    ULUL22,\n    ULUL23,\n    ULUL24,\n    ULUL25,\n    ULMSKA,\n    ULMSKJ,\n    ULMSKK,\n    ULMSKD,\n    ULMSKF,\n    ULAN8,\n    ULUTYP,\n    A.ULPID,\n    ULMTVL,\n    ULCMDE,\n    ULCLIB,\n    ULUGRP,\n    ULIPGM,\n    ULLOD,\n    ULFSTP,\n    NVL(TRIM(B.ULLNGP),' ') ULLNGP, \n    NVL(TRIM(B.ULFRMT),' ') ULFRMT,\n    NVL(TRIM(B.ULCTR),' ') ULCTR,\n    NVL(B.ULDSEP, ' ') ULDSEP,\n    NVL(B.ULDECF, ' ') ULDECF,\n    C.ABALPH\nFROM \n  #SCHEMA.SY#.F0092 A\nLEFT JOIN \n  #SCHEMA.SY#.F00921 B \n  ON A.ULUSER=B.ULUSER\nLEFT JOIN \n  #SCHEMA.DTA#.F0101 C \n  ON A.ULAN8=ABAN8\nWHERE\n ULUGRP <> '*GROUP'\nORDER BY ULUSER"
+columns = [
+    { name = "ULUSER", dd = "USER" },
+    { name = "ULMNI", dd = "MNI", hidden = true },
+    { name = "ABALPH", dd = "ALPH" },
+    { name = "ULOUTQ", dd = "OUTQ", hidden = true },
+    { name = "ULJOBQ", dd = "JOBQ", hidden = true },
+    { name = "ULJSP", dd = "JSP", hidden = true },
+    { name = "ULOUTP", dd = "OUTP", hidden = true },
+    { name = "ULLLVL", dd = "LLVL", hidden = true },
+    { name = "ULLSEV", dd = "LSEV", hidden = true },
+    { name = "ULLMSG", dd = "LMSG", hidden = true },
+    { name = "ULPRTL", dd = "PRTL", hidden = true },
+    { name = "ULUL01", dd = "UL01", hidden = true },
+    { name = "ULUL02", dd = "UL02", hidden = true },
+    { name = "ULUL03", dd = "UL03", hidden = true },
+    { name = "ULUL04", dd = "UL04", hidden = true },
+    { name = "ULUL05", dd = "UL05", hidden = true },
+    { name = "ULUL06", dd = "UL06", hidden = true },
+    { name = "ULUL07", dd = "UL07", hidden = true },
+    { name = "ULUL08", dd = "UL08", hidden = true },
+    { name = "ULUL09", dd = "UL09", hidden = true },
+    { name = "ULUL10", dd = "UL10", hidden = true },
+    { name = "ULUL11", dd = "UL11", hidden = true },
+    { name = "ULUL12", dd = "UL12", hidden = true },
+    { name = "ULUL13", dd = "UL13", hidden = true },
+    { name = "ULUL14", dd = "UL14", hidden = true },
+    { name = "ULUL15", dd = "UL15", hidden = true },
+    { name = "ULUL16", dd = "UL16", hidden = true },
+    { name = "ULUL17", dd = "UL17", hidden = true },
+    { name = "ULUL18", dd = "UL18", hidden = true },
+    { name = "ULUL19", dd = "UL19", hidden = true },
+    { name = "ULUL20", dd = "UL20", hidden = true },
+    { name = "ULUL21", dd = "UL21", hidden = true },
+    { name = "ULUL22", dd = "UL22", hidden = true },
+    { name = "ULUL23", dd = "UL23", hidden = true },
+    { name = "ULUL24", dd = "UL24", hidden = true },
+    { name = "ULUL25", dd = "UL25", hidden = true },
+    { name = "ULMSKA", dd = "MSKA", hidden = true },
+    { name = "ULMSKJ", dd = "MSKJ", hidden = true },
+    { name = "ULMSKK", dd = "MSKK", hidden = true },
+    { name = "ULMSKD", dd = "MSKD", hidden = true },
+    { name = "ULMSKF", dd = "MSKF", hidden = true },
+    { name = "ULAN8", dd = "AN8", format = "number" },
+    { name = "ULUTYP", dd = "UTYP", hidden = true },
+    { name = "ULPID", dd = "PID", hidden = true },
+    { name = "ULMTVL", dd = "MTVL", hidden = true },
+    { name = "ULCMDE", dd = "CMDE", hidden = true },
+    { name = "ULCLIB", dd = "CLIB", hidden = true },
+    { name = "ULUGRP", dd = "UGRP", hidden = true },
+    { name = "ULIPGM", dd = "IPGM", hidden = true },
+    { name = "ULLOD", dd = "LOD", hidden = true },
+    { name = "ULFSTP", dd = "FSTP", hidden = true },
+    { name = "ULLNGP", dd = "LNGP" },
+    { name = "ULFRMT", dd = "FRMT" },
+    { name = "ULCTR", dd = "CTR" },
+    { name = "ULDSEP", dd = "DSEP", hidden = true },
+    { name = "ULDECF", dd = "DECF", hidden = true },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f0092_post"
+label = "F0092"
+writable = true
+sql = "INSERT INTO\n    #SCHEMA.SY#.F0092\n(\n    ULUSER,\n    ULMNI,\n    ULOUTQ,\n    ULJOBQ,\n    ULJSP,\n    ULOUTP,\n    ULLLVL,\n    ULLSEV,\n    ULLMSG,\n    ULPRTL,\n    ULUL01,\n    ULUL02,\n    ULUL03,\n    ULUL04,\n    ULUL05,\n    ULUL06,\n    ULUL07,\n    ULUL08,\n    ULUL09,\n    ULUL10,\n    ULUL11,\n    ULUL12,\n    ULUL13,\n    ULUL14,\n    ULUL15,\n    ULUL16,\n    ULUL17,\n    ULUL18,\n    ULUL19,\n    ULUL20,\n    ULUL21,\n    ULUL22,\n    ULUL23,\n    ULUL24,\n    ULUL25,\n    ULMSKA,\n    ULMSKJ,\n    ULMSKK,\n    ULMSKD,\n    ULMSKF,\n    ULAN8,\n    ULUTYP,\n    ULPID,\n    ULMTVL,\n    ULCMDE,\n    ULCLIB,\n    ULUGRP,\n    ULIPGM,\n    ULLOD,\n    ULFSTP\n)\nVALUES (\n    :ULUSER,\n    :ULMNI,\n    :ULOUTQ,\n    :ULJOBQ,\n    :ULJSP,\n    :ULOUTP,\n    :ULLLVL,\n    :ULLSEV,\n    :ULLMSG,\n    :ULPRTL,\n    :ULUL01,\n    :ULUL02,\n    :ULUL03,\n    :ULUL04,\n    :ULUL05,\n    :ULUL06,\n    :ULUL07,\n    :ULUL08,\n    :ULUL09,\n    :ULUL10,\n    :ULUL11,\n    :ULUL12,\n    :ULUL13,\n    :ULUL14,\n    :ULUL15,\n    :ULUL16,\n    :ULUL17,\n    :ULUL18,\n    :ULUL19,\n    :ULUL20,\n    :ULUL21,\n    :ULUL22,\n    :ULUL23,\n    :ULUL24,\n    :ULUL25,\n    :ULMSKA,\n    :ULMSKJ,\n    :ULMSKK,\n    :ULMSKD,\n    :ULMSKF,\n    :ULAN8,\n    :ULUTYP,\n    :ULPID,\n    :ULMTVL,\n    :ULCMDE,\n    :ULCLIB,\n    :ULUGRP,\n    :ULIPGM,\n    :ULLOD,\n    :ULFSTP\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f0092_put"
+label = "F0092"
+writable = true
+sql = "MERGE INTO #SCHEMA.SY#.F0092 t\nUSING (\n  SELECT     \n    :ULUSER AS ULUSER,\n    :ULMNI AS ULMNI,\n    :ULOUTQ AS ULOUTQ,\n    :ULJOBQ AS ULJOBQ,\n    :ULJSP AS ULJSP,\n    :ULOUTP AS ULOUTP,\n    :ULLLVL AS ULLLVL,\n    :ULLSEV AS ULLSEV,\n    :ULLMSG AS ULLMSG,\n    :ULPRTL AS ULPRTL,\n    :ULUL01 AS ULUL01,\n    :ULUL02 AS ULUL02,\n    :ULUL03 AS ULUL03,\n    :ULUL04 AS ULUL04,\n    :ULUL05 AS ULUL05,\n    :ULUL06 AS ULUL06,\n    :ULUL07 AS ULUL07,\n    :ULUL08 AS ULUL08,\n    :ULUL09 AS ULUL09,\n    :ULUL10 AS ULUL10,\n    :ULUL11 AS ULUL11,\n    :ULUL12 AS ULUL12,\n    :ULUL13 AS ULUL13,\n    :ULUL14 AS ULUL14,\n    :ULUL15 AS ULUL15,\n    :ULUL16 AS ULUL16,\n    :ULUL17 AS ULUL17,\n    :ULUL18 AS ULUL18,\n    :ULUL19 AS ULUL19,\n    :ULUL20 AS ULUL20,\n    :ULUL21 AS ULUL21,\n    :ULUL22 AS ULUL22,\n    :ULUL23 AS ULUL23,\n    :ULUL24 AS ULUL24,\n    :ULUL25 AS ULUL25,\n    :ULMSKA AS ULMSKA,\n    :ULMSKJ AS ULMSKJ,\n    :ULMSKK AS ULMSKK,\n    :ULMSKD AS ULMSKD,\n    :ULMSKF AS ULMSKF,\n    :ULAN8 AS ULAN8,\n    :ULUTYP AS ULUTYP,\n    :ULPID AS ULPID,\n    :ULMTVL AS ULMTVL,\n    :ULCMDE AS ULCMDE,\n    :ULCLIB AS ULCLIB,\n    :ULUGRP AS ULUGRP,\n    :ULIPGM AS ULIPGM,\n    :ULLOD AS ULLOD,\n    :ULFSTP AS ULFSTP\n  FROM dual) src\nON (t.ULUSER = src.ULUSER \n)\nWHEN MATCHED THEN\n  UPDATE SET \n    t.ULMNI = src.ULMNI,\n    t.ULOUTQ = src.ULOUTQ,\n    t.ULJOBQ = src.ULJOBQ,\n    t.ULJSP = src.ULJSP,\n    t.ULOUTP = src.ULOUTP,\n    t.ULLLVL = src.ULLLVL,\n    t.ULLSEV = src.ULLSEV,\n    t.ULLMSG = src.ULLMSG,\n    t.ULPRTL = src.ULPRTL,\n    t.ULUL01 = src.ULUL01,\n    t.ULUL02 = src.ULUL02,\n    t.ULUL03 = src.ULUL03,\n    t.ULUL04 = src.ULUL04,\n    t.ULUL05 = src.ULUL05,\n    t.ULUL06 = src.ULUL06,\n    t.ULUL07 = src.ULUL07,\n    t.ULUL08 = src.ULUL08,\n    t.ULUL09 = src.ULUL09,\n    t.ULUL10 = src.ULUL10,\n    t.ULUL11 = src.ULUL11,\n    t.ULUL12 = src.ULUL12,\n    t.ULUL13 = src.ULUL13,\n    t.ULUL14 = src.ULUL14,\n    t.ULUL15 = src.ULUL15,\n    t.ULUL16 = src.ULUL16,\n    t.ULUL17 = src.ULUL17,\n    t.ULUL18 = src.ULUL18,\n    t.ULUL19 = src.ULUL19,\n    t.ULUL20 = src.ULUL20,\n    t.ULUL21 = src.ULUL21,\n    t.ULUL22 = src.ULUL22,\n    t.ULUL23 = src.ULUL23,\n    t.ULUL24 = src.ULUL24,\n    t.ULUL25 = src.ULUL25,\n    t.ULMSKA = src.ULMSKA,\n    t.ULMSKJ = src.ULMSKJ,\n    t.ULMSKK = src.ULMSKK,\n    t.ULMSKD = src.ULMSKD,\n    t.ULMSKF = src.ULMSKF,\n    t.ULAN8 = src.ULAN8,\n    t.ULUTYP = src.ULUTYP,\n    t.ULPID = src.ULPID,\n    t.ULMTVL = src.ULMTVL,\n    t.ULCMDE = src.ULCMDE,\n    t.ULCLIB = src.ULCLIB,\n    t.ULUGRP = src.ULUGRP,\n    t.ULIPGM = src.ULIPGM,\n    t.ULLOD = src.ULLOD,\n    t.ULFSTP = src.ULFSTP\nWHEN NOT MATCHED THEN\n  INSERT (ULUSER,\n    ULMNI,\n    ULOUTQ,\n    ULJOBQ,\n    ULJSP,\n    ULOUTP,\n    ULLLVL,\n    ULLSEV,\n    ULLMSG,\n    ULPRTL,\n    ULUL01,\n    ULUL02,\n    ULUL03,\n    ULUL04,\n    ULUL05,\n    ULUL06,\n    ULUL07,\n    ULUL08,\n    ULUL09,\n    ULUL10,\n    ULUL11,\n    ULUL12,\n    ULUL13,\n    ULUL14,\n    ULUL15,\n    ULUL16,\n    ULUL17,\n    ULUL18,\n    ULUL19,\n    ULUL20,\n    ULUL21,\n    ULUL22,\n    ULUL23,\n    ULUL24,\n    ULUL25,\n    ULMSKA,\n    ULMSKJ,\n    ULMSKK,\n    ULMSKD,\n    ULMSKF,\n    ULAN8,\n    ULUTYP,\n    ULPID,\n    ULMTVL,\n    ULCMDE,\n    ULCLIB,\n    ULUGRP,\n    ULIPGM,\n    ULLOD,\n    ULFSTP )\n  VALUES (src.ULUSER, src.ULMNI, src.ULOUTQ, src.ULJOBQ, src.ULJSP, src.ULOUTP, src.ULLLVL, src.ULLSEV, src.ULLMSG, src.ULPRTL, src.ULUL01, src.ULUL02, src.ULUL03, src.ULUL04, src.ULUL05, src.ULUL06, src.ULUL07, src.ULUL08, src.ULUL09, src.ULUL10, src.ULUL11, src.ULUL12, src.ULUL13, src.ULUL14, src.ULUL15, src.ULUL16, src.ULUL17, src.ULUL18, src.ULUL19, src.ULUL20, src.ULUL21, src.ULUL22, src.ULUL23, src.ULUL24, src.ULUL25, src.ULMSKA, src.ULMSKJ, src.ULMSKK, src.ULMSKD, src.ULMSKF, src.ULAN8, src.ULUTYP, src.ULPID, src.ULMTVL, src.ULCMDE, src.ULCLIB, src.ULUGRP, src.ULIPGM, src.ULLOD, src.ULFSTP)"
+
+[[connectors.jdedwards.queries]]
+name = "user_management_get"
+label = "User Management"
+description = "User Management"
+auto_load = true
+sql = "SELECT \n A.ULUSER,\n A.ULAN8,\n B.ULLNGP, \n B.ULFRMT,\n B.ULCTR\nFrom #SCHEMA.SY#.F0092 A \nLeft Outer Join #SCHEMA.SY#.F00921 B ON A.ULUSER=B.ULUSER\nLeft Outer Join #SCHEMA.DTA#.F0101 C on A.ULAN8=ABAN8\nWHERE\n ULUGRP <> '*GROUP'\nORDER BY ULUSER"
+columns = [
+    { name = "ULUSER", dd = "USER" },
+    { name = "ULAN8", dd = "AN8", format = "number" },
+    { name = "ULLNGP", dd = "LNGP" },
+    { name = "ULFRMT", dd = "FRMT" },
+    { name = "ULCTR", dd = "CTR" },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f95921_delete"
+label = "F95921"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F95921\nWHERE\n    RLFRROLE = :RLFRROLE\n    AND RLTOROLE = :RLTOROLE\n    AND RLEFFDATE = :RLEFFDATE"
+
+[[connectors.jdedwards.queries]]
+name = "f95921_get"
+label = "F95921"
+description = "Role Relationships for User / Role"
+auto_load = true
+sql = "SELECT * FROM (\nSELECT \n    TRIM(RLFRROLE) RLFRROLE,\n    TRIM(RLTOROLE) RLTOROLE,\n    RLEFFDATE,\n    RLEXPIRDATE,\n    RLROLETYP,\n    RLSYSROLE,\n    RLDEFROLE,\n    RLFUROLE1,\n    RLFUROLE2,\n    RLFUROLE3,\n    RLFUROLE4,\n    RLFUROLE5,\n    RLFUROLE6,\n    RLFUROLE7,\n    RLFUROLE8,\n    RLFUROLE9,\n    RLFUROLE10,\n    RLFUROLE11,\n    RLFUROLE12,\n    RLFUROLE13,\n    RLFUROLE14,\n    RLFUROLE15,\n    RLFUROLE16,\n    RLFUROLE17,\n    RLFUROLE18,\n    RLFUROLE19,\n    RLFUROLE20,\n    RLFUROLE22,\n    RLFUROLE23,\n    RLFUROLE24,\n    RLFUROLE25,\n    RLUSER,\n    RLPID,\n    RLJOBN,\n    RLUPMJ,\n    RLUPMT \nFROM \n  #SCHEMA.SY#.F95921\nWHERE\n  RLTOROLE <> 'ROLECHSR'\n) _flt\nWHERE 1=1\n  AND ((CAST(:RLTOROLE AS VARCHAR(4000)) IS NULL OR CAST(:RLTOROLE AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:RLTOROLE_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.RLTOROLE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:RLTOROLE AS VARCHAR(4000)) || '%')) OR (CAST(:RLTOROLE_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.RLTOROLE AS VARCHAR(4000)) = CAST(:RLTOROLE AS VARCHAR(4000))) OR (CAST(:RLTOROLE_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.RLTOROLE AS VARCHAR(4000)) <> CAST(:RLTOROLE AS VARCHAR(4000))) OR (CAST(:RLTOROLE_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.RLTOROLE AS VARCHAR(4000))) LIKE LOWER(CAST(:RLTOROLE AS VARCHAR(4000)) || '%')) OR (CAST(:RLTOROLE_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.RLTOROLE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:RLTOROLE AS VARCHAR(4000)))))\n  AND ((CAST(:RLFRROLE AS VARCHAR(4000)) IS NULL OR CAST(:RLFRROLE AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:RLFRROLE_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.RLFRROLE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:RLFRROLE AS VARCHAR(4000)) || '%')) OR (CAST(:RLFRROLE_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.RLFRROLE AS VARCHAR(4000)) = CAST(:RLFRROLE AS VARCHAR(4000))) OR (CAST(:RLFRROLE_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.RLFRROLE AS VARCHAR(4000)) <> CAST(:RLFRROLE AS VARCHAR(4000))) OR (CAST(:RLFRROLE_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.RLFRROLE AS VARCHAR(4000))) LIKE LOWER(CAST(:RLFRROLE AS VARCHAR(4000)) || '%')) OR (CAST(:RLFRROLE_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.RLFRROLE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:RLFRROLE AS VARCHAR(4000)))))\nORDER BY RLTOROLE, RLFRROLE"
+columns = [
+    { name = "RLTOROLE", dd = "TOROLE", filter = true },
+    { name = "RLFRROLE", dd = "FRROLE", filter = true },
+    { name = "RLEFFDATE", dd = "EFFDATE" },
+    { name = "RLEXPIRDATE", dd = "EXPIRDATE" },
+    { name = "RLROLETYP", dd = "ROLETYP", hidden = true },
+    { name = "RLSYSROLE", dd = "SYSROLE", hidden = true },
+    { name = "RLDEFROLE", dd = "DEFROLE", hidden = true },
+    { name = "RLFUROLE1", dd = "FUROLE1" },
+    { name = "RLFUROLE2", dd = "FUROLE2", hidden = true },
+    { name = "RLFUROLE3", dd = "FUROLE3", hidden = true },
+    { name = "RLFUROLE4", dd = "FUROLE4", hidden = true },
+    { name = "RLFUROLE5", dd = "FUROLE5", hidden = true },
+    { name = "RLFUROLE6", dd = "FUROLE6", hidden = true },
+    { name = "RLFUROLE7", dd = "FUROLE7", hidden = true },
+    { name = "RLFUROLE8", dd = "FUROLE8", hidden = true },
+    { name = "RLFUROLE9", dd = "FUROLE9", hidden = true },
+    { name = "RLFUROLE10", dd = "FUROLE10", hidden = true },
+    { name = "RLFUROLE11", dd = "FUROLE11", hidden = true },
+    { name = "RLFUROLE12", dd = "FUROLE12", hidden = true },
+    { name = "RLFUROLE13", dd = "FUROLE13", hidden = true },
+    { name = "RLFUROLE14", dd = "FUROLE14", hidden = true },
+    { name = "RLFUROLE15", dd = "FUROLE15", hidden = true },
+    { name = "RLFUROLE16", dd = "FUROLE16", hidden = true },
+    { name = "RLFUROLE17", dd = "FUROLE17", hidden = true },
+    { name = "RLFUROLE18", dd = "FUROLE18", hidden = true },
+    { name = "RLFUROLE19", dd = "FUROLE19", hidden = true },
+    { name = "RLFUROLE20", dd = "FUROLE20", hidden = true },
+    { name = "RLFUROLE22", dd = "FUROLE22", hidden = true },
+    { name = "RLFUROLE23", dd = "FUROLE23", hidden = true },
+    { name = "RLFUROLE24", dd = "FUROLE24", hidden = true, format = "number" },
+    { name = "RLFUROLE25", dd = "FUROLE25", hidden = true, format = "number" },
+    { name = "RLUSER", dd = "USER", hidden = true },
+    { name = "RLPID", dd = "PID", hidden = true },
+    { name = "RLJOBN", dd = "JOBN", hidden = true },
+    { name = "RLUPMJ", dd = "UPMJ", hidden = true },
+    { name = "RLUPMT", dd = "UPMT", hidden = true, format = "number" },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f95921_post"
+label = "F95921"
+writable = true
+sql = "INSERT INTO\n    #SCHEMA.SY#.F95921\n(\n    RLFRROLE,\n    RLTOROLE,\n    RLEFFDATE,\n    RLEXPIRDATE,\n    RLROLETYP,\n    RLSYSROLE,\n    RLDEFROLE,\n    RLFUROLE1,\n    RLFUROLE2,\n    RLFUROLE3,\n    RLFUROLE4,\n    RLFUROLE5,\n    RLFUROLE6,\n    RLFUROLE7,\n    RLFUROLE8,\n    RLFUROLE9,\n    RLFUROLE10,\n    RLFUROLE11,\n    RLFUROLE12,\n    RLFUROLE13,\n    RLFUROLE14,\n    RLFUROLE15,\n    RLFUROLE16,\n    RLFUROLE17,\n    RLFUROLE18,\n    RLFUROLE19,\n    RLFUROLE20,\n    RLFUROLE22,\n    RLFUROLE23,\n    RLFUROLE24,\n    RLFUROLE25,\n    RLUSER,\n    RLPID,\n    RLJOBN,\n    RLUPMJ,\n    RLUPMT\n)\nVALUES (\n    :RLFRROLE,\n    :RLTOROLE,\n    :RLEFFDATE,\n    :RLEXPIRDATE,\n    :RLROLETYP,\n    :RLSYSROLE,\n    :RLDEFROLE,\n    :RLFUROLE1,\n    :RLFUROLE2,\n    :RLFUROLE3,\n    :RLFUROLE4,\n    :RLFUROLE5,\n    :RLFUROLE6,\n    :RLFUROLE7,\n    :RLFUROLE8,\n    :RLFUROLE9,\n    :RLFUROLE10,\n    :RLFUROLE11,\n    :RLFUROLE12,\n    :RLFUROLE13,\n    :RLFUROLE14,\n    :RLFUROLE15,\n    :RLFUROLE16,\n    :RLFUROLE17,\n    :RLFUROLE18,\n    :RLFUROLE19,\n    :RLFUROLE20,\n    :RLFUROLE22,\n    :RLFUROLE23,\n    :RLFUROLE24,\n    :RLFUROLE25,\n    :RLUSER,\n    :RLPID,\n    :RLJOBN,\n    :RLUPMJ,\n    :RLUPMT\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f95921_put"
+label = "F95921"
+writable = true
+sql = "MERGE INTO #SCHEMA.SY#.F95921 t\nUSING (\n  SELECT \n    :RLFRROLE AS RLFRROLE,\n    :RLTOROLE AS RLTOROLE,\n    :RLEFFDATE AS RLEFFDATE,\n    :RLEXPIRDATE AS RLEXPIRDATE,\n    :RLROLETYP AS RLROLETYP,\n    :RLSYSROLE AS RLSYSROLE,\n    :RLDEFROLE AS RLDEFROLE,\n    :RLFUROLE1 AS RLFUROLE1,\n    :RLFUROLE2 AS RLFUROLE2,\n    :RLFUROLE3 AS RLFUROLE3,\n    :RLFUROLE4 AS RLFUROLE4,\n    :RLFUROLE5 AS RLFUROLE5,\n    :RLFUROLE6 AS RLFUROLE6,\n    :RLFUROLE7 AS RLFUROLE7,\n    :RLFUROLE8 AS RLFUROLE8,\n    :RLFUROLE9 AS RLFUROLE9,\n    :RLFUROLE10 AS RLFUROLE10,\n    :RLFUROLE11 AS RLFUROLE11,\n    :RLFUROLE12 AS RLFUROLE12,\n    :RLFUROLE13 AS RLFUROLE13,\n    :RLFUROLE14 AS RLFUROLE14,\n    :RLFUROLE15 AS RLFUROLE15,\n    :RLFUROLE16 AS RLFUROLE16,\n    :RLFUROLE17 AS RLFUROLE17,\n    :RLFUROLE18 AS RLFUROLE18,\n    :RLFUROLE19 AS RLFUROLE19,\n    :RLFUROLE20 AS RLFUROLE20,\n    :RLFUROLE22 AS RLFUROLE22,\n    :RLFUROLE23 AS RLFUROLE23,\n    :RLFUROLE24 AS RLFUROLE24,\n    :RLFUROLE25 AS RLFUROLE25,\n    :RLUSER AS RLUSER,\n    :RLPID AS RLPID,\n    :RLJOBN AS RLJOBN,\n    :RLUPMJ AS RLUPMJ,\n    :RLUPMT AS RLUPMT \n  FROM dual) src\nON (    t.RLFRROLE = src.RLFRROLE\n    AND t.RLTOROLE = src.RLTOROLE\n    AND t.RLEFFDATE = src.RLEFFDATE )\nWHEN MATCHED THEN\n  UPDATE SET \n    t.RLEXPIRDATE = src.RLEXPIRDATE,\n    t.RLROLETYP = src.RLROLETYP,\n    t.RLSYSROLE = src.RLSYSROLE,\n    t.RLDEFROLE = src.RLDEFROLE,\n    t.RLFUROLE1 = src.RLFUROLE1,\n    t.RLFUROLE2 = src.RLFUROLE2,\n    t.RLFUROLE3 = src.RLFUROLE3,\n    t.RLFUROLE4 = src.RLFUROLE4,\n    t.RLFUROLE5 = src.RLFUROLE5,\n    t.RLFUROLE6 = src.RLFUROLE6,\n    t.RLFUROLE7 = src.RLFUROLE7,\n    t.RLFUROLE8 = src.RLFUROLE8,\n    t.RLFUROLE9 = src.RLFUROLE9,\n    t.RLFUROLE10 = src.RLFUROLE10,\n    t.RLFUROLE11 = src.RLFUROLE11,\n    t.RLFUROLE12 = src.RLFUROLE12,\n    t.RLFUROLE13 = src.RLFUROLE13,\n    t.RLFUROLE14 = src.RLFUROLE14,\n    t.RLFUROLE15 = src.RLFUROLE15,\n    t.RLFUROLE16 = src.RLFUROLE16,\n    t.RLFUROLE17 = src.RLFUROLE17,\n    t.RLFUROLE18 = src.RLFUROLE18,\n    t.RLFUROLE19 = src.RLFUROLE19,\n    t.RLFUROLE20 = src.RLFUROLE20,\n    t.RLFUROLE22 = src.RLFUROLE22,\n    t.RLFUROLE23 = src.RLFUROLE23,\n    t.RLFUROLE24 = src.RLFUROLE24,\n    t.RLFUROLE25 = src.RLFUROLE25,\n    t.RLUSER = src.RLUSER,\n    t.RLPID = src.RLPID,\n    t.RLJOBN = src.RLJOBN,\n    t.RLUPMJ = src.RLUPMJ,\n    t.RLUPMT = src.RLUPMT\nWHEN NOT MATCHED THEN\n  INSERT ( \n    RLFRROLE,\n    RLTOROLE,\n    RLEFFDATE,\n    RLEXPIRDATE,\n    RLROLETYP,\n    RLSYSROLE,\n    RLDEFROLE,\n    RLFUROLE1,\n    RLFUROLE2,\n    RLFUROLE3,\n    RLFUROLE4,\n    RLFUROLE5,\n    RLFUROLE6,\n    RLFUROLE7,\n    RLFUROLE8,\n    RLFUROLE9,\n    RLFUROLE10,\n    RLFUROLE11,\n    RLFUROLE12,\n    RLFUROLE13,\n    RLFUROLE14,\n    RLFUROLE15,\n    RLFUROLE16,\n    RLFUROLE17,\n    RLFUROLE18,\n    RLFUROLE19,\n    RLFUROLE20,\n    RLFUROLE22,\n    RLFUROLE23,\n    RLFUROLE24,\n    RLFUROLE25,\n    RLUSER,\n    RLPID,\n    RLJOBN,\n    RLUPMJ,\n    RLUPMT  )\n  VALUES (src.RLFRROLE, src.RLTOROLE, src.RLEFFDATE, src.RLEXPIRDATE, src.RLROLETYP, src.RLSYSROLE, src.RLDEFROLE, src.RLFUROLE1, src.RLFUROLE2, src.RLFUROLE3, src.RLFUROLE4, src.RLFUROLE5, src.RLFUROLE6, src.RLFUROLE7, src.RLFUROLE8, src.RLFUROLE9, src.RLFUROLE10, src.RLFUROLE11, src.RLFUROLE12, src.RLFUROLE13, src.RLFUROLE14, src.RLFUROLE15, src.RLFUROLE16, src.RLFUROLE17, src.RLFUROLE18, src.RLFUROLE19, src.RLFUROLE20, src.RLFUROLE22, src.RLFUROLE23, src.RLFUROLE24, src.RLFUROLE25, src.RLUSER, src.RLPID, src.RLJOBN, src.RLUPMJ, src.RLUPMT)"
+
+[[connectors.jdedwards.queries]]
+name = "get_user_name_get"
+label = "Get User Name"
+sql = "SELECT \n  ABALPH ALPH,\n  TRIM(ULUSER) \"USER\"\nFROM\n  #SCHEMA.SY#.F0092\nLEFT JOIN\n  #SCHEMA.DTA#.F0101\n  ON ABAN8 = ULAN8\nWHERE\n  ULUGRP <> '*GROUP'\nORDER BY USER"
+
+[[connectors.jdedwards.queries]]
+name = "f00926_delete"
+label = "F00926"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F00926\nWHERE\n    AUUSER = :AUUSER"
+
+[[connectors.jdedwards.queries]]
+name = "f00926_get"
+label = "F00926"
+description = "Role Description"
+auto_load = true
+sql = "SELECT \n    TRIM(AUUSER) AUUSER,\n    AUWUID,\n    AUROLEDESC,\n    AULNGP,\n    AUSEQNO,\n    AUEMLA,\n    AULASTLOGIN,\n    AUUSEINTENSE,\n    AUWEBIDCRE,\n    AUACTINACT,\n    AUFUTANON1,\n    AUFUTANON2,\n    AUFUTANON10,\n    AUFUTANON11,\n    AUFUTANON12,\n    AUFUTANON3,\n    AUFUTANON4,\n    AUFUTANON5,\n    AUFUTANON6,\n    AUFUTANON7,\n    AUFUTANON8,\n    AUFUTANON9,\n    AUFUTANON13,\n    AUFUTANON14,\n    AUFUTANON15,\n    AUFUTANON16,\n    AUMUSE,\n    AUPID,\n    AUJOBN,\n    AUUPMJ,\n    AUUPMT, \n    CASE \n    WHEN EXISTS (\n        SELECT 1 \n        FROM #SCHEMA.SY#.F95921 \n        WHERE RLTOROLE = AUUSER\n    ) THEN 'Y'\n    ELSE 'N'\nEND AS IS_PARENT\nFROM \n  #SCHEMA.SY#.F00926\nORDER BY AUUSER"
+columns = [
+    { name = "AUUSER", dd = "USER" },
+    { name = "AUWUID", dd = "WUID", hidden = true },
+    { name = "AUROLEDESC", dd = "ROLEDESC" },
+    { name = "AULNGP", dd = "LNGP", hidden = true },
+    { name = "AUSEQNO", dd = "SEQNO", format = "number" },
+    { name = "AUEMLA", dd = "EMLA", hidden = true },
+    { name = "AULASTLOGIN", dd = "LASTLOGIN", hidden = true, format = "number" },
+    { name = "AUUSEINTENSE", dd = "USEINTENSE", hidden = true, format = "number" },
+    { name = "AUWEBIDCRE", dd = "WEBIDCRE", hidden = true },
+    { name = "AUACTINACT", dd = "ACTINACT", hidden = true },
+    { name = "AUFUTANON1", dd = "FUTANON1", hidden = true },
+    { name = "AUFUTANON2", dd = "FUTANON2", hidden = true },
+    { name = "AUFUTANON10", dd = "FUTANON10", hidden = true },
+    { name = "AUFUTANON11", dd = "FUTANON11", hidden = true },
+    { name = "AUFUTANON12", dd = "FUTANON12", hidden = true },
+    { name = "AUFUTANON3", dd = "FUTANON3", hidden = true },
+    { name = "AUFUTANON4", dd = "FUTANON4", hidden = true },
+    { name = "AUFUTANON5", dd = "FUTANON5", hidden = true },
+    { name = "AUFUTANON6", dd = "FUTANON6", hidden = true },
+    { name = "AUFUTANON7", dd = "FUTANON7", hidden = true },
+    { name = "AUFUTANON8", dd = "FUTANON8", hidden = true, format = "number" },
+    { name = "AUFUTANON9", dd = "FUTANON9", hidden = true, format = "number" },
+    { name = "AUFUTANON13", dd = "FUTANON13", hidden = true, format = "number" },
+    { name = "AUFUTANON14", dd = "FUTANON14", hidden = true, format = "number" },
+    { name = "AUFUTANON15", dd = "FUTANON15", hidden = true, format = "number" },
+    { name = "AUFUTANON16", dd = "FUTANON16", hidden = true, format = "number" },
+    { name = "AUMUSE", dd = "MUSE", hidden = true },
+    { name = "AUPID", dd = "PID", hidden = true },
+    { name = "AUJOBN", dd = "JOBN", hidden = true },
+    { name = "AUUPMJ", dd = "UPMJ", hidden = true, format = "jdedate" },
+    { name = "AUUPMT", dd = "UPMT", hidden = true, format = "number" },
+    { name = "IS_PARENT" },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f00926_post"
+label = "F00926"
+writable = true
+sql = "INSERT INTO\n    #SCHEMA.SY#.F00926\n(\n    AUUSER,\n    AUWUID,\n    AUROLEDESC,\n    AULNGP,\n    AUSEQNO,\n    AUEMLA,\n    AULASTLOGIN,\n    AUUSEINTENSE,\n    AUWEBIDCRE,\n    AUACTINACT,\n    AUFUTANON1,\n    AUFUTANON2,\n    AUFUTANON10,\n    AUFUTANON11,\n    AUFUTANON12,\n    AUFUTANON3,\n    AUFUTANON4,\n    AUFUTANON5,\n    AUFUTANON6,\n    AUFUTANON7,\n    AUFUTANON8,\n    AUFUTANON9,\n    AUFUTANON13,\n    AUFUTANON14,\n    AUFUTANON15,\n    AUFUTANON16,\n    AUMUSE,\n    AUPID,\n    AUJOBN,\n    AUUPMJ,\n    AUUPMT\n)\nVALUES (\n    :AUUSER,\n    :AUWUID,\n    :AUROLEDESC,\n    :AULNGP,\n    :AUSEQNO,\n    :AUEMLA,\n    :AULASTLOGIN,\n    :AUUSEINTENSE,\n    :AUWEBIDCRE,\n    :AUACTINACT,\n    :AUFUTANON1,\n    :AUFUTANON2,\n    :AUFUTANON10,\n    :AUFUTANON11,\n    :AUFUTANON12,\n    :AUFUTANON3,\n    :AUFUTANON4,\n    :AUFUTANON5,\n    :AUFUTANON6,\n    :AUFUTANON7,\n    :AUFUTANON8,\n    :AUFUTANON9,\n    :AUFUTANON13,\n    :AUFUTANON14,\n    :AUFUTANON15,\n    :AUFUTANON16,\n    :AUMUSE,\n    :AUPID,\n    :AUJOBN,\n    :AUUPMJ,\n    :AUUPMT\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f00926_put"
+label = "F00926"
+writable = true
+sql = "MERGE INTO #SCHEMA.SY#.F00926 t\nUSING (\n  SELECT \n    :AUUSER AS AUUSER,\n    :AUWUID AS AUWUID,\n    :AUROLEDESC AS AUROLEDESC,\n    :AULNGP AS AULNGP,\n    :AUSEQNO AS AUSEQNO,\n    :AUEMLA AS AUEMLA ,\n    :AULASTLOGIN AS AULASTLOGIN,\n    :AUUSEINTENSE AS AUUSEINTENSE,\n    :AUWEBIDCRE AS AUWEBIDCRE,\n    :AUACTINACT AS AUACTINACT,\n    :AUFUTANON1 AS AUFUTANON1,\n    :AUFUTANON2 AS AUFUTANON2,\n    :AUFUTANON10 AS AUFUTANON10,\n    :AUFUTANON11 AS AUFUTANON11,\n    :AUFUTANON12 AS AUFUTANON12,\n    :AUFUTANON3 AS AUFUTANON3,\n    :AUFUTANON4 AS AUFUTANON4,\n    :AUFUTANON5 AS AUFUTANON5,\n    :AUFUTANON6 AS AUFUTANON6,\n    :AUFUTANON7 AS AUFUTANON7,\n    :AUFUTANON8 AS AUFUTANON8,\n    :AUFUTANON9 AS AUFUTANON9,\n    :AUFUTANON13 AS AUFUTANON13,\n    :AUFUTANON14 AS AUFUTANON14,\n    :AUFUTANON15 AS AUFUTANON15,\n    :AUFUTANON16 AS AUFUTANON16,\n    :AUMUSE AS AUMUSE,\n    :AUPID AS AUPID,\n    :AUJOBN AS AUJOBN,\n    :AUUPMJ AS AUUPMJ,\n    :AUUPMT AS AUUPMT \n  FROM dual) src\nON (t.AUUSER = src.AUUSER )\nWHEN MATCHED THEN\n  UPDATE SET \n    t.AUWUID = src.AUWUID,\n    t.AUROLEDESC = src.AUROLEDESC,\n    t.AUSEQNO = src.AUSEQNO,\n    t.AUEMLA = src.AUEMLA,\n    t.AULASTLOGIN = src.AULASTLOGIN,\n    t.AUUSEINTENSE = src.AUUSEINTENSE,\n    t.AUWEBIDCRE = src.AUWEBIDCRE,\n    t.AUACTINACT = src.AUACTINACT,\n    t.AUFUTANON1 = src.AUFUTANON1,\n    t.AUFUTANON2 = src.AUFUTANON2,\n    t.AUFUTANON10 = src.AUFUTANON10,\n    t.AUFUTANON11 = src.AUFUTANON11,\n    t.AUFUTANON12 = src.AUFUTANON12,\n    t.AUFUTANON3 = src.AUFUTANON3,\n    t.AUFUTANON4 = src.AUFUTANON4,\n    t.AUFUTANON5 = src.AUFUTANON5,\n    t.AUFUTANON6 = src.AUFUTANON6,\n    t.AUFUTANON7 = src.AUFUTANON7,\n    t.AUFUTANON8 = src.AUFUTANON8,\n    t.AUFUTANON9 = src.AUFUTANON9,\n    t.AUFUTANON13 = src.AUFUTANON13,\n    t.AUFUTANON14 = src.AUFUTANON14,\n    t.AUFUTANON15 = src.AUFUTANON15,\n    t.AUFUTANON16 = src.AUFUTANON16,\n    t.AUMUSE = src.AUMUSE,\n    t.AUPID = src.AUPID,\n    t.AUJOBN = src.AUJOBN,\n    t.AUUPMJ = src.AUUPMJ,\n    t.AUUPMT = src.AUUPMT\nWHEN NOT MATCHED THEN\n  INSERT (AUUSER,\n    AUWUID,\n    AUROLEDESC,\n    AULNGP,\n    AUSEQNO,\n    AUEMLA,\n    AULASTLOGIN,\n    AUUSEINTENSE,\n    AUWEBIDCRE,\n    AUACTINACT,\n    AUFUTANON1,\n    AUFUTANON2,\n    AUFUTANON10,\n    AUFUTANON11,\n    AUFUTANON12,\n    AUFUTANON3,\n    AUFUTANON4,\n    AUFUTANON5,\n    AUFUTANON6,\n    AUFUTANON7,\n    AUFUTANON8,\n    AUFUTANON9,\n    AUFUTANON13,\n    AUFUTANON14,\n    AUFUTANON15,\n    AUFUTANON16,\n    AUMUSE,\n    AUPID,\n    AUJOBN,\n    AUUPMJ,\n    AUUPMT )\n  VALUES (src.AUUSER, src.AUWUID, src.AUROLEDESC, src.AULNGP, src.AUSEQNO, src.AUEMLA, src.AULASTLOGIN, src.AUUSEINTENSE, src.AUWEBIDCRE, src.AUACTINACT, src.AUFUTANON1, src.AUFUTANON2, src.AUFUTANON10, src.AUFUTANON11, src.AUFUTANON12, src.AUFUTANON3, src.AUFUTANON4, src.AUFUTANON5, src.AUFUTANON6, src.AUFUTANON7, src.AUFUTANON8, src.AUFUTANON9, src.AUFUTANON13, src.AUFUTANON14, src.AUFUTANON15, src.AUFUTANON16, UPPER(src.AUMUSE), src.AUPID, src.AUJOBN, src.AUUPMJ, src.AUUPMT)"
+
+[[connectors.jdedwards.queries]]
+name = "get_role_description_get"
+label = "Get Role Description"
+sql = "SELECT \n  TRIM(AUUSER) \"ROLE\",\n  AUROLEDESC ROLEDESC\nFROM\n  #SCHEMA.SY#.F00926\nORDER BY ROLE"
+
+[[connectors.jdedwards.queries]]
+name = "f00950_delete"
+label = "F00950"
+writable = true
+sql = "DELETE FROM\n  #SCHEMA.SY#.F00950\nWHERE\n    FSSETY = :FSSETY\n    AND FSUSER = :FSUSER\n    AND FSOBNM = :FSOBNM\n    AND NVL(TRIM(FSDTAI), ' ') = NVL(TRIM(:FSDTAI), ' ')\n    AND NVL(TRIM(FSFRDV), ' ') = NVL(TRIM(:FSFRDV), ' ')\n    AND FSSY = :FSSY"
+
+[[connectors.jdedwards.queries]]
+name = "f00950_get"
+label = "F00950"
+description = "Security Workbench Table"
+sql = "SELECT * FROM (\nWITH userRole AS\n(\nSELECT \n  ABALPH ALPH,\n  ULUSER USER_ROLE\nFROM\n  #SCHEMA.SY#.F0092\nLEFT JOIN\n  #SCHEMA.DTA#.F0101\n  ON ABAN8 = ULAN8\nWHERE\n  ULUGRP <> '*GROUP'\nUNION ALL\nSELECT \n    AUROLEDESC ALPH,\n    AUUSER USER_ROLE\nFROM\n  #SCHEMA.SY#.F00926\n)\nSELECT \n    TRIM(FSSETY) FSSETY,\n    CASE \n      WHEN TRIM(FSSETY) IN ('1', '3', '5', '9') THEN 'OBJECTS'\n      WHEN TRIM(FSSETY) IN ('2', '4', 'B') THEN 'ALIAS'\n      WHEN TRIM(FSSETY) NOT IN ('1', '3', '5', '9', '2', '4', 'B') THEN 'OTHERS'\n    END SEC_TYPE,\n    FSUSER,\n    ALPH,\n    TRIM(FSOBNM) FSOBNM ,\n    TRIM(FSDTAI) FSDTAI ,\n    TRIM(FSFRDV) FSFRDV ,\n    TRIM(FSSY) FSSY,\n    FSOWDI,\n    FSFMNM,\n    FSFUNO,\n    FSINSL,\n    FSRUN,\n    FSVWYN,\n    FSA,\n    FSCHNG,\n    FSDLT,\n    FSTHDV,\n    FSOBID,\n    FSADDC,\n    FSIOK,\n    FSICPY,\n    FSIUPT,\n    FSATN1,\n    FSATN2,\n    FSATN3,\n    FSMUSE,\n    FSPID,\n    FSJOBN,\n    FSUPMJ,\n    FSUPMT,\n    FSEXITID,\n    FSTABID,\n    FSTEXTID,\n    FSPTH \nFROM \n  #SCHEMA.SY#.F00950\nLEFT JOIN\n  userRole\n  ON FSUSER = USER_ROLE\n) _flt\nWHERE 1=1\n  AND ((CAST(:SEC_TYPE AS VARCHAR(4000)) IS NULL OR CAST(:SEC_TYPE AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:SEC_TYPE_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.SEC_TYPE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SEC_TYPE AS VARCHAR(4000)) || '%')) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.SEC_TYPE AS VARCHAR(4000)) = CAST(:SEC_TYPE AS VARCHAR(4000))) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.SEC_TYPE AS VARCHAR(4000)) <> CAST(:SEC_TYPE AS VARCHAR(4000))) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.SEC_TYPE AS VARCHAR(4000))) LIKE LOWER(CAST(:SEC_TYPE AS VARCHAR(4000)) || '%')) OR (CAST(:SEC_TYPE_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.SEC_TYPE AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:SEC_TYPE AS VARCHAR(4000)))))\n  AND ((CAST(:FSSETY AS VARCHAR(4000)) IS NULL OR CAST(:FSSETY AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:FSSETY_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.FSSETY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSSETY AS VARCHAR(4000)) || '%')) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.FSSETY AS VARCHAR(4000)) = CAST(:FSSETY AS VARCHAR(4000))) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.FSSETY AS VARCHAR(4000)) <> CAST(:FSSETY AS VARCHAR(4000))) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.FSSETY AS VARCHAR(4000))) LIKE LOWER(CAST(:FSSETY AS VARCHAR(4000)) || '%')) OR (CAST(:FSSETY_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.FSSETY AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSSETY AS VARCHAR(4000)))))\n  AND ((CAST(:FSUSER AS VARCHAR(4000)) IS NULL OR CAST(:FSUSER AS VARCHAR(4000)) = '') OR (COALESCE(CAST(:FSUSER_op AS VARCHAR(4000)), 'contains') = 'contains' AND LOWER(CAST(_flt.FSUSER AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSUSER AS VARCHAR(4000)) || '%')) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'equals'     AND CAST(_flt.FSUSER AS VARCHAR(4000)) = CAST(:FSUSER AS VARCHAR(4000))) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'notEquals'  AND CAST(_flt.FSUSER AS VARCHAR(4000)) <> CAST(:FSUSER AS VARCHAR(4000))) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'startsWith' AND LOWER(CAST(_flt.FSUSER AS VARCHAR(4000))) LIKE LOWER(CAST(:FSUSER AS VARCHAR(4000)) || '%')) OR (CAST(:FSUSER_op AS VARCHAR(4000)) = 'endsWith'   AND LOWER(CAST(_flt.FSUSER AS VARCHAR(4000))) LIKE LOWER('%' || CAST(:FSUSER AS VARCHAR(4000)))))\nORDER BY FSUSER, SEC_TYPE, FSSETY"
+columns = [
+    { name = "SEC_TYPE", filter = true },
+    { name = "FSSETY", dd = "SETY", filter = true },
+    { name = "FSUSER", dd = "USER", filter = true },
+    { name = "ALPH" },
+    { name = "FSOBNM", dd = "OBNM" },
+    { name = "FSDTAI", dd = "DTAI" },
+    { name = "FSFRDV", dd = "FRDV" },
+    { name = "FSSY", dd = "SY", hidden = true },
+    { name = "FSOWDI", dd = "OWDI", hidden = true },
+    { name = "FSTHDV", dd = "THDV" },
+    { name = "FSFMNM", dd = "FMNM", hidden = true },
+    { name = "FSFUNO", dd = "FUNO", hidden = true },
+    { name = "FSINSL", dd = "INSL" },
+    { name = "FSRUN", dd = "RUN" },
+    { name = "FSVWYN", dd = "VWYN" },
+    { name = "FSA", dd = "A" },
+    { name = "FSCHNG", dd = "CHNG" },
+    { name = "FSDLT", dd = "DLT" },
+    { name = "FSOBID", dd = "OBID", hidden = true },
+    { name = "FSADDC", dd = "ADDC" },
+    { name = "FSIOK", dd = "IOK" },
+    { name = "FSICPY", dd = "ICPY" },
+    { name = "FSIUPT", dd = "IUPT" },
+    { name = "FSATN1", dd = "ATN1" },
+    { name = "FSATN2", dd = "ATN2" },
+    { name = "FSATN3", dd = "ATN3", hidden = true },
+    { name = "FSMUSE", dd = "MUSE", hidden = true },
+    { name = "FSPID", dd = "PID", hidden = true },
+    { name = "FSJOBN", dd = "JOBN", hidden = true },
+    { name = "FSUPMJ", dd = "UPMJ" },
+    { name = "FSUPMT", dd = "UPMT", hidden = true, format = "number" },
+    { name = "FSEXITID", dd = "EXITID", hidden = true },
+    { name = "FSTABID", dd = "TABID", hidden = true },
+    { name = "FSTEXTID", dd = "TEXTID", hidden = true },
+    { name = "FSPTH", dd = "PTH", hidden = true },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f00950_post"
+label = "F00950"
+writable = true
+sql = "INSERT INTO\n  #SCHEMA.SY#.F00950\n(\n    FSSETY,\n    FSUSER,\n    FSOBNM,\n    FSDTAI,\n    FSFRDV,\n    FSSY,\n    FSOWDI,\n    FSFMNM,\n    FSFUNO,\n    FSINSL,\n    FSRUN,\n    FSVWYN,\n    FSA,\n    FSCHNG,\n    FSDLT,\n    FSTHDV,\n    FSOBID,\n    FSADDC,\n    FSIOK,\n    FSICPY,\n    FSIUPT,\n    FSATN1,\n    FSATN2,\n    FSATN3,\n    FSMUSE,\n    FSPID,\n    FSJOBN,\n    FSUPMJ,\n    FSUPMT,\n    FSEXITID,\n    FSTABID,\n    FSTEXTID,\n    FSPTH\n)\nVALUES (\n    :FSSETY,\n    :FSUSER,\n    :FSOBNM,\n    :FSDTAI,\n    CASE WHEN :FSDTAI = 'MCU' THEN LPAD(:FSFRDV, 12, ' ') ELSE :FSFRDV END,\n    :FSSY,\n    :FSOWDI,\n    :FSFMNM,\n    :FSFUNO,\n    :FSINSL,\n    :FSRUN,\n    :FSVWYN,\n    :FSA,\n    :FSCHNG,\n    :FSDLT,\n    CASE WHEN :FSDTAI = 'MCU' THEN LPAD(:FSTHDV, 12, ' ') ELSE :FSTHDV END,\n    :FSOBID,\n    :FSADDC,\n    :FSIOK,\n    :FSICPY,\n    :FSIUPT,\n    :FSATN1,\n    :FSATN2,\n    :FSATN3,\n    UPPER(:FSMUSE),\n    :FSPID,\n    :FSJOBN,\n    :FSUPMJ,\n    :FSUPMT,\n    :FSEXITID,\n    :FSTABID,\n    :FSTEXTID,\n    :FSPTH\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f00950_put"
+label = "F00950"
+writable = true
+sql = "MERGE INTO #SCHEMA.SY#.F00950 t\nUSING (\n  SELECT :FSSETY AS FSSETY,\n         :FSUSER AS FSUSER,\n         :FSOBNM AS FSOBNM,\n         :FSDTAI AS FSDTAI,\n         CASE WHEN :FSDTAI = 'MCU' THEN LPAD(:FSFRDV, 12, ' ') ELSE :FSFRDV END AS FSFRDV,\n         :FSSY AS FSSY,\n         :FSOWDI AS FSOWDI,\n         :FSFMNM AS FSFMNM,\n         :FSFUNO AS FSFUNO,\n         :FSINSL AS FSINSL,\n         :FSRUN AS FSRUN,\n         :FSVWYN AS FSVWYN,\n         :FSA AS FSA,\n         :FSCHNG AS FSCHNG,\n         :FSDLT AS FSDLT,\n         CASE WHEN :FSDTAI = 'MCU' THEN LPAD(:FSTHDV, 12, ' ') ELSE :FSTHDV END AS FSTHDV,\n         :FSOBID AS FSOBID,\n         :FSADDC AS FSADDC,\n         :FSIOK AS FSIOK,\n         :FSICPY AS FSICPY,\n         :FSIUPT AS FSIUPT,\n         :FSATN1 AS FSATN1,\n         :FSATN2 AS FSATN2,\n         :FSATN3 AS FSATN3,\n         :FSMUSE AS FSMUSE,\n         :FSPID AS FSPID,\n         :FSJOBN AS FSJOBN,\n         :FSUPMJ AS FSUPMJ,\n         :FSUPMT AS FSUPMT,\n         :FSEXITID AS FSEXITID,\n         :FSTABID AS FSTABID,\n         :FSTEXTID AS FSTEXTID,\n         :FSPTH AS FSPTH\n  FROM dual) src\nON (t.FSSETY = src.FSSETY \n    AND t.FSUSER = src.FSUSER \n    AND t.FSOBNM = src.FSOBNM \n    AND NVL(TRIM(t.FSDTAI ), ' ') = NVL(TRIM(src.FSDTAI ), ' ')\n    AND NVL(TRIM(t.FSFRDV), ' ') = NVL(TRIM(src.FSFRDV), ' ')\n    AND t.FSSY = src.FSSY)\nWHEN MATCHED THEN\n  UPDATE SET t.FSOWDI = src.FSOWDI,\n             t.FSFMNM = src.FSFMNM,\n             t.FSFUNO = src.FSFUNO,\n             t.FSINSL = src.FSINSL,\n             t.FSRUN = src.FSRUN,\n             t.FSVWYN = src.FSVWYN,\n             t.FSA = src.FSA,\n             t.FSCHNG = src.FSCHNG,\n             t.FSDLT = src.FSDLT,\n             t.FSTHDV = src.FSTHDV,\n             t.FSOBID = src.FSOBID,\n             t.FSADDC = src.FSADDC,\n             t.FSIOK = src.FSIOK,\n             t.FSICPY = src.FSICPY,\n             t.FSIUPT = src.FSIUPT,\n             t.FSATN1 = src.FSATN1,\n             t.FSATN2 = src.FSATN2,\n             t.FSATN3 = src.FSATN3,\n             t.FSMUSE = UPPER(src.FSMUSE),\n             t.FSPID = src.FSPID,\n             t.FSJOBN = src.FSJOBN,\n             t.FSUPMJ = src.FSUPMJ,\n             t.FSUPMT = src.FSUPMT,\n             t.FSEXITID = src.FSEXITID,\n             t.FSTABID = src.FSTABID,\n             t.FSTEXTID = src.FSTEXTID,\n             t.FSPTH = src.FSPTH\nWHEN NOT MATCHED THEN\n  INSERT (FSSETY, FSUSER, FSOBNM, FSDTAI, FSFRDV, FSSY, FSOWDI, FSFMNM, FSFUNO, FSINSL, FSRUN, FSVWYN, FSA, FSCHNG, FSDLT, FSTHDV, FSOBID, FSADDC, FSIOK, FSICPY, FSIUPT, FSATN1, FSATN2, FSATN3, FSMUSE, FSPID, FSJOBN, FSUPMJ, FSUPMT, FSEXITID, FSTABID, FSTEXTID, FSPTH)\n  VALUES (src.FSSETY, src.FSUSER, src.FSOBNM, src.FSDTAI, src.FSFRDV, src.FSSY, src.FSOWDI, src.FSFMNM, src.FSFUNO, src.FSINSL, src.FSRUN, src.FSVWYN, src.FSA, src.FSCHNG, src.FSDLT, src.FSTHDV, src.FSOBID, src.FSADDC, src.FSIOK, src.FSICPY, src.FSIUPT, src.FSATN1, src.FSATN2, src.FSATN3, UPPER(src.FSMUSE), src.FSPID, src.FSJOBN, src.FSUPMJ, src.FSUPMT, src.FSEXITID, src.FSTABID, src.FSTEXTID, src.FSPTH)"
+
+[[connectors.jdedwards.queries]]
+name = "get_user_role_name_get"
+label = "Get User / Role Name"
+sql = "SELECT \n  ABALPH ALPH,\n  TRIM(ULUSER) USER_ROLE\nFROM\n  #SCHEMA.SY#.F0092\nLEFT JOIN\n  #SCHEMA.DTA#.F0101\n  ON ABAN8 = ULAN8\nWHERE\n  ULUGRP <> '*GROUP'\nUNION ALL\nSELECT \n  AUROLEDESC ALPH,\n  TRIM(AUUSER) USER_ROLE\nFROM\n  #SCHEMA.SY#.F00926\nORDER BY USER_ROLE"
+
+[[connectors.jdedwards.queries]]
+name = "get_max_seqno_from_f00926_get"
+label = "Get Max SEQNO from F00926"
+sql = "SELECT   \n  MAX(AUSEQNO+9) AS SEQ_VALUE \nFROM \n   #SCHEMA.SY#.F00926"
+
+[[connectors.jdedwards.queries]]
+name = "f0093_delete"
+label = "F0093"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F0093\nWHERE\n    LLUSER = :LLUSER\n    AND LLLL = :LLLL"
+
+[[connectors.jdedwards.queries]]
+name = "f0093_get"
+label = "F0093"
+description = "Environments"
+auto_load = true
+sql = "SELECT \n    LLUSER,\n    LLLL,\n    LLSEQ,\n    LLMNI,\n    CASE WHEN EXISTS (SELECT 1 FROM #SCHEMA.SY#.F95921 WHERE RLTOROLE = LLUSER) THEN 'Y' ELSE 'N' END IS_PARENT\nFROM \n  #SCHEMA.SY#.F0093\nORDER BY LLUSER, LLSEQ"
+columns = [
+    { name = "LLUSER", dd = "USER_ROLE" },
+    { name = "LLLL", dd = "LL" },
+    { name = "LLSEQ", dd = "SEQ", format = "number" },
+    { name = "LLMNI", dd = "MNI", hidden = true },
+    { name = "IS_PARENT", format = "boolean" },
+]
+
+[[connectors.jdedwards.queries]]
+name = "f0093_post"
+label = "F0093"
+writable = true
+sql = "INSERT INTO\n    #SCHEMA.SY#.F0093\n(\n    LLUSER,\n    LLLL,\n    LLSEQ,\n    LLMNI\n)\nVALUES (\n    :LLUSER,\n    :LLLL,\n    :LLSEQ,\n    :LLMNI\n)"
+
+[[connectors.jdedwards.queries]]
+name = "f0093_put"
+label = "F0093"
+writable = true
+sql = "MERGE INTO #SCHEMA.SY#.F0093 t\nUSING (\n  SELECT     \n    :LLUSER AS LLUSER,\n    :LLLL AS LLLL,\n    :LLSEQ AS LLSEQ,\n    :LLMNI AS LLMNI \n  FROM dual) src\nON (t.LLUSER = src.LLUSER \n  AND t.LLLL = src.LLLL\n)\nWHEN MATCHED THEN\n  UPDATE SET \n    t.LLSEQ = src.LLSEQ,\n    t.LLMNI = src.LLMNI\nWHEN NOT MATCHED THEN\n  INSERT (LLUSER,\n    LLLL,\n    LLSEQ,\n    LLMNI)\n  VALUES (src.LLUSER, src.LLLL, src.LLSEQ, src.LLMNI)"
+
+[[connectors.jdedwards.queries]]
+name = "default_environments_for_user_role_delete"
+label = "Default Environments for User / Role"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F0093\nWHERE\n    LLUSER = :LLUSER"
+
+[[connectors.jdedwards.queries]]
+name = "security_workbench_user_role_delete"
+label = "Security Workbench User / Role"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F00950\nWHERE\n    FSUSER = :FSUSER"
+
+[[connectors.jdedwards.queries]]
+name = "security_workbench_user_role_post"
+label = "Security Workbench User / Role"
+writable = true
+sql = "INSERT INTO\n  #SCHEMA.SY#.F00950\nSELECT \n  FSSETY,\n  :TOUSER,\n  FSOBNM,\n  FSDTAI,\n  FSFRDV,\n  FSSY,\n  FSOWDI,\n  FSFMNM,\n  FSFUNO,\n  FSINSL,\n  FSRUN,\n  FSVWYN,\n  FSA,\n  FSCHNG,\n  FSDLT,\n  FSTHDV,\n  FSOBID,\n  FSADDC,\n  FSIOK,\n  FSICPY,\n  FSIUPT,\n  FSATN1,\n  FSATN2,\n  FSATN3,\n  UPPER(:FSMUSE),\n  :FSPID,\n  :FSJOBN,\n  :FSUPMJ,\n  FSUPMT,\n  FSEXITID,\n  FSTABID,\n  FSTEXTID,\n  FSPTH\nFROM\n  #SCHEMA.SY#.F00950\nWHERE\n  FSUSER = :FROMUSER"
+
+[[connectors.jdedwards.queries]]
+name = "display_preference_user_role_delete"
+label = "Display Preference User / Role"
+writable = true
+sql = "DELETE FROM\n  #SCHEMA.SY#.F00921\nWHERE\n  ULUSER = :ULUSER"
+
+[[connectors.jdedwards.queries]]
+name = "display_preference_user_role_put"
+label = "Display Preference User / Role"
+writable = true
+sql = "MERGE INTO #SCHEMA.SY#.F00921 t\nUSING (\n  SELECT     \n    :ULUSER AS ULUSER,\n    :ULLNGP AS ULLNGP,\n    :ULCO AS ULCO,\n    :ULFRMT AS ULFRMT,\n    :ULDSEP AS ULDSEP,\n    :ULDECF AS ULDECF,\n    :ULVRSP AS ULVRSP,\n    :ULCUR AS ULCUR,\n    :ULCTR AS ULCTR,\n    :ULUTCTIME AS ULUTCTIME,\n    :ULTIMEFORM AS ULTIMEFORM,\n    :ULOMWLOG AS ULOMWLOG,\n    :ULRIGHTLEFT AS ULRIGHTLEFT,\n    :ULFUTTIME AS ULFUTTIME,\n    :ULFUTTIME1 AS ULFUTTIME1,\n    :ULFUTTIME2 AS ULFUTTIME2,\n    :ULFUTTIME3 AS ULFUTTIME3,\n    :ULFUTTIME4 AS ULFUTTIME4,\n    :ULFUTTIME5 AS ULFUTTIME5,\n    :ULFUTTIME6 AS ULFUTTIME6,\n    :ULFUTTIME7 AS ULFUTTIME7,\n    :ULFUTTIME8 AS ULFUTTIME8,\n    :ULMUSE AS ULMUSE,\n    :ULPID AS ULPID,\n    :ULJOBN AS ULJOBN,\n    :ULUPMJ AS ULUPMJ,\n    :ULUPMT AS ULUPMT\n  FROM dual) src\nON (t.ULUSER = src.ULUSER \n)\nWHEN MATCHED THEN\n  UPDATE SET \n    t.ULLNGP = src.ULLNGP,\n    t.ULCO = src.ULCO,\n    t.ULFRMT = src.ULFRMT,\n    t.ULDSEP = src.ULDSEP,\n    t.ULDECF = src.ULDECF,\n    t.ULVRSP = src.ULVRSP,\n    t.ULCUR = src.ULCUR,\n    t.ULCTR = src.ULCTR,\n    t.ULUTCTIME = src.ULUTCTIME,\n    t.ULTIMEFORM = src.ULTIMEFORM,\n    t.ULOMWLOG = src.ULOMWLOG,\n    t.ULRIGHTLEFT = src.ULRIGHTLEFT,\n    t.ULFUTTIME = src.ULFUTTIME,\n    t.ULFUTTIME1 = src.ULFUTTIME1,\n    t.ULFUTTIME2 = src.ULFUTTIME2,\n    t.ULFUTTIME3 = src.ULFUTTIME3,\n    t.ULFUTTIME4 = src.ULFUTTIME4,\n    t.ULFUTTIME5 = src.ULFUTTIME5,\n    t.ULFUTTIME6 = src.ULFUTTIME6,\n    t.ULFUTTIME7 = src.ULFUTTIME7,\n    t.ULFUTTIME8 = src.ULFUTTIME8,\n    t.ULMUSE = src.ULMUSE,\n    t.ULPID = src.ULPID,\n    t.ULJOBN = src.ULJOBN,\n    t.ULUPMJ = src.ULUPMJ,\n    t.ULUPMT = src.ULUPMT\nWHEN NOT MATCHED THEN\n  INSERT (\n    ULUSER,\n    ULLNGP,\n    ULCO,\n    ULFRMT,\n    ULDSEP,\n    ULDECF,\n    ULVRSP,\n    ULCUR,\n    ULCTR,\n    ULUTCTIME,\n    ULTIMEFORM,\n    ULOMWLOG,\n    ULRIGHTLEFT,\n    ULFUTTIME,\n    ULFUTTIME1,\n    ULFUTTIME2,\n    ULFUTTIME3,\n    ULFUTTIME4,\n    ULFUTTIME5,\n    ULFUTTIME6,\n    ULFUTTIME7,\n    ULFUTTIME8,\n    ULMUSE,\n    ULPID,\n    ULJOBN,\n    ULUPMJ,\n    ULUPMT)\n  VALUES (\n    src.ULUSER,\n    src.ULLNGP,\n    src.ULCO,\n    src.ULFRMT,\n    src.ULDSEP,\n    src.ULDECF,\n    src.ULVRSP,\n    src.ULCUR,\n    src.ULCTR,\n    src.ULUTCTIME,\n    src.ULTIMEFORM,\n    src.ULOMWLOG,\n    src.ULRIGHTLEFT,\n    src.ULFUTTIME,\n    src.ULFUTTIME1,\n    src.ULFUTTIME2,\n    src.ULFUTTIME3,\n    src.ULFUTTIME4,\n    src.ULFUTTIME5,\n    src.ULFUTTIME6,\n    src.ULFUTTIME7,\n    src.ULFUTTIME8,\n    src.ULMUSE,\n    src.ULPID,\n    src.ULJOBN,\n    src.ULUPMJ,\n    src.ULUPMT\n  )"
+
+[[connectors.jdedwards.queries]]
+name = "menu_filtering_delete"
+label = "Menu Filtering"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.CTL#.F9006\nWHERE\n    TDVARNAME = :TDVARNAME"
+
+[[connectors.jdedwards.queries]]
+name = "menu_filtering_post"
+label = "Menu Filtering"
+writable = true
+sql = "INSERT INTO\n  #SCHEMA.CTL#.F9006\nSELECT \n  :TOUSER,\n  TDRLTYPE,\n  TDFRMREL,\n  TDTHRREL,\n  TDPARNTTSK,\n  TDCHILDTSK,\n  TDVARACTIVE,\n  TDOVNAME,\n  TDOVVERSION,\n  UPPER(:TDUSER),\n  :TDPID,\n  :TDJOBN,\n  :TDUPMJ,\n  TDUPMT,\n  TDFUVARDET1,\n  TDFUVARDET2,\n  TDFUVARDET3,\n  TDFUVARDET4,\n  TDFUVARDET5,\n  TDFUVARDET6,\n  TDFUVARDET7,\n  TDFUVARDET8\nFROM\n  #SCHEMA.CTL#.F9006\nWHERE\n  TDVARNAME = :FROMUSER"
+
+[[connectors.jdedwards.queries]]
+name = "udo_security_user_role_delete"
+label = "UDO Security User / Role"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F00950W\nWHERE\n    WSWOUSER = :WSWOUSER"
+
+[[connectors.jdedwards.queries]]
+name = "udo_security_user_role_post"
+label = "UDO Security User / Role"
+writable = true
+sql = "INSERT INTO\n  #SCHEMA.SY#.F00950W\nWITH base AS (\n    SELECT\n        (SYSTIMESTAMP AT TIME ZONE 'UTC'\n         - TIMESTAMP '1970-01-01 00:00:00 UTC') AS diff\n    FROM dual\n)\nSELECT \n     SYS_CONTEXT('USERENV', 'IP_ADDRESS')\n    || ':'\n    || TRUNC(\n           EXTRACT(DAY    FROM b.diff) * 86400000\n         + EXTRACT(HOUR   FROM b.diff) * 3600000\n         + EXTRACT(MINUTE FROM b.diff) * 60000\n         + EXTRACT(SECOND FROM b.diff) * 1000\n       )\n    || ':' ||\n    (ROW_NUMBER() OVER (ORDER BY wswosety, wsobnm) - 1) AS WSOID,\n    WSWOSETY,\n    WSWOCAT,\n    :TOUSER,\n    WSOBNM,\n    WSFMNM,\n    WSVER,\n    WSWOBNM,\n    WSSY,\n    WSSYR,\n    WSWOACTFLG,\n    WSWOSECLVL,\n    WSWOVIEW,\n    WSWODELTPU,\n    WSWOUPDTPU,\n    WSWOADDPU,\n    WSWOADDPR,\n    WSWOACCESS,\n    WSWOSECOPT1,\n    WSWOSECOPT2,\n    WSWOSECOPT3,\n    WSWOSECOPT4,\n    WSWOVALUE1,\n    WSWOVALUE2,\n    UPPER(:WSWOUSERID),\n    :WSWOPRGID,\n    :WSWOMKEY,\n    SYSDATE,\n    WSWOTYP,\n    WSWOSUBCAT,\n    WSWOOBNMS,\n    WSWOFUTID1,\n    WSWOFUTID2,\n    WSWOFU1,\n    WSWOFU2,\n    WSWOFU3,\n    WSWOFU4,\n    WSWOFU5,\n    WSWOFU6,\n    WSWOFU7,\n    WSWOFU8,\n    WSWOFU9,\n    WSWOFU10 \nFROM\n  #SCHEMA.SY#.F00950W\nCROSS JOIN base b\nWHERE\n  WSWOUSER = :FROMUSER"
+
+[[connectors.jdedwards.queries]]
+name = "roles_relationship_user_role_delete"
+label = "Roles Relationship User / Role"
+writable = true
+sql = "DELETE FROM\n    #SCHEMA.SY#.F95921\nWHERE\n    RLFRROLE = :RLFRROLE\n    OR RLTOROLE = :RLTOROLE"
+
+[[connectors.jdedwards.queries]]
+name = "merge_security_workbench_for_role_post"
+label = "Merge Security Workbench for Role"
+writable = true
+sql = "INSERT INTO\n  #SCHEMA.SY#.F00950\nSELECT \n  FSSETY,\n  TRIM(RLTOROLE) FSUSER,\n  FSOBNM,\n  FSDTAI,\n  FSFRDV,\n  FSSY,\n  MAX(FSOWDI) FSOWDI,\n  MAX(FSFMNM) FSFMNM, \n  MAX(FSFUNO) FSFUNO,\n  MAX(FSINSL) FSINSL,\n  MAX(FSRUN) FSRUN,\n  MAX(FSVWYN) FSVWYN,\n  MAX(FSA) FSA,\n  MAX(FSCHNG) FSCHNG,\n  MAX(FSDLT) FSDLT,\n  MAX(FSTHDV) FSTHDV,\n  MAX(FSOBID) FSOBID,\n  MAX(FSADDC) FSADDC,\n  MAX(FSIOK) FSIOK,\n  MAX(FSICPY) FSICPY,\n  MAX(FSIUPT) FSIUPT,\n  MAX(FSATN1) FSATN1,\n  MAX(FSATN2) FSATN2,\n  MAX(FSATN3) FSATN3,\n  MAX(FSMUSE) FSMUSE,\n  MAX(FSPID) FSPID,\n  MAX(FSJOBN) FSJOBN,\n  MAX(FSUPMJ) FSUPMJ,\n  MAX(FSUPMT) FSUPMT,\n  MAX(FSEXITID) FSEXITID,\n  MAX(FSTABID) FSTABID,\n  MAX(FSTEXTID) FSTEXTID,\n  MAX(FSPTH) FSPTH\nFROM \n  #SCHEMA.SY#.F95921\nINNER JOIN \n  #SCHEMA.SY#.F00950 \n  ON FSUSER = RLFRROLE\nWHERE \n  RLTOROLE = :RLTOROLE\n  AND (RLEXPIRDATE = 0 OR RLEXPIRDATE > ((TO_CHAR(SYSDATE, 'YYYY') - 1900) * 1000 + TO_CHAR(SYSDATE, 'DDD')))\nGROUP BY\n FSSETY,\n RLTOROLE, \n FSOBNM, \n FSDTAI,\n FSFRDV,\n FSSY"
+
+[[connectors.jdedwards.queries]]
+name = "merge_udo_security_for_role_post"
+label = "Merge UDO Security for Role"
+writable = true
+sql = "INSERT INTO #SCHEMA.SY#.F00950W\nWITH base AS (\n    SELECT\n        (SYSTIMESTAMP AT TIME ZONE 'UTC'\n         - TIMESTAMP '1970-01-01 00:00:00 UTC') AS diff\n    FROM dual\n)\nSELECT\n  SYS_CONTEXT('USERENV', 'IP_ADDRESS')\n    || ':'\n    || TRUNC(\n           EXTRACT(DAY    FROM b.diff) * 86400000\n         + EXTRACT(HOUR   FROM b.diff) * 3600000\n         + EXTRACT(MINUTE FROM b.diff) * 60000\n         + EXTRACT(SECOND FROM b.diff) * 1000\n       )\n    || ':' ||\n    (ROW_NUMBER() OVER (ORDER BY wswosety, wsobnm) - 1) AS WSOID,\n  WSWOSETY,\n  WSWOCAT,\n  WSWOUSER,\n  WSOBNM,\n  WSFMNM,\n  WSVER,\n  WSWOBNM,\n  WSSY,\n  WSSYR,\n  WSWOACTFLG,\n  (CASE WHEN WSWOSECLVL = 0 THEN 'NONE' WHEN WSWOSECLVL = 1 THEN 'CREATE'  WHEN WSWOSECLVL = 2 THEN 'SHARE' WHEN WSWOSECLVL = 3 THEN 'MODIFY' ELSE ' ' END) WSWOSECLVL,\n  WSWOVIEW,\n  WSWODELTPU,\n  WSWOUPDTPU,\n  WSWOADDPU,\n  WSWOADDPR,\n  WSWOACCESS,\n  WSWOSECOPT1,\n  WSWOSECOPT2,\n  WSWOSECOPT3,\n  WSWOSECOPT4,\n  WSWOVALUE1,\n  WSWOVALUE2,\n  WSWOUSERID,\n  WSWOPRGID,\n  WSWOMKEY,\n  WSWOUTIME,\n  WSWOTYP,\n  WSWOSUBCAT,\n  WSWOOBNMS,\n  WSWOFUTID1,\n  WSWOFUTID2,\n  WSWOFU1,\n  WSWOFU2,\n  WSWOFU3,\n  WSWOFU4,\n  WSWOFU5,\n  WSWOFU6,\n  WSWOFU7,\n  WSWOFU8,\n  WSWOFU9,\n  WSWOFU10\nFROM (\nSELECT \n  MAX(WSOID) WSOID,\n  WSWOSETY WSWOSETY,\n  WSWOCAT WSWOCAT,\n  RLTOROLE WSWOUSER,\n  WSOBNM WSOBNM, \n  WSFMNM WSFMNM,\n  WSVER WSVER,\n  WSWOBNM WSWOBNM,\n  WSSY WSSY,\n  WSSYR WSSYR,\n  MAX(WSWOACTFLG) WSWOACTFLG,\n  MAX(CASE WHEN WSWOSECLVL = 'NONE' THEN 0 WHEN WSWOSECLVL = 'CREATE' THEN 1 WHEN WSWOSECLVL = 'SHARE' THEN 2 WHEN WSWOSECLVL = 'MODIFY' THEN 3 END) WSWOSECLVL,\n  MAX(WSWOVIEW) WSWOVIEW,\n  MAX(WSWODELTPU) WSWODELTPU,\n  MAX(WSWOUPDTPU) WSWOUPDTPU,\n  MAX(WSWOADDPU) WSWOADDPU,\n  MAX(WSWOADDPR) WSWOADDPR,\n  MAX(WSWOACCESS) WSWOACCESS,\n  MAX(WSWOSECOPT1) WSWOSECOPT1,\n  MAX(WSWOSECOPT2) WSWOSECOPT2,\n  MAX(WSWOSECOPT3) WSWOSECOPT3,\n  MAX(WSWOSECOPT4) WSWOSECOPT4,\n  MAX(WSWOVALUE1) WSWOVALUE1,\n  MAX(WSWOVALUE2) WSWOVALUE2,\n  MAX(WSWOUSERID) WSWOUSERID,\n  MAX(WSWOPRGID) WSWOPRGID,\n  MAX(WSWOMKEY) WSWOMKEY,\n  MAX(WSWOUTIME) WSWOUTIME,\n  MAX(WSWOTYP) WSWOTYP,\n  MAX(WSWOSUBCAT) WSWOSUBCAT,\n  MAX(WSWOOBNMS) WSWOOBNMS,\n  MAX(WSWOFUTID1) WSWOFUTID1,\n  MAX(WSWOFUTID2) WSWOFUTID2,\n  MAX(WSWOFU1) WSWOFU1,\n  MAX(WSWOFU2) WSWOFU2,\n  MAX(WSWOFU3) WSWOFU3,\n  MAX(WSWOFU4) WSWOFU4,\n  MAX(WSWOFU5) WSWOFU5,\n  MAX(WSWOFU6) WSWOFU6,\n  MAX(WSWOFU7) WSWOFU7,\n  MAX(WSWOFU8) WSWOFU8,\n  MAX(WSWOFU9) WSWOFU9,\n  MAX(WSWOFU10) WSWOFU10\nFROM \n  #SCHEMA.SY#.F95921\nINNER JOIN \n  #SCHEMA.SY#.F00950W F1\n  ON WSWOUSER = RLFRROLE\nWHERE \n  RLTOROLE = :RLTOROLE\n  AND (RLEXPIRDATE = 0 OR RLEXPIRDATE > ((TO_CHAR(SYSDATE, 'YYYY') - 1900) * 1000 + TO_CHAR(SYSDATE, 'DDD')))\nGROUP BY\n  WSWOSETY,\n  WSWOCAT,\n  RLTOROLE,\n  WSOBNM,\n  WSFMNM,\n  WSVER,\n  WSWOBNM,\n  WSSY,\n  WSSYR\n)\nCROSS JOIN base b"
+
+[[connectors.jdedwards.queries]]
+name = "merge_menus_filtering_for_role_post"
+label = "Merge Menus Filtering for Role"
+writable = true
+sql = "INSERT INTO\n  #SCHEMA.CTL#.F9006\nSELECT \n  RLTOROLE,\n  TDRLTYPE,\n  TDFRMREL,\n  TDTHRREL,\n  TDPARNTTSK,\n  TDCHILDTSK,\n  MAX(TDVARACTIVE) TDVARACTIVE,\n  MAX(TDOVNAME) TDOVNAME,\n  MAX(TDOVVERSION) TDOVVERSION,\n  MAX(TDUSER) TDUSER,\n  MAX(TDPID) TDPID,\n  MAX(TDJOBN) TDJOBN,\n  MAX(TDUPMJ) TDUPMJ,\n  MAX(TDUPMT) TDUPMT,\n  MAX(TDFUVARDET1) TDFUVARDET1,\n  MAX(TDFUVARDET2) TDFUVARDET2,\n  MAX(TDFUVARDET3) TDFUVARDET3,\n  MAX(TDFUVARDET4) TDFUVARDET4,\n  MAX(TDFUVARDET5) TDFUVARDET5,\n  MAX(TDFUVARDET6) TDFUVARDET6,\n  MAX(TDFUVARDET7) TDFUVARDET7,\n  MAX(TDFUVARDET8) TDFUVARDET8\nFROM \n  #SCHEMA.SY#.F95921\nINNER JOIN \n  #SCHEMA.CTL#.F9006\n  ON TDVARNAME = RLFRROLE\nWHERE \n  RLTOROLE = :RLTOROLE\n  AND (RLEXPIRDATE = 0 OR RLEXPIRDATE > ((TO_CHAR(SYSDATE, 'YYYY') - 1900) * 1000 + TO_CHAR(SYSDATE, 'DDD')))\nGROUP BY \n  TDCHILDTSK,\n  TDFRMREL,\n  TDPARNTTSK,\n  TDRLTYPE,\n  TDTHRREL,\n  RLTOROLE"
+
+[[connectors.jdedwards.queries]]
+name = "check_if_security_record_exists_get"
+label = "Check if Security Record exists"
+sql = "SELECT \n  count(*) IS_FOUND\nFROM\n  #SCHEMA.SY#.F98OWSEC\nWHERE\n  SCUSER = :SCUSER"
+
+[[connectors.jdedwards.queries]]
+name = "get_max_sequence_for_environment_by_user_role_f0093_get"
+label = "Get Max Sequence for environment by User / Role (F0093)"
+sql = "SELECT   \n  MAX(LLSEQ) AS SEQ_VALUE,\n  LLUSER USER_ROLE \nFROM \n  #SCHEMA.SY#.F0093\nGROUP BY \n  LLUSER"
+
+[connectors.nomajde]
+type = "sql"
+pool = "nomajde"
+
+[[connectors.nomajde.queries]]
+name = "get_udc_description_get"
+label = "Get UDC Description"
+sql = "SELECT \n  DRDL01 DL01,\n  DRKY KY,\n  DRRT RT,\n  DRSY SY \nFROM \n  F0005\nORDER BY KY"
+
+[[connectors.nomajde.queries]]
+name = "get_product_code_get"
+label = "Get Product Code"
+sql = "SELECT \n    DRSY SY,\n    DRRT RT,\n    DRKY KY,\n    DRDL01 DL01 \nFROM \n  F0005\nWHERE \n  DRSY = '98' \n  AND DRRT = 'SY' \n  AND TRIM(SUBSTR(DRKY, 7,1)) IS NOT NULL\nORDER BY KY"
+
+[[connectors.nomajde.queries]]
+name = "get_system_code_get"
+label = "Get System Code"
+sql = "SELECT \n  DTDL01 DL01,\n  DTRT RT,\n  DTSY SY \nFROM \n  F0004\nORDER BY RT"
+
+[[connectors.nomajde.queries]]
+name = "get_security_type_get"
+label = "Get Security Type"
+sql = "SELECT \n  DRDL01 DL01,\n  DRKY KY,\n  DRRT RT,\n  DRSY SY,\n  CASE \n    WHEN DRKY IN ('1', '3', '5', '9') THEN 'OBJECTS'\n    WHEN DRKY IN ('2', '4', 'B') THEN 'ALIAS'\n    ELSE 'OTHERS' END SEC_TYPE \nFROM \n  F0005\nWHERE\n  DRSY = '98'\n  AND DRRT = 'TY'\nORDER BY KY"
+
+[[connectors.nomajde.queries]]
+name = "get_data_item_get"
+label = "Get Data Item"
+sql = "SELECT \n  F9200.FRDTAI DTAI,\n  F9202.FRDSCR DSCR,\n  F9210.FROWDI OWDI,\n  'ALL' OBNM\nFROM \n  F9200\nINNER JOIN\n  F9202\n  ON F9202.FRDTAI = F9200.FRDTAI AND F9202.FRSYR = '' AND FRLNGP =''   \nINNER JOIN\n  F9210\n  ON F9210.FRDTAI = F9200.FRDTAI \nUNION ALL\nSELECT\n  F9865.SWFMNM DTAI,\n  F9865.SWMD DSCR,\n  '' OWDI,\n  F9865.SWOBNM OBNM\nFROM\n  F9865\nORDER BY DTAI"
+
+[[connectors.nomajde.queries]]
+name = "dictionary_data_items_get"
+label = "Dictionary Data Items"
+description = "Dictionary Data Items"
+auto_load = true
+sql = "SELECT \n  F9200.FRDTAI DTAI,\n  F9202.FRDSCR DSCR,\n  F9210.FROWDI OWDI,\n  'ALL' OBNM\nFROM \n  F9200\nINNER JOIN\n  F9202\n  ON F9202.FRDTAI = F9200.FRDTAI AND F9202.FRSYR = '' AND FRLNGP =''   \nINNER JOIN\n  F9210\n  ON F9210.FRDTAI = F9200.FRDTAI \nUNION ALL\nSELECT\n  F9865.SWFMNM DTAI,\n  F9865.SWMD DSCR,\n  '' OWDI,\n  F9865.SWOBNM OBNM\nFROM\n  F9865\nORDER BY DTAI"
+columns = [
+    { name = "DTAI" },
+    { name = "DSCR" },
+    { name = "OWDI" },
+]
+
+[[connectors.nomajde.queries]]
+name = "object_librarian_get"
+label = "Object Librarian"
+description = "Object Librarian"
+auto_load = true
+sql = "SELECT \n  '*ALL' OBNM,\n  'All Objects' MD,\n  '' SY,\n  '' FUNO\nUNION ALL\nSELECT\n  SIOBNM OBNM,\n  SIMD MD,\n  SISY SY,\n  SIFUNO FUNO\nFROM\n  F9860\nWHERE\n  SIFUNO IN ('TBLE', 'APPL', 'UBE')\nUNION ALL\nSELECT \n  SWFMNM,\n  SWMD,\n  SWSY,\n  'APPL'\nFROM \n  F9865\nORDER BY OBNM"
+columns = [
+    { name = "OBNM" },
+    { name = "MD" },
+    { name = "SY" },
+    { name = "FUNO" },
+]
+
+[[connectors.nomajde.queries]]
+name = "get_object_name_get"
+label = "Get Object Name"
+sql = "SELECT \n  '*ALL' OBNM,\n  'All Objects' MD,\n  '' SY,\n  '' FUNO\nUNION ALL\nSELECT\n  SIOBNM OBNM,\n  SIMD MD,\n  SISY SY,\n  SIFUNO FUNO\nFROM\n  F9860\nWHERE\n  SIFUNO IN ('TBLE', 'APPL', 'UBE')\nUNION ALL\nSELECT \n  SWFMNM,\n  SWMD,\n  SWSY,\n  'APPL'\nFROM \n  F9865\nORDER BY OBNM"
+
+[connectors.session]
+type = "sql"
+pool = "session"
+
+[[connectors.session.queries]]
+name = "default_environments_for_user_role_get"
+label = "Default Environments for User / Role"
+sql = "SELECT \n  :LLUSER LLUSER, \n  VAL_ENUM LLLL, \n  ROW_NUMBER() OVER (PARTITION BY :LLUSER ORDER BY VAL_ENUM) AS LLSEQ,\n  ' ' AS LLMNI\nFROM \n  LY_ENUM_VAL\nWHERE \n  ENUM_ID = 2"
+
+[connectors.ais_connection]
+type = "api"
+base_url = "https://79.72.70.64:7077/jderest/v2"
+auth_type = "basic"
+auth_username = "JDE"
+auth_password = "ENC:Jixsy7pM8HizK7OlkG269uvR/+jx3kO69aWGI20m9Mw6fL5qlpOqIRhE1DRAl6mX0ELCAh1aRSjfuvyAXdXxIgzOrQxLANWjoAcW6hxD8i9+xKvExS4V6y76N9hlCBhvPa/ytHXj2WCWBCUG"
+
+[[connectors.ais_connection.endpoints]]
+name = "get_token_for_ais"
+label = "Get Token for AIS"
+method = "POST"
+path = "/tokenrequest"
+body = "{\n    \"deviceName\": \"liberty\"\n}"
+
+[[connectors.ais_connection.endpoints]]
+name = "f98owsec_update_records"
+label = "F98OWSEC Update Records"
+method = "POST"
+path = "/bsfnservice"
+body = "{\n    \"deviceName\":\"liberty\",\n    \"token\": \"$AIS_TOKEN\",\n    \"name\": \"F98OWSECUpdateRecords\",\n    \"isAsync\" : false,\n    \"inParams\" : [\n        {\n            \"id\": 1,\n            \"value\" : \"$USER\"\n        },\n        {\n            \"id\": 2,\n            \"value\" : \"$USER\"\n        }       , \n        {\n            \"id\": 3,\n            \"value\" : \"JDE\"\n        },        \n        {\n            \"id\": 4,\n            \"value\" : \" \"\n        },\n        {\n            \"id\": 6,\n            \"value\" : \"0\"\n        },\n        {\n            \"id\": 9,\n            \"value\" : \"0\"\n        },\n                {\n            \"id\": 11,\n            \"value\" : \"01\"\n        },\n                {\n            \"id\": 16,\n            \"value\" : \"0\"\n        },\n                {\n            \"id\": 17,\n            \"value\" : \"1\"\n        }    \n    ]\n}"

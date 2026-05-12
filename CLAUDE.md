@@ -275,8 +275,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `services/menuLabels.findMenuLabel` walks the `GET /api/menus` trees; the technical `connector.query` is the
   mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params` plus a
   collapsible **`FilterPanel`** — one field per `filter`-flagged column (v1's `col_filter`, from `meta.columns`),
-  each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's). On Run
-  it sends `:<col>` + `:<col>_op` for each filled field; the migration has wrapped such queries in
+  each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's); a column
+  with an ENUM rule renders a value `<select>`, a LOOKUP rule a `<select>` of resolved labels (`useLookupBatch`,
+  the user picks the label not the code), both implicitly `equals`. On Run it sends `:<col>` + `:<col>_op` for
+  each filled field; the migration has wrapped such queries in
   `SELECT * FROM (<orig>) _flt WHERE …` so this actually pre-filters server-side before the grid loads (the
   in-grid TanStack filters then refine the loaded page; those `:<col>`/`:<col>_op` binds are kept out of the
   param form). SELECT → `GET` + the `DataTable`
@@ -329,7 +331,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   v1's `query_crud` is a **REST verb** — `GET`/`SELECT` = read (gets `ORDER BY <query_orderby>`
   and the `column_hints` for its `query_id`; if any of those hints is `filter`-flagged the query is
   also wrapped — `SELECT * FROM (<orig>) _flt WHERE …` with a `:<col>` value bind + `:<col>_op` operator
-  bind per such column (both, and the column, `CAST(… AS VARCHAR(4000))` — pins the bind's type so an
+  bind per such column (both, and the column, `CAST(… AS VARCHAR(4000))` — `VARCHAR2(…)` on Oracle variants — pins the bind's type so an
   *unset* filter's NULL bind doesn't trip asyncpg's "could not determine data type", and compares
   uniformly regardless of the column's real type; an empty/NULL value matches everything = "no filter"),
   the ORDER BY moving onto the outer query — so the TableView's `FilterPanel` actually pre-filters
@@ -370,7 +372,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (`{"menus": {<app_name>: {label?, items}}}` — flat items in `menu_seq_ukid` order, linked by `parent`;
   a query-backed `menu_component` → a `type="query"` leaf whose `target` is `menu_component_id` →
   `ly_tables.tbl_id`/`ly_dlg_frm.frm_id` → `ly_query` → the exact name `migrate_sql_queries` gives that
-  query's read variant; an unresolvable component → a folder placeholder; `ly_menus_l` → `l`; v1's
+  query's read variant, plus `connector` = the slug of that query's `query_pool` when it differs from
+  `app_name` (so a `[menus.<app>]` leaf can point at a screen on another connector); an unresolvable
+  component → a folder placeholder; `ly_menus_l` → `l`; v1's
   `ly_menus_filters` not migrated yet). `merge_connectors(*)` (pools merged last → real
   `migrate_pools` URLs override `migrate_sql_queries`'s stubs); `render_toml(d)` (via `tomli-w`).
   The `# migrated: …` header notes the counts + the `${…}` placeholders + any `ENC:` secrets +
@@ -460,11 +464,16 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 `start.sh` (repo root): `serve` (default) | `dev` | `api [dev]` | `build` | `frontend` |
 `init-db` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py` works too.
 
-**Pools / DB / secrets:** `config/connectors.toml` is the *deployment* config (it ships
-with a real example — currently the migrated **nomasx1** app). Convention: `[pools.default]`
+**Pools / DB / secrets:** `config/connectors.toml` is the *deployment* config (it ships with real
+examples — the migrated **nomasx1** app (Postgres) plus the **NOMAJDE** app, whose v1 DB spans
+three v2 connectors: `jdedwards` (the Oracle JDE business DB), `nomajde` (its Postgres app DB),
+`session` (a stub) — and the `ais_connection` API connector. `config/dictionary.toml` carries
+nomasx1's fields nested under `[connectors.nomasx1.*]` and NOMAJDE's at the top level (shared);
+`config/menus.toml` has `[menus.nomasx1]` + `[menus.nomajde]` — the latter's leaves spell out
+`connector = "jdedwards"` where the screen runs against that connector). Convention: `[pools.default]`
 is the **framework pool** — it holds v2's own `ly2_users`/`ly2_roles`/`ly2_user_roles`
 (created by `liberty-admin init-db`), shared across every app; `[auth] pool` (in
-`config/app.toml`) points here. Per-*app* pools (`[pools.nomasx1]`, future `[pools.nomajde]`,
+`config/app.toml`) points here. Per-*app* pools (`[pools.nomasx1]`, `[pools.jdedwards]`, `[pools.nomajde]`,
 …) carry that app's migrated queries against its business DB; mirrors the v1 split between an
 app's "definition DB" (queries/users/roles → now TOML + `ly2_*`) and its "data DB" (`pg_dump`
 that into the target). `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`

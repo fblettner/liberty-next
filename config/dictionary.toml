@@ -3466,3 +3466,1456 @@ description = "Get Object ID from Objects (JDE_OBJECTS)"
 query = "get_object_id_from_objects_jde_objects_get"
 value = "JDEO_OBJECT"
 label = "JDEO_DESCRIPTION"
+
+# ── shared (top-level) dictionary entries migrated from libnjde (NOMAJDE) ──
+[entries.A]
+label = "Add (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "Y"
+
+[entries.AB3]
+label = "Miscellaneous Code"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC01]
+label = "Category Code 01"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC02]
+label = "Category Code 02"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC03]
+label = "Category Code 03"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC04]
+label = "Category Code 04"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC05]
+label = "Category Code 05"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC06]
+label = "Category Code 06"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC07]
+label = "Category Code 07"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC08]
+label = "Category Code 08"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC09]
+label = "Category Code 09"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC10]
+label = "Category Code 10"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC11]
+label = "Category Code 11"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC12]
+label = "Category Code 12"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC13]
+label = "Category Code 13"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC14]
+label = "Category Code 14"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC15]
+label = "Category Code 15"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC16]
+label = "Category Code 16"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC17]
+label = "Category Code 17"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC18]
+label = "Category Code 18"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC19]
+label = "Category Code 19"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC20]
+label = "Category Code 20"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC21]
+label = "Category Code 21"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC22]
+label = "Category Code 22"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC23]
+label = "Category Code 23"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC24]
+label = "Category Code 24"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC25]
+label = "Category Code 25"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC26]
+label = "Category Code 26"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC27]
+label = "Category Code 27"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC28]
+label = "Category Code 28"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC29]
+label = "Category Code 29"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AC30]
+label = "Category Code 30"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.ACTIN]
+label = "Future use Indicator"
+
+[entries.ACTINACT]
+label = "Active or Inactive"
+
+[entries.ADD1]
+label = "Address Line 1"
+
+[entries.ADD2]
+label = "Address Line 2"
+
+[entries.ADD3]
+label = "Address Line 3"
+
+[entries.ADD4]
+label = "Address Line 4"
+
+[entries.ADDC]
+label = "Add or Change"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.ADDS]
+label = "State"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.ADDZ]
+label = "Postal Code"
+
+[entries.AEMPGP]
+label = "Employee Group Approvals"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.ALKY]
+label = "Long Address Number"
+
+[entries.ALP1]
+label = "Secondary Alpha Name"
+
+[entries.ALPH]
+label = "Alpha Name"
+
+[entries.AN8]
+label = "Address Number"
+format = "number"
+
+[entries.AN81]
+label = "1st Address Number"
+format = "number"
+
+[entries.AN82]
+label = "2nd Address Number"
+format = "number"
+
+[entries.AN83]
+label = "3rd Address Number"
+format = "number"
+
+[entries.AN84]
+label = "4th Address Number"
+format = "number"
+
+[entries.AN85]
+label = "Factor/Special Payee (Hard Coded)"
+format = "number"
+
+[entries.AN86]
+label = "5th Address Number"
+format = "number"
+
+[entries.AT1]
+label = "Search Type"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.AT2]
+label = "AR/AP Netting (Y)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.AT3]
+label = "HRM Records Exist"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.AT4]
+label = "Address Type 4 Y/N"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.AT5]
+label = "Address Type 5 (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.ATE]
+label = "Employee Y/N"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.ATN1]
+label = "Scroll to End (Y/N)"
+
+[entries.ATN2]
+label = "Prompt for Version"
+
+[entries.ATN3]
+label = "Reserve Action 3"
+
+[entries.ATP]
+label = "Payables Y/N/M"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.ATPR]
+label = "User Code"
+default = "N"
+
+[entries.ATR]
+label = "Receivables Y/N"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.BKML]
+label = "Bulk Mailing Center (Future)"
+
+[entries.CAAD]
+label = "Server Status"
+format = "number"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CDL]
+label = "Code Length"
+format = "number"
+
+[entries.CFNO1]
+label = "Generic Number 1"
+format = "number"
+
+[entries.CHILDTSK]
+label = "Child Task ID"
+
+[entries.CHNG]
+label = "Change (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "Y"
+
+[entries.CLASS01]
+label = "Classification Code 01"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CLASS02]
+label = "Classification Code 02"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CLASS03]
+label = "Classification Code 03"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CLASS04]
+label = "Classification Code 04"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CLASS05]
+label = "Classification Code 05"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CLIB]
+label = "Current Library"
+
+[entries.CM]
+label = "Credit Message"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CMDE]
+label = "Command Entry"
+default = "Y"
+
+[entries.CNUM]
+label = "Numeric (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.CO]
+label = "Company"
+
+[entries.COUN]
+label = "County"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CRTE]
+label = "Carrier Route (Future)"
+
+[entries.CTR]
+label = "Country"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.CTY1]
+label = "City"
+
+[entries.CUR]
+label = "Currency Symbol"
+
+[entries.DC]
+label = "Description - Compressed"
+
+[entries.DECF]
+label = "Decimal Format Character"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.DEFROLE]
+label = "Default Role"
+default = "0"
+
+[entries.DL01]
+label = "Description"
+
+[entries.DL02]
+label = "Description 2"
+
+[entries.DL02.l]
+fr = "Description 2"
+
+[entries.DLT]
+label = "Delete (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "Y"
+
+[entries.DSCR]
+label = "Description"
+
+[entries.DSCR.l]
+fr = "Description"
+
+[entries.DSEP]
+label = "Date Separator Character"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.DTAI]
+label = "Data Item"
+
+[entries.DUNS]
+label = "DUNS Number"
+
+[entries.ECLASS]
+label = "Electronic Address Category"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.EFFDATE]
+label = "Effective Date"
+format = "jdedate"
+
+[entries.EFOR]
+label = "Email Format"
+
+[entries.EFTB]
+label = "Start Effective Date"
+format = "jdedate"
+
+[entries.EFTF]
+label = "Effective Date Existence (1/0)"
+
+[entries.EHIER]
+label = "Messaging Indicator"
+format = "number"
+rules = "LOOKUP"
+rules_values = "1"
+default = "0"
+
+[entries.EMAL]
+label = "Electronic Address"
+
+[entries.EMLA]
+label = "E-Mail Address"
+
+[entries.ETP]
+label = "Electronic Address"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.EXCHG]
+label = "Stock Exchange"
+
+[entries.EXITID]
+label = "Exit Identifier"
+format = "number"
+default = "0"
+
+[entries.EXPIRDATE]
+label = "Expiration Date"
+format = "jdedate"
+default = "0"
+
+[entries.FALGE]
+label = "Future Use Flag"
+
+[entries.FMNM]
+label = "Form Name"
+
+[entries.FRDV]
+label = "From Data Value"
+
+[entries.FRMREL]
+label = "From Release"
+
+[entries.FRMT]
+label = "Date Format"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.FRROLE]
+label = "Member"
+rules = "LOOKUP"
+rules_values = "10"
+
+[entries.FSTP]
+label = "Allow Fast Path (Y/N)"
+default = "Y"
+
+[entries.FUNO]
+label = "Object Type"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.FUROLE1]
+label = "Include in ALL"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "1"
+
+[entries.FUROLE1.l]
+fr = "Inclure dans ALL"
+
+[entries.FUROLE10]
+label = "Future Use Roles 10"
+
+[entries.FUROLE11]
+label = "Future Use Roles 11"
+
+[entries.FUROLE12]
+label = "Future Use Roles 12"
+
+[entries.FUROLE13]
+label = "Future Use Roles 13"
+
+[entries.FUROLE14]
+label = "Future Use Roles 14"
+
+[entries.FUROLE15]
+label = "Future Use Roles 15"
+
+[entries.FUROLE16]
+label = "Future Use Roles 16"
+
+[entries.FUROLE17]
+label = "Future Use Roles 17"
+
+[entries.FUROLE18]
+label = "Future Use Roles 18"
+
+[entries.FUROLE19]
+label = "Future Use Roles 19"
+
+[entries.FUROLE2]
+label = "Future Use Roles 2"
+
+[entries.FUROLE20]
+label = "Future Use Roles 20"
+
+[entries.FUROLE22]
+label = "Future Use Roles 22"
+
+[entries.FUROLE23]
+label = "Future Use Roles 23"
+
+[entries.FUROLE24]
+label = "Future Use Roles 24"
+format = "number"
+default = "0"
+
+[entries.FUROLE25]
+label = "Future Use Roles 25"
+format = "number"
+default = "0"
+
+[entries.FUROLE3]
+label = "Future Use Roles 3"
+
+[entries.FUROLE4]
+label = "Future Use Roles 4"
+
+[entries.FUROLE5]
+label = "Future Use Roles 5"
+
+[entries.FUROLE6]
+label = "Future Use Roles 6"
+
+[entries.FUROLE7]
+label = "Future Use Roles 7"
+
+[entries.FUROLE8]
+label = "Future Use Roles 8"
+
+[entries.FUROLE9]
+label = "Future Use Roles 9"
+
+[entries.FUTANON1]
+label = "Future Use Field 11"
+
+[entries.FUTANON10]
+label = "Future Use Field 10"
+
+[entries.FUTANON11]
+label = "Future Use Field 11"
+
+[entries.FUTANON12]
+label = "Future Use Field 12"
+
+[entries.FUTANON13]
+label = "Future Use Field 13"
+format = "number"
+default = "0"
+
+[entries.FUTANON14]
+label = "Future Use Field 14"
+format = "number"
+default = "0"
+
+[entries.FUTANON15]
+label = "Future Use Field 15"
+format = "number"
+default = "0"
+
+[entries.FUTANON16]
+label = "Future Use Field 16"
+format = "number"
+default = "0"
+
+[entries.FUTANON2]
+label = "Future Use Field 2"
+
+[entries.FUTANON3]
+label = "Future Use Field 3"
+
+[entries.FUTANON4]
+label = "Future Use Field 4"
+
+[entries.FUTANON5]
+label = "Future Use Field 5"
+
+[entries.FUTANON6]
+label = "Future Use Field 6"
+
+[entries.FUTANON7]
+label = "Future Use Field 7"
+
+[entries.FUTANON8]
+label = "Future Use Field 8"
+format = "number"
+default = "0"
+
+[entries.FUTANON9]
+label = "Future Use Field 9"
+format = "number"
+default = "0"
+
+[entries.FUTTIME]
+label = "Future Use Field"
+
+[entries.FUTTIME1]
+label = "Future Use Field 1"
+
+[entries.FUTTIME2]
+label = "Future Use Field 2"
+
+[entries.FUTTIME3]
+label = "Future Use Field 3"
+
+[entries.FUTTIME4]
+label = "Future Use Field 4"
+
+[entries.FUTTIME5]
+label = "Future Use Field 5"
+
+[entries.FUTTIME6]
+label = "Future Use Field 6"
+
+[entries.FUTTIME7]
+label = "Future Use Field 7"
+format = "number"
+
+[entries.FUTTIME8]
+label = "Future Use Field 8"
+format = "number"
+
+[entries.FUVARDET1]
+label = "Future Use Variant Detail 1"
+
+[entries.FUVARDET2]
+label = "Future Use Variant Detail 2"
+
+[entries.FUVARDET3]
+label = "Future Use Variant Detail 3"
+
+[entries.FUVARDET4]
+label = "Future Use Variant Detail 4"
+
+[entries.FUVARDET5]
+label = "Future Use Variant Detail 5"
+
+[entries.FUVARDET6]
+label = "Future Use Variant Detail 6"
+
+[entries.FUVARDET7]
+label = "Future Use Variant Detail 7"
+
+[entries.FUVARDET8]
+label = "Future Use Variant Detail 8"
+
+[entries.GEN1]
+label = "General Information - 1"
+
+[entries.GLBA]
+label = "G/L Bank Account"
+
+[entries.GROWTHR]
+label = "Growth Rate"
+format = "number"
+
+[entries.ICPY]
+label = "Copy Action"
+
+[entries.IDLN]
+label = "Who's Who Line"
+format = "number"
+
+[entries.INSL]
+label = "Install Application (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.IOK]
+label = "OK/Select Action"
+
+[entries.IPGM]
+label = "Initial Program"
+
+[entries.IS_FOUND]
+label = "Is Found"
+format = "number"
+
+[entries.IS_PARENT]
+label = "Parent (Y/N)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+
+[entries.IS_PARENT.l]
+fr = "Parent (Y/N)"
+
+[entries.IUPT]
+label = "Update Action"
+
+[entries.JOBN]
+label = "Work Station ID"
+default = "NODE"
+
+[entries.JOBQ]
+label = "Batch Job Queue"
+
+[entries.JSP]
+label = "Job Scheduling Priority"
+
+[entries.KY]
+label = "User Defined Code"
+
+[entries.LASTLOGIN]
+label = "Last Login Date"
+format = "number"
+default = "0"
+
+[entries.LL]
+label = "Library List Name"
+
+[entries.LLVL]
+label = "Logging Level"
+rules = "LOOKUP"
+rules_values = "1"
+default = "4"
+
+[entries.LMSG]
+label = "Logging Messages"
+rules = "LOOKUP"
+rules_values = "1"
+default = "*NOLIST"
+
+[entries.LN2]
+label = "Line 2 Desired (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "N"
+
+[entries.LNGP]
+label = "Language"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.LOD]
+label = "Level of Display"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.LSEV]
+label = "Logging Severity"
+default = "00"
+
+[entries.LUSER]
+label = "Long User ID"
+
+[entries.LYF00950]
+label = "Security Workbench"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+default = "Y"
+
+[entries.LYF00950.l]
+fr = "Security Workbench"
+
+[entries.LYF00950W]
+label = "User Defined Objects (UDO)"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+default = "Y"
+
+[entries.LYF00950W.l]
+fr = "UDO"
+
+[entries.LYF9006]
+label = "Menu Filtering"
+format = "boolean"
+rules = "BOOLEAN"
+rules_values = "Y"
+default = "Y"
+
+[entries.LYF9006.l]
+fr = "Filtres Menus"
+
+[entries.MCU]
+label = "Business Unit"
+
+[entries.MD]
+label = "Description"
+
+[entries.MD.l]
+fr = "Description"
+
+[entries.MNI]
+label = "Menu Identification"
+
+[entries.MRCT]
+label = "EnterpriseOne Merge Control (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+default = "2"
+
+[entries.MRTY]
+label = "Merge Type"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.MSGA]
+label = "Cleared (Y)"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.MSKA]
+label = "Authorization Mask"
+
+[entries.MSKD]
+label = "Department Mask"
+
+[entries.MSKF]
+label = "Future Use Mask"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.MSKJ]
+label = "Job Mask"
+
+[entries.MSKK]
+label = "Knowledge Mask"
+
+[entries.MTVL]
+label = "Menu Travel"
+default = "Y"
+
+[entries.MUSE]
+label = "User ID"
+rules = "LOGIN"
+
+[entries.NOE]
+label = "Number Of Employee"
+format = "number"
+
+[entries.OBID]
+label = "Object Identifier"
+format = "number"
+default = "0"
+
+[entries.OBNM]
+label = "Object Name"
+
+[entries.OID]
+label = "Object ID"
+
+[entries.OMWLOG]
+label = "OMW Logging"
+
+[entries.OUTP]
+label = "Output Priority"
+
+[entries.OUTQ]
+label = "Output Queue"
+default = "QPRINT"
+
+[entries.OVNAME]
+label = "Override Task Name"
+
+[entries.OVVERSION]
+label = "Override Task Version"
+
+[entries.OWDI]
+label = "Data Item (EnterpriseOne)"
+
+[entries.PARNTTSK]
+label = "Parent Task ID"
+
+[entries.PDI]
+label = "Date Scheduled In"
+format = "jdedate"
+
+[entries.PERRS]
+label = "Previous Error Status"
+format = "number"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.PID]
+label = "Program ID"
+default = "LIBERTY"
+
+[entries.PRGF]
+label = "Purge Flag"
+
+[entries.PRTL]
+label = "Print File Library"
+
+[entries.PTH]
+label = "Path"
+
+[entries.PTI]
+label = "Time Scheduled In"
+format = "number"
+
+[entries.RCK7]
+label = "Line Number"
+format = "number"
+
+[entries.REVRNG]
+label = "Revenue range"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.RIGHTLEFT]
+label = "Right to Left"
+default = "0"
+
+[entries.RLTYPE]
+label = "Task View ID"
+
+[entries.RMK]
+label = "Remark"
+
+[entries.ROLE]
+label = "Role"
+rules = "LOOKUP"
+rules_values = "5"
+
+[entries.ROLEDESC]
+label = "Role Description"
+
+[entries.ROLETYP]
+label = "Member Type"
+default = "0"
+
+[entries.RT]
+label = "User Defined Codes"
+rules = "LOOKUP"
+rules_values = "3"
+
+[entries.RUN]
+label = "Run Application (Y/N)"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.SBLI]
+label = "Subledger Inactive Code"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.SCCLTP]
+label = "Shortcut Client Type"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.SEC_TYPE]
+label = "Security Group"
+rules = "ENUM"
+rules_values = "1"
+
+[entries.SEC_TYPE.l]
+fr = "Groupe Sécurité"
+
+[entries.SEQ]
+label = "Sequence Number"
+format = "number"
+
+[entries.SEQNO]
+label = "Sequence Number"
+format = "number"
+
+[entries.SETY]
+label = "Security Type"
+rules = "LOOKUP"
+rules_values = "7"
+
+[entries.SIC]
+label = "Industry Classification"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.SY]
+label = "Product Code"
+rules = "LOOKUP"
+rules_values = "2"
+
+[entries.SYNCS]
+label = "Synchronization Status"
+format = "number"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.SYR]
+label = "Product System Code"
+rules = "LOOKUP"
+rules_values = "2"
+
+[entries.SYR.l]
+fr = "System Code Produit"
+
+[entries.SYSROLE]
+label = "System Role"
+default = "0"
+
+[entries.TABID]
+label = "Tab Identifier"
+format = "number"
+default = "0"
+
+[entries.TAX]
+label = "Tax ID"
+
+[entries.TAXC]
+label = "Person/Corporation Code"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.TEXTID]
+label = "Text ID"
+format = "number"
+default = "0"
+
+[entries.THDV]
+label = "Thru Data Value"
+
+[entries.THRREL]
+label = "Thru Release"
+
+[entries.TICKER]
+label = "Ticker"
+
+[entries.TIMEFORM]
+label = "Time Format"
+
+[entries.TOROLE]
+label = "Member of"
+rules = "LOOKUP"
+rules_values = "11"
+
+[entries.TX2]
+label = "Add'l Ind Tax ID"
+
+[entries.TXCT]
+label = "Certificate"
+
+[entries.UCD1]
+label = "Class Code"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.UGRP]
+label = "User / Role"
+
+[entries.UL01]
+label = "Time Zone"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.UL02]
+label = "Time Format"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.UL03]
+label = "User Library List 03"
+
+[entries.UL04]
+label = "User Library List 04"
+
+[entries.UL05]
+label = "User Library List 05"
+
+[entries.UL06]
+label = "User Library List 06"
+
+[entries.UL07]
+label = "User Library List 07"
+
+[entries.UL08]
+label = "User Library List 08"
+
+[entries.UL09]
+label = "User Library List 09"
+
+[entries.UL10]
+label = "User Library List 10"
+
+[entries.UL11]
+label = "User Library List 11"
+
+[entries.UL12]
+label = "User Library List 12"
+
+[entries.UL13]
+label = "User Library List 13"
+
+[entries.UL14]
+label = "User Library List 14"
+
+[entries.UL15]
+label = "User Library List 15"
+
+[entries.UL16]
+label = "User Library List 16"
+
+[entries.UL17]
+label = "User Library List 17"
+
+[entries.UL18]
+label = "User Library List 18"
+
+[entries.UL19]
+label = "User Library List 19"
+
+[entries.UL20]
+label = "User Library List 20"
+
+[entries.UL21]
+label = "User Library List 21"
+
+[entries.UL22]
+label = "User Library List 22"
+
+[entries.UL23]
+label = "User Library List 23"
+
+[entries.UL24]
+label = "User Library List 24"
+
+[entries.UL25]
+label = "User Library List 25"
+
+[entries.UPMJ]
+label = "Date Updated"
+format = "jdedate"
+rules = "SYSDATE"
+
+[entries.UPMJ.l]
+fr = "Date Maj"
+
+[entries.UPMT]
+label = "Time Last Updated"
+format = "number"
+default = "0"
+
+[entries.URAB]
+label = "User Reserved Number"
+format = "number"
+
+[entries.URAT]
+label = "User Reserved Amount"
+format = "number"
+
+[entries.URCD]
+label = "User Reserved Code"
+
+[entries.URDT]
+label = "User Reserved Date"
+format = "jdedate"
+
+[entries.URRF]
+label = "User Reserved Reference"
+
+[entries.USEINTENSE]
+label = "Use Intensity"
+format = "number"
+default = "0"
+
+[entries.USEQ]
+label = "Sequence Number"
+format = "number"
+
+[entries.USER]
+label = "User ID"
+rules = "LOOKUP"
+rules_values = "4"
+
+[entries.USER_ROLE]
+label = "User / Role"
+rules = "LOOKUP"
+rules_values = "6"
+
+[entries.USER_ROLE.l]
+fr = "Utilisateur / Rôle"
+
+[entries.UTCTIME]
+label = "Universal Time"
+
+[entries.UTYP]
+label = "User Type"
+
+[entries.VARACTIVE]
+label = "Active"
+
+[entries.VARNAME]
+label = "Variant Name"
+
+[entries.VER]
+label = "Version"
+
+[entries.VRSP]
+label = "Version Prefix"
+
+[entries.VWYN]
+label = "View (Y/N)"
+default = "Y"
+
+[entries.WEBIDCRE]
+label = "Web Id Creator"
+
+[entries.WOACCESS]
+label = "Access (1/0)"
+
+[entries.WOACTFLG]
+label = "Active Flag"
+
+[entries.WOADDPR]
+label = "Allow Add (1/0)"
+
+[entries.WOADDPU]
+label = "Allow Add (1/0)"
+
+[entries.WOBNM]
+label = "Object Name"
+
+[entries.WOCAT]
+label = "Web Object Category"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.WODELTPU]
+label = "Allow Delete (1/0)"
+
+[entries.WOFU1]
+label = "Web Object Future Use 1"
+
+[entries.WOFU10]
+label = "Web Object Future Use 10"
+
+[entries.WOFU2]
+label = "Web Object Future Use 2"
+
+[entries.WOFU3]
+label = "Web Object Future Use 3"
+
+[entries.WOFU4]
+label = "Web Object Future Use 4"
+
+[entries.WOFU5]
+label = "Web Object Future Use 5"
+
+[entries.WOFU6]
+label = "Web Object Future Use 6"
+
+[entries.WOFU7]
+label = "Web Object Future Use 7"
+format = "number"
+
+[entries.WOFU8]
+label = "Web Object Future Use 8"
+format = "number"
+
+[entries.WOFU9]
+label = "Web Object Future Use 9"
+
+[entries.WOFUTID1]
+label = "Future ID"
+
+[entries.WOFUTID2]
+label = "Future ID"
+
+[entries.WOMKEY]
+label = "Machine Key"
+
+[entries.WOOBNMS]
+label = "Web Object Description Short"
+
+[entries.WOPRGID]
+label = "Program ID"
+
+[entries.WOSECLVL]
+label = "Security Level"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.WOSECOPT1]
+label = "Security Options1"
+
+[entries.WOSECOPT2]
+label = "Security Options2"
+
+[entries.WOSECOPT3]
+label = "Security Options3"
+
+[entries.WOSECOPT4]
+label = "Security Options4"
+
+[entries.WOSETY]
+label = "Security Type"
+rules = "LOOKUP"
+rules_values = "1"
+
+[entries.WOSUBCAT]
+label = "Web Object Sub-Category"
+
+[entries.WOTYP]
+label = "Web Object Type"
+
+[entries.WOUPDTPU]
+label = "Allow Update (1/0)"
+
+[entries.WOUSER]
+label = "Web Object User"
+
+[entries.WOUSERID]
+label = "User ID"
+
+[entries.WOUTIME]
+label = "Web Object UTime"
+
+[entries.WOVALUE1]
+label = "From Value"
+
+[entries.WOVALUE2]
+label = "Thru Value"
+
+[entries.WOVIEW]
+label = "Viewable (1/0)"
+
+[entries.WUID]
+label = "Web User Identifier"
+
+[entries.YEARSTAR]
+label = "Year Started"
+
+[enums.1]
+label = "Security Types"
+values = [
+    { value = "ALIAS", label = "Dictionary Item", l = { fr = "Dictionnaire ID" } },
+    { value = "OBJECTS", label = "Objects", l = { fr = "Objets" } },
+    { value = "OTHERS", label = "Others", l = { fr = "Autres" } },
+]
+
+[enums.2]
+label = "Environments"
+values = [
+    { value = "JPS920", label = "E920 Pristine Environment" },
+    { value = "PS920", label = "E920 Pristine Environment" },
+]
+
+[lookups.1]
+description = "Get UDC Description"
+query = "get_udc_description_get"
+value = "KY"
+label = "DL01"
+
+[lookups.2]
+description = "Get Product Code"
+query = "get_product_code_get"
+value = "KY"
+label = "DL01"
+
+[lookups.3]
+description = "Get System Code"
+query = "get_system_code_get"
+value = "RT"
+label = "DL01"
+
+[lookups.4]
+description = "Get User Name"
+query = "get_user_name_get"
+value = "USER"
+label = "ALPH"
+
+[lookups.5]
+description = "Get Role Description"
+query = "get_role_description_get"
+value = "ROLE"
+label = "ROLEDESC"
+
+[lookups.6]
+description = "Get User / Role Name"
+query = "get_user_role_name_get"
+value = "USER_ROLE"
+label = "ALPH"
+
+[lookups.7]
+description = "Get Security Type"
+query = "get_security_type_get"
+value = "KY"
+label = "DL01"
+
+[lookups.8]
+description = "Get Data Item"
+query = "get_data_item_get"
+value = "DTAI"
+label = "DSCR"
+
+[lookups.9]
+description = "Get Object Name"
+query = "get_object_name_get"
+value = "OBNM"
+label = "MD"

@@ -693,3 +693,77 @@ target = "settings_license_pricing_get"
 
 [menus.nomasx1.items.l]
 fr = "Prix public"
+
+# ── nomajde app menu (migrated from libnjde) ──
+[[menus.nomajde.items]]
+id = "master_data"
+label = "Master Data"
+
+[[menus.nomajde.items]]
+id = "udc_types"
+label = "UDC Types"
+parent = "master_data"
+type = "query"
+target = "f0004_get"
+connector = "jdedwards"
+
+[[menus.nomajde.items]]
+id = "udc_code"
+label = "UDC Code"
+parent = "master_data"
+type = "query"
+target = "f0005_get"
+connector = "jdedwards"
+
+[[menus.nomajde.items]]
+id = "security_maintenance"
+label = "Security Maintenance"
+
+[menus.nomajde.items.l]
+fr = "Gestion des utilisateurs"
+
+[[menus.nomajde.items]]
+id = "user_management"
+label = "User Management"
+parent = "security_maintenance"
+type = "query"
+target = "f0092_get"
+connector = "jdedwards"
+
+[menus.nomajde.items.l]
+fr = "Gestion des Utilisateurs"
+
+[[menus.nomajde.items]]
+id = "role_management"
+label = "Role Management"
+parent = "security_maintenance"
+type = "query"
+target = "f00926_get"
+connector = "jdedwards"
+
+[menus.nomajde.items.l]
+fr = "Affectations Rôles"
+
+[[menus.nomajde.items]]
+id = "role_relationships"
+label = "Role Relationships"
+parent = "security_maintenance"
+type = "query"
+target = "f95921_get"
+connector = "jdedwards"
+
+[[menus.nomajde.items]]
+id = "environments"
+label = "Environments"
+parent = "security_maintenance"
+type = "query"
+target = "f0093_get"
+connector = "jdedwards"
+
+[[menus.nomajde.items]]
+id = "security_workbench"
+label = "Security Workbench"
+parent = "security_maintenance"
+type = "query"
+target = "f00950_get"
+connector = "jdedwards"

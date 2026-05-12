@@ -4,13 +4,16 @@
 // as `:<col>` + `:<col>_op` binds on Run, so the SQL pre-filters server-side *before* the grid
 // loads (the in-grid TanStack filters then refine the loaded page). Collapsible — open by default
 // when the query doesn't auto-load (you set filters first), collapsed when it does.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Check, Filter } from 'lucide-react'
 import type { Column } from '../../types/connectors'
 import { Input, Select, Field, Row } from '../../common'
+import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/lookups'
 import { colors, radius, fontSize, fonts, shadow } from '../../theme'
+
+type LookupRule = Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
 
 export interface ServerFilter { op: string; val: string }
 
@@ -107,8 +110,24 @@ export function FilterPanel({ cols, values, onChange, autoLoad }: {
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(!autoLoad)
+  // lookup-backed filter columns resolve to a value→label map (fetched once per session) so the
+  // field is a dropdown of *labels* — the user picks "Customer Service" not the code "01".
+  const lookupSpecs = useMemo<LookupSpec[]>(
+    () => cols.filter((c) => c.rule?.kind === 'lookup').map((c) => {
+      const r = c.rule as LookupRule
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label }
+    }),
+    [cols],
+  )
+  const lookupMaps = useLookupBatch(lookupSpecs)
   if (cols.length === 0) return null
+
   const activeCount = cols.filter((c) => (values[c.name]?.val ?? '') !== '').length
+  const lookupOptionsFor = (c: Column): { value: string; label: string }[] | undefined => {
+    if (c.rule?.kind !== 'lookup') return undefined
+    const m = lookupMaps.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label }))
+    return m ? [...m.entries()].map(([v, l]) => ({ value: v, label: l })).sort((a, b) => a.label.localeCompare(b.label)) : undefined
+  }
   return (
     <Wrap>
       <Head type="button" $open={open} onClick={() => setOpen((o) => !o)}>
@@ -121,16 +140,25 @@ export function FilterPanel({ cols, values, onChange, autoLoad }: {
           <Row align="flex-end">
             {cols.map((c) => {
               const isEnum = c.rule?.kind === 'enum'
-              const cur = values[c.name] ?? { op: isEnum ? 'equals' : 'contains', val: '' }
+              const isLookup = c.rule?.kind === 'lookup'
+              const isChoice = isEnum || isLookup  // a value-list dropdown (op is implicitly "equals")
+              const cur = values[c.name] ?? { op: isChoice ? 'equals' : 'contains', val: '' }
+              const opts = isEnum && c.rule?.kind === 'enum' ? c.rule.values
+                : isLookup ? lookupOptionsFor(c) : undefined
               return (
                 <div key={c.name} style={{ minWidth: 210 }}>
                   <Field label={c.label ?? c.name}>
                     <FieldRow>
-                      {!isEnum && <OpPicker value={cur.op} onChange={(op) => onChange(c.name, { ...cur, op })} />}
-                      {isEnum ? (
-                        <Select value={cur.val} onChange={(e) => onChange(c.name, { op: 'equals', val: e.target.value })} style={{ flex: 1 }}>
-                          <option value="">{t('table.filterAny')}</option>
-                          {c.rule!.kind === 'enum' && c.rule!.values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+                      {!isChoice && <OpPicker value={cur.op} onChange={(op) => onChange(c.name, { ...cur, op })} />}
+                      {isChoice ? (
+                        <Select
+                          value={cur.val}
+                          onChange={(e) => onChange(c.name, { op: 'equals', val: e.target.value })}
+                          style={{ flex: 1 }}
+                          disabled={isLookup && !opts}  /* lookup map still loading */
+                        >
+                          <option value="">{isLookup && !opts ? t('common.loading') : t('table.filterAny')}</option>
+                          {(opts ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </Select>
                       ) : (
                         <Input

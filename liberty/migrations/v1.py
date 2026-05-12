@@ -107,10 +107,10 @@ def _dialect_name(dbtype: Any) -> str:
 _FILTER_OPS = ("contains", "equals", "notEquals", "startsWith", "endsWith")
 
 
-def _filter_predicate(col: str) -> str:
-    pv = f"CAST(:{col} AS VARCHAR(4000))"        # the value, as text (also pins the bind's type)
-    po = f"CAST(:{col}_op AS VARCHAR(4000))"     # the operator, as text
-    cv = f"CAST(_flt.{col} AS VARCHAR(4000))"    # the column, as text
+def _filter_predicate(col: str, vchar: str) -> str:
+    pv = f"CAST(:{col} AS {vchar})"        # the value, as text (also pins the bind's type)
+    po = f"CAST(:{col}_op AS {vchar})"     # the operator, as text
+    cv = f"CAST(_flt.{col} AS {vchar})"    # the column, as text
     branches = (
         f"{pv} IS NULL OR {pv} = ''",
         f"COALESCE({po}, 'contains') = 'contains' AND LOWER({cv}) LIKE LOWER('%' || {pv} || '%')",
@@ -122,8 +122,9 @@ def _filter_predicate(col: str) -> str:
     return "  AND (" + " OR ".join(f"({b})" for b in branches) + ")"
 
 
-def _wrap_with_filters(base_sql: str, cols: list[str]) -> str:
-    preds = "\n".join(_filter_predicate(c) for c in cols)
+def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "default") -> str:
+    vchar = "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
+    preds = "\n".join(_filter_predicate(c, vchar) for c in cols)
     return f"SELECT * FROM (\n{base_sql}\n) _flt\nWHERE 1=1\n{preds}"
 
 
@@ -216,11 +217,10 @@ def migrate_sql_queries(
         # build each dialect variant: wrap in `SELECT * FROM (…) _flt WHERE <filters>` when the
         # query has filter columns, then append ORDER BY (on the outer query, when wrapped).
         ob = orderbys.get(key, "")
-        variants = {
-            dia: ((f"{_wrap_with_filters(raw, filter_cols)}\nORDER BY {ob}" if ob else _wrap_with_filters(raw, filter_cols))
-                  if filter_cols else (f"{raw}\nORDER BY {ob}" if ob else raw))
-            for dia, raw in groups[key].items()
-        }
+        def _variant(raw: str, dia: str) -> str:
+            s = _wrap_with_filters(raw, filter_cols, dialect=dia) if filter_cols else raw
+            return f"{s}\nORDER BY {ob}" if ob else s
+        variants = {dia: _variant(raw, dia) for dia, raw in groups[key].items()}
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
@@ -523,8 +523,10 @@ def migrate_menus(
     leaf whose ``target`` is resolved through ``ly_tables.tbl_id`` / ``ly_dlg_frm.frm_id`` →
     ``ly_query.query_id`` → ``slugify(<query_label>_<read CRUD>)`` — i.e. the exact name
     :func:`migrate_sql_queries` gives that query's *read* variant (``GET`` preferred, then
-    ``SELECT``; ``GET`` when the query isn't in *sql_rows*); the connector defaults to *app_name*
-    so it's left off. A node with no component is a folder; one whose component can't be resolved
+    ``SELECT``; ``GET`` when the query isn't in *sql_rows*). The connector is left off when it equals
+    *app_name* (the default), but spelled out (``connector = "<slug of query_pool>"``) when the query
+    lives on a different v2 connector — common since one v1 app can have queries against several pools.
+    A node with no component is a folder; one whose component can't be resolved
     (``Dashboard`` etc.) becomes a folder placeholder for the operator to wire up. Item ids are
     slugs of the labels, deduped. (v1's ``ly_menus_filters`` — per-node role/param filters — isn't
     migrated yet; the schema's ``roles``/``params`` are there for hand-editing.)
@@ -550,17 +552,20 @@ def migrate_menus(
     }
     query_label: dict[int, str] = {}
     read_crud: dict[int, str] = {}  # query_id → the crud its read variant migrated under (GET / SELECT / READ)
+    query_conn: dict[int, str] = {}  # query_id → the v2 connector name (slug of its v1 query_pool)
     for r in sql_rows:
         qid_raw = r.get("query_id")
         if qid_raw is None:
             continue
         qid = int(qid_raw)
         query_label.setdefault(qid, str(r.get("query_label") or ""))
+        query_conn.setdefault(qid, slugify(str(r.get("query_pool") or "default").strip() or "default", fallback="default"))
         crud = str(r.get("query_crud") or "").upper()
         if crud in _READ_CRUD and qid not in read_crud:
             read_crud[qid] = crud  # source rows arrive ordered by crud → GET wins over SELECT
 
-    def query_name(component: str, component_id: Any) -> str | None:
+    def resolve_query(component: str, component_id: Any) -> tuple[str, int] | None:
+        """(migrated query name, query_id) for a query-backed menu component, or None."""
         if component_id is None or component.upper() not in _QUERY_COMPONENTS:
             return None
         cid = int(component_id)
@@ -573,7 +578,7 @@ def migrate_menus(
         if qid is None:
             return None
         crud = read_crud.get(qid, "GET")
-        return slugify(f"{query_label.get(qid) or f'q{qid}'}_{crud}", fallback=f"q{qid}_{crud.lower()}")
+        return slugify(f"{query_label.get(qid) or f'q{qid}'}_{crud}", fallback=f"q{qid}_{crud.lower()}"), qid
 
     translations: dict[str, dict[str, str]] = {}
     for r in menu_l_rows:
@@ -601,10 +606,14 @@ def migrate_menus(
             item["parent"] = parent_id
         if seq in translations:
             item["l"] = translations[seq]
-        target = query_name(str(r.get("menu_component") or "").strip(), r.get("menu_component_id"))
-        if target:
+        resolved = resolve_query(str(r.get("menu_component") or "").strip(), r.get("menu_component_id"))
+        if resolved:
+            target, qid = resolved
             item["type"] = "query"
-            item["target"] = target  # connector defaults to the app — left off
+            item["target"] = target
+            conn = query_conn.get(qid)
+            if conn and conn != app_name:  # the query lives on another connector → spell it out
+                item["connector"] = conn
         items.append(item)
 
     app: dict[str, Any] = {"items": items}
