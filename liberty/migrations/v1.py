@@ -97,24 +97,29 @@ def _dialect_name(dbtype: Any) -> str:
 
 # When a read query has `filter`-flagged columns (v1's col_filter), wrap it so the value the
 # TableView sends for each such column actually pre-filters server-side: `SELECT * FROM (<orig>)
-# _flt WHERE …`. Each column C gets a `:C` value bind and a `:C_op` operator bind (default
-# 'contains'). The predicate is plain SQL that works on PostgreSQL / Oracle / SQLite (`||` coerces
-# the column to text on all three, `LIKE`/`LOWER` are universal). Numeric-range operators aren't
-# offered server-side — the in-grid TanStack filters cover those on the loaded page.
+# _flt WHERE …`. Each column C gets a `:C` value bind and a `:C_op` operator bind. The bind and the
+# column are CAST to text in the predicate: that pins the parameter's type (so a NULL bind — an
+# *unset* filter — doesn't trip "could not determine data type of parameter" on asyncpg) and gives
+# uniform comparison regardless of the column's real type (numbers/dates compare on their text form;
+# the in-grid TanStack filters do the type-aware range filtering on the loaded page). `LIKE`/`LOWER`/
+# `CAST(… AS VARCHAR(n))` are portable across PostgreSQL / Oracle / SQLite. A NULL/empty `:C` matches
+# everything (= "no filter"), so omitting the unset filters is fine.
 _FILTER_OPS = ("contains", "equals", "notEquals", "startsWith", "endsWith")
 
 
 def _filter_predicate(col: str) -> str:
-    p = f":{col}"
-    txt = f"LOWER(_flt.{col} || '')"
-    return (
-        f"  AND ({p} IS NULL OR {p} = ''"
-        f" OR (COALESCE({p}_op, 'contains') = 'contains'   AND {txt} LIKE LOWER('%' || {p} || '%'))"
-        f" OR ({p}_op = 'equals'     AND _flt.{col} || '' = {p})"
-        f" OR ({p}_op = 'notEquals'  AND _flt.{col} || '' <> {p})"
-        f" OR ({p}_op = 'startsWith' AND {txt} LIKE LOWER({p} || '%'))"
-        f" OR ({p}_op = 'endsWith'   AND {txt} LIKE LOWER('%' || {p})))"
+    pv = f"CAST(:{col} AS VARCHAR(4000))"        # the value, as text (also pins the bind's type)
+    po = f"CAST(:{col}_op AS VARCHAR(4000))"     # the operator, as text
+    cv = f"CAST(_flt.{col} AS VARCHAR(4000))"    # the column, as text
+    branches = (
+        f"{pv} IS NULL OR {pv} = ''",
+        f"COALESCE({po}, 'contains') = 'contains' AND LOWER({cv}) LIKE LOWER('%' || {pv} || '%')",
+        f"{po} = 'equals'     AND {cv} = {pv}",
+        f"{po} = 'notEquals'  AND {cv} <> {pv}",
+        f"{po} = 'startsWith' AND LOWER({cv}) LIKE LOWER({pv} || '%')",
+        f"{po} = 'endsWith'   AND LOWER({cv}) LIKE LOWER('%' || {pv})",
     )
+    return "  AND (" + " OR ".join(f"({b})" for b in branches) + ")"
 
 
 def _wrap_with_filters(base_sql: str, cols: list[str]) -> str:

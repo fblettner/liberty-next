@@ -328,9 +328,12 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (a single distinct statement collapses to a plain string; `--dbtype` keeps just one variant).
   v1's `query_crud` is a **REST verb** — `GET`/`SELECT` = read (gets `ORDER BY <query_orderby>`
   and the `column_hints` for its `query_id`; if any of those hints is `filter`-flagged the query is
-  also wrapped — `SELECT * FROM (<orig>) _flt WHERE …` with a `:<col>` + `:<col>_op` bind per such
-  column, the ORDER BY moving onto the outer query — so the TableView's `FilterPanel` actually
-  pre-filters server-side), `POST`/`PUT`/`PATCH`/`DELETE` = write (`writable =
+  also wrapped — `SELECT * FROM (<orig>) _flt WHERE …` with a `:<col>` value bind + `:<col>_op` operator
+  bind per such column (both, and the column, `CAST(… AS VARCHAR(4000))` — pins the bind's type so an
+  *unset* filter's NULL bind doesn't trip asyncpg's "could not determine data type", and compares
+  uniformly regardless of the column's real type; an empty/NULL value matches everything = "no filter"),
+  the ORDER BY moving onto the outer query — so the TableView's `FilterPanel` actually pre-filters
+  server-side), `POST`/`PUT`/`PATCH`/`DELETE` = write (`writable =
   true`). Pool stubs `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` (overridden by
   `migrate_pools`). `migrate_api(ly_api_conn, ly_api,
   ly_api_header, ly_api_params, …)` → an **API connector per `ly_api_conn`** (`base_url=conn_url`,

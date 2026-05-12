@@ -19,6 +19,16 @@ export interface ServerFilter { op: string; val: string }
 const OPS = ['contains', 'equals', 'notEquals', 'startsWith', 'endsWith'] as const
 const OP_GLYPH: Record<string, string> = { contains: '~', equals: '=', notEquals: '≠', startsWith: '^', endsWith: '$' }
 
+const NUM_FORMATS = new Set(['number', 'integer', 'int', 'decimal', 'numeric', 'float', 'double', 'real', 'money', 'currency'])
+const DATE_FORMATS = new Set(['date', 'datetime', 'timestamp'])
+function inputTypeFor(c: Column): 'text' | 'number' | 'date' {
+  const f = (c.format ?? '').toLowerCase()
+  const t = (c.type ?? '').toLowerCase()
+  if (DATE_FORMATS.has(f) || /\bdate\b|timestamp/.test(t)) return 'date'
+  if (NUM_FORMATS.has(f) || /int|numeric|decimal|float|double|real/.test(t)) return 'number'
+  return 'text'
+}
+
 const Wrap = styled.div`
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
 `
@@ -124,7 +134,7 @@ export function FilterPanel({ cols, values, onChange, autoLoad }: {
                         </Select>
                       ) : (
                         <Input
-                          type={(c.format ?? '').toLowerCase() === 'date' ? 'date' : 'text'}
+                          type={inputTypeFor(c)}
                           placeholder={t('table.serverFilterHint')}
                           value={cur.val}
                           onChange={(e) => onChange(c.name, { ...cur, val: e.target.value })}
