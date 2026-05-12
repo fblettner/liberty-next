@@ -69,6 +69,12 @@ class PoolConfig(BaseModel):
     # SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty →
     # derived from the URL. Used to pick a query's per-dialect SQL variant (see QueryDef.sql).
     dialect: str = ""
+    # Schema-name placeholders the queries on this pool may use — `#SCHEMA.<NAME>#` in a query's SQL
+    # is replaced at execution time with `schemas["<NAME>"]` (v1's `ly_db_schema`: `sch_name → sch_target`).
+    # Lets the same query target different schemas in dev vs prod (or several schemas reachable by one
+    # DB user) without editing the SQL. Values must be plain identifiers (`SY920`, `db.schema`); a query
+    # that references a `#SCHEMA.X#` with no mapping here fails with a clear error. Case-insensitive on the name.
+    schemas: dict[str, str] = Field(default_factory=dict)
     pool_size: int = 5
     max_overflow: int = 10
     pool_pre_ping: bool = True

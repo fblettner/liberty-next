@@ -796,6 +796,7 @@ def _parse_jdbc(jdbc: str) -> tuple[str, int, str] | None:
 def migrate_pools(
     applications: Iterable[Mapping[str, Any]],
     *,
+    db_schemas: Iterable[Mapping[str, Any]] = (),
     connector_prefix: str = "",
 ) -> dict[str, Any]:
     """Build the ``{pools}`` dict from v1's ``ly_applications`` rows — one
@@ -812,14 +813,24 @@ def migrate_pools(
     pool name, the first wins. ``apps_dbtype`` becomes the pool's explicit ``dialect`` (so v2 picks
     the right per-dialect SQL variant); ``apps_pool_min`` / ``apps_pool_max`` become ``pool_size`` /
     ``max_overflow`` (the burst above ``pool_size``); ``apps_limit`` becomes ``max_rows`` (the pool's
-    default SELECT row cap).
+    default SELECT row cap). v1's ``ly_db_schema`` rows (``db_schemas``) become each pool's ``schemas``
+    map (``sch_name → sch_target``) — the ``#SCHEMA.<name>#`` placeholder substitution.
 
     Args:
         applications: rows from ``ly_applications`` (``apps_name``, ``apps_pool``,
             ``apps_dbtype``, ``apps_jdbc``, ``apps_user``, ``apps_host``, ``apps_port``,
             ``apps_database``, ``apps_pool_max``, ``apps_limit``, …).
+        db_schemas: rows from ``ly_db_schema`` (``sch_pool``, ``sch_name``, ``sch_target``).
         connector_prefix: prepended to the pool name (e.g. ``"v1_"``).
     """
+    # group ly_db_schema by the v2 pool name → {sch_name: sch_target}
+    schemas_by_pool: dict[str, dict[str, str]] = {}
+    for r in db_schemas:
+        pn = f"{connector_prefix}{slugify(str(r.get('sch_pool') or '').strip(), fallback='')}"
+        sn, st = str(r.get("sch_name") or "").strip(), str(r.get("sch_target") or "").strip()
+        if pn and sn and st:
+            schemas_by_pool.setdefault(pn, {})[sn] = st
+
     pools: dict[str, dict[str, Any]] = {}
     for a in applications:
         name = f"{connector_prefix}{slugify(a.get('apps_pool'), fallback='')}"
@@ -872,7 +883,13 @@ def migrate_pools(
         limit = _int(a.get("apps_limit"))
         if limit is not None and limit > 0:
             entry["max_rows"] = limit  # v1's per-app row cap → the pool's default `max_rows`
+        sch = schemas_by_pool.pop(name, None)
+        if sch:
+            entry["schemas"] = sch  # ly_db_schema → #SCHEMA.<name># substitution
         pools[name] = entry
+    # ly_db_schema rows for a pool that has no ly_applications row → scaffold a stub carrying the schemas
+    for name, sch in schemas_by_pool.items():
+        pools.setdefault(name, {"url": "${LIBERTY_DB_URL_" + name.upper() + "}", "pool_pre_ping": True})["schemas"] = sch
     return {"pools": pools}
 
 

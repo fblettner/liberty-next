@@ -20,6 +20,7 @@ Safety model (also from nomaubl):
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from liberty.connectors.base import (
     ALLOWED_STATEMENTS,
     WRITE_STATEMENTS,
+    ConnectorError,
     QueryNotFoundError,
     StatementNotAllowedError,
     WriteNotAllowedError,
@@ -39,6 +41,40 @@ from liberty.connectors.base import (
 from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryFile
+
+# `#SCHEMA.<NAME>#` (or bare `#SCHEMA#`) in a query's SQL, replaced at execution time with the pool's
+# `schemas` mapping (v1's ly_db_schema). Case-insensitive on the literal and the name.
+_SCHEMA_PLACEHOLDER = re.compile(r"#SCHEMA(?:\.([A-Za-z0-9_]+))?#", re.IGNORECASE)
+# the replacement must be a plain (optionally dotted: catalog.schema) identifier — a config-injection guard
+_SCHEMA_NAME = re.compile(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?")
+
+
+def _apply_schema_placeholders(sql: str, schemas: dict[str, str], *, connector: str, query: str, pool: str) -> str:
+    """Replace ``#SCHEMA.<NAME>#`` (and bare ``#SCHEMA#`` → the ``""`` key) in *sql* with the pool's
+    ``schemas`` mapping. A referenced name with no mapping — or a mapping that isn't a plain
+    identifier — raises :class:`ConnectorError` (the SQL would otherwise be silently wrong). When the
+    query has no placeholders, *sql* is returned unchanged (so this is safe to call unconditionally)."""
+    if "#" not in sql:  # cheap fast path — no `#…#` token at all
+        return sql
+    lookup = {k.upper(): v for k, v in schemas.items()}
+
+    def _sub(m: re.Match[str]) -> str:
+        key = (m.group(1) or "").upper()
+        if key not in lookup:
+            raise ConnectorError(
+                f"{connector}.{query}: query references {m.group(0)} but pool {pool!r} has no schema "
+                f"mapping for {key or '(default)'!r} — add it to [pools.{pool}] schemas in connectors.toml"
+            )
+        value = lookup[key].strip()
+        if not _SCHEMA_NAME.fullmatch(value):
+            raise ConnectorError(
+                f"{connector}.{query}: schema mapping {key!r} = {value!r} (pool {pool!r}) is not a plain "
+                "identifier — must be like 'SY920' or 'db.schema'"
+            )
+        return value
+
+    return _SCHEMA_PLACEHOLDER.sub(_sub, sql)
+
 
 # A best-effort PostgreSQL OID → type-name map. ``cursor.description`` exposes the
 # type *code*; for asyncpg that's the pg_type OID. We surface a friendly label
@@ -291,7 +327,10 @@ class SQLConnector:
         lang = language or self._dict.default_language
         qdef = self.get_query(query_name)
         cap = self._row_cap(qdef, max_rows)
-        sql_text = qdef.sql_for(self._resolve_dialect())
+        sql_text = _apply_schema_placeholders(
+            qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            connector=self.name, query=query_name, pool=self.pool_name,
+        )
         stmt_type = detect_statement_type(sql_text)
         if stmt_type not in ALLOWED_STATEMENTS:
             raise StatementNotAllowedError(

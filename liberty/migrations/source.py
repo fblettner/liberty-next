@@ -29,6 +29,8 @@ _APPLICATIONS = text("""
            apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max, apps_limit
     FROM ly_applications ORDER BY apps_pool
 """)
+# Per-pool schema-name placeholders: `#SCHEMA.<sch_name>#` in a query → `sch_target` (e.g. SY → SY920).
+_DB_SCHEMAS = text("SELECT sch_pool, sch_name, sch_target FROM ly_db_schema ORDER BY sch_pool, sch_name")
 # Per-column display metadata: table-widget columns (ly_tbl_col ← ly_tables ← ly_query) and
 # form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query). col_dd_id references a ly_dictionary
 # entry (the migrated hint emits `dd = col_dd_id`); col_label/col_type are per-column overrides;
@@ -114,6 +116,13 @@ async def read_applications(engine: AsyncEngine) -> list[dict[str, Any]]:
     """Return ``ly_applications`` rows (one per v1 app/pool — connection details).
     Older v1 schemas may lack this table; treat that as "no pools to scaffold"."""
     return await _rows_or_empty(engine, _APPLICATIONS, what="ly_applications")
+
+
+async def read_db_schemas(engine: AsyncEngine) -> list[dict[str, Any]]:
+    """Return ``ly_db_schema`` rows (``sch_pool``, ``sch_name``, ``sch_target``) — the per-pool
+    ``#SCHEMA.<name>#`` placeholder map. Feeds :func:`liberty.migrations.v1.migrate_pools` (as
+    ``db_schemas``). Missing table → ``[]``."""
+    return await _rows_or_empty(engine, _DB_SCHEMAS, what="ly_db_schema")
 
 
 async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

@@ -53,6 +53,37 @@ def _connector(pools: PoolRegistry, *queries: QueryDef, max_rows: int = 1000) ->
     return SQLConnector("db", cfg, pools)
 
 
+@pytest.mark.asyncio
+async def test_schema_placeholder_substitution(tmp_path) -> None:
+    from liberty.connectors.base import ConnectorError
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'sch.db'}")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE item (id INTEGER PRIMARY KEY)"))
+        await c.execute(text("INSERT INTO item (id) VALUES (1),(2)"))
+    # SQLite's default schema is "main" → `#SCHEMA.DTA#.item` resolves to `main.item` = `item`.
+    pools = PoolRegistry({
+        "ok": PoolConfig(url="sqlite://", schemas={"DTA": "main"}),
+        "noschemas": PoolConfig(url="sqlite://"),
+        "badval": PoolConfig(url="sqlite://", schemas={"X": "bad name"}),  # not a plain identifier
+    })
+    for n in ("ok", "noschemas", "badval"):
+        pools.register_engine(n, engine)
+    q = QueryDef(name="q", sql="SELECT id FROM #SCHEMA.DTA#.item ORDER BY id")
+    qx = QueryDef(name="qx", sql="SELECT id FROM #SCHEMA.X#.item")
+
+    r = await SQLConnector("db", SqlConnectorConfig(type="sql", pool="ok", queries=[q]), pools).execute("q")
+    assert [row["id"] for row in r.rows] == [1, 2]                      # placeholder resolved
+    with pytest.raises(ConnectorError, match="no schema mapping for 'DTA'"):
+        await SQLConnector("db", SqlConnectorConfig(type="sql", pool="noschemas", queries=[q]), pools).execute("q")
+    with pytest.raises(ConnectorError, match="not a plain identifier"):
+        await SQLConnector("db", SqlConnectorConfig(type="sql", pool="badval", queries=[qx]), pools).execute("qx")
+    # a query with no #SCHEMA placeholders is untouched even when the pool has a `schemas` map
+    plain = QueryDef(name="p", sql="SELECT id FROM item ORDER BY id")
+    r = await SQLConnector("db", SqlConnectorConfig(type="sql", pool="ok", queries=[plain]), pools).execute("p")
+    assert [row["id"] for row in r.rows] == [1, 2]
+    await engine.dispose()
+
+
 @pytest_asyncio.fixture
 async def pools(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")

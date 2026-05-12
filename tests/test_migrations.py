@@ -308,10 +308,15 @@ _APPLICATIONS = [
 
 
 def test_migrate_pools() -> None:
-    out = migrate_pools(_APPLICATIONS)["pools"]
+    db_schemas = [
+        {"sch_pool": "nomasx1", "sch_name": "DTA", "sch_target": "PRODDTA"},
+        {"sch_pool": "nomasx1", "sch_name": "SY", "sch_target": "SY920"},
+        {"sch_pool": "jde_extra", "sch_name": "CTL", "sch_target": "JDECTL"},  # pool not in ly_applications → stub
+    ]
+    out = migrate_pools(_APPLICATIONS, db_schemas=db_schemas)["pools"]
     # v1's `default` pool is skipped — v2 reserves [pools.default] for its own framework DB
     assert "default" not in out
-    assert set(out) == {"nomasx1", "nomajde", "viajdbc", "incomplete"}
+    assert set(out) == {"nomasx1", "nomajde", "viajdbc", "incomplete", "jde_extra"}
 
     nx = out["nomasx1"]
     # the password is a separate field (kept out of the URL); v1's `ENC:` value carried over verbatim
@@ -321,13 +326,14 @@ def test_migrate_pools() -> None:
     assert nx["pool_pre_ping"] is True
     assert nx["pool_size"] == 2 and nx["max_overflow"] == 18  # apps_pool_min=2 / apps_pool_max=20 → 2 + 18 burst
     assert nx["max_rows"] == 5000  # from apps_limit
+    assert nx["schemas"] == {"DTA": "PRODDTA", "SY": "SY920"}  # ly_db_schema → #SCHEMA.<name># map
 
     jde = out["nomajde"]
     assert jde["url"] == "oracle+oracledb://jde@ora.example:1521/?service_name=JDEPROD"
     assert jde["password"] == "${MIGRATED_PW_NOMAJDE}"  # apps_password was None → env-var stub
     assert jde["dialect"] == "oracle"
     assert "pool_size" not in jde and "max_overflow" not in jde  # apps_pool_min/max were None
-    assert "max_rows" not in jde  # apps_limit was None
+    assert "max_rows" not in jde and "schemas" not in jde  # apps_limit / ly_db_schema had none
     assert "max_rows" not in out["viajdbc"]  # apps_limit was 0 → not set
 
     # apps_jdbc fallback when host/port/database aren't on the row
@@ -337,6 +343,9 @@ def test_migrate_pools() -> None:
     # nothing usable → keep the env-var stub, no explicit dialect, no separate password
     assert out["incomplete"]["url"] == "${LIBERTY_DB_URL_INCOMPLETE}"
     assert "dialect" not in out["incomplete"] and "password" not in out["incomplete"]
+
+    # ly_db_schema rows for a pool with no ly_applications row → a stub pool carrying just the schemas
+    assert out["jde_extra"]["url"] == "${LIBERTY_DB_URL_JDE_EXTRA}" and out["jde_extra"]["schemas"] == {"CTL": "JDECTL"}
 
     # round-trips through the v2 config loader
     parse_connectors(tomllib.loads(render_toml({"pools": out, "connectors": {}})))

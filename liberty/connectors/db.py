@@ -46,6 +46,12 @@ class PoolRegistry:
             )
         return cfg
 
+    def schemas(self, name: str) -> dict[str, str]:
+        """The ``[pools.<name>] schemas`` map (``#SCHEMA.<NAME>#`` placeholder → real schema name);
+        empty when the pool doesn't define any (or doesn't exist)."""
+        cfg = self._configs.get(name)
+        return dict(cfg.schemas) if cfg else {}
+
     def dialect(self, name: str) -> str:
         """The SQLAlchemy backend name for pool *name* (``postgresql`` / ``oracle`` / …) —
         a live engine's own dialect if one is registered, else the explicit

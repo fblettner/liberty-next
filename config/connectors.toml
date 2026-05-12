@@ -1,14 +1,15 @@
 # Liberty v2 — connector definitions (hot-reloadable; ${NAME} / ${NAME:-default} expand from the env).
 #
-# [pools.default] is the FRAMEWORK pool: it holds v2's own users/roles
-# (ly2_users / ly2_roles / ly2_user_roles — created by `liberty-admin init-db`),
-# shared across every app; it's the ONLY pool needed at startup. Point it at a dedicated database
-# — e.g. the old v1 "libnsx1"/framework DB, or a fresh one. `[auth] pool` in config/app.toml points here.
+# [pools.default] is the FRAMEWORK pool — historically v2's users/roles, but with the default
+# [auth] backend = "toml" those live in config/auth.toml, so no pool is needed at startup; it's now
+# just the fallback pool for a connector that doesn't name one (and the ly2_* home if [auth] backend
+# = "db"). Set LIBERTY_DB_URL to point it (else a local SQLite file). LIBERTY_DB_URL.
 #
 # Every other [pools.X] is an *app* pool — opened lazily on first query — migrated straight from v1's
-# ly_applications (url + dialect + pool_size/max_overflow + max_rows + an ENC: `password`). Set
-# LIBERTY_MASTER_KEY to v1's MASTER_KEY so v2 can decrypt the passwords; edit a pool's `url` host/port
-# if your deployment differs from v1's (the migrated values are v1's, e.g. the docker `@pg:5432` host).
+# ly_applications (url + dialect + pool_size/max_overflow + max_rows + an ENC: `password`, and a
+# `schemas` map for #SCHEMA.<NAME># placeholders — v1's ly_db_schema). Set LIBERTY_MASTER_KEY to v1's
+# MASTER_KEY so v2 can decrypt the passwords; edit a pool's `url` host/port if your deployment differs
+# from v1's (the migrated values are v1's literal apps_host, e.g. the docker `@pg:5432` host).
 
 [pools.default]
 # Set LIBERTY_DB_URL to the framework/users DB (e.g. postgresql+asyncpg://user:pw@host/libnsx1);
@@ -2530,9 +2531,10 @@ writable = true
 sql = "UPDATE\n    LICENSE_JDE_OUT_OBJECTS\nSET\n    LOUT_TYPE = :LOUT_TYPE,\n    LOUT_COUNT = :LOUT_COUNT\nWHERE\n    LOUT_APPS_ID = :LOUT_APPS_ID_ORIGINAL\n    AND LOUT_OBJECT = :LOUT_OBJECT_ORIGINAL\n    AND LOUT_VERSION = :LOUT_VERSION_ORIGINAL\n    AND LOUT_USAGE = :LOUT_USAGE_ORIGINAL"
 
 # ─────────────────────────────────────────────────────────────────────────────────────
-# App: NOMAJDE (migrated from the v1 libnjde DB) — three SQL connectors: jdedwards (the
-# Oracle JDE business DB), nomajde (its Postgres app DB), session (a stub) — plus the
-# ais_connection API connector. Permission strings: sql:<connector>:<query_name>, api:ais_connection:<ep>.
+# App: NOMAJDE (migrated from the v1 libnjde DB) — three SQL connectors: jdedwards (the Oracle
+# JDE business DB; its queries use #SCHEMA.CTL/DTA/SY# → [pools.jdedwards.schemas]), nomajde
+# (its Postgres app DB), session (a stub) — plus the ais_connection API connector.
+# Permission strings: sql:<connector>:<query_name>, api:ais_connection:<ep>.
 # ─────────────────────────────────────────────────────────────────────────────────────
 [pools.jdedwards]
 url = "oracle+oracledb://system@79.72.70.64:1521/?service_name=JDEORCL"
@@ -2542,6 +2544,11 @@ dialect = "oracle"
 pool_size = 1
 max_overflow = 9
 max_rows = 10000
+
+[pools.jdedwards.schemas]
+CTL = "PS920CTL"
+DTA = "PS920DTA"
+SY = "SY920"
 
 [pools.nomajde]
 url = "postgresql+asyncpg://nomajde@pg:5432/nomajde"

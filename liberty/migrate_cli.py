@@ -53,6 +53,7 @@ from liberty.migrations import (
     read_api,
     read_applications,
     read_column_hints,
+    read_db_schemas,
     read_dictionary,
     read_dictionary_rules,
     read_menus,
@@ -101,9 +102,11 @@ async def _build(args: argparse.Namespace) -> dict:
             conns, apis, headers, params = await read_api(engine)
             parts.append(migrate_api(conns, apis, headers, params, connector_prefix=args.prefix))
         if args.command in ("sql", "all"):
-            # Real [pools.*] from ly_applications — appended last so it overrides the
-            # ${LIBERTY_DB_URL_*} stubs that migrate_sql_queries left for referenced pools.
-            parts.append(migrate_pools(await read_applications(engine), connector_prefix=args.prefix))
+            # Real [pools.*] from ly_applications (+ #SCHEMA.<name># maps from ly_db_schema) — appended
+            # last so it overrides the ${LIBERTY_DB_URL_*} stubs migrate_sql_queries left for referenced pools.
+            parts.append(migrate_pools(
+                await read_applications(engine), db_schemas=await read_db_schemas(engine), connector_prefix=args.prefix,
+            ))
         return merge_connectors(*parts)
     finally:
         await engine.dispose()

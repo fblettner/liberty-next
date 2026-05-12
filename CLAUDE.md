@@ -53,9 +53,11 @@ Full dep set pinned in `pyproject.toml`.
   a per-request override beats it), and `key_columns` (the result columns that identify a row — v1's `col_key` —
   surfaced in `describe()` for the TableView's Excel-import update-vs-insert match). `[pools.*]` may carry an
   explicit `dialect` (else derived from the URL), a `max_rows` (the pool's default row cap — v1's per-app
-  `apps_limit`), and a `password` (kept out of the URL — substituted in, escaped, when the engine is built;
+  `apps_limit`), a `password` (kept out of the URL — substituted in, escaped, when the engine is built;
   may be an `ENC:` value decrypted via the crypto master key — how v1's `apps_password` reads — or plaintext /
-  a `${ENV}` ref; an `ENC:` password embedded in the URL is also decrypted); `[connectors.*]` (sql) a `max_rows` too.
+  a `${ENV}` ref; an `ENC:` password embedded in the URL is also decrypted), and a `schemas` map (`{NAME =
+  "actual_schema"}` — `#SCHEMA.<NAME>#` in a query's SQL is replaced with it at execution time; v1's
+  `ly_db_schema`, for dev/prod schema swaps or several schemas under one DB user); `[connectors.*]` (sql) a `max_rows` too.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
   + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
   `[connectors.<conn>.entries.<key>]` — per-connector, since v1 dictionaries were per-app) =
@@ -80,12 +82,14 @@ Full dep set pinned in `pyproject.toml`.
   `ALLOWED_STATEMENTS` / `WRITE_STATEMENTS`.
 - `db.py` — `PoolRegistry`: one SQLAlchemy async engine per named pool, created
   lazily (unreachable DB never blocks startup; tests inject their own engine); `dialect(name)`
-  → the pool's backend name (a live engine's own dialect / the explicit setting / the URL); when
-  building the engine it resolves the pool's `password` (or an `ENC:` password in the URL) — decrypts
-  an `ENC:` value via the `master_key` it's given (wrong/missing key → kept as-is + a logged warning,
-  like the API connector) and re-sets it on the URL object so URL-special chars are escaped properly.
+  → the pool's backend name (a live engine's own dialect / the explicit setting / the URL); `schemas(name)`
+  → the pool's `#SCHEMA.<NAME>#` map; when building the engine it resolves the pool's `password` (or an
+  `ENC:` password in the URL) — decrypts an `ENC:` value via the `master_key` it's given (wrong/missing key →
+  kept as-is + a logged warning, like the API connector) and re-sets it on the URL object so URL-special chars are escaped.
 - `sql.py` — `SQLConnector`: named queries, `:param` binding via SQLAlchemy
-  `text()` (never string-substituted), the SQL variant matching the pool's dialect is
+  `text()` (never string-substituted), `#SCHEMA.<NAME>#` placeholders in the SQL replaced at execute time
+  with the pool's `schemas` map (`_apply_schema_placeholders` — a `#SCHEMA.X#` with no mapping, or a mapping
+  that isn't a plain identifier, raises `ConnectorError`), the SQL variant matching the pool's dialect is
   selected per call, statement-type allow-list, `writable` gate for mutations, any `:name`
   the caller omits → SQL NULL, runtime schema from `result.keys()` + best-effort
   `cursor.description` types (then the query's `columns` hints overlaid — reorder + attach
@@ -385,7 +389,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   URL = SQLAlchemy async URL built from `apps_dbtype`/`apps_host`/`apps_port`/`apps_database`
   — `postgresql+asyncpg://…` / `oracle+oracledb://…/?service_name=…` — or a parseable
   `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}` stub; `dialect` from `apps_dbtype`,
-  `pool_size`/`max_overflow` from `apps_pool_min`/`apps_pool_max`, `max_rows` from `apps_limit`; the DB password is the pool's separate
+  `pool_size`/`max_overflow` from `apps_pool_min`/`apps_pool_max`, `max_rows` from `apps_limit`,
+  `schemas` from `ly_db_schema` (`db_schemas=…` — `{sch_name: sch_target}` per `sch_pool`; a `sch_pool`
+  with no `ly_applications` row gets a stub pool carrying just the `schemas`); the DB password is the pool's separate
   `password` field — **never inlined into the URL** (so URL-special chars don't break parsing): v1's
   `apps_password` `ENC:` value carried over **verbatim** (v2 decrypts it at runtime via the crypto master key,
   exactly as v1 reads it from the table), else a `${MIGRATED_PW_<NAME>}` env-var stub; v1's reserved `default`
@@ -435,6 +441,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `read_menus(engine)` (→ `ly_menus`, `ly_menus_l`, `ly_tables`, `ly_dlg_frm`, `ly_qry_sql⋈ly_query`) /
   `read_table_meta(engine)` (→ `ly_tables` `tbl_query_id`/`tbl_label`/`tbl_auto_load` + `ly_dlg_frm`
   `frm_query_id`/`frm_label`) /
+  `read_db_schemas(engine)` (→ `ly_db_schema` `sch_pool`/`sch_name`/`sch_target` — the `#SCHEMA.<NAME>#` maps) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
   — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter`/`col_key` — `ly_dlg_col` has
   no `col_filter`, so it's aliased NULL; these rows feed both `migrate_column_hints` and `migrate_key_columns`) (SELECT-only; a missing
@@ -491,7 +498,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-281 tests pass.
+282 tests pass.
 
 ## Run it
 
@@ -528,7 +535,8 @@ startup at all** (the framework opens connections lazily, on the first query aga
 `[pools.default]` is now just the fallback pool for a connector that doesn't name one (and the
 ly2_* tables if you switch `[auth] backend = "db"`). Every `[pools.X]`
 is an *app* pool — `nomasx1`, `jdedwards`, `nomajde`, … — migrated straight from v1's `ly_applications`
-(`url` + `dialect` + `pool_size`/`max_overflow` + `max_rows` + an `ENC:` `password`), opened **lazily**
+(`url` + `dialect` + `pool_size`/`max_overflow` + `max_rows` + an `ENC:` `password` + a `[pools.X.schemas]`
+map for `#SCHEMA.<NAME>#` query placeholders, from v1's `ly_db_schema`), opened **lazily**
 on first query; mirrors the v1 split between an app's "definition DB" (queries/users/roles → now TOML)
 and its "data DB". `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`
 (set `LIBERTY_DB_URL` for Postgres; SQLite `liberty.db` is gitignored); the app pools' URLs are v1's
