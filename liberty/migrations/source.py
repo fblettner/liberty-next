@@ -50,6 +50,29 @@ _DLG_COLS = text("""
     WHERE f.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY f.frm_query_id, c.frm_id, c.col_seq, c.col_id
 """)
+# Cascading-filter rules: ly_tbl_filters (table widgets ← ly_tbl_col ← ly_tables) and
+# ly_dlg_filters (form fields ← ly_dlg_col ← ly_dlg_frm). Each row says "for column <col_target>'s
+# filter dropdown, when the <flt_source> filter has a value, narrow this dropdown's options to the
+# lookup rows whose <flt_target> column matches it" (v1's flt_source / flt_target). `col` / `tgt`
+# are aliased away from the reserved word `column`.
+_TBL_FILTERS = text("""
+    SELECT t.tbl_query_id AS query_id, c.col_target, f.flt_source AS src, f.flt_target AS tgt, f.flt_value AS val
+    FROM ly_tbl_filters f
+      JOIN ly_tbl_col c ON c.tbl_id = f.tbl_id AND c.col_id = f.col_id
+      JOIN ly_tables t ON t.tbl_id = f.tbl_id
+    WHERE t.tbl_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
+      AND f.flt_source IS NOT NULL AND f.flt_target IS NOT NULL
+    ORDER BY t.tbl_query_id, f.tbl_id, f.col_id, f.flt_id
+""")
+_DLG_FILTERS = text("""
+    SELECT fr.frm_query_id AS query_id, c.col_target, f.flt_source AS src, f.flt_target AS tgt, f.flt_value AS val
+    FROM ly_dlg_filters f
+      JOIN ly_dlg_col c ON c.frm_id = f.frm_id AND c.col_id = f.col_id
+      JOIN ly_dlg_frm fr ON fr.frm_id = f.frm_id
+    WHERE fr.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
+      AND f.flt_source IS NOT NULL AND f.flt_target IS NOT NULL
+    ORDER BY fr.frm_query_id, f.frm_id, f.col_id, f.flt_id
+""")
 # The shared field dictionary (ly_dictionary) + its per-language labels (ly_dictionary_l).
 _DICTIONARY = text("""
     SELECT dd_id, dd_label, dd_type, dd_rules, dd_rules_values, dd_default
@@ -132,6 +155,16 @@ async def read_column_hints(engine: AsyncEngine) -> tuple[list[dict[str, Any]], 
     return (
         await _rows_or_empty(engine, _TBL_COLS, what="ly_tbl_col → ly_tables column hints"),
         await _rows_or_empty(engine, _DLG_COLS, what="ly_dlg_col → ly_dlg_frm column hints"),
+    )
+
+
+async def read_table_filters(engine: AsyncEngine) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_tbl_filters`` rows, ``ly_dlg_filters`` rows) — cascading-filter rules joined to
+    their column's ``col_target`` and their query id. Feeds
+    :func:`liberty.migrations.v1.migrate_table_filters`. Missing tables → empty lists."""
+    return (
+        await _rows_or_empty(engine, _TBL_FILTERS, what="ly_tbl_filters → ly_tables cascading filters"),
+        await _rows_or_empty(engine, _DLG_FILTERS, what="ly_dlg_filters → ly_dlg_frm cascading filters"),
     )
 
 

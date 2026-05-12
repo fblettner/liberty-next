@@ -19,6 +19,7 @@ from liberty.migrations import (
     migrate_pools,
     migrate_sql_queries,
     migrate_key_columns,
+    migrate_table_filters,
     migrate_table_meta,
     read_api,
     read_applications,
@@ -26,6 +27,7 @@ from liberty.migrations import (
     read_dictionary,
     read_menus,
     read_sql_queries,
+    read_table_filters,
     render_toml,
     slugify,
 )
@@ -266,6 +268,46 @@ def test_migrate_table_meta() -> None:
     assert meta[7] == {"auto_load": True}                       # label-less, flag only
     assert meta[2] == {"description": "Delete User"}            # form-only
     assert None not in meta
+
+
+def test_migrate_table_filters() -> None:
+    out = migrate_table_filters(
+        tbl_filter_rows=[
+            {"query_id": 1, "col_target": "USR_NAME", "src": "USR_ID", "tgt": "UN_REF", "val": None},
+            {"query_id": 1, "col_target": "USR_NAME", "src": "USR_ID", "tgt": "UN_REF", "val": None},  # dup → dropped
+            {"query_id": 1, "col_target": "ROLE", "src": "APPS_ID", "tgt": "ROL_APPS_ID", "val": None},
+            {"query_id": 1, "col_target": "ROLE", "src": "DEPT", "tgt": "ROL_DEPT", "val": None},      # 2nd dep on the same col
+            {"query_id": None, "col_target": "X", "src": "Y", "tgt": "Z", "val": None},                # no query → skipped
+            {"query_id": 3, "col_target": "C", "src": "", "tgt": "Z", "val": None},                    # blank source → skipped
+        ],
+        dlg_filter_rows=[
+            {"query_id": 1, "col_target": "USR_NAME", "src": "USR_ID", "tgt": "OTHER", "val": None},   # table widget wins → ignored
+            {"query_id": 2, "col_target": "F", "src": "G", "tgt": "H", "val": None},                   # form-only col → kept
+        ],
+    )
+    assert out[1]["USR_NAME"] == [{"source": "USR_ID", "column": "UN_REF"}]
+    assert out[1]["ROLE"] == [{"source": "APPS_ID", "column": "ROL_APPS_ID"}, {"source": "DEPT", "column": "ROL_DEPT"}]
+    assert out[2]["F"] == [{"source": "G", "column": "H"}]
+    assert 3 not in out and None not in out
+
+
+def test_migrate_sql_queries_filter_from() -> None:
+    out = migrate_sql_queries(
+        _QUERIES, _SQL_ROWS,
+        column_hints={1: [{"name": "USR_ID", "filter": True}, {"name": "USR_NAME", "filter": True}]},
+        column_filters={1: {"USR_NAME": [{"source": "USR_ID", "column": "UN_REF"}]},
+                        2: {"USR_ID": [{"source": "X", "column": "Y"}]}},  # query 2 is a write → no columns → no-op
+    )
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    cols = {c["name"]: c for c in by_name["users_list_select"]["columns"]}
+    assert cols["USR_NAME"]["filter_from"] == [{"source": "USR_ID", "column": "UN_REF"}]
+    assert "filter_from" not in cols["USR_ID"]  # no entry for it
+    # round-trips through the v2 loader
+    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
+    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
+    un = next(c for c in q1.columns if c.name == "USR_NAME")
+    assert [{"source": d.source, "column": d.column} for d in un.filter_from] == [{"source": "USR_ID", "column": "UN_REF"}]
+    assert "delete_user_delete" in by_name  # write query unaffected
 
 
 def test_migrate_sql_queries_with_table_meta() -> None:
@@ -546,6 +588,8 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT, col_key TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
     "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_key TEXT)",
+    "CREATE TABLE ly_tbl_filters (tbl_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
+    "CREATE TABLE ly_dlg_filters (frm_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_menus (menu_seq_ukid TEXT PRIMARY KEY, menu_parent_id TEXT, menu_child_id TEXT, menu_component TEXT, menu_component_id INTEGER, menu_label TEXT, menu_level INTEGER)",
     "CREATE TABLE ly_menus_l (lng_id TEXT, lng_seq_ukid TEXT, lng_label TEXT)",
     "CREATE TABLE ly_api_conn (conn_id INTEGER PRIMARY KEY, conn_label TEXT, conn_url TEXT, conn_user TEXT, conn_password TEXT)",
@@ -631,6 +675,12 @@ async def _seed_v1(engine) -> None:
                 {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y", "f": "N", "k": None},
                 {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N", "f": None, "k": "N"},
             ],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_tbl_filters (tbl_id, col_id, flt_id, flt_type, flt_source, flt_target, flt_value)"
+                 " VALUES (:t, :c, :i, :ty, :src, :tgt, :v)"),
+            # USR_NAME's filter dropdown cascades from USR_ID (its lookup-result column UN_REF matches it)
+            [{"t": 5, "c": 2, "i": 1, "ty": "DD", "src": "USR_ID", "tgt": "UN_REF", "v": None}],
         )
         await conn.execute(
             text("INSERT INTO ly_dlg_frm (frm_id, dlg_id, frm_query_id, frm_label) VALUES (:i, :d, :q, :l)"),
@@ -723,6 +773,16 @@ async def test_read_column_hints(v1_engine) -> None:
     assert hints[1][0] == {"name": "USR_ID", "filter": True, "format": "number"}  # col_dd_id == name → no `dd`; col_filter 'Y'
     assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N', col_filter null
     assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]
+
+
+@pytest.mark.asyncio
+async def test_read_table_filters(v1_engine) -> None:
+    tbl_flt, dlg_flt = await read_table_filters(v1_engine)
+    # the seeded ly_tbl_filters row, joined to its column's col_target and its query id
+    assert [{"query_id": r["query_id"], "col_target": r["col_target"], "src": r["src"], "tgt": r["tgt"]} for r in tbl_flt] \
+        == [{"query_id": 1, "col_target": "USR_NAME", "src": "USR_ID", "tgt": "UN_REF"}]
+    assert dlg_flt == []
+    assert migrate_table_filters(tbl_flt, dlg_flt) == {1: {"USR_NAME": [{"source": "USR_ID", "column": "UN_REF"}]}}
 
 
 @pytest.mark.asyncio
@@ -855,6 +915,8 @@ def test_cli_sql_to_file(tmp_path) -> None:
     q1 = next(q for q in sql_conn.queries if q.name == "users_list_select")
     assert [c.name for c in q1.columns] == ["USR_ID", "USR_NAME", "USR_PWD"]
     assert q1.columns[2].hidden is True and q1.columns[1].label == "User Name"
+    # ly_tbl_filters → the USR_NAME column's filter dropdown cascades from USR_ID
+    assert [{"source": d.source, "column": d.column} for d in q1.columns[1].filter_from] == [{"source": "USR_ID", "column": "UN_REF"}]
 
 
 def test_cli_all_to_stdout(tmp_path, capsys) -> None:

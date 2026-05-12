@@ -101,14 +101,30 @@ class ParamDef(BaseModel):
     default: str | None = None
 
 
+class FilterDep(BaseModel):
+    """One cascading-filter dependency for a column's TableView filter dropdown (v1's
+    ``ly_tbl_filters`` / ``ly_dlg_filters`` row). When the ``source`` filter (another
+    ``filter``-flagged column on the same query) has a value, this column's LOOKUP options
+    are narrowed to the rows whose ``column`` (a column of *that lookup query's* result)
+    equals the source's value — i.e. pick an App in one filter, the Role dropdown shows only
+    that App's roles. (v1's ``flt_source`` / ``flt_target``.) Purely a frontend behaviour:
+    the lookup query itself is unchanged. Ignored for non-LOOKUP columns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str   # the name of another filter column on the same query — its value is the input
+    column: str   # a result column of *this* column's lookup query to match the source's value against
+
+
 class ColumnHint(BaseModel):
     """Optional *display* metadata for one result column. The column **schema**
     (names + types) is still discovered from the query at run time — these hints only
     augment it (a display title, visibility, column order, a width/alignment, a
-    free-text ``format`` the UI may interpret, and a ``filter`` flag — v1's ``col_filter`` —
-    that surfaces the column in the TableView filter panel). ``label``/``format`` may be left out and
-    pulled from the shared dictionary (``config/dictionary.toml``) instead: the entry
-    key is ``dd`` if set, else the column ``name``; an inline ``label``/``format`` here
+    free-text ``format`` the UI may interpret, a ``filter`` flag — v1's ``col_filter`` —
+    that surfaces the column in the TableView filter panel, and ``filter_from`` — v1's
+    ``ly_tbl_filters`` — cascading-filter dependencies for that panel). ``label``/``format``
+    may be left out and pulled from the shared dictionary (``config/dictionary.toml``) instead:
+    the entry key is ``dd`` if set, else the column ``name``; an inline ``label``/``format`` here
     still overrides the dictionary. v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows migrate to
     this shape (``dd`` = v1's ``col_dd_id``). A hint for a column the query doesn't return
     is ignored. The order of the ``columns`` list is the display order; columns with no
@@ -122,6 +138,7 @@ class ColumnHint(BaseModel):
     label: str | None = None
     hidden: bool = False
     filter: bool = False       # surface this column in the TableView filter panel (v1's col_filter)
+    filter_from: list[FilterDep] = Field(default_factory=list)  # cascading-filter deps (v1's ly_tbl_filters)
     width: int | None = None
     align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
     format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted

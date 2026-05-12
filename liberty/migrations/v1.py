@@ -226,6 +226,7 @@ def migrate_sql_queries(
     dbtype: str | None = None,
     connector_prefix: str = "",
     column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
+    column_filters: Mapping[int, Mapping[str, list[dict[str, str]]]] | None = None,
     table_meta: Mapping[int, Mapping[str, Any]] | None = None,
     key_columns: Mapping[int, list[str]] | None = None,
 ) -> dict[str, Any]:
@@ -245,6 +246,9 @@ def migrate_sql_queries(
             ``filter``-flagged columns (v1's ``col_filter``) is also wrapped — ``SELECT * FROM (<orig>)
             lib_flt WHERE …`` — so the value the TableView sends for each such column (a ``:<col>`` bind
             plus an optional ``:<col>_op`` operator bind) pre-filters server-side.
+        column_filters: ``{query_id: {col_name: [{"source", "column"}, …]}}`` (from
+            :func:`migrate_table_filters`) — cascading-filter dependencies, merged onto the matching
+            column hint as ``filter_from`` (v1's ``ly_tbl_filters``).
         table_meta: ``{query_id: {"description"?, "auto_load"?}}`` (from :func:`migrate_table_meta`) —
             the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
             ``auto_load``.
@@ -299,6 +303,12 @@ def migrate_sql_queries(
         label = labels.get(qid, "")
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
+        cfilters = (column_filters or {}).get(qid) if is_read else None  # cascading-filter deps per column (v1 ly_tbl_filters)
+        if hints and cfilters:
+            for h in hints:
+                deps = cfilters.get(h["name"])
+                if deps:
+                    h["filter_from"] = [dict(d) for d in deps]
         tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
@@ -426,6 +436,45 @@ def migrate_key_columns(
             continue
         seen.add((qid, target.lower()))
         out.setdefault(qid, []).append(target)
+    return out
+
+
+def migrate_table_filters(
+    tbl_filter_rows: Iterable[Mapping[str, Any]],
+    dlg_filter_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, dict[str, list[dict[str, str]]]]:
+    """Build ``{query_id: {col_target: [{"source", "column"}, …]}}`` from v1's ``ly_tbl_filters`` /
+    ``ly_dlg_filters`` rows (already joined to their column's ``col_target`` and query id by
+    :func:`liberty.migrations.source.read_table_filters`). Each rule maps a column's filter dropdown
+    to a *source* filter (``flt_source``) and the lookup-result column to match it against
+    (``flt_target`` → ``column``). Passed to :func:`migrate_sql_queries` (as ``column_filters``),
+    which attaches it to the matching column hint as ``filter_from``. Table-widget rows win over form
+    rows for the same ``(query_id, col_target)``; duplicate ``(source, column)`` pairs are dropped.
+
+    Args:
+        tbl_filter_rows / dlg_filter_rows: rows with ``query_id``, ``col_target``, ``src``, ``tgt``.
+    """
+    out: dict[int, dict[str, list[dict[str, str]]]] = {}
+    seen: set[tuple[int, str, str, str]] = set()
+    seen_cols: set[tuple[int, str]] = set()  # a (query, col) the table-widget side already covered
+    for is_table, rows in ((True, tbl_filter_rows), (False, dlg_filter_rows)):
+        for r in rows:
+            qid_raw = r.get("query_id")
+            target = str(r.get("col_target") or "").strip()
+            source = str(r.get("src") or "").strip()
+            column = str(r.get("tgt") or "").strip()
+            if qid_raw is None or not target or not source or not column:
+                continue
+            qid = int(qid_raw)
+            if not is_table and (qid, target.lower()) in seen_cols:
+                continue  # the table widget already defined this column's cascading filters
+            key = (qid, target.lower(), source.lower(), column.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            if is_table:
+                seen_cols.add((qid, target.lower()))
+            out.setdefault(qid, {}).setdefault(target, []).append({"source": source, "column": column})
     return out
 
 

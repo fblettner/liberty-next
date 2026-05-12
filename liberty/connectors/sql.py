@@ -114,6 +114,7 @@ class Column:
     label: str | None = None
     hidden: bool = False
     filter: bool = False
+    filter_from: list[dict[str, str]] = field(default_factory=list)
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -127,6 +128,8 @@ class Column:
             d["hidden"] = True
         if self.filter:
             d["filter"] = True
+        if self.filter_from:
+            d["filter_from"] = self.filter_from
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -409,6 +412,7 @@ def _resolve_hint(
             rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, filter=h.filter,
+        filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         width=h.width, align=h.align, format=fmt, rule=rule,
     )
 

@@ -67,6 +67,9 @@ export interface Column {
   hidden?: boolean
   /** surface this column in the TableView filter panel (v1's col_filter). */
   filter?: boolean
+  /** cascading-filter deps (v1's ly_tbl_filters): when the `source` filter has a value, this
+   *  column's LOOKUP options are narrowed to the rows whose `column` matches it. */
+  filter_from?: { source: string; column: string }[]
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string

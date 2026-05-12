@@ -11,7 +11,7 @@ from liberty.connectors.base import (
     UnknownPoolError,
     WriteNotAllowedError,
 )
-from liberty.connectors.config import ColumnHint, ParamDef, PoolConfig, QueryDef, SqlConnectorConfig
+from liberty.connectors.config import ColumnHint, FilterDep, ParamDef, PoolConfig, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile
 from liberty.connectors.sql import SQLConnector
@@ -123,7 +123,8 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
             name="all",
             sql="SELECT id, name, status FROM item ORDER BY id",
             columns=[
-                ColumnHint(name="name", label="Item Name", align="left"),
+                ColumnHint(name="name", label="Item Name", align="left",
+                           filter_from=[FilterDep(source="status", column="ST")]),  # cascading dep
                 ColumnHint(name="status", hidden=True),
                 ColumnHint(name="zzz", label="ignored — not a result column"),
             ],
@@ -135,19 +136,22 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
     assert [c.name for c in result.columns] == ["name", "status", "id"]
     by_name = {c.name: c for c in result.columns}
     assert by_name["name"].label == "Item Name" and by_name["name"].align == "left"
+    assert by_name["name"].filter_from == [{"source": "status", "column": "ST"}]
     assert by_name["status"].hidden is True
     assert by_name["id"].label is None and by_name["id"].hidden is False
     # the hints surface in to_dict() (only when non-default)
     cols = {c["name"]: c for c in result.to_dict()["columns"]}
     assert cols["name"]["label"] == "Item Name" and cols["name"]["align"] == "left"
+    assert cols["name"]["filter_from"] == [{"source": "status", "column": "ST"}]
     assert cols["status"]["hidden"] is True
-    assert "label" not in cols["id"] and "hidden" not in cols["id"]
+    assert "label" not in cols["id"] and "hidden" not in cols["id"] and "filter_from" not in cols["id"]
     # rows are unaffected — every column's data is still present
     assert result.rows[0] == {"id": 1, "name": "a", "status": "on"}
     # describe() exposes the configured hints (defaults excluded)
     qd = next(q for q in conn.describe()["queries"] if q["name"] == "all")
     assert {h["name"] for h in qd["columns"]} == {"name", "status", "zzz"}
     assert next(h for h in qd["columns"] if h["name"] == "status") == {"name": "status", "hidden": True}
+    assert next(h for h in qd["columns"] if h["name"] == "name")["filter_from"] == [{"source": "status", "column": "ST"}]
 
 
 @pytest.mark.asyncio

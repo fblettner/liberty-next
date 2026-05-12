@@ -42,9 +42,11 @@ Full dep set pinned in `pyproject.toml`.
   (`sql = { default = "…", oracle = "…" }`, keyed by SQLAlchemy backend name; `default`
   required) — `QueryDef.sql_for(dialect)` / `.default_sql` / `.dialects` resolve it.
   A query may also carry optional `columns` display hints (`ColumnHint`: `name`, `dd?`,
-  `label?`, `hidden?`, `filter?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
-  schema (display title / visibility / column order / a `filter` flag — v1's `col_filter` — / a UI-interpreted
-  `format`); `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
+  `label?`, `hidden?`, `filter?`, `filter_from?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
+  schema (display title / visibility / column order / a `filter` flag — v1's `col_filter` — / `filter_from` —
+  v1's `ly_tbl_filters` — a list of `{source, column}` cascading-filter deps for the TableView panel: when the
+  `source` filter has a value this column's LOOKUP options narrow to the lookup rows whose `column` matches it /
+  a UI-interpreted `format`); `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
   `name` when `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
   A query may also carry `label`/`description` (display names — the frontend titles the TableView with
   `description`, else `label`, else the menu label; the menu label rides on the tab), `auto_load = true`
@@ -263,9 +265,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   login" idea becomes "which app's screens am I looking at"), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts`/`menus.ts` — backend response shapes, no React), `src/services/`
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`/`ruleCell` (the latter applies the
-  dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` — fetches each
-  LOOKUP-target query once, module-level session cache), `monaco.ts` (bundles
-  Monaco + its worker, no CDN), `lookups.ts`'s `useLookupBatch` listed above)), `src/common/` (shared
+  dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` → value→label maps for the
+  grid; `useLookupTables` → the richer `LookupData` (raw rows too) for the FilterPanel's cascading dropdowns;
+  `lookupOptions` narrows a table to `{value,label}[]`; fetches each LOOKUP-target query once, module-level
+  session cache), `monaco.ts` (bundles Monaco + its worker, no CDN))), `src/common/` (shared
   theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `SearchSelect`
   (a searchable single-select pop-over — themed replacement for a long native `<select>`), `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
@@ -313,7 +316,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   collapsible **`FilterPanel`** — one field per `filter`-flagged column (v1's `col_filter`, from `meta.columns`),
   each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's); a column
   with an ENUM rule renders a value `SearchSelect`, a LOOKUP rule a `SearchSelect` whose options are `<code> — <description>`
-  (`useLookupBatch`; the user picks the label not the code), both implicitly `equals`. A "Clear" button in the panel header resets
+  (`useLookupTables`; the user picks the label not the code), both implicitly `equals`. A column with `filter_from`
+  (v1's `ly_tbl_filters`) **cascades** — when its source filter has a value, its LOOKUP options narrow to the
+  lookup rows whose `column` matches it (client-side over the once-fetched rows; changing a source clears its
+  dependents). A "Clear" button in the panel header resets
   all server filters. On Run it sends `:<col>` + `:<col>_op` for
   each filled field; the migration has wrapped such queries in
   `SELECT * FROM (<orig>) lib_flt WHERE …` so this actually pre-filters server-side before the grid loads (the
@@ -416,6 +422,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `col_type` overrides the dictionary)`}`; table-widget
   columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq` order)
   — passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns`;
+  `migrate_table_filters(ly_tbl_filters rows, ly_dlg_filters rows)` → `{query_id: {col_target: [{source, column}]}}`
+  (v1's `flt_source` → `source`, `flt_target` → `column`; table-widget rows beat form rows per `(query, col)`,
+  dup `(source, column)` dropped) — passed to `migrate_sql_queries(column_filters=…)`, merged onto the matching
+  column hint as `filter_from`;
   `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, enum_rows=(), enum_val_rows=(),
   enum_val_l_rows=(), lookup_rows=(), sql_rows=(), *, default_language="en", connector_name=None)`
   → the `dictionary.toml` dict — one `[entries.<dd_id>]` per `ly_dictionary` row (`label`=`dd_label`,
@@ -447,8 +457,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `read_db_schemas(engine)` (→ `ly_db_schema` `sch_pool`/`sch_name`/`sch_target` — the `#SCHEMA.<NAME>#` maps) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
   — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter`/`col_key` — `ly_dlg_col` has
-  no `col_filter`, so it's aliased NULL; these rows feed both `migrate_column_hints` and `migrate_key_columns`) (SELECT-only; a missing
-  table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
+  no `col_filter`, so it's aliased NULL; these rows feed both `migrate_column_hints` and `migrate_key_columns`) /
+  `read_table_filters(engine)` (→ `ly_tbl_filters`←`ly_tbl_col`←`ly_tables`, `ly_dlg_filters`←`ly_dlg_col`←`ly_dlg_frm`
+  — `query_id`/`col_target`/`flt_source`/`flt_target` per cascading-filter rule; feeds `migrate_table_filters`)
+  (SELECT-only; a missing table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
   accepts any async URL — `postgresql+asyncpg://…`).
 - `liberty/menus/` — `config.py`: the `config/menus.toml` schema (`MenuItem`/`AppMenu`/`MenusFile`,
   `extra="forbid"`; validates unique ids, parents exist & don't cycle, folder-vs-leaf shape),
@@ -457,7 +469,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
 - `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
-  hints + the `ly_tables`/`ly_dlg_frm` screen labels & auto-load flags (the hints reference the
+  hints + `ly_tbl_filters`/`ly_dlg_filters` cascading-filter deps + the `ly_tables`/`ly_dlg_frm`
+  screen labels & auto-load flags (the hints reference the
   dictionary — also run `liberty-migrate dictionary -o config/dictionary.toml`);
   `dictionary [--default-language en] [--connector <app>]` migrates `ly_dictionary` (+ `ly_dictionary_l`)
   — `--connector` nests the entries under `[connectors.<app>.entries.*]` so several migrated apps don't
@@ -501,7 +514,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-282 tests pass.
+285 tests pass.
 
 ## Run it
 

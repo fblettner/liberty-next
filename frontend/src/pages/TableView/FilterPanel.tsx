@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
 import { Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
-import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupOptions, type LookupSpec } from '../../services/lookups'
 import { colors, radius, fontSize, fonts, shadow } from '../../theme'
 
 type LookupRule = Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
@@ -121,8 +121,9 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(!autoLoad)  // open by default unless the query auto-loads its result
-  // lookup-backed filter columns resolve to a value→label map (fetched once per session) so the
-  // field is a dropdown of *labels* — the user picks "Customer Service" not the code "01".
+  // lookup-backed filter columns resolve to a {value, label, …rows} table (fetched once per
+  // session) so the field is a dropdown of *labels* — the user picks "Customer Service" not "01" —
+  // and so a cascading filter (filter_from) can narrow the options to the rows matching a parent.
   const lookupSpecs = useMemo<LookupSpec[]>(
     () => cols.filter((c) => c.rule?.kind === 'lookup').map((c) => {
       const r = c.rule as LookupRule
@@ -130,19 +131,34 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
     }),
     [cols],
   )
-  const lookupMaps = useLookupBatch(lookupSpecs)
+  const lookupTables = useLookupTables(lookupSpecs)
+
+  // Cascading: when a column's value changes, clear any column that filters *from* it (its options
+  // just changed under it). One level deep — matches v1; a longer chain re-clears on the next change.
+  const handleChange = (name: string, next: ServerFilter) => {
+    onChange(name, next)
+    for (const c of cols) {
+      if (c.name !== name && c.filter_from?.some((d) => d.source === name) && (values[c.name]?.val ?? '') !== '') {
+        onChange(c.name, { op: 'equals', val: '' })
+      }
+    }
+  }
+
   if (cols.length === 0) return null
 
   const activeCount = cols.filter((c) => (values[c.name]?.val ?? '') !== '').length
   // lookup options: keep the query's own order (its SQL ORDER BY — usually the code) and show
-  // `<code> — <description>` so the picker carries both (the bare description was ambiguous).
+  // `<code> — <description>` so the picker carries both. If the column has a cascading dep
+  // (filter_from) whose source filter is set, narrow to the lookup rows whose `column` matches it.
   const lookupOptionsFor = (c: Column): SearchSelectOption[] | undefined => {
     if (c.rule?.kind !== 'lookup') return undefined
-    const m = lookupMaps.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label }))
-    if (!m) return undefined
-    return [...m.entries()].map(([v, l]) => {
-      const code = v.trim()
-      return { value: v, label: code && code !== l ? `${code} — ${l}` : l }
+    const data = lookupTables.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label }))
+    if (!data) return undefined
+    const dep = c.filter_from?.find((d) => (values[d.source]?.val ?? '') !== '')
+    const opts = lookupOptions(data, dep ? { column: dep.column, value: values[dep.source]!.val } : undefined)
+    return opts.map(({ value, label }) => {
+      const code = value.trim()
+      return { value, label: code && code !== label ? `${code} — ${label}` : label }
     })
   }
   return (
@@ -177,10 +193,10 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                       {isChoice ? (
                         <SearchSelect
                           value={cur.val}
-                          onChange={(val) => onChange(c.name, { op: 'equals', val })}
+                          onChange={(val) => handleChange(c.name, { op: 'equals', val })}
                           options={opts ?? []}
                           anyLabel={t('table.filterAny')}
-                          loading={isLookup && !opts}  /* lookup map still resolving */
+                          loading={isLookup && !opts}  /* lookup table still resolving */
                           disabled={isLookup && !opts}
                         />
                       ) : (
@@ -188,7 +204,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                           type={inputTypeFor(c)}
                           placeholder={t('table.serverFilterHint')}
                           value={cur.val}
-                          onChange={(e) => onChange(c.name, { ...cur, val: e.target.value })}
+                          onChange={(e) => handleChange(c.name, { ...cur, val: e.target.value })}
                           style={{ flex: 1, minWidth: 0 }}
                         />
                       )}
