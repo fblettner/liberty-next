@@ -1,9 +1,12 @@
 // Shapes of the structured-config admin endpoints (liberty/web/admin.py — the Phase-7 builders).
 import type { JsonSchema } from '../common/SchemaForm'
 
-/** GET /admin/config/schema — JSON Schema of the config models the builder forms render from. */
+/** GET /admin/config/schema — JSON Schema of the config models the builder forms render from
+ *  (`sql` / `api` carry their own `$defs` for QueryDef / ColumnHint / ParamDef / EndpointDef). */
 export interface ConfigSchemas {
   pool: JsonSchema
+  sql: JsonSchema
+  api: JsonSchema
   [section: string]: JsonSchema
 }
 
@@ -11,4 +14,10 @@ export interface ConfigSchemas {
 export interface PoolsDoc {
   path: string
   pools: Record<string, Record<string, unknown>>
+}
+
+/** GET /admin/config/connectors/parsed — the current `[connectors.*]` (default-valued keys dropped). */
+export interface ConnectorsDoc {
+  path: string
+  connectors: Record<string, Record<string, unknown>>
 }

@@ -460,15 +460,31 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   rest of Phase 6.
 
 ### Phase 7 — Config builders (the UI that builds the framework) — 🚧 IN PROGRESS
-**Done so far — the proof-of-concept slice:** the `[pools.*]` builder. Backend: `GET /admin/config/schema`
-(→ `PoolConfig.model_json_schema()`), `GET /admin/config/pools`, `PUT /admin/config/pools` (validate each
-against `PoolConfig`, drop default-valued keys, then **surgically rewrite only the `[pools.*]` tables** of
-`connectors.toml` via `tomlkit` — comments / the `[connectors.*]` tables / formatting all preserved; no
-auto-reload). Frontend: `common/SchemaForm` (a generic JSON-Schema→form renderer — string/number/bool/
-string-map/enum/optional), `Settings/PoolsBuilder` (a left list + a `SchemaForm` per pool, add/delete,
-Save → PUT + `/admin/reload`), and the Settings page split into tabs (`PoolsBuilder` | the raw `RawEditor`).
-Verdict on the schema-driven approach: **promising** — the pool form is ~entirely generated; the bespoke
-parts so far are just the list/nav + the save/reload wiring (~150 lines, reusable). Keep going.
+**Done so far:**
+- **`common/SchemaForm`** — a generic JSON-Schema → editing-form renderer: string / number / bool /
+  `dict[str,str]` / `list[str]` / `list[Model]` (a *collapsible* list — each item a nested `SchemaForm`,
+  so a query with 200 columns is 200 rows you expand one at a time) / `$ref`-to-a-`$defs` model (resolved) /
+  enum / `X|None` / the `sql` `str|{dialect:str}` union (a textarea, or per-dialect textareas); anything
+  it can't model → a "edit in the raw editor" note. The reusable shell — point it at a section's schema
+  (+ `$defs`) and add a custom widget when a model needs a shape it doesn't cover.
+- **Field docs → `Field(description=)`** on `PoolConfig` / `SqlConnectorConfig` / `ApiConnectorConfig` /
+  `QueryDef` / `EndpointDef` / `ColumnHint` / `ParamDef` / `FilterDep` / `VisibleWhen`, so the schemas
+  carry them and the forms show them as per-field hints.
+- **Backend** — `GET /admin/config/schema` → `{pool, sql, api}` (each with its `$defs`); `GET/PUT
+  /admin/config/pools` (surgically rewrites only the `[pools.*]` tables of `connectors.toml` via `tomlkit`
+  — comments / the `[connectors.*]` tables / formatting preserved); `GET/PUT /admin/config/connectors/parsed`
+  (validates each against the discriminated connector schema, rewrites only the `[connectors.*]` tables —
+  a changed connector's own subtree is re-rendered so its inline `columns = [{…}]` may become `[[…]]`
+  tables; re-parses the whole file before writing). PUT endpoints don't reload — call `/admin/reload`.
+  Dep: `tomlkit`.
+- **Frontend** — `Settings` is a tab switcher: `PoolsBuilder` (left list + `SchemaForm` per pool, add/delete,
+  Save → PUT + reload), `ConnectorsBuilder` (left list of sql/api connectors + a `SchemaForm` over the
+  matching schema — `queries`/`endpoints`/`columns`/`params` are the collapsible nested lists — Save → PUT
+  + reload), and `RawEditor` (the Monaco `connectors.toml` editor, the escape hatch). No rename yet.
+Verdict on the schema-driven approach: **it pays off** — the pool & connector forms are essentially all
+generated; the bespoke code is just `SchemaForm` itself + the per-builder list/nav/save wiring (~250 lines
+of `SchemaForm` + ~120 per builder, all reusable). Keep going — next: a **dictionary builder**, a **menus
+tree builder**, and a **SQL editor + "test run" preview** for queries.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
 surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one

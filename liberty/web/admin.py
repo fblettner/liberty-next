@@ -34,7 +34,14 @@ from liberty.auth.authstore import build_auth_backend
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.connectors import load_connectors
-from liberty.connectors.config import PoolConfig, load_connectors_file, parse_connectors
+from liberty.connectors.config import (
+    ApiConnectorConfig,
+    ConnectorsFile,
+    PoolConfig,
+    SqlConnectorConfig,
+    load_connectors_file,
+    parse_connectors,
+)
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
 
@@ -97,11 +104,16 @@ async def put_connectors_config(body: ConfigBody, request: Request, _: Superuser
     return {"saved": True, "path": str(path)}
 
 
-# ── structured config: the Phase-7 builders (pools first) ──────────────────────────────────
+# ── structured config: the Phase-7 builders ───────────────────────────────────────────────
 @router.get("/config/schema")
 async def get_config_schema(_: Superuser) -> dict[str, Any]:
-    """JSON Schema of the structured-config models — the builder UI renders forms from it."""
-    return {"pool": PoolConfig.model_json_schema()}
+    """JSON Schema of the structured-config models — the builder UI renders forms from it.
+    Each carries its own ``$defs`` (QueryDef / ColumnHint / ParamDef / …) for the UI to resolve."""
+    return {
+        "pool": PoolConfig.model_json_schema(),
+        "sql": SqlConnectorConfig.model_json_schema(),
+        "api": ApiConnectorConfig.model_json_schema(),
+    }
 
 
 @router.get("/config/pools")
@@ -150,4 +162,51 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/connectors/parsed")
+async def get_connectors_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``[connectors.*]`` as ``{name: connector dict}`` (default-valued keys dropped)."""
+    path = Path(request.app.state.settings.connectors.config_path)
+    cfg = load_connectors_file(path)
+    return {"path": str(path), "connectors": {name: c.model_dump(exclude_defaults=True) for name, c in cfg.connectors.items()}}
+
+
+class ConnectorsParsedBody(BaseModel):
+    connectors: dict[str, dict[str, Any]]
+
+
+@router.put("/config/connectors/parsed")
+async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate each connector against the (discriminated) connector schema, then rewrite *only* the
+    ``[connectors.*]`` tables of ``connectors.toml`` via ``tomlkit`` — the ``[pools.*]`` tables, the
+    comments and the file's overall structure are preserved (a *changed* connector's own subtree is
+    re-rendered though, so its inline `columns = [{…}]` arrays may become `[[…]]` tables — functionally
+    identical; review in git). Re-validates the whole resulting file before writing. Does not reload."""
+    for name, raw in body.connectors.items():
+        try:
+            ConnectorsFile.model_validate({"connectors": {name: raw}})
+        except ValidationError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"connector {name!r}: {exc}") from exc
+
+    path = Path(request.app.state.settings.connectors.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    conns = doc.get("connectors")
+    if conns is None:
+        conns = tomlkit.table(is_super_table=True)
+        doc["connectors"] = conns
+    for stale in [n for n in list(conns.keys()) if n not in body.connectors]:
+        del conns[stale]
+    for name, vals in body.connectors.items():
+        conns[name] = vals  # replace wholesale — tomlkit re-renders this connector's subtree
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        parse_connectors(tomllib.loads(new_text))   # belt-and-braces: the whole file must still parse
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting config is invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}

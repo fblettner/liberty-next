@@ -177,6 +177,38 @@ def test_config_pools_put(env) -> None:
         assert set(client.post("/admin/reload", headers=h).json()["pools"]) == {"default", "cache"}
 
 
+def test_config_connectors_parsed_get_and_put(env) -> None:
+    app, conn_toml, db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # schema serves the sql / api connector schemas (with their $defs)
+        sch = client.get("/admin/config/schema", headers=h).json()
+        assert "queries" in sch["sql"]["properties"] and "QueryDef" in sch["sql"]["$defs"]
+        assert "endpoints" in sch["api"]["properties"] and "EndpointDef" in sch["api"]["$defs"]
+        # the structured connectors view
+        body = client.get("/admin/config/connectors/parsed", headers=h).json()
+        assert body["path"] == str(conn_toml) and set(body["connectors"]) == {"db"}
+        db_conn = body["connectors"]["db"]
+        assert db_conn["type"] == "sql" and any(q["name"] == "answer" for q in db_conn["queries"])
+        # a non-superuser can't write; a malformed connector is rejected before anything lands
+        assert client.put("/admin/config/connectors/parsed", json={"connectors": {}}, headers=_h(client, "reader")).status_code == 403
+        assert client.put("/admin/config/connectors/parsed", json={"connectors": {"x": {"type": "ftp"}}}, headers=h).status_code == 422
+        # valid: rename a query + add a connector; [pools.*] survives, the new connector is live after reload
+        new = {
+            "db": {"type": "sql", "pool": "default", "queries": [{"name": "the_answer", "sql": "SELECT 42 AS answer"}]},
+            "extra": {"type": "sql", "pool": "default", "queries": [{"name": "two", "sql": "SELECT 2 AS two"}]},
+        }
+        assert client.put("/admin/config/connectors/parsed", json={"connectors": new}, headers=h).json()["saved"] is True
+        txt = conn_toml.read_text()
+        assert "[pools.default]" in txt and 'name = "the_answer"' in txt and "[connectors.extra]" in txt
+        after = client.get("/admin/config/connectors/parsed", headers=h).json()["connectors"]
+        assert set(after) == {"db", "extra"} and after["db"]["queries"][0]["name"] == "the_answer"
+        r = client.post("/admin/reload", headers=h)
+        assert set(r.json()["connectors"]) == {"db", "extra"}
+        assert client.get("/api/sql/extra/two", headers=h).json()["rows"] == [{"two": 2}]
+        assert client.get("/api/sql/db/the_answer", headers=h).json()["rows"] == [{"answer": 42}]
+
+
 def test_oidc_callback_fragment_redirect() -> None:
     from liberty.config import OIDCSettings
 

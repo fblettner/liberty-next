@@ -8,9 +8,10 @@ import { PageLayout, Centered } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 const PoolsBuilder = lazy(() => import('./PoolsBuilder'))
+const ConnectorsBuilder = lazy(() => import('./ConnectorsBuilder'))
 const RawEditor = lazy(() => import('./RawEditor'))
 
-type Tab = 'pools' | 'raw'
+type Tab = 'pools' | 'connectors' | 'raw'
 
 const Tabs = styled.div`display: flex; gap: 4px; margin-bottom: 14px;`
 const TabBtn = styled.button<{ $active?: boolean }>`
@@ -29,9 +30,12 @@ export default function Settings() {
     <PageLayout icon={<SlidersHorizontal size={18} />} title={t('settings.title')}>
       <Tabs>
         <TabBtn $active={tab === 'pools'} onClick={() => setTab('pools')}>{t('settings.tabs.pools')}</TabBtn>
+        <TabBtn $active={tab === 'connectors'} onClick={() => setTab('connectors')}>{t('settings.tabs.connectors')}</TabBtn>
         <TabBtn $active={tab === 'raw'} onClick={() => setTab('raw')}>{t('settings.tabs.raw')}</TabBtn>
       </Tabs>
-      <Suspense fallback={<Centered />}>{tab === 'pools' ? <PoolsBuilder /> : <RawEditor />}</Suspense>
+      <Suspense fallback={<Centered />}>
+        {tab === 'pools' ? <PoolsBuilder /> : tab === 'connectors' ? <ConnectorsBuilder /> : <RawEditor />}
+      </Suspense>
     </PageLayout>
   )
 }

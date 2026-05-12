@@ -242,13 +242,21 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   SQLAlchemy errors during execute → 502.
 - Also (config editing — superuser): `GET /admin/config/connectors` (raw `connectors.toml` text) +
   `PUT /admin/config/connectors` (validates the TOML against the schema, then writes — does *not*
-  reload; call `POST /admin/reload` after). And the **structured config builders** (Phase 7, first
-  slice): `GET /admin/config/schema` → `{pool: PoolConfig.model_json_schema()}` (the UI renders its
-  forms from this) ; `GET /admin/config/pools` → `{path, pools: {name: PoolConfig dict}}` ;
-  `PUT /admin/config/pools` (body `{pools: {name: dict}}`) — validates each against `PoolConfig`,
-  drops default-valued keys, then **surgically rewrites only the `[pools.*]` tables** in
-  `connectors.toml` via `tomlkit` (the comments + the `[connectors.*]` tables + the file's formatting
-  are left intact); does *not* reload. (Dep: `tomlkit` — comment/format-preserving TOML edits.)
+  reload; call `POST /admin/reload` after). And the **structured config builders** (Phase 7):
+  `GET /admin/config/schema` → `{pool, sql, api}` = the `PoolConfig` / `SqlConnectorConfig` /
+  `ApiConnectorConfig` `model_json_schema()`s, each with its own `$defs` (`QueryDef`/`ColumnHint`/
+  `ParamDef`/`EndpointDef`/…) — the UI renders its forms from this ; `GET /admin/config/pools` →
+  `{path, pools: {name: PoolConfig dict}}` + `PUT /admin/config/pools` (`{pools: {name: dict}}`) —
+  validates each against `PoolConfig`, drops default-valued keys, then **surgically rewrites only the
+  `[pools.*]` tables** in `connectors.toml` via `tomlkit` (comments + the `[connectors.*]` tables +
+  formatting left intact) ; `GET /admin/config/connectors/parsed` → `{path, connectors: {name: dict}}`
+  (default-valued keys dropped) + `PUT /admin/config/connectors/parsed` (`{connectors: {name: dict}}`)
+  — validates each against the discriminated connector schema, rewrites only the `[connectors.*]`
+  tables (a *changed* connector's own subtree is re-rendered by `tomlkit`, so its inline `columns =
+  [{…}]` arrays may become `[[…]]` tables — functionally identical), re-parses the whole result before
+  writing. PUT endpoints don't reload — call `POST /admin/reload` after. (Dep: `tomlkit` —
+  comment/format-preserving TOML edits.) The field docs on the config models are in `Field(description=)`
+  so the builder forms show them as hints.
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
@@ -281,8 +289,11 @@ replies), `@monaco-editor/react` (the connector-config editor).
   session cache), `monaco.ts` (bundles Monaco + its worker, no CDN))), `src/common/` (shared
   theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `SearchSelect`
   (a searchable single-select pop-over — themed replacement for a long native `<select>`), `SchemaForm`
-  (renders an editing form from a JSON Schema — string/number/bool/string-map/enum/optional; the
-  Phase-7 config-builder shell, used by `Settings/PoolsBuilder`), `Tag`/`Mono`,
+  (renders an editing form from a JSON Schema — string / number / bool / `dict[str,str]` map / `list[str]` /
+  `list[Model]` (a *collapsible* list, each item a nested `SchemaForm` — a query with 200 columns is 200
+  rows you expand one at a time) / `$ref`-to-a-`$defs`-model (resolved) / enum / `X|None` / the `sql`
+  `str|{dialect:str}` union (a textarea, or per-dialect textareas); anything else → a "edit in the raw
+  editor" note. The Phase-7 config-builder shell, used by `Settings/PoolsBuilder` & `ConnectorsBuilder`), `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
   global search (over *every* column — `getColumnCanGlobalFilter` is overridden so a column whose first row
@@ -362,11 +373,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
   `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a tab switcher over the config editors —
-  `Settings/PoolsBuilder` = the structured `[pools.*]` editor (a left list + a `SchemaForm` driven by
-  `GET /admin/config/schema`'s `PoolConfig` JSON Schema → `PUT /admin/config/pools` + Reload — the
-  Phase-7 builder slice; no rename yet) and `Settings/RawEditor` = the Monaco `connectors.toml` editor
-  (`language="ini"`, theme-aware, over `GET/PUT /admin/config/connectors` + Reload — the escape hatch)),
-  `Login` + `OidcCallback`.
+  `PoolsBuilder` = the structured `[pools.*]` editor (a left list + a `SchemaForm` over the `PoolConfig`
+  schema → `PUT /admin/config/pools` + Reload), `ConnectorsBuilder` = the `[connectors.*]` editor (a left
+  list of sql/api connectors + a `SchemaForm` over the matching schema — `queries`/`endpoints`/`columns`/
+  `params` render as collapsible nested lists inside the form — → `PUT /admin/config/connectors/parsed` +
+  Reload), and `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over
+  `GET/PUT /admin/config/connectors` + Reload — the escape hatch); the structured editors don't support
+  rename yet — delete + re-add — the Phase-7 builder slices), `Login` + `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
   fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
   `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default
@@ -562,16 +575,18 @@ nomaubl's `LicenseVerifier`; **same JWT shape and key-pair as nomaubl**). v2 onl
 - `liberty/license_cli.py` (`liberty-license` script) — `verify [<key>]` / `status` → JSON status (exit 0 if
   full, 1 if restricted); reads the key from the arg / stdin / `[license] key`; `--public-key PATH` overrides.
 
-305 tests pass.
+306 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
 the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
 contextual menus — the `visible_when`/`filter_from` work is its table-side first slice; design it
-against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell over the
-Pydantic config, not raw TOML — **started**: the `[pools.*]` builder slice (`SchemaForm` +
-`GET /admin/config/schema`/`GET-PUT /admin/config/pools`); next: connectors→queries→dictionary→menus→API
-connectors; + git-backed config-file versioning + frontend tests/CI) → **Phase 8** charts & dashboards →
+against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
+over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
+(sql + api, with queries/endpoints/columns as collapsible nested lists), the `GET /admin/config/schema` +
+`GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed` endpoints, and the field docs
+moved to `Field(description=)`; next: a dictionary builder, a menus tree builder, a SQL editor + "test run"
+for queries; + git-backed config-file versioning + frontend tests/CI) → **Phase 8** charts & dashboards →
 **Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement (in-project
 Python/local-Spark jobs & scheduling).
 
