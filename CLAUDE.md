@@ -421,8 +421,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `format`=a non-trivial `dd_type`, `rules`/`rules_values`/`default` verbatim, `[entries.<dd_id>.l]`
   = `{lng_id: lng_label}` from `ly_dictionary_l`); plus `[enums.<enum_id>]` from `ly_enum` (+
   `ly_enum_val` + `ly_enum_val_l` translations) and `[lookups.<lkp_id>]` from `ly_lookup` (its
-  `lkp_query_id` resolved via *sql_rows* to the matching read query's v2 name, same logic as
-  `migrate_menus`). `connector_name` nests all three sections under `[connectors.<name>.…]`. `migrate_menus(ly_menus rows, ly_menus_l rows, ly_tables rows,
+  `lkp_query_id` resolved via *sql_rows* to the matching read query's v2 name + the slug of that
+  query's `query_pool` as the lookup's `connector` — so a lookup pointing at a query on another
+  connector resolves there, not the asking one; same logic as `migrate_menus`). `connector_name`
+  nests all three sections under `[connectors.<name>.…]`. `migrate_menus(ly_menus rows, ly_menus_l rows, ly_tables rows,
   ly_dlg_frm rows, ly_qry_sql⋈ly_query rows, *, app_name, app_label=None)` → the `menus.toml` dict
   (`{"menus": {<app_name>: {label?, items}}}` — flat items in `menu_seq_ukid` order, linked by `parent`;
   a query-backed `menu_component` → a `type="query"` leaf whose `target` is `menu_component_id` →

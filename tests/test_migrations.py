@@ -757,13 +757,14 @@ async def test_read_dictionary_rules_and_migrate(v1_engine) -> None:
     vals = {v.value: v for v in sec.enums["1"].values}
     assert vals["A"].label == "Active" and vals["A"].label_for("fr") == "Actif"
     assert vals["I"].label_for("fr") == "Inactive"  # no fr translation → falls back to the default
-    # lookup migrated, with lkp_query_id=1 → the read-variant name migrate_sql_queries gives that query
-    assert sec.lookups["1"].query == "users_list_select"
+    # lookup migrated, with lkp_query_id=1 → the read-variant name migrate_sql_queries gives that query;
+    # `connector` is the slug of that query's pool ("default" here) — may differ from the dict section
+    assert sec.lookups["1"].query == "users_list_select" and sec.lookups["1"].connector == "default"
     assert sec.lookups["1"].value == "USR_ID" and sec.lookups["1"].label == "USR_NAME"
     # the entries' rules round-trip; resolve_rule returns the right wire shape
     usr_id_rule = d.resolve_rule(sec.entries["USR_ID"], connector="db", language="en")
     assert usr_id_rule == {
-        "kind": "lookup", "connector": "db", "query": "users_list_select", "value": "USR_ID", "label": "USR_NAME",
+        "kind": "lookup", "connector": "default", "query": "users_list_select", "value": "USR_ID", "label": "USR_NAME",
     }
     usr_name_rule = d.resolve_rule(sec.entries["USR_NAME"], connector="db", language="fr")
     assert usr_name_rule == {

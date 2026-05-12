@@ -3394,12 +3394,14 @@ values = [
 
 [connectors.nomasx1.lookups.1]
 description = "Get Applications from SETTINGS_APPLICATIONS"
+connector = "nomasx1"
 query = "get_applications_from_settings_applications_get"
 value = "APPS_ID"
 label = "APPS_NAME"
 
 [connectors.nomasx1.lookups.2]
 description = "Get Components from SETTINGS_LIC_COMPONENTS"
+connector = "nomasx1"
 query = "get_component_from_settings_lic_components_get"
 value = "CPT_ID"
 label = "CPT_COMPONENT"
@@ -3407,48 +3409,56 @@ group = "CPT_CATEGORY"
 
 [connectors.nomasx1.lookups.3]
 description = "Get Metric from SETTINGS_LIC_METRICS"
+connector = "nomasx1"
 query = "get_metric_from_settings_lic_metrics_get"
 value = "MET_ID"
 label = "MET_DESCRIPTION"
 
 [connectors.nomasx1.lookups.4]
 description = "Get CSI from LICENSE_CSI"
+connector = "nomasx1"
 query = "get_csi_from_license_csi_get"
 value = "CSI_ID"
 label = "CSI_DESCRIPTION"
 
 [connectors.nomasx1.lookups.5]
 description = "Get SYC_ID from SETTINGS_JDE_SY"
+connector = "nomasx1"
 query = "get_syc_id_from_settings_jde_sy_get"
 value = "SYC_ID"
 label = "SYC_DESCRIPTION"
 
 [connectors.nomasx1.lookups.6]
 description = "Get Users from SECURITY_USERS"
+connector = "nomasx1"
 query = "get_users_from_security_users_get"
 value = "USR_ID"
 label = "USR_NAME"
 
 [connectors.nomasx1.lookups.7]
 description = "Get Roles from SECURITY_ROLES"
+connector = "nomasx1"
 query = "get_roles_from_security_roles_get"
 value = "ROL_ID"
 label = "ROL_NAME"
 
 [connectors.nomasx1.lookups.8]
 description = "Get Process ID from Process (SOD_PROCESS)"
+connector = "nomasx1"
 query = "get_process_id_from_process_sod_process_get"
 value = "PROCESS_ID"
 label = "PROCESS_NAME"
 
 [connectors.nomasx1.lookups.9]
 description = "Get Risk ID from Risk (SOD_RISKS)"
+connector = "nomasx1"
 query = "get_risk_id_from_risk_sod_risks_get"
 value = "RISK_ID"
 label = "RISK_NAME"
 
 [connectors.nomasx1.lookups.10]
 description = "Get Activity ID from Activities (SOD_ACTIVITIES)"
+connector = "nomasx1"
 query = "get_activity_id_from_activities_sod_activities_get"
 value = "ACT_ID"
 label = "ACT_NAME"
@@ -3456,6 +3466,7 @@ group = "ACT_PROCESS_ID"
 
 [connectors.nomasx1.lookups.11]
 description = "Get Object ID from Objects (SOD_OBJECTS)"
+connector = "nomasx1"
 query = "get_object_id_from_objects_sod_objects_get"
 value = "OBJECT_ID"
 label = "OBJECT_NAME"
@@ -3463,6 +3474,7 @@ group = "OBJECT_ACT_ID"
 
 [connectors.nomasx1.lookups.12]
 description = "Get Object ID from Objects (JDE_OBJECTS)"
+connector = "nomasx1"
 query = "get_object_id_from_objects_jde_objects_get"
 value = "JDEO_OBJECT"
 label = "JDEO_DESCRIPTION"
@@ -4868,54 +4880,63 @@ values = [
 
 [lookups.1]
 description = "Get UDC Description"
+connector = "nomajde"
 query = "get_udc_description_get"
 value = "KY"
 label = "DL01"
 
 [lookups.2]
 description = "Get Product Code"
+connector = "nomajde"
 query = "get_product_code_get"
 value = "KY"
 label = "DL01"
 
 [lookups.3]
 description = "Get System Code"
+connector = "nomajde"
 query = "get_system_code_get"
 value = "RT"
 label = "DL01"
 
 [lookups.4]
 description = "Get User Name"
+connector = "jdedwards"
 query = "get_user_name_get"
 value = "USER"
 label = "ALPH"
 
 [lookups.5]
 description = "Get Role Description"
+connector = "jdedwards"
 query = "get_role_description_get"
 value = "ROLE"
 label = "ROLEDESC"
 
 [lookups.6]
 description = "Get User / Role Name"
+connector = "jdedwards"
 query = "get_user_role_name_get"
 value = "USER_ROLE"
 label = "ALPH"
 
 [lookups.7]
 description = "Get Security Type"
+connector = "nomajde"
 query = "get_security_type_get"
 value = "KY"
 label = "DL01"
 
 [lookups.8]
 description = "Get Data Item"
+connector = "nomajde"
 query = "get_data_item_get"
 value = "DTAI"
 label = "DSCR"
 
 [lookups.9]
 description = "Get Object Name"
+connector = "nomajde"
 query = "get_object_name_get"
 value = "OBNM"
 label = "MD"

@@ -575,6 +575,7 @@ def migrate_dictionary(
     # ly_lookup.lkp_query_id → the *read* variant migrate_sql_queries gives that query: same logic
     # as migrate_menus, so both stay in sync.
     query_label: dict[int, str] = {}
+    query_pool: dict[int, str] = {}
     read_crud: dict[int, str] = {}
     for r in sql_rows:
         qid_raw = r.get("query_id")
@@ -582,6 +583,10 @@ def migrate_dictionary(
             continue
         qid = int(qid_raw)
         query_label.setdefault(qid, str(r.get("query_label") or ""))
+        if qid not in query_pool:
+            pool = str(r.get("query_pool") or "").strip()
+            if pool:
+                query_pool[qid] = pool
         c = str(r.get("query_crud") or "").upper()
         if c in _READ_CRUD and qid not in read_crud:
             read_crud[qid] = c
@@ -594,14 +599,19 @@ def migrate_dictionary(
         label_col = str(r.get("lkp_dd_label") or "").strip()
         qid = r.get("lkp_query_id")
         target: str | None = None
+        lkp_connector: str | None = None
         if qid is not None:
             q = int(qid)
             crud = read_crud.get(q, "GET")
             target = slugify(f"{query_label.get(q) or f'q{q}'}_{crud}", fallback=f"q{q}_{crud.lower()}")
+            pool = query_pool.get(q)
+            if pool:  # the connector the lookup query lives on — may differ from the asking connector
+                lkp_connector = slugify(pool, fallback=pool)
         if not value_col or not label_col or not target:
             continue  # an unresolvable lookup — operator will fix it by hand or remove it
         lookups[lid] = _drop_none({
             "description": str(r.get("lkp_description") or "").strip() or None,
+            "connector": lkp_connector,
             "query": target,
             "value": value_col,
             "label": label_col,
