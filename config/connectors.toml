@@ -31,6 +31,8 @@ pool = "nomasx1"
 [[connectors.nomasx1.queries]]
 name = "security_users_get"
 label = "SECURITY_USERS"
+description = "Security - Users"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_NAME,\n    CASE WHEN USR_STATUS = '01' THEN '01' ELSE 'N' END USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_ID_LINKED,\n    USR_REGISTRATION,\n    USR_DT_REFRESH,\n    USR_UKID,\n    (SELECT MAX(LOUT_USAGE) FROM LICENSE_JDE_OUT WHERE LOUT_USER = USR_ID AND LOUT_APPS_ID = USR_APPS_ID) LAST_USAGE,\n   USR_DT_UPDATE\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -52,6 +54,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_roles_get"
 label = "SECURITY_ROLES"
+description = "Security - Roles"
+auto_load = true
 sql = "SELECT\n    ROL_APPS_ID,\n    ROL_ID,\n    ROL_NAME,\n    ROL_SEQ,\n    ROL_DT_REFRESH,\n    ROL_UKID\nFROM\n    SECURITY_ROLES\nORDER BY ROL_APPS_ID,ROL_ID"
 columns = [
     { name = "ROL_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -65,6 +69,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_assignments_get"
 label = "SECURITY_ASSIGNMENTS"
+description = "Security - Assignments"
+auto_load = true
 sql = "SELECT\n    RLU_APPS_ID,\n    RLU_USER_ID,\n    RLU_ROLE_ID,\n    RLU_DT_EFFECTIVE,\n    RLU_DT_EXPIRATION,\n    RLU_DT_REFRESH,\n    RLU_UKID\nFROM\n    SECURITY_ASSIGNMENTS\nINNER JOIN\n    SECURITY_USERS\n    ON USR_APPS_ID = RLU_APPS_ID AND USR_ID = RLU_USER_ID\nWHERE\n    USR_STATUS='01'\nORDER BY RLU_APPS_ID,RLU_USER_ID, RLU_ROLE_ID"
 columns = [
     { name = "RLU_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -79,6 +85,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_roles_not_used_get"
 label = "SECURITY_ROLES_NOT_USED"
+description = "Security - Roles not used"
+auto_load = true
 sql = "SELECT\n    APPS_ID,\n    ROL_ID\nFROM\n    SECURITY_ROLES\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = ROL_APPS_ID\nLEFT JOIN\n    SECURITY_ASSIGNMENTS\n    ON RLU_APPS_ID = ROL_APPS_ID AND RLU_ROLE_ID = ROL_ID\nWHERE\n    RLU_ROLE_ID IS NULL\nORDER BY APPS_ID,ROL_ID"
 columns = [
     { name = "APPS_ID" },
@@ -88,6 +96,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_users_without_roles_get"
 label = "SECURITY_USERS_WITHOUT_ROLES"
+description = "Security - Users without roles"
+auto_load = true
 sql = "SELECT\n    APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    USR_DT_CREATION ,\n    USR_DT_LOGIN\nFROM\n    SECURITY_USERS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = USR_APPS_ID\nLEFT JOIN\n    SECURITY_ASSIGNMENTS\n    ON RLU_APPS_ID = USR_APPS_ID AND RLU_USER_ID = USR_ID\nWHERE\n    RLU_USER_ID IS NULL\n    AND USR_STATUS = '01'\nORDER BY APPS_ID, USR_ID"
 columns = [
     { name = "APPS_ID" },
@@ -100,6 +110,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_matrix_get"
 label = "SECURITY_MATRIX"
+description = "Security - Roles Matrix (combination roles for users)"
+auto_load = true
 sql = "SELECT\n  APPS_ID,\n  USERS_COUNT,\n  RLU_ROLE_ID,\n  USR_ID\nFROM\n  (\n  SELECT\n    APPS_ID,\n    RLU_ROLE_ID,\n    count(distinct USR_ID) USERS_COUNT,\n    MAX(USR_ID) USR_ID\n  FROM\n    (\n    SELECT\n      APPS_ID,\n      USR_ID,\n      (\n      SELECT\n        STRING_AGG(RLU_ROLE_ID, ',' ORDER BY RLU_ROLE_ID)\n      FROM\n        (\n        SELECT\n          RLU_ROLE_ID\n        FROM\n          SECURITY_ASSIGNMENTS\n        WHERE\n          RLU_USER_ID = USR_ID\n          AND RLU_APPS_ID = APPS_ID\n        ) ALL_ROLES\n      ) RLU_ROLE_ID\n      FROM\n        SECURITY_USERS\n      INNER JOIN\n        SETTINGS_APPLICATIONS\n        ON APPS_ID = USR_APPS_ID\n      WHERE\n        USR_STATUS = '01'\n    ) ROLES_DETAILS\n  GROUP BY\n    APPS_ID,\n    RLU_ROLE_ID\n  ) ROLES_MATRIX\nWHERE\n  TRIM(RLU_ROLE_ID) is not null\nORDER BY APPS_ID, USERS_COUNT DESC"
 columns = [
     { name = "APPS_ID" },
@@ -111,6 +123,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_duplicate_users_get"
 label = "SECURITY_DUPLICATE_USERS"
+description = "Security - Duplicate users"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USRD_AN8,\n    USR_STATUS,\n    USR_DT_CREATION ,\n    USR_DT_LOGIN ,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_IS_LINKED,\n    USRP_ID_LINKED\nFROM\n    (\n    SELECT\n        USR_APPS_ID,\n        USR_ID,\n        USRD_AN8,\n        USR_REGISTRATION,\n        USR_STATUS,\n        USR_DT_CREATION,\n        USR_DT_LOGIN,\n        USRP_PRIVILEGED,\n        USRP_TECHNICAL,\n        USRP_GENERIC,\n        USRP_IS_LINKED,\n        USRP_ID_LINKED\n    FROM\n        SECURITY_USERS\n    INNER JOIN\n        SECURITY_USERS_DATA\n        ON USRD_APPS_ID = USR_APPS_ID AND USRD_ID = USR_ID\n    LEFT JOIN\n        SECURITY_USERS_PROP\n        ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\n    WHERE\n        (USRD_APPS_ID,USRD_AN8) IN\n        ( SELECT\n            USRD_APPS_ID,\n            USRD_AN8\n        FROM\n            SECURITY_USERS_DATA\n        GROUP BY\n            USRD_APPS_ID,USRD_AN8\n        HAVING\n            COUNT(*)  > 1 )\n        ) DUPLICATE_USERS\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -129,6 +143,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "ldap_users_get"
 label = "LDAP_USERS"
+description = "LDAP - Users"
+auto_load = true
 sql = "SELECT\n    LDAP_APPS_ID,\n    LDAP_ACCOUNT,\n    LDAP_DN,\n    LDAP_NAME,\n    LDAP_LOGON,\n    LDAP_COMPANY,\n    LDAP_CITY,\n    LDAP_DEPARTMENT,\n    LDAP_DESCRIPTION,\n    LDAP_DISPLAY_NAME,\n    LDAP_MAIL,\n    LDAP_MANAGER,\n    LDAP_OFFICE,\n    LDAP_TELEPHONE,\n    LDAP_MOBILE,\n    LDAP_TITLE,\n    LDAP_CREATION,\n    LDAP_EXPIRES,\n    LDAP_NEVER_EXPIRES,\n    LDAP_REFRESH,\n    LDAP_UKID\nFROM\n    SECURITY_LDAP\nORDER BY LDAP_APPS_ID,LDAP_DISPLAY_NAME"
 columns = [
     { name = "APPS_ID" },
@@ -157,6 +173,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "ldap_undefined_get"
 label = "LDAP_UNDEFINED"
+description = "LDAP - Users undefined"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_NAME,\n    USR_STATUS,\n    USR_REGISTRATION,\n    USR_DT_CREATION,\n    USR_DT_LOGIN\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_LDAP A  ON  UPPER(A.LDAP_DESCRIPTION)  =  UPPER(USR_REGISTRATION) AND A.LDAP_APPS_ID = 50\nLEFT JOIN\n    SECURITY_LDAP B ON  UPPER(B.LDAP_ACCOUNT)  =  UPPER(USR_ID) AND B.LDAP_APPS_ID = 50\nWHERE\n    A.LDAP_LOGON IS NULL  AND B.LDAP_LOGON IS NULL\nORDER BY USR_APPS_ID,USR_NAME"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -171,6 +189,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "ldap_apps_get"
 label = "LDAP_APPS"
+description = "LDAP - Users by application"
+auto_load = true
 sql = "SELECT\n  LDAPD_GROUP,\n  APPS_NAME,\n  LDAP_NAME,\n  LDAPD_DEPARTEMENT,\n  LDAP_DESCRIPTION,\n  LDAP_EXPIRES,\n  LDAP_COMPANY,\n  LDAP_TITLE,\n  USR_ID,\n  USR_NAME,\n  USR_REGISTRATION,\n  USR_STATUS,\n  USR_DT_LOGIN,\n  USR_DT_CREATION,\n  RLU_ROLE_ID FROM\n(\n  SELECT\n    LDAPD_GROUP,\n    C.APPS_NAME,\n    LDAP_NAME,\n    LDAPD_DEPARTEMENT,\n    LDAP_DESCRIPTION,\n    LDAP_EXPIRES,\n    LDAP_COMPANY,\n    LDAP_TITLE,\n    A.USR_ID,\n    A.USR_NAME,\n    A.USR_REGISTRATION,\n    A.USR_STATUS,\n    A.USR_DT_LOGIN,\n    A.USR_DT_CREATION,\n    (\n    SELECT \n      STRING_AGG(RLU_ROLE_ID, ',' ORDER BY RLU_ROLE_ID)      \n    FROM (\n      SELECT RLU_ROLE_ID FROM \n        SECURITY_ASSIGNMENTS\n      WHERE \n        RLU_USER_ID = A.USR_ID AND RLU_APPS_ID = A.USR_APPS_ID ORDER BY RLU_ROLE_ID) ALL_ASSIGNMENTS\n    ) RLU_ROLE_ID\n  FROM\n    SECURITY_LDAP_DPT\n  INNER JOIN\n    SECURITY_LDAP ON LDAP_DEPARTMENT = LDAPD_DEPARTEMENT\n  INNER JOIN\n    SETTINGS_APPLICATIONS LDAP  ON LDAP.APPS_ID = LDAP_APPS_ID\n  LEFT JOIN \n    (SECURITY_USERS A INNER JOIN SETTINGS_APPLICATIONS C  ON A.USR_APPS_ID = C.APPS_ID) ON \n      UPPER(A.USR_REGISTRATION)  =  UPPER(LDAP_DESCRIPTION)  \n      OR  UPPER(A.USR_ID)  =  UPPER(LDAP_ACCOUNT)\n    WHERE A.USR_ID IS NOT NULL\n  UNION ALL\n  SELECT\n    LDAPD_GROUP ,\n    APPS_NAME ,\n    LDAP_NAME ,\n    LDAPD_DEPARTEMENT,\n    LDAP_DESCRIPTION,\n    LDAP_EXPIRES,\n    LDAP_COMPANY,\n    LDAP_TITLE, NULL , NULL , NULL , NULL , NULL , NULL , NULL\n  FROM \n    SECURITY_LDAP_DPT\n  INNER JOIN \n    SECURITY_LDAP ON LDAP_DEPARTMENT = LDAPD_DEPARTEMENT\n  INNER JOIN \n    SETTINGS_APPLICATIONS ON APPS_ID = LDAP_APPS_ID\n) ALL_ROLES\nORDER BY LDAPD_GROUP,APPS_NAME,LDAP_NAME"
 columns = [
     { name = "LDAPD_GROUP" },
@@ -193,6 +213,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "ldap_department_get"
 label = "LDAP_DEPARTMENT"
+description = "LDAP - Department"
+auto_load = true
 sql = "SELECT  DISTINCT\n    APPS_ID,\n    APPS_NAME,\n    LDAPD_GROUP,\n    LDAP_DEPARTMENT\nFROM\n    SECURITY_LDAP\nINNER JOIN\n    SETTINGS_APPLICATIONS ON APPS_ID = LDAP_APPS_ID\nLEFT JOIN\n    SECURITY_LDAP_DPT ON LDAPD_DEPARTEMENT = LDAP_DEPARTMENT\nWHERE\n    LDAP_APPS_ID = 50\nORDER BY APPS_ID,APPS_NAME,LDAPD_GROUP,LDAP_DEPARTMENT"
 columns = [
     { name = "APPS_ID" },
@@ -204,6 +226,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_menus_get"
 label = "SECURITY_MENUS"
+description = "Security - Menus"
 sql = "WITH component as (\nSELECT\n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID,\n  CPT_COMPONENT\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN \n    SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    MENU_APPS_ID,\n    MENU_LANGUAGE,\n    MENU_ROOT,\n    CPT_ID,\n    MENU_OBJECT,\n    MENU_FORM,\n    MENU_VERSION,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3,\n    MENU_LEVEL4,\n    MENU_LEVEL5,\n    MENU_LEVEL6,\n    MENU_LEVEL7,\n    MENU_LEVEL8,\n    MENU_LEVEL9,\n    MENU_LEVEL10,\n    MENU_SEQ_UKID,\n    MENU_PARENT_ID,\n    MENU_CHILD_ID,\n    MENU_REFRESH,\n    MENU_UKID,\n    COALESCE(MENU_LEVEL9, \n    COALESCE(MENU_LEVEL8, \n    COALESCE(MENU_LEVEL7, \n    COALESCE(MENU_LEVEL6, \n    COALESCE(MENU_LEVEL5, \n    COALESCE(MENU_LEVEL4,MENU_LEVEL3, \n    COALESCE(MENU_LEVEL2, \n    COALESCE(MENU_LEVEL1, MENU_ROOT)))))))) MENU_LABEL\nFROM\n    SECURITY_MENUS\nLEFT JOIN\n    component\n    ON JDEO_APPS_ID = MENU_APPS_ID\n    AND JDEO_OBJECT = MENU_OBJECT\nORDER BY MENU_APPS_ID, MENU_SEQ_UKID"
 columns = [
     { name = "MENU_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -231,6 +254,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_rights_users_get"
 label = "SECURITY_RIGHTS_USERS"
+description = "Rights - Users"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -248,6 +272,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_rights_roles_get"
 label = "SECURITY_RIGHTS_ROLES"
+description = "Rights - Roles"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_USER_ID = '*ROLE'\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_ROLE_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -265,6 +290,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_rights_users_roles_get"
 label = "SECURITY_RIGHTS_USERS_ROLES"
+description = "Rights - Users by roles"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -283,6 +309,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_rights_users_menus_get"
 label = "SECURITY_RIGHTS_USERS_MENUS"
+description = "Rights - Users by menus"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n        SECURITY_MENUS\n        ON MENU_APPS_ID = SER_APPS_ID\n        AND MENU_SEQ_UKID = SER_MENU_SEQUKID\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -306,6 +333,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_rights_roles_menus_get"
 label = "SECURITY_RIGHTS_ROLES_MENUS"
+description = "Rights - Roles by menus"
 sql = "WITH component as (\nSELECT\n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID,\n  CPT_COMPONENT\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN \n    SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    CPT_ID,\n    SER_ROLE_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3,\n    MENU_LEVEL4,\n    MENU_LEVEL5,\n    MENU_LEVEL6,\n    MENU_LEVEL7,\n    MENU_LEVEL8,\n    MENU_LEVEL9,\n    MENU_SEQ_UKID\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n    SECURITY_MENUS\n    ON MENU_APPS_ID = SER_APPS_ID\n    AND MENU_SEQ_UKID = SER_MENU_SEQUKID\nLEFT JOIN\n    component\n    ON JDEO_APPS_ID = SER_APPS_ID\n    AND JDEO_OBJECT = SER_OBJECT\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_USER_ID = '*ROLE'\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,MENU_SEQ_UKID,SER_ROLE_ID"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -336,6 +364,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_summary_get"
 label = "SOD_SUMMARY"
+description = "SOD - Summary"
+auto_load = true
 sql = "SELECT\n    CFS_APPS_ID,\n    CFS_PROCESS_ID,\n    CFS_RISK_ID,\n    CFS_COUNT,\n    CFS_REFRESH\nFROM\n(\nSELECT\n    CFS_APPS_ID,\n    CFS_PROCESS_ID,\n    CFS_RISK_ID,\n    SUM(CFS_COUNT) CFS_COUNT,\n    CFS_REFRESH\nFROM\n    SOD_CONFLICT_SUMMARY\nWHERE\n    CFS_COUNT> 0\nGROUP BY CFS_APPS_ID,CFS_PROCESS_ID,CFS_RISK_ID,CFS_REFRESH\n) SOD_SUMMARY\nORDER BY CFS_APPS_ID,CFS_PROCESS_ID,CFS_RISK_ID"
 columns = [
     { name = "CFS_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -348,6 +378,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_details_get"
 label = "SOD_DETAILS"
+description = "SOD - Details"
 sql = "SELECT\n    CFD_APPS_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -365,6 +396,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_proven_get"
 label = "SOD_PROVEN"
+description = "SOD - Proven"
 sql = "WITH  Activity AS\n( SELECT  DISTINCT\n    ACL_APPS_ID,\n    TRIM(ACL_USER_ID) ACL_USER_ID,\n    ACL_TABLE_NAME\n    FROM\n        SECURITY_ACTIVITY_LOG\n)\nSELECT DISTINCT\n    CFD_APPS_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nINNER JOIN\n    SECURITY_XREF G  ON G.XREF_APPS_ID = CFD_APPS_ID AND G.XREF_OBJECT_FROM = CFD_ACT1_OBJECT\nINNER JOIN\n    SECURITY_XREF H  ON H.XREF_APPS_ID = CFD_APPS_ID AND H.XREF_OBJECT_FROM = CFD_ACT2_OBJECT AND H.XREF_OBJECT_FROM <> G.XREF_OBJECT_FROM\nINNER JOIN  Activity I  ON I.ACL_APPS_ID = CFD_APPS_ID AND I.ACL_USER_ID = CFD_USER_ID AND I.ACL_TABLE_NAME = G.XREF_OBJECT_TO\nINNER JOIN  Activity J  ON J.ACL_APPS_ID = CFD_APPS_ID AND J.ACL_USER_ID = CFD_USER_ID AND J.ACL_TABLE_NAME = H.XREF_OBJECT_TO\nWHERE\n    I.ACL_TABLE_NAME <> J.ACL_TABLE_NAME\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -382,6 +414,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_users_get"
 label = "SOD_USERS"
+description = "SOD - Users"
+auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_USER_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN\nFROM\n    SOD_CONFLICT_DETAILS\nINNER JOIN\n    SECURITY_USERS ON USR_APPS_ID = CFD_APPS_ID AND USR_ID = CFD_USER_ID\nORDER BY CFD_USER_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -394,6 +428,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_roles_get"
 label = "SOD_ROLES"
+description = "SOD - Roles"
+auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_ROLE1_ID,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_ROLE1_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -404,6 +440,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "database_oracle_get"
 label = "DATABASE_ORACLE"
+description = "Database - Oracle Properties"
+auto_load = true
 sql = "SELECT\n    ORAP_APPS_ID,\n    ORAP_PRODUCT,\n    ORAP_FULL_VERSION,\n    ORAP_VERSION,\n    ORAP_HOSTNAME,\n    ORAP_NAME,\n    ORAP_COUNT_INST,\n    ORAP_CPU,\n    ORAP_ACTIVE_USERS,\n    ORAP_TOTAL_USERS,\n    (SELECT COUNT(*) FROM SECURITY_USERS_PROP WHERE USRP_APPS_ID = ORAP_APPS_ID AND USRP_TECHNICAL='Y') ORAP_TECHNICAL_USERS,\n    ORAP_PACK,\n    ORAP_DG,\n    ORAP_SIZE_GB\nFROM\n    DB_ORA_PROPERTIES\nORDER BY ORAP_APPS_ID"
 columns = [
     { name = "ORAP_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -431,6 +469,8 @@ sql = "DELETE FROM \n  LICENSE_CSI\nWHERE\n  CSI_ID = :CSI_ID"
 [[connectors.nomasx1.queries]]
 name = "license_csi_get"
 label = "LICENSE_CSI"
+description = "License - Contracts"
+auto_load = true
 sql = "SELECT\n  CSI_ID,\n  CSI_DESCRIPTION,\n  CSI_FROM_DATE,\n  CSI_TO_DATE,\n  CSI_STATUS,\n  CSI_AUDIT_USER,\n  CSI_AUDIT_DATE\nFROM\n  LICENSE_CSI\nORDER BY CSI_ID"
 columns = [
     { name = "CSI_ID", format = "number" },
@@ -457,6 +497,8 @@ sql = "UPDATE LICENSE_CSI\nSET\n  CSI_ID = :CSI_ID,\n  CSI_DESCRIPTION = :CSI_DE
 [[connectors.nomasx1.queries]]
 name = "license_jdedwards_get"
 label = "LICENSE_JDEDWARDS"
+description = "License - JD Edwards"
+auto_load = true
 sql = "WITH activeUsers as (\nSELECT\n        USR_APPS_ID,COUNT(DISTINCT USR_ID) JDE_ACTIVE_USERS\n    FROM\n        SECURITY_USERS\n    INNER JOIN\n        SECURITY_ASSIGNMENTS\n        ON RLU_APPS_ID = USR_APPS_ID\n        AND RLU_USER_ID = USR_ID\n    WHERE\n        USR_STATUS = '01'\n    GROUP BY USR_APPS_ID\n),\ntransactionUsers as (\nSELECT\n        USR_APPS_ID,COUNT(DISTINCT USR_ID) JDE_TRANSACTION_USERS\n    FROM\n        SECURITY_USERS\n    INNER JOIN\n        LICENSE_JDE_USERS\n        ON LUSR_APPS_ID = USR_APPS_ID\n        AND TRIM(LUSR_USER_ID) = USR_ID\n    WHERE\n         USR_STATUS = '01'\n          AND LUSR_DT_TRANSACTION  >= CURRENT_DATE  - 90\n    GROUP BY\n        USR_APPS_ID\n),\nnoTransactionUsers as (\nSELECT\n        USR_APPS_ID,COUNT(DISTINCT USR_ID) JDE_NOTRANSACTION_USERS\n    FROM\n        SECURITY_USERS\n    LEFT JOIN\n        LICENSE_JDE_USERS\n        ON LUSR_APPS_ID = USR_APPS_ID\n        AND TRIM(LUSR_USER_ID) = USR_ID\n    WHERE\n          USR_STATUS = '01'\n          AND LUSR_USER_ID IS NULL\n    GROUP BY\n        USR_APPS_ID\n),\ntransactionNoUsers as (\nSELECT\n        LUSR_APPS_ID,COUNT(DISTINCT LUSR_USER_ID) JDE_TRANSACTION_NOUSERS\n    FROM\n        LICENSE_JDE_USERS\n    LEFT JOIN\n        SECURITY_USERS\n        ON USR_APPS_ID = LUSR_APPS_ID\n        AND TRIM(LUSR_USER_ID) = USR_ID\n    WHERE\n      USR_ID IS NULL\n      AND LUSR_DT_TRANSACTION  >= CURRENT_DATE  - 90\n    GROUP BY\n        LUSR_APPS_ID\n)\nSELECT\n    APPS_ID,\n    COALESCE(JDE_ACTIVE_USERS,0) JDE_ACTIVE_USERS,\n    COALESCE(JDE_TRANSACTION_USERS,0) JDE_TRANSACTION_USERS,\n    COALESCE(JDE_NOTRANSACTION_USERS,0) JDE_NOTRANSACTION_USERS,\n    COALESCE(JDE_TRANSACTION_NOUSERS,0) JDE_TRANSACTION_NOUSERS\nFROM\n    SETTINGS_APPLICATIONS \nLEFT JOIN \n    activeUsers ON APPS_ID = activeUsers.USR_APPS_ID\nLEFT JOIN \n    transactionUsers ON APPS_ID = transactionUsers.USR_APPS_ID\nLEFT JOIN \n    noTransactionUsers ON APPS_ID = noTransactionUsers.USR_APPS_ID\nLEFT JOIN \n    transactionNoUsers ON APPS_ID = transactionNoUsers.LUSR_APPS_ID\nWHERE APPS_TYPE = 'JDE'\nORDER BY APPS_ID"
 columns = [
     { name = "APPS_ID" },
@@ -469,6 +511,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_oracle_get"
 label = "LICENSE_ORACLE"
+description = "License - Oracle"
+auto_load = true
 sql = "SELECT\n    APPS_ID,\n    APPS_NAME,\n    ORAP_PRODUCT,\n    ORAP_FULL_VERSION,\n    ORAP_VERSION,\n    ORAP_HOSTNAME,\n    ORAP_NAME,\n    ORAP_COUNT_INST,\n    ORAP_CPU,\n    ORAP_ACTIVE_USERS,\n    ORAP_TOTAL_USERS,\n    (SELECT COUNT(*) FROM SECURITY_USERS_PROP WHERE USRP_APPS_ID = APPS_ID AND USRP_TECHNICAL='Y') ORAP_TECHNICAL_USERS,\n    ORAP_PACK,\n    ORAP_SIZE_GB\nFROM\n    DB_ORA_PROPERTIES\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = ORAP_APPS_ID\nWHERE APPS_DBTYPE = 'ORACLE'\nORDER BY APPS_ID, ORAP_PRODUCT"
 columns = [
     { name = "APPS_ID" },
@@ -489,6 +533,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_subscribed_get"
 label = "LICENSE_SUBSCRIBED"
+description = "License - Subscribed Licences"
+auto_load = true
 sql = "SELECT\n    LCC_CSI_ID,\n    CPT_LISTS,\n    CPT_COMPONENT,\n    LCC_MET_ID,\n    SUM(LCC_QUANTITY) LCC_QUANTITY\nFROM\n    LICENSE_CSI_COMPONENTS\nINNER JOIN\n    LICENSE_CSI\n    ON CSI_ID = LCC_CSI_ID\nINNER JOIN\n   SETTINGS_LIC_COMPONENTS\n   ON LCC_CPT_ID = CPT_ID\nGROUP BY LCC_CSI_ID,CPT_LISTS,CPT_COMPONENT,LCC_MET_ID\nORDER BY CPT_LISTS,CPT_COMPONENT"
 columns = [
     { name = "LCC_CSI_ID", dd = "CSI_ID" },
@@ -501,6 +547,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_usage_get"
 label = "LICENSE_USAGE"
+description = "License - Usage report"
+auto_load = true
 sql = "SELECT\n    APPS_ID,\n    CPT_ID,\n    USERS_COUNT,\n    ACTIVE_USERS_COUNT,\n    COALESCE(QUANTITY,0) SUBSCRIBED,\n    COALESCE(QUANTITY,0) - (CASE WHEN ACTIVE_USERS_COUNT = 0 THEN USERS_COUNT ELSE ACTIVE_USERS_COUNT END)  COMPLIANCE\nFROM\n(\n(SELECT\n    APPS_ID,\n    CPT_ID,\n    USERS_COUNT,\n    ACTIVE_USERS_COUNT\nFROM\n    LICENSE_JDE_USAGE\n) LINK_USERS\nLEFT JOIN \n(\nSELECT \n    LCA_APPS_ID,\n    LCC_CPT_ID,\n    SUM(LCC_QUANTITY) QUANTITY\nFROM\n    LICENSE_CSI_COMPONENTS\nINNER JOIN\n    LICENSE_CSI_APPS\n    ON LCA_CSI_ID = LCC_CSI_ID\nGROUP BY\n    LCA_APPS_ID,\n    LCC_CPT_ID\n) LICENSE_COMPONENTS\n    ON LCC_CPT_ID = CPT_ID \n    AND LCA_APPS_ID  = APPS_ID\n)\nORDER BY APPS_ID, CPT_ID"
 columns = [
     { name = "APPS_ID" },
@@ -514,6 +562,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_financial_get"
 label = "LICENSE_FINANCIAL"
+description = "License - Financial report"
+auto_load = true
 sql = "SELECT\n    APPS_ID,\n    CPT_ID,\n    COMPLIANCE,\n    ROUND(PRC_PRICE) PRC_PRICE,\n    ROUND(COMPLIANCE * PRC_PRICE) TOTAL_PRICE,\n    ROUND(PRC_SUPPORT) PRC_SUPPORT,\n    ROUND(COMPLIANCE * PRC_SUPPORT * 3) TOTAL_SUPPORT,\n    ROUND(COMPLIANCE * PRC_PRICE + COMPLIANCE * PRC_SUPPORT * 3) TOTAL_COMPLIANCE\nFROM\n((\nSELECT\n    APPS_ID,\n    CPT_ID,\n    USERS_COUNT,\n    ACTIVE_USERS_COUNT,\n    COALESCE(QUANTITY,0) SUBSCRIBED,\n    COALESCE(QUANTITY,0) - (CASE WHEN ACTIVE_USERS_COUNT = 0 THEN USERS_COUNT ELSE ACTIVE_USERS_COUNT END)  COMPLIANCE\nFROM\n(\n(SELECT\n    APPS_ID,\n    CPT_ID,\n    USERS_COUNT,\n    ACTIVE_USERS_COUNT\nFROM\n    LICENSE_JDE_USAGE\n) LINKED_USERS\nLEFT JOIN \n(\nSELECT \n    LCA_APPS_ID,\n    LCC_CPT_ID,\n    SUM(LCC_QUANTITY) QUANTITY\nFROM\n    LICENSE_CSI_COMPONENTS\nINNER JOIN\n    LICENSE_CSI_APPS\n    ON LCA_CSI_ID = LCC_CSI_ID\nGROUP BY\n    LCA_APPS_ID,\n    LCC_CPT_ID\n) ALL_COMPONENTS\n    ON LCC_CPT_ID = CPT_ID \n    AND LCA_APPS_ID  = APPS_ID\n) \n) ALL_COMPLIANCE\nINNER JOIN \n(\nSELECT \n    PRC_CPT_ID,\n    PRC_PRICE,\n    PRC_SUPPORT\nFROM\n    SETTINGS_LIC_PRICING\n) PRICING ON PRC_CPT_ID = CPT_ID\n) \nWHERE COMPLIANCE < 0"
 columns = [
     { name = "APPS_ID" },
@@ -535,6 +585,8 @@ sql = "DELETE FROM\n    SETTINGS_APPLICATIONS\nWHERE\n    APPS_ID = :APPS_ID"
 [[connectors.nomasx1.queries]]
 name = "settings_applications_get"
 label = "SETTINGS_APPLICATIONS"
+description = "Settings - Applications"
+auto_load = true
 sql = "SELECT\n  APPS_ID,\n  APPS_TYPE,\n  APPS_CTRY_ID,\n  APPS_NAME,\n  APPS_DBTYPE,\n  APPS_DIRECTDB,\n  APPS_DBLINK,\n  APPS_JDBC,\n  APPS_USER,\n  APPS_PASSWORD,\n  APPS_HOST,\n  APPS_PORT,\n  APPS_DATABASE\nFROM\n    SETTINGS_APPLICATIONS\nORDER BY APPS_ID"
 columns = [
     { name = "APPS_ID", format = "number" },
@@ -573,6 +625,8 @@ sql = "DELETE FROM\n  SETTINGS_CUSTOMSQL\nWHERE\n  SQL_APPS_ID = :SQL_APPS_ID\n 
 [[connectors.nomasx1.queries]]
 name = "settings_customsql_get"
 label = "SETTINGS_CUSTOMSQL"
+description = "Settings - User defined query"
+auto_load = true
 sql = "SELECT \n    APPS_ID,\n    APPS_NAME,\n    SQL_METHOD,\n    SQL_BLOB,\n    SQL_JDBC,\n    SQL_USER,\n    SQL_PASSWORD,\n    SQL_AUDIT_USER,\n    SQL_AUDIT_DATE\nFROM \n    SETTINGS_CUSTOMSQL\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = SQL_APPS_ID\nORDER BY APPS_ID,SQL_METHOD"
 columns = [
     { name = "SQL_APPS_ID", dd = "APPS_ID" },
@@ -600,6 +654,8 @@ sql = "UPDATE SETTINGS_CUSTOMSQL\nSET\n  SQL_BLOB = :SQL_BLOB,\n  SQL_JDBC = :SQ
 [[connectors.nomasx1.queries]]
 name = "settings_sod_process_get"
 label = "SETTINGS_SOD_PROCESS"
+description = "Settings - Process (SOD)"
+auto_load = true
 sql = "SELECT\n    PROCESS_APPS_ID,\n    PROCESS_ID,\n    PROCESS_NAME,\n    PROCESS_AUDIT_USER,\n    PROCESS_AUDIT_DATE,\n    PROCESS_UKID\nFROM\n    SOD_PROCESS\nORDER BY PROCESS_APPS_ID,PROCESS_ID"
 columns = [
     { name = "PROCESS_APPS_ID", dd = "APPS_ID" },
@@ -625,6 +681,8 @@ sql = "INSERT INTO SOD_PROCESS\n  (\n  PROCESS_APPS_ID,\n  PROCESS_ID,\n  PROCES
 [[connectors.nomasx1.queries]]
 name = "settings_sod_activities_get"
 label = "SETTINGS_SOD_ACTIVITIES"
+description = "Settings - Activities (SOD)"
+auto_load = true
 sql = "SELECT\n    ACT_APPS_ID,\n    ACT_PROCESS_ID,\n    ACT_ID,\n    ACT_NAME,\n    ACT_UKID\nFROM\n    SOD_ACTIVITIES\nORDER BY ACT_APPS_ID,ACT_PROCESS_ID,ACT_ID"
 columns = [
     { name = "ACT_APPS_ID", dd = "APPS_ID" },
@@ -651,6 +709,8 @@ sql = "INSERT INTO SOD_ACTIVITIES\n  (\n  ACT_APPS_ID,\n  ACT_PROCESS_ID,\n  ACT
 [[connectors.nomasx1.queries]]
 name = "settings_sod_risks_get"
 label = "SETTINGS_SOD_RISKS"
+description = "Settings - Risks (SOD)"
+auto_load = true
 sql = "SELECT\n    RISK_APPS_ID,\n    RISK_PROCESS_ID,\n    RISK_ID,\n    RISK_NAME,\n    RISK_LEVEL,\n    RISK_UKID\nFROM\n    SOD_RISKS\nORDER BY RISK_APPS_ID,RISK_PROCESS_ID,RISK_ID"
 columns = [
     { name = "RISK_APPS_ID", dd = "APPS_ID" },
@@ -678,6 +738,8 @@ sql = "INSERT INTO SOD_RISKS\n  (\n  RISK_APPS_ID,\n  RISK_PROCESS_ID,\n  RISK_I
 [[connectors.nomasx1.queries]]
 name = "settings_sod_matrix_get"
 label = "SETTINGS_SOD_MATRIX"
+description = "Settings - Matrix (SOD)"
+auto_load = true
 sql = "SELECT\n    MATRIX_APPS_ID ,\n    MATRIX_PROCESS_ID ,\n    MATRIX_ACT1_ID ,\n    MATRIX_ACT2_ID ,\n    MATRIX_RISK_ID ,\n    MATRIX_RISK_LEVEL,\n    MATRIX_AUDIT_USER,\n    MATRIX_AUDIT_DATE,\n    MATRIX_UKID\nFROM\n    SOD_MATRIX\nORDER BY MATRIX_APPS_ID,MATRIX_PROCESS_ID,MATRIX_ACT1_ID,MATRIX_ACT2_ID"
 columns = [
     { name = "MATRIX_APPS_ID", dd = "APPS_ID" },
@@ -706,6 +768,8 @@ sql = "INSERT INTO SOD_MATRIX\n  (\n  MATRIX_APPS_ID,\n  MATRIX_PROCESS_ID,\n  M
 [[connectors.nomasx1.queries]]
 name = "settings_sod_objects_get"
 label = "SETTINGS_SOD_OBJECTS"
+description = "Settings - Objects (SOD)"
+auto_load = true
 sql = "SELECT\n    OBJECT_APPS_ID ,\n    OBJECT_PROCESS_ID ,\n    OBJECT_ACT_ID ,\n    OBJECT_ROW_ID ,\n    OBJECT_ID ,\n    OBJECT_NAME,\n    OBJECT_AUDIT_USER,\n    OBJECT_AUDIT_DATE,\n    OBJECT_UKID\nFROM\n    SOD_OBJECTS\nORDER BY OBJECT_APPS_ID,OBJECT_PROCESS_ID,OBJECT_ACT_ID,OBJECT_ROW_ID"
 columns = [
     { name = "OBJECT_APPS_ID", dd = "APPS_ID" },
@@ -740,6 +804,8 @@ sql = "DELETE FROM\n  SECURITY_USERS_PROP\nWHERE\n  USRP_APPS_ID = :USRP_APPS_ID
 [[connectors.nomasx1.queries]]
 name = "security_users_prop_get"
 label = "SECURITY_USERS_PROP"
+description = "Security - Users properties"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID USRP_APPS_ID,\n    APPS_NAME,\n    USR_ID USRP_ID,\n    USR_NAME USRP_NAME,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_GENERIC_COUNT,\n    USRP_IS_LINKED,\n    USRP_ID_LINKED,\n    USRP_IS_PREVIOUS,\n    USRP_ID_PREVIOUS\nFROM\n    SECURITY_USERS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = USR_APPS_ID\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON  USR_APPS_ID = USRP_APPS_ID AND USR_ID = USRP_ID\nORDER BY USRP_APPS_ID,USRP_ID"
 columns = [
     { name = "USRP_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -779,6 +845,8 @@ sql = "DELETE FROM SECURITY_LDAP_DPT\nWHERE\n  LDAPD_GROUP = :LDAPD_GROUP\n  AND
 [[connectors.nomasx1.queries]]
 name = "settings_ldap_department_get"
 label = "SETTINGS_LDAP_DEPARTMENT"
+description = "Settings - LDAP Department"
+auto_load = true
 sql = "SELECT\n    LDAPD_GROUP,\n    LDAPD_DEPARTEMENT\nFROM\n    SECURITY_LDAP_DPT\nORDER BY LDAPD_GROUP"
 columns = [
     { name = "LDAPD_GROUP" },
@@ -803,6 +871,8 @@ sql = "INSERT INTO SECURITY_LDAP_DPT\n  (\n  LDAPD_GROUP,\n  LDAPD_DEPARTEMENT,\
 [[connectors.nomasx1.queries]]
 name = "settings_license_jde_sy_get"
 label = "SETTINGS_LICENSE_JDE_SY"
+description = "Settings - System Code (JDE)"
+auto_load = true
 sql = "SELECT\n    SYC_ID,\n    SYC_DESCRIPTION,\n    SYC_MODULE,\n    SYC_COMPONENT_E1,\n    SYC_CPT_ID,\n    CPT_COMPONENT\nFROM\n    SETTINGS_JDE_SY\nINNER JOIN\n    SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID  = CPT_ID\nORDER BY SYC_ID"
 columns = [
     { name = "SYC_ID" },
@@ -831,6 +901,8 @@ sql = "DELETE FROM\n  SETTINGS_JDE_RCLST\nWHERE\n  JDES_OBJECT = :JDES_OBJECT"
 [[connectors.nomasx1.queries]]
 name = "settings_license_jde_reclassification_get"
 label = "SETTINGS_LICENSE_JDE_RECLASSIFICATION"
+description = "Settings - Reclassification (JDE)"
+auto_load = true
 sql = "SELECT\n    JDES_OBJECT,\n    JDES_DESCRIPTION,\n    JDES_SY\nFROM\n    SETTINGS_JDE_RCLST\nORDER BY JDES_OBJECT"
 columns = [
     { name = "JDES_OBJECT" },
@@ -856,6 +928,8 @@ sql = "INSERT INTO SETTINGS_JDE_RCLST\n  (\n  JDES_OBJECT,\n  JDES_DESCRIPTION,\
 [[connectors.nomasx1.queries]]
 name = "settings_license_jde_prerequisite_get"
 label = "SETTINGS_LICENSE_JDE_PREREQUISITE"
+description = "Settings - Prerequisite (JDE)"
+auto_load = true
 sql = "SELECT\n    PRQ_PRODUCT,\n    PRQ_COMPONENT,\n    PRQ_PREREQ\nFROM\n    SETTINGS_JDE_PREREQ\nORDER BY PRQ_PRODUCT,PRQ_COMPONENT"
 columns = [
     { name = "PRQ_PRODUCT" },
@@ -875,6 +949,8 @@ sql = "INSERT INTO SETTINGS_JDE_PREREQ\n  (\n  PRQ_PRODUCT,\n  PRQ_COMPONENT,\n 
 [[connectors.nomasx1.queries]]
 name = "settings_license_jde_restrictions_get"
 label = "SETTINGS_LICENSE_JDE_RESTRICTIONS"
+description = "Settings - Restrictions (JDE)"
+auto_load = true
 sql = "SELECT\n    RTC_PRODUCT,\n    RTC_COMPONENT,\n    RTC_RESTRICTION\nFROM\n    SETTINGS_JDE_RESTRICTIONS\nORDER BY RTC_PRODUCT,RTC_COMPONENT"
 columns = [
     { name = "RTC_PRODUCT" },
@@ -894,6 +970,8 @@ sql = "INSERT INTO SETTINGS_JDE_RESTRICTIONS\n  (\n  RTC_PRODUCT,\n  RTC_COMPONE
 [[connectors.nomasx1.queries]]
 name = "settings_oracle_versions_get"
 label = "SETTINGS_ORACLE_VERSIONS"
+description = "Settings - Oracle Versions"
+auto_load = true
 sql = "SELECT\n    VER_ID,\n    VER_CPT_ID,\n    CPT_COMPONENT,\n    VER_VERSION\nFROM\n    SETTINGS_DB_VERSIONS\nINNER JOIN\n    SETTINGS_LIC_COMPONENTS\n    ON CPT_ID= VER_CPT_ID\nORDER BY VER_ID"
 columns = [
     { name = "VER_ID" },
@@ -913,6 +991,8 @@ sql = "INSERT INTO SETTINGS_DB_VERSIONS\n  (\n  VER_ID,\n  VER_CPT_ID,\n  VER_VE
 [[connectors.nomasx1.queries]]
 name = "settings_oracle_options_get"
 label = "SETTINGS_ORACLE_OPTIONS"
+description = "Settings - Oracle Options"
+auto_load = true
 sql = "SELECT\n    OPT_ID,\n    OPT_CPT_ID,\n    CPT_COMPONENT,\n    OPT_OPTION\nFROM\n    SETTINGS_DB_OPTIONS\nINNER JOIN\n    SETTINGS_LIC_COMPONENTS\n    ON CPT_ID= OPT_CPT_ID\nORDER BY CPT_COMPONENT"
 columns = [
     { name = "OPT_ID" },
@@ -932,6 +1012,8 @@ sql = "INSERT INTO SETTINGS_DB_OPTIONS\n  (\n  OPT_ID,\n  OPT_CPT_ID,\n  OPT_OPT
 [[connectors.nomasx1.queries]]
 name = "settings_oracle_features_get"
 label = "SETTINGS_ORACLE_FEATURES"
+description = "Settings - Oracle Features"
+auto_load = true
 sql = "SELECT\n    FEA_ID,\n    FEA_CPT_ID,\n    CPT_COMPONENT,\n    FEA_FEATURES,\n    FEA_DESCRIPTION\nFROM\n    SETTINGS_DB_FEATURES\nINNER JOIN\n    SETTINGS_LIC_COMPONENTS\n    ON CPT_ID= FEA_CPT_ID\nORDER BY CPT_COMPONENT, FEA_FEATURES"
 columns = [
     { name = "FEA_ID" },
@@ -952,6 +1034,8 @@ sql = "INSERT INTO SETTINGS_DB_FEATURES\n  (\n  FEA_ID,\n  FEA_CPT_ID,\n  FEA_FE
 [[connectors.nomasx1.queries]]
 name = "settings_license_components_get"
 label = "SETTINGS_LICENSE_COMPONENTS"
+description = "Settings - Licenses Components"
+auto_load = true
 sql = "SELECT\n    CPT_ID,\n    CPT_LISTS,\n    CPT_CATEGORY,\n    CPT_COMPONENT\nFROM\n    SETTINGS_LIC_COMPONENTS\nORDER BY CPT_LISTS,CPT_CATEGORY,CPT_COMPONENT"
 columns = [
     { name = "CPT_ID" },
@@ -972,6 +1056,8 @@ sql = "INSERT INTO SETTINGS_LIC_COMPONENTS\n  (\n  CPT_ID,\n  CPT_LISTS,\n  CPT_
 [[connectors.nomasx1.queries]]
 name = "settings_license_metrics_get"
 label = "SETTINGS_LICENSE_METRICS"
+description = "Settings - Licenses Metrics"
+auto_load = true
 sql = "SELECT\n    MET_ID,\n    MET_DESCRIPTION\nFROM\n    SETTINGS_LIC_METRICS\nORDER BY MET_ID"
 columns = [
     { name = "MET_ID" },
@@ -990,6 +1076,8 @@ sql = "INSERT INTO SETTINGS_LIC_METRICS\n  (\n  MET_ID,\n  MET_DESCRIPTION,\n  M
 [[connectors.nomasx1.queries]]
 name = "settings_license_pricing_get"
 label = "SETTINGS_LICENSE_PRICING"
+description = "Settings - Licences Pricing"
+auto_load = true
 sql = "SELECT\n    PRC_ID,\n    CPT_LISTS,\n    CPT_CATEGORY,\n    PRC_CPT_ID,\n    CPT_COMPONENT,\n    PRC_MET_ID,\n    MET_DESCRIPTION,\n    PRC_PRICE,\n    PRC_MINIMUM,\n    PRC_SUPPORT\nFROM\n    SETTINGS_LIC_PRICING\nINNER JOIN\n   SETTINGS_LIC_COMPONENTS\n   ON PRC_CPT_ID = CPT_ID\nINNER JOIN\n   SETTINGS_LIC_METRICS\n   ON PRC_MET_ID = MET_ID\nORDER BY CPT_LISTS,CPT_CATEGORY,CPT_COMPONENT"
 columns = [
     { name = "PRC_ID" },
@@ -1012,6 +1100,8 @@ sql = "INSERT INTO SETTINGS_LIC_PRICING\n  (\n  PRC_ID,\n  PRC_CPT_ID,\n  PRC_ME
 [[connectors.nomasx1.queries]]
 name = "security_users_rights_get"
 label = "SECURITY_USERS_RIGHTS"
+description = "Settings - Users to rights"
+auto_load = true
 sql = "SELECT\n    SER_APPS_ID,\n    SER_USER_ID,\n    SER_ROLE_ID,\n    MENU_OBJECT,\n    MENU_FORM,\n    MENU_VERSION,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_ROLE_ACTION_ID\n        END SER_ROLE_ACTION_ID,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_ADD\n        END SER_ADD,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_CHG\n        END SER_CHG,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_DEL\n        END SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3,\n    MENU_LEVEL4,\n    MENU_LEVEL5,\n    MENU_LEVEL6,\n    MENU_LEVEL7,\n    MENU_LEVEL8,\n    MENU_LEVEL9,\n    MENU_LEVEL10,\n    MENU_SEQ_UKID\nFROM\n    SECURITY_MENUS\nINNER JOIN\n    SECURITY_RIGHTS\n    ON MENU_APPS_ID = SER_APPS_ID\n    AND SER_MENU_SEQUKID = MENU_SEQ_UKID\nWHERE\n    SER_RUN = 'Y'\nORDER BY MENU_SEQ_UKID"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1042,6 +1132,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_users_details_get"
 label = "SECURITY_USERS_DETAILS"
+description = "Settings - Users to details"
+auto_load = true
 sql = "SELECT\n    USRD_APPS_ID,\n    USRD_ID,\n    USRD_AN8,\n    USRD_AC01,\n    USRD_AC01_DESC,\n    USRD_AC02,\n    USRD_AC02_DESC,\n    USRD_AC03,\n    USRD_AC03_DESC,\n    USRD_AC04,\n    USRD_AC04_DESC,\n    USRD_AC05,\n    USRD_AC05_DESC,\n    USRD_ABAT1,\n    USRD_ABAT1_DESC,\n    USRD_ULLNGP,\n    USRD_ULFRMT,\n    USRD_ULCTR,\n    USRD_ULLUSER,\n    USRD_MCCO,\n    USRD_MCMCU,\n    USRD_MCRP09,\n    USRD_MCRP08,\n    USRD_EAEMAL,\n    USRD_AC05,\n    USRD_AC05_DESC,\n    USRD_AC06,\n    USRD_AC06_DESC,\n    USRD_AC07,\n    USRD_AC07_DESC,\n    USRD_AC08,\n    USRD_AC08_DESC,\n    USRD_AC09,\n    USRD_AC09_DESC,\n    USRD_AC10,\n    USRD_AC10_DESC,\n    USRD_AC11,\n    USRD_AC11_DESC,\n    USRD_AC12,\n    USRD_AC12_DESC,\n    USRD_AC13,\n    USRD_AC13_DESC,\n    USRD_AC14,\n    USRD_AC14_DESC,\n    USRD_AC15,\n    USRD_AC15_DESC,\n    USRD_AC16,\n    USRD_AC16_DESC,\n    USRD_AC17,\n    USRD_AC17_DESC,\n    USRD_AC18,\n    USRD_AC18_DESC,\n    USRD_AC19,\n    USRD_AC19_DESC,    \n    USRD_AC20,\n    USRD_AC20_DESC\nFROM\n    SECURITY_USERS_DATA\nORDER BY USRD_APPS_ID,USRD_ID"
 columns = [
     { name = "USRD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1103,6 +1195,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_roles_rights_get"
 label = "SECURITY_ROLES_RIGHTS"
+description = "Settings - Roles to rights"
+auto_load = true
 sql = "SELECT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    MENU_OBJECT,\n    MENU_FORM,\n    MENU_VERSION,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_ROLE_ACTION_ID\n        END SER_ROLE_ACTION_ID,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_ADD\n        END SER_ADD,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_CHG\n        END SER_CHG,\n    CASE WHEN TRIM(MENU_OBJECT) IS NULL\n        THEN NULL\n        ELSE SER_DEL\n        END SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3,\n    MENU_LEVEL4,\n    MENU_LEVEL5,\n    MENU_LEVEL6,\n    MENU_LEVEL7,\n    MENU_LEVEL8,\n    MENU_LEVEL9,\n    MENU_LEVEL10,\n    MENU_SEQ_UKID\nFROM\n    SECURITY_MENUS\nINNER JOIN\n    SECURITY_RIGHTS\n    ON MENU_APPS_ID = SER_APPS_ID\n    AND SER_MENU_SEQUKID = MENU_SEQ_UKID\n    AND SER_USER_ID = '*ROLE'\nWHERE\n    SER_RUN = 'Y'\nORDER BY MENU_SEQ_UKID"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1132,6 +1226,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_matrix_users_get"
 label = "SECURITY_MATRIX_USERS"
+description = "Settings - Matrix to users"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_NAME,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    RLU_ROLE_ID\nFROM\n(\nSELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_NAME,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    (\n        SELECT\n              STRING_AGG(RLU_ROLE_ID, ',' ORDER BY RLU_ROLE_ID) \n        FROM\n          (\n           SELECT\n              RLU_ROLE_ID\n           FROM\n             SECURITY_ASSIGNMENTS\n           WHERE\n             RLU_USER_ID = USR_ID\n              AND RLU_APPS_ID = USR_APPS_ID\n           ) ALL_ASSIGNMENTS\n    ) RLU_ROLE_ID\n    FROM\n        SECURITY_USERS\n    WHERE\n        USR_STATUS = '01'\n) MATRIX_USERS\nORDER BY USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1146,6 +1242,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_menus_users_get"
 label = "SECURITY_MENUS_USERS"
+description = "Settings - Menus to users"
+auto_load = true
 sql = "SELECT\n    DISTINCT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_ID_LINKED,\n    SER_MENU_SEQUKID\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n    SECURITY_USERS\n    ON USR_APPS_ID = SER_APPS_ID\n    AND USR_ID = SER_USER_ID\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nWHERE\n    SER_RUN = 'Y'\n    AND USR_STATUS = '01'\nORDER BY USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1164,6 +1262,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_menus_roles_get"
 label = "SECURITY_MENUS_ROLES"
+description = "Settings - Menus to roles"
+auto_load = true
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_MENU_SEQUKID\nFROM\n    SECURITY_RIGHTS\nWHERE\n    SER_RUN ='Y' AND SER_USER_ID = '*ROLE'\nORDER BY SER_ROLE_ID"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1174,6 +1274,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_summary_users_get"
 label = "SOD_SUMMARY_USERS"
+description = "SOD - Summary to Users"
+auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_USER_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USR_PRIVILEGED,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nINNER JOIN\n    SECURITY_USERS ON USR_APPS_ID = CFD_APPS_ID AND USR_ID = CFD_USER_ID\nORDER BY CFD_USER_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1189,6 +1291,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_summary_roles_get"
 label = "SOD_SUMMARY_ROLES"
+description = "SOD - Summary to Roles"
+auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_ROLE1_ID,\n    CFD_ROLE2_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_ROLE1_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1201,6 +1305,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_summary_objects_get"
 label = "SOD_SUMMARY_OBJECTS"
+description = "SOD - Summary to Objects"
+auto_load = true
 sql = "SELECT  DISTINCT\n    CFD_APPS_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_ACT1_OBJECT,CFD_ACT2_OBJECT"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1215,6 +1321,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "sod_summary_details_get"
 label = "SOD_SUMMARY_DETAILS"
+description = "SOD - Summary to Details"
+auto_load = true
 sql = "SELECT\n    CFD_APPS_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID ,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
     { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1232,6 +1340,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "database_oracle_options_get"
 label = "DATABASE_ORACLE_OPTIONS"
+description = "Database - Oracle to options"
+auto_load = true
 sql = "SELECT DISTINCT\n    ORAO_APPS_ID,\n    OPT_CPT_ID,\n    ORAO_PARAMETER,\n    ORAO_VALUE\nFROM\n    DB_ORA_OPTIONS\nLEFT JOIN\n    SETTINGS_DB_OPTIONS\n    ON OPT_OPTION = ORAO_PARAMETER\nORDER BY ORAO_APPS_ID,OPT_CPT_ID, ORAO_PARAMETER"
 columns = [
     { name = "ORAO_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1243,6 +1353,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "database_oracle_features_get"
 label = "DATABASE_ORACLE_FEATURES"
+description = "Database - Oracle to features"
+auto_load = true
 sql = "SELECT DISTINCT\n    ORAF_APPS_ID,\n    FEA_CPT_ID,\n    ORAF_FEATURE,\n    ORAF_USAGE,\n    ORAF_FIRST_USAGE,\n    ORAF_LAST_USAGE\nFROM\n    DB_ORA_FEATURES\nLEFT JOIN\n    SETTINGS_DB_FEATURES\n    ON FEA_FEATURES = ORAF_FEATURE\nORDER BY ORAF_APPS_ID,FEA_CPT_ID, ORAF_FEATURE"
 columns = [
     { name = "ORAF_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1256,6 +1368,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "database_oracle_partitions_get"
 label = "DATABASE_ORACLE_PARTITIONS"
+description = "Database - Oracle to partitions"
+auto_load = true
 sql = "SELECT DISTINCT\n    OPAR_APPS_ID,\n    OPAR_OWNER,\n    USRP_TECHNICAL,\n    OPAR_SEGMENT_TYPE,\n    OPAR_SEGMENT_NAME,\n    OPAR_MIN_CREATED,\n    OPAR_MIN_LAST_DDL\nFROM\n    DB_ORA_PARTITIONS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = OPAR_APPS_ID\n    AND USRP_NAME = OPAR_OWNER\nORDER BY OPAR_APPS_ID, OPAR_OWNER, OPAR_SEGMENT_TYPE"
 columns = [
     { name = "OPAR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1276,6 +1390,8 @@ sql = "DELETE FROM \n  LICENSE_CSI_APPS\nWHERE\n  LCA_CSI_ID = :LCA_CSI_ID\n  AN
 [[connectors.nomasx1.queries]]
 name = "license_csi_applications_get"
 label = "LICENSE_CSI_APPLICATIONS"
+description = "License - CSI Applications"
+auto_load = true
 sql = "SELECT\n    LCA_CSI_ID,\n    CSI_DESCRIPTION,\n    LCA_APPS_ID,\n    APPS_NAME,\n    APPS_TYPE,\n    APPS_DBTYPE,\n    LCA_AUDIT_USER,\n    LCA_AUDIT_DATE\nFROM\n    LICENSE_CSI\nINNER JOIN\n    LICENSE_CSI_APPS\n    ON LCA_CSI_ID = CSI_ID\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = LCA_APPS_ID\nORDER BY LCA_APPS_ID"
 columns = [
     { name = "LCA_CSI_ID", dd = "CSI_ID" },
@@ -1307,6 +1423,8 @@ sql = "DELETE FROM \n  LICENSE_CSI_COMPONENTS\nWHERE\n  LCC_CSI_ID = :LCC_CSI_ID
 [[connectors.nomasx1.queries]]
 name = "license_csi_components_get"
 label = "LICENSE_CSI_COMPONENTS"
+description = "License - CSI Components"
+auto_load = true
 sql = "SELECT\n    LCC_CSI_ID,\n    CPT_COMPONENT,\n    LCC_QUANTITY,\n    MET_DESCRIPTION,\n    CASE WHEN (PRC_ID IS NULL) THEN 'KO' ELSE 'OK' END PRC_PRICE,\n    LCC_CPT_ID,\n    LCC_MET_ID,\n    LCC_AUDIT_USER,\n    LCC_AUDIT_DATE,\n    LCC_UKID\nFROM\n    LICENSE_CSI_COMPONENTS\nINNER JOIN\n    LICENSE_CSI\n    ON CSI_ID = LCC_CSI_ID\nINNER JOIN\n   SETTINGS_LIC_COMPONENTS\n   ON LCC_CPT_ID = CPT_ID\nINNER JOIN\n   SETTINGS_LIC_METRICS\n   ON LCC_MET_ID = MET_ID\nLEFT JOIN\n    SETTINGS_LIC_PRICING\n    ON PRC_CPT_ID = LCC_CPT_ID\n    AND PRC_MET_ID = LCC_MET_ID\nORDER BY CPT_COMPONENT"
 columns = [
     { name = "LCC_CSI_ID", dd = "CSI_ID" },
@@ -1333,6 +1451,8 @@ sql = "UPDATE LICENSE_CSI_COMPONENTS\nSET\n  LCC_CPT_ID = :LCC_CPT_ID,\n  LCC_ME
 [[connectors.nomasx1.queries]]
 name = "license_jde_active_users_get"
 label = "LICENSE_JDE_ACTIVE_USERS"
+description = "License - Active Users (JDE)"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    TO_CHAR(USR_DT_CREATION,'yyyy-MM-dd') USR_DT_CREATION,\n    TO_CHAR(USR_DT_LOGIN,'yyyy-MM-dd') USR_DT_LOGIN,\n    COALESCE(USRP_TECHNICAL,'N') USRP_TECHNICAL,\n    COALESCE(USRP_GENERIC,'N') USRP_GENERIC,\n    USRP_ID_LINKED\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nWHERE\n    USR_STATUS IN ('01','Y')\n AND USR_ID IN (SELECT RLU_USER_ID FROM SECURITY_ASSIGNMENTS WHERE RLU_APPS_ID = USR_APPS_ID)\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1348,6 +1468,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_users_transactions_get"
 label = "LICENSE_JDE_USERS_TRANSACTIONS"
+description = "License - Users with Transactions (JDE)"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    LUSR_DT_TRANSACTION\nFROM\n(\nSELECT DISTINCT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    TO_CHAR(MAX(LUSR_DT_TRANSACTION),'yyyy-MM-dd') LUSR_DT_TRANSACTION\nFROM\n    SECURITY_USERS\nINNER JOIN\n    LICENSE_JDE_USERS\n    ON LUSR_APPS_ID = USR_APPS_ID\n    AND TRIM(LUSR_USER_ID) = USR_ID\nWHERE\n    USR_STATUS = '01'\n    AND LUSR_DT_TRANSACTION  >= CURRENT_DATE  - 90\nGROUP BY\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS\n) USERS_TRANSACTIONS\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1359,6 +1481,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_no_transactions_get"
 label = "LICENSE_JDE_NO_TRANSACTIONS"
+description = "License - Users without Transactions (JDE)"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_ID_LINKED\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    LICENSE_JDE_USERS\n    ON LUSR_APPS_ID = USR_APPS_ID\n    AND TRIM(LUSR_USER_ID) = USR_ID\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nWHERE\n    USR_STATUS = '01'\n    AND LUSR_USER_ID IS NULL\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1375,6 +1499,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_not_declared_get"
 label = "LICENSE_JDE_NOT_DECLARED"
+description = "License - Users not declared (JDE)"
+auto_load = true
 sql = "SELECT\n    LUSR_APPS_ID,\n    LUSR_USER_ID,\n    LUSR_DT_TRANSACTION\nFROM (\nSELECT\n    LUSR_APPS_ID,\n    LUSR_USER_ID,\n    TO_CHAR(MAX(LUSR_DT_TRANSACTION),'yyyy-MM-dd') LUSR_DT_TRANSACTION\nFROM\n    LICENSE_JDE_USERS\nLEFT JOIN\n    SECURITY_USERS\n    ON USR_APPS_ID = LUSR_APPS_ID\n    AND TRIM(LUSR_USER_ID) = USR_ID\nWHERE\n    LUSR_APPS_ID  = LUSR_APPS_ID\n    AND USR_ID IS NULL\n    AND LUSR_DT_TRANSACTION  >= CURRENT_DATE  - 90\nGROUP BY\n    LUSR_APPS_ID,\n    LUSR_USER_ID\n) USERS_NOT_DECLARED\nORDER BY LUSR_APPS_ID,LUSR_USER_ID"
 columns = [
     { name = "LUSR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1385,6 +1511,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_modules_transactions_get"
 label = "LICENSE_JDE_MODULES_TRANSACTIONS"
+description = "License - Modules with Transactions (JDE)"
+auto_load = true
 sql = "WITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDEO_OBJECT,\n    CPT_ID\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    LUSR_APPS_ID,\n    CPT_ID,\n    COUNT(DISTINCT LUSR_USER_ID) USERS_COUNT\nFROM\n    LICENSE_JDE_USERS\nINNER JOIN\n    component\n    ON JDEO_APPS_ID = LUSR_APPS_ID\n    AND LUSR_TABLE_NAME = JDEO_OBJECT\nWHERE\n    LUSR_DT_TRANSACTION  >= CURRENT_DATE  - 90\nGROUP BY\n    LUSR_APPS_ID,\n    CPT_ID\nORDER BY LUSR_APPS_ID, CPT_ID"
 columns = [
     { name = "LUSR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1395,6 +1523,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_modules_allowed_get"
 label = "LICENSE_JDE_MODULES_ALLOWED"
+description = "License - Modules allowed (JDE)"
+auto_load = true
 sql = "SELECT\n    APPS_ID SER_APPS_ID,\n    CPT_ID,\n    USERS_COUNT,\n    ACTIVE_USERS_COUNT,\n    COALESCE(QUANTITY,0) SUBSCRIBED,\n    COALESCE(QUANTITY,0) - (CASE WHEN ACTIVE_USERS_COUNT = 0 THEN USERS_COUNT ELSE ACTIVE_USERS_COUNT END)  COMPLIANCE\nFROM\n(\n(SELECT\n    APPS_ID,\n    CPT_ID,\n    USERS_COUNT,\n    ACTIVE_USERS_COUNT\nFROM\n    LICENSE_JDE_USAGE\n) LINK_USERS\nLEFT JOIN \n(\nSELECT \n    LCA_APPS_ID,\n    LCC_CPT_ID,\n    SUM(LCC_QUANTITY) QUANTITY\nFROM\n    LICENSE_CSI_COMPONENTS\nINNER JOIN\n    LICENSE_CSI_APPS\n    ON LCA_CSI_ID = LCC_CSI_ID\nGROUP BY\n    LCA_APPS_ID,\n    LCC_CPT_ID\n) LICENSE_COMPONENTS\n    ON LCC_CPT_ID = CPT_ID \n    AND LCA_APPS_ID  = APPS_ID\n)\nORDER BY SER_APPS_ID, CPT_ID"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1406,6 +1536,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_transactions_details_get"
 label = "LICENSE_JDE_TRANSACTIONS_DETAILS"
+description = "License - Transactions Details (JDE)"
 sql = "WITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDEO_OBJECT,\n    JDEO_DESCRIPTION,\n    CPT_ID\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    LUSR_APPS_ID,\n    CPT_ID,\n    TRIM(LUSR_USER_ID) LUSR_USER_ID,\n    LUSR_TABLE_NAME,\n    JDEO_DESCRIPTION,\n    TO_CHAR(MAX(LUSR_DT_TRANSACTION),'yyyy-MM-dd') LUSR_DT_TRANSACTION\nFROM\n    LICENSE_JDE_USERS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = LUSR_APPS_ID\nINNER JOIN\n    component\n    ON JDEO_APPS_ID = LUSR_APPS_ID\n    AND LUSR_TABLE_NAME = JDEO_OBJECT\nGROUP BY\n    LUSR_APPS_ID,\n    CPT_ID,\n    LUSR_USER_ID,\n    LUSR_TABLE_NAME,\n    JDEO_DESCRIPTION\nORDER BY LUSR_APPS_ID,CPT_ID,LUSR_USER_ID,LUSR_TABLE_NAME"
 columns = [
     { name = "LUSR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1418,6 +1549,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_objects_allowed_get"
 label = "LICENSE_JDE_OBJECTS_ALLOWED"
+description = "License - Objects Details (JDE)"
 sql = "WITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDEO_OBJECT,\n    JDEO_DESCRIPTION,\n    CPT_ID\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    CPT_ID,\n    SER_USER_ID,\n    USRP_TECHNICAL,\n    USRP_IS_LINKED,\n    SER_OBJECT,\n    JDEO_DESCRIPTION\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = SER_APPS_ID\nINNER JOIN\n    component\n    ON JDEO_APPS_ID = SER_APPS_ID\n    AND  JDEO_OBJECT = SER_OBJECT\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_ID = SER_USER_ID AND (USRP_TECHNICAL = 'Y' OR USRP_IS_LINKED = 'Y')\n    AND USRP_APPS_ID= SER_APPS_ID\nWHERE \n    SER_USER_ID <> '*ROLE' AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,CPT_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1431,6 +1563,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_oracle_required_get"
 label = "LICENSE_ORACLE_REQUIRED"
+description = "License - Required (ORACLE)"
+auto_load = true
 sql = "SELECT DISTINCT\n    APPS_ID,\n    APPS_NAME,\n    CPT_CATEGORY,\n    CPT_COMPONENT,\n    ORAL_USED\nFROM\n    DB_ORA_LICENSES\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = ORAL_APPS_ID\nLEFT JOIN\n    SETTINGS_LIC_COMPONENTS\n    ON CPT_COMPONENT = ORAL_COMPONENT\nORDER BY APPS_ID,CPT_CATEGORY,CPT_COMPONENT"
 columns = [
     { name = "APPS_ID" },
@@ -1563,6 +1697,8 @@ sql = "DELETE FROM\n  SETTINGS_JDEDWARDS\nWHERE\n  APPS_ID = :APPS_ID"
 [[connectors.nomasx1.queries]]
 name = "settings_jdedwards_get"
 label = "SETTINGS_JDEDWARDS"
+description = "Settings - JD Edwards"
+auto_load = true
 sql = "SELECT\n  APPS_ID,\n  JDE_SY,\n  JDE_DTA,\n  JDE_CTL,\n  JDE_SVM,\n  JDE_CO,\n  JDE_OL,\n  JDE_F00950,\n  JDE_MENU_STANDARD,\n  JDE_E1PAGES,\n  JDE_E1COMPOSITE,\n  JDE_AUDIT_USER,\n  JDE_AUDIT_DATE,\n  JDE_OUT_PURGE,\n  JDE_OUT_RETENTION\nFROM\n  SETTINGS_JDEDWARDS"
 columns = [
     { name = "APPS_ID", hidden = true },
@@ -1603,6 +1739,8 @@ sql = "DELETE FROM\n  SETTINGS_LDAP\nWHERE\n  LDAP_APPS_ID = :LDAP_APPS_ID"
 [[connectors.nomasx1.queries]]
 name = "settings_ldap_get"
 label = "SETTINGS_LDAP"
+description = "Settings - LDAP"
+auto_load = true
 sql = "SELECT\n  LDAP_APPS_ID,\n  LDAP_CONTEXT,\n  LDAP_FILTER,\n  LDAP_EXCLUDE,\n  LDAP_AUDIT_USER,\n  LDAP_AUDIT_DATE\nFROM\n  SETTINGS_LDAP"
 columns = [
     { name = "LDAP_APPS_ID", hidden = true },
@@ -1628,6 +1766,7 @@ sql = "UPDATE SETTINGS_LDAP SET\n  LDAP_CONTEXT = :LDAP_CONTEXT,\n  LDAP_FILTER 
 [[connectors.nomasx1.queries]]
 name = "security_activity_log_get"
 label = "SECURITY_ACTIVITY_LOG"
+description = "Activity Log"
 sql = "SELECT\n  ACL_APPS_ID,\n  TRIM(ACL_USER_ID) ACL_USER_ID,\n  ACL_SCHEMA,\n  ACL_TABLE_NAME,\n  ACL_DT_TRANSACTION,\n  ACL_COUNT,\n  ACL_OBJECT_ID\nFROM\n  SECURITY_ACTIVITY_LOG\nORDER BY ACL_APPS_ID, ACL_USER_ID, ACL_TABLE_NAME"
 columns = [
     { name = "ACL_APPS_ID", dd = "APPS_ID" },
@@ -1642,6 +1781,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_get"
 label = "LICENSE_JDE_OUT"
+description = "License - Object Usage Tracking"
+auto_load = true
 sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID\nFROM\n  JDE_OBJECTS\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n)\nSELECT \n  LOUT_APPS_ID,\n  CPT_ID,\n  COUNT(DISTINCT LOUT_USER) USERS_COUNT,\n  MAX(LOUT_USAGE) LAST_USAGE\nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  component\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nGROUP BY\n  LOUT_APPS_ID,\n  CPT_ID\nORDER BY LOUT_APPS_ID, CPT_ID"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1653,6 +1794,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_users_get"
 label = "LICENSE_JDE_OUT_USERS"
+description = "License - Object Usage Tracking - Users"
+auto_load = true
 sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID\nFROM\n  JDE_OBJECTS\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n)\nSELECT DISTINCT\n    LOUT_APPS_ID,\n    CPT_ID,\n    LOUT_USER,\n    USR_STATUS,\n    TO_CHAR(USR_DT_CREATION,'yyyy-MM-dd') USR_DT_CREATION,\n    TO_CHAR(USR_DT_LOGIN,'yyyy-MM-dd') USR_DT_LOGIN,\n    COALESCE(USRP_TECHNICAL,'N') USRP_TECHNICAL,\n    COALESCE(USRP_GENERIC,'N') USRP_GENERIC,\n    USRP_ID_LINKED\nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  SECURITY_USERS\n  ON USR_APPS_ID = LOUT_APPS_ID\n  AND USR_ID = LOUT_USER\nINNER JOIN\n  component\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = LOUT_USER\nORDER BY LOUT_USER"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1669,6 +1812,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_objects_get"
 label = "LICENSE_JDE_OUT_OBJECTS"
+description = "License - Object Usage Tracking - Objects"
+auto_load = true
 sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  JDEO_DESCRIPTION,\n  CPT_ID\nFROM\n  JDE_OBJECTS\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n)\nSELECT DISTINCT\n    LOUT_APPS_ID,\n    CPT_ID,\n    LOUT_OBJECT,\n    JDEO_DESCRIPTION\nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  component\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nORDER BY LOUT_OBJECT"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1680,6 +1825,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_details_get"
 label = "LICENSE_JDE_OUT_DETAILS"
+description = "License - Object Usage Tracking - Details"
+auto_load = true
 sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  JDEO_DESCRIPTION,\n  CPT_ID\nFROM\n  JDE_OBJECTS\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n)\nSELECT \n    LOUT_APPS_ID,\n    CPT_ID,\n    LOUT_USER,\n    JDEO_OBJECT,\n    JDEO_DESCRIPTION,\n    LOUT_USAGE LAST_USAGE\nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  component\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = LOUT_APPS_ID AND USRP_ID = LOUT_USER\nORDER BY LOUT_USER, JDEO_OBJECT"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1693,6 +1840,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_all_get"
 label = "LICENSE_JDE_OUT_ALL"
+description = "License - Object Usage Tracking - All"
 sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  JDEO_DESCRIPTION,\n  CPT_ID\nFROM\n  JDE_OBJECTS\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n)\nSELECT \n  LOUT_APPS_ID,\n  CPT_ID,\n  LOUT_USER,\n  LOUT_OBJECT,\n  JDEO_DESCRIPTION,\n  LOUT_VERSION,\n  LOUT_USAGE LAST_USAGE\nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  component\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nORDER BY LOUT_APPS_ID, CPT_ID, LOUT_USER, LOUT_OBJECT"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1707,6 +1855,7 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "security_rights_users_roles_out_get"
 label = "SECURITY_RIGHTS_USERS_ROLES_OUT"
+description = "Rights / OUT - Users by roles"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nUNION ALL\nSELECT \n  LOUT_APPS_ID,\n  '*ALL' SER_ROLE_ID,\n  LOUT_USER SER_USER_ID,\n  LOUT_OBJECT SER_OBJECT,\n  '*ALL' SERL_FORM,\n  LOUT_VERSION SER_VERSION,\n  'Y' SER_RUN,\n  '*DEFAULT' SER_ROLE_ACTION_ID,\n  'Y' SER_ADD,\n  'Y' SER_CHG,\n  'Y' SER_DEL  \nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  JDE_OBJECTS\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
     { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1731,6 +1880,8 @@ sql = "DELETE FROM SETTINGS_JDE_TV\nWHERE\n  TV_APPS_ID = :TV_APPS_ID\n  AND TV_
 [[connectors.nomasx1.queries]]
 name = "settings_jde_tv_get"
 label = "SETTINGS_JDE_TV"
+description = "Settings - JD Edwards - Task Views"
+auto_load = true
 sql = "SELECT\n  TV_APPS_ID,\n  TV_TASK_ID,\n  TV_TASK_NAME,\n  TV_SECURITY,\n  TV_AUDIT_USER,\n  TV_AUDIT_DATE\nFROM\n  SETTINGS_JDE_TV\nORDER BY TV_APPS_ID, TV_TASK_ID"
 columns = [
     { name = "TV_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1762,6 +1913,8 @@ sql = "DELETE FROM SETTINGS_ACTIVITY_LOG\nWHERE\n  ACL_APPS_ID = :ACL_APPS_ID\n 
 [[connectors.nomasx1.queries]]
 name = "settings_activity_log_get"
 label = "SETTINGS_ACTIVITY_LOG"
+description = "Settings - Activity Log"
+auto_load = true
 sql = "SELECT\n  acl_apps_id,\n  acl_type,\n  acl_apps_type,\n  acl_name,\n  acl_rule,\n  acl_audit_user,\n  acl_audit_date\nFROM\n  SETTINGS_ACTIVITY_LOG"
 columns = [
     { name = "ACL_APPS_ID", hidden = true },
@@ -1793,6 +1946,8 @@ sql = "SELECT   \n  MAX(APPS_ID) AS SEQ_VALUE \nFROM \n  SETTINGS_APPLICATIONS"
 [[connectors.nomasx1.queries]]
 name = "security_users_audit_get"
 label = "SECURITY_USERS_AUDIT"
+description = "Security Users - Audit"
+auto_load = true
 sql = "SELECT DISTINCT\n    USR_APPS_ID,\n    USR_ID,\n    USR_NAME,\n    CASE WHEN USR_STATUS = '01' THEN '01' ELSE 'N' END USR_STATUS,\n    USRD_ULCTR,\n    USRD_MCCO,\n    USRD_MCMCU,\n    USRD_MCRP08,\n    USR_DT_CREATION,    \n    CPT_COMPONENT,\n    LAST_USAGE\nFROM\n    SECURITY_USERS_DATA\nINNER JOIN\n    SECURITY_USERS\n    ON USR_ID = USRD_ID \nLEFT JOIN\n    (SELECT \n        LOUT_APPS_ID, \n        CPT_COMPONENT,\n        LOUT_USER, \n        MAX(LOUT_USAGE) LAST_USAGE \n    FROM\n      LICENSE_JDE_OUT \n    INNER JOIN\n      JDE_OBJECTS\n      ON JDEO_APPS_ID = LOUT_APPS_ID\n      AND JDEO_OBJECT = LOUT_OBJECT\n    INNER JOIN\n      SETTINGS_JDE_SY\n      ON JDEO_SY = SYC_ID\n    INNER JOIN \n      SETTINGS_LIC_COMPONENTS\n      ON SYC_CPT_ID = CPT_ID\n    GROUP BY\n        LOUT_APPS_ID, \n        CPT_COMPONENT,\n        LOUT_USER\n    )\n    ON LOUT_USER = USR_ID AND LOUT_APPS_ID = USR_APPS_ID\nORDER BY USR_APPS_ID, USR_ID, CPT_COMPONENT"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1810,6 +1965,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "get_last_refresh_get"
 label = "Get Last Refresh"
+description = "Get Last Refresh"
+auto_load = true
 sql = "SELECT\n    APPS_NAME,\n    AUD_MODULE,\n    SUBSTR(AUD_TABLE, POSITION('_' IN AUD_TABLE)+1) AUD_TABLE\nFROM (\nSELECT\n    APPS_ID ||' - ' || APPS_NAME APPS_NAME,\n    COALESCE(SUBSTR(AUD_TABLE, 0, POSITION('_' IN AUD_TABLE)), AUD_TABLE)  AUD_MODULE,\n    AUD_TABLE || ' : ' || TO_CHAR(MAX(AUD_AUDIT_DATE),'yyyy-MM-dd') AUD_TABLE\nFROM\n    SETTINGS_APPLICATIONS\nINNER JOIN\n    SECURITY_AUDIT\n    ON AUD_APPS_ID = APPS_ID\nGROUP BY\n    APPS_ID ||' - ' ||APPS_NAME ,\n    APPS_NAME,\n    COALESCE(SUBSTR(AUD_TABLE, 0, POSITION('_' IN AUD_TABLE)), AUD_TABLE),\n    AUD_TABLE\n)\nUNION ALL\nSELECT\n    APPS_NAME,\n    AUD_MODULE,\n    SUBSTR(AUD_TABLE, POSITION('_' IN AUD_TABLE)+1) AUD_TABLE\nFROM (\nSELECT\n    APPS_ID ||' - ' || APPS_NAME APPS_NAME,\n    COALESCE(SUBSTR(AUD_TABLE, 0, POSITION('_' IN AUD_TABLE)), AUD_TABLE)  AUD_MODULE,\n    AUD_TABLE || ' : ' || TO_CHAR(MAX(AUD_AUDIT_DATE),'yyyy-MM-dd') AUD_TABLE\nFROM\n    SETTINGS_APPLICATIONS\nINNER JOIN\n    DB_AUDIT\n    ON AUD_APPS_ID = APPS_ID\nGROUP BY\n    APPS_ID ||' - ' ||APPS_NAME ,\n    APPS_NAME,\n    COALESCE(SUBSTR(AUD_TABLE, 0, POSITION('_' IN AUD_TABLE)), AUD_TABLE),\n    AUD_TABLE\n)\nORDER BY APPS_NAME, AUD_MODULE, AUD_TABLE"
 columns = [
     { name = "APPS_NAME" },
@@ -1825,6 +1982,8 @@ sql = "SELECT\n  'Users / Roles' SERIES,\n  CAST(USR_ID AS INTEGER) USR_ID,\n  C
 [[connectors.nomasx1.queries]]
 name = "license_jde_employees_summary_get"
 label = "LICENSE_JDE_EMPLOYEES_SUMMARY"
+description = "License - JDE Employees"
+auto_load = true
 sql = "SELECT \n  LEMP_APPS_ID, \n  LEMP_DT_EXTRACT,\n  LEMP_GROUP, \n  COUNT(DISTINCT LEMP_ID) LEMP_COUNT\nFROM \n(\nSELECT \n  LEMP_APPS_ID, \n  LEMP_DT_EXTRACT,\n  CASE WHEN LEMP_TYPE='E' THEN 'Internal' else 'External' END LEMP_GROUP,\n  LEMP_ID\nFROM\n  LICENSE_JDE_EMPLOYEES\n)\nGROUP BY \n  LEMP_APPS_ID, \n  LEMP_DT_EXTRACT,\n  LEMP_GROUP\nORDER BY LEMP_APPS_ID, LEMP_DT_EXTRACT DESC, LEMP_GROUP"
 columns = [
     { name = "LEMP_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1836,6 +1995,8 @@ columns = [
 [[connectors.nomasx1.queries]]
 name = "license_jde_employees_details_get"
 label = "LICENSE_JDE_EMPLOYEES_DETAILS"
+description = "License - JDE Employees - Details"
+auto_load = true
 sql = "SELECT \n  LEMP_APPS_ID, \n  LEMP_DT_EXTRACT,\n  LEMP_ID,\n  LEMP_NAME,\n  CASE WHEN LEMP_TYPE='E' THEN 'Internal' else 'External' END LEMP_GROUP,\n  LEMP_TYPE,\n  LEMP_TYPE_DESC,\n  LEMP_COMPANY,\n  LEMP_DT_START,\n  LEMP_DT_WORK\nFROM \n  LICENSE_JDE_EMPLOYEES\nORDER BY LEMP_APPS_ID, LEMP_ID"
 columns = [
     { name = "LEMP_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1894,6 +2055,8 @@ sql = "DELETE FROM\n    JDE_OBJECTS\nWHERE\n    JDEO_APPS_ID = :JDEO_APPS_ID\n  
 [[connectors.nomasx1.queries]]
 name = "jde_objects_get"
 label = "JDE_OBJECTS"
+description = "JD Edwards Objects"
+auto_load = true
 sql = "SELECT \n    JDEO_APPS_ID,\n    JDEO_OBJECT,\n    JDEO_DESCRIPTION,\n    JDEO_SY,\n    JDEO_TYPE,\n    JDEO_UKID \nFROM \n  JDE_OBJECTS"
 columns = [
     { name = "JDEO_APPS_ID" },
@@ -1930,6 +2093,8 @@ sql = "DELETE FROM\n  SECURITY_USERS_PROP\nWHERE\n  USRP_APPS_ID = :USRP_APPS_ID
 [[connectors.nomasx1.queries]]
 name = "settings_users_properties_get"
 label = "Settings - Users properties"
+description = "Settings - Users properties"
+auto_load = true
 sql = "SELECT\n    USR_APPS_ID USRP_APPS_ID,\n    USR_ID USRP_ID,\n    USR_NAME USRP_NAME,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_GENERIC_COUNT,\n    USRP_IS_LINKED,\n    USRP_ID_LINKED,\n    USRP_IS_PREVIOUS,\n    USRP_ID_PREVIOUS,\n    USRP_AUDIT_USER,\n    USRP_AUDIT_DATE,\n    USRP_UKID\n--    CASE WHEN USRP_ID IS NULL THEN 'Y' ELSE 'N' END ADD_ROW\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON  USRP_APPS_ID = USR_APPS_ID  AND USRP_ID = USR_ID\nORDER BY USRP_APPS_ID, USRP_ID"
 columns = [
     { name = "USRP_APPS_ID", dd = "APPS_ID", format = "number" },
@@ -1969,6 +2134,8 @@ sql = "DELETE FROM\n    SETTINGS_AUDIT\nWHERE\n    AUD_APPS_ID = :AUD_APPS_ID"
 [[connectors.nomasx1.queries]]
 name = "settings_audit_get"
 label = "SETTINGS_AUDIT"
+description = "Settings - Audit"
+auto_load = true
 sql = "SELECT \n    AUD_APPS_ID,\n    AUD_USER,\n    AUD_PASSWORD,\n    AUD_HOST,\n    AUD_PORT,\n    AUD_DATABASE,\n    AUD_SCN,\n    AUD_LAST,\n    AUD_AUDIT_USER,\n    AUD_AUDIT_DATE \nFROM \n  SETTINGS_AUDIT"
 columns = [
     { name = "AUD_APPS_ID", format = "number" },
@@ -2004,6 +2171,8 @@ sql = "DELETE FROM\n    AUDIT_TRAIL\nWHERE\n    AUD_APPS_ID = :AUD_APPS_ID\n    
 [[connectors.nomasx1.queries]]
 name = "audit_trail_get"
 label = "AUDIT_TRAIL"
+description = "Audit - Header"
+auto_load = true
 sql = "SELECT \n    AUD_APPS_ID,\n    AUD_DT_TRANSACTION,\n    AUD_OPERATION,\n    AUD_SEG_OWNER,\n    AUD_SEG_NAME,\n    AUD_USER,\n    AUD_COUNT \nFROM \n  AUDIT_TRAIL\nORDER BY AUD_DT_TRANSACTION DESC, AUD_SEG_NAME, AUD_OPERATION, AUD_USER"
 columns = [
     { name = "AUD_APPS_ID" },
@@ -2036,6 +2205,8 @@ sql = "DELETE FROM\n    AUDIT_TRAIL_QUERY\nWHERE\n    AUD_APPS_ID = :AUD_APPS_ID
 [[connectors.nomasx1.queries]]
 name = "audit_trail_query_get"
 label = "AUDIT_TRAIL_QUERY"
+description = "Audit - Query"
+auto_load = true
 sql = "SELECT \n    AUDIT_TRAIL_QUERY.AUD_APPS_ID,\n    AUDIT_TRAIL_QUERY.AUD_ROW_ID,\n    AUD_SCN,\n    AUD_DT_TRANSACTION,\n    AUD_OPERATION,\n    AUD_SEG_OWNER,\n    AUD_SEG_NAME,\n    AUD_SEG_TYPE,\n    AUD_SQL,\n    AUD_UNDO,\n    COALESCE(AUD_VALUE, AUDIT_TRAIL_QUERY.AUD_USERNAME) AUD_USERNAME \nFROM \n  AUDIT_TRAIL_QUERY\nLEFT JOIN\n  AUDIT_TRAIL_VALUES\n  ON AUDIT_TRAIL_QUERY.AUD_APPS_ID = AUDIT_TRAIL_VALUES.AUD_APPS_ID\n  AND AUDIT_TRAIL_QUERY.AUD_ROW_ID = AUDIT_TRAIL_VALUES.AUD_ROW_ID\n  AND RIGHT(AUDIT_TRAIL_VALUES.AUD_NAME,4)='USER' \n  AND LENGTH(AUDIT_TRAIL_VALUES.AUD_NAME) = 6  \n  AND AUD_TYPE = CASE WHEN AUD_OPERATION = 'DELETE' THEN 'BEFORE' ELSE 'AFTER' END\nORDER BY AUD_ROW_ID DESC"
 columns = [
     { name = "AUD_APPS_ID", format = "number" },
@@ -2072,6 +2243,8 @@ sql = "DELETE FROM\n    AUDIT_TRAIL_VALUES\nWHERE\n    AUD_APPS_ID = :AUD_APPS_I
 [[connectors.nomasx1.queries]]
 name = "audit_trail_values_get"
 label = "AUDIT_TRAIL_VALUES"
+description = "Audit - Values"
+auto_load = true
 sql = "SELECT \n    aud_apps_id,\n    aud_row_id,\n    aud_name,\n    MAX(CASE WHEN aud_type = 'BEFORE' THEN aud_value END) AS AUD_BEFORE_VALUE,\n    MAX(CASE WHEN aud_type = 'AFTER' THEN aud_value END) AS AUD_AFTER_VALUE\nFROM \n    audit_trail_values\nGROUP BY \n    aud_apps_id, \n    aud_row_id, \n    aud_name\nORDER BY \n    aud_apps_id, \n    aud_row_id, \n    aud_name"
 columns = [
     { name = "AUD_APPS_ID" },
@@ -2096,6 +2269,7 @@ sql = "UPDATE\n    AUDIT_TRAIL_VALUES\nSET\n    AUD_VALUE = :AUD_VALUE\nWHERE\n 
 [[connectors.nomasx1.queries]]
 name = "audit_lookup_get"
 label = "Audit - Lookup"
+description = "Audit - Lookup"
 sql = "SELECT \n  audit_trail_query.AUD_APPS_ID, \n  audit_trail_query.AUD_ROW_ID, \n  AUD_OPERATION,\n  AUD_DT_TRANSACTION,\n  AUD_USERNAME,\n  AUD_SEG_OWNER,\n  AUD_SEG_NAME, \n  AUD_TYPE, \n  AUD_NAME, \n  AUD_VALUE\nFROM \n  audit_trail_query\nINNER JOIN \n  audit_trail_values\n  ON audit_trail_query.aud_apps_id = audit_trail_values.aud_apps_id\n  AND audit_trail_query.aud_row_id = audit_trail_values.aud_row_id\nORDER BY AUD_APPS_ID, AUD_ROW_ID"
 columns = [
     { name = "AUD_APPS_ID", format = "number" },
@@ -2119,6 +2293,7 @@ sql = "DELETE FROM\n    LICENSE_JDE_OUT_USERS\nWHERE\n    LOUT_APPS_ID = :LOUT_A
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_users_roles_get"
 label = "LICENSE_JDE_OUT_USERS_ROLES"
+description = "License - Object Usage Tracking - Users / Roles"
 sql = "SELECT \n    LOUT_APPS_ID,\n    LOUT_USER,\n    LOUT_USAGE,\n    LOUT_ROLE,\n    LOUT_ENV \nFROM \n  LICENSE_JDE_OUT_USERS\nORDER BY LOUT_USAGE DESC"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID" },
@@ -2149,6 +2324,7 @@ sql = "DELETE FROM\n    LICENSE_JDE_OUT_OBJECTS\nWHERE\n    LOUT_APPS_ID = :LOUT
 [[connectors.nomasx1.queries]]
 name = "license_jde_out_objects_get_2"
 label = "LICENSE_JDE_OUT_OBJECTS"
+description = "License - Object Usage Tracking - Objects"
 sql = "SELECT \n    LOUT_APPS_ID,\n    LOUT_OBJECT,\n    LOUT_VERSION,\n    LOUT_TYPE,\n    LOUT_USAGE,\n    LOUT_COUNT \nFROM \n  LICENSE_JDE_OUT_OBJECTS"
 columns = [
     { name = "LOUT_APPS_ID" },
