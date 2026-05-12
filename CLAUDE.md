@@ -26,7 +26,7 @@ configuration drives discovery, not code drives configuration.
 ## Stack
 
 Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg (PostgreSQL) + oracledb (Oracle, thin) · Anthropic SDK ·
-authlib (OIDC/Keycloak) · argon2-cffi (passwords) · React 19 + Vite + TS
+authlib (OIDC — any provider) · argon2-cffi (passwords) · React 19 + Vite + TS
 (frontend, Phase 4, embedded as static — no shared libraries).
 
 ## Current status
@@ -137,8 +137,11 @@ connector + pool names.
 - `service.py` — `AuthService` over an `AsyncSession`: `authenticate` (+ rehash),
   `create_user`, `set_password`/`set_active`, role ops, `provision_oidc_user`
   (find-or-create by `(provider="oidc", sub)`, username-collision suffixing).
-- `oidc.py` — `build_oidc(settings)` → Authlib Starlette `OAuth` client (Keycloak
-  discovery URL); `None` when disabled. ID-token validation is Authlib's job.
+- `oidc.py` — `build_oidc(settings)` → Authlib Starlette `OAuth` client, configured purely from
+  `[oidc] discovery_url` (`…/.well-known/openid-configuration`) — provider-agnostic (Keycloak,
+  OneLogin, Auth0, Okta, Azure AD, Google, … directly, no broker); `None` when disabled. ID-token
+  validation is Authlib's job. (`username_claim` defaults to `preferred_username` — set it to
+  `email`/`sub` for providers that don't emit that, e.g. OneLogin.)
 - `dependencies.py` — `get_current_principal` / `optional_principal`,
   `require_permission(perm)` / `require_role(role)` / `require_superuser`,
   `get_auth_service` (session per request), `get_oidc` (404 if off). All read

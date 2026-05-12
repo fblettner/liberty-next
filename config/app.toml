@@ -20,16 +20,22 @@ jwt_issuer = "liberty-v2"
 access_token_ttl = 3600          # seconds
 refresh_token_ttl = 1209600      # seconds (14 days)
 
-# OpenID Connect (Keycloak-ready). Disabled until enabled=true and a discovery
-# URL is set; then /auth/oidc/login and /auth/oidc/callback become live and a
-# cookie session is enabled for the OAuth state/nonce.
+# OpenID Connect — works with any OIDC-compliant provider via its discovery URL: Keycloak,
+# OneLogin, Auth0, Okta, Azure AD, Google, … (no broker/Keycloak-in-front needed). Disabled until
+# enabled=true and a discovery_url is set; then /auth/oidc/login and /auth/oidc/callback become
+# live and a cookie session is enabled for the OAuth state/nonce. Register
+# https://<your-liberty-host>/auth/oidc/callback as the app's redirect URI at the provider.
 [oidc]
 enabled = false
-discovery_url = ""               # e.g. https://keycloak.example/realms/liberty/.well-known/openid-configuration
+# the provider's .well-known/openid-configuration URL, e.g.
+#   Keycloak:  https://keycloak.example/realms/liberty/.well-known/openid-configuration
+#   OneLogin:  https://<subdomain>.onelogin.com/oidc/2/.well-known/openid-configuration
+#   Okta:      https://<org>.okta.com/.well-known/openid-configuration
+discovery_url = ""
 client_id = ""
 client_secret = "${OIDC_CLIENT_SECRET}"
 scopes = "openid email profile"
-username_claim = "preferred_username"
+username_claim = "preferred_username"   # the ID-token claim used as the local username — OneLogin/Auth0/Okta often have no `preferred_username`; use "email" (or "sub") there
 email_claim = "email"
 name_claim = "name"
 redirect_url = ""                # override the auto-derived /auth/oidc/callback URL behind a proxy

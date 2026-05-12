@@ -1,10 +1,12 @@
-"""OpenID Connect via Authlib's Starlette client (Keycloak-ready).
+"""OpenID Connect via Authlib's Starlette client — provider-agnostic.
 
-Thin wrapper: build an :class:`~authlib.integrations.starlette_client.OAuth`
-registry with one provider (``"oidc"``) configured from the server's discovery
-document, and expose the two half-steps of the auth-code flow. ID-token
-signature/claims validation (against the JWKS in the discovery doc) is done by
-Authlib inside :meth:`authorize_access_token`.
+Configured purely from the provider's discovery document (``…/.well-known/openid-configuration``),
+so it works with **any** OIDC-compliant IdP — Keycloak, OneLogin, Auth0, Okta, Azure AD, Google,
+… — directly, with no broker (e.g. a Keycloak in front) needed. Thin wrapper: build an
+:class:`~authlib.integrations.starlette_client.OAuth` registry with one provider (``"oidc"``)
+configured from that discovery doc, and expose the two half-steps of the auth-code flow. ID-token
+signature/claims validation (against the JWKS in the discovery doc) is done by Authlib inside
+:meth:`authorize_access_token`.
 
 When OIDC is disabled (:attr:`OIDCSettings.enabled` false or no discovery URL),
 :func:`build_oidc` returns ``None`` and the routes 404.

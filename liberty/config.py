@@ -77,10 +77,14 @@ class AuthSettings(BaseModel):
 
 
 class OIDCSettings(BaseModel):
-    """OpenID Connect (Keycloak-ready). Disabled unless ``enabled`` + a discovery URL."""
+    """OpenID Connect — any OIDC-compliant provider via its discovery URL (Keycloak, OneLogin,
+    Auth0, Okta, Azure AD, Google, …; no broker/Keycloak-in-front needed). Disabled unless
+    ``enabled`` + a ``discovery_url``."""
 
     enabled: bool = False
-    discovery_url: str = ""  # the .well-known/openid-configuration URL
+    # the provider's .well-known/openid-configuration URL — e.g. OneLogin:
+    # https://<subdomain>.onelogin.com/oidc/2/.well-known/openid-configuration
+    discovery_url: str = ""
     client_id: str = ""
     client_secret: str = ""  # ${OIDC_CLIENT_SECRET}
     scopes: str = "openid email profile"
