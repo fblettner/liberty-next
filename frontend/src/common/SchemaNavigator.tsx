@@ -7,9 +7,9 @@
 // `label` changes (= a different thing is being edited).
 import { useEffect, useState } from 'react'
 import styled from '@emotion/styled'
-import { ChevronRight, ChevronLeft } from 'lucide-react'
+import { ChevronRight, ArrowLeft, Layers } from 'lucide-react'
 import { SchemaForm, type JsonSchema, type NavSeg } from './SchemaForm'
-import { colors, fontSize, fonts } from '../theme'
+import { colors, fontSize, fonts, radius } from '../theme'
 
 // minimal $ref / anyOf peeling, mirroring SchemaForm's `effective` (kept local to avoid exporting it)
 function effective(s: JsonSchema | undefined, defs: Record<string, JsonSchema>): JsonSchema {
@@ -32,16 +32,26 @@ export interface NavRoot {
   onChange: (v: Record<string, unknown>) => void
 }
 
-const Crumbs = styled.nav`display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-bottom: 12px;`
+const Crumbs = styled.nav`
+  display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin-bottom: 14px;
+  padding: 7px 10px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+  & > .lead { color: ${colors.text.muted}; margin-right: 4px; display: inline-flex; }
+`
 const Crumb = styled.button<{ $current?: boolean }>`
-  border: none; background: none; padding: 2px 5px; border-radius: 4px;
+  border: none; background: none; padding: 3px 6px; border-radius: ${radius.sm};
   font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  font-weight: ${({ $current }) => ($current ? 600 : 400)};
   color: ${({ $current }) => ($current ? colors.text.primary : colors.text.muted)};
   cursor: ${({ $current }) => ($current ? 'default' : 'pointer')};
   ${({ $current }) => (!$current ? `&:hover { color: ${colors.blue.main}; background: var(--hover-subtle); }` : '')}
 `
-const Sep = styled(ChevronRight)`flex-shrink: 0; color: ${colors.text.muted}; opacity: 0.45; margin: 0 1px;`
-const BackBtn = styled(Crumb)`margin-left: auto; & svg { vertical-align: -2px; }`
+const Sep = styled(ChevronRight)`flex-shrink: 0; color: ${colors.text.muted}; opacity: 0.4; margin: 0;`
+const BackBtn = styled.button`
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
+  border: 1px solid ${colors.border}; background: ${colors.bg.card}; color: ${colors.text.secondary};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
+`
 
 export function SchemaNavigator({ root }: { root: NavRoot }) {
   const [path, setPath] = useState<NavSeg[]>([])
@@ -85,14 +95,15 @@ export function SchemaNavigator({ root }: { root: NavRoot }) {
 
   return (
     <div>
-      <Crumbs>
+      <Crumbs aria-label="path">
+        <span className="lead" title="you're editing one item of the config tree"><Layers size={13} /></span>
         {levels.map((lv, i) => (
-          <span key={i} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
             {i > 0 && <Sep size={13} />}
             <Crumb type="button" $current={i === levels.length - 1} onClick={() => i < levels.length - 1 && go(i)}>{lv.label}</Crumb>
           </span>
         ))}
-        {path.length > 0 && <BackBtn type="button" onClick={() => go(path.length - 1)}><ChevronLeft size={12} /> back</BackBtn>}
+        {path.length > 0 && <BackBtn type="button" onClick={() => go(path.length - 1)}><ArrowLeft size={13} /> back</BackBtn>}
       </Crumbs>
       <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} />
     </div>

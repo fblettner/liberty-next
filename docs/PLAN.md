@@ -462,14 +462,16 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
 ### Phase 7 — Config builders (the UI that builds the framework) — 🚧 IN PROGRESS
 **Done so far:**
 - **`common/SchemaForm`** — a generic JSON-Schema → editing-form renderer: string / number / bool /
-  `dict[str,str]` / `list[str]` / `list[Model]` (a *collapsible* list — each item a nested `SchemaForm`,
-  so a query with 200 columns is 200 rows you expand one at a time) / `$ref`-to-a-`$defs` model (resolved) /
-  enum / `X|None` / the `sql` `str|{dialect:str}` union (a textarea, or per-dialect textareas); anything
-  it can't model → a "edit in the raw editor" note. The reusable shell — point it at a section's schema
-  (+ `$defs`) and add a custom widget when a model needs a shape it doesn't cover.
-- **Field docs → `Field(description=)`** on `PoolConfig` / `SqlConnectorConfig` / `ApiConnectorConfig` /
-  `QueryDef` / `EndpointDef` / `ColumnHint` / `ParamDef` / `FilterDep` / `VisibleWhen`, so the schemas
-  carry them and the forms show them as per-field hints.
+  `dict[str,str]` / `list[str]` / `list[Model]` / `$ref`-to-a-`$defs` model (resolved) / enum / `X|None` /
+  the `sql` `str|{dialect:str}` union (a textarea, or per-dialect textareas); anything it can't model → a
+  "edit in the raw editor" note. Fields are **tabbed** by their `x_group` (e.g. a query → General | Params |
+  Columns | Advanced); `list[Model]` / nested-object props render as drill-in rows when given an `onNavigate`
+  (used by `SchemaNavigator`), or as inline collapsible accordions without it. The reusable shell — point
+  it at a section's schema (+ `$defs`); add a custom widget / a new `x_group` when a model needs more.
+- **Per-field metadata on the config models** — `Field(description=…)` (→ form hints) and
+  `Field(json_schema_extra={"x_group": "…"})` (→ which tab) on `PoolConfig` / `SqlConnectorConfig` /
+  `ApiConnectorConfig` / `QueryDef` / `EndpointDef` / `ColumnHint`, so the schemas carry the UI's hints &
+  grouping (the old inline `#` field comments moved into `description=`).
 - **Backend** — `GET /admin/config/schema` → `{pool, sql, api}` (each with its `$defs`); `GET/PUT
   /admin/config/pools` (surgically rewrites only the `[pools.*]` tables of `connectors.toml` via `tomlkit`
   — comments / the `[connectors.*]` tables / formatting preserved); `GET/PUT /admin/config/connectors/parsed`
@@ -478,11 +480,11 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   tables; re-parses the whole file before writing). PUT endpoints don't reload — call `/admin/reload`.
   Dep: `tomlkit`.
 - **`common/SchemaNavigator`** — a master-detail wrapper around `SchemaForm`: shows *one* level at a time
-  with a **breadcrumb** of the path (`nomasx1 / users_get / USR_ID`); clicking a `list[Model]` row (or a
-  nested-object "edit…") in the current form drills in, a crumb pops back. The path is stored as *segments*
-  and the current (schema, value, onChange) is derived from the root each render — so edits keep the path
-  valid, a re-fetch of the same root doesn't reset where you are, and a deleted item just pops the path.
-  (No more nested accordions in the connector builder.)
+  with a **breadcrumb bar** (a bordered/tinted strip — `🗀 nomasx1 / users_get / USR_ID` + a Back button);
+  clicking a `list[Model]` row (or a nested-object "edit…") in the current form drills in, a crumb pops
+  back. The path is stored as *segments* and the current (schema, value, onChange) is derived from the root
+  each render — so edits keep the path valid, a re-fetch of the same root doesn't reset where you are, and
+  a deleted item just pops the path. (No more nested accordions in the connector builder.)
 - **Frontend** — `Settings` is a tab switcher: `PoolsBuilder` (flat → plain `SchemaForm`, a left list +
   add/delete, Save → PUT + reload), `ConnectorsBuilder` (left list of sql/api connectors + a
   `SchemaNavigator` over the matching schema — drill connector → query → column → … — Save → PUT + reload),

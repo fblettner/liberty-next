@@ -7,7 +7,7 @@
 // or per-dialect textareas if the value is a map). Anything it can't make sense of → a "edit in the raw
 // editor" note. The Phase-7 config-builder shell: point it at a section's schema (with its `$defs`) +
 // add a custom widget here when a config model needs a shape it doesn't cover.
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown } from 'lucide-react'
 import { Input, Textarea, Field } from './Input'
@@ -27,6 +27,7 @@ export interface JsonSchema {
   items?: JsonSchema
   $ref?: string
   $defs?: Record<string, JsonSchema>
+  x_group?: string   // from a Pydantic Field's json_schema_extra — groups the form into tabs
 }
 
 type Defs = Record<string, JsonSchema>
@@ -208,6 +209,17 @@ function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: J
 }
 
 // ── the form ────────────────────────────────────────────────────────────────
+// Tabs for the field groups (a Pydantic Field's json_schema_extra={"x_group": "…"}). Only shown
+// when a model has >1 group; the "General" group (or whichever appears first) is the default tab.
+const TabsBar = styled.div`display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
+const TabBtn = styled.button<{ $active?: boolean }>`
+  height: 28px; padding: 0 11px; border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)};
+  &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; }
+`
+
 /** A breadcrumb hop the navigator can take from this form (drill into a nested object property,
  *  or into item #index of a `list[Model]` property). `SchemaNavigator` consumes these. */
 export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; label: string }
@@ -233,9 +245,31 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
     else next[key] = v
     onChange(next)
   }
+  // group the fields into tabs (a Pydantic Field's `x_group`); ungrouped → "General". Order =
+  // first-appearance order, which puts the ungrouped/core fields' group first.
+  const groups = new Map<string, [string, JsonSchema][]>()
+  for (const [key, raw] of Object.entries(props)) {
+    const g = raw.x_group ?? 'General'
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g)!.push([key, raw])
+  }
+  const groupNames = [...groups.keys()]
+  const showTabs = groupNames.length > 1
+  const [tab, setTab] = useState(groupNames[0])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reset to the first tab when the *model* changes
+  useEffect(() => { setTab(groupNames[0]) }, [schema.title])
+  const activeProps = groups.get(tab) ?? groups.get(groupNames[0]) ?? []
+
   return (
     <div>
-      {Object.entries(props).map(([key, raw]) => {
+      {showTabs && (
+        <TabsBar>
+          {groupNames.map((g) => (
+            <TabBtn key={g} type="button" $active={(groups.get(tab) ? tab : groupNames[0]) === g} onClick={() => setTab(g)}>{g}</TabBtn>
+          ))}
+        </TabsBar>
+      )}
+      {activeProps.map(([key, raw]) => {
         const sub = effective(raw, allDefs)
         const isReq = required.has(key)
         const label = (sub.title ?? raw.title ?? key) + (isReq ? ' *' : '')

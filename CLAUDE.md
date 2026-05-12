@@ -255,8 +255,10 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   tables (a *changed* connector's own subtree is re-rendered by `tomlkit`, so its inline `columns =
   [{…}]` arrays may become `[[…]]` tables — functionally identical), re-parses the whole result before
   writing. PUT endpoints don't reload — call `POST /admin/reload` after. (Dep: `tomlkit` —
-  comment/format-preserving TOML edits.) The field docs on the config models are in `Field(description=)`
-  so the builder forms show them as hints.
+  comment/format-preserving TOML edits.) The config models carry per-field metadata for the builder
+  forms: `Field(description=…)` → form hints, `Field(json_schema_extra={"x_group": "…"})` → which tab
+  the field goes in (e.g. a query's `params`/`columns` are their own tabs, the optional bits are an
+  "Advanced" tab; ungrouped → "General").
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
@@ -291,9 +293,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (a searchable single-select pop-over — themed replacement for a long native `<select>`), `SchemaForm`
   (renders an editing form from a JSON Schema — string / number / bool / `dict[str,str]` map / `list[str]` /
   `list[Model]` / `$ref`-to-a-`$defs`-model (resolved) / enum / `X|None` / the `sql` `str|{dialect:str}`
-  union (a textarea, or per-dialect textareas); anything else → a "edit in the raw editor" note. With
-  `onNavigate` it renders `list[Model]` / nested-object props as drill-in rows, without it as inline
-  accordions) + `SchemaNavigator` (a master-detail wrapper around `SchemaForm` — shows one level at a time
+  union (a textarea, or per-dialect textareas); anything else → a "edit in the raw editor" note. Fields are
+  tabbed by their `x_group`; with `onNavigate` it renders `list[Model]` / nested-object props as drill-in
+  rows, without it as inline accordions) + `SchemaNavigator` (a master-detail wrapper around `SchemaForm` — shows one level at a time
   with a breadcrumb of the path `nomasx1 / users_get / USR_ID`; the path is *segments*, the current
   schema/value derived from the root each render so edits keep it valid). The Phase-7 config-builder
   shell, used by `Settings/PoolsBuilder` (flat → plain `SchemaForm`) & `ConnectorsBuilder` (nested → `SchemaNavigator`)), `Tag`/`Mono`,
