@@ -152,7 +152,8 @@ const Tr = styled.tr`
   &:hover td { background: var(--hover-subtle); }
   &:not(:last-child) td { border-bottom: 1px solid ${colors.border}; }
   &.dt-row-new td { background: ${colors.green.bg}; box-shadow: inset 3px 0 0 ${colors.green.main}; }
-  &.dt-row-deleted td { background: ${colors.red.bg}; }
+  &.dt-row-dirty td { background: ${colors.orange.bg}; box-shadow: inset 3px 0 0 ${colors.orange.main}; }
+  &.dt-row-deleted td { background: ${colors.red.bg}; box-shadow: inset 3px 0 0 ${colors.red.main}; text-decoration: line-through; }
 `
 const GroupTr = styled.tr` td { background: ${colors.bg.card}; font-family: ${fonts.sans}; }`
 const Td = styled.td`padding: 5px 12px; color: ${colors.text.secondary}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`
@@ -237,13 +238,32 @@ export function DataTable<T extends object>({
     return () => document.removeEventListener('mousedown', h)
   }, [colOpen, groupOpen, exportOpen])
 
+  // Internal columns (select / status) are always pinned to the front, regardless of the user's
+  // saved (data-only) column order; `columnOrder` persists only the data columns.
+  const internalIds = useMemo(
+    () => columns.filter((c) => (c.meta as { internal?: boolean } | undefined)?.internal).map((c) => String((c as { id?: string }).id ?? '')),
+    [columns],
+  )
+  const dataIds = useMemo(
+    () => columns.filter((c) => !(c.meta as { internal?: boolean } | undefined)?.internal).map((c) => String((c as { id?: string }).id ?? '')),
+    [columns],
+  )
+  const dataOrder = useMemo(
+    () => (columnOrder.length ? [...columnOrder.filter((id) => dataIds.includes(id)), ...dataIds.filter((id) => !columnOrder.includes(id))] : dataIds),
+    [columnOrder, dataIds],
+  )
+  const tableColumnOrder = useMemo(() => [...internalIds, ...dataOrder], [internalIds, dataOrder])
+
   const table = useReactTable({
     data,
     columns,
-    state: { sorting, columnVisibility, columnOrder, columnSizing, columnFilters, globalFilter, grouping, expanded, pagination },
+    state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnSizing, columnFilters, globalFilter, grouping, expanded, pagination },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
-    onColumnOrderChange: setColumnOrder,
+    onColumnOrderChange: (updater) => {
+      const next = typeof updater === 'function' ? updater(tableColumnOrder) : updater
+      setColumnOrder(next.filter((id) => !internalIds.includes(id)))
+    },
     onColumnSizingChange: setColumnSizing,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
@@ -264,10 +284,8 @@ export function DataTable<T extends object>({
     getPaginationRowModel: getPaginationRowModel(),
   })
 
-  const allColIds = table.getAllLeafColumns().map((c) => c.id)
-  const effectiveOrder = columnOrder.length
-    ? [...columnOrder.filter((id) => allColIds.includes(id)), ...allColIds.filter((id) => !columnOrder.includes(id))]
-    : allColIds
+  // the data columns in user order — used by the Columns menu (↑/↓) and the header drag-reorder
+  const effectiveOrder = dataOrder
   const moveColumn = (idx: number, dir: 'up' | 'down') => {
     const next = [...effectiveOrder]
     const swap = dir === 'up' ? idx - 1 : idx + 1
@@ -277,7 +295,7 @@ export function DataTable<T extends object>({
   }
   // header drag-reorder: move `draggedId` to where `targetId` sits
   const dropColumn = (draggedId: string, targetId: string) => {
-    if (draggedId === targetId) return
+    if (draggedId === targetId || internalIds.includes(draggedId) || internalIds.includes(targetId)) return
     const ids = effectiveOrder.filter((id) => id !== draggedId)
     const at = ids.indexOf(targetId)
     if (at < 0) return

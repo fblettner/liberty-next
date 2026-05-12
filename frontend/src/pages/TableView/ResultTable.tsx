@@ -110,7 +110,6 @@ const TbBtn = styled.button<{ $tone?: 'primary' }>`
   &:hover:not(:disabled) { background: var(--hover-subtle); color: ${colors.text.primary}; }
   &:disabled { opacity: 0.4; cursor: default; }
 `
-const StruckRow = styled.span`text-decoration: line-through; opacity: 0.5;`
 
 function EditCell({ ctrl, column, defaultText, onChange }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
@@ -172,6 +171,17 @@ export function ResultTable({
 
   // current values of a row (its original fields overlaid with any pending edits)
   const valuesOf = useCallback((row: DataRow): Record<string, unknown> => ({ ...row, ...editsRef.current.get(row) }), [])
+  // `editChange` must be referentially stable so the data-column `cell` functions don't change on
+  // every keystroke (a new cell fn → flexRender remounts the cell → the <input> loses focus). It
+  // reads `newRows` via a ref so it isn't a dependency.
+  const newRowsRef = useRef<DataRow[]>([])
+  useEffect(() => { newRowsRef.current = newRows }, [newRows])
+  const editChange = useCallback((row: DataRow, name: string, v: unknown) => {
+    let ed = editsRef.current.get(row)
+    if (!ed) { ed = {}; editsRef.current.set(row, ed) }
+    ed[name] = v
+    if (!newRowsRef.current.includes(row)) setDirtyRows((s) => (s.has(row) ? s : new Set(s).add(row)))
+  }, [])
   // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values
   const prependNewRows = useCallback((seeds: Record<string, unknown>[]) => {
     if (seeds.length === 0) return
@@ -280,89 +290,36 @@ export function ResultTable({
   const data = useMemo<DataRow[]>(() => (editMode ? [...newRows, ...result.rows] : result.rows), [result.rows, editMode, newRows])
 
   // ── column definitions ──
-  const columns = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
-    const idSuffix = ` ${t('table.idColumnSuffix')}`
-    const span = (text: string, kind: ReturnType<typeof ruleCell>['kind'], align: Align, titleVal?: string) => (
+  // `dataCols` is the part that must stay referentially stable across edit-state churn (typing,
+  // selecting, deleting) — its `cell` functions only close over `editMode`, `editChange` (stable)
+  // and the per-result maps, so the data cells (incl. the edit <input>s) keep their identity →
+  // focus is preserved while typing. Per-row state (dirty/new/deleted/selected) lives entirely
+  // in the `editCols` (the leftmost select + status columns), which may rebuild freely.
+  const span = useMemo(
+    () => (text: string, kind: ReturnType<typeof ruleCell>['kind'], align: Align, titleVal?: string) => (
       <CellSpan className={kind === 'plain' ? undefined : kind} style={align ? { textAlign: align } : undefined} title={titleVal}>{text}</CellSpan>
-    )
-    const grouped = (info: { cell: { getIsGrouped: () => boolean }; getValue: () => unknown }, align: Align) =>
-      info.cell.getIsGrouped() ? span(String(info.getValue() ?? ''), 'plain', align) : null
-    const isGroupRow = (info: { row: { getIsGrouped?: () => boolean } }) => !!info.row.getIsGrouped?.()
-    const cur = (row: DataRow, name: string) => {
-      const ed = editsRef.current.get(row)
-      return ed && name in ed ? ed[name] : row[name]
-    }
-    const editChange = (row: DataRow, name: string, v: unknown) => {
-      let ed = editsRef.current.get(row)
-      if (!ed) { ed = {}; editsRef.current.set(row, ed) }
-      ed[name] = v
-      if (!newRows.includes(row)) setDirtyRows((s) => (s.has(row) ? s : new Set(s).add(row)))
-    }
+    ),
+    [],
+  )
+  const grouped = useCallback(
+    (info: { cell: { getIsGrouped: () => boolean }; getValue: () => unknown }, align: Align) =>
+      info.cell.getIsGrouped() ? span(String(info.getValue() ?? ''), 'plain', align) : null,
+    [span],
+  )
+  const isGroupRow = useCallback((info: { row: { getIsGrouped?: () => boolean } }) => !!info.row.getIsGrouped?.(), [])
+  const cur = useCallback((row: DataRow, name: string) => {
+    const ed = editsRef.current.get(row)
+    return ed && name in ed ? ed[name] : row[name]
+  }, [])
+
+  const dataCols = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
+    const idSuffix = ` ${t('table.idColumnSuffix')}`
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
       const v = cur(row, c.name)
       return <EditCell ctrl={editCtrlOf(c)} column={c} defaultText={v === null || v === undefined ? '' : String(v)} onChange={(nv) => editChange(row, c.name, nv)} />
     }
-    const editable = editMode
-
     const out: ColumnDef<DataRow, unknown>[] = []
-
-    if (editMode) {
-      // ── selection checkbox (for Copy) ──
-      out.push({
-        id: '__select',
-        header: ({ table }) => {
-          // "select all" = every row matching the current filter (across all pages), not just this page
-          const rows = table.getFilteredRowModel().rows.filter((r) => !r.getIsGrouped?.()).map((r) => r.original as DataRow)
-          const allOn = rows.length > 0 && rows.every((r) => selected.has(r))
-          return (
-            <CheckBox
-              $on={allOn}
-              onClick={() => setSelected(() => (allOn ? new Set() : new Set(rows)))}
-              title={allOn ? t('table.selectNone', 'Select none') : t('table.selectAll', 'Select all')}
-            >{allOn && <Check size={9} />}</CheckBox>
-          )
-        },
-        size: 34, minSize: 34,
-        enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
-        meta: { internal: true },
-        cell: (info) => {
-          if (isGroupRow(info)) return null
-          const row = info.row.original as DataRow
-          return <CheckBox $on={selected.has(row)} onClick={() => toggleSelected(row)} title={t('table.selectRow', 'Select row')}>{selected.has(row) && <Check size={9} />}</CheckBox>
-        },
-      })
-      // ── status + row actions ──
-      out.push({
-        id: '__status',
-        header: () => null,
-        size: 64, minSize: 64,
-        enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
-        meta: { internal: true },
-        cell: (info) => {
-          if (isGroupRow(info)) return null
-          const row = info.row.original as DataRow
-          const isNew = newRows.includes(row)
-          const isDel = deleted.has(row)
-          const isDirty = dirtyRows.has(row)
-          return (
-            <StatusCell>
-              {isNew ? <StatusMark $tone="new" title={t('table.rowNew')}>+</StatusMark>
-                : isDel ? <StatusMark $tone="deleted" title={t('table.rowDeleted')}>−</StatusMark>
-                : isDirty ? <StatusMark $tone="dirty" title={t('table.rowEdited')}>●</StatusMark>
-                : <span style={{ width: 7 }} />}
-              {insertQuery && !isDel && (
-                <RowXBtn onClick={() => duplicateRow(row)} title={t('table.duplicateRow')}><Copy size={11} /></RowXBtn>
-              )}
-              <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
-                <X size={11} />
-              </RowXBtn>
-            </StatusCell>
-          )
-        },
-      })
-    }
-
     for (const c of result.columns) {
       const align = cellAlign(c)
 
@@ -377,7 +334,7 @@ export function ResultTable({
           ...filterPropsFor('text'),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
-            if (editable && !isGroupRow(info)) return editCellFor(c, info)
+            if (editMode && !isGroupRow(info)) return editCellFor(c, info)
             const v = cur(info.row.original as DataRow, c.name)
             const { text, isNull } = ruleCell(v, { ...c, rule: undefined }, undefined, undefined)
             return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
@@ -415,17 +372,76 @@ export function ResultTable({
         ...filterPropsFor(kind, enumOptions),
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
-          if (editable && !isGroupRow(info)) return editCellFor(c, info)
+          if (editMode && !isGroupRow(info)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
           const { text, kind: rk, isNull } = ruleCell(v, c, enumMapForCol, undefined)
-          const node = span(text, isNull ? 'null' : rk, align, rk === 'enum' && !isNull ? String(v ?? '') : undefined)
-          return deleted.has(info.row.original as DataRow) ? <StruckRow>{node}</StruckRow> : node
+          return span(text, isNull ? 'null' : rk, align, rk === 'enum' && !isNull ? String(v ?? '') : undefined)
         },
       })
     }
     return out
-    // editsRef is a ref — typing into an edit input doesn't churn this memo.
-  }, [result.columns, enumMaps, lookupMaps, t, editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, insertQuery])
+  }, [result.columns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span])
+
+  // the leftmost select + status columns — rebuild freely on edit-state changes; they hold no
+  // <input>, only checkboxes/markers/buttons, so remounting them is harmless.
+  const editCols = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
+    if (!editMode) return []
+    return [
+      {
+        id: '__select',
+        header: ({ table }) => {
+          // "select all" = every row matching the current filter (across all pages), not just this page
+          const rows = table.getFilteredRowModel().rows.filter((r) => !r.getIsGrouped?.()).map((r) => r.original as DataRow)
+          const allOn = rows.length > 0 && rows.every((r) => selected.has(r))
+          return (
+            <CheckBox
+              $on={allOn}
+              onClick={() => setSelected(() => (allOn ? new Set() : new Set(rows)))}
+              title={allOn ? t('table.selectNone') : t('table.selectAll')}
+            >{allOn && <Check size={9} />}</CheckBox>
+          )
+        },
+        size: 34, minSize: 34,
+        enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
+        meta: { internal: true },
+        cell: (info) => {
+          if (isGroupRow(info)) return null
+          const row = info.row.original as DataRow
+          return <CheckBox $on={selected.has(row)} onClick={() => toggleSelected(row)} title={t('table.selectRow')}>{selected.has(row) && <Check size={9} />}</CheckBox>
+        },
+      },
+      {
+        id: '__status',
+        header: () => null,
+        size: 62, minSize: 62,
+        enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
+        meta: { internal: true },
+        cell: (info) => {
+          if (isGroupRow(info)) return null
+          const row = info.row.original as DataRow
+          const isNew = newRows.includes(row)
+          const isDel = deleted.has(row)
+          const isDirty = dirtyRows.has(row)
+          return (
+            <StatusCell>
+              {isNew ? <StatusMark $tone="new" title={t('table.rowNew')}>+</StatusMark>
+                : isDel ? <StatusMark $tone="deleted" title={t('table.rowDeleted')}>−</StatusMark>
+                : isDirty ? <StatusMark $tone="dirty" title={t('table.rowEdited')}>●</StatusMark>
+                : <span style={{ width: 7 }} />}
+              {insertQuery && !isDel && (
+                <RowXBtn onClick={() => duplicateRow(row)} title={t('table.duplicateRow')}><Copy size={11} /></RowXBtn>
+              )}
+              <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
+                <X size={11} />
+              </RowXBtn>
+            </StatusCell>
+          )
+        },
+      },
+    ]
+  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, insertQuery, isGroupRow, t])
+
+  const columns = useMemo<ColumnDef<DataRow, unknown>[]>(() => [...editCols, ...dataCols], [editCols, dataCols])
 
   const initialVisibility = useMemo<VisibilityState>(() => {
     const v: VisibilityState = {}
@@ -456,7 +472,7 @@ export function ResultTable({
         tableId={`sql:${connector}:${query}`}
         exportFilename={query}
         initialColumnVisibility={initialVisibility}
-        rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : undefined)}
+        rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : dirtyRows.has(row) ? 'dt-row-dirty' : undefined)}
         toolbar={
           !canEdit ? undefined : !editMode ? (
             <>
