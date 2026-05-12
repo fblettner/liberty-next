@@ -153,6 +153,7 @@ export default function TableView({ connector, query }: { connector: string; que
               cols={filterCols}
               values={filters}
               onChange={(name, next) => setFilters((f) => ({ ...f, [name]: next }))}
+              onClearAll={() => setFilters({})}
               autoLoad={meta.auto_load}
             />
             <Row align="flex-end">

@@ -134,7 +134,11 @@ const MiniLink = styled.button`
 const TableScroll = styled.div`
   overflow: auto; max-height: 60vh; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
-const Table = styled.table`width: 100%; border-collapse: collapse; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
+// `table-layout: fixed` + an explicit table width = the sum of the column sizes: this makes the
+// per-cell `width` styles authoritative (with the default `auto` layout the browser ignores them
+// when content needs more room, so column resizing did nothing). `min-width: 100%` keeps the table
+// filling the viewport when the columns are narrow; it scrolls horizontally when they overflow.
+const Table = styled.table`border-collapse: collapse; table-layout: fixed; min-width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
 const Th = styled.th<{ $sortable?: boolean; $dropTarget?: boolean }>`
   text-align: left; padding: 8px 18px 8px 12px; position: sticky; top: 0; z-index: 2;
   background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
@@ -436,7 +440,7 @@ export function DataTable<T extends object>({
       </ToolbarRow>
 
       <TableScroll>
-        <Table>
+        <Table style={{ width: table.getTotalSize() }}>
           <thead>
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
@@ -485,6 +489,9 @@ export function DataTable<T extends object>({
                           </SortMark>
                         )}
                       </ThInner>
+                      {/* drag this 5px strip = resize the column (TanStack's resize handler); `data-resize`
+                          lets onDragStart above tell it apart from a column-reorder drag, and the onClick
+                          stopPropagation keeps the mouseup from toggling the header's sort */}
                       <ResizeHandle
                         $resizing={h.column.getIsResizing()}
                         data-resize="1"

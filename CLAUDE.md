@@ -240,7 +240,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
   global search, a type-aware per-column filter row (text/number/date with an operator picked from a small
   labelled popover — `OpPicker`; boolean/enum as a select) + clear-all, sort (shift-click = multi), column
-  resize/drag-reorder/hide (the Columns menu has All/None), row grouping, CSV/Excel export via `xlsx`, paging, localStorage
+  resize (the `<table>` is `table-layout: fixed`, width = `getTotalSize()`, so the per-cell widths are
+  authoritative)/drag-reorder/hide (the Columns menu has All/None), row grouping, CSV/Excel export via `xlsx`, paging, localStorage
   persistence per `tableId`; ported from nomaubl — *not* barrelled, it pulls in `xlsx`) and `Markdown`
   (react-markdown — also *not* re-exported by `common/index.ts`, so each rides only its lazy page chunk);
   `common/index.ts` barrels the rest, pages import
@@ -277,7 +278,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   collapsible **`FilterPanel`** — one field per `filter`-flagged column (v1's `col_filter`, from `meta.columns`),
   each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's); a column
   with an ENUM rule renders a value `<select>`, a LOOKUP rule a `<select>` of resolved labels (`useLookupBatch`,
-  the user picks the label not the code), both implicitly `equals`. On Run it sends `:<col>` + `:<col>_op` for
+  the user picks the label not the code), both implicitly `equals`. A "Clear" button in the panel header resets
+  all server filters. On Run it sends `:<col>` + `:<col>_op` for
   each filled field; the migration has wrapped such queries in
   `SELECT * FROM (<orig>) _flt WHERE …` so this actually pre-filters server-side before the grid loads (the
   in-grid TanStack filters then refine the loaded page; those `:<col>`/`:<col>_op` binds are kept out of the
@@ -288,12 +290,15 @@ replies), `@monaco-editor/react` (the connector-config editor).
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
   run on the displayed value, rule rendering is visual-only. When the query has writable companions, an
   **Edit** toggle puts the *whole grid* into edit mode (v1's FormsTable batch model): every cell editable,
-  "+ Add row" / per-row "duplicate" / **Import** (.xlsx/.csv → headers matched to columns) / multi-row
-  copy-paste (a selection checkbox column → Copy → Paste) → new rows (added at the *top*); a per-row × marks
-  an existing row for deletion (a status column shows +/●/− marks); **Save**
-  fires the lot — edited rows → `update_query`, new rows → `insert_query`, deleted → `delete_query` (merged
-  params sent both as-is + UPPERCASE — PG lowercases the read columns, v1's `_put`/`_post`/`_delete` use
-  uppercase; `text()` binds only what it references) — then refetches; **Cancel** discards. (Modal-form edit
+  "+ Add row" / per-row "duplicate" / **Import** (.xlsx/.csv → headers matched to *result columns by header
+  text* — name / label / "(ID)"-suffixed, case-insensitive — so the sheet's column order doesn't matter) /
+  multi-row copy-paste (a selection checkbox column → Copy → Paste) → new rows (added at the *top*); a per-row
+  × marks an existing row for deletion (a status column shows +/●/− marks); **Save**
+  fires the lot — edited rows → `update_query` (the merged new values, plus the row's original values under
+  `:<NAME>_ORIGINAL` so a key-aware WHERE can use them — the verbatim-migrated `_put`s don't yet), new rows →
+  `insert_query`, deleted → `delete_query` (params sent both as-is + UPPERCASE — PG lowercases the read columns,
+  v1's `_put`/`_post`/`_delete` use uppercase; `text()` binds only what it references) — then refetches;
+  **Cancel** discards. (Modal-form edit
   = the form layer, Phase 6.) A non-SELECT query → `confirm` + `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via

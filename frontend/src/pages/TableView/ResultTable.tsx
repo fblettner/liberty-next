@@ -65,6 +65,14 @@ function withUpper(o: Record<string, unknown>): Record<string, unknown> {
   for (const [k, v] of Object.entries(o)) out[k.toUpperCase()] = v
   return out
 }
+// The row's original (pre-edit) values, keyed `<NAME>_ORIGINAL` — so an `_put` query whose WHERE
+// must match a column the user just edited (e.g. a business key) can bind `:<NAME>_ORIGINAL` to the
+// old value. The verbatim-migrated v1 `_put` queries don't reference these (their WHERE reuses
+// `:<NAME>`, so editing the key matches nothing — same behaviour as v1); they're forward-compat,
+// and harmless when unused since `text()` only binds the `:params` the SQL actually mentions.
+function originalKeys(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).map(([k, v]) => [`${k}_ORIGINAL`, v]))
+}
 
 // ── edit-mode controls ──────────────────────────────────────────────────────
 const EditInput = styled.input`
@@ -209,9 +217,12 @@ export function ResultTable({
   const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
   const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
-  // Import rows from an Excel/CSV file — the first sheet's header row is matched against the
-  // result's column names / labels (and the "(ID)" suffix on lookup columns), case-insensitively;
-  // every matched row becomes a new row to insert.
+  // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
+  // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
+  // {normalized header text → result column name}, registering for each result column its `name`,
+  // its display `label`, and the "(ID)" suffixed forms (a lookup column shows as "<label> (ID)" in
+  // the grid, so that's a natural header to round-trip). `sheet_to_json` already gives each row as
+  // {headerText → value} (the first sheet row is the header), so we just look each header up.
   const importFile = useCallback(async (file: File) => {
     setSaveErrors([])
     try {
@@ -220,19 +231,19 @@ export function ResultTable({
       if (!ws) return
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
       const idTag = t('table.idColumnSuffix')
-      const byHeader = new Map<string, string>() // normalized header → column name
+      const byHeader = new Map<string, string>() // normalized header text → result column name
       for (const c of result.columns) {
         const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
         add(c.name); add(c.label); add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
       }
       const seeds = rows.map((r) => {
         const out: Record<string, unknown> = {}
-        for (const [k, v] of Object.entries(r)) {
-          const col = byHeader.get(k.trim().toLowerCase())
+        for (const [header, v] of Object.entries(r)) {
+          const col = byHeader.get(header.trim().toLowerCase())  // header text → which result column
           if (col) out[col] = v
         }
         return out
-      }).filter((s) => Object.keys(s).length > 0)
+      }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
       if (seeds.length === 0) setSaveErrors([t('table.importNoMatch', { file: file.name })])
       else { if (!editMode) setEditMode(true); prependNewRows(seeds) }
     } catch (e) {
@@ -246,16 +257,19 @@ export function ResultTable({
     const post = (q: string, params: Record<string, unknown>) =>
       jobs.push(api.post(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}`, { params: withUpper(params) }))
     const localErrs: string[] = []
+    // edited existing rows → `_put`: new values for SET, plus `:<NAME>_ORIGINAL` for a key-aware WHERE
     for (const row of dirtyRows) {
       if (deleted.has(row)) continue
       if (!updateQuery) { localErrs.push(t('table.editNoUpdate')); break }
-      post(updateQuery, { ...row, ...editsRef.current.get(row) })
+      post(updateQuery, { ...row, ...editsRef.current.get(row), ...originalKeys(row) })
     }
+    // new rows → `_post`: just the entered values (nothing existed before)
     for (const row of newRows) {
       if (deleted.has(row)) continue
       if (!insertQuery) { localErrs.push(t('table.editNoInsert')); break }
       post(insertQuery, editsRef.current.get(row) ?? {})
     }
+    // rows marked for deletion → `_delete`: the current row identifies it (it wasn't edited if it's deleted)
     for (const row of deleted) {
       if (newRows.includes(row)) continue
       if (!deleteQuery) { localErrs.push(t('table.editNoDelete')); break }

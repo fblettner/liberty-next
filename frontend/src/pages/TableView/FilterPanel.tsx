@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Check, Filter } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
 import { Input, Select, Field, Row } from '../../common'
 import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/lookups'
@@ -35,14 +35,24 @@ function inputTypeFor(c: Column): 'text' | 'number' | 'date' {
 const Wrap = styled.div`
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
 `
-const Head = styled.button<{ $open?: boolean }>`
-  display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 10px;
+// Header bar = a flex row of [toggle button (chevron + "Filters (n)") , clear-all button].
+// Two sibling <button>s rather than nesting (a button can't contain a button).
+const HeadBar = styled.div<{ $open?: boolean }>`
+  display: flex; align-items: center; border-bottom: 1px solid ${({ $open }) => ($open ? colors.border : 'transparent')};
+`
+const HeadToggle = styled.button`
+  display: flex; align-items: center; gap: 6px; flex: 1; padding: 7px 10px;
   border: none; background: transparent; cursor: pointer; text-align: left;
   color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
-  border-bottom: 1px solid ${({ $open }) => ($open ? colors.border : 'transparent')};
   & svg { color: ${colors.text.muted}; }
   &:hover { color: ${colors.text.primary}; }
   & .count { color: ${colors.blue.main}; }
+`
+const ClearBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 5px; margin-right: 8px; padding: 3px 8px; border-radius: ${radius.sm};
+  border: 1px solid ${colors.border}; background: transparent; cursor: pointer;
+  color: ${colors.text.muted}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
+  &:hover { color: ${colors.red.main}; border-color: ${colors.red.border}; }
 `
 const Body = styled.div`padding: 10px;`
 const OpWrap = styled.div`position: relative; flex-shrink: 0;`
@@ -102,14 +112,15 @@ function OpPicker({ value, onChange }: { value: string; onChange: (op: string) =
   )
 }
 
-export function FilterPanel({ cols, values, onChange, autoLoad }: {
+export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
   cols: Column[]
   values: Record<string, ServerFilter>
   onChange: (name: string, next: ServerFilter) => void
+  onClearAll: () => void
   autoLoad: boolean
 }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(!autoLoad)
+  const [open, setOpen] = useState(!autoLoad)  // open by default unless the query auto-loads its result
   // lookup-backed filter columns resolve to a value→label map (fetched once per session) so the
   // field is a dropdown of *labels* — the user picks "Customer Service" not the code "01".
   const lookupSpecs = useMemo<LookupSpec[]>(
@@ -130,11 +141,18 @@ export function FilterPanel({ cols, values, onChange, autoLoad }: {
   }
   return (
     <Wrap>
-      <Head type="button" $open={open} onClick={() => setOpen((o) => !o)}>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <Filter size={13} />
-        {t('table.filters')}{activeCount ? <span className="count"> ({activeCount})</span> : null}
-      </Head>
+      <HeadBar $open={open}>
+        <HeadToggle type="button" onClick={() => setOpen((o) => !o)}>
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <Filter size={13} />
+          {t('table.filters')}{activeCount ? <span className="count"> ({activeCount})</span> : null}
+        </HeadToggle>
+        {activeCount > 0 && (
+          <ClearBtn type="button" onClick={onClearAll} title={t('table.clearFilters')}>
+            <FilterX size={11} /> {t('table.clearFilters')}
+          </ClearBtn>
+        )}
+      </HeadBar>
       {open && (
         <Body>
           <Row align="flex-end">
