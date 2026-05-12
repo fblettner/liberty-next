@@ -242,18 +242,23 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `common/index.ts` barrels the rest, pages import
   `{ Button, ... } from '../../common'`), `src/pages/<Screen>/index.tsx` (one dir per page,
   splitting helpers alongside — e.g. `TableView/ResultTable.tsx` + `TableView/styled.ts`),
-  `src/components/` (app chrome: `Layout`, `Sidebar`, `SidebarMenu`, `ProfileModal`, `WorkspaceSelect`), `src/theme.ts`
-  (tokens — colours/fonts/`fontSize`/`radius`/`shadow`/`glass`, all via CSS vars), `src/index.css`
+  `src/components/` (app chrome: `Layout`, `Sidebar`, `SidebarMenu`, `ProfileModal`, `WorkspaceSelect`, `TabStrip`, `TabHost`),
+  `src/tabs/TabsContext.tsx` (`useTabs()` — the open `/sql`+`/http` tabs + the active one, persisted to sessionStorage),
+  `src/theme.ts` (tokens — colours/fonts/`fontSize`/`radius`/`shadow`/`glass`, all via CSS vars), `src/index.css`
   (the `:root`/`.theme-light` var sets + ambient gradient bg + thin scrollbar), `src/i18n.ts` +
   `src/locales/{en,fr}.ts`. **Rule: keep pages small (split helpers into `pages/<X>/`), reusable
   bits go in `common/`, plain logic/shapes go in `services/`/`types/` (no React), and styled
   components pull every colour/size/radius/shadow from `theme.ts` — no hard-coded hex/rgba.**
 - `src/App.tsx` — `react-router-dom` v7; `/login`, `/oidc/callback`, and a `RequireAuth`
-  `Layout` with children `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e`
-  (HttpRunner), `/chat` (Chat), `/settings` (Settings, superuser-only link). The page
-  components are `React.lazy`-split (each its own chunk — the heavy libs travel with them);
-  `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
-- The pages: `Layout` (the shell — `Sidebar` + workspace-title header + a fixed top-right
+  `Layout` with children `/` (Connectors), `/chat` (Chat), `/settings` (Settings, superuser-only),
+  and `/sql/:connector/:target` / `/http/:connector/:target` — the latter two are **thin `<TabRoute>`
+  markers** that open/activate the matching tab; the actual screens render inside `<TabHost>` (in `Layout`),
+  which keeps every open tab mounted (only the active one shown) so each keeps its state. The framework
+  pages (`Connectors`/`Chat`/`Settings`) render via `<Outlet/>` (not tabs — AI gets a drawer later, the
+  others a later phase); `TableView`/`HttpRunner` take `connector`/`query`(or `endpoint`) as props. All
+  `React.lazy`-split; `Layout` shows `<TabStrip/>` (the tab bar, or the "Liberty" title when no tabs) and
+  renders `<Outlet/>` + `<TabHost/>` inside a `<Suspense fallback={<Centered/>}>`.
+- The pages: `Layout` (the shell — `Sidebar` + a `<TabStrip/>` bar + a fixed top-right
   utility pill: app-picker (`WorkspaceSelect` — shown when ≥2 connectors) · EN/FR · dark/light ·
   username→profile · sign-out), `Sidebar` (collapsible nav
   rail — when an app is active it leads with that app's menu tree (`SidebarMenu` — collapsible

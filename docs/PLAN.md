@@ -277,11 +277,14 @@ response_field = "data.0.name"
   `common/`, plain logic/shapes go in `services/`/`types/` (no React there), and every styled
   component pulls colours/sizes/radii/shadows from `theme.ts` — no hard-coded hex/rgba/font-px.
 - `src/App.tsx` — `react-router-dom` v7: `/login`, `/oidc/callback`, `RequireAuth` `Layout`
-  with `/` (Connectors), `/sql/:c/:q` (TableView), `/http/:c/:e` (HttpRunner), `/chat`,
-  `/settings` (superuser). The page components are `React.lazy`-split (the heavy libs ride
-  along — TableView/Chat/Settings each become their own chunk; entry chunk ~112 kB gz);
-  `Layout` renders `<Outlet/>` inside a `<Suspense fallback={<Centered/>}>`.
-- The pages: **Layout** (shell — `Sidebar` + workspace-title header + a fixed top-right
+  with `/` (Connectors), `/chat`, `/settings` (framework pages, via `<Outlet/>`), and
+  `/sql/:connector/:target` / `/http/:connector/:target` — thin `<TabRoute>` markers that
+  open/activate a **tab**; the screens render inside `<TabHost>` (in `Layout`), each kept
+  mounted (only the active shown) so their state persists, the set + active tab persisted to
+  sessionStorage (`src/tabs/TabsContext`). `TableView`/`HttpRunner` take `connector`/`query`(or
+  `endpoint`) as props. All `React.lazy`-split; `Layout` shows `<TabStrip/>` (the tab bar, or the
+  "Liberty" title when no tabs) and renders `<Outlet/>`+`<TabHost/>` in a `<Suspense fallback={<Centered/>}>`.
+- The pages: **Layout** (shell — `Sidebar` + a `<TabStrip/>` bar + a fixed top-right
   utility pill: app-picker (`WorkspaceSelect`, shown when ≥2 connectors — v2 auth is centralized,
   so v1's "pick an app at login" becomes "which connector's screens am I scoped to", persisted,
   pure-frontend soft filter) · EN/FR · dark/light · username→profile · sign-out), **Sidebar** (collapsible nav
@@ -293,8 +296,9 @@ response_field = "data.0.name"
   from `useWorkspace()`, scoped to the picked app — drills to queries/endpoints), **TableView** (param form from `params`/`bind_params`; SELECT →
   `GET` + the `DataTable` grid (`common/DataTable.tsx` — ported from nomaubl: uppercase themed headers,
   global search + a type-aware per-column filter row (text/number/date with an operator; boolean/enum as a
-  select) + clear-all, sort, column resize/hide/reorder, row grouping, CSV/Excel export, paging, localStorage
-  persistence) built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
+  select) + clear-all, multi-column sort (shift-click), column resize / hide / drag-reorder, row grouping,
+  CSV/Excel export, paging, localStorage persistence, a `rowClassName` hook) built from `result.columns`,
+  honouring their display hints (label/hidden/width/align) and `rule`
   (BOOLEAN ✓/✗, ENUM label, LOOKUP split into a "(ID)" + a resolved-label column); when the query has writable
   companions (`describe()` resolves `update_query`/`insert_query`/`delete_query` from the `_put`/`_post`/`_delete`
   naming), an **Edit** toggle puts the whole grid into edit mode (v1's FormsTable batch model — every cell editable,
