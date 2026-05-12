@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { Table as TableIcon, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
-import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
+import { PageLayout, Card, Button, Input, Select, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
 import { colors } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
@@ -25,6 +25,7 @@ export default function TableView({ connector, query }: { connector: string; que
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
+  const [filters, setFilters] = useState<Record<string, string>>({})  // server-filter fields (v1's col_filter columns)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [runErr, setRunErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -43,6 +44,7 @@ export default function TableView({ connector, query }: { connector: string; que
         const init: Record<string, string> = {}
         for (const p of q.params) if (p.default != null) init[p.name] = p.default
         setParams(init)
+        setFilters({})
       })
       .catch((e) => setMetaErr(e instanceof ApiError ? e.message : String(e)))
   }, [connector, query])
@@ -60,6 +62,12 @@ export default function TableView({ connector, query }: { connector: string; que
     return out
   }, [meta])
 
+  // Server-filter fields: result columns flagged `filter` in the query's `columns` config (v1's
+  // col_filter). Their values are passed to the query as :params (sent both as-is and UPPERCASE —
+  // PG folds the discovered column names to lowercase while migrated SQL binds may be uppercase;
+  // text() ignores any :param the SQL doesn't reference, so this is harmless when there's no bind).
+  const filterCols = useMemo(() => (meta?.columns ?? []).filter((c) => c.filter), [meta])
+
   const run = useCallback(async () => {
     if (!meta) return
     if (meta.writable && !window.confirm(t('table.runWritableConfirm', { q: `${connector}.${query}` }))) return
@@ -67,6 +75,7 @@ export default function TableView({ connector, query }: { connector: string; que
     setRunErr(null)
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
+    for (const [k, v] of Object.entries(filters)) if (v !== '') { sent[k] = v; sent[k.toUpperCase()] = v }
     try {
       let res: QueryResult
       if (meta.statement_type === 'SELECT') {
@@ -85,7 +94,7 @@ export default function TableView({ connector, query }: { connector: string; que
     } finally {
       setBusy(false)
     }
-  }, [meta, params, connector, query, t])
+  }, [meta, params, filters, connector, query, t])
 
   // Auto-load: run a SELECT immediately when the screen opens, once, if the query asks for it.
   const autoRan = useRef(false)
@@ -97,8 +106,10 @@ export default function TableView({ connector, query }: { connector: string; que
     }
   }, [meta, result, busy, run])
 
+  // Title = the screen's description (v1 ly_tables.tbl_label) — the menu label is already shown
+  // on the tab; fall back to the menu label, then the technical name.
   const menuLabel = findMenuLabel(menus, { kind: 'sql', connector, target: query })
-  const friendlyName = menuLabel || meta?.label || meta?.description || `${connector}.${query}`
+  const friendlyName = meta?.description || meta?.label || menuLabel || `${connector}.${query}`
 
   if (metaErr)
     return (
@@ -126,7 +137,7 @@ export default function TableView({ connector, query }: { connector: string; que
       description={
         <Sub>
           <Mono>{connector}.{query}</Mono>
-          {meta.description && meta.description !== friendlyName ? <span>· {meta.description}</span> : null}
+          {menuLabel && menuLabel !== friendlyName ? <span>· {menuLabel}</span> : null}
         </Sub>
       }
     >
@@ -148,6 +159,25 @@ export default function TableView({ connector, query }: { connector: string; que
                 </div>
               )
             })}
+            {filterCols.map((c) => (
+              <div key={`f:${c.name}`} style={{ minWidth: 160 }}>
+                <Field label={c.label ?? c.name}>
+                  {c.rule?.kind === 'enum' ? (
+                    <Select value={filters[c.name] ?? ''} onChange={(e) => setFilters((f) => ({ ...f, [c.name]: e.target.value }))}>
+                      <option value="">{t('table.filterAny')}</option>
+                      {c.rule.values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+                    </Select>
+                  ) : (
+                    <Input
+                      type={(c.format ?? '').toLowerCase() === 'date' ? 'date' : 'text'}
+                      placeholder={t('table.serverFilterHint')}
+                      value={filters[c.name] ?? ''}
+                      onChange={(e) => setFilters((f) => ({ ...f, [c.name]: e.target.value }))}
+                    />
+                  )}
+                </Field>
+              </div>
+            ))}
             <Button $variant="primary" onClick={run} disabled={busy}>
               {busy ? <SpinnerRing size={14} thickness={2} /> : <Play size={14} />}
               {busy ? t('common.running') : t('common.run')}

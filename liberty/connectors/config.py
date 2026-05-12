@@ -88,8 +88,9 @@ class ParamDef(BaseModel):
 class ColumnHint(BaseModel):
     """Optional *display* metadata for one result column. The column **schema**
     (names + types) is still discovered from the query at run time — these hints only
-    augment it (a display title, visibility, column order, a width/alignment, and a
-    free-text ``format`` the UI may interpret). ``label``/``format`` may be left out and
+    augment it (a display title, visibility, column order, a width/alignment, a
+    free-text ``format`` the UI may interpret, and a ``filter`` flag — v1's ``col_filter`` —
+    that surfaces the column in the TableView filter panel). ``label``/``format`` may be left out and
     pulled from the shared dictionary (``config/dictionary.toml``) instead: the entry
     key is ``dd`` if set, else the column ``name``; an inline ``label``/``format`` here
     still overrides the dictionary. v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows migrate to
@@ -104,6 +105,7 @@ class ColumnHint(BaseModel):
     dd: str | None = None      # dictionary-entry key for label/format; None → look it up under `name`
     label: str | None = None
     hidden: bool = False
+    filter: bool = False       # surface this column in the TableView filter panel (v1's col_filter)
     width: int | None = None
     align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
     format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted

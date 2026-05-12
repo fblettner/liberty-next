@@ -105,6 +105,7 @@ const en = {
     idColumnSuffix: '(ID)',
     filterAny: '(any)',
     filterOp: 'Operator',
+    serverFilterHint: 'filter…',
     op_contains: 'contains',
     op_equals: 'equals',
     op_notEquals: 'not equals',

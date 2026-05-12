@@ -195,8 +195,9 @@ def migrate_sql_queries(
 # Column hints  (ly_tbl_col / ly_dlg_col → QueryDef.columns)  + dictionary  (ly_dictionary → dictionary.toml)
 # --------------------------------------------------------------------------- #
 
-# v1's `col_visible` is a single char — these spellings mean "hidden".
+# v1's single-char flags. `col_visible` ∈ _HIDDEN_FLAGS → hidden; `col_filter` / `tbl_auto_load` ∈ _YES_FLAGS → on.
 _HIDDEN_FLAGS = {"N", "n", "0", "F", "f", "FALSE", "false", "NO", "no", "OFF", "off"}
+_YES_FLAGS = {"Y", "y", "1", "T", "t", "TRUE", "true", "YES", "yes", "ON", "on"}
 # `col_type` / `dd_type` values that carry no useful display information (the default) — drop them.
 _FORMAT_NOOP = {"", "text", "varchar", "varchar2", "nvarchar", "string", "char", "clob"}
 
@@ -217,15 +218,16 @@ def migrate_column_hints(
     ``col_dd_id`` *only when it differs from* ``name`` (when equal — the common case — it's omitted;
     the connector looks the dictionary entry up under the column name); ``label`` only when an
     explicit ``col_label`` overrides the dictionary; ``hidden`` when ``col_visible`` reads false;
-    ``format`` only when an explicit ``col_type`` overrides the dictionary. Table-widget columns
-    take precedence over form-field columns; the first occurrence of each ``(query_id, col_target)``
-    wins, so the per-query list keeps ``col_seq`` order. (Labels themselves live in the shared
-    dictionary — see :func:`migrate_dictionary`.)
+    ``filter`` when ``col_filter`` reads true (table widgets only — surfaces the column in the
+    TableView filter panel); ``format`` only when an explicit ``col_type`` overrides the dictionary.
+    Table-widget columns take precedence over form-field columns; the first occurrence of each
+    ``(query_id, col_target)`` wins, so the per-query list keeps ``col_seq`` order. (Labels themselves
+    live in the shared dictionary — see :func:`migrate_dictionary`.)
 
     Args:
         tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
             (``query_id``, ``col_target``, ``col_dd_id``, ``col_label``, ``col_seq``,
-            ``col_visible``, ``col_type``, ``col_id``).
+            ``col_visible``, ``col_type``, ``col_filter``, ``col_id``).
     """
     out: dict[int, list[dict[str, Any]]] = {}
     seen: set[tuple[int, str]] = set()
@@ -248,15 +250,13 @@ def migrate_column_hints(
             hint["label"] = col_label  # explicit per-column override of the dictionary
         if str(r.get("col_visible") or "").strip() in _HIDDEN_FLAGS:
             hint["hidden"] = True
+        if str(r.get("col_filter") or "").strip() in _YES_FLAGS:
+            hint["filter"] = True  # surface this column in the TableView filter panel (v1 col_filter)
         fmt = _column_format(r.get("col_type"))
         if fmt:
             hint["format"] = fmt  # explicit per-column override of the dictionary's format
         out.setdefault(qid, []).append(hint)
     return out
-
-
-# v1 single-char "yes" spellings (the inverse of `_HIDDEN_FLAGS`).
-_YES_FLAGS = {"Y", "y", "1", "T", "t", "TRUE", "true", "YES", "yes", "ON", "on"}
 
 
 def migrate_table_meta(

@@ -400,8 +400,8 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_enum_val (enum_id INTEGER, val_enum TEXT, val_label TEXT)",
     "CREATE TABLE ly_enum_val_l (enum_id INTEGER, val_enum TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_lookup (lkp_id INTEGER PRIMARY KEY, lkp_description TEXT, lkp_query_id INTEGER, lkp_dd_id TEXT, lkp_dd_label TEXT, lkp_dd_group TEXT)",
-    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT)",
-    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
+    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT)",
+    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
     "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
     "CREATE TABLE ly_menus (menu_seq_ukid TEXT PRIMARY KEY, menu_parent_id TEXT, menu_child_id TEXT, menu_component TEXT, menu_component_id INTEGER, menu_label TEXT, menu_level INTEGER)",
@@ -478,16 +478,16 @@ async def _seed_v1(engine) -> None:
             [{"i": 1, "d": "Users list", "q": 1, "v": "USR_ID", "l": "USR_NAME", "g": None}],
         )
         await conn.execute(
-            text("INSERT INTO ly_tables (tbl_id, tbl_query_id, tbl_label) VALUES (:i, :q, :l)"),
-            [{"i": 5, "q": 1, "l": "Users"}],
+            text("INSERT INTO ly_tables (tbl_id, tbl_query_id, tbl_label, tbl_auto_load) VALUES (:i, :q, :l, :al)"),
+            [{"i": 5, "q": 1, "l": "Users", "al": "Y"}],
         )
         await conn.execute(
-            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible)"
-                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v)"),
+            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible, col_filter)"
+                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v, :f)"),
             [
-                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y"},
-                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y"},
-                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N"},
+                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y", "f": "Y"},
+                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y", "f": "N"},
+                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N", "f": None},
             ],
         )
         await conn.execute(
@@ -577,8 +577,8 @@ async def test_read_column_hints(v1_engine) -> None:
     assert {(r["query_id"], r["col_target"]) for r in dlg_cols} == {(2, "USR_ID")}
     hints = migrate_column_hints(tbl_cols, dlg_cols)
     assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD"]
-    assert hints[1][0] == {"name": "USR_ID", "format": "number"}  # col_dd_id == name → no `dd`
-    assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N'
+    assert hints[1][0] == {"name": "USR_ID", "filter": True, "format": "number"}  # col_dd_id == name → no `dd`; col_filter 'Y'
+    assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N', col_filter null
     assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]
 
 

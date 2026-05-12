@@ -107,6 +107,7 @@ const fr: Resources = {
     idColumnSuffix: '(ID)',
     filterAny: '(tout)',
     filterOp: 'Opérateur',
+    serverFilterHint: 'filtrer…',
     op_contains: 'contient',
     op_equals: 'égal à',
     op_notEquals: 'différent de',

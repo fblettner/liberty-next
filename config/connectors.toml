@@ -36,7 +36,7 @@ auto_load = true
 sql = "SELECT\n    USR_APPS_ID,\n    USR_ID,\n    USR_NAME,\n    CASE WHEN USR_STATUS = '01' THEN '01' ELSE 'N' END USR_STATUS,\n    USR_DT_CREATION,\n    USR_DT_LOGIN,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_ID_LINKED,\n    USR_REGISTRATION,\n    USR_DT_REFRESH,\n    USR_UKID,\n    (SELECT MAX(LOUT_USAGE) FROM LICENSE_JDE_OUT WHERE LOUT_USER = USR_ID AND LOUT_APPS_ID = USR_APPS_ID) LAST_USAGE,\n   USR_DT_UPDATE\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_APPS_ID = USR_APPS_ID AND USRP_ID = USR_ID\nORDER BY USR_APPS_ID,USR_ID"
 columns = [
     { name = "USR_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USR_ID" },
+    { name = "USR_ID", filter = true },
     { name = "USR_NAME" },
     { name = "USR_STATUS" },
     { name = "USR_DT_CREATION" },
@@ -229,14 +229,14 @@ label = "SECURITY_MENUS"
 description = "Security - Menus"
 sql = "WITH component as (\nSELECT\n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID,\n  CPT_COMPONENT\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN \n    SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    MENU_APPS_ID,\n    MENU_LANGUAGE,\n    MENU_ROOT,\n    CPT_ID,\n    MENU_OBJECT,\n    MENU_FORM,\n    MENU_VERSION,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3,\n    MENU_LEVEL4,\n    MENU_LEVEL5,\n    MENU_LEVEL6,\n    MENU_LEVEL7,\n    MENU_LEVEL8,\n    MENU_LEVEL9,\n    MENU_LEVEL10,\n    MENU_SEQ_UKID,\n    MENU_PARENT_ID,\n    MENU_CHILD_ID,\n    MENU_REFRESH,\n    MENU_UKID,\n    COALESCE(MENU_LEVEL9, \n    COALESCE(MENU_LEVEL8, \n    COALESCE(MENU_LEVEL7, \n    COALESCE(MENU_LEVEL6, \n    COALESCE(MENU_LEVEL5, \n    COALESCE(MENU_LEVEL4,MENU_LEVEL3, \n    COALESCE(MENU_LEVEL2, \n    COALESCE(MENU_LEVEL1, MENU_ROOT)))))))) MENU_LABEL\nFROM\n    SECURITY_MENUS\nLEFT JOIN\n    component\n    ON JDEO_APPS_ID = MENU_APPS_ID\n    AND JDEO_OBJECT = MENU_OBJECT\nORDER BY MENU_APPS_ID, MENU_SEQ_UKID"
 columns = [
-    { name = "MENU_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "MENU_ROOT" },
-    { name = "MENU_OBJECT" },
+    { name = "MENU_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "MENU_ROOT", filter = true },
+    { name = "MENU_OBJECT", filter = true },
     { name = "MENU_FORM" },
     { name = "MENU_VERSION" },
-    { name = "CPT_ID" },
-    { name = "MENU_ID" },
-    { name = "MENU_LEVEL1" },
+    { name = "CPT_ID", filter = true },
+    { name = "MENU_ID", filter = true },
+    { name = "MENU_LEVEL1", filter = true },
     { name = "MENU_LEVEL2" },
     { name = "MENU_LEVEL3" },
     { name = "MENU_LEVEL4", hidden = true },
@@ -257,9 +257,9 @@ label = "SECURITY_RIGHTS_USERS"
 description = "Rights - Users"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_RUN" },
@@ -275,9 +275,9 @@ label = "SECURITY_RIGHTS_ROLES"
 description = "Rights - Roles"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_USER_ID = '*ROLE'\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_ROLE_ID,SER_OBJECT"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_RUN" },
@@ -293,9 +293,9 @@ label = "SECURITY_RIGHTS_USERS_ROLES"
 description = "Rights - Users by roles"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_ROLE_ID", dd = "ROL_ID" },
@@ -312,9 +312,9 @@ label = "SECURITY_RIGHTS_USERS_MENUS"
 description = "Rights - Users by menus"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n        SECURITY_MENUS\n        ON MENU_APPS_ID = SER_APPS_ID\n        AND MENU_SEQ_UKID = SER_MENU_SEQUKID\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_ROLE_ID", dd = "ROL_ID" },
@@ -336,10 +336,10 @@ label = "SECURITY_RIGHTS_ROLES_MENUS"
 description = "Rights - Roles by menus"
 sql = "WITH component as (\nSELECT\n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  CPT_ID,\n  CPT_COMPONENT\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN \n    SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    CPT_ID,\n    SER_ROLE_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL,\n    MENU_ROOT,\n    MENU_ID,\n    MENU_LEVEL1,\n    MENU_LEVEL2,\n    MENU_LEVEL3,\n    MENU_LEVEL4,\n    MENU_LEVEL5,\n    MENU_LEVEL6,\n    MENU_LEVEL7,\n    MENU_LEVEL8,\n    MENU_LEVEL9,\n    MENU_SEQ_UKID\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n    SECURITY_MENUS\n    ON MENU_APPS_ID = SER_APPS_ID\n    AND MENU_SEQ_UKID = SER_MENU_SEQUKID\nLEFT JOIN\n    component\n    ON JDEO_APPS_ID = SER_APPS_ID\n    AND JDEO_OBJECT = SER_OBJECT\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_USER_ID = '*ROLE'\n    AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,MENU_SEQ_UKID,SER_ROLE_ID"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CPT_ID" },
-    { name = "SER_ROLE_ID", dd = "ROL_ID" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "CPT_ID", filter = true },
+    { name = "SER_ROLE_ID", dd = "ROL_ID", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_RUN" },
@@ -381,10 +381,10 @@ label = "SOD_DETAILS"
 description = "SOD - Details"
 sql = "SELECT\n    CFD_APPS_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
-    { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID" },
-    { name = "CFD_RISK_ID", dd = "RISK_ID" },
-    { name = "CFD_USER_ID", dd = "USR_ID" },
+    { name = "CFD_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter = true },
+    { name = "CFD_RISK_ID", dd = "RISK_ID", filter = true },
+    { name = "CFD_USER_ID", dd = "USR_ID", filter = true },
     { name = "CFD_ACT1_ID" },
     { name = "CFD_ACT1_OBJECT" },
     { name = "CFD_ROLE1_ID" },
@@ -399,9 +399,9 @@ label = "SOD_PROVEN"
 description = "SOD - Proven"
 sql = "WITH  Activity AS\n( SELECT  DISTINCT\n    ACL_APPS_ID,\n    TRIM(ACL_USER_ID) ACL_USER_ID,\n    ACL_TABLE_NAME\n    FROM\n        SECURITY_ACTIVITY_LOG\n)\nSELECT DISTINCT\n    CFD_APPS_ID,\n    CFD_PROCESS_ID,\n    CFD_RISK_ID,\n    CFD_USER_ID,\n    CFD_ACT1_ID,\n    CFD_ACT1_OBJECT,\n    CFD_ROLE1_ID,\n    CFD_ACT2_ID,\n    CFD_ACT2_OBJECT,\n    CFD_ROLE2_ID\nFROM\n    SOD_CONFLICT_DETAILS\nINNER JOIN\n    SECURITY_XREF G  ON G.XREF_APPS_ID = CFD_APPS_ID AND G.XREF_OBJECT_FROM = CFD_ACT1_OBJECT\nINNER JOIN\n    SECURITY_XREF H  ON H.XREF_APPS_ID = CFD_APPS_ID AND H.XREF_OBJECT_FROM = CFD_ACT2_OBJECT AND H.XREF_OBJECT_FROM <> G.XREF_OBJECT_FROM\nINNER JOIN  Activity I  ON I.ACL_APPS_ID = CFD_APPS_ID AND I.ACL_USER_ID = CFD_USER_ID AND I.ACL_TABLE_NAME = G.XREF_OBJECT_TO\nINNER JOIN  Activity J  ON J.ACL_APPS_ID = CFD_APPS_ID AND J.ACL_USER_ID = CFD_USER_ID AND J.ACL_TABLE_NAME = H.XREF_OBJECT_TO\nWHERE\n    I.ACL_TABLE_NAME <> J.ACL_TABLE_NAME\nORDER BY CFD_APPS_ID,CFD_PROCESS_ID,CFD_RISK_ID,CFD_USER_ID,CFD_ACT1_ID,CFD_ACT2_ID"
 columns = [
-    { name = "CFD_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID" },
-    { name = "CFD_RISK_ID", dd = "RISK_ID" },
+    { name = "CFD_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "CFD_PROCESS_ID", dd = "PROCESS_ID", filter = true },
+    { name = "CFD_RISK_ID", dd = "RISK_ID", filter = true },
     { name = "CFD_USER_ID", dd = "USR_ID" },
     { name = "CFD_ACT1_ID" },
     { name = "CFD_ACT1_OBJECT" },
@@ -1539,10 +1539,10 @@ label = "LICENSE_JDE_TRANSACTIONS_DETAILS"
 description = "License - Transactions Details (JDE)"
 sql = "WITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDEO_OBJECT,\n    JDEO_DESCRIPTION,\n    CPT_ID\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    LUSR_APPS_ID,\n    CPT_ID,\n    TRIM(LUSR_USER_ID) LUSR_USER_ID,\n    LUSR_TABLE_NAME,\n    JDEO_DESCRIPTION,\n    TO_CHAR(MAX(LUSR_DT_TRANSACTION),'yyyy-MM-dd') LUSR_DT_TRANSACTION\nFROM\n    LICENSE_JDE_USERS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = LUSR_APPS_ID\nINNER JOIN\n    component\n    ON JDEO_APPS_ID = LUSR_APPS_ID\n    AND LUSR_TABLE_NAME = JDEO_OBJECT\nGROUP BY\n    LUSR_APPS_ID,\n    CPT_ID,\n    LUSR_USER_ID,\n    LUSR_TABLE_NAME,\n    JDEO_DESCRIPTION\nORDER BY LUSR_APPS_ID,CPT_ID,LUSR_USER_ID,LUSR_TABLE_NAME"
 columns = [
-    { name = "LUSR_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CPT_ID" },
-    { name = "LUSR_USER_ID", dd = "USR_ID" },
-    { name = "LUSR_TABLE_NAME", dd = "JDEO_OBJECT" },
+    { name = "LUSR_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "CPT_ID", filter = true },
+    { name = "LUSR_USER_ID", dd = "USR_ID", filter = true },
+    { name = "LUSR_TABLE_NAME", dd = "JDEO_OBJECT", filter = true },
     { name = "LUSR_DT_TRANSACTION" },
 ]
 
@@ -1552,12 +1552,12 @@ label = "LICENSE_JDE_OBJECTS_ALLOWED"
 description = "License - Objects Details (JDE)"
 sql = "WITH component as (\nSELECT \n    JDEO_APPS_ID,\n    JDEO_OBJECT,\n    JDEO_DESCRIPTION,\n    CPT_ID\nFROM\n    JDE_OBJECTS\nINNER JOIN\n    SETTINGS_JDE_SY\n    ON JDEO_SY = SYC_ID\nINNER JOIN SETTINGS_LIC_COMPONENTS\n    ON SYC_CPT_ID = CPT_ID\n)\nSELECT\n    DISTINCT\n    SER_APPS_ID,\n    CPT_ID,\n    SER_USER_ID,\n    USRP_TECHNICAL,\n    USRP_IS_LINKED,\n    SER_OBJECT,\n    JDEO_DESCRIPTION\nFROM\n    SECURITY_RIGHTS\nINNER JOIN\n    SETTINGS_APPLICATIONS\n    ON APPS_ID = SER_APPS_ID\nINNER JOIN\n    component\n    ON JDEO_APPS_ID = SER_APPS_ID\n    AND  JDEO_OBJECT = SER_OBJECT\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON USRP_ID = SER_USER_ID AND (USRP_TECHNICAL = 'Y' OR USRP_IS_LINKED = 'Y')\n    AND USRP_APPS_ID= SER_APPS_ID\nWHERE \n    SER_USER_ID <> '*ROLE' AND SER_RUN = 'Y'\nORDER BY SER_APPS_ID,CPT_ID,SER_USER_ID,SER_OBJECT"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "CPT_ID" },
-    { name = "SER_USER_ID", dd = "USR_ID" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "CPT_ID", filter = true },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
     { name = "USRP_TECHNICAL", format = "boolean" },
     { name = "USRP_IS_LINKED" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
 ]
 
 [[connectors.nomasx1.queries]]
@@ -1769,10 +1769,10 @@ label = "SECURITY_ACTIVITY_LOG"
 description = "Activity Log"
 sql = "SELECT\n  ACL_APPS_ID,\n  TRIM(ACL_USER_ID) ACL_USER_ID,\n  ACL_SCHEMA,\n  ACL_TABLE_NAME,\n  ACL_DT_TRANSACTION,\n  ACL_COUNT,\n  ACL_OBJECT_ID\nFROM\n  SECURITY_ACTIVITY_LOG\nORDER BY ACL_APPS_ID, ACL_USER_ID, ACL_TABLE_NAME"
 columns = [
-    { name = "ACL_APPS_ID", dd = "APPS_ID" },
-    { name = "ACL_USER_ID", dd = "USR_ID" },
+    { name = "ACL_APPS_ID", dd = "APPS_ID", filter = true },
+    { name = "ACL_USER_ID", dd = "USR_ID", filter = true },
     { name = "ACL_SCHEMA" },
-    { name = "ACL_TABLE_NAME" },
+    { name = "ACL_TABLE_NAME", filter = true },
     { name = "ACL_DT_TRANSACTION" },
     { name = "ACL_COUNT" },
     { name = "ACL_OBJECT_ID" },
@@ -1843,10 +1843,10 @@ label = "LICENSE_JDE_OUT_ALL"
 description = "License - Object Usage Tracking - All"
 sql = "WITH component as (\nSELECT \n  JDEO_APPS_ID,\n  JDEO_OBJECT,\n  JDEO_DESCRIPTION,\n  CPT_ID\nFROM\n  JDE_OBJECTS\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\n)\nSELECT \n  LOUT_APPS_ID,\n  CPT_ID,\n  LOUT_USER,\n  LOUT_OBJECT,\n  JDEO_DESCRIPTION,\n  LOUT_VERSION,\n  LOUT_USAGE LAST_USAGE\nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  component\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nORDER BY LOUT_APPS_ID, CPT_ID, LOUT_USER, LOUT_OBJECT"
 columns = [
-    { name = "LOUT_APPS_ID", dd = "APPS_ID", format = "number" },
+    { name = "LOUT_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
     { name = "CPT_ID", hidden = true },
-    { name = "LOUT_USER", dd = "USR_ID" },
-    { name = "LOUT_OBJECT" },
+    { name = "LOUT_USER", dd = "USR_ID", filter = true },
+    { name = "LOUT_OBJECT", filter = true },
     { name = "LOUT_VERSION" },
     { name = "JDEO_DESCRIPTION" },
     { name = "LAST_USAGE", format = "date" },
@@ -1858,9 +1858,9 @@ label = "SECURITY_RIGHTS_USERS_ROLES_OUT"
 description = "Rights / OUT - Users by roles"
 sql = "SELECT\n    DISTINCT\n    SER_APPS_ID,\n    SER_ROLE_ID,\n    SER_USER_ID,\n    SER_OBJECT,\n    SERL_FORM,\n    SER_VERSION,\n    SER_RUN,\n    SER_ROLE_ACTION_ID,\n    SER_ADD,\n    SER_CHG,\n    SER_DEL\nFROM\n    SECURITY_RIGHTS\nWHERE\n    TRIM(SER_OBJECT) IS NOT NULL\n    AND SER_RUN = 'Y'\nUNION ALL\nSELECT \n  LOUT_APPS_ID,\n  '*ALL' SER_ROLE_ID,\n  LOUT_USER SER_USER_ID,\n  LOUT_OBJECT SER_OBJECT,\n  '*ALL' SERL_FORM,\n  LOUT_VERSION SER_VERSION,\n  'Y' SER_RUN,\n  '*DEFAULT' SER_ROLE_ACTION_ID,\n  'Y' SER_ADD,\n  'Y' SER_CHG,\n  'Y' SER_DEL  \nFROM\n  LICENSE_JDE_OUT\nINNER JOIN\n  JDE_OBJECTS\n  ON JDEO_APPS_ID = LOUT_APPS_ID\n  AND JDEO_OBJECT = LOUT_OBJECT\nINNER JOIN\n  SETTINGS_JDE_SY\n  ON SYC_ID = JDEO_SY\nINNER JOIN \n  SETTINGS_LIC_COMPONENTS\n  ON SYC_CPT_ID = CPT_ID\nORDER BY SER_APPS_ID,SER_USER_ID,SER_OBJECT"
 columns = [
-    { name = "SER_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "SER_USER_ID", dd = "USR_ID" },
-    { name = "SER_OBJECT", dd = "JDEO_OBJECT" },
+    { name = "SER_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "SER_USER_ID", dd = "USR_ID", filter = true },
+    { name = "SER_OBJECT", dd = "JDEO_OBJECT", filter = true },
     { name = "SERL_FORM" },
     { name = "SER_VERSION" },
     { name = "SER_ROLE_ID", dd = "ROL_ID" },
@@ -2097,11 +2097,11 @@ description = "Settings - Users properties"
 auto_load = true
 sql = "SELECT\n    USR_APPS_ID USRP_APPS_ID,\n    USR_ID USRP_ID,\n    USR_NAME USRP_NAME,\n    USRP_PRIVILEGED,\n    USRP_TECHNICAL,\n    USRP_GENERIC,\n    USRP_GENERIC_COUNT,\n    USRP_IS_LINKED,\n    USRP_ID_LINKED,\n    USRP_IS_PREVIOUS,\n    USRP_ID_PREVIOUS,\n    USRP_AUDIT_USER,\n    USRP_AUDIT_DATE,\n    USRP_UKID\n--    CASE WHEN USRP_ID IS NULL THEN 'Y' ELSE 'N' END ADD_ROW\nFROM\n    SECURITY_USERS\nLEFT JOIN\n    SECURITY_USERS_PROP\n    ON  USRP_APPS_ID = USR_APPS_ID  AND USRP_ID = USR_ID\nORDER BY USRP_APPS_ID, USRP_ID"
 columns = [
-    { name = "USRP_APPS_ID", dd = "APPS_ID", format = "number" },
-    { name = "USRP_ID", dd = "USR_ID" },
+    { name = "USRP_APPS_ID", dd = "APPS_ID", filter = true, format = "number" },
+    { name = "USRP_ID", dd = "USR_ID", filter = true },
     { name = "USRP_NAME", hidden = true },
     { name = "USRP_PRIVILEGED" },
-    { name = "USRP_TECHNICAL", format = "boolean" },
+    { name = "USRP_TECHNICAL", filter = true, format = "boolean" },
     { name = "USRP_GENERIC" },
     { name = "USRP_GENERIC_COUNT" },
     { name = "USRP_IS_LINKED" },
@@ -2272,14 +2272,14 @@ label = "Audit - Lookup"
 description = "Audit - Lookup"
 sql = "SELECT \n  audit_trail_query.AUD_APPS_ID, \n  audit_trail_query.AUD_ROW_ID, \n  AUD_OPERATION,\n  AUD_DT_TRANSACTION,\n  AUD_USERNAME,\n  AUD_SEG_OWNER,\n  AUD_SEG_NAME, \n  AUD_TYPE, \n  AUD_NAME, \n  AUD_VALUE\nFROM \n  audit_trail_query\nINNER JOIN \n  audit_trail_values\n  ON audit_trail_query.aud_apps_id = audit_trail_values.aud_apps_id\n  AND audit_trail_query.aud_row_id = audit_trail_values.aud_row_id\nORDER BY AUD_APPS_ID, AUD_ROW_ID"
 columns = [
-    { name = "AUD_APPS_ID", format = "number" },
+    { name = "AUD_APPS_ID", filter = true, format = "number" },
     { name = "AUD_ROW_ID" },
-    { name = "AUD_DT_TRANSACTION", format = "date" },
-    { name = "AUD_USERNAME" },
-    { name = "AUD_SEG_NAME" },
+    { name = "AUD_DT_TRANSACTION", filter = true, format = "date" },
+    { name = "AUD_USERNAME", filter = true },
+    { name = "AUD_SEG_NAME", filter = true },
     { name = "AUD_TYPE" },
-    { name = "AUD_NAME" },
-    { name = "AUD_VALUE" },
+    { name = "AUD_NAME", filter = true },
+    { name = "AUD_VALUE", filter = true },
     { name = "AUD_OPERATION" },
     { name = "AUD_SEG_OWNER" },
 ]
@@ -2297,8 +2297,8 @@ description = "License - Object Usage Tracking - Users / Roles"
 sql = "SELECT \n    LOUT_APPS_ID,\n    LOUT_USER,\n    LOUT_USAGE,\n    LOUT_ROLE,\n    LOUT_ENV \nFROM \n  LICENSE_JDE_OUT_USERS\nORDER BY LOUT_USAGE DESC"
 columns = [
     { name = "LOUT_APPS_ID", dd = "APPS_ID" },
-    { name = "LOUT_USER", dd = "USR_ID", format = "date" },
-    { name = "LOUT_USAGE", format = "date" },
+    { name = "LOUT_USER", dd = "USR_ID", filter = true, format = "date" },
+    { name = "LOUT_USAGE", filter = true, format = "date" },
     { name = "LOUT_ROLE" },
     { name = "LOUT_ENV" },
 ]
@@ -2328,10 +2328,10 @@ description = "License - Object Usage Tracking - Objects"
 sql = "SELECT \n    LOUT_APPS_ID,\n    LOUT_OBJECT,\n    LOUT_VERSION,\n    LOUT_TYPE,\n    LOUT_USAGE,\n    LOUT_COUNT \nFROM \n  LICENSE_JDE_OUT_OBJECTS"
 columns = [
     { name = "LOUT_APPS_ID" },
-    { name = "LOUT_OBJECT" },
+    { name = "LOUT_OBJECT", filter = true },
     { name = "LOUT_VERSION" },
-    { name = "LOUT_TYPE" },
-    { name = "LOUT_USAGE", format = "date" },
+    { name = "LOUT_TYPE", filter = true },
+    { name = "LOUT_USAGE", filter = true, format = "date" },
     { name = "LOUT_COUNT" },
 ]
 

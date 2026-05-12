@@ -209,7 +209,10 @@ export function DataTable<T extends object>({
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
 
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(saved.visibility ?? initialColumnVisibility ?? {})
+  // Start from the column hints' hidden flags, then layer the user's saved choices on top — so a
+  // `hidden` hint takes effect on first load *and* survives a stale saved `{}` from before the hint
+  // existed, while still letting the user un-hide a column and have that stick.
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => ({ ...(initialColumnVisibility ?? {}), ...(saved.visibility ?? {}) }))
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(saved.order ?? [])
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(saved.sizes ?? {})
   const [sorting, setSorting] = useState<SortingState>([])

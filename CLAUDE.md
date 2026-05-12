@@ -42,13 +42,13 @@ Full dep set pinned in `pyproject.toml`.
   (`sql = { default = "…", oracle = "…" }`, keyed by SQLAlchemy backend name; `default`
   required) — `QueryDef.sql_for(dialect)` / `.default_sql` / `.dialects` resolve it.
   A query may also carry optional `columns` display hints (`ColumnHint`: `name`, `dd?`,
-  `label?`, `hidden?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
-  schema (display title / visibility / column order / a UI-interpreted `format`); `label`/`format`
-  may be omitted and pulled from the shared dictionary (the entry key is `dd`, or `name` when
-  `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
-  A query may also carry `label`/`description` (display names — the frontend titles the screen with
-  the *menu* label if it has one, else `description`/`label`) and `auto_load = true` (v1's per-table
-  auto-load — the TableView runs a SELECT immediately on open instead of waiting for a Run click).
+  `label?`, `hidden?`, `filter?`, `width?`, `align?`, `format?`) — these only *augment* the still-discovered
+  schema (display title / visibility / column order / a `filter` flag — v1's `col_filter` — / a UI-interpreted
+  `format`); `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
+  `name` when `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
+  A query may also carry `label`/`description` (display names — the frontend titles the TableView with
+  `description`, else `label`, else the menu label; the menu label rides on the tab) and `auto_load = true`
+  (v1's per-table auto-load — the TableView runs a SELECT immediately on open instead of waiting for a Run click).
   `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
   + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
@@ -271,11 +271,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
   self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
   the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
-  `TableView` (titled with the screen's *menu* label — `services/menuLabels.findMenuLabel` walks the
-  `GET /api/menus` trees — else the query's `description`/`label`, the technical `connector.query` as a
-  mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params`;
-  SELECT → `GET` + the `DataTable`
-  grid built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
+  `TableView` (titled with the query's `description` (v1's `tbl_label`), else `label`, else the menu label —
+  `services/menuLabels.findMenuLabel` walks the `GET /api/menus` trees; the technical `connector.query` is the
+  mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params` plus a
+  **server-filter field per `filter`-flagged result column** (v1's `col_filter`, from `meta.columns`) — its value
+  is sent to the query as a `:param` (both as-is and UPPERCASE) on Run, so the SQL can pre-filter before the
+  grid loads (the in-grid TanStack filters then refine the loaded page). SELECT → `GET` + the `DataTable`
+  grid built from `result.columns`, honouring their display hints (label/hidden/width/align — `hidden` takes
+  effect on first load and survives a stale saved grid state) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
   run on the displayed value, rule rendering is visual-only. When the query has writable companions, an
@@ -342,7 +345,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
   `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
   `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
-  reads false), `format?` (only when an explicit `col_type` overrides the dictionary)`}`; table-widget
+  reads false), `filter?` (`col_filter` reads true — table widgets only), `format?` (only when an explicit
+  `col_type` overrides the dictionary)`}`; table-widget
   columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq` order)
   — passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns`;
   `migrate_dictionary(ly_dictionary rows, ly_dictionary_l rows, enum_rows=(), enum_val_rows=(),
@@ -370,7 +374,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `read_table_meta(engine)` (→ `ly_tables` `tbl_query_id`/`tbl_label`/`tbl_auto_load` + `ly_dlg_frm`
   `frm_query_id`/`frm_label`) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
-  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`) (SELECT-only; a missing
+  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter` — `ly_dlg_col` has
+  no `col_filter`, so it's aliased NULL) (SELECT-only; a missing
   table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
   accepts any async URL — `postgresql+asyncpg://…`).
 - `liberty/menus/` — `config.py`: the `config/menus.toml` schema (`MenuItem`/`AppMenu`/`MenusFile`,

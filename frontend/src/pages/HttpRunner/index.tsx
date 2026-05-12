@@ -75,7 +75,7 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
   }, [params, connector, endpoint])
 
   const menuLabel = findMenuLabel(menus, { kind: 'http', connector, target: endpoint })
-  const friendlyName = menuLabel || meta?.label || meta?.description || `${connector}.${endpoint}`
+  const friendlyName = meta?.description || meta?.label || menuLabel || `${connector}.${endpoint}`
 
   if (metaErr)
     return (
@@ -103,7 +103,7 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
       description={
         <Sub>
           <Mono>{connector}.{endpoint}</Mono>
-          {meta.description && meta.description !== friendlyName ? <span>· {meta.description}</span> : null}
+          {menuLabel && menuLabel !== friendlyName ? <span>· {menuLabel}</span> : null}
         </Sub>
       }
     >

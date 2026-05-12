@@ -77,6 +77,7 @@ class Column:
     type: str | None = None
     label: str | None = None
     hidden: bool = False
+    filter: bool = False
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -88,6 +89,8 @@ class Column:
             d["label"] = self.label
         if self.hidden:
             d["hidden"] = True
+        if self.filter:
+            d["filter"] = True
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -345,7 +348,7 @@ def _resolve_hint(
                 fmt = entry.format
             rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
-        name=name or h.name, type=type_, label=label, hidden=h.hidden,
+        name=name or h.name, type=type_, label=label, hidden=h.hidden, filter=h.filter,
         width=h.width, align=h.align, format=fmt, rule=rule,
     )
 

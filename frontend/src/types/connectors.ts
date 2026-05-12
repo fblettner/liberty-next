@@ -21,6 +21,9 @@ export interface SqlQueryMeta {
   statement_type: string
   params: ParamDef[]
   bind_params: string[]
+  /** resolved display hints from the query's `columns` config (label/format/hidden/filter/width/align/rule);
+   *  `filter: true` ones are surfaced as server-filter fields in TableView. */
+  columns: Column[]
 }
 
 export interface ApiEndpointMeta {
@@ -59,6 +62,8 @@ export interface Column {
   /** Optional display hints from the query's `columns` config (see ColumnHint on the backend). */
   label?: string
   hidden?: boolean
+  /** surface this column in the TableView filter panel (v1's col_filter). */
+  filter?: boolean
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string
