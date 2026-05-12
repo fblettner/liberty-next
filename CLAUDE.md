@@ -330,7 +330,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   in-grid TanStack filters then refine the loaded page; those `:<col>`/`:<col>_op` binds are kept out of the
   param form). SELECT → `GET` + the `DataTable`
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align — `hidden` takes
-  effect on first load and survives a stale saved grid state; a `visible_when` column is dropped from the
+  effect on first load and survives a stale saved grid state; `align` defaults from the type when not set —
+  numbers right, booleans/checkboxes centred, everything else left — and is carried in the column's TanStack
+  `meta` so the header lines up with the cells; a `visible_when` column is dropped from the
   grid entirely when a `field` server-filter is set to a value outside its allowed set — recomputed live as you change the FilterPanel) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters

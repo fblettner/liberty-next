@@ -32,8 +32,13 @@ type Align = CSSProperties['textAlign']
 type EditCtrl = 'enum' | 'date' | 'number' | 'text'
 
 function colHeader(c: Column): string { return c.label ?? c.name }
-function cellAlign(c: Column): Align {
-  return c.align === 'left' || c.align === 'right' || c.align === 'center' ? c.align : undefined
+// Column alignment: an explicit `align` hint wins; otherwise the natural default — booleans
+// (✓/✗) centered, numbers right-aligned (like every spreadsheet), everything else left.
+function cellAlign(c: Column): 'left' | 'right' | 'center' | undefined {
+  if (c.align === 'left' || c.align === 'right' || c.align === 'center') return c.align
+  if (c.rule?.kind === 'boolean') return 'center'
+  if (isNumericish((c.format ?? '').toLowerCase(), (c.type ?? '').toLowerCase())) return 'right'
+  return undefined
 }
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
 function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
@@ -52,10 +57,10 @@ function editCtrlOf(c: Column): EditCtrl {
   if (isNumericish(fmt, typ)) return 'number'
   return 'text'  // boolean codes & everything else → raw text
 }
-const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[]) =>
+const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
   kind === 'boolean' || kind === 'enum'
-    ? { filterFn: 'equals' as const, meta: { filter: { kind, options } } as FilterMeta }
-    : { filterFn: genericFilterFn, meta: { filter: { kind } } as FilterMeta }
+    ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
+    : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
 
 // Send both the as-is keys and UPPERCASE copies: the migrated `_put`/`_post`/`_delete` queries
 // use v1's uppercase column names, while Postgres returns the read result's columns lowercased;
@@ -395,7 +400,7 @@ export function ResultTable({
           header: colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
-          ...filterPropsFor('text'),
+          ...filterPropsFor('text', undefined, align),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             if (editMode && !isGroupRow(info)) return editCellFor(c, info)
@@ -433,7 +438,7 @@ export function ResultTable({
           return v
         },
         size: c.width ?? undefined,
-        ...filterPropsFor(kind, enumOptions),
+        ...filterPropsFor(kind, enumOptions, align),
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
           if (editMode && !isGroupRow(info)) return editCellFor(c, info)
@@ -467,7 +472,7 @@ export function ResultTable({
         },
         size: 34, minSize: 34,
         enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
-        meta: { internal: true },
+        meta: { internal: true, align: 'center' },
         cell: (info) => {
           if (isGroupRow(info)) return null
           const row = info.row.original as DataRow
@@ -479,7 +484,7 @@ export function ResultTable({
         header: () => null,
         size: 62, minSize: 62,
         enableSorting: false, enableHiding: false, enableColumnFilter: false, enableGrouping: false, enableResizing: false,
-        meta: { internal: true },
+        meta: { internal: true, align: 'center' },
         cell: (info) => {
           if (isGroupRow(info)) return null
           const row = info.row.original as DataRow

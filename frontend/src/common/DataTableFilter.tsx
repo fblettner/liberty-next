@@ -12,9 +12,14 @@ import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum'
 
+/** Per-column extras carried in TanStack's `columnDef.meta`. */
 export interface FilterMeta {
-  /** what control to show + how to interpret the filter value */
+  /** what filter control to show + how to interpret the filter value */
   filter?: { kind: FilterKind; options?: { value: string; label: string }[] }
+  /** header + cell text alignment (numbers → right, booleans → center, …); default left */
+  align?: 'left' | 'right' | 'center'
+  /** an internal helper column (the edit-mode select / status columns) — excluded from search, the Columns menu, etc. */
+  internal?: boolean
 }
 
 /** The filter value for a text/number/date column: an operator + up to two operands.

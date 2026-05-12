@@ -32,7 +32,7 @@ import {
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
-import { ColumnFilterControl } from './DataTableFilter'
+import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
 
@@ -154,7 +154,10 @@ const Th = styled.th<{ $sortable?: boolean; $dropTarget?: boolean }>`
   cursor: ${({ $sortable }) => ($sortable ? 'pointer' : 'default')};
   ${({ $sortable }) => $sortable && `&:hover { color: ${colors.text.secondary}; }`}
 `
-const ThInner = styled.div`display: flex; align-items: center; gap: 4px;`
+const ThInner = styled.div<{ $align?: FilterMeta['align'] }>`
+  display: flex; align-items: center; gap: 4px;
+  justify-content: ${({ $align }) => ($align === 'right' ? 'flex-end' : $align === 'center' ? 'center' : 'flex-start')};
+`
 const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; align-items: center; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
 const SortIx = styled.sup`font-size: 8px; color: ${colors.blue.main}; margin-left: 1px;`
 const GroupBadge = styled.span`display: inline-flex; align-items: center; color: ${colors.blue.main};`
@@ -317,7 +320,8 @@ export function DataTable<T extends object>({
     setColumnOrder(ids)
   }
 
-  const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as { internal?: boolean } | undefined)?.internal
+  const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.internal
+  const colAlign = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.align
   const exportRows = () => {
     const cols = table.getVisibleLeafColumns().filter((c) => !isInternal(c))
     const headers = cols.map((c) => colHeaderText(c))
@@ -453,6 +457,7 @@ export function DataTable<T extends object>({
                   const sortIx = h.column.getSortIndex()
                   const internal = isInternal(h.column)
                   const reorderable = !internal && h.column.getCanHide() !== false // a real column
+                  const align = colAlign(h.column)
                   return (
                     <Th
                       key={h.id}
@@ -460,7 +465,10 @@ export function DataTable<T extends object>({
                       $dropTarget={reorderable && dragOverId === h.column.id}
                       // only constrain a column that asked for a width (a `width` display hint, or the
                       // narrow internal select/status columns); the rest auto-size to content
-                      style={h.column.columnDef.size != null ? { width: h.getSize(), minWidth: h.column.columnDef.minSize } : undefined}
+                      style={{
+                        ...(h.column.columnDef.size != null ? { width: h.getSize(), minWidth: h.column.columnDef.minSize } : null),
+                        textAlign: align,
+                      }}
                       onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
                       draggable={reorderable}
                       onDragStart={(e) => {
@@ -482,7 +490,7 @@ export function DataTable<T extends object>({
                       }}
                       onDragEnd={() => { dragColRef.current = null; setDragOverId(null) }}
                     >
-                      <ThInner>
+                      <ThInner $align={align}>
                         {h.column.getIsGrouped() && <GroupBadge title={t('table.grouped', 'grouped')}><Group size={11} /></GroupBadge>}
                         {flexRender(h.column.columnDef.header, h.getContext())}
                         {canSort && (
@@ -522,6 +530,7 @@ export function DataTable<T extends object>({
                         style={{
                           ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
                           paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
+                          textAlign: colAlign(cell.column),
                         }}
                       >
                         {cell.getIsGrouped() ? (
