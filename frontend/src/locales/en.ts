@@ -109,6 +109,8 @@ const en = {
     op_contains: 'contains',
     op_equals: 'equals',
     op_notEquals: 'not equals',
+    op_startsWith: 'starts with',
+    op_endsWith: 'ends with',
     op_lt: 'less than',
     op_le: 'less than or equal',
     op_gt: 'greater than',

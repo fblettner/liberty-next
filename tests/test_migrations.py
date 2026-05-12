@@ -123,6 +123,31 @@ def test_migrate_sql_queries_connector_prefix() -> None:
     assert "v1_default" in out["pools"]
 
 
+def test_migrate_sql_queries_filter_wrap() -> None:
+    # a read query with a filter-flagged column gets wrapped: SELECT * FROM (<orig>) _flt WHERE …
+    out = migrate_sql_queries(
+        _QUERIES, _SQL_ROWS,
+        column_hints={1: [{"name": "USR_ID", "filter": True}, {"name": "USR_NAME"}]},
+    )
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    sql = by_name["users_list_select"]["sql"]
+    assert isinstance(sql, dict)  # query 1 has two dialect variants → still a map
+    inner = "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status"
+    assert sql["default"].startswith("SELECT * FROM (\n" + inner)
+    assert "WHERE 1=1" in sql["default"]
+    assert ":USR_ID IS NULL" in sql["default"] and ":USR_ID_op" in sql["default"]
+    assert sql["default"].rstrip().endswith("ORDER BY usr_name")  # ORDER BY moved onto the outer query
+    # a query with no filter columns is left alone (no wrapper)
+    assert by_name["twins_select"]["sql"] == "SELECT 1 AS x"
+    # write queries are never wrapped
+    assert by_name["delete_user_delete"]["sql"] == "DELETE FROM ly_users WHERE usr_id = :id"
+    # round-trips through the v2 loader
+    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
+    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
+    from liberty.connectors.base import find_bind_params
+    assert {"status", "USR_ID", "USR_ID_op"} <= set(find_bind_params(q1.default_sql))
+
+
 def test_migrate_table_meta() -> None:
     meta = migrate_table_meta(
         tables_rows=[

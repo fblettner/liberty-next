@@ -144,10 +144,11 @@ def _summary(data: dict, *, command: str) -> str:
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]
     n_q, n_e = len(queries), sum(len(c.get("endpoints") or []) for c in connectors.values() if c.get("type") == "api")
     n_hinted = sum(1 for q in queries if q.get("columns"))
+    n_filtered = sum(1 for q in queries if any(c.get("filter") for c in (q.get("columns") or [])))
     blob = render_toml(data)
     lines = [
         f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies)"
-        f"{f' ({n_hinted} with column hints)' if n_hinted else ''}, {n_e} endpoint(s)"
+        f"{f' ({n_hinted} with column hints' if n_hinted else ''}{f', {n_filtered} with server-filter columns' if n_filtered else ''}{')' if n_hinted else ''}, {n_e} endpoint(s)"
     ]
     ph = _placeholders(data)
     if ph:

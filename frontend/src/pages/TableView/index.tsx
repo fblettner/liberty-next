@@ -8,12 +8,13 @@ import { useTranslation } from 'react-i18next'
 import { Table as TableIcon, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
-import { PageLayout, Card, Button, Input, Select, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
+import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
 import { colors } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
+import { FilterPanel, type ServerFilter } from './FilterPanel'
 
 const Sub = styled.span`
   display: inline-flex; align-items: center; gap: 8px;
@@ -25,7 +26,7 @@ export default function TableView({ connector, query }: { connector: string; que
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
-  const [filters, setFilters] = useState<Record<string, string>>({})  // server-filter fields (v1's col_filter columns)
+  const [filters, setFilters] = useState<Record<string, ServerFilter>>({})  // server-filter fields (v1's col_filter columns)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [runErr, setRunErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -49,24 +50,28 @@ export default function TableView({ connector, query }: { connector: string; que
       .catch((e) => setMetaErr(e instanceof ApiError ? e.message : String(e)))
   }, [connector, query])
 
+  // Server-filter fields: result columns flagged `filter` in the query's `columns` config (v1's
+  // col_filter). The migrated SQL is wrapped in `SELECT * FROM (…) _flt WHERE …` with a `:<col>` +
+  // optional `:<col>_op` bind per such column, so the value here actually pre-filters server-side.
+  const filterCols = useMemo(() => (meta?.columns ?? []).filter((c) => c.filter), [meta])
+  const filterBindNames = useMemo(() => {
+    const s = new Set<string>()
+    for (const c of filterCols) { s.add(c.name); s.add(`${c.name}_op`) }
+    return s
+  }, [filterCols])
+
   const paramNames = useMemo(() => {
     if (!meta) return [] as string[]
     const seen = new Set<string>()
     const out: string[] = []
     for (const n of [...meta.bind_params, ...meta.params.map((p) => p.name)]) {
-      if (!seen.has(n)) {
+      if (!seen.has(n) && !filterBindNames.has(n)) {  // filter columns get their own panel, not the param form
         seen.add(n)
         out.push(n)
       }
     }
     return out
-  }, [meta])
-
-  // Server-filter fields: result columns flagged `filter` in the query's `columns` config (v1's
-  // col_filter). Their values are passed to the query as :params (sent both as-is and UPPERCASE —
-  // PG folds the discovered column names to lowercase while migrated SQL binds may be uppercase;
-  // text() ignores any :param the SQL doesn't reference, so this is harmless when there's no bind).
-  const filterCols = useMemo(() => (meta?.columns ?? []).filter((c) => c.filter), [meta])
+  }, [meta, filterBindNames])
 
   const run = useCallback(async () => {
     if (!meta) return
@@ -75,7 +80,7 @@ export default function TableView({ connector, query }: { connector: string; que
     setRunErr(null)
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
-    for (const [k, v] of Object.entries(filters)) if (v !== '') { sent[k] = v; sent[k.toUpperCase()] = v }
+    for (const [name, f] of Object.entries(filters)) if (f.val !== '') { sent[name] = f.val; sent[`${name}_op`] = f.op }
     try {
       let res: QueryResult
       if (meta.statement_type === 'SELECT') {
@@ -143,46 +148,35 @@ export default function TableView({ connector, query }: { connector: string; que
     >
       <Stack gap={14}>
         <Card>
-          <Row align="flex-end">
-            {paramNames.map((name) => {
-              const def = meta.params.find((p) => p.name === name)
-              return (
-                <div key={name} style={{ minWidth: 160 }}>
-                  <Field label={def?.label ?? name}>
-                    <Input
-                      type="text"
-                      placeholder={def?.default != null ? t('table.defaultPrefix', { v: def.default }) : t('table.nullIfBlank')}
-                      value={params[name] ?? ''}
-                      onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
-                    />
-                  </Field>
-                </div>
-              )
-            })}
-            {filterCols.map((c) => (
-              <div key={`f:${c.name}`} style={{ minWidth: 160 }}>
-                <Field label={c.label ?? c.name}>
-                  {c.rule?.kind === 'enum' ? (
-                    <Select value={filters[c.name] ?? ''} onChange={(e) => setFilters((f) => ({ ...f, [c.name]: e.target.value }))}>
-                      <option value="">{t('table.filterAny')}</option>
-                      {c.rule.values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
-                    </Select>
-                  ) : (
-                    <Input
-                      type={(c.format ?? '').toLowerCase() === 'date' ? 'date' : 'text'}
-                      placeholder={t('table.serverFilterHint')}
-                      value={filters[c.name] ?? ''}
-                      onChange={(e) => setFilters((f) => ({ ...f, [c.name]: e.target.value }))}
-                    />
-                  )}
-                </Field>
-              </div>
-            ))}
-            <Button $variant="primary" onClick={run} disabled={busy}>
-              {busy ? <SpinnerRing size={14} thickness={2} /> : <Play size={14} />}
-              {busy ? t('common.running') : t('common.run')}
-            </Button>
-          </Row>
+          <Stack gap={12}>
+            <FilterPanel
+              cols={filterCols}
+              values={filters}
+              onChange={(name, next) => setFilters((f) => ({ ...f, [name]: next }))}
+              autoLoad={meta.auto_load}
+            />
+            <Row align="flex-end">
+              {paramNames.map((name) => {
+                const def = meta.params.find((p) => p.name === name)
+                return (
+                  <div key={name} style={{ minWidth: 160 }}>
+                    <Field label={def?.label ?? name}>
+                      <Input
+                        type="text"
+                        placeholder={def?.default != null ? t('table.defaultPrefix', { v: def.default }) : t('table.nullIfBlank')}
+                        value={params[name] ?? ''}
+                        onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+                )
+              })}
+              <Button $variant="primary" onClick={run} disabled={busy}>
+                {busy ? <SpinnerRing size={14} thickness={2} /> : <Play size={14} />}
+                {busy ? t('common.running') : t('common.run')}
+              </Button>
+            </Row>
+          </Stack>
           {runErr && (
             <div style={{ marginTop: 12 }}>
               <Banner $tone="error">{runErr}</Banner>

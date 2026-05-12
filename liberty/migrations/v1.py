@@ -95,6 +95,33 @@ def _dialect_name(dbtype: Any) -> str:
     return _DBTYPE_TO_DIALECT.get(key, key or "default")
 
 
+# When a read query has `filter`-flagged columns (v1's col_filter), wrap it so the value the
+# TableView sends for each such column actually pre-filters server-side: `SELECT * FROM (<orig>)
+# _flt WHERE …`. Each column C gets a `:C` value bind and a `:C_op` operator bind (default
+# 'contains'). The predicate is plain SQL that works on PostgreSQL / Oracle / SQLite (`||` coerces
+# the column to text on all three, `LIKE`/`LOWER` are universal). Numeric-range operators aren't
+# offered server-side — the in-grid TanStack filters cover those on the loaded page.
+_FILTER_OPS = ("contains", "equals", "notEquals", "startsWith", "endsWith")
+
+
+def _filter_predicate(col: str) -> str:
+    p = f":{col}"
+    txt = f"LOWER(_flt.{col} || '')"
+    return (
+        f"  AND ({p} IS NULL OR {p} = ''"
+        f" OR (COALESCE({p}_op, 'contains') = 'contains'   AND {txt} LIKE LOWER('%' || {p} || '%'))"
+        f" OR ({p}_op = 'equals'     AND _flt.{col} || '' = {p})"
+        f" OR ({p}_op = 'notEquals'  AND _flt.{col} || '' <> {p})"
+        f" OR ({p}_op = 'startsWith' AND {txt} LIKE LOWER({p} || '%'))"
+        f" OR ({p}_op = 'endsWith'   AND {txt} LIKE LOWER('%' || {p})))"
+    )
+
+
+def _wrap_with_filters(base_sql: str, cols: list[str]) -> str:
+    preds = "\n".join(_filter_predicate(c) for c in cols)
+    return f"SELECT * FROM (\n{base_sql}\n) _flt\nWHERE 1=1\n{preds}"
+
+
 def _sql_value(variants: dict[str, str]) -> str | dict[str, str]:
     """Collapse a {dialect: sql} map to v2's `sql`: a plain string when there's one
     distinct statement, else `{default: …, <dialect>: …}` (default = the v1 `generic`
@@ -130,7 +157,10 @@ def migrate_sql_queries(
         dbtype: if given, only migrate rows with this ``query_dbtype`` (→ plain-string SQL).
         connector_prefix: prepended to the per-pool connector name (e.g. ``"v1_"``).
         column_hints: ``{query_id: [column-hint dict]}`` (from :func:`migrate_column_hints`) —
-            attached to each emitted query as its ``columns`` display hints.
+            attached to each emitted query as its ``columns`` display hints. A read query that has
+            ``filter``-flagged columns (v1's ``col_filter``) is also wrapped — ``SELECT * FROM (<orig>)
+            _flt WHERE …`` — so the value the TableView sends for each such column (a ``:<col>`` bind
+            plus an optional ``:<col>_op`` operator bind) pre-filters server-side.
         table_meta: ``{query_id: {"description"?, "auto_load"?}}`` (from :func:`migrate_table_meta`) —
             the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
             ``auto_load``.
@@ -144,7 +174,8 @@ def migrate_sql_queries(
     pools: dict[str, dict[str, Any]] = {}
     connectors: dict[str, dict[str, Any]] = {}
     names_per_connector: dict[str, set[str]] = {}
-    groups: dict[tuple[str, int, str], dict[str, str]] = {}  # (conn, query_id, crud) → {dialect: sql}
+    groups: dict[tuple[str, int, str], dict[str, str]] = {}  # (conn, query_id, crud) → {dialect: raw sql}
+    orderbys: dict[tuple[str, int, str], str] = {}           # (conn, query_id, crud) → ORDER BY clause
     order: list[tuple[str, int, str]] = []
 
     for r in rows:
@@ -160,14 +191,14 @@ def migrate_sql_queries(
             names_per_connector[conn_name] = set()
             # Stub pool — fill in the real URL (or set the named env var).
             pools.setdefault(conn_name, {"url": "${LIBERTY_DB_URL_" + conn_name.upper() + "}", "pool_pre_ping": True})
-        orderby = (r.get("query_orderby") or "").strip()
-        if orderby and crud in _READ_CRUD:
-            sql = f"{sql}\nORDER BY {orderby}"
         key = (conn_name, qid, crud)
         if key not in groups:
             groups[key] = {}
             order.append(key)
         groups[key].setdefault(_dialect_name(r.get("query_dbtype")), sql)  # first row of a dialect wins
+        orderby = (r.get("query_orderby") or "").strip()
+        if orderby and crud in _READ_CRUD:
+            orderbys.setdefault(key, orderby)
 
     for key in order:
         conn_name, qid, crud = key
@@ -176,6 +207,15 @@ def migrate_sql_queries(
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
         tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
+        filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
+        # build each dialect variant: wrap in `SELECT * FROM (…) _flt WHERE <filters>` when the
+        # query has filter columns, then append ORDER BY (on the outer query, when wrapped).
+        ob = orderbys.get(key, "")
+        variants = {
+            dia: ((f"{_wrap_with_filters(raw, filter_cols)}\nORDER BY {ob}" if ob else _wrap_with_filters(raw, filter_cols))
+                  if filter_cols else (f"{raw}\nORDER BY {ob}" if ob else raw))
+            for dia, raw in groups[key].items()
+        }
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
@@ -183,7 +223,7 @@ def migrate_sql_queries(
                 "description": (tm or {}).get("description") or None,
                 "auto_load": True if (tm or {}).get("auto_load") else None,
                 "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
-                "sql": _sql_value(groups[key]),
+                "sql": _sql_value(variants),
                 "columns": (hints or None),  # omit when empty
             })
         )

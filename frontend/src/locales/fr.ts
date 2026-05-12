@@ -111,6 +111,8 @@ const fr: Resources = {
     op_contains: 'contient',
     op_equals: 'égal à',
     op_notEquals: 'différent de',
+    op_startsWith: 'commence par',
+    op_endsWith: 'finit par',
     op_lt: 'inférieur à',
     op_le: 'inférieur ou égal',
     op_gt: 'supérieur à',

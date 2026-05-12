@@ -274,9 +274,12 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `TableView` (titled with the query's `description` (v1's `tbl_label`), else `label`, else the menu label —
   `services/menuLabels.findMenuLabel` walks the `GET /api/menus` trees; the technical `connector.query` is the
   mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params` plus a
-  **server-filter field per `filter`-flagged result column** (v1's `col_filter`, from `meta.columns`) — its value
-  is sent to the query as a `:param` (both as-is and UPPERCASE) on Run, so the SQL can pre-filter before the
-  grid loads (the in-grid TanStack filters then refine the loaded page). SELECT → `GET` + the `DataTable`
+  collapsible **`FilterPanel`** — one field per `filter`-flagged column (v1's `col_filter`, from `meta.columns`),
+  each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's). On Run
+  it sends `:<col>` + `:<col>_op` for each filled field; the migration has wrapped such queries in
+  `SELECT * FROM (<orig>) _flt WHERE …` so this actually pre-filters server-side before the grid loads (the
+  in-grid TanStack filters then refine the loaded page; those `:<col>`/`:<col>_op` binds are kept out of the
+  param form). SELECT → `GET` + the `DataTable`
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align — `hidden` takes
   effect on first load and survives a stale saved grid state) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
@@ -324,7 +327,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   per-`query_dbtype` SQL variants become a `sql = { default = …, oracle = …, … }` dialect map
   (a single distinct statement collapses to a plain string; `--dbtype` keeps just one variant).
   v1's `query_crud` is a **REST verb** — `GET`/`SELECT` = read (gets `ORDER BY <query_orderby>`
-  and the `column_hints` for its `query_id`), `POST`/`PUT`/`PATCH`/`DELETE` = write (`writable =
+  and the `column_hints` for its `query_id`; if any of those hints is `filter`-flagged the query is
+  also wrapped — `SELECT * FROM (<orig>) _flt WHERE …` with a `:<col>` + `:<col>_op` bind per such
+  column, the ORDER BY moving onto the outer query — so the TableView's `FilterPanel` actually
+  pre-filters server-side), `POST`/`PUT`/`PATCH`/`DELETE` = write (`writable =
   true`). Pool stubs `[pools.<name>] url = "${LIBERTY_DB_URL_<NAME>}"` (overridden by
   `migrate_pools`). `migrate_api(ly_api_conn, ly_api,
   ly_api_header, ly_api_params, …)` → an **API connector per `ly_api_conn`** (`base_url=conn_url`,
@@ -427,7 +433,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-263 tests pass.
+264 tests pass.
 
 ## Run it
 
