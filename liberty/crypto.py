@@ -68,7 +68,10 @@ def decrypt(value: str, master_key: str) -> str:
     if not master_key:
         raise CryptoError(_NO_KEY)
     try:
-        blob = base64.b64decode(value[len(PREFIX) :], validate=True)
+        # v1 decodes leniently (Python's default `validate=False` — non-alphabet chars, incl.
+        # whitespace/newlines, are discarded); match that so an ``ENC:`` value with a stray
+        # newline or surrounding whitespace (copied from a DB column / file) still decrypts here.
+        blob = base64.b64decode(value[len(PREFIX) :])
         salt = blob[:_SALT_LEN]
         iv = blob[_SALT_LEN : _SALT_LEN + _IV_LEN]
         tag = blob[_SALT_LEN + _IV_LEN : _SALT_LEN + _IV_LEN + _TAG_LEN]

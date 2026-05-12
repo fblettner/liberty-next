@@ -39,6 +39,15 @@ def test_round_trip() -> None:
     assert encrypt("x", MK) != encrypt("x", MK)
 
 
+def test_decrypt_tolerates_trailing_whitespace() -> None:
+    # v1 decodes base64 leniently; an ENC: value copied with a stray newline (DB column, file, …)
+    # must still decrypt here — only the base64 part is lenient; a leading-whitespace `ENC:` is still
+    # rejected by `is_encrypted` (the prefix must be at the start), which matches v1.
+    enc = encrypt("a JDE password", MK)
+    assert decrypt(enc + "\n", MK) == "a JDE password"
+    assert decrypt(enc + "  \n\t", MK) == "a JDE password"
+
+
 def test_format_layout() -> None:
     blob = base64.b64decode(encrypt("abc", MK)[len(PREFIX):])
     assert len(blob) == 64 + 16 + 16 + 3  # salt + iv + tag + len("abc")
