@@ -55,35 +55,43 @@ from liberty.config import substitute_env
 
 
 class PoolConfig(BaseModel):
-    """A named database pool — one SQLAlchemy async engine per entry."""
+    """A named database pool — one SQLAlchemy async engine per entry. (Field docs are in
+    ``description=`` so the config-builder UI shows them as form hints; see ``GET /admin/config/schema``.)"""
 
     model_config = ConfigDict(extra="forbid")
 
-    url: str
-    # Optional DB password kept *out of the URL* — substituted into it (escaped) when the engine is
-    # built. May be an ``ENC:`` value (decrypted at runtime via the crypto master key, like v1 reads
-    # ``ly_applications.apps_password``) or plaintext / a ``${ENV}`` ref. Use this when the password
-    # has URL-special characters (``@``, ``/``, ``:`` …) that would break parsing if inlined. When
-    # unset, the URL is used as-is (but an ``ENC:`` password embedded in the URL is still decrypted).
-    password: str | None = None
-    # SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty →
-    # derived from the URL. Used to pick a query's per-dialect SQL variant (see QueryDef.sql).
-    dialect: str = ""
-    # Schema-name placeholders the queries on this pool may use — `#SCHEMA.<NAME>#` in a query's SQL
-    # is replaced at execution time with `schemas["<NAME>"]` (v1's `ly_db_schema`: `sch_name → sch_target`).
-    # Lets the same query target different schemas in dev vs prod (or several schemas reachable by one
-    # DB user) without editing the SQL. Values must be plain identifiers (`SY920`, `db.schema`); a query
-    # that references a `#SCHEMA.X#` with no mapping here fails with a clear error. Case-insensitive on the name.
-    schemas: dict[str, str] = Field(default_factory=dict)
-    pool_size: int = 5
-    max_overflow: int = 10
-    pool_pre_ping: bool = True
-    pool_recycle: int = -1
-    echo: bool = False
-    # Default cap on rows a SELECT returns on this pool (v1's per-app `apps_limit`). `None` → no
-    # pool-level default. A connector's `max_rows`, a query's `max_rows`, or a per-request override
-    # each take precedence in that order; the absolute fallback is 1000. See SQLConnector.execute.
-    max_rows: int | None = None
+    url: str = Field(description=(
+        "SQLAlchemy *async* URL — e.g. postgresql+asyncpg://user@host:5432/db, "
+        "oracle+oracledb://user@host:1521/?service_name=ORCL, sqlite+aiosqlite:///./file.db. "
+        "Supports ${ENV} / ${ENV:-default} refs. A URL-special password (@ / : / …) belongs in the "
+        "separate `password` field, not here."
+    ))
+    password: str | None = Field(default=None, description=(
+        "DB password kept *out of the URL* — substituted in (escaped) when the engine is built. May be "
+        "an ENC: value (decrypted at runtime via the crypto master key, like v1's apps_password), plain "
+        "text, or a ${ENV} ref. Leave empty if it's already in the URL (an ENC: password in the URL is "
+        "still decrypted)."
+    ))
+    dialect: str = Field(default="", description=(
+        "SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty → derived from "
+        "the URL. Used to pick a query's per-dialect SQL variant."
+    ))
+    schemas: dict[str, str] = Field(default_factory=dict, description=(
+        "Schema-name map for `#SCHEMA.<NAME>#` placeholders in this pool's queries → the real schema name "
+        "(v1's ly_db_schema). Values must be plain identifiers (SY920, db.schema). Lets the same query "
+        "target dev vs prod schemas — or several schemas under one DB user — without editing the SQL. "
+        "Name lookup is case-insensitive."
+    ))
+    pool_size: int = Field(default=5, description="Persistent connections kept in the pool.")
+    max_overflow: int = Field(default=10, description="Extra connections allowed beyond `pool_size` under load.")
+    pool_pre_ping: bool = Field(default=True, description="Test a connection's liveness before handing it out (recovers from dropped connections).")
+    pool_recycle: int = Field(default=-1, description="Recycle a connection after this many seconds; -1 = never.")
+    echo: bool = Field(default=False, description="Log every SQL statement (debug only — very noisy).")
+    max_rows: int | None = Field(default=None, description=(
+        "Default cap on rows a SELECT returns on this pool (v1's per-app apps_limit). Empty → no pool-level "
+        "cap. A connector's max_rows, a query's max_rows, or a per-request override each take precedence in "
+        "that order; the absolute fallback is 1000."
+    ))
 
 
 # --------------------------------------------------------------------------- #
@@ -92,13 +100,13 @@ class PoolConfig(BaseModel):
 
 
 class ParamDef(BaseModel):
-    """A declared parameter — surfaces a default and (eventually) a UI label."""
+    """A declared parameter — gives a `:name` placeholder a UI label and a default value."""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    label: str | None = None
-    default: str | None = None
+    name: str = Field(description="The `:name` placeholder in the SQL / `{{name}}` in the endpoint.")
+    label: str | None = Field(default=None, description="Form label for the parameter input (defaults to the name).")
+    default: str | None = Field(default=None, description="Pre-filled value; blank means the caller omits it (→ SQL NULL for a query).")
 
 
 class FilterDep(BaseModel):
@@ -112,8 +120,8 @@ class FilterDep(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source: str   # the name of another filter column on the same query — its value is the input
-    column: str   # a result column of *this* column's lookup query to match the source's value against
+    source: str = Field(description="Another filter-flagged column on the same query — its current value is the input.")
+    column: str = Field(description="A result column of *this* column's lookup query to match the source's value against.")
 
 
 class VisibleWhen(BaseModel):
@@ -127,8 +135,8 @@ class VisibleWhen(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str
-    value: str | list[str]
+    field: str = Field(description="A filter-flagged column on the same query whose value gates this column's visibility.")
+    value: str | list[str] = Field(description="The allowed value (or list of values); the column hides when `field` is set to something else.")
 
     def as_dict(self) -> dict[str, Any]:
         return {"field": self.field, "value": self.value}
@@ -153,17 +161,16 @@ class ColumnHint(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    dd: str | None = None      # dictionary-entry key for label/format; None → look it up under `name`
-    label: str | None = None
-    hidden: bool = False
-    filter: bool = False       # surface this column in the TableView filter panel (v1's col_filter)
-    filter_from: list[FilterDep] = Field(default_factory=list)  # cascading-filter deps (v1's ly_tbl_filters)
-    # conditional visibility (v1's cdn_*): one rule or a list — all must hold; see VisibleWhen
-    visible_when: VisibleWhen | list[VisibleWhen] | None = None
-    width: int | None = None
-    align: str | None = None   # "left" | "right" | "center" — a UI hint, not strictly validated
-    format: str | None = None  # e.g. "date" / "datetime" / "number" / "boolean" / "currency" — UI-interpreted
+    name: str = Field(description="The result column this hint applies to (matched case-insensitively; a hint for a column the query doesn't return is ignored).")
+    dd: str | None = Field(default=None, description="Dictionary-entry key for the label/format/rule (config/dictionary.toml). Blank → looked up under `name`; set to \"\" to opt this column out of the dictionary.")
+    label: str | None = Field(default=None, description="Display title — overrides the dictionary's label.")
+    hidden: bool = Field(default=False, description="Hide this column in the grid by default (the user can still un-hide it via the Columns menu).")
+    filter: bool = Field(default=False, description="Surface this column as a server-filter field in the TableView filter panel (v1's col_filter).")
+    filter_from: list[FilterDep] = Field(default_factory=list, description="Cascading-filter dependencies (v1's ly_tbl_filters) — narrow this column's LOOKUP options when a source filter is set.")
+    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, description="Conditional visibility (v1's cdn_*): a rule (or list of rules, all AND-ed) — the column drops from the grid unless a server-filter has the allowed value.")
+    width: int | None = Field(default=None, description="Fixed column width in pixels (blank → auto-size to content).")
+    align: str | None = Field(default=None, description='"left" / "right" / "center" — blank auto-aligns (numbers right, booleans centred).')
+    format: str | None = Field(default=None, description='UI-interpreted format hint — "date" / "datetime" / "number" / "boolean" / "currency" / … — overrides the dictionary\'s.')
 
     @property
     def visible_when_rules(self) -> list[VisibleWhen]:
@@ -196,30 +203,19 @@ class QueryDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    sql: str | dict[str, str]
-    writable: bool = False
-    params: list[ParamDef] = Field(default_factory=list)
-    columns: list[ColumnHint] = Field(default_factory=list)  # display hints; the schema is still from the query
-    label: str | None = None
-    description: str | None = None
-    # When true the TableView runs this query immediately on open (no "Run" click) — v1's
-    # per-table "auto load" flag. A query with required-feeling params is still safe: every
-    # `:name` the caller omits becomes SQL NULL.
-    auto_load: bool = False
-    # Per-query override of the row cap (else the connector's, then the pool's, then 1000); a
-    # per-request override beats this. See SQLConnector.execute.
-    max_rows: int | None = None
-    # Result columns that identify a row (v1's `col_key`) — surfaced in `describe()`; the TableView's
-    # Excel import matches imported rows against the loaded ones on these to decide update vs insert.
-    key_columns: list[str] = Field(default_factory=list)
-    # Names of `writable` queries on the same connector that update / insert / delete a row of this
-    # query's result — set explicitly, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
-    # / `<base>_post` / `<base>_delete` naming convention the migration uses. Drive the TableView's
-    # batch edit mode (edit a row → its `_put`; "Add row" → `_post`; delete a row → `_delete`).
-    update_query: str | None = None
-    insert_query: str | None = None
-    delete_query: str | None = None
+    name: str = Field(description="Unique name within the connector; the permission string is sql:<connector>:<name>.")
+    sql: str | dict[str, str] = Field(description="The SQL statement (`:name` placeholders). Either one string, or a per-dialect map { default = \"…\", oracle = \"…\" } keyed by SQLAlchemy backend name (the connector picks the variant matching its pool, falling back to `default`, which is then required).")
+    writable: bool = Field(default=False, description="Allow non-SELECT statements (INSERT/UPDATE/DELETE/…). Required for any mutating query — plus the caller must hold the permission.")
+    params: list[ParamDef] = Field(default_factory=list, description="Declared parameters — give a `:name` placeholder a form label and a default.")
+    columns: list[ColumnHint] = Field(default_factory=list, description="Display hints for the result columns (label/visibility/order/filter/…). The column *schema* is still discovered from the query at run time — these only augment it; order here = display order.")
+    label: str | None = Field(default=None, description="Friendly name for the query (shown in listings).")
+    description: str | None = Field(default=None, description="Screen title in the TableView (falls back to `label`, then the menu label).")
+    auto_load: bool = Field(default=False, description="Run this query immediately when the TableView opens — no \"Run\" click (v1's per-table auto-load). Safe even with params: an omitted `:name` becomes SQL NULL.")
+    max_rows: int | None = Field(default=None, description="Per-query SELECT row cap (else the connector's, then the pool's, then 1000). A per-request `?_limit` override beats this.")
+    key_columns: list[str] = Field(default_factory=list, description="Result columns that identify a row (v1's col_key) — the TableView's Excel import matches imported rows against loaded ones on these to decide update-vs-insert.")
+    update_query: str | None = Field(default=None, description="A `writable` query on this connector that UPDATEs a row of this result (the TableView's batch-edit). Blank → auto-derived from the `<base>_get` → `<base>_put` naming convention.")
+    insert_query: str | None = Field(default=None, description="A `writable` query that INSERTs a new row. Blank → auto-derived (`<base>_post`).")
+    delete_query: str | None = Field(default=None, description="A `writable` query that DELETEs a row. Blank → auto-derived (`<base>_delete`).")
 
     @field_validator("sql")
     @classmethod
@@ -251,14 +247,10 @@ class SqlConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["sql"]
-    pool: str = "default"
-    # `licensed = true` → this connector is only loaded when a valid [license] key covers it (see
-    # liberty.licensing). Without one (the open framework) it's silently dropped at registry build.
-    licensed: bool = False
-    # Default row cap for this connector's SELECTs. `None` → fall back to the pool's `max_rows`, then 1000.
-    # A query's `max_rows`, or a per-request override, take precedence. See SQLConnector.execute.
-    max_rows: int | None = None
-    queries: list[QueryDef] = Field(default_factory=list)
+    pool: str = Field(default="default", description="Which [pools.*] this connector's queries run on.")
+    licensed: bool = Field(default=False, description="Gate this connector behind a valid [license] key — without one (the open framework) it isn't loaded.")
+    max_rows: int | None = Field(default=None, description="Default SELECT row cap for this connector's queries (else the pool's, then 1000). A query's max_rows / a per-request override take precedence.")
+    queries: list[QueryDef] = Field(default_factory=list, description="The named SQL queries this connector exposes.")
 
 
 # --------------------------------------------------------------------------- #
@@ -273,43 +265,41 @@ class EndpointDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    method: str = "GET"
-    path: str = ""
-    headers: dict[str, str] = Field(default_factory=dict)
-    query_params: dict[str, str] = Field(default_factory=dict)
-    body: str | None = None
-    content_type: str = "application/json"
-    response_field: str | None = None
-    response_map: dict[str, str] = Field(default_factory=dict)
-    params: list[ParamDef] = Field(default_factory=list)
-    label: str | None = None
-    description: str | None = None
+    name: str = Field(description="Unique name within the connector; the permission string is api:<connector>:<name>.")
+    method: str = Field(default="GET", description="HTTP method — GET / POST / PUT / PATCH / DELETE / …")
+    path: str = Field(default="", description="Path appended to the connector's base_url. Supports {{placeholder}} substitution (params + built-ins {{username}}/{{password}}/{{token}}). An absolute http(s):// path overrides base_url.")
+    headers: dict[str, str] = Field(default_factory=dict, description="Per-endpoint request headers (merged over the connector's default_headers); values support {{placeholders}}.")
+    query_params: dict[str, str] = Field(default_factory=dict, description="Query-string parameters; values support {{placeholders}}.")
+    body: str | None = Field(default=None, description="Request body template ({{placeholders}}). For multipart/form-data: lines of `name=value` (text) or `name=@path;filename=X;contentType=Y` (file).")
+    content_type: str = Field(default="application/json", description="Content-Type of the request body.")
+    response_field: str | None = Field(default=None, description='Dot-path into the JSON response to extract (e.g. "data.0.id" indexes lists). Blank → return the whole response.')
+    response_map: dict[str, str] = Field(default_factory=dict, description="Pick several fields out of the response: {output_name = dot.path}.")
+    params: list[ParamDef] = Field(default_factory=list, description="Declared parameters for the {{placeholders}}.")
+    label: str | None = Field(default=None, description="Friendly name (shown in listings).")
+    description: str | None = Field(default=None, description="Longer description of what the endpoint does.")
 
 
 class ApiConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["api"]
-    licensed: bool = False   # gated behind [license] — see SqlConnectorConfig.licensed
-    base_url: str
-    auth_type: AuthType = "none"
-    auth_username: str | None = None
-    auth_password: str | None = None
-    auth_token: str | None = None
-    auth_api_key_header: str = "X-Api-Key"
-    # OAuth2 token endpoint
-    auth_token_endpoint: str | None = None
-    auth_token_field: str | None = None
-    auth_token_body: str | None = None
-    auth_token_content_type: str = "application/json"
-    auth_token_headers: dict[str, str] = Field(default_factory=dict)
-    auth_token_ttl: int = 3300  # seconds (55 min — matches nomaubl's TokenManager)
-    # Transport
-    default_headers: dict[str, str] = Field(default_factory=dict)
-    timeout: float = 30.0
-    verify_ssl: bool = True
-    endpoints: list[EndpointDef] = Field(default_factory=list)
+    licensed: bool = Field(default=False, description="Gate this connector behind a valid [license] key — without one (the open framework) it isn't loaded.")
+    base_url: str = Field(description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. (Leave blank only if every endpoint uses an absolute path.)")
+    auth_type: AuthType = Field(default="none", description="none / basic / bearer / api_key / oauth2.")
+    auth_username: str | None = Field(default=None, description="Username — for basic auth, and the {{username}} placeholder. May be an ENC: value.")
+    auth_password: str | None = Field(default=None, description="Password — for basic auth, and {{password}}. May be an ENC: value (decrypted at runtime via the crypto master key).")
+    auth_token: str | None = Field(default=None, description="Static bearer token / API key (for bearer & api_key auth), and the {{token}} placeholder. May be an ENC: value.")
+    auth_api_key_header: str = Field(default="X-Api-Key", description="Header name for api_key auth.")
+    auth_token_endpoint: str | None = Field(default=None, description="OAuth2: token-endpoint URL (POSTed to fetch a token).")
+    auth_token_field: str | None = Field(default=None, description="OAuth2: dot-path to the token in the token-endpoint response (e.g. \"access_token\").")
+    auth_token_body: str | None = Field(default=None, description="OAuth2: request body sent to the token endpoint.")
+    auth_token_content_type: str = Field(default="application/json", description="OAuth2: Content-Type of that request body.")
+    auth_token_headers: dict[str, str] = Field(default_factory=dict, description="OAuth2: extra headers for the token request.")
+    auth_token_ttl: int = Field(default=3300, description="OAuth2: how long (seconds) to cache a fetched token before refreshing (default 3300 = 55 min).")
+    default_headers: dict[str, str] = Field(default_factory=dict, description="Headers sent on every request from this connector.")
+    timeout: float = Field(default=30.0, description="Per-request timeout in seconds.")
+    verify_ssl: bool = Field(default=True, description="Verify the server's TLS certificate (disable only for dev / self-signed).")
+    endpoints: list[EndpointDef] = Field(default_factory=list, description="The named HTTP endpoints this connector exposes.")
 
 
 ConnectorConfig = Annotated[
