@@ -483,8 +483,17 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   + reload), and `RawEditor` (the Monaco `connectors.toml` editor, the escape hatch). No rename yet.
 Verdict on the schema-driven approach: **it pays off** — the pool & connector forms are essentially all
 generated; the bespoke code is just `SchemaForm` itself + the per-builder list/nav/save wiring (~250 lines
-of `SchemaForm` + ~120 per builder, all reusable). Keep going — next: a **dictionary builder**, a **menus
-tree builder**, and a **SQL editor + "test run" preview** for queries.
+of `SchemaForm` + ~120 per builder, all reusable). **Known weak point — the navigation UX** (the connector
+builder is one long page of *nested* accordions: expand a connector → expand a query → expand a column →
+… — you lose track of where you are). Next step before more builders: a **drill-down master-detail
+navigator** — clicking a list item *navigates into* it (the panel shows that item's form), with a
+**breadcrumb** along the top (`nomasx1 / query: users_get / column: USR_ID`) and a Back; a `list[Model]`
+property becomes a clickable list (summary rows + "add"), not an inline accordion. So you always see *one*
+form + the path to it. (Likely a `SchemaNavigator` shell owning the stack; `SchemaForm` renders the
+current level's scalars/maps inline and delegates `list[Model]` / nested-object drilling to it.) Then:
+a **dictionary builder**, a **menus tree builder** (a DnD tree), and a **SQL editor + "test run" preview**
+for queries — all built on the navigator. The general UI polish (modern look & feel — spacing, search
+within a list, validation surfacing, etc.) rides along.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
 surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one

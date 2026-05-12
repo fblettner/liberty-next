@@ -585,7 +585,8 @@ against real migrated screens) → **Phase 7** the config builders (a *schema-dr
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api, with queries/endpoints/columns as collapsible nested lists), the `GET /admin/config/schema` +
 `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed` endpoints, and the field docs
-moved to `Field(description=)`; next: a dictionary builder, a menus tree builder, a SQL editor + "test run"
+moved to `Field(description=)`; next: a drill-down master-detail navigator (breadcrumb + clickable list rows
+instead of nested accordions — the current builder UX weak point), then a dictionary builder, a menus tree builder, a SQL editor + "test run"
 for queries; + git-backed config-file versioning + frontend tests/CI) → **Phase 8** charts & dashboards →
 **Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement (in-project
 Python/local-Spark jobs & scheduling).
