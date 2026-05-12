@@ -143,7 +143,7 @@ function EditCell({ ctrl, column, defaultText, onChange }: {
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl,
 }: {
   result: QueryResult
   connector: string
@@ -153,6 +153,8 @@ export function ResultTable({
   deleteQuery?: string | null
   keyColumns?: string[]  // result columns that identify a row (v1's col_key) — used by the Excel import to match
   onSaved?: () => void
+  runControl?: React.ReactNode    // the Run button — sits just right of the grid's search box
+  maxRowsControl?: React.ReactNode  // the Max-rows input — sits at the far right, before the Filters button
 }) {
   const { t } = useTranslation()
   const canEdit = !!(updateQuery || insertQuery)
@@ -513,6 +515,8 @@ export function ResultTable({
         data={data}
         tableId={`sql:${connector}:${query}`}
         exportFilename={query}
+        toolbarAfterSearch={runControl}
+        toolbarRight={maxRowsControl}
         initialColumnVisibility={initialVisibility}
         rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : dirtyRows.has(row) ? 'dt-row-dirty' : undefined)}
         toolbar={

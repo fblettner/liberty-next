@@ -8,8 +8,8 @@ import { useTranslation } from 'react-i18next'
 import { Table as TableIcon, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
-import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
-import { colors } from '../../theme'
+import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
+import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 import { Meta } from './styled'
@@ -18,6 +18,28 @@ import { FilterPanel, type ServerFilter } from './FilterPanel'
 
 const Sub = styled.span`
   display: inline-flex; align-items: center; gap: 8px;
+`
+// Run / Max-rows controls — sized to sit inline with the grid's 28px-tall toolbar buttons
+// (Run goes just right of the search box, Max-rows at the far right before the Filters button).
+const RunBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 14px; flex-shrink: 0;
+  border: 1px solid ${colors.blue.border}; border-radius: ${radius.md}; background: ${colors.blue.bg};
+  color: ${colors.blue.main}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: background 0.15s, color 0.15s, border-color 0.15s;
+  &:hover:not(:disabled) { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  &:disabled { opacity: 0.5; cursor: default; }
+`
+const MaxRowsBox = styled.label`
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; flex-shrink: 0;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; white-space: nowrap;
+  & input {
+    width: 60px; border: none; background: transparent; outline: none; text-align: right;
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+    &::placeholder { color: ${colors.text.muted}; text-align: left; }
+    &::-webkit-outer-spin-button, &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  }
+  &:focus-within { border-color: ${colors.blue.border}; }
 `
 
 export default function TableView({ connector, query }: { connector: string; query: string }) {
@@ -131,6 +153,28 @@ export default function TableView({ connector, query }: { connector: string; que
       </PageLayout>
     )
 
+  const hasSelectResult = result?.statement_type === 'SELECT'
+  // override this run's row cap (DbVisualizer-style) — blank = the configured connector/pool/query cap
+  const maxRowsField = meta.statement_type === 'SELECT' ? (
+    <MaxRowsBox title={t('table.maxRowsHint')}>
+      {t('table.maxRows')}
+      <input
+        type="number" min={1} placeholder={t('table.maxRowsHint')}
+        value={maxRows} onChange={(e) => setMaxRows(e.target.value)}
+      />
+    </MaxRowsBox>
+  ) : null
+  const runBtn = (
+    <RunBtn onClick={run} disabled={busy}>
+      {busy ? <SpinnerRing size={13} thickness={2} /> : <Play size={13} />}
+      {busy ? t('common.running') : t('common.run')}
+    </RunBtn>
+  )
+  // The standalone control bar carries the param form; it also carries Run + Max-rows until the
+  // first SELECT result lands — after that those two move into the grid's own toolbar (see below),
+  // so the data has the screen to itself.
+  const showBar = paramNames.length > 0 || !hasSelectResult
+
   return (
     <PageLayout
       icon={<TableIcon size={18} />}
@@ -149,57 +193,39 @@ export default function TableView({ connector, query }: { connector: string; que
       }
     >
       <Stack gap={14}>
-        <Card>
-          <Stack gap={12}>
-            <FilterPanel
-              cols={filterCols}
-              values={filters}
-              onChange={(name, next) => setFilters((f) => ({ ...f, [name]: next }))}
-              onClearAll={() => setFilters({})}
-              autoLoad={meta.auto_load}
-            />
-            <Row align="flex-end">
-              {paramNames.map((name) => {
-                const def = meta.params.find((p) => p.name === name)
-                return (
-                  <div key={name} style={{ minWidth: 160 }}>
-                    <Field label={def?.label ?? name}>
-                      <Input
-                        type="text"
-                        placeholder={def?.default != null ? t('table.defaultPrefix', { v: def.default }) : t('table.nullIfBlank')}
-                        value={params[name] ?? ''}
-                        onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
-                      />
-                    </Field>
-                  </div>
-                )
-              })}
-              {meta.statement_type === 'SELECT' && (
-                <div style={{ width: 110 }}>
-                  {/* override the configured row cap for this run (DbVisualizer-style) — blank = use the default */}
-                  <Field label={t('table.maxRows')}>
+        {filterCols.length > 0 && (
+          <FilterPanel
+            cols={filterCols}
+            values={filters}
+            onChange={(name, next) => setFilters((f) => ({ ...f, [name]: next }))}
+            onClearAll={() => setFilters({})}
+            autoLoad={meta.auto_load}
+          />
+        )}
+
+        {showBar && (
+          <Row align="flex-end">
+            {paramNames.map((name) => {
+              const def = meta.params.find((p) => p.name === name)
+              return (
+                <div key={name} style={{ minWidth: 160 }}>
+                  <Field label={def?.label ?? name}>
                     <Input
-                      type="number"
-                      min={1}
-                      placeholder={t('table.maxRowsHint')}
-                      value={maxRows}
-                      onChange={(e) => setMaxRows(e.target.value)}
+                      type="text"
+                      placeholder={def?.default != null ? t('table.defaultPrefix', { v: def.default }) : t('table.nullIfBlank')}
+                      value={params[name] ?? ''}
+                      onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
                     />
                   </Field>
                 </div>
-              )}
-              <Button $variant="primary" onClick={run} disabled={busy}>
-                {busy ? <SpinnerRing size={14} thickness={2} /> : <Play size={14} />}
-                {busy ? t('common.running') : t('common.run')}
-              </Button>
-            </Row>
-          </Stack>
-          {runErr && (
-            <div style={{ marginTop: 12 }}>
-              <Banner $tone="error">{runErr}</Banner>
-            </div>
-          )}
-        </Card>
+              )
+            })}
+            {!result && maxRowsField}
+            {!hasSelectResult && runBtn}
+          </Row>
+        )}
+
+        {runErr && <Banner $tone="error">{runErr}</Banner>}
 
         {result && result.statement_type === 'SELECT' && (
           <Stack gap={10}>
@@ -223,6 +249,8 @@ export default function TableView({ connector, query }: { connector: string; que
                 deleteQuery={meta.delete_query}
                 keyColumns={meta.key_columns}
                 onSaved={run}
+                runControl={runBtn}
+                maxRowsControl={maxRowsField}
               />
             )}
           </Stack>

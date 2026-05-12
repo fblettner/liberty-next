@@ -43,6 +43,10 @@ export interface DataTableProps<T extends object> {
   tableId?: string
   /** Extra controls rendered at the left of the toolbar (e.g. an Edit toggle). */
   toolbar?: React.ReactNode
+  /** Controls rendered immediately to the right of the search box (e.g. a Run button). */
+  toolbarAfterSearch?: React.ReactNode
+  /** Controls rendered at the far right, just before the Filters/Columns/Export group (e.g. a Max-rows input). */
+  toolbarRight?: React.ReactNode
   exportFilename?: string
   initialPageSize?: number
   /** Columns hidden by default (e.g. from a `hidden` display hint) — a saved choice still wins. */
@@ -70,7 +74,7 @@ const ActionGroup = styled.div`display: flex; gap: 4px; align-items: center; fle
 const SearchBox = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-  color: ${colors.text.muted}; max-width: 240px;
+  color: ${colors.text.muted}; min-width: 240px; max-width: 360px;
   & input {
     border: none; background: transparent; outline: none; min-width: 0; flex: 1;
     color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -202,7 +206,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName,
+  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -359,7 +363,9 @@ export function DataTable<T extends object>({
           <Search size={13} />
           <input value={globalFilter} onChange={(e) => table.setGlobalFilter(e.target.value)} placeholder={t('table.search')} />
         </SearchBox>
+        {toolbarAfterSearch}
         <Spacer />
+        {toolbarRight}
         <ActionGroup>
           <CtrlBtn $active={showFilters} onClick={() => setShowFilters((v) => !v)} title={t('table.filters')}>
             <Filter size={13} /> {t('table.filters')}
