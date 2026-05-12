@@ -133,6 +133,59 @@ def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "defaul
     return f"SELECT * FROM (\n{base_sql}\n) _flt\nWHERE 1=1\n{preds}"
 
 
+def _simplify_upsert(sql: str) -> str:
+    """v1's ``_post`` SQL for some tables is an *upsert* — PostgreSQL ``INSERT … ON CONFLICT … DO
+    UPDATE …`` or Oracle ``MERGE INTO … WHEN NOT MATCHED THEN INSERT (…) VALUES (…)`` — so an Excel
+    re-import would replace existing rows. v2 decides update-vs-insert in the TableView's batch-edit
+    model (the import matches imported rows against the loaded ones on the query's ``key_columns``),
+    so the ``_post`` query only needs to *insert*. Collapse it to a plain ``INSERT INTO t (cols)
+    VALUES (:cols)`` — far easier to maintain (a future query builder will generate these). Anything
+    that isn't an upsert is returned unchanged."""
+    if re.search(r"(?i)\bON\s+CONFLICT\b", sql):  # PostgreSQL upsert → drop the ON CONFLICT … tail
+        return re.split(r"(?i)\s*\bON\s+CONFLICT\b", sql, maxsplit=1)[0].rstrip()
+    m = re.match(r"(?is)\s*MERGE\s+INTO\s+(\S+)", sql)  # Oracle MERGE → rebuild the INSERT half
+    if m:
+        ins = re.search(r"(?is)\bWHEN\s+NOT\s+MATCHED\s+THEN\s+INSERT\s*\(([^)]*)\)\s*VALUES\b", sql)
+        if ins:
+            cols = [c.strip() for c in ins.group(1).split(",") if c.strip()]
+            if cols:
+                names = ",\n  ".join(cols)
+                binds = ",\n  ".join(f":{c}" for c in cols)
+                return f"INSERT INTO {m.group(1)}\n  (\n  {names}\n  )\nVALUES\n  (\n  {binds}\n  )"
+    return sql
+
+
+def _upsert_to_update(sql: str) -> str:
+    """The `_put` counterpart of :func:`_simplify_upsert` — v1 often registered an *upsert* under
+    the ``PUT`` crud (the FormsTable's "update" action ran an ``INSERT … ON CONFLICT`` / ``MERGE``).
+    v2's TableView already separates update from insert (and :func:`_simplify_upsert` handles the
+    insert side), so collapse the update side to a plain ``UPDATE t SET … WHERE <key cols> = :<col>``
+    — the WHERE is the conflict / ``ON`` columns; :func:`_rewrite_put_where` then turns those into
+    ``:<col>_ORIGINAL``. PostgreSQL `EXCLUDED.col` references and Oracle `src.col` / `<alias>.col`
+    references become plain ``:col``. Anything that isn't an upsert is returned unchanged."""
+    pg = re.match(
+        r"(?is)\s*INSERT\s+INTO\s+(\S+).*?\bON\s+CONFLICT\s*\(([^)]*)\)\s*DO\s+UPDATE\s+SET\s+(.*)$", sql
+    )
+    if pg:
+        table, keys_raw, set_body = pg.group(1), pg.group(2), pg.group(3).strip()
+        set_body = re.sub(r"(?i)\bEXCLUDED\.(\w+)", r":\1", set_body)
+        keys = [k.strip() for k in keys_raw.split(",") if k.strip()]
+        where = " AND ".join(f"{k} = :{k}" for k in keys)
+        return f"UPDATE {table}\nSET {set_body}\nWHERE {where}"
+    m = re.match(r"(?is)\s*MERGE\s+INTO\s+(\S+)(?:\s+(\w+))?\s+USING\b", sql)
+    if m:
+        table, alias = m.group(1), m.group(2)
+        on_m = re.search(r"(?is)\bON\s*\((.*?)\)\s*WHEN\s+MATCHED\b", sql)
+        set_m = re.search(r"(?is)\bWHEN\s+MATCHED\s+THEN\s+UPDATE\s+SET\s+(.*?)\bWHEN\s+NOT\s+MATCHED\b", sql)
+        if on_m and set_m:
+            def _deref(s: str) -> str:
+                if alias:
+                    s = re.sub(rf"\b{re.escape(alias)}\.", "", s)
+                return re.sub(r"\bsrc\.(\w+)", r":\1", s).strip()
+            return f"UPDATE {table}\nSET {_deref(set_m.group(1))}\nWHERE {_deref(on_m.group(1))}"
+    return sql
+
+
 def _rewrite_put_where(sql: str) -> str:
     """In an `UPDATE … SET … WHERE …` statement, rebind **every** parameter in the WHERE clause
     from `:<col>` to `:<col>_ORIGINAL` (the SET clause is untouched — it keeps `:<col>` for the new
@@ -197,8 +250,13 @@ def migrate_sql_queries(
             ``auto_load``.
         key_columns: ``{query_id: [col, …]}`` (from :func:`migrate_key_columns`) — the row-key columns
             (v1's ``col_key``); attached to the read query as ``key_columns`` (the TableView's Excel
-            import uses them to decide update-vs-insert). (The ``_put`` query's WHERE is rewritten to
-            ``:<col>_ORIGINAL`` for **every** parameter it references, automatically — not just keys.)
+            import uses them to decide update-vs-insert).
+    SQL is also touched per crud (v2's TableView already separates update/insert, so v1's upsert
+    queries are split apart): a ``_post`` upsert (PostgreSQL ``INSERT … ON CONFLICT`` / Oracle
+    ``MERGE``) collapses to a plain ``INSERT`` (:func:`_simplify_upsert`); a ``_put`` upsert collapses
+    to a plain ``UPDATE`` (:func:`_upsert_to_update`); and every ``_put``'s WHERE is rebound to
+    ``:<col>_ORIGINAL`` for every parameter it references (:func:`_rewrite_put_where` — so editing the
+    key still finds the row, since the TableView sends the row's pre-edit values under those names).
     """
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
     tmeta = {int(k): dict(v) for k, v in (table_meta or {}).items()}
@@ -245,17 +303,20 @@ def migrate_sql_queries(
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
         is_update = crud in _UPDATE_CRUD
-        # build each dialect variant: a read query with filter columns is wrapped in
-        # `SELECT * FROM (…) _flt WHERE <filters>`; an UPDATE query's WHERE is rewritten to
-        # `:<col>_ORIGINAL`; then ORDER BY is appended (to the outer query, when the read was wrapped).
+        # build each dialect variant. read + filter columns → `SELECT * FROM (…) _flt WHERE <filters>`.
+        # an UPDATE-crud query: an upsert there collapses to a plain UPDATE, then its WHERE is rebound
+        # to `:<col>_ORIGINAL`. an INSERT-crud upsert (`_post`) collapses to a plain INSERT. then
+        # ORDER BY is appended (to the outer query, when the read was wrapped).
         ob = orderbys.get(key, "")
         def _variant(raw: str, dia: str) -> str:
             if filter_cols:
                 s = _wrap_with_filters(raw, filter_cols, dialect=dia)
             elif is_update:
-                s = _rewrite_put_where(raw)
-            else:
+                s = _rewrite_put_where(_upsert_to_update(raw))
+            elif is_read:
                 s = raw
+            else:
+                s = _simplify_upsert(raw)
             return f"{s}\nORDER BY {ob}" if ob else s
         variants = {dia: _variant(raw, dia) for dia, raw in groups[key].items()}
         connectors[conn_name]["queries"].append(

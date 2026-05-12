@@ -303,7 +303,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   "+ Add row" / per-row "duplicate" / **Import** (.xlsx/.csv → headers matched to *result columns by header
   text* — name / label / "(ID)"-suffixed, case-insensitive — so the sheet's column order doesn't matter; an
   imported row whose `key_columns` match a *loaded* row becomes an **edit** of that row (→ `update_query`),
-  the rest are **new** rows (→ `insert_query`) — that replaces v1's MERGE/UPSERT `_post` queries) /
+  the rest are **new** rows (→ `insert_query`) — that's why the migration can collapse v1's upsert queries
+  (`INSERT … ON CONFLICT` / `MERGE`) to plain `INSERT`/`UPDATE`) /
   multi-row copy-paste (a selection checkbox column → Copy → Paste) → new rows (added at the *top*); a per-row
   × marks an existing row for deletion (a status column shows +/●/− marks); **Save**
   fires the lot — edited rows → `update_query` (the merged new values, plus the row's pre-edit values under
@@ -372,10 +373,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `migrate_sql_queries(table_meta=…)`; `migrate_key_columns(ly_tbl_col rows, ly_dlg_col rows)` → `{query_id:
   [col, …]}` (the `col_key = 'Y'` columns) — passed as `key_columns=…`, attached to the **read** query as
   `key_columns` (the TableView's Excel import matches imported rows against the loaded ones on these to decide
-  update vs insert). Separately, `migrate_sql_queries` rewrites **every** `_put`'s WHERE clause — every `:<col>`
-  it references → `:<col>_ORIGINAL` (the SET clause untouched — the new value), automatically — so editing a
-  column the WHERE matches on (typically the key) still updates the right row (the TableView sends the row's
-  pre-edit values under `:<col>_ORIGINAL`); `migrate_column_hints(ly_tbl_col rows,
+  update vs insert). Separately, `migrate_sql_queries` normalises the write queries (v2's TableView splits
+  update/insert, so v1's upserts are split apart): a `_post` upsert (`INSERT … ON CONFLICT` / Oracle `MERGE`)
+  collapses to a plain `INSERT` (`_simplify_upsert`); a `_put` upsert collapses to a plain `UPDATE`
+  (`_upsert_to_update` — its WHERE = the conflict / `ON` columns); and every `_put`'s WHERE is then rebound —
+  every `:<col>` → `:<col>_ORIGINAL` (`_rewrite_put_where`; the SET clause untouched — the new value) — so
+  editing a key column still updates the right row (the TableView sends the row's pre-edit values under
+  `:<col>_ORIGINAL`); `migrate_column_hints(ly_tbl_col rows,
   ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
   `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
   `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
@@ -463,7 +467,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-267 tests pass.
+269 tests pass.
 
 ## Run it
 

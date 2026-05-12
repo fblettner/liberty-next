@@ -163,6 +163,64 @@ def test_migrate_sql_queries_put_where_rewrite() -> None:
     assert "USR_APPS_ID" not in binds  # only the _ORIGINAL form survives in the WHERE
 
 
+def test_migrate_sql_queries_simplify_upsert() -> None:
+    from liberty.connectors.base import detect_statement_type, find_bind_params
+    queries = [{"query_id": 1, "query_label": "Users", "query_type": "TABLE"},
+               {"query_id": 2, "query_label": "Roles", "query_type": "TABLE"}]
+    sql_rows = [
+        # PostgreSQL upsert _post → plain INSERT (the ON CONFLICT … tail dropped)
+        {"query_id": 1, "query_dbtype": "postgres", "query_crud": "POST", "query_pool": "default",
+         "query_sqlquery": "INSERT INTO USERS (ID, NAME) VALUES (:ID, :NAME)\nON CONFLICT (ID) DO UPDATE SET NAME = :NAME",
+         "query_orderby": None},
+        # Oracle MERGE _post → plain INSERT rebuilt from the WHEN NOT MATCHED clause
+        {"query_id": 2, "query_dbtype": "oracle", "query_crud": "POST", "query_pool": "default",
+         "query_sqlquery": "MERGE INTO ROLES t\nUSING (SELECT :ID AS ID, :LABEL AS LABEL FROM dual) src\n"
+                           "ON (t.ID = src.ID)\nWHEN MATCHED THEN UPDATE SET t.LABEL = src.LABEL\n"
+                           "WHEN NOT MATCHED THEN INSERT (ID, LABEL) VALUES (src.ID, src.LABEL)",
+         "query_orderby": None},
+    ]
+    out = migrate_sql_queries(queries, sql_rows)
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    pg = by_name["users_post"]["sql"]
+    assert "ON CONFLICT" not in pg and detect_statement_type(pg) == "INSERT"
+    assert set(find_bind_params(pg)) == {"ID", "NAME"}
+    ora = by_name["roles_post"]["sql"]
+    assert "MERGE" not in ora and detect_statement_type(ora) == "INSERT"
+    assert "INSERT INTO ROLES" in ora and set(find_bind_params(ora)) == {"ID", "LABEL"}
+    # both still round-trip + stay writable
+    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
+    assert all(q.writable for q in reparsed.connectors["default"].queries)
+
+
+def test_migrate_sql_queries_upsert_put_to_update() -> None:
+    from liberty.connectors.base import detect_statement_type, find_bind_params
+    queries = [{"query_id": 1, "query_label": "Users", "query_type": "TABLE"},
+               {"query_id": 2, "query_label": "Roles", "query_type": "TABLE"}]
+    sql_rows = [
+        # v1 registered a PG upsert under the PUT crud → collapse to a plain UPDATE (key cols → :<col>_ORIGINAL)
+        {"query_id": 1, "query_dbtype": "postgres", "query_crud": "PUT", "query_pool": "default",
+         "query_sqlquery": "INSERT INTO USERS (APPS_ID, ID, NAME) VALUES (:APPS_ID, :ID, :NAME)\n"
+                           "ON CONFLICT (APPS_ID, ID) DO UPDATE SET NAME = :NAME", "query_orderby": None},
+        # an Oracle MERGE under PUT → plain UPDATE built from the WHEN MATCHED + ON clauses
+        {"query_id": 2, "query_dbtype": "oracle", "query_crud": "PUT", "query_pool": "default",
+         "query_sqlquery": "MERGE INTO ROLES t\nUSING (SELECT :ID AS ID, :LABEL AS LABEL FROM dual) src\n"
+                           "ON (t.ID = src.ID)\nWHEN MATCHED THEN UPDATE SET t.LABEL = src.LABEL\n"
+                           "WHEN NOT MATCHED THEN INSERT (ID, LABEL) VALUES (src.ID, src.LABEL)",
+         "query_orderby": None},
+    ]
+    out = migrate_sql_queries(queries, sql_rows)
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    pg = by_name["users_put"]["sql"]
+    assert detect_statement_type(pg) == "UPDATE" and "ON CONFLICT" not in pg
+    assert "SET NAME = :NAME" in pg
+    assert set(find_bind_params(pg)) == {"NAME", "APPS_ID_ORIGINAL", "ID_ORIGINAL"}  # key cols → _ORIGINAL in the WHERE
+    ora = by_name["roles_put"]["sql"]
+    assert detect_statement_type(ora) == "UPDATE" and "MERGE" not in ora
+    assert "UPDATE ROLES" in ora and "SET LABEL = :LABEL" in ora
+    assert set(find_bind_params(ora)) == {"LABEL", "ID_ORIGINAL"}
+    assert all(q.writable for q in parse_connectors(tomllib.loads(render_toml(out))).connectors["default"].queries)
+
+
 def test_migrate_sql_queries_filter_wrap() -> None:
     # a read query with a filter-flagged column gets wrapped: SELECT * FROM (<orig>) _flt WHERE …
     out = migrate_sql_queries(
