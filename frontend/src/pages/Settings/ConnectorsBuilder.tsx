@@ -1,15 +1,15 @@
-// Structured editor for `[connectors.*]` (sql + api) — Phase-7 config builder. Lists the connectors,
-// renders each via a SchemaForm driven by SqlConnectorConfig / ApiConnectorConfig's JSON Schema
-// (queries/endpoints/columns/params are collapsible nested lists inside the form); Save validates +
-// rewrites only the [connectors.*] tables of connectors.toml (a changed connector's subtree is
-// re-rendered, so its inline `columns = [{…}]` may become `[[…]]` — review in git), then reloads.
+// Structured editor for `[connectors.*]` (sql + api) — Phase-7 config builder. Left = the connector
+// list; right = a SchemaNavigator over the chosen connector's schema — drill connector → query →
+// column → … via a breadcrumb (no nested accordions). Save validates each against the discriminated
+// schema + rewrites only the [connectors.*] tables of connectors.toml (a changed connector's subtree
+// is re-rendered, so its inline `columns = [{…}]` may become `[[…]]` — review in git), then reloads.
 // No rename yet — delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Globe } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -110,7 +110,7 @@ export default function ConnectorsBuilder() {
                 <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>[connectors.{sel}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {String(conns[sel].type)}</span></strong>
                 <Button $variant="danger" $size="sm" onClick={() => removeConnector(sel)} disabled={busy}><Trash2 size={13} /> {t('settings.connectors.delete')}</Button>
               </Row>
-              <SchemaForm schema={selSchema} value={conns[sel]} onChange={(v) => update(sel, v)} />
+              <SchemaNavigator root={{ label: sel, schema: selSchema, value: conns[sel], onChange: (v) => update(sel, v) }} />
             </Stack>
           ) : (
             <Empty>{names.length ? t('settings.connectors.pickOne') : t('settings.connectors.empty')}</Empty>

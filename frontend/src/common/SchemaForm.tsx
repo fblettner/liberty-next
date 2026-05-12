@@ -146,15 +146,46 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
   )
 }
 
-// a collapsible list of nested objects (params / columns / queries / endpoints / …)
+// the summary line for a nested-object item in a list (the breadcrumb / list-row label)
+function itemSummary(it: Record<string, unknown>, itemSchema: JsonSchema, defs: Defs): string {
+  if (typeof it.name === 'string' && it.name) return it.name
+  const firstStr = Object.entries(itemSchema.properties ?? {}).find(([, p]) => effective(p, defs).type === 'string')?.[0]
+  const v = firstStr ? it[firstStr] : undefined
+  return typeof v === 'string' && v ? v : '(unnamed)'
+}
+
+// ── drill-in list (nav mode): each item is a clickable row; clicking it navigates into the item ──
+const NavListRow = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; margin-bottom: 4px; text-align: left;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
+  color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
+  & .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & svg { flex-shrink: 0; color: ${colors.text.muted}; }
+  &:hover { border-color: ${colors.blue.border}; color: ${colors.text.primary}; }
+`
+function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
+  itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]
+  onChange: (v: Record<string, unknown>[]) => void
+  onNavigate: (index: number, summary: string) => void
+}) {
+  return (
+    <div>
+      {value.map((it, i) => (
+        <NavListRow key={i} type="button" onClick={() => onNavigate(i, itemSummary(it, itemSchema, defs))}>
+          <span className="lbl">{itemSummary(it, itemSchema, defs)}</span>
+          <SmallX as="span" role="button" title="remove" onClick={(e) => { e.stopPropagation(); onChange(value.filter((_, j) => j !== i)) }}><X size={12} /></SmallX>
+          <ChevronRight size={13} />
+        </NavListRow>
+      ))}
+      <MiniBtn type="button" onClick={() => { onChange([...value, {}]); onNavigate(value.length, '(new)') }}><Plus size={12} /> add</MiniBtn>
+    </div>
+  )
+}
+
+// a collapsible list of nested objects (the no-navigator fallback — params / columns / queries / …)
 function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
   const [open, setOpen] = useState<number | null>(null)
-  const summary = (it: Record<string, unknown>): string => {
-    if (typeof it.name === 'string' && it.name) return it.name
-    const firstStr = Object.entries(itemSchema.properties ?? {}).find(([, p]) => effective(p, defs).type === 'string')?.[0]
-    const v = firstStr ? it[firstStr] : undefined
-    return typeof v === 'string' && v ? v : '(unnamed)'
-  }
+  const summary = (it: Record<string, unknown>) => itemSummary(it, itemSchema, defs)
   return (
     <div>
       {value.map((it, i) => (
@@ -177,14 +208,21 @@ function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: J
 }
 
 // ── the form ────────────────────────────────────────────────────────────────
+/** A breadcrumb hop the navigator can take from this form (drill into a nested object property,
+ *  or into item #index of a `list[Model]` property). `SchemaNavigator` consumes these. */
+export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; label: string }
+
 /** Render an editing form for one object value against its JSON Schema. `undefined` for a key
  *  means "not set" (the backend's `exclude_defaults` then drops it from the file). Pass the
- *  top-level schema's `$defs` so `$ref`s in nested models resolve. */
-export function SchemaForm({ schema, value, onChange, defs }: {
+ *  top-level schema's `$defs` so `$ref`s in nested models resolve. When `onNavigate` is given,
+ *  `list[Model]` / nested-object properties become drill-in rows (used inside `SchemaNavigator`);
+ *  without it they render as inline collapsible accordions. */
+export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
   defs?: Defs
+  onNavigate?: (seg: NavSeg) => void
 }) {
   const allDefs = { ...(schema.$defs ?? {}), ...(defs ?? {}) }
   const props = schema.properties ?? {}
@@ -217,9 +255,16 @@ export function SchemaForm({ schema, value, onChange, defs }: {
           control = <Bool><input type="checkbox" checked={checked} onChange={(e) => set(key, e.target.checked)} /> {checked ? 'enabled' : 'disabled'}</Bool>
         } else if (sub.type === 'array') {
           const items = effective(sub.items ?? {}, allDefs)
-          const arr = Array.isArray(cur) ? (cur as unknown[]) : []
+          // `cur` may be a single object for the `T | list[T] | None` shape (a hand-written single rule)
+          const arr = Array.isArray(cur) ? (cur as unknown[]) : cur && typeof cur === 'object' ? [cur] : []
           if (isObjectModel(items)) {
-            control = <ObjectListEditor itemSchema={items} defs={allDefs} value={arr as Record<string, unknown>[]} onChange={(v) => set(key, v.length ? v : undefined)} />
+            const objs = arr as Record<string, unknown>[]
+            const setArr = (v: Record<string, unknown>[]) => set(key, v.length ? v : undefined)
+            const labelPlain = label.replace(' *', '')
+            control = onNavigate
+              ? <ObjectNavList itemSchema={items} defs={allDefs} value={objs} onChange={setArr}
+                  onNavigate={(index, summary) => onNavigate({ kind: 'item', key, index, label: `${labelPlain}: ${summary}` })} />
+              : <ObjectListEditor itemSchema={items} defs={allDefs} value={objs} onChange={setArr} />
           } else {
             control = <StringListEditor value={arr.map((x) => (x == null ? '' : String(x)))} onChange={(v) => set(key, v.length ? v : undefined)} />
           }
@@ -227,9 +272,14 @@ export function SchemaForm({ schema, value, onChange, defs }: {
           const map = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
           control = <StringMapEditor value={Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v == null ? '' : String(v)]))} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} />
         } else if (isObjectModel(sub)) {
-          control = (
+          const subValue = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
+          control = onNavigate ? (
+            <NavListRow type="button" onClick={() => onNavigate({ kind: 'prop', key, label: label.replace(' *', '') })}>
+              <span className="lbl">edit…</span><ChevronRight size={13} />
+            </NavListRow>
+          ) : (
             <ItemBox><ItemBody style={{ borderTop: 'none' }}>
-              <SchemaForm schema={sub} defs={allDefs} value={(cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} />
+              <SchemaForm schema={sub} defs={allDefs} value={subValue} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} />
             </ItemBody></ItemBox>
           )
         } else if (sub.type === 'integer' || sub.type === 'number') {

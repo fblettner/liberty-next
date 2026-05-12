@@ -290,10 +290,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `SearchSelect`
   (a searchable single-select pop-over — themed replacement for a long native `<select>`), `SchemaForm`
   (renders an editing form from a JSON Schema — string / number / bool / `dict[str,str]` map / `list[str]` /
-  `list[Model]` (a *collapsible* list, each item a nested `SchemaForm` — a query with 200 columns is 200
-  rows you expand one at a time) / `$ref`-to-a-`$defs`-model (resolved) / enum / `X|None` / the `sql`
-  `str|{dialect:str}` union (a textarea, or per-dialect textareas); anything else → a "edit in the raw
-  editor" note. The Phase-7 config-builder shell, used by `Settings/PoolsBuilder` & `ConnectorsBuilder`), `Tag`/`Mono`,
+  `list[Model]` / `$ref`-to-a-`$defs`-model (resolved) / enum / `X|None` / the `sql` `str|{dialect:str}`
+  union (a textarea, or per-dialect textareas); anything else → a "edit in the raw editor" note. With
+  `onNavigate` it renders `list[Model]` / nested-object props as drill-in rows, without it as inline
+  accordions) + `SchemaNavigator` (a master-detail wrapper around `SchemaForm` — shows one level at a time
+  with a breadcrumb of the path `nomasx1 / users_get / USR_ID`; the path is *segments*, the current
+  schema/value derived from the root each render so edits keep it valid). The Phase-7 config-builder
+  shell, used by `Settings/PoolsBuilder` (flat → plain `SchemaForm`) & `ConnectorsBuilder` (nested → `SchemaNavigator`)), `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
   global search (over *every* column — `getColumnCanGlobalFilter` is overridden so a column whose first row
@@ -375,9 +378,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a tab switcher over the config editors —
   `PoolsBuilder` = the structured `[pools.*]` editor (a left list + a `SchemaForm` over the `PoolConfig`
   schema → `PUT /admin/config/pools` + Reload), `ConnectorsBuilder` = the `[connectors.*]` editor (a left
-  list of sql/api connectors + a `SchemaForm` over the matching schema — `queries`/`endpoints`/`columns`/
-  `params` render as collapsible nested lists inside the form — → `PUT /admin/config/connectors/parsed` +
-  Reload), and `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over
+  list of sql/api connectors + a `SchemaNavigator` over the matching schema — drill connector → query →
+  column → … via a breadcrumb, no nested accordions — → `PUT /admin/config/connectors/parsed` + Reload),
+  and `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over
   `GET/PUT /admin/config/connectors` + Reload — the escape hatch); the structured editors don't support
   rename yet — delete + re-add — the Phase-7 builder slices), `Login` + `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
@@ -583,11 +586,11 @@ the form/screen engine (dialogs + conditions + actions/events + `call_api` from 
 contextual menus — the `visible_when`/`filter_from` work is its table-side first slice; design it
 against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
-(sql + api, with queries/endpoints/columns as collapsible nested lists), the `GET /admin/config/schema` +
-`GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed` endpoints, and the field docs
-moved to `Field(description=)`; next: a drill-down master-detail navigator (breadcrumb + clickable list rows
-instead of nested accordions — the current builder UX weak point), then a dictionary builder, a menus tree builder, a SQL editor + "test run"
-for queries; + git-backed config-file versioning + frontend tests/CI) → **Phase 8** charts & dashboards →
+(sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
+the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed`
+endpoints, and the field docs moved to `Field(description=)`; next: a dictionary builder, a menus tree builder,
+a SQL editor + "test run" preview for queries, plus rename support; + git-backed config-file versioning +
+frontend tests/CI) → **Phase 8** charts & dashboards →
 **Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement (in-project
 Python/local-Spark jobs & scheduling).
 
