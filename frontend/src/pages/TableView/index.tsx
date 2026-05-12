@@ -27,6 +27,7 @@ export default function TableView({ connector, query }: { connector: string; que
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
   const [filters, setFilters] = useState<Record<string, ServerFilter>>({})  // server-filter fields (v1's col_filter columns)
+  const [maxRows, setMaxRows] = useState('')  // override the configured row cap for this run (DbVisualizer-style); blank = use the default
   const [result, setResult] = useState<QueryResult | null>(null)
   const [runErr, setRunErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -81,10 +82,11 @@ export default function TableView({ connector, query }: { connector: string; que
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
     for (const [name, f] of Object.entries(filters)) if (f.val !== '') { sent[name] = f.val; sent[`${name}_op`] = f.op }
+    const limit = maxRows.trim()  // `_limit=N` overrides the connector/pool/query row cap for this run
     try {
       let res: QueryResult
       if (meta.statement_type === 'SELECT') {
-        const qs = new URLSearchParams(sent).toString()
+        const qs = new URLSearchParams(limit ? { ...sent, _limit: limit } : sent).toString()
         res = await api.get<QueryResult>(
           `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}${qs ? `?${qs}` : ''}`,
         )
@@ -99,7 +101,7 @@ export default function TableView({ connector, query }: { connector: string; que
     } finally {
       setBusy(false)
     }
-  }, [meta, params, filters, connector, query, t])
+  }, [meta, params, filters, maxRows, connector, query, t])
 
   // Auto-load: run a SELECT immediately when the screen opens, once, if the query asks for it.
   const autoRan = useRef(false)
@@ -172,6 +174,20 @@ export default function TableView({ connector, query }: { connector: string; que
                   </div>
                 )
               })}
+              {meta.statement_type === 'SELECT' && (
+                <div style={{ width: 110 }}>
+                  {/* override the configured row cap for this run (DbVisualizer-style) — blank = use the default */}
+                  <Field label={t('table.maxRows')}>
+                    <Input
+                      type="number"
+                      min={1}
+                      placeholder={t('table.maxRowsHint')}
+                      value={maxRows}
+                      onChange={(e) => setMaxRows(e.target.value)}
+                    />
+                  </Field>
+                </div>
+              )}
               <Button $variant="primary" onClick={run} disabled={busy}>
                 {busy ? <SpinnerRing size={14} thickness={2} /> : <Play size={14} />}
                 {busy ? t('common.running') : t('common.run')}

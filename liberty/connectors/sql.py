@@ -142,6 +142,11 @@ class QueryResult:
 class SQLConnector:
     """A connector exposing a fixed set of named queries against one pool."""
 
+    # Hard ceiling on any row cap (a per-request override can't ask for more) — keeps a runaway
+    # "give me everything" from OOM-ing the server.
+    HARD_MAX_ROWS = 1_000_000
+    DEFAULT_MAX_ROWS = 1000
+
     def __init__(
         self,
         name: str,
@@ -149,11 +154,15 @@ class SQLConnector:
         pools: PoolRegistry,
         *,
         dictionary: DictionaryFile | None = None,
+        pool_max_rows: int | None = None,
     ) -> None:
         self.name = name
         self.config = config
         self.pool_name = config.pool
-        self.max_rows = config.max_rows
+        # effective default row cap: this connector's, else the pool's, else DEFAULT_MAX_ROWS
+        self.max_rows = config.max_rows if config.max_rows is not None else (
+            pool_max_rows if pool_max_rows is not None else self.DEFAULT_MAX_ROWS
+        )
         self._pools = pools
         self._dict = dictionary or DictionaryFile()
         self._queries: dict[str, QueryDef] = {q.name: q for q in config.queries}
@@ -257,19 +266,30 @@ class SQLConnector:
             bound.setdefault(p.name, merged.get(p.name))
         return bound
 
+    def _row_cap(self, qdef: QueryDef, override: int | None) -> int:
+        """Effective row cap for one SELECT: a per-request *override* if given, else the query's
+        ``max_rows``, else this connector's (which already folds in the pool's) — clamped to
+        ``[1, HARD_MAX_ROWS]``."""
+        cap = override if override is not None else (qdef.max_rows if qdef.max_rows is not None else self.max_rows)
+        return max(1, min(int(cap), self.HARD_MAX_ROWS))
+
     async def execute(
-        self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None
+        self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
+        max_rows: int | None = None,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
         The SQL variant matching the pool's database is selected (``QueryDef.sql_for``).
         Result-column display hints (``QueryDef.columns``) are resolved against the shared
-        dictionary in *language* (default: the dictionary's ``default_language``). Raises
-        :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`, :class:`WriteNotAllowedError`,
-        or :class:`UnknownPoolError`; database errors propagate as the underlying SQLAlchemy exception.
+        dictionary in *language* (default: the dictionary's ``default_language``). *max_rows*
+        overrides the configured row cap for this call (query → connector → pool → 1000), clamped
+        to ``[1, HARD_MAX_ROWS]``. Raises :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`,
+        :class:`WriteNotAllowedError`, or :class:`UnknownPoolError`; database errors propagate as the
+        underlying SQLAlchemy exception.
         """
         lang = language or self._dict.default_language
         qdef = self.get_query(query_name)
+        cap = self._row_cap(qdef, max_rows)
         sql_text = qdef.sql_for(self._resolve_dialect())
         stmt_type = detect_statement_type(sql_text)
         if stmt_type not in ALLOWED_STATEMENTS:
@@ -297,7 +317,7 @@ class SQLConnector:
                 rows: list[dict[str, Any]] = []
                 truncated = False
                 for row in result.mappings():
-                    if len(rows) >= self.max_rows:
+                    if len(rows) >= cap:
                         truncated = True
                         break
                     rows.append(dict(row))

@@ -98,6 +98,8 @@ const en = {
     grouped: 'grouped',
     export: 'Export',
     rowsPerPage: 'Rows per page',
+    maxRows: 'Max rows',
+    maxRowsHint: 'default',
     showing: 'Showing {{from}}–{{to}} of {{total}}',
     rowsTotal_one: '{{count}} row total',
     rowsTotal_other: '{{count}} rows total',

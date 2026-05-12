@@ -1,12 +1,14 @@
 // "Current app" workspace state — a soft filter over the UI.
 //
-// In v2 auth is centralized (you log in once, app-agnostic) and connectors are
-// already permission-scoped on the server; this just remembers which connector
-// ("app" — nomasx1, nomajde, …) you're focused on so the Connectors page / nav
-// don't show everything at once. Persisted to localStorage. No backend role —
-// the permission checks are still what actually enforces access. It owns the
-// one `GET /api/connectors` + `GET /api/menus` fetch, shared by the header
-// picker, the Connectors page and the Sidebar (re-runnable via `refresh()`).
+// In v2 auth is centralized (you log in once, app-agnostic) and connectors are already
+// permission-scoped on the server; this just remembers which *app* you're focused on so the
+// Connectors page / nav don't show everything at once. "App" ≠ "connector": one v1 app can map to
+// several v2 connectors (e.g. NOMAJDE → `nomajde` (its data DB) + `jdedwards` (the live JDE DB) +
+// helper pools). The apps are the connectors that have a menu (`config/menus.toml` defines an app's
+// screens); the rest are data sources reached *through* an app's menu, not picked directly. With no
+// menus at all (a bare deployment) every connector counts as an app. Persisted to localStorage; no
+// backend role — permission checks still enforce access. Owns the one `GET /api/connectors` +
+// `GET /api/menus` fetch, shared by the header picker, the Connectors page and the Sidebar.
 import {
   createContext,
   useCallback,
@@ -23,15 +25,18 @@ import type { AppMenuTree, MenusByApp } from '../types/menus'
 import { useAuth } from '../auth/AuthContext'
 
 const APP_KEY = 'liberty.app'
-// Routes that "belong to" a connector — opening one makes the workspace follow it.
+// Routes that "belong to" a connector — opening one makes the workspace follow it *iff* that
+// connector is an app (so opening a screen on a data-source connector via an app's menu doesn't
+// yank the workspace over to it).
 const CONNECTOR_ROUTE = /^\/(?:sql|http)\/([^/]+)\//
 
 interface WorkspaceState {
-  connectors: ConnectorMeta[] | null // null while loading / signed out
+  connectors: ConnectorMeta[] | null // every accessible connector (null while loading / signed out)
+  apps: ConnectorMeta[] | null // the subset that are "apps" (have a menu) — what the header picker offers
   menus: MenusByApp | null // app → its (permission-pruned, localized) menu tree
   error: string | null
-  currentApp: string | null // the explicitly picked connector; null = all accessible
-  currentMenu: AppMenuTree | null // the menu to show in the Sidebar (the picked app's, or — if there's only one connector — that one's)
+  currentApp: string | null // the explicitly picked app; null = "(all apps)"
+  currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
   setCurrentApp: (name: string | null) => void
   refresh: () => void
 }
@@ -91,23 +96,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [ready, user, nonce])
 
-  // If the remembered app isn't (or no longer is) one we can access, drop it.
+  // "Apps" = connectors that have a menu; with no menus defined, every connector is an app.
+  const apps = useMemo<ConnectorMeta[] | null>(() => {
+    if (!connectors) return null
+    const appNames = menus ? Object.keys(menus) : []
+    return appNames.length ? connectors.filter((c) => appNames.includes(c.name)) : connectors
+  }, [connectors, menus])
+  const isApp = useCallback((name: string) => !!apps?.some((a) => a.name === name), [apps])
+
+  // If the remembered app isn't (or no longer is) a pickable app, drop it.
   useEffect(() => {
-    if (connectors && currentApp && !connectors.some((c) => c.name === currentApp)) {
+    if (apps && currentApp && !isApp(currentApp)) {
       setCurrentAppState(null)
       writeApp(null)
     }
-  }, [connectors, currentApp])
+  }, [apps, currentApp, isApp])
 
-  // Deep-linking into a connector's screen (/sql/<c>/<q>, /http/<c>/<e>) makes the
-  // workspace follow it — so "back to Connectors" stays scoped to that app.
+  // Deep-linking into a screen (/sql/<c>/<q>, /http/<c>/<e>) makes the workspace follow it — but
+  // only when <c> is an app; opening a data-source connector's screen (e.g. via the nomajde menu
+  // pointing at a jdedwards query) leaves the picked app alone.
   useEffect(() => {
     const m = CONNECTOR_ROUTE.exec(pathname)
     if (!m) return
     const name = decodeURIComponent(m[1])
+    if (!isApp(name)) return
     setCurrentAppState((cur) => (cur === name ? cur : name))
     writeApp(name)
-  }, [pathname])
+  }, [pathname, isApp])
 
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)
@@ -116,16 +131,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
-  // With exactly one connector there's no picker, so the Sidebar follows it implicitly.
+  // With exactly one app there's no picker, so the Sidebar follows it implicitly.
   const currentMenu = useMemo<AppMenuTree | null>(() => {
     if (!menus) return null
-    const app = currentApp ?? (connectors?.length === 1 ? connectors[0].name : null)
+    const app = currentApp ?? (apps?.length === 1 ? apps[0].name : null)
     return (app && menus[app]) || null
-  }, [menus, connectors, currentApp])
+  }, [menus, apps, currentApp])
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, menus, error, currentApp, currentMenu, setCurrentApp, refresh }),
-    [connectors, menus, error, currentApp, currentMenu, setCurrentApp, refresh],
+    () => ({ connectors, apps, menus, error, currentApp, currentMenu, setCurrentApp, refresh }),
+    [connectors, apps, menus, error, currentApp, currentMenu, setCurrentApp, refresh],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

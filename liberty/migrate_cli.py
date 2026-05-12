@@ -44,6 +44,7 @@ from liberty.migrations import (
     migrate_api,
     migrate_column_hints,
     migrate_dictionary,
+    migrate_key_columns,
     migrate_menus,
     migrate_pools,
     migrate_sql_queries,
@@ -93,6 +94,7 @@ async def _build(args: argparse.Namespace) -> dict:
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
                 column_hints=migrate_column_hints(tbl_cols, dlg_cols),
                 table_meta=migrate_table_meta(tbl_meta, frm_meta),
+                key_columns=migrate_key_columns(tbl_cols, dlg_cols),
             ))
         if args.command in ("api", "all"):
             conns, apis, headers, params = await read_api(engine)

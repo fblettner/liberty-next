@@ -60,19 +60,31 @@ async def describe_connector(connector: str, principal: CurrentPrincipal, connec
 # --------------------------------------------------------------------------- #
 
 
+# `_limit` (query string) / `max_rows` (POST body) aren't query params — they override the row cap.
+_RESERVED_BODY_KEYS = {"params", "max_rows"}
+
+
 def _params_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
     if not body:
         return {}
     nested = body.get("params")
-    return nested if isinstance(nested, dict) else body
+    return nested if isinstance(nested, dict) else {k: v for k, v in body.items() if k not in _RESERVED_BODY_KEYS}
+
+
+def _as_int(v: Any) -> int | None:
+    try:
+        return int(v) if v is not None and str(v).strip() != "" else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def _run_sql(
-    connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *, language: str | None = None
+    connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
+    language: str | None = None, max_rows: int | None = None,
 ) -> dict[str, Any]:
     try:
         conn = connectors.sql(connector)  # UnknownConnectorError if missing / wrong type
-        result = await conn.execute(query, params, language=language)
+        result = await conn.execute(query, params, language=language, max_rows=max_rows)
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
@@ -92,7 +104,9 @@ async def sql_query_get(
         raise http_for_connector_error(exc) from exc
     if detect_statement_type(qdef.sql) != "SELECT":
         raise HTTPException(status.HTTP_405_METHOD_NOT_ALLOWED, detail="Non-SELECT queries must be run with POST")
-    return await _run_sql(connectors, connector, query, dict(request.query_params), language=request_language(request))
+    qp = dict(request.query_params)
+    limit = _as_int(qp.pop("_limit", None))  # ?_limit=N overrides the row cap; the rest are query params
+    return await _run_sql(connectors, connector, query, qp, language=request_language(request), max_rows=limit)
 
 
 @router.post("/sql/{connector}/{query}")
@@ -101,7 +115,8 @@ async def sql_query_post(
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     require_permission(principal, f"sql:{connector}:{query}")
-    return await _run_sql(connectors, connector, query, _params_from_body(body), language=request_language(request))
+    limit = _as_int(body.get("max_rows")) if body else None  # body {"params": …, "max_rows": N}
+    return await _run_sql(connectors, connector, query, _params_from_body(body), language=request_language(request), max_rows=limit)
 
 
 # --------------------------------------------------------------------------- #

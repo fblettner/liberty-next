@@ -68,6 +68,10 @@ class PoolConfig(BaseModel):
     pool_pre_ping: bool = True
     pool_recycle: int = -1
     echo: bool = False
+    # Default cap on rows a SELECT returns on this pool (v1's per-app `apps_limit`). `None` → no
+    # pool-level default. A connector's `max_rows`, a query's `max_rows`, or a per-request override
+    # each take precedence in that order; the absolute fallback is 1000. See SQLConnector.execute.
+    max_rows: int | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +149,9 @@ class QueryDef(BaseModel):
     # per-table "auto load" flag. A query with required-feeling params is still safe: every
     # `:name` the caller omits becomes SQL NULL.
     auto_load: bool = False
+    # Per-query override of the row cap (else the connector's, then the pool's, then 1000); a
+    # per-request override beats this. See SQLConnector.execute.
+    max_rows: int | None = None
     # Names of `writable` queries on the same connector that update / insert / delete a row of this
     # query's result — set explicitly, or (when unset) auto-derived from the `<base>_get` → `<base>_put`
     # / `<base>_post` / `<base>_delete` naming convention the migration uses. Drive the TableView's
@@ -184,7 +191,9 @@ class SqlConnectorConfig(BaseModel):
 
     type: Literal["sql"]
     pool: str = "default"
-    max_rows: int = 1000
+    # Default row cap for this connector's SELECTs. `None` → fall back to the pool's `max_rows`, then 1000.
+    # A query's `max_rows`, or a per-request override, take precedence. See SQLConnector.execute.
+    max_rows: int | None = None
     queries: list[QueryDef] = Field(default_factory=list)
 
 

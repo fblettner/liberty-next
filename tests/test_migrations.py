@@ -18,6 +18,7 @@ from liberty.migrations import (
     migrate_menus,
     migrate_pools,
     migrate_sql_queries,
+    migrate_key_columns,
     migrate_table_meta,
     read_api,
     read_applications,
@@ -123,6 +124,43 @@ def test_migrate_sql_queries_connector_prefix() -> None:
     assert "v1_default" in out["pools"]
 
 
+def test_migrate_key_columns() -> None:
+    keys = migrate_key_columns(
+        # rows arrive in col_seq order (the readers ORDER BY col_seq)
+        tbl_col_rows=[
+            {"query_id": 1, "col_target": "USR_APPS_ID", "col_key": "Y"},
+            {"query_id": 1, "col_target": "USR_NAME", "col_key": "N"},  # not a key → dropped
+            {"query_id": 1, "col_target": "USR_ID", "col_key": "Y"},
+            {"query_id": None, "col_target": "X", "col_key": "Y"},  # no query → skipped
+        ],
+        dlg_col_rows=[{"query_id": 1, "col_target": "USR_ID", "col_key": "Y"}],  # dup of a table-widget key → ignored
+    )
+    assert keys == {1: ["USR_APPS_ID", "USR_ID"]}  # given (col_seq) order, deduped; non-key columns dropped
+
+
+def test_migrate_sql_queries_put_where_rewrite() -> None:
+    queries = [{"query_id": 1, "query_label": "Users", "query_type": "TABLE"}]
+    sql_rows = [
+        {"query_id": 1, "query_dbtype": "postgres", "query_crud": "GET", "query_pool": "default",
+         "query_sqlquery": "SELECT USR_APPS_ID, USR_ID, USR_NAME FROM SECURITY_USERS", "query_orderby": None},
+        {"query_id": 1, "query_dbtype": "postgres", "query_crud": "PUT", "query_pool": "default",
+         "query_sqlquery": "UPDATE SECURITY_USERS SET USR_NAME = :USR_NAME, USR_ID = :USR_ID "
+                           "WHERE USR_APPS_ID = :USR_APPS_ID AND USR_ID = :USR_ID", "query_orderby": None},
+    ]
+    out = migrate_sql_queries(queries, sql_rows, key_columns={1: ["USR_APPS_ID", "USR_ID"]})
+    by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
+    put_sql = by_name["users_put"]["sql"]
+    # the SET clause keeps the new values; the WHERE binds the key columns to :<col>_ORIGINAL
+    assert "SET USR_NAME = :USR_NAME, USR_ID = :USR_ID" in put_sql
+    assert "WHERE USR_APPS_ID = :USR_APPS_ID_ORIGINAL AND USR_ID = :USR_ID_ORIGINAL" in put_sql
+    # the read query is untouched
+    assert by_name["users_get"]["sql"] == "SELECT USR_APPS_ID, USR_ID, USR_NAME FROM SECURITY_USERS"
+    from liberty.connectors.base import find_bind_params
+    binds = set(find_bind_params(put_sql))
+    assert {"USR_NAME", "USR_ID", "USR_APPS_ID_ORIGINAL", "USR_ID_ORIGINAL"} <= binds
+    assert "USR_APPS_ID" not in binds  # only the _ORIGINAL form survives in the WHERE
+
+
 def test_migrate_sql_queries_filter_wrap() -> None:
     # a read query with a filter-flagged column gets wrapped: SELECT * FROM (<orig>) _flt WHERE …
     out = migrate_sql_queries(
@@ -193,19 +231,19 @@ def test_migrate_sql_queries_with_table_meta() -> None:
 _APPLICATIONS = [
     {"apps_name": "Framework", "apps_pool": "default", "apps_dbtype": "postgres", "apps_jdbc": None,
      "apps_user": "liberty", "apps_password": "ENC:fw", "apps_host": "fw.example", "apps_port": 5432,
-     "apps_database": "libnsx1", "apps_pool_min": 1, "apps_pool_max": 10},
+     "apps_database": "libnsx1", "apps_pool_min": 1, "apps_pool_max": 10, "apps_limit": 1000},
     {"apps_name": "NOMASX1", "apps_pool": "nomasx1", "apps_dbtype": "postgres", "apps_jdbc": None,
      "apps_user": "nomasx1", "apps_password": "ENC:nx", "apps_host": "db.example", "apps_port": 5432,
-     "apps_database": "nomasx1", "apps_pool_min": 2, "apps_pool_max": 20},
+     "apps_database": "nomasx1", "apps_pool_min": 2, "apps_pool_max": 20, "apps_limit": 5000},
     {"apps_name": "NOMAJDE", "apps_pool": "nomajde", "apps_dbtype": "oracle", "apps_jdbc": None,
      "apps_user": "jde", "apps_password": None, "apps_host": "ora.example", "apps_port": 1521,
-     "apps_database": "JDEPROD", "apps_pool_min": None, "apps_pool_max": None},
+     "apps_database": "JDEPROD", "apps_pool_min": None, "apps_pool_max": None, "apps_limit": None},
     {"apps_name": "ViaJdbc", "apps_pool": "viajdbc", "apps_dbtype": "postgres",
      "apps_jdbc": "jdbc:postgresql://jdbc-host:5444/jdbcdb", "apps_user": "u", "apps_password": "ENC:z",
-     "apps_host": None, "apps_port": None, "apps_database": None, "apps_pool_min": None, "apps_pool_max": None},
+     "apps_host": None, "apps_port": None, "apps_database": None, "apps_pool_min": None, "apps_pool_max": None, "apps_limit": 0},
     {"apps_name": "Incomplete", "apps_pool": "incomplete", "apps_dbtype": None, "apps_jdbc": None,
      "apps_user": "u", "apps_password": None, "apps_host": None, "apps_port": None, "apps_database": None,
-     "apps_pool_min": None, "apps_pool_max": None},
+     "apps_pool_min": None, "apps_pool_max": None, "apps_limit": None},
 ]
 
 
@@ -220,11 +258,14 @@ def test_migrate_pools() -> None:
     assert nx["dialect"] == "postgresql"
     assert nx["pool_pre_ping"] is True
     assert nx["pool_size"] == 20  # from apps_pool_max
+    assert nx["max_rows"] == 5000  # from apps_limit
 
     jde = out["nomajde"]
     assert jde["url"] == "oracle+oracledb://jde:${MIGRATED_PW_NOMAJDE}@ora.example:1521/?service_name=JDEPROD"
     assert jde["dialect"] == "oracle"
     assert "pool_size" not in jde  # apps_pool_max was None
+    assert "max_rows" not in jde  # apps_limit was None
+    assert "max_rows" not in out["viajdbc"]  # apps_limit was 0 → not set
 
     # apps_jdbc fallback when host/port/database aren't on the row
     assert out["viajdbc"]["url"] == "postgresql+asyncpg://u:${MIGRATED_PW_VIAJDBC}@jdbc-host:5444/jdbcdb"
@@ -419,7 +460,7 @@ def test_merge_connectors() -> None:
 _V1_SCHEMA = [
     "CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY, query_label TEXT, query_type TEXT)",
     "CREATE TABLE ly_qry_sql (query_id INTEGER, query_dbtype TEXT, query_crud TEXT, query_pool TEXT, query_sqlquery TEXT, query_orderby TEXT)",
-    "CREATE TABLE ly_applications (apps_name TEXT, apps_pool TEXT, apps_dbtype TEXT, apps_jdbc TEXT, apps_user TEXT, apps_password TEXT, apps_host TEXT, apps_port INTEGER, apps_database TEXT, apps_pool_min INTEGER, apps_pool_max INTEGER)",
+    "CREATE TABLE ly_applications (apps_name TEXT, apps_pool TEXT, apps_dbtype TEXT, apps_jdbc TEXT, apps_user TEXT, apps_password TEXT, apps_host TEXT, apps_port INTEGER, apps_database TEXT, apps_pool_min INTEGER, apps_pool_max INTEGER, apps_limit INTEGER)",
     "CREATE TABLE ly_dictionary (dd_id TEXT PRIMARY KEY, dd_label TEXT, dd_type TEXT, dd_rules TEXT, dd_rules_values TEXT, dd_default TEXT)",
     "CREATE TABLE ly_dictionary_l (dd_id TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_enum (enum_id INTEGER PRIMARY KEY, enum_label TEXT)",
@@ -427,9 +468,9 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_enum_val_l (enum_id INTEGER, val_enum TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_lookup (lkp_id INTEGER PRIMARY KEY, lkp_description TEXT, lkp_query_id INTEGER, lkp_dd_id TEXT, lkp_dd_label TEXT, lkp_dd_group TEXT)",
     "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT)",
-    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT)",
+    "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT, col_key TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
-    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT)",
+    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_key TEXT)",
     "CREATE TABLE ly_menus (menu_seq_ukid TEXT PRIMARY KEY, menu_parent_id TEXT, menu_child_id TEXT, menu_component TEXT, menu_component_id INTEGER, menu_label TEXT, menu_level INTEGER)",
     "CREATE TABLE ly_menus_l (lng_id TEXT, lng_seq_ukid TEXT, lng_label TEXT)",
     "CREATE TABLE ly_api_conn (conn_id INTEGER PRIMARY KEY, conn_label TEXT, conn_url TEXT, conn_user TEXT, conn_password TEXT)",
@@ -458,11 +499,11 @@ async def _seed_v1(engine) -> None:
             ],
         )
         await conn.execute(
-            text("INSERT INTO ly_applications (apps_name, apps_pool, apps_dbtype, apps_jdbc, apps_user, apps_password, apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max)"
-                 " VALUES (:n, :p, :db, :j, :u, :pw, :h, :port, :d, :mn, :mx)"),
+            text("INSERT INTO ly_applications (apps_name, apps_pool, apps_dbtype, apps_jdbc, apps_user, apps_password, apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max, apps_limit)"
+                 " VALUES (:n, :p, :db, :j, :u, :pw, :h, :port, :d, :mn, :mx, :lim)"),
             [
-                {"n": "Framework", "p": "default", "db": "postgres", "j": None, "u": "liberty", "pw": "ENC:fw", "h": "fw.example", "port": 5432, "d": "libnsx1", "mn": 1, "mx": 10},
-                {"n": "NOMASX1", "p": "nomasx1", "db": "postgres", "j": None, "u": "nomasx1", "pw": "ENC:nx", "h": "db.example", "port": 5432, "d": "nomasx1", "mn": 2, "mx": 20},
+                {"n": "Framework", "p": "default", "db": "postgres", "j": None, "u": "liberty", "pw": "ENC:fw", "h": "fw.example", "port": 5432, "d": "libnsx1", "mn": 1, "mx": 10, "lim": 1000},
+                {"n": "NOMASX1", "p": "nomasx1", "db": "postgres", "j": None, "u": "nomasx1", "pw": "ENC:nx", "h": "db.example", "port": 5432, "d": "nomasx1", "mn": 2, "mx": 20, "lim": 5000},
             ],
         )
         await conn.execute(
@@ -508,12 +549,12 @@ async def _seed_v1(engine) -> None:
             [{"i": 5, "q": 1, "l": "Users", "al": "Y"}],
         )
         await conn.execute(
-            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible, col_filter)"
-                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v, :f)"),
+            text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible, col_filter, col_key)"
+                 " VALUES (:t, :c, :s, :dd, :lab, :tgt, :ty, :v, :f, :k)"),
             [
-                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y", "f": "Y"},
-                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y", "f": "N"},
-                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N", "f": None},
+                {"t": 5, "c": 1, "s": 1, "dd": "USR_ID", "lab": None, "tgt": "USR_ID", "ty": "number", "v": "Y", "f": "Y", "k": "Y"},
+                {"t": 5, "c": 2, "s": 2, "dd": None, "lab": "User Name", "tgt": "USR_NAME", "ty": "text", "v": "Y", "f": "N", "k": None},
+                {"t": 5, "c": 3, "s": 3, "dd": None, "lab": "Password", "tgt": "USR_PWD", "ty": "password", "v": "N", "f": None, "k": "N"},
             ],
         )
         await conn.execute(
@@ -521,9 +562,9 @@ async def _seed_v1(engine) -> None:
             [{"i": 7, "d": 1, "q": 2, "l": "Delete Form"}],
         )
         await conn.execute(
-            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_component, col_dd_id, col_label, col_target, col_type, col_visible)"
-                 " VALUES (:f, :c, :ta, :s, :cm, :dd, :lab, :tgt, :ty, :v)"),
-            [{"f": 7, "c": 1, "ta": 1, "s": 1, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y"}],
+            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_component, col_dd_id, col_label, col_target, col_type, col_visible, col_key)"
+                 " VALUES (:f, :c, :ta, :s, :cm, :dd, :lab, :tgt, :ty, :v, :k)"),
+            [{"f": 7, "c": 1, "ta": 1, "s": 1, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y", "k": "Y"}],
         )
         await conn.execute(
             text("INSERT INTO ly_menus (menu_seq_ukid, menu_parent_id, menu_child_id, menu_component, menu_component_id, menu_label, menu_level)"

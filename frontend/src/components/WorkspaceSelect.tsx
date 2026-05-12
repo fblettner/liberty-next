@@ -1,8 +1,8 @@
-// The "current app" picker in the top utility pill. Lists the connectors you
-// can access; picking one filters the Connectors page / nav to it ("(all apps)"
-// = no filter). Rendered only when there's more than one connector — with one,
-// "all" and that connector show the same thing, so there's nothing to pick.
-// Includes its own trailing separator so it leaves no orphan when it renders null.
+// The "current app" picker in the top utility pill. Lists the *apps* you can access (connectors
+// that have a menu — not the data-source pools they hang off); picking one filters the Connectors
+// page / nav to it ("(all apps)" = no filter). Rendered only when there's more than one app — with
+// one, "all" and that app show the same thing, so there's nothing to pick. Includes its own
+// trailing separator so it leaves no orphan when it renders null.
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { colors, fontSize, fonts, radius } from '../theme'
@@ -36,8 +36,8 @@ const Sep = styled.div`
 
 export default function WorkspaceSelect() {
   const { t } = useTranslation()
-  const { connectors, currentApp, setCurrentApp } = useWorkspace()
-  if (!connectors || connectors.length < 2) return null
+  const { apps, currentApp, setCurrentApp } = useWorkspace()
+  if (!apps || apps.length < 2) return null
   return (
     <>
       <PillSelect
@@ -46,7 +46,7 @@ export default function WorkspaceSelect() {
         title={t('workspace.app')}
       >
         <option value="">{t('workspace.allApps')}</option>
-        {connectors.map((c) => (
+        {apps.map((c) => (
           <option key={c.name} value={c.name}>
             {c.name}
           </option>

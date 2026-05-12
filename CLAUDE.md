@@ -25,7 +25,7 @@ configuration drives discovery, not code drives configuration.
 
 ## Stack
 
-Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg · Anthropic SDK ·
+Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg (PostgreSQL) + oracledb (Oracle, thin) · Anthropic SDK ·
 authlib (OIDC/Keycloak) · argon2-cffi (passwords) · React 19 + Vite + TS
 (frontend, Phase 4, embedded as static — no shared libraries).
 
@@ -47,9 +47,11 @@ Full dep set pinned in `pyproject.toml`.
   `format`); `label`/`format` may be omitted and pulled from the shared dictionary (the entry key is `dd`, or
   `name` when `dd` is unset; `dd = ""` opts out); a hint for a column the query doesn't return is ignored.
   A query may also carry `label`/`description` (display names — the frontend titles the TableView with
-  `description`, else `label`, else the menu label; the menu label rides on the tab) and `auto_load = true`
-  (v1's per-table auto-load — the TableView runs a SELECT immediately on open instead of waiting for a Run click).
-  `[pools.*]` may carry an explicit `dialect`; else it's derived from the URL.
+  `description`, else `label`, else the menu label; the menu label rides on the tab), `auto_load = true`
+  (v1's per-table auto-load — the TableView runs a SELECT immediately on open instead of waiting for a Run click),
+  and `max_rows` (the SELECT row cap for this query — overrides the connector's, then the pool's, then 1000;
+  a per-request override beats it). `[pools.*]` may carry an explicit `dialect` (else derived from the URL) and a
+  `max_rows` (the pool's default row cap — v1's per-app `apps_limit`); `[connectors.*]` (sql) a `max_rows` too.
 - `dictionary.py` — `config/dictionary.toml`: the **shared field dictionary** (v1's `ly_dictionary`
   + `ly_dictionary_l`, plus `ly_enum`/`ly_enum_val`/`ly_lookup`). `[entries.<key>]` (or
   `[connectors.<conn>.entries.<key>]` — per-connector, since v1 dictionaries were per-app) =
@@ -184,8 +186,8 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
 - `connectors.py` — `GET /api/connectors` (+ `/{connector}`) lists connectors filtered
   to what the caller may use — **metadata only: no SQL text, no credentials, no pool** (the
   `columns` hints it shows are *resolved* for the dictionary's default language); `GET /api/sql/{c}/{q}`
-  (SELECT-only, params from the query string) and `POST /api/sql/{c}/{q}` (any allowed statement;
-  body `{"params": {…}}` or a flat `{name: value}`) execute a query → `QueryResult.to_dict()`
+  (SELECT-only, params from the query string; `?_limit=N` overrides the row cap) and `POST /api/sql/{c}/{q}`
+  (any allowed statement; body `{"params": {…}, "max_rows": N}` or a flat `{name: value}`) execute a query → `QueryResult.to_dict()`
   (its `columns` carry the display hints, labels/formats resolved in the request's language —
   the `X-Liberty-Lang` header, else the first `Accept-Language` tag, else `default_language`);
   `POST /api/http/{c}/{e}` calls an API endpoint → `ApiResult.to_dict()` (returned as HTTP 200
@@ -225,11 +227,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (`AuthContext.tsx` — `AuthProvider`/`useAuth()`: login → `POST /auth/login`, token in
   `localStorage`, validate on mount via `/auth/me`, OIDC fragment hand-off), `src/workspace/`
   (`WorkspaceContext.tsx` — `WorkspaceProvider`/`useWorkspace()`: owns the one `GET /api/connectors`
-  + `GET /api/menus` fetch, holds `currentApp` — the connector the UI is scoped to, persisted, dropped
-  if not in the accessible list, and made to follow the route when you open a `/sql/<c>/…` or
-  `/http/<c>/…` screen — plus `currentMenu` (the picked app's nav tree, or — with a single connector —
-  that one's, for the Sidebar). A pure-frontend soft filter; v2 auth is centralized so the v1 "pick an
-  app at login" idea becomes "which connector's screens am I looking at"), `src/types/`
+  + `GET /api/menus` fetch; exposes `connectors` (all accessible) and `apps` (the subset that have a
+  menu — one v1 app can map to several v2 connectors, so "app" ≠ "connector"; with no menus defined,
+  every connector is an app); holds `currentApp` — the picked app, persisted, dropped if it's no
+  longer an app, made to follow the route when you open a `/sql/<c>/…` or `/http/<c>/…` screen *only*
+  if `<c>` is an app (so opening a data-source connector's screen via an app's menu doesn't yank the
+  picker over) — plus `currentMenu` (the picked app's nav tree, or — with a single app — that one's,
+  for the Sidebar). A pure-frontend soft filter; v2 auth is centralized so the v1 "pick an app at
+  login" idea becomes "which app's screens am I looking at"), `src/types/`
   (`connectors.ts`/`auth.ts`/`ai.ts`/`menus.ts` — backend response shapes, no React), `src/services/`
   (plain-TS helpers/side-effect modules — `cells.ts`'s `cellText`/`ruleCell` (the latter applies the
   dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` — fetches each
@@ -264,7 +269,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `React.lazy`-split; `Layout` shows `<TabStrip/>` (the tab bar, or the "Liberty" title when no tabs) and
   renders `<Outlet/>` + `<TabHost/>` inside a `<Suspense fallback={<Centered/>}>`.
 - The pages: `Layout` (the shell — `Sidebar` + a `<TabStrip/>` bar + a fixed top-right
-  utility pill: app-picker (`WorkspaceSelect` — shown when ≥2 connectors) · EN/FR · dark/light ·
+  utility pill: app-picker (`WorkspaceSelect` — lists the *apps* (menu-having connectors), shown when ≥2) · EN/FR · dark/light ·
   username→profile · sign-out), `Sidebar` (collapsible nav
   rail — when an app is active it leads with that app's menu tree (`SidebarMenu` — collapsible
   folders, leaf `NavLink`s to `/sql|/http`, from `GET /api/menus`) above a divider, then the
@@ -274,7 +279,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
   `TableView` (titled with the query's `description` (v1's `tbl_label`), else `label`, else the menu label —
   `services/menuLabels.findMenuLabel` walks the `GET /api/menus` trees; the technical `connector.query` is the
-  mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params` plus a
+  mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params`, a
+  "Max rows" input (blank = the configured cap; else sent as `?_limit=N`, DbVisualizer-style), plus a
   collapsible **`FilterPanel`** — one field per `filter`-flagged column (v1's `col_filter`, from `meta.columns`),
   each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's); a column
   with an ENUM rule renders a value `<select>`, a LOOKUP rule a `<select>` of resolved labels (`useLookupBatch`,
@@ -352,12 +358,16 @@ replies), `@monaco-editor/react` (the connector-config editor).
   URL = SQLAlchemy async URL built from `apps_dbtype`/`apps_host`/`apps_port`/`apps_database`
   — `postgresql+asyncpg://…` / `oracle+oracledb://…/?service_name=…` — or a parseable
   `apps_jdbc`, else the `${LIBERTY_DB_URL_<NAME>}` stub; `dialect` from `apps_dbtype`,
-  `pool_size` from `apps_pool_max`; the DB **password is never inlined** — `${MIGRATED_PW_<NAME>}`,
+  `pool_size` from `apps_pool_max`, `max_rows` from `apps_limit`; the DB **password is never inlined** — `${MIGRATED_PW_<NAME>}`,
   v1 keeps it `ENC:`-encrypted in `apps_password`; v1's reserved `default` pool is **skipped**
   — v2's `[pools.default]` is v2's own framework DB); `migrate_table_meta(ly_tables rows, ly_dlg_frm rows)` →
   `{query_id: {description?, auto_load?}}` (the table/form friendly label `tbl_label`/`frm_label` → the read
   query's `description`, `tbl_auto_load = 'Y'` → `auto_load = true`; a table widget beats a form) — passed to
-  `migrate_sql_queries(table_meta=…)`; `migrate_column_hints(ly_tbl_col rows,
+  `migrate_sql_queries(table_meta=…)`; `migrate_key_columns(ly_tbl_col rows, ly_dlg_col rows)` → `{query_id:
+  [col, …]}` (the `col_key = 'Y'` columns) — passed as `key_columns=…`; for an UPDATE-crud write query
+  `migrate_sql_queries` rebinds those columns in the `_put`'s **WHERE** from `:<col>` to `:<col>_ORIGINAL`
+  (the SET clause keeps `:<col>` — the new value), so editing a key column still updates the right row (the
+  TableView sends the row's pre-edit values under `:<col>_ORIGINAL`); `migrate_column_hints(ly_tbl_col rows,
   ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
   `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
   `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
@@ -392,8 +402,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `read_table_meta(engine)` (→ `ly_tables` `tbl_query_id`/`tbl_label`/`tbl_auto_load` + `ly_dlg_frm`
   `frm_query_id`/`frm_label`) /
   `read_column_hints(engine)` → (`ly_tbl_col`←`ly_tables`←`ly_query`, `ly_dlg_col`←`ly_dlg_frm`←`ly_query`
-  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter` — `ly_dlg_col` has
-  no `col_filter`, so it's aliased NULL) (SELECT-only; a missing
+  — `col_target`/`col_dd_id`/`col_label`/`col_seq`/`col_visible`/`col_type`/`col_filter`/`col_key` — `ly_dlg_col` has
+  no `col_filter`, so it's aliased NULL; these rows feed both `migrate_column_hints` and `migrate_key_columns`) (SELECT-only; a missing
   table on an old v1 schema → `[]` *with a logged warning* — not silently swallowed; `make_engine(url)`
   accepts any async URL — `postgresql+asyncpg://…`).
 - `liberty/menus/` — `config.py`: the `config/menus.toml` schema (`MenuItem`/`AppMenu`/`MenusFile`,
@@ -445,7 +455,7 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-264 tests pass.
+267 tests pass.
 
 ## Run it
 

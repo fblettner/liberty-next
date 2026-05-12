@@ -46,7 +46,12 @@ class ConnectorRegistry:
         self._connectors: dict[str, Connector] = {}
         for name, conn_cfg in config.connectors.items():
             if isinstance(conn_cfg, SqlConnectorConfig):
-                self._connectors[name] = SQLConnector(name, conn_cfg, self.pools, dictionary=self.dictionary)
+                # pass the pool's row-cap default through; the connector folds query → connector → pool
+                pool_cfg = config.pools.get(conn_cfg.pool)
+                self._connectors[name] = SQLConnector(
+                    name, conn_cfg, self.pools, dictionary=self.dictionary,
+                    pool_max_rows=pool_cfg.max_rows if pool_cfg else None,
+                )
             elif isinstance(conn_cfg, ApiConnectorConfig):
                 self._connectors[name] = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
             else:  # pragma: no cover - guarded by the discriminated union

@@ -230,6 +230,24 @@ async def test_max_rows_truncation(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
+async def test_row_cap_precedence(pools: PoolRegistry) -> None:
+    # connector leaves max_rows unset → its effective default falls back to the pool's (passed here as 1)
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="all", sql="SELECT id FROM item ORDER BY id"),
+        QueryDef(name="cap2", sql="SELECT id FROM item ORDER BY id", max_rows=2),  # per-query override
+    ])
+    conn = SQLConnector("db", cfg, pools, pool_max_rows=1)
+    r = await conn.execute("all")
+    assert len(r.rows) == 1 and r.truncated is True            # pool default (1)
+    r = await conn.execute("cap2")
+    assert len(r.rows) == 2 and r.truncated is True            # query's max_rows (2)
+    r = await conn.execute("all", max_rows=3)
+    assert len(r.rows) == 3 and r.truncated is False           # per-request override (3) — all rows
+    r = await conn.execute("all", max_rows=10_000_000)
+    assert len(r.rows) == 3                                     # clamped to HARD_MAX_ROWS, but only 3 rows exist
+
+
+@pytest.mark.asyncio
 async def test_write_requires_writable(pools: PoolRegistry) -> None:
     conn = _connector(pools, QueryDef(name="ins", sql="INSERT INTO item (id, name) VALUES (9, 'z')"))
     with pytest.raises(WriteNotAllowedError):

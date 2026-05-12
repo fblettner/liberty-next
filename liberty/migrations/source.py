@@ -26,15 +26,16 @@ _SQL_QUERIES = text("""
 _QUERIES = text("SELECT query_id, query_label, query_type FROM ly_query ORDER BY query_id")
 _APPLICATIONS = text("""
     SELECT apps_name, apps_pool, apps_dbtype, apps_jdbc, apps_user, apps_password,
-           apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max
+           apps_host, apps_port, apps_database, apps_pool_min, apps_pool_max, apps_limit
     FROM ly_applications ORDER BY apps_pool
 """)
 # Per-column display metadata: table-widget columns (ly_tbl_col ← ly_tables ← ly_query) and
 # form-field columns (ly_dlg_col ← ly_dlg_frm ← ly_query). col_dd_id references a ly_dictionary
-# entry (the migrated hint emits `dd = col_dd_id`); col_label/col_type are per-column overrides.
+# entry (the migrated hint emits `dd = col_dd_id`); col_label/col_type are per-column overrides;
+# col_key flags the row-identifying columns (→ the migrated `_put` WHERE binds them as :<col>_ORIGINAL).
 _TBL_COLS = text("""
     SELECT t.tbl_query_id AS query_id, c.col_target, c.col_dd_id, c.col_label, c.col_seq,
-           c.col_visible, c.col_type, c.col_filter, c.col_id
+           c.col_visible, c.col_type, c.col_filter, c.col_key, c.col_id
     FROM ly_tbl_col c JOIN ly_tables t ON t.tbl_id = c.tbl_id
     WHERE t.tbl_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY t.tbl_query_id, c.tbl_id, c.col_seq, c.col_id
@@ -42,7 +43,7 @@ _TBL_COLS = text("""
 # ly_dlg_col has no col_filter — alias NULL so the migration sees the same shape.
 _DLG_COLS = text("""
     SELECT f.frm_query_id AS query_id, c.col_target, c.col_dd_id, c.col_label, c.col_seq,
-           c.col_visible, c.col_type, NULL AS col_filter, c.col_id
+           c.col_visible, c.col_type, NULL AS col_filter, c.col_key, c.col_id
     FROM ly_dlg_col c JOIN ly_dlg_frm f ON f.frm_id = c.frm_id
     WHERE f.frm_query_id IS NOT NULL AND c.col_target IS NOT NULL AND c.col_target <> ''
     ORDER BY f.frm_query_id, c.frm_id, c.col_seq, c.col_id

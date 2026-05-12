@@ -42,6 +42,9 @@ from urllib.parse import quote as _urlquote
 # older rows use SQL keywords (SELECT/INSERT/UPDATE/MERGE). A query is a *read* iff its crud is
 # one of these (else it's treated as a mutation: `writable = true`, no display column hints).
 _READ_CRUD = {"GET", "SELECT", "READ"}
+# crud values that mean "update an existing row" — their `_put` WHERE clause is rewritten to bind
+# the key columns as `:<col>_ORIGINAL` (so editing a key column still finds the row to update).
+_UPDATE_CRUD = {"PUT", "PATCH", "UPDATE"}
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -128,6 +131,23 @@ def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "defaul
     return f"SELECT * FROM (\n{base_sql}\n) _flt\nWHERE 1=1\n{preds}"
 
 
+def _rewrite_put_where(sql: str, key_cols: list[str]) -> str:
+    """In an `UPDATE … SET … WHERE …` statement, rebind each key column in the **WHERE clause**
+    from `:<col>` to `:<col>_ORIGINAL` (the SET clause keeps `:<col>` for the new value). The
+    TableView sends the row's pre-edit values under those keys, so editing a key column still
+    matches the right row. v1's `_put` queries reuse `:<col>` in both SET and WHERE; this only
+    touches what comes after the first `WHERE`. No `WHERE`, or no key columns → returned unchanged."""
+    if not key_cols:
+        return sql
+    m = re.search(r"\bWHERE\b", sql, re.IGNORECASE)
+    if not m:
+        return sql
+    head, where = sql[: m.start()], sql[m.start():]
+    for kc in key_cols:
+        where = re.sub(rf"(?<!:):{re.escape(kc)}\b", f":{kc}_ORIGINAL", where)
+    return head + where
+
+
 def _sql_value(variants: dict[str, str]) -> str | dict[str, str]:
     """Collapse a {dialect: sql} map to v2's `sql`: a plain string when there's one
     distinct statement, else `{default: …, <dialect>: …}` (default = the v1 `generic`
@@ -150,6 +170,7 @@ def migrate_sql_queries(
     connector_prefix: str = "",
     column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
     table_meta: Mapping[int, Mapping[str, Any]] | None = None,
+    key_columns: Mapping[int, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Build the ``{pools, connectors}`` dict for the SQL side.
 
@@ -170,6 +191,9 @@ def migrate_sql_queries(
         table_meta: ``{query_id: {"description"?, "auto_load"?}}`` (from :func:`migrate_table_meta`) —
             the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
             ``auto_load``.
+        key_columns: ``{query_id: [col, …]}`` (from :func:`migrate_key_columns`) — the row-key columns
+            (v1's ``col_key``); for an UPDATE-type write query they're rebound to ``:<col>_ORIGINAL``
+            in the WHERE so editing a key still updates the right row.
     """
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
     tmeta = {int(k): dict(v) for k, v in (table_meta or {}).items()}
@@ -214,11 +238,19 @@ def migrate_sql_queries(
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
         tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
-        # build each dialect variant: wrap in `SELECT * FROM (…) _flt WHERE <filters>` when the
-        # query has filter columns, then append ORDER BY (on the outer query, when wrapped).
+        # an UPDATE-type write query: rebind its key columns in the WHERE to :<col>_ORIGINAL
+        upd_keys = (key_columns or {}).get(qid, []) if crud in _UPDATE_CRUD else []
+        # build each dialect variant: a read query with filter columns is wrapped in
+        # `SELECT * FROM (…) _flt WHERE <filters>`; an update query's WHERE is rewritten; then
+        # ORDER BY is appended (to the outer query, when the read query was wrapped).
         ob = orderbys.get(key, "")
         def _variant(raw: str, dia: str) -> str:
-            s = _wrap_with_filters(raw, filter_cols, dialect=dia) if filter_cols else raw
+            if filter_cols:
+                s = _wrap_with_filters(raw, filter_cols, dialect=dia)
+            elif upd_keys:
+                s = _rewrite_put_where(raw, upd_keys)
+            else:
+                s = raw
             return f"{s}\nORDER BY {ob}" if ob else s
         variants = {dia: _variant(raw, dia) for dia, raw in groups[key].items()}
         connectors[conn_name]["queries"].append(
@@ -301,6 +333,32 @@ def migrate_column_hints(
         if fmt:
             hint["format"] = fmt  # explicit per-column override of the dictionary's format
         out.setdefault(qid, []).append(hint)
+    return out
+
+
+def migrate_key_columns(
+    tbl_col_rows: Iterable[Mapping[str, Any]],
+    dlg_col_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, list[str]]:
+    """``{query_id: [col_target, …]}`` for the columns flagged ``col_key = 'Y'`` in v1's
+    ``ly_tbl_col`` / ``ly_dlg_col`` (the row-identifying columns). Passed to
+    :func:`migrate_sql_queries` (as ``key_columns``) — it rewrites the matching ``_put`` query's
+    WHERE clause to bind these as ``:<col>_ORIGINAL``. ``ly_query.query_id`` is shared across cruds,
+    so a query's key columns (read from its table/form widget) also apply to its ``_put`` variant.
+    Table-widget rows take precedence; per ``query_id`` the order follows ``col_seq``, deduped."""
+    out: dict[int, list[str]] = {}
+    seen: set[tuple[int, str]] = set()
+    for r in (*tbl_col_rows, *dlg_col_rows):
+        if str(r.get("col_key") or "").strip() not in _YES_FLAGS:
+            continue
+        qid_raw, target = r.get("query_id"), str(r.get("col_target") or "").strip()
+        if qid_raw is None or not target:
+            continue
+        qid = int(qid_raw)
+        if (qid, target.lower()) in seen:
+            continue
+        seen.add((qid, target.lower()))
+        out.setdefault(qid, []).append(target)
     return out
 
 
@@ -682,12 +740,13 @@ def migrate_pools(
     — its framework/definition DB — is **skipped**: v2 reserves ``[pools.default]`` for v2's
     own framework DB (the ``ly2_*`` tables). When several apps share a pool name, the first
     wins. ``apps_dbtype`` becomes the pool's explicit ``dialect`` (so v2 picks the right
-    per-dialect SQL variant); ``apps_pool_max`` becomes ``pool_size`` when sensible.
+    per-dialect SQL variant); ``apps_pool_max`` becomes ``pool_size`` when sensible;
+    ``apps_limit`` becomes ``max_rows`` (the pool's default SELECT row cap).
 
     Args:
         applications: rows from ``ly_applications`` (``apps_name``, ``apps_pool``,
             ``apps_dbtype``, ``apps_jdbc``, ``apps_user``, ``apps_host``, ``apps_port``,
-            ``apps_database``, ``apps_pool_max``, …).
+            ``apps_database``, ``apps_pool_max``, ``apps_limit``, …).
         connector_prefix: prepended to the pool name (e.g. ``"v1_"``).
     """
     pools: dict[str, dict[str, Any]] = {}
@@ -724,6 +783,12 @@ def migrate_pools(
             pool_max = int(a.get("apps_pool_max") or 0)
             if 0 < pool_max <= 100:
                 entry["pool_size"] = pool_max
+        except (TypeError, ValueError):
+            pass
+        try:
+            limit = int(a.get("apps_limit") or 0)
+            if limit > 0:
+                entry["max_rows"] = limit  # v1's per-app row cap → the pool's default `max_rows`
         except (TypeError, ValueError):
             pass
         pools[name] = entry
