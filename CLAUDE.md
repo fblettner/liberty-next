@@ -268,8 +268,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
   run on the displayed value, rule rendering is visual-only. When the query has writable companions, an
   **Edit** toggle puts the *whole grid* into edit mode (v1's FormsTable batch model): every cell editable,
-  "+ Add row" / per-row "duplicate" → new rows, a per-row × marks an existing row for deletion (a status
-  column shows +/●/− marks); **Import** picks an .xlsx/.csv → matches headers to columns → new rows; **Save**
+  "+ Add row" / per-row "duplicate" / **Import** (.xlsx/.csv → headers matched to columns) / multi-row
+  copy-paste (a selection checkbox column → Copy → Paste) → new rows (added at the *top*); a per-row × marks
+  an existing row for deletion (a status column shows +/●/− marks); **Save**
   fires the lot — edited rows → `update_query`, new rows → `insert_query`, deleted → `delete_query` (merged
   params sent both as-is + UPPERCASE — PG lowercases the read columns, v1's `_put`/`_post`/`_delete` use
   uppercase; `text()` binds only what it references) — then refetches; **Cancel** discards. (Modal-form edit
