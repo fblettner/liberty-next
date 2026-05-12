@@ -295,10 +295,13 @@ response_field = "data.0.name"
   global search + a type-aware per-column filter row (text/number/date with an operator; boolean/enum as a
   select) + clear-all, sort, column resize/hide/reorder, row grouping, CSV/Excel export, paging, localStorage
   persistence) built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
-  (BOOLEAN ✓/✗, ENUM label, LOOKUP split into a "(ID)" + a resolved-label column); when the query has an
-  `update_query` companion, an **Edit** toggle → per-row inline editing (cells become inputs; Save POSTs the row
-  to `/api/sql/<c>/<update_query>` and refetches). A non-SELECT query → confirm + `POST`. (Modal-form edit is
-  the form layer — Phase 6.) **HttpRunner**
+  (BOOLEAN ✓/✗, ENUM label, LOOKUP split into a "(ID)" + a resolved-label column); when the query has writable
+  companions (`describe()` resolves `update_query`/`insert_query`/`delete_query` from the `_put`/`_post`/`_delete`
+  naming), an **Edit** toggle puts the whole grid into edit mode (v1's FormsTable batch model — every cell editable,
+  + Add row / duplicate / Import-from-Excel for new rows, a per-row × for deletion); **Save** commits the lot
+  (edits → `update_query`, new → `insert_query`, deleted → `delete_query`; params sent both as-is + UPPERCASE) and
+  refetches, **Cancel** discards. A non-SELECT query → confirm + `POST`. (Modal-form edit is the form layer —
+  Phase 6.) **HttpRunner**
   (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`), **Chat** (consumes the `/ai/chat`
   SSE — user bubbles plain, assistant bubbles via `<Markdown>`, + tool_call/tool_result lines +
   new-conversation), **Settings** (a Monaco editor — `ini` highlighting, theme follows

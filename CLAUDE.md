@@ -83,9 +83,10 @@ Full dep set pinned in `pyproject.toml`.
   unquoted identifiers, Postgres→lower / Oracle→upper, v1's hints are upper — and the emitted
   column keeps the *discovered* case so it lines up with the row dict's keys), `max_rows` cap;
   `QueryResult.to_dict()` carries the resolved per-column
-  hints, `describe()` exposes the `columns` resolved for the default language plus `update_query` per
-  query (the explicit `QueryDef.update_query`, else the `<base>_get` → `<base>_put` companion if it
-  exists & is writable — the frontend's inline-edit hook). (JDE Julian date/time
+  hints, `describe()` exposes the `columns` resolved for the default language plus `update_query` /
+  `insert_query` / `delete_query` per query (the explicit `QueryDef.{update,insert,delete}_query`, else
+  the `<base>_get` → `<base>_put` / `_post` / `_delete` companion if it exists & is writable — the
+  frontend's batch-edit hook). (JDE Julian date/time
   conversion from nomaubl `DynamicResultMapper`: deferred to Phase 5, if NOMAJDE needs it.)
 - `api.py` — `APIConnector`: `httpx.AsyncClient`; auth `none`/`basic`/`bearer`/
   `api_key`/`oauth2` (OAuth2 = token-endpoint POST + dot-path token extraction +
@@ -265,11 +266,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align) and `rule`
   — BOOLEAN → ✓ green / ✗ red, ENUM → the value's label, LOOKUP → split into a "(ID)" column (raw code)
   + a resolved-label column (fetched once, raw value tooltipped, italic-muted while fetching); sorts/filters
-  run on the displayed value, rule rendering is visual-only. When the query has an `update_query` companion,
-  an **Edit** toggle appears → a per-row pencil starts inline editing (one row at a time): cells become
-  inputs (date/number/select-for-enum/text), **Save** POSTs the merged row to `/api/sql/<c>/<update_query>`
-  (both as-is + UPPERCASE keys — PG lowercases the read columns, v1's `_put` queries use uppercase) and
-  refetches, **Cancel** reverts. A non-SELECT query → `confirm` + `POST` + affected-rows banner),
+  run on the displayed value, rule rendering is visual-only. When the query has writable companions, an
+  **Edit** toggle puts the *whole grid* into edit mode (v1's FormsTable batch model): every cell editable,
+  "+ Add row" / per-row "duplicate" → new rows, a per-row × marks an existing row for deletion (a status
+  column shows +/●/− marks); **Import** picks an .xlsx/.csv → matches headers to columns → new rows; **Save**
+  fires the lot — edited rows → `update_query`, new rows → `insert_query`, deleted → `delete_query` (merged
+  params sent both as-is + UPPERCASE — PG lowercases the read columns, v1's `_put`/`_post`/`_delete` use
+  uppercase; `text()` binds only what it references) — then refetches; **Cancel** discards. (Modal-form edit
+  = the form layer, Phase 6.) A non-SELECT query → `confirm` + `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
   `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
   `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a Monaco editor — `language="ini"`,
