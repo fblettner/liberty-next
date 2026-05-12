@@ -266,7 +266,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   dictionary's BOOLEAN/ENUM/LOOKUP display rules), `lookups.ts` (`useLookupBatch` — fetches each
   LOOKUP-target query once, module-level session cache), `monaco.ts` (bundles
   Monaco + its worker, no CDN), `lookups.ts`'s `useLookupBatch` listed above)), `src/common/` (shared
-  theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `Tag`/`Mono`,
+  theme-driven primitives, one file each — `Button`, `Card`, `Input`/`Select`/`Textarea`/`Field`, `SearchSelect`
+  (a searchable single-select pop-over — themed replacement for a long native `<select>`), `Tag`/`Mono`,
   `Banner`/`Pre`, `Spinner`/`Centered`, `PageLayout`, `Modal`/`ConfirmModal`, `layout` `Stack`/`Row`,
   `useIsLight`, plus `DataTable` + `DataTableFilter` (the generic TanStack grid — uppercase themed headers,
   global search (over *every* column — `getColumnCanGlobalFilter` is overridden so a column whose first row
@@ -311,8 +312,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   "Max rows" input (blank = the configured cap; else sent as `?_limit=N`, DbVisualizer-style), plus a
   collapsible **`FilterPanel`** — one field per `filter`-flagged column (v1's `col_filter`, from `meta.columns`),
   each with an operator picker (contains / equals / notEquals / startsWith / endsWith — like the grid's); a column
-  with an ENUM rule renders a value `<select>`, a LOOKUP rule a `<select>` of resolved labels (`useLookupBatch`,
-  the user picks the label not the code), both implicitly `equals`. A "Clear" button in the panel header resets
+  with an ENUM rule renders a value `SearchSelect`, a LOOKUP rule a `SearchSelect` whose options are `<code> — <description>`
+  (`useLookupBatch`; the user picks the label not the code), both implicitly `equals`. A "Clear" button in the panel header resets
   all server filters. On Run it sends `:<col>` + `:<col>_op` for
   each filled field; the migration has wrapped such queries in
   `SELECT * FROM (<orig>) lib_flt WHERE …` so this actually pre-filters server-side before the grid loads (the

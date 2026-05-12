@@ -9,7 +9,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
-import { Input, Select, Field, Row } from '../../common'
+import { Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
 import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/lookups'
 import { colors, radius, fontSize, fonts, shadow } from '../../theme'
 
@@ -134,10 +134,16 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
   if (cols.length === 0) return null
 
   const activeCount = cols.filter((c) => (values[c.name]?.val ?? '') !== '').length
-  const lookupOptionsFor = (c: Column): { value: string; label: string }[] | undefined => {
+  // lookup options: keep the query's own order (its SQL ORDER BY — usually the code) and show
+  // `<code> — <description>` so the picker carries both (the bare description was ambiguous).
+  const lookupOptionsFor = (c: Column): SearchSelectOption[] | undefined => {
     if (c.rule?.kind !== 'lookup') return undefined
     const m = lookupMaps.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label }))
-    return m ? [...m.entries()].map(([v, l]) => ({ value: v, label: l })).sort((a, b) => a.label.localeCompare(b.label)) : undefined
+    if (!m) return undefined
+    return [...m.entries()].map(([v, l]) => {
+      const code = v.trim()
+      return { value: v, label: code && code !== l ? `${code} — ${l}` : l }
+    })
   }
   return (
     <Wrap>
@@ -169,15 +175,14 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                     <FieldRow>
                       {!isChoice && <OpPicker value={cur.op} onChange={(op) => onChange(c.name, { ...cur, op })} />}
                       {isChoice ? (
-                        <Select
+                        <SearchSelect
                           value={cur.val}
-                          onChange={(e) => onChange(c.name, { op: 'equals', val: e.target.value })}
-                          style={{ flex: 1 }}
-                          disabled={isLookup && !opts}  /* lookup map still loading */
-                        >
-                          <option value="">{isLookup && !opts ? t('common.loading') : t('table.filterAny')}</option>
-                          {(opts ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </Select>
+                          onChange={(val) => onChange(c.name, { op: 'equals', val })}
+                          options={opts ?? []}
+                          anyLabel={t('table.filterAny')}
+                          loading={isLookup && !opts}  /* lookup map still resolving */
+                          disabled={isLookup && !opts}
+                        />
                       ) : (
                         <Input
                           type={inputTypeFor(c)}

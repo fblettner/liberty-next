@@ -106,6 +106,7 @@ const en = {
     noResults: 'No rows.',
     idColumnSuffix: '(ID)',
     filterAny: '(any)',
+    noMatches: 'No matches',
     filterOp: 'Operator',
     serverFilterHint: 'filter…',
     op_contains: 'contains',

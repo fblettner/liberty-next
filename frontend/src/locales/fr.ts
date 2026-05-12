@@ -108,6 +108,7 @@ const fr: Resources = {
     noResults: 'Aucune ligne.',
     idColumnSuffix: '(ID)',
     filterAny: '(tout)',
+    noMatches: 'Aucune correspondance',
     filterOp: 'Opérateur',
     serverFilterHint: 'filtrer…',
     op_contains: 'contient',
