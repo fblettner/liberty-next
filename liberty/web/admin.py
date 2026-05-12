@@ -2,8 +2,8 @@
 
 * ``POST /admin/reload`` rebuilds the :class:`ConnectorRegistry` from
   ``connectors.toml`` on disk (and re-reads ``menus.toml``), swaps them into
-  ``app.state`` (also re-pointing the auth database at the new pool registry),
-  then disposes the old registry. New connector definitions, edited queries and
+  ``app.state`` (also rebuilding the auth backend — for the DB backend, against the
+  new pool registry), then disposes the old registry. New connector definitions, edited queries and
   menu changes take effect immediately for subsequent requests. The AI assistant's
   connector tools still reference the previous registry until the app restarts;
   in-flight requests keep using whichever registry they started with.
@@ -22,7 +22,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from liberty.auth.db import AuthDatabase
+from liberty.auth.authstore import build_auth_backend
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.connectors import load_connectors
@@ -45,7 +45,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     )
     request.app.state.connectors = new
     request.app.state.menus = load_menus(settings.menus.config_path)
-    request.app.state.auth_db = AuthDatabase(new.pools, settings.auth.pool)
+    request.app.state.auth_backend = build_auth_backend(settings, new.pools)
     await old.aclose()
     return {
         "reloaded": True,

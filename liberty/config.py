@@ -11,7 +11,7 @@ import os
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -66,9 +66,13 @@ class MenuSettings(BaseModel):
 
 
 class AuthSettings(BaseModel):
-    """Internal-user auth: which pool the auth tables live on, JWT signing."""
+    """Internal-user auth: where users/roles live (a TOML file or the DB), JWT signing."""
 
-    pool: str = "default"
+    # "toml" → users/roles in `toml_path` (no DB needed to start — the default); "db" → the ly2_*
+    # tables on `pool` (created by `liberty-admin init-db`; for big user bases).
+    backend: Literal["toml", "db"] = "toml"
+    toml_path: Path = Path("config/auth.toml")  # used when backend == "toml"
+    pool: str = "default"  # used when backend == "db" — which connector pool the ly2_* tables live on
     jwt_secret: str = ""  # ${LIBERTY_JWT_SECRET}; empty → ephemeral key generated at startup
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "liberty-v2"

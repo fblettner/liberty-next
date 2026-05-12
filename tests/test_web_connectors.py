@@ -81,7 +81,7 @@ def app(tmp_path):
     settings = Settings(
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
-        auth=AuthSettings(jwt_secret=JWT_SECRET, pool="default"),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
     return create_app(settings)

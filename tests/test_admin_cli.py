@@ -15,7 +15,7 @@ from liberty.connectors.db import PoolRegistry
 def env(tmp_path):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'admin.db'}"
     app_toml = tmp_path / "app.toml"
-    app_toml.write_text('[auth]\npool = "default"\n')
+    app_toml.write_text('[auth]\nbackend = "db"\npool = "default"\n')
     conn_toml = tmp_path / "connectors.toml"
     conn_toml.write_text(f'[pools.default]\nurl = "{db_url}"\n')
     base = ["--config-app", str(app_toml), "--config-connectors", str(conn_toml)]
@@ -47,7 +47,7 @@ def test_init_db_bootstraps_admin(env, capsys) -> None:
     base, db_url = env
     rc, out = _run(base, "init-db", "--admin-username", "root", capsys=capsys)
     assert rc == 0
-    assert out["schema"] == "ready" and out["admin_created"] is True
+    assert out["ready"] is True and out["backend"] == "db" and out["admin_created"] is True
     assert out["user"]["username"] == "root"
     assert out["user"]["is_superuser"] is True
     assert out["user"]["roles"] == ["admin"]
@@ -124,8 +124,7 @@ def test_set_password(env, capsys) -> None:
 def test_set_password_unknown_user(env, capsys) -> None:
     base, _ = env
     _run(base, "init-db", capsys=capsys)
-    with pytest.raises(SystemExit):
-        main([*base, "set-password", "nobody", "--password", "x"])
+    assert main([*base, "set-password", "nobody", "--password", "x"]) == 2  # AuthError → exit 2
 
 
 def test_set_active_disables_login(env, capsys) -> None:

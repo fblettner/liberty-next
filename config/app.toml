@@ -7,13 +7,17 @@ log_level = "info"
 [connectors]
 config_path = "config/connectors.toml"
 
-# Internal-user authentication. The auth tables (ly2_users / ly2_roles) live on
-# the connector pool named below; create them with `liberty-admin init-db`.
-# jwt_secret signs the access/refresh JWTs — set it via the environment; if left
-# empty an ephemeral key is generated at startup (dev only — tokens won't survive
-# a restart).
+# Internal-user authentication.
+#   backend = "toml"  → users/roles live in `toml_path` (config/auth.toml) — NO database needed to
+#                       start the framework (the default). For lots of users, use OIDC/LDAP instead.
+#           = "db"    → the ly2_users / ly2_roles tables on the connector pool `pool`.
+# Either way: `liberty-admin init-db` bootstraps an `admin` (and creates the store); login passwords
+# are Argon2id. jwt_secret signs the access/refresh JWTs — set it via the environment; if left empty
+# an ephemeral key is generated at startup (dev only — tokens won't survive a restart).
 [auth]
-pool = "default"
+backend = "toml"
+toml_path = "config/auth.toml"   # used when backend = "toml" — keep this file mode 600
+pool = "default"                 # used when backend = "db" — which connector pool holds ly2_*
 jwt_secret = "${LIBERTY_JWT_SECRET}"
 jwt_algorithm = "HS256"
 jwt_issuer = "liberty-v2"

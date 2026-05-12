@@ -14,7 +14,7 @@ from starlette.staticfiles import StaticFiles
 from liberty import __version__
 from liberty.ai.assistant import build_assistant
 from liberty.ai.routes import router as ai_router
-from liberty.auth.db import AuthDatabase
+from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
 from liberty.auth.tokens import TokenConfig, TokenService
@@ -73,7 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             master_key=settings.crypto.master_key,
         )
         app.state.menus = load_menus(settings.menus.config_path)
-        app.state.auth_db = AuthDatabase(app.state.connectors.pools, settings.auth.pool)
+        app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
         app.state.token_service = _build_token_service(settings.auth)
         app.state.oidc = build_oidc(settings.oidc)
         app.state.ai = build_assistant(settings.ai, app.state.connectors)
@@ -127,7 +127,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "default_language": connectors.dictionary.default_language,
             },
             "menus": {"apps": list(app.state.menus.menus)},
-            "auth": {"pool": s.auth.pool, "oidc_enabled": app.state.oidc is not None},
+            "auth": {
+                "backend": s.auth.backend,
+                **({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)}),
+                "oidc_enabled": app.state.oidc is not None,
+            },
             "ai": {
                 "enabled": ai is not None,
                 "available": ai.available if ai is not None else False,

@@ -16,15 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
+from liberty.auth.authstore import AuthBackend, UserRecord
 from liberty.auth.dependencies import (
     CurrentPrincipal,
-    get_auth_service,
+    get_auth_backend,
     get_oidc,
     get_token_service,
 )
-from liberty.auth.models import User
 from liberty.auth.oidc import OIDCClient
-from liberty.auth.service import AuthService
 from liberty.auth.tokens import REFRESH, TokenError, TokenService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -52,9 +51,9 @@ class TokenPair(BaseModel):
 # -- helpers ---------------------------------------------------------------- #
 
 
-def _issue_pair(tokens: TokenService, user: User) -> TokenPair:
+def _issue_pair(tokens: TokenService, user: UserRecord) -> TokenPair:
     access = tokens.access_token(
-        subject=str(user.id),
+        subject=user.id,
         username=user.username,
         email=user.email,
         roles=user.role_names,
@@ -62,7 +61,7 @@ def _issue_pair(tokens: TokenService, user: User) -> TokenPair:
         is_superuser=user.is_superuser,
         provider=user.provider,
     )
-    refresh = tokens.refresh_token(subject=str(user.id))
+    refresh = tokens.refresh_token(subject=user.id)
     return TokenPair(
         access_token=access.token,
         refresh_token=refresh.token,
@@ -84,10 +83,10 @@ _BAD_CREDENTIALS = HTTPException(
 @router.post("/login", response_model=TokenPair)
 async def login(
     body: LoginRequest,
-    svc: Annotated[AuthService, Depends(get_auth_service)],
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> TokenPair:
-    user = await svc.authenticate(body.username, body.password)
+    user = await backend.authenticate(body.username, body.password)
     if user is None:
         raise _BAD_CREDENTIALS
     return _issue_pair(tokens, user)
@@ -96,7 +95,7 @@ async def login(
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(
     body: RefreshRequest,
-    svc: Annotated[AuthService, Depends(get_auth_service)],
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> TokenPair:
     try:
@@ -107,11 +106,10 @@ async def refresh(
             detail=f"Invalid refresh token: {exc}",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
-    try:
-        user_id = int(claims["sub"])
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
-    user = await svc.get_user(user_id)
+    subject = claims.get("sub")
+    if not subject:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    user = await backend.get_by_id(str(subject))
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User is inactive or unknown")
     return _issue_pair(tokens, user)
@@ -134,7 +132,7 @@ async def oidc_login(request: Request, oidc: Annotated[OIDCClient, Depends(get_o
 async def oidc_callback(
     request: Request,
     oidc: Annotated[OIDCClient, Depends(get_oidc)],
-    svc: Annotated[AuthService, Depends(get_auth_service)],
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ):
     try:
@@ -145,7 +143,7 @@ async def oidc_callback(
     if not userinfo:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="OIDC response carried no ID-token claims")
     s = oidc.settings
-    user = await svc.provision_oidc_user(
+    user = await backend.provision_oidc_user(
         userinfo,
         username_claim=s.username_claim,
         email_claim=s.email_claim,

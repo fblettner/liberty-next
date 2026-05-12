@@ -21,7 +21,7 @@ def test_info() -> None:
         # Reflects config/connectors.toml (loaded in the lifespan) — whatever it contains.
         assert body["connectors_loaded"] == len(body["connectors"])
         assert "default" in body["pools"]  # the framework pool is always there
-        assert body["auth"]["pool"] == "default"
+        assert body["auth"]["backend"] in ("toml", "db")  # config/app.toml ships "toml"
 
 
 def test_config_load() -> None:

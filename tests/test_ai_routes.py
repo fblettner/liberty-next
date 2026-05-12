@@ -43,7 +43,7 @@ def _make_app(tmp_path, *, ai_enabled: bool = True):
     settings = Settings(
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
-        auth=AuthSettings(jwt_secret=JWT_SECRET, pool="default"),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=ai_enabled, api_key=""),  # no API key → "unconfigured"
     )
     return create_app(settings)

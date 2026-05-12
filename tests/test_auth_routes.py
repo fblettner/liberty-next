@@ -46,7 +46,7 @@ def app(tmp_path):
     settings = Settings(
         app=AppSettings(static_dir=""),  # no SPA mount — these tests add routes after create_app
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
-        auth=AuthSettings(jwt_secret=JWT_SECRET, jwt_issuer=ISSUER, pool="default"),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, jwt_issuer=ISSUER, pool="default"),
     )
     application = create_app(settings)
 

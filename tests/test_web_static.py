@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from liberty.config import AppSettings, ConnectorSettings, Settings
+from liberty.config import AppSettings, AuthSettings, ConnectorSettings, Settings
 from liberty.main import create_app
 
 INDEX_HTML = '<!doctype html><html><body><div id="root"></div></body></html>'
@@ -52,9 +52,15 @@ def test_missing_static_dir_means_no_mount(tmp_path) -> None:
 def test_connector_error_surfaces_as_503(tmp_path) -> None:
     # An unconfigured pool (env var unset → empty url) must not crash with a 500 stack
     # trace on /auth/login — the global ConnectorError handler turns it into a clean 503.
+    # (Use the DB auth backend so login actually touches the pool.)
     toml = tmp_path / "connectors.toml"
     toml.write_text('[pools.default]\nurl = "${THIS_ENV_VAR_IS_DEFINITELY_NOT_SET}"\n')
-    with TestClient(_app(tmp_path, static_dir="", connectors_toml=toml)) as client:
+    app = create_app(Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=toml),
+        auth=AuthSettings(backend="db", pool="default"),
+    ))
+    with TestClient(app) as client:
         r = client.post("/auth/login", json={"username": "x", "password": "y"})
         assert r.status_code == 503
         assert "empty url" in r.json()["detail"]

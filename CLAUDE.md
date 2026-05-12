@@ -118,25 +118,38 @@ connector + pool names.
 
 **Phase 2 (Auth + AI) — DONE.**
 
-*Auth* lives in `liberty/auth/`:
-- `models.py` — SQLAlchemy 2.0 ORM: `User`, `Role`, `user_roles` M2M (tables
-  `ly2_users` / `ly2_roles` / `ly2_user_roles`). These are *app data*, not v1-style
-  metadata tables. `Role.permissions` is a JSON list of strings (`"sql:liberty:read"`,
-  `"*"`); superuser bypasses checks. Own `Base` → `create_all` scopes to auth tables.
-- `password.py` — Argon2id via `argon2-cffi` (`hash_password` / `verify_password` /
-  `needs_rehash`).
-- `tokens.py` — `TokenService` mints/verifies HS256 JWTs: `access` (carries
-  `roles`/`perms`/`sup` → no per-request DB hit) and `refresh` (re-reads the user).
-- `db.py` — `AuthDatabase`: lazy `async_sessionmaker` over a `PoolRegistry` pool
-  (`[auth] pool`, default `default`); `create_schema()` for `liberty-admin init-db`.
-  ⚠ async-ORM gotcha: assign `user.roles = [...]` explicitly (even `[]`) on new
-  rows — a freshly-flushed object's unloaded relationship lazy-loads on access,
-  which raises `MissingGreenlet` under async.
+*Auth* lives in `liberty/auth/`. Users/roles have **two interchangeable backends** behind one async
+interface (`AuthBackend`), both returning `UserRecord`s — `[auth] backend = "toml" | "db"` (default
+`"toml"`, in the shipped `config/app.toml`):
+- `authstore.py` — the abstraction + both backends + `config/auth.toml` schema:
+  - `AuthRole` (`permissions: [str]`, `description?`) / `AuthUser` (`password_hash?` — Argon2, `None`
+    for OIDC-only; `roles: [str]`, `active`, `superuser`, `provider`, `sub?`, `email?`, `full_name?`)
+    / `AuthFile` (`roles`, `users` dicts); `load_auth(path)` / `save_auth(path, file)` (atomic temp+rename,
+    `chmod 600`, TOML has no null so `None`s are stripped). `UserRecord` (the common view: `id` = `str(db id)`
+    for the DB backend / the *username* for TOML; `username`, `email`, `roles`, `permissions`, `is_active`,
+    `is_superuser`, `provider`, `provider_subject`, `public_dict()`).
+  - `TomlAuthBackend(path)` — users/roles in `config/auth.toml`, **no database**. Reloaded on every
+    call (it's small) so a hand edit / hot-reload takes effect at once; mutations rewrite the file.
+    `ready()` creates an empty file. For lots of users, point customers at OIDC/LDAP instead.
+  - `DbAuthBackend(AuthDatabase)` — the `ly2_*` tables; a thin adapter (one session per call) over
+    `AuthService` (below), mapping its ORM `User`s to `UserRecord`s. `ready()` = `create_schema()`.
+  - `build_auth_backend(settings, pools)` picks one from `[auth] backend`.
+  Both: `authenticate`, `get_by_id` (= the JWT subject), `provision_oidc_user`, `list_users`,
+  `list_roles`, `count_users`, `create_user`, `set_password`, `set_active`, `assign_roles`, `get_or_create_role`.
+- `password.py` — Argon2id via `argon2-cffi` (`hash_password` / `verify_password` / `needs_rehash`) —
+  login passwords are one-way hashed (not reversibly encrypted) either way.
+- `tokens.py` — `TokenService` mints/verifies HS256 JWTs: `access` (carries `roles`/`perms`/`sup`
+  + `sub` (the user id) → no per-request DB hit) and `refresh` (re-reads the user by `sub`).
+- `models.py` / `db.py` / `service.py` — the **DB backend's** internals: SQLAlchemy 2.0 ORM (`User`,
+  `Role`, `user_roles` M2M; tables `ly2_users`/`ly2_roles`/`ly2_user_roles`; `Role.permissions` a JSON
+  list, `User.is_superuser` a bool — *app data*, not v1-style metadata), `AuthDatabase` (lazy
+  `async_sessionmaker` over a `PoolRegistry` pool — `[auth] pool` — `create_schema()` for init-db),
+  `AuthService` (the ORM operations: `authenticate` + rehash, `create_user`, `set_password`/`set_active`,
+  role ops, `provision_oidc_user` — find-or-create by `(provider="oidc", sub)`, username-collision suffixing).
+  ⚠ async-ORM gotcha: assign `user.roles = [...]` explicitly (even `[]`) on new rows — a freshly-flushed
+  object's unloaded relationship lazy-loads on access, which raises `MissingGreenlet` under async.
 - `principal.py` — `Principal` (built from JWT claims, no DB): `has_permission`
   with colon-segment globs (`sql:*` ⊇ `sql:liberty:read`), `has_role`, superuser.
-- `service.py` — `AuthService` over an `AsyncSession`: `authenticate` (+ rehash),
-  `create_user`, `set_password`/`set_active`, role ops, `provision_oidc_user`
-  (find-or-create by `(provider="oidc", sub)`, username-collision suffixing).
 - `oidc.py` — `build_oidc(settings)` → Authlib Starlette `OAuth` client, configured purely from
   `[oidc] discovery_url` (`…/.well-known/openid-configuration`) — provider-agnostic (Keycloak,
   OneLogin, Auth0, Okta, Azure AD, Google, … directly, no broker); `None` when disabled. ID-token
@@ -144,20 +157,19 @@ connector + pool names.
   `email`/`sub` for providers that don't emit that, e.g. OneLogin.)
 - `dependencies.py` — `get_current_principal` / `optional_principal`,
   `require_permission(perm)` / `require_role(role)` / `require_superuser`,
-  `get_auth_service` (session per request), `get_oidc` (404 if off). All read
-  `request.app.state`.
+  `get_auth_backend` (the configured `AuthBackend`), `get_oidc` (404 if off). All read `request.app.state`.
 - `routes.py` — `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me`,
-  `GET /auth/oidc/login`, `GET /auth/oidc/callback` (both 404 when OIDC is off).
-  Both login paths mint *our* JWTs; the IdP's tokens aren't propagated.
-- `liberty/admin_cli.py` (`liberty-admin` script) — `init-db` (create tables +
-  bootstrap a superuser `admin` with role `admin`/perm `*`; password from
-  `--password` / `--password-env` / generated-and-printed), `create-user`,
-  `set-password`, `set-active`, `list-users`, `create-role`.
-- `liberty/config.py` — added `[auth]` + `[oidc]` settings; `${ENV_VAR}`
-  substitution now applies to `app.toml` too (`substitute_env` moved here).
-- `liberty/main.py` — `create_app(settings=None)`; lifespan builds `auth_db`,
-  `token_service`, `oidc` (and `ai` — below) on `app.state`; `SessionMiddleware`
-  added iff OIDC enabled; includes the auth router; `/info` reports `auth.pool` +
+  `GET /auth/oidc/login`, `GET /auth/oidc/callback` (both 404 when OIDC is off);
+  go through `AuthBackend`. Both login paths mint *our* JWTs; the IdP's tokens aren't propagated.
+- `liberty/admin_cli.py` (`liberty-admin` script) — operates on the active backend: `init-db`
+  (`ready()` — create the DB tables *or* an empty `auth.toml` — + a `admin` role (perm `*`) and, if
+  there are no users yet, a superuser `admin`; password from `--password` / `--password-env` /
+  generated-and-printed), `create-user`, `set-password`, `set-active`, `list-users`, `create-role`.
+- `liberty/config.py` — `[auth]` (`backend`, `toml_path`, `pool`, `jwt_*`) + `[oidc]` settings;
+  `${ENV_VAR}` substitution applies to `app.toml` too (`substitute_env` moved here).
+- `liberty/main.py` — `create_app(settings=None)`; lifespan builds `auth_backend`
+  (`build_auth_backend`), `token_service`, `oidc` (and `ai` — below) on `app.state`; `SessionMiddleware`
+  added iff OIDC enabled; includes the auth router; `/info` reports `auth.backend` (+ `pool`/`toml`) +
   `oidc_enabled` (and `ai`).
 OIDC full-flow integration test: deferred (needs a fake IdP).
 
@@ -479,13 +491,13 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
   `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
   unaffected by the master key.)
 
-271 tests pass.
+281 tests pass.
 
 ## Run it
 
 ```bash
 .venv/bin/pytest -v               # tests
-./start.sh init-db                # FIRST RUN: create the auth tables + an `admin` user (prints the password)
+./start.sh init-db                # FIRST RUN: bootstrap the auth store + an `admin` user (prints the password) — default backend = "toml" → writes config/auth.toml; backend = "db" → creates the ly2_* tables
 ./start.sh                        # builds frontend/dist if stale, then runs FastAPI serving the SPA + API on :8000
 ./start.sh dev                    # same, with --reload   ·   ./start.sh frontend → Vite :5173 (HMR)   ·   ./start.sh help
 # by hand: .venv/bin/fastapi dev liberty/main.py   |   .venv/bin/uvicorn liberty.main:app --reload   |   .venv/bin/liberty-v2
@@ -510,13 +522,15 @@ three v2 connectors: `jdedwards` (the Oracle JDE business DB), `nomajde` (its Po
 nomasx1's fields nested under `[connectors.nomasx1.*]` and NOMAJDE's at the top level (shared);
 `config/menus.toml` has `[menus.nomasx1]` + `[menus.nomajde]` — the latter's leaves spell out
 `connector = "jdedwards"` where the screen runs against that connector). Convention: `[pools.default]`
-is the **framework pool** — it holds v2's own `ly2_users`/`ly2_roles`/`ly2_user_roles`
-(created by `liberty-admin init-db`), shared across every app; `[auth] pool` (in
-`config/app.toml`) points here, and it's the **only pool needed at startup**. Every other `[pools.X]`
+is the **framework pool** — historically it held v2's own users/roles, but with the default
+`[auth] backend = "toml"` those live in `config/auth.toml` instead, so **no pool is needed at
+startup at all** (the framework opens connections lazily, on the first query against a pool);
+`[pools.default]` is now just the fallback pool for a connector that doesn't name one (and the
+ly2_* tables if you switch `[auth] backend = "db"`). Every `[pools.X]`
 is an *app* pool — `nomasx1`, `jdedwards`, `nomajde`, … — migrated straight from v1's `ly_applications`
 (`url` + `dialect` + `pool_size`/`max_overflow` + `max_rows` + an `ENC:` `password`), opened **lazily**
-on first query; mirrors the v1 split between an app's "definition DB" (queries/users/roles → now TOML +
-`ly2_*`) and its "data DB". `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`
+on first query; mirrors the v1 split between an app's "definition DB" (queries/users/roles → now TOML)
+and its "data DB". `[pools.default]` defaults to `${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}`
 (set `LIBERTY_DB_URL` for Postgres; SQLite `liberty.db` is gitignored); the app pools' URLs are v1's
 literal `apps_host`/`apps_port`/`apps_database` (so a docker `@pg:5432` host etc. — edit the `url` line if
 your deployment's host differs), and `LIBERTY_MASTER_KEY` must equal v1's `MASTER_KEY` so v2 can decrypt
@@ -532,10 +546,12 @@ or columns the user's other scripts touch) are decrypted at runtime with `[crypt
 ## Layout
 
 ```
-config/         app.toml, connectors.toml, dictionary.toml (shared field labels/types), menus.toml (app nav)
+config/         app.toml, connectors.toml, dictionary.toml (shared field labels/types), menus.toml (app nav),
+                auth.toml (the TOML auth store — users/roles, password hashes; gitignored, created by `liberty-admin init-db`)
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py
                 · connectors/{config,base,db,sql,api,registry,dictionary}.py
-                · menus/config.py · auth/{models,password,tokens,db,principal,service,oidc,dependencies,routes}.py
+                · menus/config.py · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
+                  (authstore = the TOML/DB backend abstraction + config/auth.toml schema; models/db/service = the DB backend's internals)
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,menus,admin}.py
                 · migrations/{v1,source}.py

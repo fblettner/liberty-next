@@ -5,7 +5,7 @@
 * :func:`optional_principal` — same, but ``None`` instead of 401 when absent;
 * :func:`require_permission` / :func:`require_role` — dependency factories that
   401 if unauthenticated, 403 if the principal lacks the permission/role;
-* :func:`get_auth_service` — yields an :class:`AuthService` on a fresh session;
+* :func:`get_auth_backend` — the configured :class:`AuthBackend` (TOML or DB);
 * :func:`get_oidc` — the configured :class:`OIDCClient`, or 404 if OIDC is off.
 
 Wiring is read from ``request.app.state`` (set in the app lifespan), so these
@@ -14,15 +14,14 @@ work with whatever ``Settings`` the app was started with.
 
 from __future__ import annotations
 
-from typing import Annotated, AsyncIterator
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from liberty.auth.db import AuthDatabase
+from liberty.auth.authstore import AuthBackend
 from liberty.auth.oidc import OIDCClient
 from liberty.auth.principal import Principal
-from liberty.auth.service import AuthService
 from liberty.auth.tokens import ACCESS, TokenError, TokenService
 
 _bearer = HTTPBearer(auto_error=False, description="Liberty access token")
@@ -36,13 +35,8 @@ def get_token_service(request: Request) -> TokenService:
     return request.app.state.token_service
 
 
-def get_auth_db(request: Request) -> AuthDatabase:
-    return request.app.state.auth_db
-
-
-async def get_auth_service(request: Request) -> AsyncIterator[AuthService]:
-    async with get_auth_db(request).session() as session:
-        yield AuthService(session)
+def get_auth_backend(request: Request) -> AuthBackend:
+    return request.app.state.auth_backend
 
 
 def get_oidc(request: Request) -> OIDCClient:

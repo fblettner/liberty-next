@@ -108,7 +108,7 @@ def app(tmp_path):
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
         menus=MenuSettings(config_path=Path(tmp_path / "menus.toml")),
-        auth=AuthSettings(jwt_secret=JWT_SECRET, pool="default"),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
     return create_app(settings)

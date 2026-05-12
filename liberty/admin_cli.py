@@ -1,4 +1,4 @@
-"""``liberty-admin`` — manage the internal users / roles tables.
+"""``liberty-admin`` — manage the internal users / roles (the TOML store or the DB tables).
 
     liberty-admin init-db [--admin-username admin] [--password … | --password-env VAR]
     liberty-admin create-user <username> [--email …] [--full-name …]
@@ -8,9 +8,12 @@
     liberty-admin list-users
     liberty-admin create-role <name> [--permission P ...] [--description …]
 
-Reads ``config/app.toml`` for ``[auth] pool`` and ``config/connectors.toml`` for
-the pool's connection URL (override with ``--config-app`` / ``--config-connectors``).
-When no password is supplied, a random one is generated and printed once.
+Operates on whatever ``[auth] backend`` is configured in ``config/app.toml``: ``"toml"`` (the
+default) edits ``[auth] toml_path`` (``config/auth.toml``) — no database; ``"db"`` uses the
+``ly2_*`` tables on ``[auth] pool`` (``init-db`` then creates them). Override the config paths with
+``--config-app`` / ``--config-connectors``. When no password is supplied, a random one is generated
+and printed once. (``init-db`` is the name kept for `./start.sh init-db`; for the TOML backend it
+just creates ``auth.toml`` + bootstraps an ``admin``.)
 """
 
 from __future__ import annotations
@@ -23,12 +26,10 @@ import secrets
 import sys
 from typing import Awaitable, Callable
 
-from liberty.auth.db import AuthDatabase
-from liberty.auth.service import AuthError, AuthService
+from liberty.auth.authstore import ADMIN_ROLE, build_auth_backend
+from liberty.auth.service import AuthError
 from liberty.config import load_settings
 from liberty.connectors import load_connectors
-
-ADMIN_ROLE = "admin"
 
 
 # --------------------------------------------------------------------------- #
@@ -39,9 +40,10 @@ ADMIN_ROLE = "admin"
 class _Context:
     def __init__(self, args: argparse.Namespace) -> None:
         settings = load_settings(args.config_app) if args.config_app else load_settings()
+        self.settings = settings
         connectors_path = args.config_connectors or settings.connectors.config_path
-        self.registry = load_connectors(connectors_path)
-        self.auth_db = AuthDatabase(self.registry.pools, settings.auth.pool)
+        self.registry = load_connectors(connectors_path)  # for the DB backend's pool; harmless for TOML
+        self.backend = build_auth_backend(settings, self.registry.pools)
 
     async def aclose(self) -> None:
         await self.registry.aclose()
@@ -70,88 +72,61 @@ def _print(obj) -> None:
 
 
 async def _cmd_init_db(ctx: _Context, args: argparse.Namespace) -> int:
-    await ctx.auth_db.create_schema()
-    async with ctx.auth_db.session() as session:
-        svc = AuthService(session)
-        await svc.get_or_create_role(
-            ADMIN_ROLE, permissions=["*"], description="Full access (wildcard)."
-        )
-        if await svc.count_users() > 0:
-            _print({"schema": "ready", "admin_created": False})
-            return 0
-        password, generated = _resolve_password(args)
-        user = await svc.create_user(
-            args.admin_username,
-            password=password,
-            is_superuser=True,
-            roles=[ADMIN_ROLE],
-        )
-        out = {"schema": "ready", "admin_created": True, "user": user.public_dict()}
-        if generated:
-            out["generated_password"] = password
-        _print(out)
+    await ctx.backend.ready()
+    await ctx.backend.get_or_create_role(ADMIN_ROLE, permissions=["*"], description="Full access (wildcard).")
+    base = {"backend": ctx.settings.auth.backend, "ready": True}
+    if await ctx.backend.count_users() > 0:
+        _print({**base, "admin_created": False})
+        return 0
+    password, generated = _resolve_password(args)
+    user = await ctx.backend.create_user(
+        args.admin_username, password=password, is_superuser=True, roles=[ADMIN_ROLE]
+    )
+    out = {**base, "admin_created": True, "user": user.public_dict()}
+    if generated:
+        out["generated_password"] = password
+    _print(out)
     return 0
 
 
 async def _cmd_create_user(ctx: _Context, args: argparse.Namespace) -> int:
     password, generated = _resolve_password(args)
-    async with ctx.auth_db.session() as session:
-        svc = AuthService(session)
-        user = await svc.create_user(
-            args.username,
-            password=password,
-            email=args.email,
-            full_name=args.full_name,
-            is_superuser=args.superuser,
-            roles=args.role or None,
-        )
-        out = {"user": user.public_dict()}
-        if generated:
-            out["generated_password"] = password
-        _print(out)
+    user = await ctx.backend.create_user(
+        args.username, password=password, email=args.email, full_name=args.full_name,
+        is_superuser=args.superuser, roles=args.role or None,
+    )
+    out = {"user": user.public_dict()}
+    if generated:
+        out["generated_password"] = password
+    _print(out)
     return 0
 
 
 async def _cmd_set_password(ctx: _Context, args: argparse.Namespace) -> int:
     password, generated = _resolve_password(args)
-    async with ctx.auth_db.session() as session:
-        svc = AuthService(session)
-        user = await svc.get_user_by_username(args.username)
-        if user is None:
-            raise SystemExit(f"unknown user {args.username!r}")
-        await svc.set_password(user, password)
-        out = {"user": user.public_dict(), "password_changed": True}
-        if generated:
-            out["generated_password"] = password
-        _print(out)
+    user = await ctx.backend.set_password(args.username, password)
+    out = {"user": user.public_dict(), "password_changed": True}
+    if generated:
+        out["generated_password"] = password
+    _print(out)
     return 0
 
 
 async def _cmd_set_active(ctx: _Context, args: argparse.Namespace) -> int:
-    async with ctx.auth_db.session() as session:
-        svc = AuthService(session)
-        user = await svc.get_user_by_username(args.username)
-        if user is None:
-            raise SystemExit(f"unknown user {args.username!r}")
-        await svc.set_active(user, args.active)
-        _print({"user": user.public_dict()})
+    _print({"user": (await ctx.backend.set_active(args.username, args.active)).public_dict()})
     return 0
 
 
 async def _cmd_list_users(ctx: _Context, args: argparse.Namespace) -> int:
-    async with ctx.auth_db.session() as session:
-        users = await AuthService(session).list_users()
-        _print([u.public_dict() for u in users])
+    _print([u.public_dict() for u in await ctx.backend.list_users()])
     return 0
 
 
 async def _cmd_create_role(ctx: _Context, args: argparse.Namespace) -> int:
-    async with ctx.auth_db.session() as session:
-        svc = AuthService(session)
-        role = await svc.get_or_create_role(
-            args.name, permissions=args.permission or [], description=args.description
-        )
-        _print({"role": {"name": role.name, "permissions": role.permissions, "description": role.description}})
+    name, perms, desc = await ctx.backend.get_or_create_role(
+        args.name, permissions=args.permission or [], description=args.description
+    )
+    _print({"role": {"name": name, "permissions": perms, "description": desc}})
     return 0
 
 
@@ -171,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config-connectors", help="path to connectors.toml (default: from app.toml)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_init = sub.add_parser("init-db", help="create the auth tables + bootstrap an admin")
+    p_init = sub.add_parser("init-db", help="create the store (DB tables or auth.toml) + bootstrap an admin")
     p_init.add_argument("--admin-username", default="admin")
     _add_password_args(p_init)
     p_init.set_defaults(func=_cmd_init_db)

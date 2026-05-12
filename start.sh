@@ -11,7 +11,9 @@
 #   ./start.sh build      build the frontend into frontend/dist (no server).
 #   ./start.sh frontend   run the Vite dev server (:5173, hot reload). It proxies the API
 #                         paths to :8000 — run `./start.sh api dev` in another terminal.
-#   ./start.sh init-db    bootstrap the auth tables + an `admin` user (needs the configured DB).
+#   ./start.sh init-db    bootstrap the auth store + an `admin` user (creates config/auth.toml with
+#                         the default `[auth] backend = "toml"`; with `backend = "db"` it creates the
+#                         ly2_* tables on the configured pool instead — needs that DB reachable).
 #
 # The built React app lives in frontend/dist and is served by FastAPI (liberty/main.py),
 # which mounts it at "/" after the API routes — no copying to a "public" folder needed.
@@ -57,7 +59,7 @@ maybe_build_frontend() {
 run_api() {  # $1 = "dev" → enable --reload
   local extra=()
   [ "${1:-}" = "dev" ] && extra=(--reload)
-  [ -n "${LIBERTY_DB_URL:-}" ] || echo "==> LIBERTY_DB_URL unset → using SQLite (./liberty.db). First time? run: ./start.sh init-db"
+  [ -f config/auth.toml ] || echo "==> config/auth.toml missing — no users yet. Run: ./start.sh init-db   (bootstraps an 'admin')"
   [ -n "${LIBERTY_JWT_SECRET:-}" ] || echo "==> LIBERTY_JWT_SECRET unset → ephemeral JWT key (tokens won't survive a restart)"
   echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs)"
   exec "$PY" -m uvicorn liberty.main:app --host "$HOST" --port "$PORT" "${extra[@]}"
