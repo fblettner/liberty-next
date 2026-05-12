@@ -315,7 +315,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   the user picks the label not the code), both implicitly `equals`. A "Clear" button in the panel header resets
   all server filters. On Run it sends `:<col>` + `:<col>_op` for
   each filled field; the migration has wrapped such queries in
-  `SELECT * FROM (<orig>) _flt WHERE …` so this actually pre-filters server-side before the grid loads (the
+  `SELECT * FROM (<orig>) lib_flt WHERE …` so this actually pre-filters server-side before the grid loads (the
   in-grid TanStack filters then refine the loaded page; those `:<col>`/`:<col>_op` binds are kept out of the
   param form). SELECT → `GET` + the `DataTable`
   grid built from `result.columns`, honouring their display hints (label/hidden/width/align — `hidden` takes
@@ -372,7 +372,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   (a single distinct statement collapses to a plain string; `--dbtype` keeps just one variant).
   v1's `query_crud` is a **REST verb** — `GET`/`SELECT` = read (gets `ORDER BY <query_orderby>`
   and the `column_hints` for its `query_id`; if any of those hints is `filter`-flagged the query is
-  also wrapped — `SELECT * FROM (<orig>) _flt WHERE …` with a `:<col>` value bind + `:<col>_op` operator
+  also wrapped — `SELECT * FROM (<orig>) lib_flt WHERE …` with a `:<col>` value bind + `:<col>_op` operator
   bind per such column (both, and the column, `CAST(… AS VARCHAR(4000))` — `VARCHAR2(…)` on Oracle variants — pins the bind's type so an
   *unset* filter's NULL bind doesn't trip asyncpg's "could not determine data type", and compares
   uniformly regardless of the column's real type; an empty/NULL value matches everything = "no filter"),

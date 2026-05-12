@@ -102,7 +102,7 @@ def _dialect_name(dbtype: Any) -> str:
 
 # When a read query has `filter`-flagged columns (v1's col_filter), wrap it so the value the
 # TableView sends for each such column actually pre-filters server-side: `SELECT * FROM (<orig>)
-# _flt WHERE …`. Each column C gets a `:C` value bind and a `:C_op` operator bind. The bind and the
+# lib_flt WHERE …`. Each column C gets a `:C` value bind and a `:C_op` operator bind. The bind and the
 # column are CAST to text in the predicate: that pins the parameter's type (so a NULL bind — an
 # *unset* filter — doesn't trip "could not determine data type of parameter" on asyncpg) and gives
 # uniform comparison regardless of the column's real type (numbers/dates compare on their text form;
@@ -115,7 +115,7 @@ _FILTER_OPS = ("contains", "equals", "notEquals", "startsWith", "endsWith")
 def _filter_predicate(col: str, vchar: str) -> str:
     pv = f"CAST(:{col} AS {vchar})"        # the value, as text (also pins the bind's type)
     po = f"CAST(:{col}_op AS {vchar})"     # the operator, as text
-    cv = f"CAST(_flt.{col} AS {vchar})"    # the column, as text
+    cv = f"CAST(lib_flt.{col} AS {vchar})"    # the column, as text
     branches = (
         f"{pv} IS NULL OR {pv} = ''",
         f"COALESCE({po}, 'contains') = 'contains' AND LOWER({cv}) LIKE LOWER('%' || {pv} || '%')",
@@ -130,7 +130,7 @@ def _filter_predicate(col: str, vchar: str) -> str:
 def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "default") -> str:
     vchar = "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
     preds = "\n".join(_filter_predicate(c, vchar) for c in cols)
-    return f"SELECT * FROM (\n{base_sql}\n) _flt\nWHERE 1=1\n{preds}"
+    return f"SELECT * FROM (\n{base_sql}\n) lib_flt\nWHERE 1=1\n{preds}"
 
 
 def _simplify_upsert(sql: str) -> str:
@@ -243,7 +243,7 @@ def migrate_sql_queries(
         column_hints: ``{query_id: [column-hint dict]}`` (from :func:`migrate_column_hints`) —
             attached to each emitted query as its ``columns`` display hints. A read query that has
             ``filter``-flagged columns (v1's ``col_filter``) is also wrapped — ``SELECT * FROM (<orig>)
-            _flt WHERE …`` — so the value the TableView sends for each such column (a ``:<col>`` bind
+            lib_flt WHERE …`` — so the value the TableView sends for each such column (a ``:<col>`` bind
             plus an optional ``:<col>_op`` operator bind) pre-filters server-side.
         table_meta: ``{query_id: {"description"?, "auto_load"?}}`` (from :func:`migrate_table_meta`) —
             the v1 table/form friendly label → the read query's ``description``, ``tbl_auto_load`` →
@@ -303,7 +303,7 @@ def migrate_sql_queries(
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
         is_update = crud in _UPDATE_CRUD
-        # build each dialect variant. read + filter columns → `SELECT * FROM (…) _flt WHERE <filters>`.
+        # build each dialect variant. read + filter columns → `SELECT * FROM (…) lib_flt WHERE <filters>`.
         # an UPDATE-crud query: an upsert there collapses to a plain UPDATE, then its WHERE is rebound
         # to `:<col>_ORIGINAL`. an INSERT-crud upsert (`_post`) collapses to a plain INSERT. then
         # ORDER BY is appended (to the outer query, when the read was wrapped).

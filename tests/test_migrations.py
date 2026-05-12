@@ -222,7 +222,7 @@ def test_migrate_sql_queries_upsert_put_to_update() -> None:
 
 
 def test_migrate_sql_queries_filter_wrap() -> None:
-    # a read query with a filter-flagged column gets wrapped: SELECT * FROM (<orig>) _flt WHERE …
+    # a read query with a filter-flagged column gets wrapped: SELECT * FROM (<orig>) lib_flt WHERE …
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
         column_hints={1: [{"name": "USR_ID", "filter": True}, {"name": "USR_NAME"}]},
@@ -233,6 +233,7 @@ def test_migrate_sql_queries_filter_wrap() -> None:
     inner = "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status"
     assert sql["default"].startswith("SELECT * FROM (\n" + inner)
     assert "WHERE 1=1" in sql["default"]
+    assert ") lib_flt\n" in sql["default"] and "_flt" not in sql["default"].replace("lib_flt", "")  # alias must start with a letter (Oracle)
     assert "CAST(:USR_ID AS VARCHAR(4000)) IS NULL" in sql["default"] and ":USR_ID_op" in sql["default"]
     assert "CAST(:USR_ID AS VARCHAR2(4000))" in sql["oracle"]  # the oracle variant uses VARCHAR2
     assert sql["default"].rstrip().endswith("ORDER BY usr_name")  # ORDER BY moved onto the outer query
