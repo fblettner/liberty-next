@@ -1,0 +1,54 @@
+# Liberty v2 — per-app screen definitions  (TEMPLATE — copy to `config/screens.toml`)
+#
+# The real `config/screens.toml` is *not* committed (per-deployment / licensed-app data). A missing
+# file = no screens, which is fine — the framework still serves the raw connector/query flow. To populate:
+#   • copy this file:  cp config/screens.toml.example config/screens.toml
+#   • or migrate a v1 DB:  liberty-migrate screen --source-url postgresql+asyncpg://… --connector myapp -o config/screens.toml
+#
+# A screen collapses v1's table → dialog → tabs → fields → field-param-binds chain into one entity.
+# Each [screens.<app>.<screen_id>] carries: the screen's read query + the CRUD companions (update/insert/
+# delete_query), flags (auto_load / audit / editable / uploadable), and an optional inline `dialog` with
+# tabs and fields. `connector` is set only when the screen's queries live on a different connector than
+# the app; otherwise it inherits the app name. Lookup parameter bindings on dialog fields (the unified
+# `ParamBind` shape — same one used by actions and row menus in later slices) ride under
+# `dialog.tabs.fields.lookup_param_binds`.
+#
+# Permission gate: a screen is shown / openable iff the caller holds `sql:<connector>:<read_query>`.
+
+# ── example ───────────────────────────────────────────────────────────────────────────
+# [screens.myapp.security_users]
+# label = "Users"
+# description = "User accounts"
+# read_query = "users_get"
+# update_query = "users_put"
+# insert_query = "users_post"
+# delete_query = "users_delete"
+# auto_load = true
+# audit = true     # wire AUD_<table> writes (slice 5)
+# # connector = "otherconn"   # only when the queries live on a different connector
+#
+# [screens.myapp.security_users.dialog]
+# title = "User"
+#
+# [[screens.myapp.security_users.dialog.tabs]]
+# id = "general"
+# label = "General"
+# cols = 2
+#
+# [[screens.myapp.security_users.dialog.tabs.fields]]
+# name = "USR_ID"
+# required = true
+#
+# [[screens.myapp.security_users.dialog.tabs.fields]]
+# name = "USR_ROLE_ID"
+# dd = "ROL_ID"               # dictionary override (defaults to `name` when unset)
+#
+# # Bind the field's lookup query's `:ROL_APPS_ID` parameter to the form's USR_APPS_ID at call time.
+# [[screens.myapp.security_users.dialog.tabs.fields.lookup_param_binds]]
+# param = "ROL_APPS_ID"
+# source = "USR_APPS_ID"
+#
+# # Same shape with a literal binding:
+# # [[screens.myapp.security_users.dialog.tabs.fields.lookup_param_binds]]
+# # param = "SY"
+# # value = "01"

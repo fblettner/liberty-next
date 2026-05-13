@@ -22,6 +22,7 @@ config/connectors.toml
 config/connectors.toml.tmp
 config/dictionary.toml
 config/menus.toml
+config/screens.toml
 # local dev SQLite (the default [pools.default] when LIBERTY_DB_URL is unset)
 *.db
 *.db-journal

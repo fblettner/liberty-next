@@ -11,6 +11,7 @@ export interface ConfigSchemas {
   api: JsonSchema
   dictionary: JsonSchema
   menus: JsonSchema
+  screens: JsonSchema
   framework_enums: FrameworkEnums
 }
 
@@ -75,4 +76,65 @@ export interface AppMenu {
 export interface MenusDoc {
   path: string
   menus: Record<string, AppMenu>
+}
+
+/** One `ParamBind` — v2's port of v1's `ly_dlg_filters`. Exactly one of `value` (literal) /
+ *  `source` (column or form-field whose live value to bind) is set per row in practice. */
+export interface ParamBind {
+  param: string
+  value?: string | null
+  source?: string | null
+}
+
+/** One field on a dialog tab (matches `liberty/screens/config.py::ScreenField`). */
+export interface ScreenField {
+  name: string
+  dd?: string | null
+  label?: string | null
+  hidden?: boolean
+  disabled?: boolean
+  required?: boolean
+  colspan?: number | null
+  default?: string | null
+  lookup_param_binds?: ParamBind[]
+}
+
+/** One tab in a dialog. */
+export interface ScreenTab {
+  id: string
+  label?: string | null
+  l?: Record<string, string>
+  cols?: number | null
+  hide_on_add?: boolean
+  hide_on_edit?: boolean
+  fields?: ScreenField[]
+}
+
+/** Optional dialog body — the form shown for adding / editing a row. */
+export interface ScreenDialog {
+  title?: string | null
+  tabs?: ScreenTab[]
+}
+
+/** One screen — collapses v1's table + dialog into a single entity. */
+export interface Screen {
+  id?: string
+  label?: string | null
+  description?: string | null
+  connector?: string | null
+  read_query: string
+  update_query?: string | null
+  insert_query?: string | null
+  delete_query?: string | null
+  auto_load?: boolean
+  audit?: boolean
+  editable?: boolean
+  uploadable?: boolean
+  dialog?: ScreenDialog | null
+}
+
+/** GET /admin/config/screens/parsed. Map of `<app>.<screen_id>` → Screen. */
+export interface ScreensDoc {
+  path: string
+  screens: Record<string, Record<string, Screen>>
 }

@@ -9,7 +9,15 @@ from fastapi.testclient import TestClient
 
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
-from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, MenuSettings, Settings
+from liberty.config import (
+    AISettings,
+    AppSettings,
+    AuthSettings,
+    ConnectorSettings,
+    MenuSettings,
+    ScreenSettings,
+    Settings,
+)
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -72,6 +80,7 @@ def env(tmp_path):
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
         menus=MenuSettings(config_path=tmp_path / "menus.toml"),
+        screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
@@ -311,6 +320,74 @@ def test_config_menus_parsed_get_and_put(env) -> None:
         assert [it["id"] for it in after["nomasx1"]["items"]] == ["security", "users", "roles"]
         # Reload picks it up — the app's menu count goes from 0 to 1
         assert client.post("/admin/reload", headers=h).json()["menu_apps"] == ["nomasx1"]
+
+
+def test_config_screens_parsed_get_and_put(env) -> None:
+    app, conn_toml, _ = env
+    screens_toml = conn_toml.parent / "screens.toml"  # see env fixture — the same tmp_path
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # schema serves the ScreensFile shape with its $defs
+        sch = client.get("/admin/config/schema", headers=h).json()
+        assert "screens" in sch["screens"]["properties"]
+        for nested in ("Screen", "ScreenDialog", "ScreenTab", "ScreenField", "ParamBind"):
+            assert nested in sch["screens"]["$defs"]
+        # a fresh tmp dir has no screens.toml → GET returns an empty dict (path still reported)
+        body = client.get("/admin/config/screens/parsed", headers=h).json()
+        assert body["path"] == str(screens_toml) and body["screens"] == {}
+        # permission gate + validation gate (an explicit id ≠ its key is a config bug)
+        assert (
+            client.put("/admin/config/screens/parsed", json={"screens": {}}, headers=_h(client, "reader")).status_code
+            == 403
+        )
+        bad = {"app1": {"users": {"id": "people", "read_query": "q"}}}
+        assert client.put("/admin/config/screens/parsed", json={"screens": bad}, headers=h).status_code == 422
+        # valid: one screen with a dialog + a ParamBind binding for a field's lookup
+        payload = {
+            "nomasx1": {
+                "security_users": {
+                    "label": "Users",
+                    "read_query": "users_get",
+                    "update_query": "users_put",
+                    "audit": True,
+                    "dialog": {
+                        "title": "User",
+                        "tabs": [
+                            {
+                                "id": "general",
+                                "label": "General",
+                                "fields": [
+                                    {"name": "USR_ID"},
+                                    {
+                                        "name": "USR_ROLE_ID",
+                                        "dd": "ROL_ID",
+                                        "lookup_param_binds": [
+                                            {"param": "ROL_APPS_ID", "source": "USR_APPS_ID"},
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+        r = client.put("/admin/config/screens/parsed", json={"screens": payload}, headers=h)
+        assert r.status_code == 200 and r.json()["saved"] is True
+        text = screens_toml.read_text()
+        assert "[screens.nomasx1.security_users]" in text
+        assert 'read_query = "users_get"' in text and "audit = true" in text
+        # round-trip GET — id is injected from the dict key (default-valued keys dropped)
+        after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        assert set(after) == {"nomasx1"}
+        assert set(after["nomasx1"]) == {"security_users"}
+        s = after["nomasx1"]["security_users"]
+        assert s["read_query"] == "users_get" and s["audit"] is True
+        assert s["dialog"]["tabs"][0]["fields"][1]["lookup_param_binds"][0] == {
+            "param": "ROL_APPS_ID", "source": "USR_APPS_ID",
+        }
+        # Reload picks it up — the screen apps go from 0 → 1
+        assert client.post("/admin/reload", headers=h).json()["screen_apps"] == ["nomasx1"]
 
 
 def test_oidc_callback_fragment_redirect() -> None:

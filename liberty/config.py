@@ -65,6 +65,15 @@ class MenuSettings(BaseModel):
     config_path: Path = Path("config/menus.toml")
 
 
+class ScreenSettings(BaseModel):
+    """Screen definitions per app (the v2 collapse of v1's ``ly_tables`` + dialog stack —
+    see :mod:`liberty.screens`)."""
+
+    # `[screens.<app>.<id>]` per screen; a missing file is fine (no screens → only the raw
+    # connector/queries flow is available in the UI).
+    config_path: Path = Path("config/screens.toml")
+
+
 class AuthSettings(BaseModel):
     """Internal-user auth: where users/roles live (a TOML file or the DB), JWT signing."""
 
@@ -145,6 +154,7 @@ class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     menus: MenuSettings = Field(default_factory=MenuSettings)
+    screens: ScreenSettings = Field(default_factory=ScreenSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)

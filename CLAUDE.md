@@ -691,11 +691,40 @@ business object:
   field(s), B param-bind(s)``.
 Real-data check (the user's live DBs): 96 screens for nomasx1 (14 with dialog, 6 with audit, 122
 fields, 2 param-binds) and 12 for nomajde (6 dialogs, 10 cross-connector, 199 fields, 2 param-binds)
-migrate cleanly. *Still pending in slice 1f:* runtime wiring (``app.state.screens`` + a
-``GET /api/screens`` route) and the Settings-tab screens builder. Slices 2-6 (dialog runtime,
-per-field conditions, actions/events, AUD audit, row menus) follow.
+migrate cleanly.
 
-327 tests pass.
+**Phase 6 slice 1f (runtime + builder wiring) — DONE.**
+- `liberty/config.py::ScreenSettings` adds ``[screens] config_path`` (default ``config/screens.toml``);
+  ``./start.sh init-config`` now also seeds ``screens.toml`` from the shipped ``.example`` template.
+- `liberty/main.py` lifespan loads it into ``app.state.screens``; ``/info`` reports
+  ``screens.{apps, total}``.
+- `liberty/web/screens.py` — three permission-pruned routes:
+  ``GET /api/screens`` (every accessible screen per app, list view — no dialog body, no actions),
+  ``GET /api/screens/{app}`` (one app's accessible screens; 404 when nothing survives), and
+  ``GET /api/screens/{app}/{id}`` (the full screen including ``dialog``/``actions``/``row_menu`` —
+  same shape ``Screen.model_dump`` produces). Permission gate: a screen is shown iff the caller
+  holds ``sql:{effective_connector}:{read_query}`` (``effective_connector`` = the explicit ``connector``
+  field, else the app name — same convention :func:`migrate_screens` uses). Single-screen 403s
+  surface as 404s so we don't leak existence — matches the connectors-route convention.
+- `liberty/web/admin.py` — ``POST /admin/reload`` now re-reads ``screens.toml`` (reply carries
+  ``screen_apps``); ``GET /admin/config/schema`` now includes ``screens`` (the ``ScreensFile``
+  shape with its ``$defs`` — ``Screen``, ``ScreenDialog``, ``ScreenTab``, ``ScreenField``,
+  ``ParamBind``, ``ScreenAction``); ``GET/PUT /admin/config/screens/parsed`` for the builder
+  (the PUT runs the payload through :func:`parse_screens` so each screen's ``id`` is injected
+  from its dict key, then surgically replaces the ``[screens]`` table via ``tomlkit`` — comments
+  outside it survive).
+- Frontend: ``src/types/config.ts`` adds ``ScreensDoc`` / ``Screen`` / ``ScreenDialog`` /
+  ``ScreenTab`` / ``ScreenField`` / ``ParamBind``; ``src/pages/Settings/ScreensBuilder.tsx`` (a
+  new lazy-loaded tab) — app chips on the left + per-app screen list (search past ~6); right
+  pane drills into the selected screen via ``SchemaNavigator`` over the ``Screen`` ``$def``
+  (dialog → tabs → fields → ``lookup_param_binds`` all become drill-in rows). Renaming a screen
+  via the inspector ``id`` field moves the dict key. Save → ``PUT /admin/config/screens/parsed``
+  + Reload. (No frontend *consumer* for ``GET /api/screens`` yet — that's slice 2's job, the
+  TableView opens the dialog from it.)
+
+Slices 2-6 still to do (dialog runtime, per-field conditions, actions/events, AUD audit, row menus).
+
+335 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
@@ -727,9 +756,9 @@ Python/local-Spark jobs & scheduling).
 .venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
 .venv/bin/liberty-license verify "$LIBERTY_LICENSE_KEY"   # inspect a license key → JSON status (exit 0=full, 1=restricted); `status` checks the configured one
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
-# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  GET /api/menus  ·  GET /api/license  ·  /docs (OpenAPI)
+# HTTP: GET /api/connectors  ·  GET/POST /api/sql/{c}/{q}  ·  POST /api/http/{c}/{e}  ·  GET /api/menus  ·  GET /api/screens  ·  GET /api/license  ·  /docs (OpenAPI)
 # AI: set ANTHROPIC_API_KEY, then POST /ai/chat (SSE) with an `ai:chat`-permitted token
-./start.sh init-config            # copy config/{connectors,dictionary,menus}.toml.example → the real (uncommitted) files (serve/dev do this too)
+./start.sh init-config            # copy config/{connectors,dictionary,menus,screens}.toml.example → the real (uncommitted) files (serve/dev do this too)
 # fresh checkout: python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"  (then ./start.sh init-config, or run liberty-migrate)
 ```
 
@@ -772,7 +801,7 @@ or columns the user's other scripts touch) are decrypted at runtime with `[crypt
 ## Layout
 
 ```
-config/         app.toml (committed — framework config) · connectors.toml / dictionary.toml / menus.toml (NOT committed —
+config/         app.toml (committed — framework config) · connectors.toml / dictionary.toml / menus.toml / screens.toml (NOT committed —
                 per-deployment / licensed-app config; only *.toml.example templates are committed; `./start.sh init-config` copies them) ·
                 auth.toml (the TOML auth store — users/roles, password hashes; gitignored, created by `liberty-admin init-db`)
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py, license_cli.py
@@ -782,7 +811,7 @@ liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli
                 · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
                   (authstore = the TOML/DB backend abstraction + config/auth.toml schema; models/db/service = the DB backend's internals)
                 · ai/{tools,connector_tools,assistant,routes}.py
-                · web/{deps,errors,connectors,menus,license,admin}.py
+                · web/{deps,errors,connectors,menus,screens,license,admin}.py
                 · migrations/{v1,source}.py
 frontend/       Vite + React 19 + TS (emotion + react-i18next) — src/{App,main,theme,i18n}.* +
                 src/{api,auth,workspace,types,services,common,pages,components,locales}/* (nomaubl layout:

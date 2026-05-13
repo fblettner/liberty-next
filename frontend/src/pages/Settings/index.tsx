@@ -12,9 +12,10 @@ const PoolsBuilder = lazy(() => import('./PoolsBuilder'))
 const ConnectorsBuilder = lazy(() => import('./ConnectorsBuilder'))
 const DictionaryBuilder = lazy(() => import('./DictionaryBuilder'))
 const MenusBuilder = lazy(() => import('./MenusBuilder'))
+const ScreensBuilder = lazy(() => import('./ScreensBuilder'))
 const RawEditor = lazy(() => import('./RawEditor'))
 
-type Tab = 'pools' | 'connectors' | 'dictionary' | 'menus' | 'raw'
+type Tab = 'pools' | 'connectors' | 'dictionary' | 'menus' | 'screens' | 'raw'
 
 const Tabs = styled.div`display: flex; gap: 4px; margin-bottom: 14px;`
 const TabBtn = styled.button<{ $active?: boolean }>`
@@ -36,6 +37,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'connectors'} onClick={() => setTab('connectors')}>{t('settings.tabs.connectors')}</TabBtn>
         <TabBtn $active={tab === 'dictionary'} onClick={() => setTab('dictionary')}>{t('settings.tabs.dictionary')}</TabBtn>
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
+        <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'raw'} onClick={() => setTab('raw')}>{t('settings.tabs.raw')}</TabBtn>
       </Tabs>
       <Suspense fallback={<Centered />}>
@@ -43,6 +45,7 @@ export default function Settings() {
           : tab === 'connectors' ? <ConnectorsBuilder />
           : tab === 'dictionary' ? <DictionaryBuilder />
           : tab === 'menus' ? <MenusBuilder />
+          : tab === 'screens' ? <ScreensBuilder />
           : <RawEditor />}
       </Suspense>
     </PageLayout>

@@ -14,6 +14,7 @@ from fastapi import HTTPException, Request, status
 from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry
 from liberty.menus import MenusFile
+from liberty.screens import ScreensFile
 
 
 def get_connectors(request: Request) -> ConnectorRegistry:
@@ -22,6 +23,10 @@ def get_connectors(request: Request) -> ConnectorRegistry:
 
 def get_menus(request: Request) -> MenusFile:
     return request.app.state.menus
+
+
+def get_screens(request: Request) -> ScreensFile:
+    return request.app.state.screens
 
 
 def request_language(request: Request) -> str | None:

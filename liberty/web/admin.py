@@ -51,6 +51,8 @@ from liberty.framework_enums import FRAMEWORK_ENUMS
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
+from liberty.screens import load_screens
+from liberty.screens.config import ScreensFile, parse_screens
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -71,6 +73,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     request.app.state.license = license_result
     request.app.state.connectors = new
     request.app.state.menus = load_menus(settings.menus.config_path)
+    request.app.state.screens = load_screens(settings.screens.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
     await old.aclose()
     return {
@@ -79,6 +82,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "pools": new.pools.names(),
         "dictionary_entries": len(new.dictionary.entries),
         "menu_apps": list(request.app.state.menus.menus),
+        "screen_apps": list(request.app.state.screens.screens),
         "license_mode": license_result.mode,
     }
 
@@ -136,6 +140,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "api": ApiConnectorConfig.model_json_schema(),
         "dictionary": DictionaryFile.model_json_schema(),
         "menus": MenusFile.model_json_schema(),
+        "screens": ScreensFile.model_json_schema(),
         "framework_enums": bundled,
     }
 
@@ -338,6 +343,60 @@ async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> d
         parse_menus(tomllib.loads(new_text))   # belt-and-braces re-validation
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting menus are invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/screens/parsed")
+async def get_screens_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``screens.toml`` parsed and normalised — ``{path, screens: {<app>: {<screen_id>:
+    Screen dict}}}``. A missing file → an empty screen set. Default-valued keys are dropped."""
+    path = Path(request.app.state.settings.screens.config_path)
+    cfg = load_screens(path)
+    return {
+        "path": str(path),
+        "screens": {
+            app: {sid: s.model_dump(exclude_defaults=True) for sid, s in screens.items()}
+            for app, screens in cfg.screens.items()
+        },
+    }
+
+
+class ScreensBody(BaseModel):
+    screens: dict[str, dict[str, dict[str, Any]]]
+
+
+@router.put("/config/screens/parsed")
+async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted dict against :class:`ScreensFile` (every screen's ``id`` injected from
+    its dict key, dialog/tabs/fields/param-binds round-trip cleanly), then rewrite ``screens.toml``
+    via ``tomlkit`` (replacing the top-level ``[screens]`` table wholesale — screens are nested
+    array-of-table-like under each app and re-rendering them in one shot is cleanest). Re-parses
+    the resulting file before writing. Does not reload — call ``POST /admin/reload`` afterwards."""
+    try:
+        # parse_screens injects each screen's `id` from its dict key — most operators won't repeat
+        # it in TOML, and the wire payload follows the same convention. Then the model_validator
+        # enforces that an explicit `id` (if present) matches its key.
+        parse_screens({"screens": body.screens})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid screens: {exc}") from exc
+    except ValueError as exc:                                # id != key, etc.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid screens: {exc}") from exc
+
+    path = Path(request.app.state.settings.screens.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    if body.screens:
+        doc["screens"] = body.screens
+    elif "screens" in doc:
+        del doc["screens"]
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        parse_screens(tomllib.loads(new_text))   # belt-and-braces re-validation
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting screens are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
