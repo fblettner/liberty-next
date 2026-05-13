@@ -53,8 +53,8 @@ class MenuItem(BaseModel):
     id: str = Field(description="Stable unique id within the app — used by descendant items as their parent.")
     parent: str | None = Field(
         default=None,
-        description="Parent item id (blank = top-level). Normally managed by the tree UI.",
-        json_schema_extra={"x_group": "Advanced"},
+        description="Parent item id (blank = top-level). Normally managed by the tree UI; the inspector dropdown lists every item in the app (except the current one's descendants — that would form a cycle).",
+        json_schema_extra={"x_group": "Advanced", "x_enum_ref": "MENU_PARENT_IDS"},
     )
     label: str = Field(description="Default-language display label (v1's menu_label).")
     l: dict[str, str] = Field(
@@ -72,10 +72,12 @@ class MenuItem(BaseModel):
     connector: str | None = Field(
         default=None,
         description="Connector the `target` lives in (blank → the app's own connector).",
+        json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
     )
     target: str | None = Field(
         default=None,
-        description="Query or endpoint name (required for leaves; ignored on folders).",
+        description="Query or endpoint name (required for leaves; ignored on folders). Dropdown lists the queries / endpoints exposed by `connector` (or the app's own connector when blank), filtered by `type`.",
+        json_schema_extra={"x_enum_ref": "MENU_TARGETS"},
     )
     params: dict[str, Any] = Field(
         default_factory=dict,

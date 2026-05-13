@@ -15,8 +15,8 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type JsonSchema } from '../../common'
-import type { AppMenu, ConfigSchemas, MenuItem, MenusDoc } from '../../types/config'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
+import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type AppsMap = Record<string, AppMenu>
@@ -183,6 +183,9 @@ function freshId(items: MenuItem[], seed: string): string {
 export default function MenusBuilder() {
   const { t } = useTranslation()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
+  // Read-only — the inspector's CONNECTOR / TARGET dropdowns pull from here. Loaded alongside
+  // the menus + schema so the framework-enum augmentation can offer real query / endpoint names.
+  const [connectors, setConnectors] = useState<Record<string, Record<string, unknown>> | null>(null)
   const [path, setPath] = useState('')
   const [apps, setApps] = useState<AppsMap | null>(null)
   const [original, setOriginal] = useState('')
@@ -197,9 +200,14 @@ export default function MenusBuilder() {
 
   const load = () => {
     setError(null); setStatus(null)
-    Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<MenusDoc>('/admin/config/menus/parsed')])
-      .then(([s, d]) => {
+    Promise.all([
+      api.get<ConfigSchemas>('/admin/config/schema'),
+      api.get<MenusDoc>('/admin/config/menus/parsed'),
+      api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
+    ])
+      .then(([s, d, c]) => {
         setSchemas(s); setPath(d.path); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
+        setConnectors(c.connectors)
         setSelApp((cur) => (cur && d.menus[cur] ? cur : Object.keys(d.menus)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -240,6 +248,66 @@ export default function MenusBuilder() {
     const forbidden = descendantIds(items, selItem)
     return items.filter((it) => !forbidden.has(it.id)).map((it) => it.id)
   }, [apps, selApp, selItem])
+
+  // Augment the framework enums with the three menus-specific data-driven dropdowns the inspector
+  // needs. All three are recomputed when the selected item changes (because `target` depends on
+  // *that* item's `type` + `connector`, `parent` excludes the item's own descendants, etc.).
+  // Kept above the early returns so the hook count stays stable across loading / loaded renders.
+  const augmentedEnums: FrameworkEnums | null = useMemo(() => {
+    if (!schemas) return null
+    const base: FrameworkEnums = { ...(schemas.framework_enums ?? {}) }
+
+    // CONNECTOR_NAMES — every connector defined in connectors.toml, ordered. Used by the menu
+    // item's `connector` field (blank → the app's own connector, which is the convention).
+    const connNames = connectors ? Object.keys(connectors).sort() : []
+    base.CONNECTOR_NAMES = {
+      label: 'Connectors',
+      values: connNames.map((n) => ({ value: n, label: n })),
+    }
+
+    // MENU_PARENT_IDS — every item in the current app *except* the selected one's descendants
+    // (which would form a cycle) and the item itself. Folders are surfaced first (they're the
+    // intended parents); leaves still appear because v2 lets any item host children.
+    const appItems: MenuItem[] = (apps && selApp) ? (apps[selApp]?.items ?? []) : []
+    const forbidden = selItem ? descendantIds(appItems, selItem) : new Set<string>()
+    const parentValues: { value: string; label: string }[] = []
+    for (const it of appItems) {
+      if (forbidden.has(it.id)) continue
+      const isFolderRow = !it.type
+      parentValues.push({ value: it.id, label: it.label || it.id, ...(isFolderRow ? {} : { /* leaf */ }) })
+    }
+    base.MENU_PARENT_IDS = { label: 'Available parents', values: parentValues }
+
+    // MENU_TARGETS — queries/endpoints of (the inspector's `connector` ?? the app). Filtered by
+    // the item's `type` (query → SQL connector's queries, endpoint → API connector's endpoints).
+    // Empty when type is blank (folder) or the connector / type is misaligned.
+    const selRec = appItems.find((it) => it.id === selItem)
+    const connKey = (typeof selRec?.connector === 'string' && selRec.connector) ? selRec.connector : selApp
+    const conn = connectors && connKey ? connectors[connKey] : undefined
+    const targets: { value: string; label: string }[] = []
+    if (selRec?.type === 'query' && conn?.type === 'sql') {
+      const qs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
+      for (const q of qs) {
+        const name = typeof q?.name === 'string' ? q.name : ''
+        if (!name) continue
+        const desc = typeof q?.description === 'string' ? q.description : (typeof q?.label === 'string' ? q.label : '')
+        targets.push({ value: name, label: desc || name })
+      }
+    } else if (selRec?.type === 'endpoint' && conn?.type === 'api') {
+      const es = Array.isArray(conn.endpoints) ? (conn.endpoints as Record<string, unknown>[]) : []
+      for (const e of es) {
+        const name = typeof e?.name === 'string' ? e.name : ''
+        if (!name) continue
+        const desc = typeof e?.description === 'string' ? e.description : (typeof e?.label === 'string' ? e.label : '')
+        targets.push({ value: name, label: desc || name })
+      }
+    }
+    base.MENU_TARGETS = {
+      label: selRec?.type === 'endpoint' ? `Endpoints — ${connKey ?? ''}` : `Queries — ${connKey ?? ''}`,
+      values: targets,
+    }
+    return base
+  }, [schemas, connectors, apps, selApp, selItem])
 
   if (error && !apps) return <Banner $tone="error">{error}</Banner>
   if (!apps || !schemas) return <Centered />
@@ -390,7 +458,7 @@ export default function MenusBuilder() {
   }
 
   return (
-    <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>
+    <FrameworkEnumsContext.Provider value={augmentedEnums}>
     <Stack gap={12}>
       <Mono>{path}</Mono>
       <Split>
