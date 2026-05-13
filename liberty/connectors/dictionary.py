@@ -86,6 +86,7 @@ class DictionaryEntry(BaseModel):
     )
     l: dict[str, str] = Field(
         default_factory=dict,
+        title="Translations",
         description="Per-language overrides for the label: {language_code: translated_label} (v1's ly_dictionary_l).",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
@@ -107,6 +108,7 @@ class EnumValue(BaseModel):
     label: str | None = Field(default=None, description="Default-language label (e.g. 'JD Edwards').")
     l: dict[str, str] = Field(
         default_factory=dict,
+        title="Translations",
         description="Per-language label overrides: {language_code: translated_label}.",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )

@@ -59,6 +59,7 @@ class MenuItem(BaseModel):
     label: str = Field(description="Default-language display label (v1's menu_label).")
     l: dict[str, str] = Field(
         default_factory=dict,
+        title="Translations",
         description="Per-language overrides: {language_code: translated_label} (v1's ly_menus_l).",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
