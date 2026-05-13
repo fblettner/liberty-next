@@ -190,7 +190,10 @@ export default function TableView({ connector, query }: { connector: string; que
       }
       description={<Mono>{connector}.{query}</Mono>}
     >
-      <Stack gap={14}>
+      {/* `flex: 1; minHeight: 0` so the Stack fills PageContent's height; the grid inside flexes
+          to whatever's left after the filter panel / control bar / result-meta line. Single
+          scrollbar inside the grid; the page chrome stays put. */}
+      <Stack gap={14} style={{ flex: 1, minHeight: 0 }}>
         {filterCols.length > 0 && (
           <FilterPanel
             cols={filterCols}

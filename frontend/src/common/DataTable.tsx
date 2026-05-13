@@ -67,7 +67,10 @@ function saveGrid(id: string, s: SavedGrid) {
 }
 
 // ── styled ──────────────────────────────────────────────────────────────────
-const Wrap = styled.div`display: flex; flex-direction: column; min-height: 0;`
+// `flex: 1` so the grid fills whatever vertical space its parent gives it (the TableView's Stack
+// stretches to fill PageContent's height). Together with TableScroll's own `flex: 1; min-height: 0`,
+// the grid is exactly viewport-minus-chrome tall — single scrollbar inside the grid, none on the page.
+const Wrap = styled.div`display: flex; flex-direction: column; min-height: 0; flex: 1;`
 const ToolbarRow = styled.div`display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1; min-width: 4px;`
 const ActionGroup = styled.div`display: flex; gap: 4px; align-items: center; flex-shrink: 0;`
@@ -137,8 +140,13 @@ const MiniLink = styled.button`
 // Cap at the space the table actually has below the page chrome (header + the run/toolbar rows +
 // the result-meta line + the pager) — `100dvh - ~14rem` — so a result that fits doesn't get a
 // (clipped) inner scrollbar, and a bigger one scrolls inside the box with its last row fully visible.
+// `flex: 1; min-height: 0` makes the scroller fill whatever the Wrap leaves it after the
+// toolbar — so it has a fixed height (its content scrolls inside) and never grows the page.
+// (Previously a `max-height: calc(100dvh - 14rem)` tried to do this — but the deduction couldn't
+// cover every page's chrome, so a tall result would push the page past the viewport and you'd
+// get a second outer scrollbar on top of the inner one.)
 const TableScroll = styled.div`
-  overflow: auto; max-height: calc(100dvh - 14rem); border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
+  overflow: auto; flex: 1; min-height: 0; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
 // `table-layout: auto` (the default): the browser sizes columns to their content — the best fit in
 // practice. (Column *resizing* was tried with `table-layout: fixed`, but that forced widths the
