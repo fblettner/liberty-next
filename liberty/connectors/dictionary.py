@@ -142,20 +142,20 @@ class LookupDef(BaseModel):
     description: str | None = Field(default=None, description="Display name / description (informational).")
     connector: str | None = Field(
         default=None,
-        description="Connector the lookup query lives on. Blank → the asking connector (the one the lookup is referenced from).",
-        json_schema_extra={"x_group": "Target"},
+        description="Connector the lookup query lives on. Blank → the asking connector (the one the lookup is referenced from). Drives the dropdowns below — query/value/label are scoped to whichever connector this resolves to.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "CONNECTOR_NAMES"},
     )
     query: str = Field(
-        description="The v2 query name (the *read* migrated name, e.g. 'security_roles_get').",
-        json_schema_extra={"x_group": "Target"},
+        description="The lookup's *read* query (e.g. 'security_roles_get'). The dropdown lists the resolved connector's tables (its `<base>_get` queries) plus any non-CRUD reads.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
     )
     value: str = Field(
-        description="The result column whose value matches the cell.",
-        json_schema_extra={"x_group": "Target"},
+        description="The result column whose value matches the cell. Dropdown lists the dictionary entries of the resolved connector — columns are typically named after their dd entry.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
     label: str = Field(
-        description="The result column whose value to display in place of the code.",
-        json_schema_extra={"x_group": "Target"},
+        description="The result column whose value to display in place of the code. Same scope as `value`.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
     group: str | None = Field(
         default=None,

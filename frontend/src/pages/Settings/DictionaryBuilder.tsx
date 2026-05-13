@@ -12,8 +12,9 @@ import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers } from 'lucide-rea
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
-import type { ConfigSchemas, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
+import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { groupQueriesByTable } from './connectorTables'
 
 type DictionaryData = DictionaryDoc['dictionary']
 
@@ -127,6 +128,9 @@ export default function DictionaryBuilder() {
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [path, setPath] = useState('')
   const [dict, setDict] = useState<DictionaryData | null>(null)
+  // Read-only — the *Lookups* form's query / value / label dropdowns read from here. We need to know
+  // each connector's read queries (LOOKUP_QUERIES) and dictionary fields (LOOKUP_DD_FIELDS).
+  const [connectors, setConnectors] = useState<Record<string, Record<string, unknown>> | null>(null)
   const [original, setOriginal] = useState('')
   const [kind, setKind] = useState<DictionaryKind>('entries')
   const [scope, setScope] = useState<string>(SCOPE_SHARED)
@@ -138,9 +142,14 @@ export default function DictionaryBuilder() {
 
   const load = () => {
     setError(null); setStatus(null)
-    Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<DictionaryDoc>('/admin/config/dictionary/parsed')])
-      .then(([s, d]) => {
+    Promise.all([
+      api.get<ConfigSchemas>('/admin/config/schema'),
+      api.get<DictionaryDoc>('/admin/config/dictionary/parsed'),
+      api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
+    ])
+      .then(([s, d, c]) => {
         setSchemas(s); setPath(d.path); setDict(d.dictionary); setOriginal(JSON.stringify(d.dictionary))
+        setConnectors(c.connectors)
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
@@ -186,8 +195,65 @@ export default function DictionaryBuilder() {
     const overlay = scope && dict ? (dict.connectors ?? {})[scope] : undefined
     base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(['label'], dict?.enums, overlay?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups (current scope)', values: mkValues(['description'], dict?.lookups, overlay?.lookups) }
+
+    // CONNECTOR_NAMES — every connector in connectors.toml. Drives LookupDef.connector (which in
+    // turn picks which connector's queries / dd entries fill the next two dropdowns).
+    const connNames = connectors ? Object.keys(connectors).sort() : []
+    base.CONNECTOR_NAMES = { label: 'Connectors', values: connNames.map((n) => ({ value: n, label: n })) }
+
+    // LOOKUP_QUERIES — the read queries (tables) of the *effective* connector for the currently
+    // selected lookup record. Effective = the lookup's `connector` field (when explicitly set) →
+    // else the current scope (if it's a connector overlay) → else nothing (a shared lookup with no
+    // explicit connector resolves at runtime to the "asking" connector, which the builder can't
+    // know about ahead of time). Same table-grouping as MenusBuilder: mono=base, value=base_get.
+    // LOOKUP_DD_FIELDS — the dictionary entries available to that effective connector (shared +
+    // per-connector overlay). Drives `value` / `label` since columns are dd-named in practice.
+    let effectiveConn = ''
+    if (kind === 'lookups' && sel) {
+      const rec = (overlay?.lookups?.[sel] ?? dict?.lookups?.[sel]) as Record<string, unknown> | undefined
+      const explicit = typeof rec?.connector === 'string' ? rec.connector : ''
+      effectiveConn = explicit || (scope || '')
+    }
+    const conn = effectiveConn && connectors ? connectors[effectiveConn] : undefined
+    const lookupQueries: { value: string; label: string; mono?: string }[] = []
+    if (conn?.type === 'sql') {
+      const qs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
+      const grouped = groupQueriesByTable(qs)
+      for (const g of grouped.tables) {
+        if (!g.slots.get) continue
+        const qg = g.slots.get.query
+        const desc = typeof qg?.description === 'string' ? qg.description : (typeof qg?.label === 'string' ? qg.label : '')
+        lookupQueries.push({ value: g.slots.get.name, label: desc || g.base, mono: g.base })
+      }
+      for (const ls of grouped.loose) {
+        if (!ls.name) continue
+        const desc = typeof ls.query?.description === 'string' ? ls.query.description : (typeof ls.query?.label === 'string' ? ls.query.label : '')
+        lookupQueries.push({ value: ls.name, label: desc || ls.name, mono: ls.name })
+      }
+    }
+    base.LOOKUP_QUERIES = {
+      label: effectiveConn ? `Read queries — ${effectiveConn}` : 'Read queries (pick a connector first)',
+      values: lookupQueries,
+    }
+    const ddOut = new Map<string, string>()
+    if (effectiveConn) {
+      // shared first, then per-connector overlay — overlay wins on collision (runtime semantics).
+      for (const [id, rec] of Object.entries(dict?.entries ?? {})) {
+        const lbl = typeof (rec as Record<string, unknown>)?.label === 'string' ? (rec as Record<string, unknown>).label as string : id
+        ddOut.set(id, lbl)
+      }
+      const connEntries = ((dict?.connectors ?? {})[effectiveConn]?.entries) as Record<string, Record<string, unknown>> | undefined
+      for (const [id, rec] of Object.entries(connEntries ?? {})) {
+        const lbl = typeof rec?.label === 'string' ? (rec.label as string) : id
+        ddOut.set(id, lbl)
+      }
+    }
+    base.LOOKUP_DD_FIELDS = {
+      label: effectiveConn ? `Dictionary entries — ${effectiveConn}` : 'Dictionary entries (pick a connector first)',
+      values: [...ddOut.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([value, label]) => ({ value, label })),
+    }
     return base
-  }, [schemas, dict, scope])
+  }, [schemas, dict, scope, kind, sel, connectors])
 
   if (error && !dict) return <Banner $tone="error">{error}</Banner>
   if (!dict || !schemas) return <Centered />
