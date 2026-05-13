@@ -9,14 +9,14 @@
 // No rename yet — delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
-import { CRUD_KINDS, groupQueriesByTable, newQueryStub } from './connectorTables'
+import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, tableExists } from './connectorTables'
 
 type Connectors = Record<string, Record<string, unknown>>
 
@@ -64,6 +64,11 @@ const Slot = styled.span<{ $on?: boolean }>`
   background: ${({ $on }) => ($on ? colors.green.bg : 'transparent')};
   color: ${({ $on }) => ($on ? colors.green.main : colors.text.muted)};
   opacity: ${({ $on }) => ($on ? 1 : 0.45)};
+`
+const RowAction = styled.span`
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: ${radius.sm}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
 `
 const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 8px 4px 0;`
 
@@ -130,6 +135,28 @@ export default function ConnectorsBuilder() {
     }
     updateQueries(connectorName, [...queries, newQueryStub(base, 'get')])
     setSelTable(base)
+  }
+  const duplicateTable = (connectorName: string, oldBase: string) => {
+    const cur = (conns ?? {})[connectorName] ?? {}
+    const queries = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
+    const suggested = `${oldBase}_copy`
+    const newBase = window.prompt(t('settings.tables.duplicatePrompt', { name: oldBase }), suggested)?.trim()
+    if (!newBase) return
+    if (newBase.toLowerCase() === oldBase.toLowerCase()) {
+      window.alert(t('settings.tables.duplicateSameName'))
+      return
+    }
+    if (tableExists(queries, newBase)) {
+      window.alert(t('settings.tables.duplicateExists', { name: newBase }))
+      return
+    }
+    const next = duplicateTableQueries(queries, oldBase, newBase)
+    if (next === queries) {
+      window.alert(t('settings.tables.duplicateNoSource', { name: oldBase }))
+      return
+    }
+    updateQueries(connectorName, next)
+    setSelTable(newBase)
   }
 
   async function save() {
@@ -221,6 +248,7 @@ export default function ConnectorsBuilder() {
                     defs={allDefs}
                     onChangeQueries={(next) => updateQueries(sel!, next)}
                     onBack={() => setSelTable(null)}
+                    onDuplicate={() => sel && duplicateTable(sel, selTable)}
                   />
                 ) : (
                   <Stack gap={10}>
@@ -243,6 +271,14 @@ export default function ConnectorsBuilder() {
                           {CRUD_KINDS.map((c) => (
                             <Slot key={c} $on={!!g.slots[c]} title={g.slots[c]?.name ?? `${g.base}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
                           ))}
+                          <RowAction
+                            role="button"
+                            aria-label={t('settings.tables.duplicate')}
+                            title={t('settings.tables.duplicate')}
+                            onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, g.base) }}
+                          >
+                            <Copy size={13} />
+                          </RowAction>
                         </TableRow>
                       ))}
                     </TableList>

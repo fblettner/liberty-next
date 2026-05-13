@@ -89,6 +89,39 @@ export function newQueryStub(base: string, crud: CrudKind): Record<string, unkno
   return crud === 'get' ? { name, sql: '' } : { name, sql: '', writable: true }
 }
 
+/** Deep-clone every `<oldBase>_<crud>` query as `<newBase>_<crud>` and append to the array.
+ *  Clones are JSON-cloned, so nested `params` / `columns` / per-dialect `sql` maps are independent.
+ *  Returns the same array reference when no source queries exist (nothing to copy). */
+export function duplicateTable(
+  queries: ReadonlyArray<Record<string, unknown>>,
+  oldBase: string,
+  newBase: string,
+): Record<string, unknown>[] {
+  const oldLc = oldBase.toLowerCase()
+  const clones: Record<string, unknown>[] = []
+  for (const q of queries) {
+    const name = typeof q.name === 'string' ? q.name : ''
+    const c = classifyQueryName(name)
+    if (!c || c.base.toLowerCase() !== oldLc) continue
+    const clone = JSON.parse(JSON.stringify(q)) as Record<string, unknown>
+    clone.name = `${newBase}_${c.crud}`
+    clones.push(clone)
+  }
+  if (clones.length === 0) return queries as Record<string, unknown>[]
+  return [...queries, ...clones]
+}
+
+/** Check whether any query in the array belongs to the given base (case-insensitive on the prefix). */
+export function tableExists(queries: ReadonlyArray<Record<string, unknown>>, base: string): boolean {
+  const lc = base.toLowerCase()
+  for (const q of queries) {
+    const name = typeof q.name === 'string' ? q.name : ''
+    const c = classifyQueryName(name)
+    if (c && c.base.toLowerCase() === lc) return true
+  }
+  return false
+}
+
 /** Pick a subset of a model schema's properties, flattening the picked fields' `x_group` so they
  *  render as one tab (the table-editor already provides its own outer tabs). Required filter likewise. */
 export function pickSchemaProperties(s: JsonSchema, keys: ReadonlyArray<string>): JsonSchema {

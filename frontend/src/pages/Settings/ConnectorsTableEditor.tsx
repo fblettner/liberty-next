@@ -8,7 +8,7 @@
 // No rename yet (delete + re-add), matching the rest of the Phase-7 builders.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button, Row, SchemaForm, SchemaNavigator, Stack, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -70,10 +70,11 @@ export interface ConnectorsTableEditorProps {
   defs: Record<string, JsonSchema>
   onChangeQueries: (next: Record<string, unknown>[]) => void
   onBack: () => void
+  onDuplicate?: () => void
 }
 
 export default function ConnectorsTableEditor({
-  base, slots, queries, queryDefSchema, defs, onChangeQueries, onBack,
+  base, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>(slots.get ? 'general' : 'get')
@@ -216,9 +217,16 @@ export default function ConnectorsTableEditor({
       <Header>
         <BackBtn type="button" onClick={onBack}><ArrowLeft size={13} /> {t('settings.tables.backToTables')}</BackBtn>
         <Title>{base} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
-        <Button $variant="danger" $size="sm" onClick={removeWholeTable}>
-          <Trash2 size={13} /> {t('settings.tables.deleteTable')}
-        </Button>
+        <Row gap={6}>
+          {onDuplicate && (
+            <Button $variant="ghost" $size="sm" onClick={onDuplicate}>
+              <Copy size={13} /> {t('settings.tables.duplicate')}
+            </Button>
+          )}
+          <Button $variant="danger" $size="sm" onClick={removeWholeTable}>
+            <Trash2 size={13} /> {t('settings.tables.deleteTable')}
+          </Button>
+        </Row>
       </Header>
       <TabsBar>
         {TAB_ORDER.map((k) => {

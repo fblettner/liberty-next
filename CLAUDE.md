@@ -385,10 +385,12 @@ replies), `@monaco-editor/react` (the connector-config editor).
   queries grouped by `<base>_<get|put|post|delete>` suffix — v1's "table/view/business object" concept —
   each table opens a unified `ConnectorsTableEditor` with tabs *General · Columns · Read · Update ·
   Insert · Delete*; General/Columns write to `<base>_get` since `columns`/`label`/`auto_load`/etc. only
-  live on the read query; missing CRUD slots show a "+ Create" button; loose non-CRUD queries are listed
-  as a footnote that points to the Form view) and **Form** (the full connector `SchemaNavigator` —
-  General/Pool/Queries, the escape hatch for the flat queries list and connector-level settings); API
-  connectors only show Form. Saves go through `PUT /admin/config/connectors/parsed` + Reload),
+  live on the read query; missing CRUD slots show a "+ Create" button; a **Duplicate** action (per row
+  + in the editor header) deep-clones every CRUD slot under a new base name so a table can be forked +
+  customized; loose non-CRUD queries are listed as a footnote that points to the Form view) and
+  **Form** (the full connector `SchemaNavigator` — General/Pool/Queries, the escape hatch for the flat
+  queries list and connector-level settings); API connectors only show Form. Saves go through
+  `PUT /admin/config/connectors/parsed` + Reload),
   and `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over
   `GET/PUT /admin/config/connectors` + Reload — the escape hatch); the structured editors don't support
   rename yet — delete + re-add — the Phase-7 builder slices), `Login` + `OidcCallback`.
