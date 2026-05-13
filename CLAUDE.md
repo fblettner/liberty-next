@@ -295,7 +295,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `list[Model]` / `$ref`-to-a-`$defs`-model (resolved) / enum / `X|None` / the `sql` `str|{dialect:str}`
   union (a textarea, or per-dialect textareas); anything else → a "edit in the raw editor" note. Fields are
   tabbed by their `x_group`; with `onNavigate` it renders `list[Model]` / nested-object props as drill-in
-  rows, without it as inline accordions) + `SchemaNavigator` (a master-detail wrapper around `SchemaForm` — shows one level at a time
+  rows, without it as inline accordions — a `list[Model]` of more than ~6 items also gets a **search box**
+  that filters by each row's summary so a connector's dozens of queries are findable) + `SchemaNavigator` (a master-detail wrapper around `SchemaForm` — shows one level at a time
   with a breadcrumb of the path `nomasx1 / users_get / USR_ID`; the path is *segments*, the current
   schema/value derived from the root each render so edits keep it valid). The Phase-7 config-builder
   shell, used by `Settings/PoolsBuilder` (flat → plain `SchemaForm`) & `ConnectorsBuilder` (nested → `SchemaNavigator`)), `Tag`/`Mono`,
@@ -381,7 +382,8 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `PoolsBuilder` = the structured `[pools.*]` editor (a left list + a `SchemaForm` over the `PoolConfig`
   schema → `PUT /admin/config/pools` + Reload), `ConnectorsBuilder` = the `[connectors.*]` editor (a left
   list of sql/api connectors + a `SchemaNavigator` over the matching schema — drill connector → query →
-  column → … via a breadcrumb, no nested accordions — → `PUT /admin/config/connectors/parsed` + Reload),
+  column → … via a breadcrumb, no nested accordions; the connector list (and any inner `list[Model]`) gets
+  a search box past ~6 items — → `PUT /admin/config/connectors/parsed` + Reload),
   and `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over
   `GET/PUT /admin/config/connectors` + Reload — the escape hatch); the structured editors don't support
   rename yet — delete + re-add — the Phase-7 builder slices), `Login` + `OidcCallback`.

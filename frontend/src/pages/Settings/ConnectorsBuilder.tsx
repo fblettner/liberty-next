@@ -6,7 +6,7 @@
 // No rename yet — delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, type JsonSchema } from '../../common'
@@ -16,7 +16,12 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 type Connectors = Record<string, Record<string, unknown>>
 
 const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px;`
+const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px; min-width: 0;`
+const NavSearch = styled.div`
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
+`
 const NavItem = styled.button<{ $active?: boolean }>`
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
@@ -38,6 +43,7 @@ export default function ConnectorsBuilder() {
   const [conns, setConns] = useState<Connectors | null>(null)
   const [original, setOriginal] = useState('')
   const [sel, setSel] = useState<string | null>(null)
+  const [q, setQ] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -86,6 +92,8 @@ export default function ConnectorsBuilder() {
   if (error && !conns) return <Banner $tone="error">{error}</Banner>
   if (!conns || !schemas) return <Centered />
   const names = Object.keys(conns)
+  const needle = q.trim().toLowerCase()
+  const shownNames = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
   const selSchema = sel && conns[sel] ? schemaFor(conns[sel]) : null
 
   return (
@@ -93,11 +101,18 @@ export default function ConnectorsBuilder() {
       <Mono>{path}</Mono>
       <Split>
         <NavCol>
-          {names.map((n) => (
+          {names.length > 6 && (
+            <NavSearch>
+              <Search size={13} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${names.length}…`} />
+            </NavSearch>
+          )}
+          {shownNames.map((n) => (
             <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
               {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
             </NavItem>
           ))}
+          {shownNames.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '2px 4px' }}>no match</div>}
           <Row gap={4} style={{ marginTop: 6 }}>
             <Button $variant="ghost" $size="sm" onClick={() => addConnector('sql')} style={{ flex: 1, justifyContent: 'flex-start' }}><Plus size={13} /> {t('settings.connectors.addSql')}</Button>
           </Row>

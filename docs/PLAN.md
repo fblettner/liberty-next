@@ -441,9 +441,14 @@ is being migrated for real (Phase 5), so there's something to validate against. 
 slices already shipped (these are the same machinery, narrowed to tables): a column's `visible_when`
 (conditional rendering, v1's `cdn_*`), `filter_from` (cascading filter dropdowns, v1's `ly_tbl_filters`),
 the writable-companion batch-edit model, server-side filters. The form/dialog version extends them:
-- **Dialogs/forms** — `config/dialogs.toml` (or `forms.toml`): tabs, fields, layout; v1's `ly_dlg_frm`/
-  `ly_dlg_tab`/`ly_dlg_col`. The *field* schema follows the same "discover from the query, augment with
-  hints" rule as tables (no metadata-table re-traversal).
+- **Dialogs/forms — and a "screen" concept** — `config/screens.toml` (≈ v1's `ly_tables`/`ly_dlg_frm`):
+  a *screen* is the user-facing unit — it points at a read `query` plus its CRUD companions (`update_query`/
+  `insert_query`/`delete_query`) and (for a form) a dialog layout (tabs/fields — v1's `ly_dlg_tab`/`ly_dlg_col`).
+  This is the missing higher-level grouping the config-builder needs: today the migration explodes a v1
+  "table" into 4 flat `[[connectors.X.queries]]` (`f0005_get`/`_put`/`_post`/`_delete`) that the connector
+  builder lists individually — once screens exist, the builder presents one "F0005 screen" that bundles them.
+  The *field* schema still follows the "discover from the query, augment with hints" rule (no metadata-table
+  re-traversal).
 - **Conditions / rules** — extend the `{field, value}` rule shape (`visible_when`, cascading) to
   per-field `visible_when` / `required_when` / `disabled_when` / `default_when` (the v1 `ly_cdn_params`
   cases). Declarative for the 80%; a Python-plugin escape hatch for the rest. (Don't port v1's
@@ -489,11 +494,13 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   add/delete, Save → PUT + reload), `ConnectorsBuilder` (left list of sql/api connectors + a
   `SchemaNavigator` over the matching schema — drill connector → query → column → … — Save → PUT + reload),
   and `RawEditor` (the Monaco `connectors.toml` editor, the escape hatch). No *rename* yet (delete + re-add).
+  Long lists (the connector list, a connector's `queries`, …) get a **search box** (shown past ~6 items).
 Verdict on the schema-driven approach: **it pays off** — the pool & connector forms are essentially all
-generated; the bespoke code is `SchemaForm` + `SchemaNavigator` (~300 lines, grows slowly) + the per-builder
-list/nav/save wiring (~120 each, all reusable). Next: a **dictionary builder**, a **menus tree builder** (a
-DnD tree), a **SQL editor + "test run" preview** for queries, and **rename** support — all on `SchemaNavigator`.
-The general UI polish (modern look & feel — spacing, a search box within long lists, validation surfaced
+generated; the bespoke code is `SchemaForm` + `SchemaNavigator` (~350 lines, grows slowly) + the per-builder
+list/nav/save wiring (~120 each, all reusable). Next: **rename** support, a **dictionary builder**, a **menus
+tree builder** (a DnD tree), a **SQL editor + "test run" preview** for queries, and — once Phase 6's *screen*
+concept lands — presenting a v1 table's `_get`/`_put`/`_post`/`_delete` quartet as one "screen" rather than 4
+flat queries. The general UI polish (modern look & feel — spacing, validation surfaced
 inline, etc.) rides along.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`

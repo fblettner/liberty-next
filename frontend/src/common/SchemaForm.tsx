@@ -9,7 +9,7 @@
 // add a custom widget here when a config model needs a shape it doesn't cover.
 import { useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronDown } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
 import { Input, Textarea, Field } from './Input'
 import { SearchSelect } from './SearchSelect'
 import { colors, fontSize, fonts, radius } from '../theme'
@@ -164,21 +164,38 @@ const NavListRow = styled.button`
   & svg { flex-shrink: 0; color: ${colors.text.muted}; }
   &:hover { border-color: ${colors.blue.border}; color: ${colors.text.primary}; }
 `
+const SearchRow = styled.div`
+  display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; margin-bottom: 8px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
+`
 function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
   itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]
   onChange: (v: Record<string, unknown>[]) => void
   onNavigate: (index: number, summary: string) => void
 }) {
+  const [q, setQ] = useState('')
+  const needle = q.trim().toLowerCase()
+  const rows = value.map((it, i) => ({ i, label: itemSummary(it, itemSchema, defs) }))
+  const shown = needle ? rows.filter((r) => r.label.toLowerCase().includes(needle)) : rows
   return (
     <div>
-      {value.map((it, i) => (
-        <NavListRow key={i} type="button" onClick={() => onNavigate(i, itemSummary(it, itemSchema, defs))}>
-          <span className="lbl">{itemSummary(it, itemSchema, defs)}</span>
+      {value.length > 6 && (
+        <SearchRow>
+          <Search size={13} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${value.length}…`} />
+          {q && <SmallX as="span" role="button" title="clear" onClick={() => setQ('')}><X size={12} /></SmallX>}
+        </SearchRow>
+      )}
+      {shown.map(({ i, label }) => (
+        <NavListRow key={i} type="button" onClick={() => onNavigate(i, label)}>
+          <span className="lbl">{label}</span>
           <SmallX as="span" role="button" title="remove" onClick={(e) => { e.stopPropagation(); onChange(value.filter((_, j) => j !== i)) }}><X size={12} /></SmallX>
           <ChevronRight size={13} />
         </NavListRow>
       ))}
-      <MiniBtn type="button" onClick={() => { onChange([...value, {}]); onNavigate(value.length, '(new)') }}><Plus size={12} /> add</MiniBtn>
+      {shown.length === 0 && needle && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '4px 2px 8px' }}>no match</div>}
+      <MiniBtn type="button" onClick={() => { setQ(''); onChange([...value, {}]); onNavigate(value.length, '(new)') }}><Plus size={12} /> add</MiniBtn>
     </div>
   )
 }
