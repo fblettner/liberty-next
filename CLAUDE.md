@@ -281,7 +281,17 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   via the same `GET /admin/config/schema` response under `framework_enums` (the operator can
   override a bundled entry by adding a `[framework_enums.<id>]` section to `dictionary.toml` —
   full replace, merged on the fly at the schema endpoint, surfaced in the DictionaryBuilder's
-  *Framework* sub-tab). A field referencing one
+  *Framework* sub-tab). Two extensions on top: `x_enum_ref_when={"field": "rules", "map":
+  {"ENUM": "ENUM_IDS", "LOOKUP": "LOOKUP_IDS", "BOOLEAN": "BOOLEAN_TRUE_VALUES"}}` picks the ref
+  from a *sibling* field's current value (DictionaryEntry's `rules_values` swaps source when
+  `rules` changes); `x_key_enum_ref` on a `dict[str, T]` field renders the row's *key* as a
+  themed SearchSelect (translations `l` use `SUPPORTED_LANGUAGES` so the user picks "fr /
+  Français" rather than typing a code, and already-used languages drop from per-row options so
+  the same locale can't appear twice). And each builder *augments* the bundled set with its own
+  dynamic enums before threading the context — DictionaryBuilder materialises `ENUM_IDS` /
+  `LOOKUP_IDS` from the current scope's enums + lookups; ConnectorsBuilder fetches
+  `dictionary.toml` and materialises `DD_ENTRIES` from the selected connector's entries + the
+  shared bucket, which feeds `ColumnHint.dd` and `FilterDep.source` / `.column`. A field referencing one
   (`json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"}` on `DictionaryEntry.format`,
   `DictionaryEntry.rules`, `ColumnHint.format`, `ColumnHint.align`, `PoolConfig.dialect`,
   `EndpointDef.method`, `ApiConnectorConfig.auth_type`, …) renders as a themed two-column
@@ -364,7 +374,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `React.lazy`-split; `Layout` shows `<TabStrip/>` (the tab bar, or the "Liberty" title when no tabs) and
   renders `<Outlet/>` + `<TabHost/>` inside a `<Suspense fallback={<Centered/>}>`.
 - The pages: `Layout` (the shell — `Sidebar` + a `<TabStrip/>` bar + a fixed top-right
-  utility pill: app-picker (`WorkspaceSelect` — lists the *apps* (menu-having connectors), shown when ≥2) · EN/FR · dark/light ·
+  utility pill: app-picker (`WorkspaceSelect` — a themed `SearchSelect` over the *apps* (menu-having connectors), shown when ≥2) · EN/FR · dark/light ·
   username→profile · sign-out), `Sidebar` (collapsible nav
   rail — when an app is active it leads with that app's menu tree (`SidebarMenu` — collapsible
   folders, leaf `NavLink`s to `/sql|/http`, from `GET /api/menus`) above a divider, then the

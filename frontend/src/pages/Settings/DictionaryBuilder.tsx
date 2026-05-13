@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -157,6 +157,43 @@ export default function DictionaryBuilder() {
   const defs = (dictSchema?.$defs ?? {}) as Record<string, JsonSchema>
   const recordSchema: JsonSchema | null = defs[KIND_TO_DEF[kind]] ?? null
 
+  // Augment the bundled framework enums with the *dynamic* sources this builder owns — so a
+  // dictionary entry's `rules_values` field (whose `x_enum_ref_when` swaps between ENUM_IDS and
+  // LOOKUP_IDS based on `rules`) renders as a proper dropdown of the ids that *actually exist* in
+  // the current dict. Both shared + per-connector overlay ids are included when a connector scope
+  // is active (the per-connector one wins on collision, the same way the runtime resolves them).
+  const augmentedEnums: FrameworkEnums = useMemo(() => {
+    const base: FrameworkEnums = { ...(schemas.framework_enums ?? {}) }
+    const mkValues = (...maps: (Record<string, Record<string, unknown>> | undefined)[]): { value: string; label: string }[] => {
+      const out = new Map<string, string>()
+      for (const m of maps) {
+        if (!m) continue
+        for (const [id, rec] of Object.entries(m)) {
+          const lbl = typeof (rec as Record<string, unknown>)?.label === 'string'
+            ? ((rec as Record<string, unknown>).label as string)
+            : typeof (rec as Record<string, unknown>)?.description === 'string'
+              ? ((rec as Record<string, unknown>).description as string)
+              : id
+          out.set(id, lbl)
+        }
+      }
+      return [...out.entries()].map(([value, label]) => ({ value, label }))
+    }
+    const overlay = scope ? (dict.connectors ?? {})[scope] : undefined
+    const enumIds: FrameworkEnum = {
+      label: 'Enums (current scope)',
+      values: mkValues(dict.enums, overlay?.enums),
+    }
+    const lookupIds: FrameworkEnum = {
+      label: 'Lookups (current scope)',
+      values: mkValues(dict.lookups, overlay?.lookups),
+    }
+    base.ENUM_IDS = enumIds
+    base.LOOKUP_IDS = lookupIds
+    return base
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-derive on any dict / scope / schemas change
+  }, [schemas.framework_enums, dict.enums, dict.lookups, dict.connectors, scope])
+
   // scopes = the shared bucket + any connector that already has a section + the just-added scope
   // (so it has a chip to click before its first record materialises it in dict.connectors).
   const scopeKeys = new Set([SCOPE_SHARED, ...Object.keys(dict.connectors ?? {})])
@@ -217,7 +254,7 @@ export default function DictionaryBuilder() {
   const scopeLabel = (s: string) => (s ? s : t('settings.dictionary.scope.shared'))
 
   return (
-    <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>
+    <FrameworkEnumsContext.Provider value={augmentedEnums}>
     <Stack gap={12}>
       <Header>
         <Mono>{path}</Mono>

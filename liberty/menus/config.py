@@ -60,7 +60,7 @@ class MenuItem(BaseModel):
     l: dict[str, str] = Field(
         default_factory=dict,
         description="Per-language overrides: {language_code: translated_label} (v1's ly_menus_l).",
-        json_schema_extra={"x_group": "Translations"},
+        json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
     icon: str | None = Field(default=None, description="Lucide icon name (a UI hint — e.g. 'shield', 'users').")
     type: ItemType | None = Field(

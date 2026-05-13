@@ -128,8 +128,14 @@ class FilterDep(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source: str = Field(description="Another filter-flagged column on the same query — its current value is the input.")
-    column: str = Field(description="A result column of *this* column's lookup query to match the source's value against.")
+    source: str = Field(
+        description="Another filter-flagged column on the same query — its current value is the input.",
+        json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
+    )
+    column: str = Field(
+        description="A result column of *this* column's lookup query to match the source's value against.",
+        json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
+    )
 
 
 class VisibleWhen(BaseModel):
@@ -170,7 +176,11 @@ class ColumnHint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(description="The result column this hint applies to (matched case-insensitively; a hint for a column the query doesn't return is ignored).")
-    dd: str | None = Field(default=None, description="Dictionary-entry key for the label/format/rule (config/dictionary.toml). Blank → looked up under `name`; set to \"\" to opt this column out of the dictionary.")
+    dd: str | None = Field(
+        default=None,
+        description="Dictionary-entry key for the label/format/rule (config/dictionary.toml). Blank → looked up under `name`; set to \"\" to opt this column out of the dictionary.",
+        json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
+    )
     label: str | None = Field(default=None, description="Display title — overrides the dictionary's label.")
     hidden: bool = Field(default=False, description="Hide this column in the grid by default (the user can still un-hide it via the Columns menu).")
     filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Surface this column as a server-filter field in the TableView filter panel (v1's col_filter).")

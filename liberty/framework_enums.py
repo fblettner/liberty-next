@@ -117,4 +117,30 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "endpoint", "label": "Endpoint (API call)"},
         ],
     },
+    "SUPPORTED_LANGUAGES": {
+        "label": "Languages",
+        "values": [
+            {"value": "en", "label": "English"},
+            {"value": "fr", "label": "Français"},
+            {"value": "de", "label": "Deutsch"},
+            {"value": "es", "label": "Español"},
+            {"value": "it", "label": "Italiano"},
+            {"value": "pt", "label": "Português"},
+            {"value": "nl", "label": "Nederlands"},
+            {"value": "pl", "label": "Polski"},
+            {"value": "ja", "label": "日本語"},
+            {"value": "zh", "label": "中文"},
+            {"value": "ar", "label": "العربية"},
+        ],
+    },
+    "BOOLEAN_TRUE_VALUES": {
+        "label": "Boolean True Values",
+        "values": [
+            {"value": "Y", "label": "Y / N (default)"},
+            {"value": "1", "label": "1 / 0"},
+            {"value": "01", "label": "01 / 02"},
+            {"value": "true", "label": "true / false"},
+            {"value": "T", "label": "T / F"},
+        ],
+    },
 }

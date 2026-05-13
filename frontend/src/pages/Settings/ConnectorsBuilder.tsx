@@ -12,8 +12,8 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, type JsonSchema } from '../../common'
-import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
 import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, tableExists } from './connectorTables'
@@ -81,6 +81,9 @@ const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
+  // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
+  // the DD_ENTRIES dropdown that drives `ColumnHint.dd` and `FilterDep.source/column`.
+  const [dictionary, setDictionary] = useState<DictionaryDoc['dictionary'] | null>(null)
   const [path, setPath] = useState('')
   const [conns, setConns] = useState<Connectors | null>(null)
   const [original, setOriginal] = useState('')
@@ -95,9 +98,14 @@ export default function ConnectorsBuilder() {
 
   const load = () => {
     setError(null); setStatus(null)
-    Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<ConnectorsDoc>('/admin/config/connectors/parsed')])
-      .then(([s, d]) => {
+    Promise.all([
+      api.get<ConfigSchemas>('/admin/config/schema'),
+      api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
+      api.get<DictionaryDoc>('/admin/config/dictionary/parsed'),
+    ])
+      .then(([s, d, dd]) => {
         setSchemas(s); setPath(d.path); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
+        setDictionary(dd.dictionary)
         setSel((cur) => (cur && d.connectors[cur] ? cur : Object.keys(d.connectors)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -109,6 +117,33 @@ export default function ConnectorsBuilder() {
 
   const dirty = useMemo(() => conns != null && JSON.stringify(conns) !== original, [conns, original])
   const schemaFor = (c: Record<string, unknown>): JsonSchema | null => (!schemas ? null : c.type === 'api' ? schemas.api : schemas.sql)
+
+  // Per-connector dynamic enum: `DD_ENTRIES` for the current connector — shared entries plus the
+  // connector's own overlay (per-connector wins on collision, same as the runtime resolves them).
+  // Drives `ColumnHint.dd` (the entry the column references) and `FilterDep.source/column` (the
+  // source / target column for cascading filters). Recomputed when `sel` or `dictionary` changes.
+  const augmentedEnums: FrameworkEnums | null = useMemo(() => {
+    if (!schemas) return null
+    const base: FrameworkEnums = { ...(schemas.framework_enums ?? {}) }
+    if (!dictionary) { base.DD_ENTRIES = { label: 'Dictionary entries', values: [] }; return base }
+    const out = new Map<string, string>()
+    const ingest = (m: Record<string, Record<string, unknown>> | undefined) => {
+      if (!m) return
+      for (const [id, rec] of Object.entries(m)) {
+        const lbl = typeof (rec as Record<string, unknown>)?.label === 'string'
+          ? ((rec as Record<string, unknown>).label as string)
+          : id
+        out.set(id, lbl)  // later wins → per-connector overlay overrides shared
+      }
+    }
+    ingest(dictionary.entries)
+    if (sel) ingest((dictionary.connectors ?? {})[sel]?.entries)
+    const values: FrameworkEnum['values'] = [...out.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([value, label]) => ({ value, label }))
+    base.DD_ENTRIES = { label: 'Dictionary entries (this connector)', values }
+    return base
+  }, [schemas, dictionary, sel])
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
   const updateQueries = (name: string, queries: Record<string, unknown>[]) => {
@@ -197,7 +232,7 @@ export default function ConnectorsBuilder() {
   const allDefs = (selSchema?.$defs ?? {}) as Record<string, JsonSchema>
 
   return (
-    <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>
+    <FrameworkEnumsContext.Provider value={augmentedEnums}>
     <Stack gap={12}>
       <Mono>{path}</Mono>
       <Split>

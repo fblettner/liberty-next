@@ -39,6 +39,16 @@ export interface JsonSchema {
   $ref?: string
   $defs?: Record<string, JsonSchema>
   x_group?: string   // from a Pydantic Field's json_schema_extra — groups the form into tabs
+  /** This field's options come from `framework_enums[<ref>]` (renders as a SearchSelect). */
+  x_enum_ref?: string
+  /** Like `x_enum_ref`, but the ref is picked at render-time from a sibling field's value:
+   *  `{field: "rules", map: {ENUM: "ENUM_IDS", LOOKUP: "LOOKUP_IDS", BOOLEAN: "BOOLEAN_TRUE_VALUES"}}`.
+   *  The form watches the sibling and swaps the dropdown when it changes. */
+  x_enum_ref_when?: { field: string; map: Record<string, string> }
+  /** For a `dict[str, T]` field, the KEY is drawn from this framework-enum (the value editor stays
+   *  whatever the additionalProperties type produces). e.g. `l: dict[str, str]` for translations
+   *  uses `SUPPORTED_LANGUAGES` so the user picks "fr" / "Français" instead of typing a code. */
+  x_key_enum_ref?: string
 }
 
 /** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema). */
@@ -51,10 +61,24 @@ export type FrameworkEnums = Record<string, FrameworkEnum>
  *  consumed deeply by every SchemaForm in the tree (nested ObjectListEditor / drill-in pages). */
 export const FrameworkEnumsContext = createContext<FrameworkEnums | null>(null)
 
-/** Pick the framework-enum referenced by a field's `x_enum_ref`, or `null` when there isn't one. */
-function enumFor(sub: JsonSchema, enums: FrameworkEnums | null): FrameworkEnum | null {
-  const ref = (sub as { x_enum_ref?: unknown }).x_enum_ref
-  if (typeof ref !== 'string' || !enums) return null
+/** Resolve a field's effective enum ref: prefer `x_enum_ref_when` (which switches by a sibling
+ *  field's current value) over plain `x_enum_ref`. Returns `null` when no ref applies (the
+ *  conditional rule fell through, or neither annotation is set). */
+function effectiveEnumRef(sub: JsonSchema, siblings: Record<string, unknown>): string | null {
+  if (sub.x_enum_ref_when) {
+    const driver = siblings[sub.x_enum_ref_when.field]
+    if (typeof driver === 'string') {
+      const ref = sub.x_enum_ref_when.map[driver]
+      if (ref) return ref
+    }
+    return null  // `x_enum_ref_when` declares the conditional behaviour — falling through means no enum
+  }
+  return sub.x_enum_ref ?? null
+}
+
+/** Pick the framework enum behind a ref, or `null` when the registry doesn't know it. */
+function enumFor(ref: string | null, enums: FrameworkEnums | null): FrameworkEnum | null {
+  if (!ref || !enums) return null
   return enums[ref] ?? null
 }
 
@@ -91,10 +115,10 @@ function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
     description: outer.description ?? branch.description,
     title: outer.title ?? branch.title,
     x_group: outer.x_group ?? branch.x_group,
+    x_enum_ref: outer.x_enum_ref ?? branch.x_enum_ref,
+    x_enum_ref_when: outer.x_enum_ref_when ?? branch.x_enum_ref_when,
+    x_key_enum_ref: outer.x_key_enum_ref ?? branch.x_key_enum_ref,
     anyOf: undefined,
-    ...(((outer as { x_enum_ref?: unknown }).x_enum_ref !== undefined)
-      ? { x_enum_ref: (outer as { x_enum_ref?: unknown }).x_enum_ref }
-      : {}),
   } as JsonSchema
 }
 function effective(s: JsonSchema, defs: Defs): JsonSchema {
@@ -138,15 +162,38 @@ const Complex = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted
 const DialectLabel = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; margin: 6px 0 2px;`
 
 // ── leaf editors ────────────────────────────────────────────────────────────
-function StringMapEditor({ value, onChange }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+// `keyEnum` (when given) renders the row's KEY as a SearchSelect over the framework enum's values
+// — for translation maps (`l: dict[str, str]` with x_key_enum_ref="SUPPORTED_LANGUAGES") the user
+// picks "fr / Français" from a dropdown instead of typing `fr` blindly. Picks that already exist in
+// the map are filtered out of the per-row option list so the user can't duplicate a language. The
+// VALUE editor stays a free-text Input either way.
+function StringMapEditor({ value, onChange, keyEnum }: {
+  value: Record<string, string>
+  onChange: (v: Record<string, string>) => void
+  keyEnum?: FrameworkEnum | null
+}) {
   const entries = Object.entries(value)
-  const replace = (i: number, k: string, v: string) => onChange(Object.fromEntries(entries.map(([ek, ev], idx) => (idx === i ? [k, v] : [ek, ev]))))
+  const replaceAt = (i: number, k: string, v: string) =>
+    onChange(Object.fromEntries(entries.map(([ek, ev], idx) => (idx === i ? [k, v] : [ek, ev]))))
+  const usedKeys = new Set(entries.map(([k]) => k))
+  const optionsFor = (currentKey: string): SearchSelectOption[] => {
+    if (!keyEnum) return []
+    return keyEnum.values
+      .filter((v) => v.value === currentKey || !usedKeys.has(v.value))
+      .map((v) => ({ value: v.value, label: v.label, mono: v.value }))
+  }
   return (
     <div>
       {entries.map(([k, v], i) => (
         <Row key={i}>
-          <Input value={k} onChange={(e) => replace(i, e.target.value, v)} placeholder="name" style={{ flex: '0 0 35%', minWidth: 0 }} />
-          <Input value={v} onChange={(e) => replace(i, k, e.target.value)} placeholder="value" style={{ flex: 1, minWidth: 0 }} />
+          {keyEnum ? (
+            <div style={{ flex: '0 0 35%', minWidth: 0, display: 'flex' }}>
+              <SearchSelect value={k} onChange={(nv) => replaceAt(i, nv, v)} options={optionsFor(k)} placeholder="language" />
+            </div>
+          ) : (
+            <Input value={k} onChange={(e) => replaceAt(i, e.target.value, v)} placeholder="name" style={{ flex: '0 0 35%', minWidth: 0 }} />
+          )}
+          <Input value={v} onChange={(e) => replaceAt(i, k, e.target.value)} placeholder="value" style={{ flex: 1, minWidth: 0 }} />
           <SmallX type="button" title="remove" onClick={() => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))}><X size={12} /></SmallX>
         </Row>
       ))}
@@ -351,10 +398,13 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
         let control: ReactNode
 
         // A field that points at a framework enum (json_schema_extra={"x_enum_ref": "…"}) — render
-        // with rich labels from the registry. If the field is *also* a Literal we constrain the
-        // option list to that Literal's enum (the strict shape wins); otherwise it's a combobox
-        // (allowCustom — typing a value the registry doesn't know commits).
-        const fe = enumFor(sub, enums)
+        // with rich labels from the registry. `x_enum_ref_when` picks the ref from a sibling field's
+        // current value (e.g. dictionary `rules_values` becomes an ENUM_IDS / LOOKUP_IDS dropdown
+        // depending on `rules`). If the field is *also* a Literal we constrain the option list to
+        // that Literal's enum (the strict shape wins); otherwise it's a combobox (allowCustom —
+        // typing a value the registry doesn't know commits).
+        const ref = effectiveEnumRef(sub, value)
+        const fe = enumFor(ref, enums)
         if (key === 'sql') {
           control = <SqlField value={cur} onChange={(v) => set(key, v)} />
         } else if (fe) {
@@ -389,7 +439,12 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           }
         } else if (isStringMap(sub)) {
           const map = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
-          control = <StringMapEditor value={Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v == null ? '' : String(v)]))} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} />
+          const keyEnum = enumFor(sub.x_key_enum_ref ?? null, enums)
+          control = <StringMapEditor
+            value={Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v == null ? '' : String(v)]))}
+            onChange={(v) => set(key, Object.keys(v).length ? v : undefined)}
+            keyEnum={keyEnum}
+          />
         } else if (isObjectModel(sub)) {
           const subValue = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
           control = onNavigate ? (

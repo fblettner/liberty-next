@@ -66,8 +66,18 @@ class DictionaryEntry(BaseModel):
     )
     rules_values: str | None = Field(
         default=None,
-        description="The rule's argument — true-value for BOOLEAN (default 'Y'), enum id for ENUM, lookup id for LOOKUP.",
-        json_schema_extra={"x_group": "Rule"},
+        description="The rule's argument — true-value for BOOLEAN (default 'Y'), enum id for ENUM, lookup id for LOOKUP. The builder swaps the dropdown to the right source based on `rules`.",
+        json_schema_extra={
+            "x_group": "Rule",
+            "x_enum_ref_when": {
+                "field": "rules",
+                "map": {
+                    "BOOLEAN": "BOOLEAN_TRUE_VALUES",
+                    "ENUM": "ENUM_IDS",
+                    "LOOKUP": "LOOKUP_IDS",
+                },
+            },
+        },
     )
     default: str | None = Field(
         default=None,
@@ -77,7 +87,7 @@ class DictionaryEntry(BaseModel):
     l: dict[str, str] = Field(
         default_factory=dict,
         description="Per-language overrides for the label: {language_code: translated_label} (v1's ly_dictionary_l).",
-        json_schema_extra={"x_group": "Translations"},
+        json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
 
     def label_for(self, language: str | None) -> str | None:
@@ -98,7 +108,7 @@ class EnumValue(BaseModel):
     l: dict[str, str] = Field(
         default_factory=dict,
         description="Per-language label overrides: {language_code: translated_label}.",
-        json_schema_extra={"x_group": "Translations"},
+        json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
 
     def label_for(self, language: str | None) -> str:
