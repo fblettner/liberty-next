@@ -266,7 +266,12 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   `Field(json_schema_extra={"x_group": "…"})` → which tab the field goes in (e.g. a query's
   `params`/`columns` are their own tabs, the optional bits are an "Advanced" tab; a dictionary
   entry's `rules`/`rules_values`/`default` form a "Rule" tab, the `l` map is "Translations";
-  ungrouped → "General").
+  ungrouped → "General"). Field types pick the widget: a `Literal[…]`-typed field
+  (`ColumnHint.align`, `EndpointDef.method`, `ApiConnectorConfig.auth_type`) renders as a strict
+  `SearchSelect`; a free-text field with `Field(examples=[…])` (`DictionaryEntry.format`/`.rules`,
+  `ColumnHint.format`, `PoolConfig.dialect`) renders as a **combobox** (`<input list>` +
+  `<datalist>` — suggested values with auto-complete, free-text still accepted so a value migrated
+  from v1 isn't rejected).
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
@@ -402,8 +407,10 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `DictionaryBuilder` = the structured `dictionary.toml` editor — sub-tabs for *Entries* / *Enums* /
   *Lookups*, a scope chip strip (*Shared* + one chip per connector overlay; "+ Add connector scope"
   for new), per-record `SchemaNavigator` over the matching schema (`DictionaryEntry`/`EnumDef`/
-  `LookupDef`; enums drill into their `values: [{value, label, l}]`), search past ~6 records, top-level
-  `default_language` input — → `PUT /admin/config/dictionary/parsed` + Reload), and `RawEditor` = the
+  `LookupDef`; enums drill into their `values: [{value, label, l}]`), search past ~6 records, each
+  list row shows the record's `label` (or `description` for lookups) under the key so a numeric
+  `[lookups.1]` is findable, top-level `default_language` input — → `PUT /admin/config/dictionary/parsed`
+  + Reload), and `RawEditor` = the
   Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over `GET/PUT /admin/config/connectors`
   + Reload — the escape hatch); the structured editors don't support rename yet — delete + re-add — the
   Phase-7 builder slices), `Login` + `OidcCallback`.

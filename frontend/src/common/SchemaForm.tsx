@@ -7,7 +7,7 @@
 // or per-dialect textareas if the value is a map). Anything it can't make sense of → a "edit in the raw
 // editor" note. The Phase-7 config-builder shell: point it at a section's schema (with its `$defs`) +
 // add a custom widget here when a config model needs a shape it doesn't cover.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
 import { Input, Textarea, Field } from './Input'
@@ -20,6 +20,7 @@ export interface JsonSchema {
   description?: string
   default?: unknown
   enum?: unknown[]
+  examples?: unknown[]   // a Pydantic Field's `examples=[…]` — for free-text fields, surfaced as a combobox datalist
   properties?: Record<string, JsonSchema>
   required?: string[]
   anyOf?: JsonSchema[]
@@ -28,6 +29,27 @@ export interface JsonSchema {
   $ref?: string
   $defs?: Record<string, JsonSchema>
   x_group?: string   // from a Pydantic Field's json_schema_extra — groups the form into tabs
+}
+
+// A free-text Input with a `<datalist>` of suggestions (a Pydantic Field's `examples=[…]`) — used
+// for the canonical-but-not-strict fields like `format` / `rules` / `dialect`: the dropdown shows
+// the known values without rejecting whatever the migration emitted from v1.
+function ComboInput({ value, onChange, suggestions, placeholder }: {
+  value: string
+  onChange: (v: string) => void
+  suggestions: string[]
+  placeholder?: string
+}) {
+  const id = useId()
+  return (
+    <>
+      <Input type="text" list={id} value={value} placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)} />
+      <datalist id={id}>
+        {suggestions.map((s) => <option key={s} value={s} />)}
+      </datalist>
+    </>
+  )
 }
 
 type Defs = Record<string, JsonSchema>
@@ -337,8 +359,15 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           control = <Input type="number" value={cur == null ? '' : String(cur)} placeholder={sub.default != null ? `default: ${sub.default}` : isReq ? 'required' : ''}
             onChange={(e) => { const txt = e.target.value; set(key, txt === '' ? undefined : sub.type === 'integer' ? Math.trunc(Number(txt)) : Number(txt)) }} />
         } else if (sub.type === 'string' || sub.type === undefined) {
-          control = <Input type="text" value={cur == null ? '' : String(cur)} placeholder={sub.default ? `default: ${sub.default}` : isReq ? 'required' : ''}
-            onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
+          const placeholder = sub.default ? `default: ${sub.default}` : isReq ? 'required' : ''
+          const examples = Array.isArray(sub.examples) ? sub.examples.map((e) => String(e)) : null
+          control = examples && examples.length > 0 ? (
+            <ComboInput value={cur == null ? '' : String(cur)} suggestions={examples} placeholder={placeholder}
+              onChange={(v) => set(key, v === '' ? undefined : v)} />
+          ) : (
+            <Input type="text" value={cur == null ? '' : String(cur)} placeholder={placeholder}
+              onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
+          )
         } else {
           control = <Complex>complex value — edit it in the raw editor</Complex>
         }

@@ -72,10 +72,14 @@ class PoolConfig(BaseModel):
         "text, or a ${ENV} ref. Leave empty if it's already in the URL (an ENC: password in the URL is "
         "still decrypted)."
     ))
-    dialect: str = Field(default="", description=(
-        "SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty → derived from "
-        "the URL. Used to pick a query's per-dialect SQL variant."
-    ))
+    dialect: str = Field(
+        default="",
+        description=(
+            "SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty → derived from "
+            "the URL. Used to pick a query's per-dialect SQL variant."
+        ),
+        examples=["", "postgresql", "oracle", "sqlite", "mysql", "mssql"],
+    )
     schemas: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Schemas"}, description=(
         "Schema-name map for `#SCHEMA.<NAME>#` placeholders in this pool's queries → the real schema name "
         "(v1's ly_db_schema). Values must be plain identifiers (SY920, db.schema). Lets the same query "
@@ -169,8 +173,15 @@ class ColumnHint(BaseModel):
     filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading-filter dependencies (v1's ly_tbl_filters) — narrow this column's LOOKUP options when a source filter is set.")
     visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Conditional visibility (v1's cdn_*): a rule (or list of rules, all AND-ed) — the column drops from the grid unless a server-filter has the allowed value.")
     width: int | None = Field(default=None, description="Fixed column width in pixels (blank → auto-size to content).")
-    align: str | None = Field(default=None, description='"left" / "right" / "center" — blank auto-aligns (numbers right, booleans centred).')
-    format: str | None = Field(default=None, description='UI-interpreted format hint — "date" / "datetime" / "number" / "boolean" / "currency" / … — overrides the dictionary\'s.')
+    align: Literal["left", "right", "center"] | None = Field(
+        default=None,
+        description='"left" / "right" / "center" — blank auto-aligns (numbers right, booleans centred).',
+    )
+    format: str | None = Field(
+        default=None,
+        description='UI-interpreted format hint — "date" / "datetime" / "number" / "boolean" / "currency" / … — overrides the dictionary\'s. Free-text — the frontend tolerates v1\'s various aliases.',
+        examples=["text", "textarea", "date", "datetime", "timestamp", "number", "integer", "decimal", "boolean", "currency", "password", "email", "url"],
+    )
 
     @property
     def visible_when_rules(self) -> list[VisibleWhen]:
@@ -266,7 +277,10 @@ class EndpointDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(description="Unique name within the connector; the permission string is api:<connector>:<name>.")
-    method: str = Field(default="GET", description="HTTP method — GET / POST / PUT / PATCH / DELETE / …")
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] = Field(
+        default="GET",
+        description="HTTP method.",
+    )
     path: str = Field(default="", description="Path appended to the connector's base_url. Supports {{placeholder}} substitution (params + built-ins {{username}}/{{password}}/{{token}}). An absolute http(s):// path overrides base_url.")
     headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Per-endpoint request headers (merged over the connector's default_headers); values support {{placeholders}}.")
     query_params: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Query-string parameters; values support {{placeholders}}.")

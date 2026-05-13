@@ -50,12 +50,14 @@ const NavSearch = styled.div`
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
 `
 const NavItem = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
+  display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 6px 10px;
+  border-radius: ${radius.md}; text-align: left;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
-  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  cursor: pointer;
+  & .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.sm}; font-family: ${fonts.mono}; }
+  & .sub  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.sans}; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0;`
@@ -233,11 +235,20 @@ export default function DictionaryBuilder() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${keys.length}…`} />
             </NavSearch>
           )}
-          {shown.map((k) => (
-            <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
-              <span className="name">{k}</span>
-            </NavItem>
-          ))}
+          {shown.map((k) => {
+            // Help the user find the right record at a glance — show its label/description below
+            // the key (entries/enums → `label`; lookups → `description`). Falls back to nothing when
+            // the record has no human-readable side-name yet (in that case only the key shows).
+            const rec = section[k] as Record<string, unknown> | undefined
+            const sub = kind === 'lookups' ? rec?.description : rec?.label
+            const subStr = typeof sub === 'string' && sub.trim() ? sub : null
+            return (
+              <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
+                <span className="name">{k}</span>
+                {subStr && <span className="sub">{subStr}</span>}
+              </NavItem>
+            )
+          })}
           {shown.length === 0 && (
             <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '4px 4px' }}>
               {keys.length ? t('common.noMatches') : t(`settings.dictionary.${kind}.empty`)}

@@ -56,11 +56,13 @@ class DictionaryEntry(BaseModel):
     label: str | None = Field(default=None, description="Default-language display title (v1's dd_label).")
     format: str | None = Field(
         default=None,
-        description="Display format hint — e.g. 'date' / 'number' / 'boolean' / 'textarea' (v1's dd_type). The frontend uses it to render the cell.",
+        description="Display format hint — e.g. 'date' / 'number' / 'boolean' / 'textarea' (v1's dd_type). The frontend uses it to render the cell. Free-text — v1 used various aliases (numeric, decimal, …) which the frontend tolerates.",
+        examples=["text", "textarea", "date", "datetime", "timestamp", "number", "integer", "decimal", "boolean", "password", "email", "url", "color"],
     )
     rules: str | None = Field(
         default=None,
         description="Display rule (v1's dd_rules) — BOOLEAN / ENUM / LOOKUP show a ✓/✗ / label / lookup-resolved label in the grid. SEQUENCE / SYSDATE / LOGIN / PASSWORD / CURRENT_DATE are form-layer (Phase 6).",
+        examples=["BOOLEAN", "ENUM", "LOOKUP", "SEQUENCE", "SYSDATE", "LOGIN", "PASSWORD", "CURRENT_DATE"],
         json_schema_extra={"x_group": "Rule"},
     )
     rules_values: str | None = Field(
