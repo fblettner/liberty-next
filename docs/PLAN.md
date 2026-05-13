@@ -444,9 +444,11 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
 - **Dialogs/forms — and a "screen" concept** — `config/screens.toml` (≈ v1's `ly_tables`/`ly_dlg_frm`):
   a *screen* is the user-facing unit — it points at a read `query` plus its CRUD companions (`update_query`/
   `insert_query`/`delete_query`) and (for a form) a dialog layout (tabs/fields — v1's `ly_dlg_tab`/`ly_dlg_col`).
-  This is the missing higher-level grouping the config-builder needs: today the migration explodes a v1
-  "table" into 4 flat `[[connectors.X.queries]]` (`f0005_get`/`_put`/`_post`/`_delete`) that the connector
-  builder lists individually — once screens exist, the builder presents one "F0005 screen" that bundles them.
+  The table-side grouping of this concept already ships in Phase 7's `ConnectorsBuilder` *Tables view* —
+  it's a pure-UI rollup over `<base>_<get|put|post|delete>` naming, so a v1 "table" already appears as one
+  row (`F0005`) with four CRUD slots, not four flat queries. Phase 6 promotes this from an inferred view
+  to a first-class `screens.toml` object (so it can carry dialog layout + per-field rules — the bits that
+  don't live on a query), and the builder reads from there.
   The *field* schema still follows the "discover from the query, augment with hints" rule (no metadata-table
   re-traversal).
 - **Conditions / rules** — extend the `{field, value}` rule shape (`visible_when`, cascading) to
@@ -495,13 +497,24 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   `SchemaNavigator` over the matching schema — drill connector → query → column → … — Save → PUT + reload),
   and `RawEditor` (the Monaco `connectors.toml` editor, the escape hatch). No *rename* yet (delete + re-add).
   Long lists (the connector list, a connector's `queries`, …) get a **search box** (shown past ~6 items).
+- **Tables view in `ConnectorsBuilder`** (this lands the v1 "table/view/business object" grouping ahead of
+  Phase 6) — a SQL connector's right pane has a `Tables` / `Form` toggle. **Tables** (default) groups the
+  flat `queries` list by `<base>_<get|put|post|delete>` suffix, listing one row per base (e.g. `F0005`)
+  with `GET / PUT / POST / DEL` slot badges (green when filled, muted when absent); clicking a row opens
+  `ConnectorsTableEditor` — one unified form with tabs **General · Columns · Read · Update · Insert ·
+  Delete**. General (`label`/`description`/`auto_load`/`max_rows`/`key_columns`) and Columns (the display
+  hints + filter/cascade/visibility rules) write to `<base>_get` since those only live on the read query;
+  Read/Update/Insert/Delete edit the body (`sql`/`params`/`writable`) of their respective query, with a
+  `+ Create` CTA when a CRUD slot is missing. Loose non-CRUD queries are listed as a footnote pointing to
+  the Form view. **Form** keeps the full `SchemaNavigator` (General/Pool/Queries) as the escape hatch for
+  connector-level settings and non-CRUD queries. The grouping is rule-based — no on-disk change to the
+  TOML — so it stays a pure UI feature, easy to evolve.
 Verdict on the schema-driven approach: **it pays off** — the pool & connector forms are essentially all
 generated; the bespoke code is `SchemaForm` + `SchemaNavigator` (~350 lines, grows slowly) + the per-builder
-list/nav/save wiring (~120 each, all reusable). Next: **rename** support, a **dictionary builder**, a **menus
-tree builder** (a DnD tree), a **SQL editor + "test run" preview** for queries, and — once Phase 6's *screen*
-concept lands — presenting a v1 table's `_get`/`_put`/`_post`/`_delete` quartet as one "screen" rather than 4
-flat queries. The general UI polish (modern look & feel — spacing, validation surfaced
-inline, etc.) rides along.
+list/nav/save wiring (~120 each, all reusable). Next: **rename** support (which, for a table, would rename
+all 4 CRUD slots in one go), a **dictionary builder**, a **menus tree builder** (a DnD tree), a **SQL
+editor + "test run" preview** for queries. The general UI polish (modern look & feel — spacing, validation
+surfaced inline, etc.) rides along.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
 surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one

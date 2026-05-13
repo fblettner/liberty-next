@@ -1,17 +1,22 @@
 // Structured editor for `[connectors.*]` (sql + api) — Phase-7 config builder. Left = the connector
-// list; right = a SchemaNavigator over the chosen connector's schema — drill connector → query →
-// column → … via a breadcrumb (no nested accordions). Save validates each against the discriminated
+// list; right pane has two views for a SQL connector — **Tables** (the default: queries grouped by
+// `<base>_<get|put|post|delete>` suffix, each table opens a unified editor where General/Columns/
+// Read/Update/Insert/Delete share one form) and **Form** (the full connector config via
+// SchemaNavigator — General/Pool/Queries, the escape hatch for non-CRUD queries and connector-level
+// settings). API connectors only show Form. Save validates each connector against the discriminated
 // schema + rewrites only the [connectors.*] tables of connectors.toml (a changed connector's subtree
 // is re-rendered, so its inline `columns = [{…}]` may become `[[…]]` — review in git), then reloads.
 // No rename yet — delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import ConnectorsTableEditor from './ConnectorsTableEditor'
+import { CRUD_KINDS, groupQueriesByTable, newQueryStub } from './connectorTables'
 
 type Connectors = Record<string, Record<string, unknown>>
 
@@ -35,6 +40,32 @@ const NavItem = styled.button<{ $active?: boolean }>`
 const FormCol = styled(Card)`flex: 1; min-width: 0;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
 const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
+const ModeBar = styled.div`display: inline-flex; gap: 4px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};`
+const ModeBtn = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
+  border: none; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  background: ${({ $active }) => ($active ? colors.bg.card : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
+  &:hover { color: ${colors.text.primary}; }
+`
+const TableList = styled.div`display: flex; flex-direction: column; gap: 6px;`
+const TableRow = styled.button`
+  display: flex; align-items: center; gap: 10px; padding: 9px 11px; width: 100%; text-align: left;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
+  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
+  & .base { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
+`
+const Slot = styled.span<{ $on?: boolean }>`
+  display: inline-block; min-width: 38px; padding: 2px 6px; border-radius: ${radius.sm};
+  font-size: ${fontSize.micro}; font-family: ${fonts.mono}; text-align: center;
+  border: 1px solid ${({ $on }) => ($on ? colors.green.border : colors.border)};
+  background: ${({ $on }) => ($on ? colors.green.bg : 'transparent')};
+  color: ${({ $on }) => ($on ? colors.green.main : colors.text.muted)};
+  opacity: ${({ $on }) => ($on ? 1 : 0.45)};
+`
+const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 8px 4px 0;`
 
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
@@ -44,6 +75,9 @@ export default function ConnectorsBuilder() {
   const [original, setOriginal] = useState('')
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
+  const [mode, setMode] = useState<'tables' | 'form'>('tables')
+  const [selTable, setSelTable] = useState<string | null>(null)
+  const [tq, setTq] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -59,10 +93,20 @@ export default function ConnectorsBuilder() {
   }
   useEffect(load, [t])
 
+  // reset table selection + search when changing connector or mode
+  useEffect(() => { setSelTable(null); setTq('') }, [sel, mode])
+
   const dirty = useMemo(() => conns != null && JSON.stringify(conns) !== original, [conns, original])
   const schemaFor = (c: Record<string, unknown>): JsonSchema | null => (!schemas ? null : c.type === 'api' ? schemas.api : schemas.sql)
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
+  const updateQueries = (name: string, queries: Record<string, unknown>[]) => {
+    setConns((p) => {
+      const cur = (p ?? {})[name] ?? {}
+      return { ...(p ?? {}), [name]: { ...cur, queries } }
+    })
+    setStatus(null)
+  }
   const addConnector = (type: 'sql' | 'api') => {
     const name = window.prompt(t('settings.connectors.namePrompt'))?.trim()
     if (!name) return
@@ -74,6 +118,18 @@ export default function ConnectorsBuilder() {
     if (!window.confirm(t('settings.connectors.confirmDelete', { name }))) return
     setConns((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
+  }
+  const addTable = (connectorName: string) => {
+    const base = window.prompt(t('settings.tables.namePrompt'))?.trim()
+    if (!base) return
+    const cur = (conns ?? {})[connectorName] ?? {}
+    const queries = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
+    const getName = `${base}_get`
+    if (queries.some((q) => typeof q.name === 'string' && q.name.toLowerCase() === getName.toLowerCase())) {
+      setSelTable(base); return
+    }
+    updateQueries(connectorName, [...queries, newQueryStub(base, 'get')])
+    setSelTable(base)
   }
 
   async function save() {
@@ -94,7 +150,18 @@ export default function ConnectorsBuilder() {
   const names = Object.keys(conns)
   const needle = q.trim().toLowerCase()
   const shownNames = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
-  const selSchema = sel && conns[sel] ? schemaFor(conns[sel]) : null
+  const selConn = sel && conns[sel] ? conns[sel] : null
+  const selSchema = selConn ? schemaFor(selConn) : null
+  const isSql = selConn?.type !== 'api'
+  const effectiveMode: 'tables' | 'form' = isSql ? mode : 'form'
+
+  // --- table grouping (only when SQL + tables mode) --------------------------
+  const queriesArr = (selConn && Array.isArray(selConn.queries) ? selConn.queries : []) as Record<string, unknown>[]
+  const grouped = isSql ? groupQueriesByTable(queriesArr) : { tables: [], loose: [] }
+  const tNeedle = tq.trim().toLowerCase()
+  const shownTables = tNeedle ? grouped.tables.filter((g) => g.base.toLowerCase().includes(tNeedle)) : grouped.tables
+  const queryDefSchema = (selSchema?.$defs?.QueryDef ?? null) as JsonSchema | null
+  const allDefs = (selSchema?.$defs ?? {}) as Record<string, JsonSchema>
 
   return (
     <Stack gap={12}>
@@ -119,13 +186,77 @@ export default function ConnectorsBuilder() {
           <Button $variant="ghost" $size="sm" onClick={() => addConnector('api')} style={{ justifyContent: 'flex-start' }}><Plus size={13} /> {t('settings.connectors.addApi')}</Button>
         </NavCol>
         <FormCol>
-          {sel && conns[sel] && selSchema ? (
+          {selConn && selSchema ? (
             <Stack gap={12}>
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>[connectors.{sel}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {String(conns[sel].type)}</span></strong>
-                <Button $variant="danger" $size="sm" onClick={() => removeConnector(sel)} disabled={busy}><Trash2 size={13} /> {t('settings.connectors.delete')}</Button>
+                <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
+                  [connectors.{sel}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {String(selConn.type)}</span>
+                </strong>
+                <Row gap={8}>
+                  {isSql && (
+                    <ModeBar>
+                      <ModeBtn type="button" $active={effectiveMode === 'tables'} onClick={() => setMode('tables')}>
+                        <Layers size={13} /> {t('settings.tables.tablesView')}
+                      </ModeBtn>
+                      <ModeBtn type="button" $active={effectiveMode === 'form'} onClick={() => setMode('form')}>
+                        <FileCog size={13} /> {t('settings.tables.formView')}
+                      </ModeBtn>
+                    </ModeBar>
+                  )}
+                  <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
+                    <Trash2 size={13} /> {t('settings.connectors.delete')}
+                  </Button>
+                </Row>
               </Row>
-              <SchemaNavigator root={{ label: sel, schema: selSchema, value: conns[sel], onChange: (v) => update(sel, v) }} />
+              {effectiveMode === 'form' && (
+                <SchemaNavigator root={{ label: sel!, schema: selSchema, value: selConn, onChange: (v) => update(sel!, v) }} />
+              )}
+              {effectiveMode === 'tables' && (
+                selTable && queryDefSchema ? (
+                  <ConnectorsTableEditor
+                    base={selTable}
+                    slots={grouped.tables.find((g) => g.base === selTable)?.slots ?? {}}
+                    queries={queriesArr}
+                    queryDefSchema={queryDefSchema}
+                    defs={allDefs}
+                    onChangeQueries={(next) => updateQueries(sel!, next)}
+                    onBack={() => setSelTable(null)}
+                  />
+                ) : (
+                  <Stack gap={10}>
+                    {grouped.tables.length > 6 && (
+                      <NavSearch>
+                        <Search size={13} />
+                        <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`filter ${grouped.tables.length}…`} />
+                      </NavSearch>
+                    )}
+                    {shownTables.length === 0 && grouped.tables.length > 0 && (
+                      <Empty>{t('common.noMatches')}</Empty>
+                    )}
+                    {grouped.tables.length === 0 && (
+                      <Empty>{t('settings.tables.emptyConnector')}</Empty>
+                    )}
+                    <TableList>
+                      {shownTables.map((g) => (
+                        <TableRow key={g.base} type="button" onClick={() => setSelTable(g.base)}>
+                          <span className="base">{g.base}</span>
+                          {CRUD_KINDS.map((c) => (
+                            <Slot key={c} $on={!!g.slots[c]} title={g.slots[c]?.name ?? `${g.base}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableList>
+                    <Row gap={6}>
+                      <Button $variant="ghost" $size="sm" onClick={() => sel && addTable(sel)}>
+                        <Plus size={13} /> {t('settings.tables.addTable')}
+                      </Button>
+                    </Row>
+                    {grouped.loose.length > 0 && (
+                      <LooseNote>{t('settings.tables.looseHint', { count: grouped.loose.length })}</LooseNote>
+                    )}
+                  </Stack>
+                )
+              )}
             </Stack>
           ) : (
             <Empty>{names.length ? t('settings.connectors.pickOne') : t('settings.connectors.empty')}</Empty>
