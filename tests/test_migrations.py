@@ -18,6 +18,7 @@ from liberty.migrations import (
     migrate_dictionary,
     migrate_menus,
     migrate_pools,
+    migrate_screens,
     migrate_sql_queries,
     migrate_key_columns,
     migrate_table_filters,
@@ -28,11 +29,13 @@ from liberty.migrations import (
     read_dictionary,
     read_menus,
     read_column_conditions,
+    read_screens,
     read_sql_queries,
     read_table_filters,
     render_toml,
     slugify,
 )
+from liberty.screens import parse_screens
 
 
 # --------------------------------------------------------------------------- #
@@ -713,6 +716,220 @@ def test_merge_connectors() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# migrate_screens — Phase 6 slice 1 (ly_tables + ly_dlg_* → screens.toml)
+# --------------------------------------------------------------------------- #
+
+# Re-usable sql_rows that name a few CRUD verbs migrate_screens needs to resolve. Real
+# v1 data uses REST verbs (GET/PUT/POST/DELETE) — the v2 query name is built from the **raw**
+# v1 crud verbatim, so it matches whatever migrate_sql_queries emits in connectors.toml.
+_SCR_SQL = [
+    {"query_id": 10, "query_label": "Users", "query_crud": "GET", "query_pool": "nomasx1", "query_dbtype": "postgres",
+     "query_sqlquery": "SELECT * FROM users", "query_orderby": None},
+    {"query_id": 10, "query_label": "Users", "query_crud": "PUT", "query_pool": "nomasx1", "query_dbtype": "postgres",
+     "query_sqlquery": "UPDATE users SET …", "query_orderby": None},
+    {"query_id": 10, "query_label": "Users", "query_crud": "POST", "query_pool": "nomasx1", "query_dbtype": "postgres",
+     "query_sqlquery": "INSERT INTO users …", "query_orderby": None},
+    {"query_id": 10, "query_label": "Users", "query_crud": "DELETE", "query_pool": "nomasx1", "query_dbtype": "postgres",
+     "query_sqlquery": "DELETE FROM users", "query_orderby": None},
+]
+
+
+def test_migrate_screens_no_dialog() -> None:
+    """A ly_tables row with no tbl_frm_id → screen carries the read/update/insert/delete refs
+    but no ``dialog`` (read-only / grid-edit only) and the flag wiring round-trips."""
+    table_rows = [
+        {"tbl_id": 1, "tbl_db_name": "security_users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": "Y", "tbl_auto_load": "Y", "tbl_frm_id": None},
+    ]
+    out = migrate_screens(table_rows, sql_rows=_SCR_SQL, app_name="nomasx1")
+    assert list(out["screens"]) == ["nomasx1"]
+    screens = out["screens"]["nomasx1"]
+    assert list(screens) == ["security_users"]
+    s = screens["security_users"]
+    assert s == {
+        "id": "security_users",
+        "label": "Users",
+        "description": "Users",
+        "read_query": "users_get",
+        "update_query": "users_put",
+        "insert_query": "users_post",
+        "delete_query": "users_delete",
+        "auto_load": True,
+        "audit": True,
+    }
+    # Round-trips through the screens schema.
+    parse_screens(out)
+
+
+def test_migrate_screens_with_dialog() -> None:
+    """A screen with a dialog: tabs from ly_dlg_tab (translations from _l), fields from
+    ly_dlg_col, and per-field ``lookup_param_binds`` from ly_dlg_filters (both VALUE
+    and DD flavours of ParamBind)."""
+    table_rows = [
+        {"tbl_id": 5, "tbl_db_name": "security_users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "Y", "tbl_audit": None, "tbl_auto_load": "N", "tbl_frm_id": 7},
+    ]
+    frm_rows = [{"frm_id": 7, "dlg_id": 1, "frm_query_id": 10, "frm_label": "User"}]
+    tab_rows = [
+        {"frm_id": 7, "tab_id": 1, "tab_seq": 1, "tab_label": "General", "tab_cols": 2,
+         "tab_disable_add": "N", "tab_disable_edit": "N"},
+        {"frm_id": 7, "tab_id": 2, "tab_seq": 2, "tab_label": "Audit", "tab_cols": None,
+         "tab_disable_add": "Y", "tab_disable_edit": "Y"},
+    ]
+    tab_l_rows = [
+        {"frm_id": 7, "tab_id": 1, "lng_id": "fr", "lng_label": "Général"},
+    ]
+    col_rows = [
+        {"frm_id": 7, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_colspan": 2,
+         "col_dd_id": "USR_ID", "col_label": None, "col_target": "USR_ID",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "Y", "col_default": None},
+        {"frm_id": 7, "col_id": 2, "tab_id": 1, "col_seq": 2, "col_colspan": None,
+         "col_dd_id": "ROL_ID", "col_label": "Role", "col_target": "USR_ROLE_ID",
+         "col_visible": "N", "col_disabled": "Y", "col_required": "N", "col_default": "ADMIN"},
+        # placeholder (no col_target) — dropped
+        {"frm_id": 7, "col_id": 3, "tab_id": 1, "col_seq": 3, "col_colspan": None,
+         "col_dd_id": None, "col_label": None, "col_target": "",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N", "col_default": None},
+    ]
+    filter_rows = [
+        # VALUE literal — `{param=, value=}` ParamBind
+        {"frm_id": 7, "col_id": 1, "flt_id": 1, "flt_type": "VALUE",
+         "flt_source": None, "flt_target": "STATUS", "flt_value": "A"},
+        # DD column-bind — `{param=, source=}` ParamBind
+        {"frm_id": 7, "col_id": 2, "flt_id": 1, "flt_type": "DD",
+         "flt_source": "USR_APPS_ID", "flt_target": "ROL_APPS_ID", "flt_value": None},
+        # missing flt_target → dropped
+        {"frm_id": 7, "col_id": 2, "flt_id": 2, "flt_type": "VALUE",
+         "flt_source": None, "flt_target": None, "flt_value": "ignored"},
+        # VALUE with blank flt_value → dropped
+        {"frm_id": 7, "col_id": 2, "flt_id": 3, "flt_type": "VALUE",
+         "flt_source": None, "flt_target": "X", "flt_value": ""},
+    ]
+    out = migrate_screens(
+        table_rows, dialog_rows=[{"dlg_id": 1, "dlg_label": "Users"}],
+        frm_rows=frm_rows, tab_rows=tab_rows, tab_l_rows=tab_l_rows,
+        col_rows=col_rows, filter_rows=filter_rows, sql_rows=_SCR_SQL, app_name="nomasx1",
+    )
+    s = out["screens"]["nomasx1"]["security_users"]
+    assert s["uploadable"] is True
+    assert "audit" not in s  # tbl_audit None → key omitted
+    assert "auto_load" not in s
+    dialog = s["dialog"]
+    assert [t["id"] for t in dialog["tabs"]] == ["general", "audit"]
+    g = dialog["tabs"][0]
+    assert g["label"] == "General" and g["cols"] == 2 and g["l"] == {"fr": "Général"}
+    assert "hide_on_add" not in g and "hide_on_edit" not in g
+    a = dialog["tabs"][1]
+    assert a["hide_on_add"] is True and a["hide_on_edit"] is True and "cols" not in a
+    fields = g["fields"]
+    # Placeholder row (col_target='') is dropped.
+    assert [f["name"] for f in fields] == ["USR_ID", "USR_ROLE_ID"]
+    # First field: col_dd_id == col_target → `dd` key omitted; required=True; colspan=2.
+    assert fields[0] == {
+        "name": "USR_ID", "required": True, "colspan": 2,
+        "lookup_param_binds": [{"param": "STATUS", "value": "A"}],
+    }
+    # Second field: dd override, label, hidden, disabled, default; one DD bind, the malformed ones dropped.
+    assert fields[1] == {
+        "name": "USR_ROLE_ID", "dd": "ROL_ID", "label": "Role",
+        "hidden": True, "disabled": True, "default": "ADMIN",
+        "lookup_param_binds": [{"param": "ROL_APPS_ID", "source": "USR_APPS_ID"}],
+    }
+    parse_screens(out)
+
+
+def test_migrate_screens_cross_connector() -> None:
+    """Screen's read query lives on a *different* pool than the app — `connector` is set."""
+    sql = [
+        {"query_id": 20, "query_label": "F0005 List", "query_crud": "SELECT", "query_pool": "jdedwards",
+         "query_dbtype": "oracle", "query_sqlquery": "SELECT * FROM f0005", "query_orderby": None},
+    ]
+    out = migrate_screens(
+        [{"tbl_id": 1, "tbl_db_name": "f0005", "tbl_query_id": 20, "tbl_label": "F0005"}],
+        sql_rows=sql, app_name="nomajde",
+    )
+    s = out["screens"]["nomajde"]["f0005"]
+    assert s["connector"] == "jdedwards"
+    # Same-pool: `connector` is omitted.
+    out2 = migrate_screens(
+        [{"tbl_id": 1, "tbl_db_name": "f0005", "tbl_query_id": 20, "tbl_label": "F0005"}],
+        sql_rows=sql, app_name="jdedwards",
+    )
+    assert "connector" not in out2["screens"]["jdedwards"]["f0005"]
+
+
+def test_migrate_screens_crud_normalization() -> None:
+    """The CRUD map normalises v1's REST verbs + SQL keywords to GET/PUT/POST/DELETE for
+    *routing* (which slot — read_query / update_query / insert_query / delete_query — the
+    name lands in), but the v2 *name* keeps the raw v1 crud verbatim so it matches what
+    :func:`migrate_sql_queries` emits in ``connectors.toml`` for that pool."""
+    # Four CRUD families, each spelled in different v1 styles. First-row-wins per family.
+    sql = [
+        # GET family — REST verb wins (would match v1 REST data)
+        {"query_id": 30, "query_label": "Items", "query_crud": "SELECT", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "SELECT 1", "query_orderby": None},
+        # UPDATE → PUT slot
+        {"query_id": 30, "query_label": "Items", "query_crud": "UPDATE", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "UPDATE", "query_orderby": None},
+        # MERGE / INSERT both map to POST slot — first row wins
+        {"query_id": 30, "query_label": "Items", "query_crud": "MERGE", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "MERGE", "query_orderby": None},
+        {"query_id": 30, "query_label": "Items", "query_crud": "INSERT", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "INSERT", "query_orderby": None},
+        # PATCH → PUT slot (loses to UPDATE — first wins)
+        {"query_id": 30, "query_label": "Items", "query_crud": "PATCH", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "UPDATE", "query_orderby": None},
+        # REMOVE → DELETE slot
+        {"query_id": 30, "query_label": "Items", "query_crud": "REMOVE", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "DELETE", "query_orderby": None},
+    ]
+    out = migrate_screens(
+        [{"tbl_id": 1, "tbl_db_name": "items", "tbl_query_id": 30, "tbl_label": "Items"}],
+        sql_rows=sql, app_name="nomasx1",
+    )
+    s = out["screens"]["nomasx1"]["items"]
+    # Names mirror migrate_sql_queries' convention: slugify(<label>_<RAW v1 crud>).
+    assert s["read_query"] == "items_select"     # SELECT row landed in the GET slot
+    assert s["update_query"] == "items_update"   # UPDATE row landed in the PUT slot
+    assert s["insert_query"] == "items_merge"    # MERGE first → POST slot (INSERT/PATCH dropped)
+    assert s["delete_query"] == "items_remove"   # REMOVE row landed in the DELETE slot
+
+
+def test_migrate_screens_skips_unreadable() -> None:
+    """A table whose query has no GET/SELECT companion → skipped (would be broken at runtime)."""
+    sql = [
+        {"query_id": 99, "query_label": "Only Delete", "query_crud": "DELETE", "query_pool": "p",
+         "query_dbtype": "postgres", "query_sqlquery": "DELETE", "query_orderby": None},
+    ]
+    out = migrate_screens(
+        [{"tbl_id": 1, "tbl_db_name": "x", "tbl_query_id": 99, "tbl_label": "X"}],
+        sql_rows=sql, app_name="p",
+    )
+    assert out == {"screens": {"p": {}}}
+
+
+def test_migrate_screens_id_dedup_and_fallbacks() -> None:
+    """Two tables that slug to the same id → ``_2`` suffix; rows missing both
+    ``tbl_db_name`` and ``tbl_label`` fall back to ``screen_<tbl_id>``."""
+    rows = [
+        # both yield "users"
+        {"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users"},
+        {"tbl_id": 2, "tbl_db_name": None, "tbl_query_id": 10, "tbl_label": "Users"},
+        # no name at all → fallback to screen_3
+        {"tbl_id": 3, "tbl_db_name": "", "tbl_query_id": 10, "tbl_label": ""},
+    ]
+    out = migrate_screens(rows, sql_rows=_SCR_SQL, app_name="nomasx1")
+    assert list(out["screens"]["nomasx1"]) == ["users", "users_2", "screen_3"]
+
+
+def test_migrate_screens_no_dialog_when_frm_unresolved() -> None:
+    """``tbl_frm_id`` pointing at a non-existent form (or one with no tabs) → no dialog."""
+    rows = [{"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users", "tbl_frm_id": 999}]
+    out = migrate_screens(rows, sql_rows=_SCR_SQL, app_name="nomasx1")
+    assert "dialog" not in out["screens"]["nomasx1"]["users"]
+
+
+# --------------------------------------------------------------------------- #
 # DB readers (against a minimal v1 schema in SQLite)
 # --------------------------------------------------------------------------- #
 
@@ -726,10 +943,13 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_enum_val (enum_id INTEGER, val_enum TEXT, val_label TEXT)",
     "CREATE TABLE ly_enum_val_l (enum_id INTEGER, val_enum TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_lookup (lkp_id INTEGER PRIMARY KEY, lkp_description TEXT, lkp_query_id INTEGER, lkp_dd_id TEXT, lkp_dd_label TEXT, lkp_dd_group TEXT)",
-    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT)",
+    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_db_name TEXT, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT, tbl_editable TEXT, tbl_uploadable TEXT, tbl_audit TEXT, tbl_frm_id INTEGER)",
     "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT, col_key TEXT, col_cdn_id INTEGER)",
+    "CREATE TABLE ly_dialogs (dlg_id INTEGER PRIMARY KEY, dlg_label TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
-    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_key TEXT, col_cdn_id INTEGER)",
+    "CREATE TABLE ly_dlg_tab (frm_id INTEGER, tab_id INTEGER, tab_seq INTEGER, tab_label TEXT, tab_cols INTEGER, tab_disable_add TEXT, tab_disable_edit TEXT)",
+    "CREATE TABLE ly_dlg_tab_l (frm_id INTEGER, tab_id INTEGER, lng_id TEXT, lng_label TEXT)",
+    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_colspan INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_disabled TEXT, col_required TEXT, col_default TEXT, col_key TEXT, col_cdn_id INTEGER)",
     "CREATE TABLE ly_tbl_filters (tbl_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_dlg_filters (frm_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_cdn_params (cdn_id INTEGER, cdn_params_id INTEGER, cdn_seq INTEGER, cdn_dd_id TEXT, cdn_operator TEXT, cdn_value TEXT, cdn_logical TEXT, cdn_group INTEGER)",
@@ -807,8 +1027,9 @@ async def _seed_v1(engine) -> None:
             [{"i": 1, "d": "Users list", "q": 1, "v": "USR_ID", "l": "USR_NAME", "g": None}],
         )
         await conn.execute(
-            text("INSERT INTO ly_tables (tbl_id, tbl_query_id, tbl_label, tbl_auto_load) VALUES (:i, :q, :l, :al)"),
-            [{"i": 5, "q": 1, "l": "Users", "al": "Y"}],
+            text("INSERT INTO ly_tables (tbl_id, tbl_db_name, tbl_query_id, tbl_label, tbl_auto_load, tbl_editable, tbl_uploadable, tbl_audit, tbl_frm_id)"
+                 " VALUES (:i, :n, :q, :l, :al, :e, :u, :a, :f)"),
+            [{"i": 5, "n": "security_users", "q": 1, "l": "Users", "al": "Y", "e": "Y", "u": "N", "a": "Y", "f": 7}],
         )
         await conn.execute(
             text("INSERT INTO ly_tbl_col (tbl_id, col_id, col_seq, col_dd_id, col_label, col_target, col_type, col_visible, col_filter, col_key, col_cdn_id)"
@@ -834,14 +1055,38 @@ async def _seed_v1(engine) -> None:
                 {"i": 1, "p": 2, "s": 2, "dd": "USR_ID", "op": "EMPTY", "v": None, "lg": "OR", "g": 0},
             ],
         )
+        # Dialog stack: ly_dialogs → ly_dlg_frm → ly_dlg_tab (+ _l) → ly_dlg_col → ly_dlg_filters.
+        # Screen 5 ("Users") points at frm 7 → the dialog with one tab and one field.
+        await conn.execute(
+            text("INSERT INTO ly_dialogs (dlg_id, dlg_label) VALUES (:i, :l)"),
+            [{"i": 1, "l": "Users"}],
+        )
         await conn.execute(
             text("INSERT INTO ly_dlg_frm (frm_id, dlg_id, frm_query_id, frm_label) VALUES (:i, :d, :q, :l)"),
             [{"i": 7, "d": 1, "q": 2, "l": "Delete Form"}],
         )
         await conn.execute(
-            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_component, col_dd_id, col_label, col_target, col_type, col_visible, col_key)"
-                 " VALUES (:f, :c, :ta, :s, :cm, :dd, :lab, :tgt, :ty, :v, :k)"),
-            [{"f": 7, "c": 1, "ta": 1, "s": 1, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y", "k": "Y"}],
+            text("INSERT INTO ly_dlg_tab (frm_id, tab_id, tab_seq, tab_label, tab_cols, tab_disable_add, tab_disable_edit)"
+                 " VALUES (:f, :t, :s, :l, :c, :a, :e)"),
+            [{"f": 7, "t": 1, "s": 1, "l": "General", "c": 2, "a": "N", "e": "N"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_dlg_tab_l (frm_id, tab_id, lng_id, lng_label) VALUES (:f, :t, :lng, :lab)"),
+            [{"f": 7, "t": 1, "lng": "fr", "lab": "Général"}],
+        )
+        await conn.execute(
+            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_colspan, col_component, col_dd_id, col_label, col_target, col_type, col_visible, col_disabled, col_required, col_default, col_key)"
+                 " VALUES (:f, :c, :ta, :s, :cs, :cm, :dd, :lab, :tgt, :ty, :v, :di, :rq, :de, :k)"),
+            [{"f": 7, "c": 1, "ta": 1, "s": 1, "cs": 2, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y", "di": "N", "rq": "Y", "de": "0", "k": "Y"}],
+        )
+        # Per-field param binds (v1 ly_dlg_filters): one VALUE literal + one DD column-bind on the same field.
+        await conn.execute(
+            text("INSERT INTO ly_dlg_filters (frm_id, col_id, flt_id, flt_type, flt_source, flt_target, flt_value)"
+                 " VALUES (:f, :c, :i, :ty, :src, :tgt, :v)"),
+            [
+                {"f": 7, "c": 1, "i": 1, "ty": "VALUE", "src": None, "tgt": "STATUS", "v": "A"},
+                {"f": 7, "c": 1, "i": 2, "ty": "DD", "src": "USR_APPS_ID", "tgt": "ROL_APPS_ID", "v": None},
+            ],
         )
         await conn.execute(
             text("INSERT INTO ly_menus (menu_seq_ukid, menu_parent_id, menu_child_id, menu_component, menu_component_id, menu_label, menu_level)"
@@ -933,8 +1178,14 @@ async def test_read_table_filters(v1_engine) -> None:
     # the seeded ly_tbl_filters row, joined to its column's col_target and its query id
     assert [{"query_id": r["query_id"], "col_target": r["col_target"], "src": r["src"], "tgt": r["tgt"]} for r in tbl_flt] \
         == [{"query_id": 1, "col_target": "USR_NAME", "src": "USR_ID", "tgt": "UN_REF"}]
-    assert dlg_flt == []
-    assert migrate_table_filters(tbl_flt, dlg_flt) == {1: {"USR_NAME": [{"source": "USR_ID", "column": "UN_REF"}]}}
+    # ly_dlg_filters seed: the VALUE row (flt_source NULL) is filtered out by _DLG_FILTERS' WHERE;
+    # the DD row (col USR_ID on frm 7 → query 2) survives.
+    assert [{"query_id": r["query_id"], "col_target": r["col_target"], "src": r["src"], "tgt": r["tgt"]} for r in dlg_flt] \
+        == [{"query_id": 2, "col_target": "USR_ID", "src": "USR_APPS_ID", "tgt": "ROL_APPS_ID"}]
+    assert migrate_table_filters(tbl_flt, dlg_flt) == {
+        1: {"USR_NAME": [{"source": "USR_ID", "column": "UN_REF"}]},
+        2: {"USR_ID": [{"source": "USR_APPS_ID", "column": "ROL_APPS_ID"}]},
+    }
 
 
 @pytest.mark.asyncio
@@ -1024,8 +1275,53 @@ async def test_read_menus(v1_engine) -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_screens(v1_engine) -> None:
+    """End-to-end read_screens + migrate_screens against the SQLite fixture: the seeded
+    ``ly_tables`` row 5 has ``tbl_frm_id=7``, which fans out to one tab with one field plus
+    two ly_dlg_filters bindings (one VALUE literal, one DD column-source)."""
+    rows = await read_screens(v1_engine)
+    table_rows, dialog_rows, frm_rows, tab_rows, tab_l_rows, col_rows, filter_rows, sql_rows = rows
+    assert {r["tbl_id"] for r in table_rows} == {5}
+    assert {r["tbl_db_name"] for r in table_rows} == {"security_users"}
+    assert {r["dlg_id"] for r in dialog_rows} == {1}
+    assert {r["frm_id"] for r in frm_rows} == {7}
+    assert {(r["frm_id"], r["tab_id"]) for r in tab_rows} == {(7, 1)}
+    assert {(r["frm_id"], r["tab_id"], r["lng_id"]) for r in tab_l_rows} == {(7, 1, "fr")}
+    assert {(r["frm_id"], r["col_id"], r["col_target"]) for r in col_rows} == {(7, 1, "USR_ID")}
+    assert {(r["frm_id"], r["col_id"], r["flt_type"]) for r in filter_rows} == {(7, 1, "VALUE"), (7, 1, "DD")}
+    assert {r["query_id"] for r in sql_rows} == {1, 2}  # the join feeds CRUD → v2 name resolution
+    # Build the screens.toml fragment + round-trip through the screens schema.
+    out = migrate_screens(*rows, app_name="nomasx1")
+    sf = parse_screens(out)
+    screens = sf.screens["nomasx1"]
+    s = screens["security_users"]
+    assert s.read_query == "users_list_select"
+    # tbl_query_id=1 has only a SELECT companion in ly_qry_sql → no update/insert/delete refs.
+    assert s.update_query is None and s.insert_query is None and s.delete_query is None
+    assert s.audit is True and s.auto_load is True
+    # Pool of query 1 is 'default' (not the app 'nomasx1') → `connector` is explicitly set.
+    assert s.connector == "default"
+    # Dialog walks ly_dlg_tab (+ _l) + ly_dlg_col + ly_dlg_filters.
+    assert s.dialog is not None
+    assert [t.id for t in s.dialog.tabs] == ["general"]
+    tab = s.dialog.tabs[0]
+    assert tab.label == "General" and tab.cols == 2 and tab.l == {"fr": "Général"}
+    assert [f.name for f in tab.fields] == ["USR_ID"]
+    field = tab.fields[0]
+    # col_label='Id' overrides the dictionary; col_dd_id None → `dd` left unset (falls back to `name`).
+    assert field.label == "Id" and field.dd is None and field.required is True and field.colspan == 2
+    assert field.default == "0"
+    # Both ParamBind flavours preserved: VALUE → {param, value}, DD → {param, source}.
+    binds = [{"param": b.param, "value": b.value, "source": b.source} for b in field.lookup_param_binds]
+    assert binds == [
+        {"param": "STATUS", "value": "A", "source": None},
+        {"param": "ROL_APPS_ID", "value": None, "source": "USR_APPS_ID"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_read_applications_column_hints_dictionary_menus_missing_tables(tmp_path) -> None:
-    from liberty.migrations import read_dictionary_rules
+    from liberty.migrations import read_dictionary_rules, read_screens
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_meta.db'}")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))
@@ -1035,6 +1331,8 @@ async def test_read_applications_column_hints_dictionary_menus_missing_tables(tm
         assert await read_dictionary(engine) == ([], [])       # no ly_dictionary/ly_dictionary_l → ([], [])
         assert await read_menus(engine) == ([], [], [], [], [])  # no ly_menus/… → all empty
         assert await read_dictionary_rules(engine) == ([], [], [], [], [], [], [])  # no ly_enum/ly_lookup/ly_dictionary_filters/ly_lkp_params → all empty
+        # ly_tables / ly_dialogs / ly_dlg_frm / ly_dlg_tab / _l / ly_dlg_col / ly_dlg_filters / ly_qry_sql → all empty
+        assert await read_screens(engine) == ([], [], [], [], [], [], [], [])
     finally:
         await engine.dispose()
 
@@ -1129,3 +1427,33 @@ def test_cli_menu(tmp_path) -> None:
     assert set(items) == {"security", "users", "overview"}
     assert items["users"].type == "query" and items["users"].target == "users_list_select"
     assert items["users"].parent == "security" and items["users"].l == {"fr": "Utilisateurs"}
+
+
+def test_cli_screen(tmp_path) -> None:
+    """End-to-end ``liberty-migrate screen`` against the SQLite fixture."""
+    url = _make_v1_db(tmp_path)
+    out = tmp_path / "screens.toml"
+    assert migrate_main(["screen", "--source-url", url, "--connector", "nomasx1", "-o", str(out)]) == 0
+    txt = out.read_text()
+    assert txt.startswith("# migrated:")
+    assert "1 screen(s) for [screens.nomasx1]" in txt
+    assert "1 with dialog" in txt and "1 with audit" in txt
+    # Pool of query 1 is 'default', not the app 'nomasx1' → flagged as cross-connector.
+    assert "1 cross-connector" in txt
+    assert "2 param-bind(s)" in txt
+    # Parses through both tomllib (comments are fine) and the screens schema.
+    sf = parse_screens(tomllib.loads(txt))
+    screens = sf.screens["nomasx1"]
+    s = screens["security_users"]
+    assert s.read_query == "users_list_select"
+    assert s.connector == "default" and s.audit is True and s.auto_load is True
+    assert s.dialog is not None
+    tab = s.dialog.tabs[0]
+    assert tab.label == "General" and tab.l == {"fr": "Général"}
+    field = tab.fields[0]
+    assert field.name == "USR_ID" and field.required is True
+    # Both ParamBind shapes round-trip.
+    assert [(b.param, b.value, b.source) for b in field.lookup_param_binds] == [
+        ("STATUS", "A", None),
+        ("ROL_APPS_ID", None, "USR_APPS_ID"),
+    ]

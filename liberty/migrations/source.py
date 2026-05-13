@@ -129,6 +129,47 @@ _DLG_FRM = text("SELECT frm_id, frm_query_id FROM ly_dlg_frm WHERE frm_query_id 
 # table/form *display* metadata: friendly label → v2 query.description ; auto-load flag → query.auto_load
 _TABLE_META = text("SELECT tbl_query_id, tbl_label, tbl_auto_load FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id")
 _DLG_FRM_META = text("SELECT frm_query_id, frm_label FROM ly_dlg_frm WHERE frm_query_id IS NOT NULL ORDER BY frm_id")
+# Screens-side reads (slice 1 of phase 6). v1 has the chain:
+#   ly_tables (the list/grid widget — links its dialog form via tbl_frm_id and its read
+#     query via tbl_query_id; tbl_audit gates AUD_<table> writes)
+#   ly_dialogs (a logical grouping; its label is what shows in the form's title)
+#   ly_dlg_frm (the form — has its own frm_query_id, may differ from tbl_query_id)
+#   ly_dlg_tab (the tabs — keyed by frm_id, ordered by tab_seq, cols = grid columns)
+#   ly_dlg_col (the fields — keyed by (frm_id, col_id); tab_id picks the tab; col_target =
+#     the result-column name, col_dd_id = the dictionary entry, plus flags col_visible /
+#     col_disabled / col_required / col_default / col_key / col_seq / col_colspan)
+#   ly_dlg_filters (parameter bindings for a field's lookup query — same shape as
+#     ly_tbl_filters / ly_dictionary_filters: (flt_type=DD with flt_source) OR
+#     (flt_type=VALUE with flt_value), flt_target = the lookup query's :param name)
+_SCREENS_TABLES = text("""
+    SELECT tbl_id, tbl_db_name, tbl_label, tbl_query_id, tbl_editable, tbl_uploadable,
+           tbl_audit, tbl_auto_load, tbl_frm_id
+    FROM ly_tables ORDER BY tbl_id
+""")
+_SCREENS_DIALOGS = text("SELECT dlg_id, dlg_label FROM ly_dialogs ORDER BY dlg_id")
+_SCREENS_DLG_FRM = text("""
+    SELECT frm_id, dlg_id, frm_label, frm_query_id
+    FROM ly_dlg_frm ORDER BY frm_id
+""")
+_SCREENS_DLG_TAB = text("""
+    SELECT frm_id, tab_id, tab_seq, tab_label, tab_cols,
+           tab_disable_add, tab_disable_edit
+    FROM ly_dlg_tab ORDER BY frm_id, COALESCE(tab_seq, tab_id)
+""")
+_SCREENS_DLG_TAB_L = text("""
+    SELECT frm_id, tab_id, lng_id, lng_label
+    FROM ly_dlg_tab_l ORDER BY frm_id, tab_id, lng_id
+""")
+_SCREENS_DLG_COL = text("""
+    SELECT frm_id, col_id, tab_id, col_seq, col_colspan, col_dd_id, col_label, col_target,
+           col_default, col_visible, col_disabled, col_required
+    FROM ly_dlg_col ORDER BY frm_id, COALESCE(col_seq, col_id)
+""")
+_SCREENS_DLG_FILTERS = text("""
+    SELECT frm_id, col_id, flt_id, flt_type, flt_source, flt_target, flt_value
+    FROM ly_dlg_filters ORDER BY frm_id, col_id, flt_id
+""")
+
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
 _APIS = text("SELECT api_id, api_label, api_source, api_method, api_url, api_user, api_password, api_body, api_conn_id FROM ly_api ORDER BY api_id")
 _API_HEADERS = text("SELECT api_id, hdr_id, hdr_key, hdr_value FROM ly_api_header ORDER BY api_id, hdr_id")
@@ -260,6 +301,37 @@ async def read_menus(
         await _rows_or_empty(engine, _TABLES, what="ly_tables (menu component → query)"),
         await _rows_or_empty(engine, _DLG_FRM, what="ly_dlg_frm (menu component → query)"),
         await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (menu component → query name)"),
+    )
+
+
+async def read_screens(
+    engine: AsyncEngine,
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
+]:
+    """Return the seven row-sets v2's screens migration needs:
+
+    1. ``ly_tables`` — the table widgets (with ``tbl_frm_id`` linking to the dialog, ``tbl_audit``
+       for AUD, ``tbl_auto_load`` etc.)
+    2. ``ly_dialogs`` — dialog containers (mostly an organisational layer; carries ``dlg_label``)
+    3. ``ly_dlg_frm`` — dialog forms (the unit of "one form per screen")
+    4. ``ly_dlg_tab`` — tabs within a form (one CSS grid of fields each)
+    5. ``ly_dlg_tab_l`` — per-language tab labels (v1 had a separate `_l` table for tabs)
+    6. ``ly_dlg_col`` — fields within a tab (col_target = the column name, col_dd_id = the dd ref)
+    7. ``ly_dlg_filters`` — parameter bindings per field for the field's lookup query
+    8. ``ly_qry_sql`` joined with ``ly_query`` — resolves ``tbl_query_id`` / ``frm_query_id`` to v2 query names
+
+    Missing tables → empty lists (an old v1 schema without screens just produces no screens)."""
+    return (
+        await _rows_or_empty(engine, _SCREENS_TABLES, what="ly_tables (screens)"),
+        await _rows_or_empty(engine, _SCREENS_DIALOGS, what="ly_dialogs"),
+        await _rows_or_empty(engine, _SCREENS_DLG_FRM, what="ly_dlg_frm"),
+        await _rows_or_empty(engine, _SCREENS_DLG_TAB, what="ly_dlg_tab"),
+        await _rows_or_empty(engine, _SCREENS_DLG_TAB_L, what="ly_dlg_tab_l translations"),
+        await _rows_or_empty(engine, _SCREENS_DLG_COL, what="ly_dlg_col"),
+        await _rows_or_empty(engine, _SCREENS_DLG_FILTERS, what="ly_dlg_filters (field param binds)"),
+        await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (screen query name resolution)"),
     )
 
 

@@ -1058,6 +1058,262 @@ def _parse_jdbc(jdbc: str) -> tuple[str, int, str] | None:
     return None
 
 
+# Which v1 `query_crud` values map to which v2 `_<suffix>` companion on a screen. v1 mixes
+# REST verbs (GET/POST/PUT/PATCH/DELETE) with SQL keywords (SELECT/INSERT/UPDATE/MERGE) — the
+# migration normalises to the GET/PUT/POST/DELETE quartet that matches the connector builder's
+# Tables view + `connectorTables.ts::groupQueriesByTable` on the frontend.
+_SCREEN_CRUD_MAP: dict[str, str] = {
+    # read — used as `read_query`
+    "GET": "GET", "SELECT": "GET", "READ": "GET",
+    # update — `update_query`
+    "PUT": "PUT", "PATCH": "PUT", "UPDATE": "PUT",
+    # insert — `insert_query`
+    "POST": "POST", "INSERT": "POST", "MERGE": "POST",
+    # delete — `delete_query`
+    "DELETE": "DELETE", "REMOVE": "DELETE",
+}
+
+
+def migrate_screens(
+    table_rows: Iterable[Mapping[str, Any]],
+    dialog_rows: Iterable[Mapping[str, Any]] = (),
+    frm_rows: Iterable[Mapping[str, Any]] = (),
+    tab_rows: Iterable[Mapping[str, Any]] = (),
+    tab_l_rows: Iterable[Mapping[str, Any]] = (),
+    col_rows: Iterable[Mapping[str, Any]] = (),
+    filter_rows: Iterable[Mapping[str, Any]] = (),
+    sql_rows: Iterable[Mapping[str, Any]] = (),
+    *,
+    app_name: str,
+) -> dict[str, Any]:
+    """Build the ``screens.toml`` dict for one app from v1's table+dialog stack.
+
+    One Screen per ``ly_tables`` row, keyed by the slug of ``tbl_db_name`` (preferred — it's the
+    stable name v1 carried for cross-references) or ``tbl_label`` (fallback). Duplicates are
+    de-duped with ``_2``/``_3`` suffixes. The screen's CRUD query refs are resolved from
+    *sql_rows*: each (query_id, query_crud) yields a v2 query name via the same slugify rule
+    :func:`migrate_sql_queries` uses, so the screen's ``read_query`` / ``update_query`` /
+    ``insert_query`` / ``delete_query`` *are exactly* the names that already live in
+    ``connectors.toml``.
+
+    When ``tbl_frm_id`` is set, the screen also gets a ``dialog`` — tabs from *tab_rows* (in
+    ``tab_seq`` order, translations from *tab_l_rows*), fields from *col_rows* (in ``col_seq``
+    order, skipping placeholder rows with no ``col_target``), and per-field ``lookup_param_binds``
+    from *filter_rows* (``flt_type='DD'`` → dynamic ``source``, ``flt_type='VALUE'`` → static
+    ``value``). Without ``tbl_frm_id`` the screen is read-only / grid-edit only.
+
+    Args:
+        table_rows: ``ly_tables`` — one row per screen.
+        dialog_rows: ``ly_dialogs`` — read but not yet used (kept for forward compat / debug).
+        frm_rows: ``ly_dlg_frm`` — links a form to its (optional) read query and dialog group.
+        tab_rows: ``ly_dlg_tab`` (+ tab_l_rows: ``ly_dlg_tab_l``).
+        col_rows: ``ly_dlg_col`` — the form's fields.
+        filter_rows: ``ly_dlg_filters`` — per-field parameter bindings for the field's lookup.
+        sql_rows: ``ly_qry_sql`` joined with ``ly_query``.
+        app_name: the app these screens belong to (matches a connector name). The screen's
+            ``connector`` field is set only when the query's pool resolves to a *different*
+            connector (e.g. NOMAJDE app with screens on the ``jdedwards`` connector).
+    """
+    # ── resolve query names per (query_id, our_crud) ──────────────────────────
+    # The v2 *name* must match what migrate_sql_queries emits — and that uses the **raw** v1
+    # ``query_crud`` verbatim (so a v1 SELECT becomes ``…_select`` in connectors.toml, even
+    # though we classify it as a GET on the screen). The *slot* we route the name into
+    # (read/update/insert/delete) uses the normalised verb via _SCREEN_CRUD_MAP.
+    crud_by_qid: dict[int, dict[str, str]] = {}                     # {qid: {GET/PUT/POST/DELETE: v2_name}}
+    pool_by_qid: dict[int, str] = {}                                 # {qid: connector slug}
+    label_by_qid: dict[int, str] = {}
+    for r in sql_rows:
+        qid = r.get("query_id")
+        if qid is None:
+            continue
+        try:
+            qid = int(qid)
+        except (TypeError, ValueError):
+            continue
+        label = (r.get("query_label") or "").strip()
+        if label:
+            label_by_qid.setdefault(qid, label)
+        raw_crud = str(r.get("query_crud") or "").upper()
+        our_crud = _SCREEN_CRUD_MAP.get(raw_crud)
+        if not our_crud:
+            continue
+        # Build the v2 name from the **raw** crud (matches migrate_sql_queries' naming exactly);
+        # an empty raw crud falls back to the normalised slot — same fallback path as migrate_sql_queries.
+        name_crud = raw_crud or our_crud
+        v2_name = slugify(f"{label_by_qid.get(qid) or f'q{qid}'}_{name_crud}", fallback=f"q{qid}_{name_crud.lower()}")
+        crud_by_qid.setdefault(qid, {}).setdefault(our_crud, v2_name)
+        pool = (r.get("query_pool") or "").strip()
+        if pool:
+            pool_by_qid.setdefault(qid, slugify(pool, fallback=pool))
+
+    # ── group dialog children by (frm_id, …) ──────────────────────────────────
+    tabs_by_frm: dict[int, list[Mapping[str, Any]]] = {}
+    for r in tab_rows:
+        frm_id = r.get("frm_id")
+        if frm_id is None:
+            continue
+        tabs_by_frm.setdefault(int(frm_id), []).append(r)
+    tab_l_by_key: dict[tuple[int, int], dict[str, str]] = {}        # {(frm_id, tab_id): {lng: lbl}}
+    for r in tab_l_rows:
+        frm_id, tab_id = r.get("frm_id"), r.get("tab_id")
+        lng = (r.get("lng_id") or "").strip()
+        lbl = (r.get("lng_label") or "").strip()
+        if frm_id is None or tab_id is None or not lng or not lbl:
+            continue
+        tab_l_by_key.setdefault((int(frm_id), int(tab_id)), {})[lng] = lbl
+
+    cols_by_tab: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+    for r in col_rows:
+        frm_id, tab_id = r.get("frm_id"), r.get("tab_id")
+        if frm_id is None or tab_id is None:
+            continue
+        cols_by_tab.setdefault((int(frm_id), int(tab_id)), []).append(r)
+
+    binds_by_col: dict[tuple[int, int], list[Mapping[str, Any]]] = {}  # {(frm_id, col_id): [filter rows]}
+    for r in filter_rows:
+        frm_id, col_id = r.get("frm_id"), r.get("col_id")
+        if frm_id is None or col_id is None:
+            continue
+        binds_by_col.setdefault((int(frm_id), int(col_id)), []).append(r)
+
+    # ── build one Screen per ly_tables row ────────────────────────────────────
+    screens: dict[str, dict[str, Any]] = {}
+    taken: set[str] = set()
+    for r in table_rows:
+        try:
+            tbl_id = int(r["tbl_id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        tbl_q = r.get("tbl_query_id")
+        if tbl_q is None:
+            continue
+        try:
+            tbl_q = int(tbl_q)
+        except (TypeError, ValueError):
+            continue
+        cruds = crud_by_qid.get(tbl_q) or {}
+        read_q = cruds.get("GET")
+        if not read_q:
+            # Without a resolvable read query the screen would be broken at runtime; skip.
+            continue
+
+        seed = (r.get("tbl_db_name") or r.get("tbl_label") or "").strip()
+        sid = _uniquify(slugify(seed, fallback=f"screen_{tbl_id}"), taken)
+
+        screen: dict[str, Any] = {
+            "id": sid,
+            "label": (r.get("tbl_label") or "").strip() or None,
+            "description": (r.get("tbl_label") or "").strip() or None,
+            "read_query": read_q,
+        }
+        # Only spell out `connector` when it differs from app_name (matches menus.toml style).
+        screen_connector = pool_by_qid.get(tbl_q)
+        if screen_connector and screen_connector != app_name:
+            screen["connector"] = screen_connector
+        for our_crud, key in (("PUT", "update_query"), ("POST", "insert_query"), ("DELETE", "delete_query")):
+            if our_crud in cruds:
+                screen[key] = cruds[our_crud]
+
+        if str(r.get("tbl_auto_load") or "").upper() in _YES_FLAGS:
+            screen["auto_load"] = True
+        if str(r.get("tbl_audit") or "").upper() in _YES_FLAGS:
+            screen["audit"] = True
+        if str(r.get("tbl_editable") or "Y").upper() in _HIDDEN_FLAGS:  # `'N'` → not editable
+            screen["editable"] = False
+        if str(r.get("tbl_uploadable") or "").upper() in _YES_FLAGS:
+            screen["uploadable"] = True
+
+        # Dialog: only when the table widget is wired to a dialog form.
+        frm_id_raw = r.get("tbl_frm_id")
+        if frm_id_raw is not None:
+            try:
+                frm_id = int(frm_id_raw)
+            except (TypeError, ValueError):
+                frm_id = None
+            if frm_id is not None and frm_id in tabs_by_frm:
+                tabs: list[dict[str, Any]] = []
+                seen_tab_ids: set[str] = set()
+                for t in tabs_by_frm[frm_id]:
+                    raw_tab_id = t.get("tab_id")
+                    if raw_tab_id is None:
+                        continue
+                    tab_v1_id = int(raw_tab_id)
+                    tab_label = (t.get("tab_label") or "").strip()
+                    tab_v2_id = _uniquify(slugify(tab_label, fallback=f"tab_{tab_v1_id}"), seen_tab_ids)
+                    tab_out: dict[str, Any] = {"id": tab_v2_id}
+                    if tab_label:
+                        tab_out["label"] = tab_label
+                    l = tab_l_by_key.get((frm_id, tab_v1_id))
+                    if l:
+                        tab_out["l"] = l
+                    cols_for_tab = cols_by_tab.get((frm_id, tab_v1_id), [])
+                    if t.get("tab_cols") not in (None, 0):
+                        try:
+                            tab_out["cols"] = int(t["tab_cols"])
+                        except (TypeError, ValueError):
+                            pass
+                    if str(t.get("tab_disable_add") or "").upper() in _YES_FLAGS:
+                        tab_out["hide_on_add"] = True
+                    if str(t.get("tab_disable_edit") or "").upper() in _YES_FLAGS:
+                        tab_out["hide_on_edit"] = True
+
+                    fields: list[dict[str, Any]] = []
+                    for c in cols_for_tab:
+                        target = (c.get("col_target") or "").strip()
+                        if not target:                              # placeholder/layout-only rows
+                            continue
+                        dd_id = (c.get("col_dd_id") or "").strip()
+                        col_label = (c.get("col_label") or "").strip()
+                        field: dict[str, Any] = {"name": target}
+                        if dd_id and dd_id != target:
+                            field["dd"] = dd_id
+                        if col_label:
+                            field["label"] = col_label
+                        if str(c.get("col_visible") or "Y").upper() in _HIDDEN_FLAGS:
+                            field["hidden"] = True
+                        if str(c.get("col_disabled") or "").upper() in _YES_FLAGS:
+                            field["disabled"] = True
+                        if str(c.get("col_required") or "").upper() in _YES_FLAGS:
+                            field["required"] = True
+                        if c.get("col_colspan") not in (None, 0):
+                            try:
+                                field["colspan"] = int(c["col_colspan"])
+                            except (TypeError, ValueError):
+                                pass
+                        default_v = (c.get("col_default") or "").strip()
+                        if default_v:
+                            field["default"] = default_v
+                        # Field-level parameter bindings (v1 ly_dlg_filters).
+                        binds: list[dict[str, Any]] = []
+                        for f in binds_by_col.get((frm_id, int(c["col_id"])), []):
+                            target_p = (f.get("flt_target") or "").strip()
+                            if not target_p:
+                                continue
+                            ftype = (f.get("flt_type") or "").strip().upper()
+                            if ftype == "VALUE":
+                                v = f.get("flt_value")
+                                if v is None or str(v).strip() == "":
+                                    continue
+                                binds.append({"param": target_p, "value": str(v)})
+                            elif ftype == "DD":
+                                src = (f.get("flt_source") or "").strip()
+                                if not src:
+                                    continue
+                                binds.append({"param": target_p, "source": src})
+                            # Other flt_type values (FIELD / etc.) — Phase 6 follow-up; skip for now.
+                        if binds:
+                            field["lookup_param_binds"] = binds
+                        fields.append(field)
+                    tab_out["fields"] = fields
+                    tabs.append(tab_out)
+                if tabs:
+                    screen["dialog"] = {"tabs": tabs}
+
+        screens[sid] = screen
+
+    return {"screens": {app_name: screens}}
+
+
 def migrate_pools(
     applications: Iterable[Mapping[str, Any]],
     *,

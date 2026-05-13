@@ -581,7 +581,7 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `extra="forbid"`; validates unique ids, parents exist & don't cycle, folder-vs-leaf shape),
   `load_menus`/`parse_menus`, `build_menu_tree(app_menu, *, app, language, keep)` → nested dicts
   (labels resolved in *language*, `keep(item, connector)` prunes leaves, empty folders collapse).
-- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu`,
+- `liberty/migrate_cli.py` (`liberty-migrate` script) — `sql | api | all | dictionary | menu | screen`,
   `--source-url <v1-db-url>`, `--dbtype`, `--prefix`, `-o out.toml` (else stdout); `sql`/`all`
   also scaffold the `ly_applications` pools + carry over the `ly_tbl_col`/`ly_dlg_col` column
   hints + `ly_tbl_filters`/`ly_dlg_filters` cascading-filter deps + `ly_cdn_params` conditional-render
@@ -591,7 +591,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `dictionary [--default-language en] [--connector <app>]` migrates `ly_dictionary` (+ `ly_dictionary_l`)
   — `--connector` nests the entries under `[connectors.<app>.entries.*]` so several migrated apps don't
   clash on a `dd_id`; `menu --connector <app>` migrates `ly_menus` (+ `ly_menus_l`) → `config/menus.toml`
-  (one `[menus.<app>]` per app — run `sql`/`all` first so the menu's query targets exist). Prepends a
+  (one `[menus.<app>]` per app — run `sql`/`all` first so the menu's query targets exist);
+  `screen --connector <app>` migrates `ly_tables` (+ `ly_dialogs`/`ly_dlg_frm`/`ly_dlg_tab`/`ly_dlg_col`/
+  `ly_dlg_filters`) → `config/screens.toml` — one ``[screens.<app>.<id>]`` per ``ly_tables`` row,
+  ``connector`` only set when the query's pool differs from ``<app>``, ``read_query`` /
+  ``update_query`` / ``insert_query`` / ``delete_query`` resolved against ``ly_qry_sql`` (the
+  v2 name keeps the **raw** v1 ``query_crud`` verbatim — matches what ``migrate_sql_queries``
+  emits in ``connectors.toml``), and an inline ``dialog`` built from the form's tabs/fields when
+  ``tbl_frm_id`` resolves. (Phase 6 slice 1 — runtime + builder wiring still pending.) Prepends a
   `# migrated: …` summary + the `${…}` placeholders the operator must fill in (incl. each
   `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
 v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
@@ -650,13 +657,51 @@ nomaubl's `LicenseVerifier`; **same JWT shape and key-pair as nomaubl**). v2 onl
 - `liberty/license_cli.py` (`liberty-license` script) — `verify [<key>]` / `status` → JSON status (exit 0 if
   full, 1 if restricted); reads the key from the arg / stdin / `[license] key`; `--public-key PATH` overrides.
 
-306 tests pass.
+**Phase 6 (Form/screen engine) — slice 1 (Screen + ParamBind + migration) DONE.** Lives in
+`liberty/screens/` — the v2 collapse of v1's ``ly_tables`` → ``ly_dialogs`` → ``ly_dlg_frm`` →
+``ly_dlg_tab`` → ``ly_dlg_col`` → ``ly_dlg_filters`` chain into one ``Screen`` entity per
+business object:
+- `liberty/screens/config.py` — Pydantic shape for ``config/screens.toml`` (``[screens.<app>.<id>]``
+  per screen): ``Screen`` (``id``, ``label``, ``description``, ``connector?``, ``read_query``,
+  ``update_query?``/``insert_query?``/``delete_query?``, ``auto_load``, ``audit``, ``editable``,
+  ``uploadable``, ``dialog?``, ``actions`` & ``row_menu`` — placeholders for slices 4 & 6), inline
+  ``ScreenDialog`` (``title?``, ``tabs[]``) → ``ScreenTab`` (``id``, ``label?``, ``l``, ``cols?``,
+  ``hide_on_add``/``hide_on_edit``, ``fields[]``) → ``ScreenField`` (``name``, ``dd?``, ``label?``,
+  ``hidden``/``disabled``/``required``, ``colspan?``, ``default?``, ``lookup_param_binds[]``), and
+  the unified ``ParamBind`` (``{param, value | source}``) — v2's port of v1's ``ly_dlg_filters``
+  (and ``ly_tbl_filters`` / ``ly_dictionary_filters``: one mechanism for every kind of parameter
+  passing — dialog lookups, action arguments, row menu triggers, etc.). ``parse_screens`` injects
+  each screen's ``id`` from its dict key; a mismatched explicit ``id`` is rejected. ``load_screens``
+  → an empty ``ScreensFile`` when no file.
+- `liberty/migrations/source.py::read_screens(engine)` returns 8 row-sets (the seven dialog tables
+  + ``ly_qry_sql ⋈ ly_query`` for v2-name resolution); missing tables → ``[]`` with a logged warning.
+- `liberty/migrations/v1.py::migrate_screens(*, app_name=…)` builds the ``screens.toml`` dict:
+  one Screen per ``ly_tables`` row, ``id`` from ``slugify(tbl_db_name | tbl_label | screen_<id>)``
+  (deduped via ``_2``/``_3``), CRUD slot map (REST + SQL keywords) routes the resolved v2 name
+  into ``read_query`` / ``update_query`` / ``insert_query`` / ``delete_query``; the **v2 name itself
+  keeps the raw v1 ``query_crud`` verbatim** so it lines up with what ``migrate_sql_queries`` emits
+  in ``connectors.toml`` (e.g. v1 ``GET`` → ``users_get``, v1 ``SELECT`` → ``users_select``).
+  ``connector`` is set only when the query's pool ≠ ``app_name``. With ``tbl_frm_id`` resolvable,
+  the screen also gets a ``dialog`` — tabs from ``ly_dlg_tab`` (in ``tab_seq`` order, translations
+  from ``ly_dlg_tab_l``), fields from ``ly_dlg_col`` (placeholder rows with empty ``col_target``
+  dropped), per-field ``lookup_param_binds`` from ``ly_dlg_filters`` (``flt_type='VALUE'`` →
+  ``{param, value}``, ``flt_type='DD'`` → ``{param, source}``).
+- `liberty/migrate_cli.py` — `screen --connector <app>` subcommand; summary line reports
+  ``N screen(s) for [screens.<app>] — X with dialog, Y with audit, Z cross-connector, F dialog
+  field(s), B param-bind(s)``.
+Real-data check (the user's live DBs): 96 screens for nomasx1 (14 with dialog, 6 with audit, 122
+fields, 2 param-binds) and 12 for nomajde (6 dialogs, 10 cross-connector, 199 fields, 2 param-binds)
+migrate cleanly. *Still pending in slice 1f:* runtime wiring (``app.state.screens`` + a
+``GET /api/screens`` route) and the Settings-tab screens builder. Slices 2-6 (dialog runtime,
+per-field conditions, actions/events, AUD audit, row menus) follow.
+
+327 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
 the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
-contextual menus — the `visible_when`/`filter_from` work is its table-side first slice; design it
-against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
+contextual menus — slice 1 (Screen + ParamBind + migration) **done**; the `visible_when`/`filter_from`
+work is its table-side first slice; design it against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
 the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed`
@@ -678,6 +723,7 @@ Python/local-Spark jobs & scheduling).
 .venv/bin/liberty-migrate all --source-url postgresql+asyncpg://…/libnsx1 -o migrated.toml   # v1 ly_* → connectors.toml fragment
 .venv/bin/liberty-migrate dictionary --source-url postgresql+asyncpg://…/libnsx1 -o config/dictionary.toml   # v1 ly_dictionary → shared field labels
 .venv/bin/liberty-migrate menu --source-url postgresql+asyncpg://…/libnsx1 --connector nomasx1 -o config/menus.toml   # v1 ly_menus → app nav tree
+.venv/bin/liberty-migrate screen --source-url postgresql+asyncpg://…/libnsx1 --connector nomasx1 -o config/screens.toml   # v1 ly_tables+ly_dlg_* → screens.toml
 .venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
 .venv/bin/liberty-license verify "$LIBERTY_LICENSE_KEY"   # inspect a license key → JSON status (exit 0=full, 1=restricted); `status` checks the configured one
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
@@ -732,7 +778,8 @@ config/         app.toml (committed — framework config) · connectors.toml / d
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py, license_cli.py
                 · connectors/{config,base,db,sql,api,registry,dictionary}.py
                 · licensing/{__init__.py (verify_license), public.pem}   (RS256 license-key verification — the embedded public key)
-                · menus/config.py · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
+                · menus/config.py · screens/config.py (ParamBind, ScreenField, ScreenTab, ScreenDialog, ScreenAction, Screen, ScreensFile)
+                · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
                   (authstore = the TOML/DB backend abstraction + config/auth.toml schema; models/db/service = the DB backend's internals)
                 · ai/{tools,connector_tools,assistant,routes}.py
                 · web/{deps,errors,connectors,menus,license,admin}.py

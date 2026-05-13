@@ -48,6 +48,7 @@ from liberty.migrations import (
     migrate_dictionary,
     migrate_key_columns,
     migrate_menus,
+    migrate_screens,
     migrate_pools,
     migrate_sql_queries,
     migrate_lookup_param_names,
@@ -61,6 +62,7 @@ from liberty.migrations import (
     read_dictionary,
     read_dictionary_rules,
     read_menus,
+    read_screens,
     read_sql_queries,
     read_table_filters,
     read_table_meta,
@@ -92,6 +94,8 @@ async def _build(args: argparse.Namespace) -> dict:
             )
         if args.command == "menu":
             return migrate_menus(*await read_menus(engine), app_name=args.connector)
+        if args.command == "screen":
+            return migrate_screens(*await read_screens(engine), app_name=args.connector)
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -158,6 +162,24 @@ def _summary(data: dict, *, command: str) -> str:
             lines.append("# folder(s) with no children (e.g. a v1 Dashboard/Chart component we can't map): "
                          + ", ".join(stray) + " — give each children or a `type`/`target`, or drop it")
         return "\n".join(lines)
+    if command == "screen":
+        apps = data.get("screens") or {}
+        app = next(iter(apps), "?")
+        screens = apps.get(app) or {}
+        n = len(screens)
+        with_dlg = sum(1 for s in screens.values() if s.get("dialog"))
+        with_audit = sum(1 for s in screens.values() if s.get("audit"))
+        cross = sum(1 for s in screens.values() if s.get("connector") and s["connector"] != app)
+        n_fields = sum(len(t.get("fields") or []) for s in screens.values() for t in ((s.get("dialog") or {}).get("tabs") or []))
+        n_binds = sum(
+            len(f.get("lookup_param_binds") or [])
+            for s in screens.values()
+            for t in ((s.get("dialog") or {}).get("tabs") or [])
+            for f in (t.get("fields") or [])
+        )
+        return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "
+                f"{with_audit} with audit, {cross} cross-connector, {n_fields} dialog field(s), "
+                f"{n_binds} param-bind(s) — put this at config/screens.toml")
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]
@@ -193,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("all", "sql + api"),
         ("dictionary", "migrate ly_dictionary (+ ly_dictionary_l) → dictionary.toml"),
         ("menu", "migrate ly_menus (+ ly_menus_l) → menus.toml"),
+        ("screen", "migrate ly_tables + ly_dlg_frm/_tab/_col/_filters → screens.toml"),
     ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
@@ -203,6 +226,9 @@ def build_parser() -> argparse.ArgumentParser:
             p.set_defaults(prefix="", dbtype=None)
         elif name == "menu":
             p.add_argument("--connector", required=True, help="the app/connector this menu belongs to ([menus.<name>])")
+            p.set_defaults(prefix="", dbtype=None, default_language="en")
+        elif name == "screen":
+            p.add_argument("--connector", required=True, help="the app/connector these screens belong to ([screens.<name>])")
             p.set_defaults(prefix="", dbtype=None, default_language="en")
         else:
             p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
