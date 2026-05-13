@@ -160,24 +160,32 @@ export default function DictionaryBuilder() {
   // rules-of-hooks check (#310).
   const augmentedEnums: FrameworkEnums = useMemo(() => {
     const base: FrameworkEnums = { ...(schemas?.framework_enums ?? {}) }
-    const mkValues = (...maps: (Record<string, Record<string, unknown>> | undefined)[]): { value: string; label: string }[] => {
+    // `priority` is the chain of fields to try for the dropdown's *display label*. The two record
+    // shapes have different "display name" fields — for an EnumDef it's `label` ("Status"); for a
+    // LookupDef it's `description` ("Get UDC Description"), since `label` there is the result
+    // column whose value to *display* (e.g. "DL01") — a column name, not a human name.
+    const mkValues = (
+      priority: ReadonlyArray<string>,
+      ...maps: (Record<string, Record<string, unknown>> | undefined)[]
+    ): { value: string; label: string }[] => {
       const out = new Map<string, string>()
       for (const m of maps) {
         if (!m) continue
         for (const [id, rec] of Object.entries(m)) {
-          const lbl = typeof (rec as Record<string, unknown>)?.label === 'string'
-            ? ((rec as Record<string, unknown>).label as string)
-            : typeof (rec as Record<string, unknown>)?.description === 'string'
-              ? ((rec as Record<string, unknown>).description as string)
-              : id
+          const r = rec as Record<string, unknown>
+          let lbl = id
+          for (const key of priority) {
+            const v = r?.[key]
+            if (typeof v === 'string' && v.trim()) { lbl = v; break }
+          }
           out.set(id, lbl)
         }
       }
       return [...out.entries()].map(([value, label]) => ({ value, label }))
     }
     const overlay = scope && dict ? (dict.connectors ?? {})[scope] : undefined
-    base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(dict?.enums, overlay?.enums) }
-    base.LOOKUP_IDS = { label: 'Lookups (current scope)', values: mkValues(dict?.lookups, overlay?.lookups) }
+    base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(['label'], dict?.enums, overlay?.enums) }
+    base.LOOKUP_IDS = { label: 'Lookups (current scope)', values: mkValues(['description'], dict?.lookups, overlay?.lookups) }
     return base
   }, [schemas, dict, scope])
 
