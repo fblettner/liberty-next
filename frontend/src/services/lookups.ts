@@ -94,14 +94,34 @@ function fetchLookup(spec: LookupSpec): Promise<LookupData> {
         const byColLower = new Map(r.columns.map((c) => [c.name.toLowerCase(), c.name]))
         const vKey = byColLower.get(spec.value.toLowerCase()) ?? spec.value
         const lKey = byColLower.get(spec.label.toLowerCase()) ?? spec.label
-        const map = new Map<string, string>()
+        // Params double as a *client-side* row filter: v1 (and migrated v2) UDC SQLs don't carry a
+        // WHERE on :SY/:RT, they just return every UDC row and v1's runtime narrowed them. Match
+        // each non-empty param against the same-named result column (case-insensitive, trimmed) —
+        // this is what makes the Language column show "Français" instead of "Fahrenheit" for "F".
+        // If the SQL *does* have a WHERE on the param (some future query), the URL bind already
+        // narrowed server-side and the filter here is a no-op.
+        const paramFilters: Array<[string, string]> = spec.params
+          ? Object.entries(spec.params)
+              .filter(([, v]) => v !== '' && v != null)
+              .map(([k, v]) => [(byColLower.get(k.toLowerCase()) ?? k), String(v).trim()])
+          : []
+        const rows: Record<string, unknown>[] = []
         for (const row of r.rows) {
+          let keep = true
+          for (const [col, want] of paramFilters) {
+            const got = row[col]
+            if (got === null || got === undefined || String(got).trim() !== want) { keep = false; break }
+          }
+          if (keep) rows.push(row)
+        }
+        const map = new Map<string, string>()
+        for (const row of rows) {
           const v = row[vKey]
           if (v === null || v === undefined) continue
           const l = row[lKey]
           map.set(String(v), l === null || l === undefined ? String(v) : String(l))
         }
-        return { map, rows: r.rows, vKey, lKey, byColLower }
+        return { map, rows, vKey, lKey, byColLower }
       })
       .catch((e) => {
         cache.delete(key)
