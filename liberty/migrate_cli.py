@@ -50,6 +50,7 @@ from liberty.migrations import (
     migrate_menus,
     migrate_pools,
     migrate_sql_queries,
+    migrate_lookup_param_names,
     migrate_table_filters,
     migrate_table_meta,
     read_api,
@@ -98,6 +99,9 @@ async def _build(args: argparse.Namespace) -> dict:
             tbl_meta, frm_meta = await read_table_meta(engine)
             tbl_flt, dlg_flt = await read_table_filters(engine)
             cdn_params = await read_column_conditions(engine)
+            # Pull ly_lookup + ly_lkp_params so each lookup-target query gets its WHERE wrap +
+            # declared params (UDC etc. — v1's SQL didn't carry its own WHERE).
+            _, _, _, lookup_rows, _, _, lookup_params_rows = await read_dictionary_rules(engine)
             parts.append(migrate_sql_queries(
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
                 column_hints=migrate_column_hints(tbl_cols, dlg_cols),
@@ -105,6 +109,7 @@ async def _build(args: argparse.Namespace) -> dict:
                 column_visibility=migrate_column_visibility(tbl_cols, dlg_cols, cdn_params),
                 table_meta=migrate_table_meta(tbl_meta, frm_meta),
                 key_columns=migrate_key_columns(tbl_cols, dlg_cols),
+                lookup_params=migrate_lookup_param_names(lookup_rows, lookup_params_rows),
             ))
         if args.command in ("api", "all"):
             conns, apis, headers, params = await read_api(engine)

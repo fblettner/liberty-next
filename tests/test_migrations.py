@@ -564,6 +564,32 @@ def test_migrate_dictionary_lookup_params() -> None:
     _ = EnumDef  # silence unused-import warning when the helper isn't needed for an assertion path
 
 
+def test_migrate_sql_queries_lookup_param_wrap() -> None:
+    """A read query used as a lookup target (ly_lookup.lkp_query_id) gets its SQL wrapped with
+    `WHERE (:P IS NULL OR <col> = :P)` per declared param, and the params are declared on
+    QueryDef.params so the SQL connector binds them. NULL/blank → no filter."""
+    from liberty.migrations import migrate_lookup_param_names
+    queries = [{"query_id": 7, "query_label": "Get UDC Description", "query_type": "LOOKUP"}]
+    sql_rows = [{
+        "query_id": 7, "query_dbtype": "postgres", "query_crud": "GET", "query_pool": "ds",
+        "query_sqlquery": "SELECT DRDL01 DL01, DRKY KY, DRRT RT, DRSY SY FROM F0005",
+    }]
+    lookup_rows = [{"lkp_id": "1", "lkp_query_id": 7}]
+    lookup_params_rows = [
+        {"lkp_id": "1", "dd_id": "SY"},
+        {"lkp_id": "1", "dd_id": "RT"},
+    ]
+    by_qid = migrate_lookup_param_names(lookup_rows, lookup_params_rows)
+    assert by_qid == {7: ["SY", "RT"]}
+    out = migrate_sql_queries(queries, sql_rows, dbtype="postgres", lookup_params=by_qid)
+    q = out["connectors"]["ds"]["queries"][0]
+    sql = q["sql"]
+    assert "lib_lkp" in sql and ":SY" in sql and ":RT" in sql
+    assert "IS NULL OR" in sql           # NULL bind → match every row
+    assert q["params"] == [{"name": "SY"}, {"name": "RT"}]
+    assert "writable" not in q           # read query → omitted (default False)
+
+
 def test_migrate_dictionary_lookup_param_names() -> None:
     """v1's ly_lkp_params declares which `:placeholder` params each lookup's query needs (one
     row per (lkp_id, dd_id)). The migration attaches the ordered list to the lookup as

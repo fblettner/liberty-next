@@ -136,6 +136,26 @@ def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "defaul
     return f"SELECT * FROM (\n{base_sql}\n) lib_flt\nWHERE 1=1\n{preds}"
 
 
+# A read query used as a lookup target (v1 ly_lookup.lkp_query_id) needs its declared params
+# (ly_lkp_params) to *actually filter* — v1's SQLs return every row and the framework narrowed
+# them in code. Wrap with `SELECT * FROM (…) lib_lkp WHERE (param IS NULL OR <col> = param)` per
+# declared param: a NULL/unset bind matches every row, an explicit value narrows the result. The
+# bind and column are CAST to text, same as `_wrap_with_filters` — pins the asyncpg bind type
+# and makes the comparison portable across PG / Oracle / SQLite. The wrapped column name *is*
+# the param name (UDC: SY → DRSY DRSY, aliased as SY in the SELECT — so the outer wrap can
+# reference `lib_lkp.SY` regardless of the inner alias).
+def _lookup_param_predicate(param: str, vchar: str) -> str:
+    pv = f"CAST(:{param} AS {vchar})"
+    cv = f"CAST(lib_lkp.{param} AS {vchar})"
+    return f"  AND ({pv} IS NULL OR {pv} = '' OR {cv} = {pv})"
+
+
+def _wrap_with_lookup_params(base_sql: str, params: list[str], *, dialect: str = "default") -> str:
+    vchar = "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
+    preds = "\n".join(_lookup_param_predicate(p, vchar) for p in params)
+    return f"SELECT * FROM (\n{base_sql}\n) lib_lkp\nWHERE 1=1\n{preds}"
+
+
 def _simplify_upsert(sql: str) -> str:
     """v1's ``_post`` SQL for some tables is an *upsert* — PostgreSQL ``INSERT … ON CONFLICT … DO
     UPDATE …`` or Oracle ``MERGE INTO … WHEN NOT MATCHED THEN INSERT (…) VALUES (…)`` — so an Excel
@@ -233,6 +253,7 @@ def migrate_sql_queries(
     column_visibility: Mapping[int, Mapping[str, list[dict[str, Any]]]] | None = None,
     table_meta: Mapping[int, Mapping[str, Any]] | None = None,
     key_columns: Mapping[int, list[str]] | None = None,
+    lookup_params: Mapping[int, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Build the ``{pools, connectors}`` dict for the SQL side.
 
@@ -262,6 +283,13 @@ def migrate_sql_queries(
         key_columns: ``{query_id: [col, …]}`` (from :func:`migrate_key_columns`) — the row-key columns
             (v1's ``col_key``); attached to the read query as ``key_columns`` (the TableView's Excel
             import uses them to decide update-vs-insert).
+        lookup_params: ``{query_id: [param_name, …]}`` (from :func:`migrate_lookup_param_names`) —
+            for queries used as a lookup target (v1's ``ly_lookup.lkp_query_id``), wrap the read SQL
+            with ``WHERE (:P IS NULL OR <col> = :P)`` per declared param. v1's lookup queries didn't
+            carry their own WHERE (the framework filtered rows in code), so the wrapped form is what
+            actually narrows the result server-side; the params are also declared on ``QueryDef.params``
+            so the SQL connector binds them. NULL/blank params match every row → backward-compatible
+            with callers that don't pass anything.
     SQL is also touched per crud (v2's TableView already separates update/insert, so v1's upsert
     queries are split apart): a ``_post`` upsert (PostgreSQL ``INSERT … ON CONFLICT`` / Oracle
     ``MERGE``) collapses to a plain ``INSERT`` (:func:`_simplify_upsert`); a ``_put`` upsert collapses
@@ -323,10 +351,17 @@ def migrate_sql_queries(
         tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
+        # Lookup-target params (v1 ly_lkp_params) — declarative names the lookup callers bind. We
+        # wrap the read SQL with `(:P IS NULL OR <col> = :P)` so they actually narrow server-side
+        # (v1's SQL didn't have its own WHERE — the framework filtered in code). Only applies to
+        # *read* queries; a writable query isn't a lookup target.
+        lkp_params = list((lookup_params or {}).get(qid, [])) if is_read else []
         is_update = crud in _UPDATE_CRUD
         # build each dialect variant. read + filter columns → `SELECT * FROM (…) lib_flt WHERE <filters>`.
-        # an UPDATE-crud query: an upsert there collapses to a plain UPDATE, then its WHERE is rebound
-        # to `:<col>_ORIGINAL`. an INSERT-crud upsert (`_post`) collapses to a plain INSERT. then
+        # a read that's a lookup target → `SELECT * FROM (…) lib_lkp WHERE <params>` (wraps independently of
+        # filter_cols — a query can be both a TableView source AND a lookup target). an UPDATE-crud
+        # query: an upsert there collapses to a plain UPDATE, then its WHERE is rebound to
+        # `:<col>_ORIGINAL`. an INSERT-crud upsert (`_post`) collapses to a plain INSERT. then
         # ORDER BY is appended (to the outer query, when the read was wrapped).
         ob = orderbys.get(key, "")
         def _variant(raw: str, dia: str) -> str:
@@ -338,8 +373,13 @@ def migrate_sql_queries(
                 s = raw
             else:
                 s = _simplify_upsert(raw)
+            if lkp_params:
+                s = _wrap_with_lookup_params(s, lkp_params, dialect=dia)
             return f"{s}\nORDER BY {ob}" if ob else s
         variants = {dia: _variant(raw, dia) for dia, raw in groups[key].items()}
+        # Declare the lookup params on `QueryDef.params` so the SQL connector accepts the binds and
+        # the runtime knows they're optional (blank → SQL NULL → the WHERE branch lets every row through).
+        param_defs = [{"name": p} for p in lkp_params]
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
@@ -349,6 +389,7 @@ def migrate_sql_queries(
                 "key_columns": (kcs or None),  # omit when empty — used by the Excel-import match-by-key
                 "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
                 "sql": _sql_value(variants),
+                "params": (param_defs or None),
                 "columns": (hints or None),  # omit when empty
             })
         )
@@ -370,6 +411,36 @@ _FORMAT_NOOP = {"", "text", "varchar", "varchar2", "nvarchar", "string", "char",
 def _column_format(col_type: Any) -> str | None:
     t = str(col_type or "").strip().lower()
     return t if t and t not in _FORMAT_NOOP else None
+
+
+def migrate_lookup_param_names(
+    lookup_rows: Iterable[Mapping[str, Any]],
+    lookup_params_rows: Iterable[Mapping[str, Any]],
+) -> dict[int, list[str]]:
+    """Crosswalk v1's ``ly_lookup`` (lkp_id → lkp_query_id) + ``ly_lkp_params`` (lkp_id, dd_id) into
+    ``{query_id: [param_name, …]}`` keyed on the query the lookup points at. Fed to
+    :func:`migrate_sql_queries` (``lookup_params=…``) so each lookup-target read query gets wrapped
+    with a ``WHERE`` on its declared params and the params are declared on ``QueryDef.params``.
+    Multiple lookups pointing at the same query get their param lists unioned (file order preserved)."""
+    lkp_to_qid: dict[str, int] = {}
+    for r in lookup_rows:
+        lid = str(r.get("lkp_id") or "").strip()
+        qid = r.get("lkp_query_id")
+        if lid and qid is not None:
+            try:
+                lkp_to_qid[lid] = int(qid)
+            except (TypeError, ValueError):
+                continue
+    out: dict[int, list[str]] = {}
+    for r in lookup_params_rows:
+        lid = str(r.get("lkp_id") or "").strip()
+        name = str(r.get("dd_id") or "").strip()
+        if not lid or not name or lid not in lkp_to_qid:
+            continue
+        lst = out.setdefault(lkp_to_qid[lid], [])
+        if name not in lst:
+            lst.append(name)
+    return out
 
 
 def migrate_column_hints(
