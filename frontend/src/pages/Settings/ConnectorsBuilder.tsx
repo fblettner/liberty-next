@@ -21,7 +21,11 @@ import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTabl
 type Connectors = Record<string, Record<string, unknown>>
 
 const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px; min-width: 0;`
+// Left nav scrolls on its own (a connector list with dozens of entries shouldn't drag the page
+// along when wheeled). Search row + the two "+ Add" buttons stay pinned outside the scroller —
+// items live in NavList.
+const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
   border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
@@ -49,7 +53,9 @@ const ModeBtn = styled.button<{ $active?: boolean }>`
   & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
   &:hover { color: ${colors.text.primary}; }
 `
-const TableList = styled.div`display: flex; flex-direction: column; gap: 6px;`
+// Same idea as NavList — a connector with dozens of tables (jdedwards has 52) needs its own
+// scroller so wheeling doesn't drag the whole Settings page along.
+const TableList = styled.div`display: flex; flex-direction: column; gap: 6px; max-height: calc(100dvh - 22rem); overflow-y: auto; padding-right: 4px;`
 const TableRow = styled.button`
   display: flex; align-items: center; gap: 10px; padding: 9px 11px; width: 100%; text-align: left;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
@@ -202,12 +208,14 @@ export default function ConnectorsBuilder() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${names.length}…`} />
             </NavSearch>
           )}
-          {shownNames.map((n) => (
-            <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
-              {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
-            </NavItem>
-          ))}
-          {shownNames.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '2px 4px' }}>no match</div>}
+          <NavList>
+            {shownNames.map((n) => (
+              <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
+                {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
+              </NavItem>
+            ))}
+            {shownNames.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '2px 4px' }}>no match</div>}
+          </NavList>
           <Row gap={4} style={{ marginTop: 6 }}>
             <Button $variant="ghost" $size="sm" onClick={() => addConnector('sql')} style={{ flex: 1, justifyContent: 'flex-start' }}><Plus size={13} /> {t('settings.connectors.addSql')}</Button>
           </Row>

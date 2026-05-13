@@ -43,7 +43,12 @@ const Chip = styled.button<{ $active?: boolean }>`
   &:hover { color: ${colors.text.primary}; }
 `
 const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0;`
+// The left nav has its own scroll container so a long list (think 347 dictionary entries) doesn't
+// drag the whole page along when you wheel through it. The search row and the "+ Add" button stay
+// pinned outside the scroller, the items live in NavList. Capped at the viewport minus the
+// Settings chrome above + the Save bar below; if the list is short the cap is a no-op.
+const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
   border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
@@ -249,25 +254,27 @@ export default function DictionaryBuilder() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${keys.length}…`} />
             </NavSearch>
           )}
-          {shown.map((k) => {
-            // Help the user find the right record at a glance — show its label/description below
-            // the key (entries/enums → `label`; lookups → `description`). Falls back to nothing when
-            // the record has no human-readable side-name yet (in that case only the key shows).
-            const rec = section[k] as Record<string, unknown> | undefined
-            const sub = kind === 'lookups' ? rec?.description : rec?.label
-            const subStr = typeof sub === 'string' && sub.trim() ? sub : null
-            return (
-              <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
-                <span className="name">{k}</span>
-                {subStr && <span className="sub">{subStr}</span>}
-              </NavItem>
-            )
-          })}
-          {shown.length === 0 && (
-            <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '4px 4px' }}>
-              {keys.length ? t('common.noMatches') : t(`settings.dictionary.${kind}.empty`)}
-            </div>
-          )}
+          <NavList>
+            {shown.map((k) => {
+              // Help the user find the right record at a glance — show its label/description below
+              // the key (entries/enums → `label`; lookups → `description`). Falls back to nothing when
+              // the record has no human-readable side-name yet (in that case only the key shows).
+              const rec = section[k] as Record<string, unknown> | undefined
+              const sub = kind === 'lookups' ? rec?.description : rec?.label
+              const subStr = typeof sub === 'string' && sub.trim() ? sub : null
+              return (
+                <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
+                  <span className="name">{k}</span>
+                  {subStr && <span className="sub">{subStr}</span>}
+                </NavItem>
+              )
+            })}
+            {shown.length === 0 && (
+              <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '4px 4px' }}>
+                {keys.length ? t('common.noMatches') : t(`settings.dictionary.${kind}.empty`)}
+              </div>
+            )}
+          </NavList>
           <Button $variant="ghost" $size="sm" onClick={addRecord} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
             <Plus size={13} /> {t(`settings.dictionary.${kind}.add`)}
           </Button>

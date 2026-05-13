@@ -15,7 +15,10 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 type Pools = Record<string, Record<string, unknown>>
 
 const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-const NavCol = styled.div`flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px;`
+// Left nav scrolls on its own — pools rarely run into dozens, but the cap keeps the page wheel-
+// friendly when a deployment does. Add button stays pinned outside the scroller.
+const NavCol = styled.div`flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100dvh - 18rem);`
+const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavItem = styled.button<{ $active?: boolean }>`
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
@@ -91,9 +94,11 @@ export default function PoolsBuilder() {
       <Mono>{path}</Mono>
       <Split>
         <NavCol>
-          {names.map((n) => (
-            <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}><Database size={13} /> {n}</NavItem>
-          ))}
+          <NavList>
+            {names.map((n) => (
+              <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}><Database size={13} /> {n}</NavItem>
+            ))}
+          </NavList>
           <Button $variant="ghost" $size="sm" onClick={addPool} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
             <Plus size={13} /> {t('settings.pools.add')}
           </Button>
