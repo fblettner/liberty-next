@@ -509,12 +509,28 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   the Form view. **Form** keeps the full `SchemaNavigator` (General/Pool/Queries) as the escape hatch for
   connector-level settings and non-CRUD queries. The grouping is rule-based — no on-disk change to the
   TOML — so it stays a pure UI feature, easy to evolve.
-Verdict on the schema-driven approach: **it pays off** — the pool & connector forms are essentially all
-generated; the bespoke code is `SchemaForm` + `SchemaNavigator` (~350 lines, grows slowly) + the per-builder
-list/nav/save wiring (~120 each, all reusable). Next: **rename** support (which, for a table, would rename
-all 4 CRUD slots in one go), a **dictionary builder**, a **menus tree builder** (a DnD tree), a **SQL
-editor + "test run" preview** for queries. The general UI polish (modern look & feel — spacing, validation
-surfaced inline, etc.) rides along.
+- **Duplicate table** (skipping rename — it cascades into menus.toml and would later cascade into
+  screens/dialogs; brittle. A table's user-facing title comes from `description`, editable in the General
+  tab, so plain rename isn't needed). A `Duplicate` action on each row + in the editor header deep-clones
+  every `<oldBase>_<crud>` query under a new base name (the user picks; default `<oldBase>_copy`), with
+  independent nested `params`/`columns`/per-dialect `sql` maps. Refuses to overwrite an existing base in
+  the same connector. After copy the selection jumps to the new table.
+- **`DictionaryBuilder`** (`config/dictionary.toml`) — sub-tabs for *Entries* / *Enums* / *Lookups*, a
+  scope chip strip (*Shared* + one chip per existing connector overlay + "+ Add connector scope") that
+  picks between the top-level `[entries.*]` etc. and `[connectors.<name>.entries.*]` (v1's per-app
+  isolation), per-record `SchemaNavigator` over the matching schema (`DictionaryEntry` / `EnumDef` —
+  whose `values: [{value, label, l}]` drill in / `LookupDef`), a `default_language` input at the top.
+  Save → `PUT /admin/config/dictionary/parsed` + Reload. The endpoint validates the whole payload
+  against `DictionaryFile`, then replaces each top-level section (`default_language` / `entries` /
+  `enums` / `lookups` / `connectors`) wholesale via `tomlkit` (comments outside those sections survive),
+  re-parses before writing. `model_json_schema()` carries the same per-field metadata (`description` for
+  hints, `x_group` for tabs — entries get a "Rule" tab for `rules`/`rules_values`/`default` + a
+  "Translations" tab for `l`; lookups group target fields under "Target").
+Verdict on the schema-driven approach: **it pays off** — the pool / connector / dictionary forms are
+essentially all generated; the bespoke code is `SchemaForm` + `SchemaNavigator` (~350 lines, grows slowly) +
+the per-builder list/nav/save wiring (~120 each, all reusable). Next: a **menus tree builder** (a DnD tree),
+a **SQL editor + "test run" preview** for queries. The general UI polish (modern look & feel — spacing,
+validation surfaced inline, etc.) rides along.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
 surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one

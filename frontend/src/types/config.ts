@@ -21,3 +21,22 @@ export interface ConnectorsDoc {
   path: string
   connectors: Record<string, Record<string, unknown>>
 }
+
+/** One section of the shared dictionary (top-level OR nested under `connectors.<name>`). */
+export interface DictionarySection {
+  entries?: Record<string, Record<string, unknown>>
+  enums?: Record<string, Record<string, unknown>>
+  lookups?: Record<string, Record<string, unknown>>
+}
+
+/** GET /admin/config/dictionary/parsed — the current `dictionary.toml`, default keys dropped. */
+export interface DictionaryDoc {
+  path: string
+  dictionary: DictionarySection & {
+    default_language?: string
+    connectors?: Record<string, DictionarySection>
+  }
+}
+
+/** Which kind of dictionary record the builder is editing. */
+export type DictionaryKind = 'entries' | 'enums' | 'lookups'

@@ -209,6 +209,50 @@ def test_config_connectors_parsed_get_and_put(env) -> None:
         assert client.get("/api/sql/db/the_answer", headers=h).json()["rows"] == [{"answer": 42}]
 
 
+def test_config_dictionary_parsed_get_and_put(env) -> None:
+    app, conn_toml, _ = env
+    dict_toml = conn_toml.with_name("dictionary.toml")
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # schema serves the DictionaryFile shape (with its $defs)
+        sch = client.get("/admin/config/schema", headers=h).json()
+        assert "entries" in sch["dictionary"]["properties"]
+        for nested in ("DictionaryEntry", "EnumDef", "LookupDef", "EnumValue", "DictionarySection"):
+            assert nested in sch["dictionary"]["$defs"]
+        # a fresh checkout has no dictionary.toml → GET returns an empty dict (path still reported)
+        body = client.get("/admin/config/dictionary/parsed", headers=h).json()
+        assert body["path"] == str(dict_toml) and body["dictionary"] == {}
+        # permission gate + validation gate
+        assert client.put("/admin/config/dictionary/parsed", json={"dictionary": {}}, headers=_h(client, "reader")).status_code == 403
+        assert client.put("/admin/config/dictionary/parsed", json={"dictionary": {"entries": {"X": {"nope": 1}}}}, headers=h).status_code == 422
+        # valid: shared entries + an enum + a per-connector overlay
+        payload = {
+            "default_language": "en",
+            "entries": {
+                "AUDIT_DATE": {"label": "Audit Date", "format": "date"},
+                "USR_STATUS": {"label": "Status", "rules": "ENUM", "rules_values": "STATUS"},
+            },
+            "enums": {
+                "STATUS": {"label": "Status", "values": [{"value": "A", "label": "Active"}, {"value": "I", "label": "Inactive"}]},
+            },
+            "connectors": {
+                "db": {"entries": {"USR_NAME": {"label": "User Name", "l": {"fr": "Nom"}}}},
+            },
+        }
+        assert client.put("/admin/config/dictionary/parsed", json={"dictionary": payload}, headers=h).json()["saved"] is True
+        # the file was written + parses cleanly
+        text = dict_toml.read_text()
+        assert "[entries.AUDIT_DATE]" in text and "[enums.STATUS]" in text and "[connectors.db.entries.USR_NAME]" in text
+        assert 'fr = "Nom"' in text
+        # GET round-trips it (default-valued keys dropped — no `l = {}` on AUDIT_DATE)
+        after = client.get("/admin/config/dictionary/parsed", headers=h).json()["dictionary"]
+        assert after["entries"]["AUDIT_DATE"] == {"label": "Audit Date", "format": "date"}
+        assert after["connectors"]["db"]["entries"]["USR_NAME"]["l"] == {"fr": "Nom"}
+        # Reload picks it up — dictionary_entries goes from 0 to 2 (the shared entries)
+        r = client.post("/admin/reload", headers=h).json()
+        assert r["dictionary_entries"] == 2
+
+
 def test_oidc_callback_fragment_redirect() -> None:
     from liberty.config import OIDCSettings
 

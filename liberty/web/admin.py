@@ -42,6 +42,11 @@ from liberty.connectors.config import (
     load_connectors_file,
     parse_connectors,
 )
+from liberty.connectors.dictionary import (
+    DictionaryFile,
+    load_dictionary,
+    parse_dictionary,
+)
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
 
@@ -113,7 +118,17 @@ async def get_config_schema(_: Superuser) -> dict[str, Any]:
         "pool": PoolConfig.model_json_schema(),
         "sql": SqlConnectorConfig.model_json_schema(),
         "api": ApiConnectorConfig.model_json_schema(),
+        "dictionary": DictionaryFile.model_json_schema(),
     }
+
+
+def _dictionary_path(settings: Any) -> Path:
+    """Resolve where ``dictionary.toml`` lives — explicit ``[connectors] dictionary_path`` setting,
+    else next to ``connectors.toml`` (matching what :func:`load_connectors` does)."""
+    explicit = settings.connectors.dictionary_path
+    if explicit:
+        return Path(explicit)
+    return Path(settings.connectors.config_path).with_name("dictionary.toml")
 
 
 @router.get("/config/pools")
@@ -207,6 +222,59 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
         parse_connectors(tomllib.loads(new_text))   # belt-and-braces: the whole file must still parse
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting config is invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/dictionary/parsed")
+async def get_dictionary_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``dictionary.toml`` parsed and normalised — ``{path, dictionary: {default_language,
+    entries, enums, lookups, connectors: {<name>: {entries, enums, lookups}}}}``. A missing file →
+    an empty dictionary. Default-valued keys are dropped so the wire payload stays terse."""
+    path = _dictionary_path(request.app.state.settings)
+    cfg = load_dictionary(path)
+    return {"path": str(path), "dictionary": cfg.model_dump(exclude_defaults=True)}
+
+
+class DictionaryBody(BaseModel):
+    dictionary: dict[str, Any]
+
+
+@router.put("/config/dictionary/parsed")
+async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted dict against :class:`DictionaryFile`, then rewrite ``dictionary.toml``
+    via ``tomlkit`` (replacing each top-level section wholesale — ``default_language`` / ``entries`` /
+    ``enums`` / ``lookups`` / ``connectors``); comments outside those sections are preserved. Re-parses
+    the resulting file before writing. Does not reload — call ``POST /admin/reload`` afterwards."""
+    try:
+        validated = DictionaryFile.model_validate(body.dictionary)
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dictionary: {exc}") from exc
+    normalized = validated.model_dump(exclude_defaults=True)
+
+    path = _dictionary_path(request.app.state.settings)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+
+    # default_language (top-level scalar) — set or remove based on the payload
+    if "default_language" in normalized:
+        doc["default_language"] = normalized["default_language"]
+    elif "default_language" in doc:
+        del doc["default_language"]
+
+    # entries / enums / lookups / connectors — replace each section wholesale (tomlkit re-renders).
+    for section in ("entries", "enums", "lookups", "connectors"):
+        if section in normalized and normalized[section]:
+            doc[section] = normalized[section]
+        elif section in doc:
+            del doc[section]
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        parse_dictionary(tomllib.loads(new_text))   # belt-and-braces re-validation
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting dictionary is invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}

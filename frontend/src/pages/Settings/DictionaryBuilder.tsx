@@ -1,0 +1,289 @@
+// Structured editor for `config/dictionary.toml` — the shared field dictionary (v1's ly_dictionary
+// family + ly_enum/ly_lookup). Three record kinds via sub-tabs: **Entries** (a column's label/
+// format/display rule), **Enums** (a code→label set referenced from a BOOLEAN/ENUM/LOOKUP rule),
+// **Lookups** (a query-backed code→label table). Each kind exists at two scopes — `Shared` (the
+// top-level `[entries.*]` etc.) and per-connector overlays (`[connectors.<name>.entries.*]`) — v1's
+// per-app dictionaries map onto these so two migrated apps can't clash on a `dd_id`. Save validates
+// the whole `DictionaryFile` then rewrites the file (via tomlkit), then reloads. No rename yet —
+// delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
+import { useEffect, useMemo, useState } from 'react'
+import styled from '@emotion/styled'
+import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { api, ApiError } from '../../api/client'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, type JsonSchema } from '../../common'
+import type { ConfigSchemas, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
+import { colors, fontSize, fonts, radius } from '../../theme'
+
+type DictionaryData = DictionaryDoc['dictionary']
+
+const SCOPE_SHARED = '' as const
+
+const Header = styled(Row)`align-items: center; justify-content: space-between; gap: 12px;`
+const LangBox = styled.label`
+  display: inline-flex; align-items: center; gap: 6px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & input { width: 60px; }
+`
+const SubTabs = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
+const SubTab = styled.button<{ $active?: boolean }>`
+  height: 30px; padding: 0 14px; border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; }
+`
+const ScopeBar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
+const Chip = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
+  &:hover { color: ${colors.text.primary}; }
+`
+const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
+const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0;`
+const NavSearch = styled.div`
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
+`
+const NavItem = styled.button<{ $active?: boolean }>`
+  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
+  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
+const FormCol = styled(Card)`flex: 1; min-width: 0;`
+const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
+const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
+
+const KIND_TO_DEF: Record<DictionaryKind, string> = {
+  entries: 'DictionaryEntry',
+  enums: 'EnumDef',
+  lookups: 'LookupDef',
+}
+
+/** A blank record for the chosen kind. Lookup needs `query`/`value`/`label` to validate, so we
+ *  leave them empty strings (the user fills them in; SchemaForm flags required fields with `*`). */
+function newRecord(kind: DictionaryKind): Record<string, unknown> {
+  if (kind === 'lookups') return { query: '', value: '', label: '' }
+  return {}
+}
+
+/** The current `entries` / `enums` / `lookups` map for `scope` (`''` = shared, else a connector). */
+function getSection(dict: DictionaryData, scope: string, kind: DictionaryKind): Record<string, Record<string, unknown>> {
+  if (!scope) {
+    return (dict[kind] ?? {}) as Record<string, Record<string, unknown>>
+  }
+  const sec = (dict.connectors ?? {})[scope]
+  return ((sec?.[kind]) ?? {}) as Record<string, Record<string, unknown>>
+}
+
+/** Write back a section map; drops empty sections + empty connector scopes so the file stays terse. */
+function setSection(
+  dict: DictionaryData,
+  scope: string,
+  kind: DictionaryKind,
+  next: Record<string, Record<string, unknown>>,
+): DictionaryData {
+  const out: DictionaryData = { ...dict }
+  if (!scope) {
+    if (Object.keys(next).length === 0) delete out[kind]; else out[kind] = next
+    return out
+  }
+  const connectors: Record<string, DictionarySection> = { ...(out.connectors ?? {}) }
+  const cur: DictionarySection = { ...(connectors[scope] ?? {}) }
+  if (Object.keys(next).length === 0) delete cur[kind]; else cur[kind] = next
+  if (!cur.entries && !cur.enums && !cur.lookups) delete connectors[scope]
+  else connectors[scope] = cur
+  if (Object.keys(connectors).length === 0) delete out.connectors
+  else out.connectors = connectors
+  return out
+}
+
+export default function DictionaryBuilder() {
+  const { t } = useTranslation()
+  const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
+  const [path, setPath] = useState('')
+  const [dict, setDict] = useState<DictionaryData | null>(null)
+  const [original, setOriginal] = useState('')
+  const [kind, setKind] = useState<DictionaryKind>('entries')
+  const [scope, setScope] = useState<string>(SCOPE_SHARED)
+  const [sel, setSel] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => {
+    setError(null); setStatus(null)
+    Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<DictionaryDoc>('/admin/config/dictionary/parsed')])
+      .then(([s, d]) => {
+        setSchemas(s); setPath(d.path); setDict(d.dictionary); setOriginal(JSON.stringify(d.dictionary))
+      })
+      .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
+  }
+  useEffect(load, [t])
+  // when the user changes section or scope, drop the (now-stale) selection + search
+  useEffect(() => { setSel(null); setQ('') }, [kind, scope])
+
+  const dirty = useMemo(() => dict != null && JSON.stringify(dict) !== original, [dict, original])
+
+  if (error && !dict) return <Banner $tone="error">{error}</Banner>
+  if (!dict || !schemas) return <Centered />
+
+  const dictSchema = schemas.dictionary
+  const defs = (dictSchema?.$defs ?? {}) as Record<string, JsonSchema>
+  const recordSchema: JsonSchema | null = defs[KIND_TO_DEF[kind]] ?? null
+
+  // scopes = the shared bucket + any connector that already has a section + the just-added scope
+  // (so it has a chip to click before its first record materialises it in dict.connectors).
+  const scopeKeys = new Set([SCOPE_SHARED, ...Object.keys(dict.connectors ?? {})])
+  if (scope) scopeKeys.add(scope)
+  const scopes: string[] = [SCOPE_SHARED, ...[...scopeKeys].filter((s) => s !== SCOPE_SHARED).sort()]
+  const section = getSection(dict, scope, kind)
+  const keys = Object.keys(section)
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? keys.filter((k) => k.toLowerCase().includes(needle)) : keys
+
+  const setRecord = (key: string, v: Record<string, unknown>) => {
+    setDict(setSection(dict, scope, kind, { ...section, [key]: v }))
+    setStatus(null)
+  }
+  const addRecord = () => {
+    const key = window.prompt(t(`settings.dictionary.${kind}.namePrompt`))?.trim()
+    if (!key) return
+    if (key in section) { setSel(key); return }
+    setDict(setSection(dict, scope, kind, { ...section, [key]: newRecord(kind) }))
+    setSel(key); setStatus(null)
+  }
+  const removeRecord = (key: string) => {
+    if (!window.confirm(t(`settings.dictionary.${kind}.confirmDelete`, { name: key }))) return
+    const next = { ...section }; delete next[key]
+    setDict(setSection(dict, scope, kind, next))
+    setSel((s) => (s === key ? null : s)); setStatus(null)
+  }
+  const addScope = () => {
+    const name = window.prompt(t('settings.dictionary.scope.addPrompt'))?.trim()
+    if (!name) return
+    if (scopes.includes(name)) { setScope(name); return }
+    // We just switch — the scope materialises in `dict.connectors` as soon as a record is added
+    // (the section-cleanup in setSection won't drop it then). If the user adds nothing and saves,
+    // the empty scope naturally disappears on the next round-trip.
+    setScope(name)
+  }
+  const setLang = (lang: string) => {
+    const trimmed = lang.trim()
+    const next: DictionaryData = { ...dict }
+    if (!trimmed || trimmed === 'en') delete next.default_language
+    else next.default_language = trimmed
+    setDict(next); setStatus(null)
+  }
+
+  async function save() {
+    if (!dict) return
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      await api.put<{ saved: boolean }>('/admin/config/dictionary/parsed', { dictionary: dict })
+      await api.post<{ connectors: string[] }>('/admin/reload')
+      setStatus(t('settings.dictionary.saved'))
+      load()  // re-fetch — the backend strips defaults and may have re-rendered subsections
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+
+  const scopeLabel = (s: string) => (s ? s : t('settings.dictionary.scope.shared'))
+
+  return (
+    <Stack gap={12}>
+      <Header>
+        <Mono>{path}</Mono>
+        <LangBox title={t('settings.dictionary.langHint')}>
+          {t('settings.dictionary.lang')}
+          <Input type="text" value={dict.default_language ?? ''} placeholder="en" onChange={(e) => setLang(e.target.value)} />
+        </LangBox>
+      </Header>
+      <SubTabs>
+        {(['entries', 'enums', 'lookups'] as DictionaryKind[]).map((k) => (
+          <SubTab key={k} $active={kind === k} type="button" onClick={() => setKind(k)}>{t(`settings.dictionary.${k}.tab`)}</SubTab>
+        ))}
+      </SubTabs>
+      <ScopeBar>
+        <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.dictionary.scope.label')}</span>
+        {scopes.map((s) => (
+          <Chip key={s || '_shared'} $active={scope === s} type="button" onClick={() => setScope(s)}>
+            {s ? <Globe size={12} /> : <Layers size={12} />}{scopeLabel(s)}
+          </Chip>
+        ))}
+        <Chip type="button" onClick={addScope} title={t('settings.dictionary.scope.addPrompt')}>
+          <Plus size={12} /> {t('settings.dictionary.scope.add')}
+        </Chip>
+      </ScopeBar>
+      <Split>
+        <NavCol>
+          {keys.length > 6 && (
+            <NavSearch>
+              <Search size={13} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${keys.length}…`} />
+            </NavSearch>
+          )}
+          {shown.map((k) => (
+            <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
+              <span className="name">{k}</span>
+            </NavItem>
+          ))}
+          {shown.length === 0 && (
+            <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '4px 4px' }}>
+              {keys.length ? t('common.noMatches') : t(`settings.dictionary.${kind}.empty`)}
+            </div>
+          )}
+          <Button $variant="ghost" $size="sm" onClick={addRecord} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
+            <Plus size={13} /> {t(`settings.dictionary.${kind}.add`)}
+          </Button>
+        </NavCol>
+        <FormCol>
+          {sel && section[sel] && recordSchema ? (
+            <Stack gap={12}>
+              <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
+                  {scope ? `[connectors.${scope}.${kind}.${sel}]` : `[${kind}.${sel}]`}
+                </strong>
+                <Button $variant="danger" $size="sm" onClick={() => removeRecord(sel)} disabled={busy}>
+                  <Trash2 size={13} /> {t(`settings.dictionary.${kind}.delete`)}
+                </Button>
+              </Row>
+              <SchemaNavigator
+                root={{
+                  label: sel,
+                  schema: { ...recordSchema, $defs: defs },
+                  value: section[sel],
+                  onChange: (v) => setRecord(sel, v),
+                }}
+              />
+            </Stack>
+          ) : (
+            <Empty>{keys.length ? t(`settings.dictionary.${kind}.pickOne`) : t(`settings.dictionary.${kind}.empty`)}</Empty>
+          )}
+        </FormCol>
+      </Split>
+      <Row>
+        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
+        </Button>
+        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
+        </Button>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+      </Row>
+      <Hint>{t('settings.dictionary.hint')}</Hint>
+    </Stack>
+  )
+}

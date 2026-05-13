@@ -53,12 +53,31 @@ class DictionaryEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None = None          # the default-language display title (v1's dd_label)
-    format: str | None = None         # e.g. "date" / "number" / "boolean" / "textarea" (v1's dd_type)
-    rules: str | None = None          # v1's dd_rules — BOOLEAN / ENUM / LOOKUP / SEQUENCE / SYSDATE / LOGIN / PASSWORD
-    rules_values: str | None = None   # v1's dd_rules_values — the rule's argument (true-value for BOOLEAN, enum id, lookup id, …)
-    default: str | None = None        # v1's dd_default — a default value (form-layer, pass-through)
-    l: dict[str, str] = Field(default_factory=dict)  # language code → translated label
+    label: str | None = Field(default=None, description="Default-language display title (v1's dd_label).")
+    format: str | None = Field(
+        default=None,
+        description="Display format hint — e.g. 'date' / 'number' / 'boolean' / 'textarea' (v1's dd_type). The frontend uses it to render the cell.",
+    )
+    rules: str | None = Field(
+        default=None,
+        description="Display rule (v1's dd_rules) — BOOLEAN / ENUM / LOOKUP show a ✓/✗ / label / lookup-resolved label in the grid. SEQUENCE / SYSDATE / LOGIN / PASSWORD / CURRENT_DATE are form-layer (Phase 6).",
+        json_schema_extra={"x_group": "Rule"},
+    )
+    rules_values: str | None = Field(
+        default=None,
+        description="The rule's argument — true-value for BOOLEAN (default 'Y'), enum id for ENUM, lookup id for LOOKUP.",
+        json_schema_extra={"x_group": "Rule"},
+    )
+    default: str | None = Field(
+        default=None,
+        description="Default value (form-layer, pass-through — v1's dd_default).",
+        json_schema_extra={"x_group": "Rule"},
+    )
+    l: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-language overrides for the label: {language_code: translated_label} (v1's ly_dictionary_l).",
+        json_schema_extra={"x_group": "Translations"},
+    )
 
     def label_for(self, language: str | None) -> str | None:
         """The label in *language* if a translation exists, else the default label."""
@@ -73,9 +92,13 @@ class EnumValue(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    value: str                              # the code as it appears in the cell (e.g. "JDE")
-    label: str | None = None                # the default-language label (e.g. "JD Edwards")
-    l: dict[str, str] = Field(default_factory=dict)
+    value: str = Field(description="Code as it appears in the cell (e.g. 'JDE').")
+    label: str | None = Field(default=None, description="Default-language label (e.g. 'JD Edwards').")
+    l: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-language label overrides: {language_code: translated_label}.",
+        json_schema_extra={"x_group": "Translations"},
+    )
 
     def label_for(self, language: str | None) -> str:
         if language and self.l:
@@ -88,8 +111,12 @@ class EnumDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None = None
-    values: list[EnumValue] = Field(default_factory=list)
+    label: str | None = Field(default=None, description="Display name for the enum set (informational).")
+    values: list[EnumValue] = Field(
+        default_factory=list,
+        description="Members of the enum — each row is one {value, label, l?} pair.",
+        json_schema_extra={"x_group": "Values"},
+    )
 
 
 class LookupDef(BaseModel):
@@ -99,12 +126,29 @@ class LookupDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str | None = None
-    connector: str | None = None            # the connector the lookup query lives on (None → the asking connector)
-    query: str                              # the v2 query name (the *read* migrated name, e.g. "security_roles_get")
-    value: str                              # the result column whose value matches the cell
-    label: str                              # the result column whose value to display
-    group: str | None = None                # v1's lkp_dd_group — optional secondary key, not used yet
+    description: str | None = Field(default=None, description="Display name / description (informational).")
+    connector: str | None = Field(
+        default=None,
+        description="Connector the lookup query lives on. Blank → the asking connector (the one the lookup is referenced from).",
+        json_schema_extra={"x_group": "Target"},
+    )
+    query: str = Field(
+        description="The v2 query name (the *read* migrated name, e.g. 'security_roles_get').",
+        json_schema_extra={"x_group": "Target"},
+    )
+    value: str = Field(
+        description="The result column whose value matches the cell.",
+        json_schema_extra={"x_group": "Target"},
+    )
+    label: str = Field(
+        description="The result column whose value to display in place of the code.",
+        json_schema_extra={"x_group": "Target"},
+    )
+    group: str | None = Field(
+        default=None,
+        description="Optional secondary key (v1's lkp_dd_group — not used yet).",
+        json_schema_extra={"x_group": "Advanced"},
+    )
 
 
 class DictionarySection(BaseModel):

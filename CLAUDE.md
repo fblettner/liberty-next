@@ -243,9 +243,10 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
 - Also (config editing — superuser): `GET /admin/config/connectors` (raw `connectors.toml` text) +
   `PUT /admin/config/connectors` (validates the TOML against the schema, then writes — does *not*
   reload; call `POST /admin/reload` after). And the **structured config builders** (Phase 7):
-  `GET /admin/config/schema` → `{pool, sql, api}` = the `PoolConfig` / `SqlConnectorConfig` /
-  `ApiConnectorConfig` `model_json_schema()`s, each with its own `$defs` (`QueryDef`/`ColumnHint`/
-  `ParamDef`/`EndpointDef`/…) — the UI renders its forms from this ; `GET /admin/config/pools` →
+  `GET /admin/config/schema` → `{pool, sql, api, dictionary}` = the `PoolConfig` /
+  `SqlConnectorConfig` / `ApiConnectorConfig` / `DictionaryFile` `model_json_schema()`s, each with
+  its own `$defs` (`QueryDef`/`ColumnHint`/`ParamDef`/`EndpointDef` / `DictionaryEntry`/`EnumDef`/
+  `LookupDef`/…) — the UI renders its forms from this ; `GET /admin/config/pools` →
   `{path, pools: {name: PoolConfig dict}}` + `PUT /admin/config/pools` (`{pools: {name: dict}}`) —
   validates each against `PoolConfig`, drops default-valued keys, then **surgically rewrites only the
   `[pools.*]` tables** in `connectors.toml` via `tomlkit` (comments + the `[connectors.*]` tables +
@@ -254,11 +255,18 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   — validates each against the discriminated connector schema, rewrites only the `[connectors.*]`
   tables (a *changed* connector's own subtree is re-rendered by `tomlkit`, so its inline `columns =
   [{…}]` arrays may become `[[…]]` tables — functionally identical), re-parses the whole result before
-  writing. PUT endpoints don't reload — call `POST /admin/reload` after. (Dep: `tomlkit` —
-  comment/format-preserving TOML edits.) The config models carry per-field metadata for the builder
-  forms: `Field(description=…)` → form hints, `Field(json_schema_extra={"x_group": "…"})` → which tab
-  the field goes in (e.g. a query's `params`/`columns` are their own tabs, the optional bits are an
-  "Advanced" tab; ungrouped → "General").
+  writing ; `GET /admin/config/dictionary/parsed` → `{path, dictionary: {default_language, entries,
+  enums, lookups, connectors: {<name>: {entries, enums, lookups}}}}` (default-valued keys dropped, a
+  missing `dictionary.toml` → an empty dict) + `PUT /admin/config/dictionary/parsed` (`{dictionary:
+  {…}}`) — validates the whole payload against `DictionaryFile`, then replaces each top-level section
+  (`default_language`/`entries`/`enums`/`lookups`/`connectors`) wholesale via `tomlkit` (comments
+  outside those sections survive), re-parses the file before writing. PUT endpoints don't reload —
+  call `POST /admin/reload` after. (Dep: `tomlkit` — comment/format-preserving TOML edits.) The
+  config models carry per-field metadata for the builder forms: `Field(description=…)` → form hints,
+  `Field(json_schema_extra={"x_group": "…"})` → which tab the field goes in (e.g. a query's
+  `params`/`columns` are their own tabs, the optional bits are an "Advanced" tab; a dictionary
+  entry's `rules`/`rules_values`/`default` form a "Rule" tab, the `l` map is "Translations";
+  ungrouped → "General").
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 
@@ -391,9 +399,14 @@ replies), `@monaco-editor/react` (the connector-config editor).
   **Form** (the full connector `SchemaNavigator` — General/Pool/Queries, the escape hatch for the flat
   queries list and connector-level settings); API connectors only show Form. Saves go through
   `PUT /admin/config/connectors/parsed` + Reload),
-  and `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over
-  `GET/PUT /admin/config/connectors` + Reload — the escape hatch); the structured editors don't support
-  rename yet — delete + re-add — the Phase-7 builder slices), `Login` + `OidcCallback`.
+  `DictionaryBuilder` = the structured `dictionary.toml` editor — sub-tabs for *Entries* / *Enums* /
+  *Lookups*, a scope chip strip (*Shared* + one chip per connector overlay; "+ Add connector scope"
+  for new), per-record `SchemaNavigator` over the matching schema (`DictionaryEntry`/`EnumDef`/
+  `LookupDef`; enums drill into their `values: [{value, label, l}]`), search past ~6 records, top-level
+  `default_language` input — → `PUT /admin/config/dictionary/parsed` + Reload), and `RawEditor` = the
+  Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over `GET/PUT /admin/config/connectors`
+  + Reload — the escape hatch); the structured editors don't support rename yet — delete + re-add — the
+  Phase-7 builder slices), `Login` + `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
   fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
   `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default
