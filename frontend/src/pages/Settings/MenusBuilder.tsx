@@ -195,6 +195,38 @@ export default function MenusBuilder() {
 
   const dirty = useMemo(() => apps != null && JSON.stringify(apps) !== original, [apps, original])
 
+  // Tree filter: matched rows + their ancestors. Hook MUST stay above the early returns below so
+  // it runs on every render (otherwise React #310 — the hook count changes between the loading
+  // and loaded renders). Source from raw state so it handles the null cases.
+  const matchedIds = useMemo(() => {
+    if (!apps || !selApp) return null
+    const items: MenuItem[] = apps[selApp]?.items ?? []
+    const needle = treeQ.trim().toLowerCase()
+    if (!needle) return null
+    const direct = new Set(
+      items.filter((it) => it.id.toLowerCase().includes(needle) || it.label.toLowerCase().includes(needle)).map((it) => it.id),
+    )
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const it of items) {
+        if (direct.has(it.id) && it.parent && !direct.has(it.parent)) {
+          direct.add(it.parent); changed = true
+        }
+      }
+    }
+    return direct
+  }, [apps, selApp, treeQ])
+
+  // Inspector's "allowed parents" list — descendants of the selected item form a cycle, drop them.
+  // Same rule of hooks dance: keep this above the early returns.
+  const safeParents = useMemo(() => {
+    if (!apps || !selApp || !selItem) return [] as string[]
+    const items: MenuItem[] = apps[selApp]?.items ?? []
+    const forbidden = descendantIds(items, selItem)
+    return items.filter((it) => !forbidden.has(it.id)).map((it) => it.id)
+  }, [apps, selApp, selItem])
+
   if (error && !apps) return <Banner $tone="error">{error}</Banner>
   if (!apps || !schemas) return <Centered />
 
@@ -207,30 +239,7 @@ export default function MenusBuilder() {
 
   const currentApp: AppMenu | null = selApp ? apps[selApp] ?? null : null
   const items: MenuItem[] = currentApp?.items ?? []
-  const treeNeedle = treeQ.trim().toLowerCase()
-  // Walk the tree once for rendering; the filter is *visibility-only* (a hit reveals its
-  // ancestors but doesn't change the underlying items[] order — saving still preserves it).
-  const matchesFilter = (it: MenuItem): boolean => {
-    if (!treeNeedle) return true
-    return it.id.toLowerCase().includes(treeNeedle) || it.label.toLowerCase().includes(treeNeedle)
-  }
   const byParent = groupByParent(items)
-  const matchedIds = useMemo(() => {
-    if (!treeNeedle) return null
-    const direct = new Set(items.filter(matchesFilter).map((it) => it.id))
-    // include ancestors of every direct hit
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const it of items) {
-        if (direct.has(it.id) && it.parent && !direct.has(it.parent)) {
-          direct.add(it.parent); changed = true
-        }
-      }
-    }
-    return direct
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- depends on items + needle, computed inline
-  }, [items, treeNeedle])
 
   const selItemRec = items.find((it) => it.id === selItem) ?? null
 
@@ -365,17 +374,6 @@ export default function MenusBuilder() {
       </div>
     )
   }
-
-  // ── inspector — SchemaForm over MenuItem (the parent field's edits go through patchItem
-  // which detects an id rename; the form also writes label/type/target/etc. directly). The set
-  // of available `parent` ids excludes the current row's own descendants (preventing cycles)
-  // — surfaced as a help line; the user can pick any id from the inspector.
-  const safeParents = useMemo(() => {
-    if (!selItemRec) return [] as string[]
-    const forbidden = descendantIds(items, selItemRec.id)
-    return items.filter((it) => !forbidden.has(it.id)).map((it) => it.id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, selItem])
 
   return (
     <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>

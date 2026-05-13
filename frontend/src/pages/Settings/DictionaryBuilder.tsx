@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -150,20 +150,16 @@ export default function DictionaryBuilder() {
 
   const dirty = useMemo(() => dict != null && JSON.stringify(dict) !== original, [dict, original])
 
-  if (error && !dict) return <Banner $tone="error">{error}</Banner>
-  if (!dict || !schemas) return <Centered />
-
-  const dictSchema = schemas.dictionary
-  const defs = (dictSchema?.$defs ?? {}) as Record<string, JsonSchema>
-  const recordSchema: JsonSchema | null = defs[KIND_TO_DEF[kind]] ?? null
-
   // Augment the bundled framework enums with the *dynamic* sources this builder owns — so a
   // dictionary entry's `rules_values` field (whose `x_enum_ref_when` swaps between ENUM_IDS and
   // LOOKUP_IDS based on `rules`) renders as a proper dropdown of the ids that *actually exist* in
   // the current dict. Both shared + per-connector overlay ids are included when a connector scope
   // is active (the per-connector one wins on collision, the same way the runtime resolves them).
+  // NOTE: this useMemo MUST stay above the early returns below — moving it after them would change
+  // the hook count between renders (load → early return / loaded → full render) and trip React's
+  // rules-of-hooks check (#310).
   const augmentedEnums: FrameworkEnums = useMemo(() => {
-    const base: FrameworkEnums = { ...(schemas.framework_enums ?? {}) }
+    const base: FrameworkEnums = { ...(schemas?.framework_enums ?? {}) }
     const mkValues = (...maps: (Record<string, Record<string, unknown>> | undefined)[]): { value: string; label: string }[] => {
       const out = new Map<string, string>()
       for (const m of maps) {
@@ -179,20 +175,18 @@ export default function DictionaryBuilder() {
       }
       return [...out.entries()].map(([value, label]) => ({ value, label }))
     }
-    const overlay = scope ? (dict.connectors ?? {})[scope] : undefined
-    const enumIds: FrameworkEnum = {
-      label: 'Enums (current scope)',
-      values: mkValues(dict.enums, overlay?.enums),
-    }
-    const lookupIds: FrameworkEnum = {
-      label: 'Lookups (current scope)',
-      values: mkValues(dict.lookups, overlay?.lookups),
-    }
-    base.ENUM_IDS = enumIds
-    base.LOOKUP_IDS = lookupIds
+    const overlay = scope && dict ? (dict.connectors ?? {})[scope] : undefined
+    base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(dict?.enums, overlay?.enums) }
+    base.LOOKUP_IDS = { label: 'Lookups (current scope)', values: mkValues(dict?.lookups, overlay?.lookups) }
     return base
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: re-derive on any dict / scope / schemas change
-  }, [schemas.framework_enums, dict.enums, dict.lookups, dict.connectors, scope])
+  }, [schemas, dict, scope])
+
+  if (error && !dict) return <Banner $tone="error">{error}</Banner>
+  if (!dict || !schemas) return <Centered />
+
+  const dictSchema = schemas.dictionary
+  const defs = (dictSchema?.$defs ?? {}) as Record<string, JsonSchema>
+  const recordSchema: JsonSchema | null = defs[KIND_TO_DEF[kind]] ?? null
 
   // scopes = the shared bucket + any connector that already has a section + the just-added scope
   // (so it has a chip to click before its first record materialises it in dict.connectors).
