@@ -39,16 +39,29 @@ const FormCol = styled(Card)`flex: 1; min-width: 0;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
 const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
-const TreeSplit = styled.div`display: flex; gap: 14px; align-items: flex-start; min-height: 0;`
+// The split is *fixed* height (height, not max-height) so expanding/collapsing folders never
+// resizes the column — TreeBox / InspectorInner scroll internally. `align-items: stretch` makes
+// both columns the same height (so the empty space below a short tree stays put instead of being
+// pushed up by the inspector's content).
+const TreeSplit = styled.div`
+  display: flex; gap: 14px; align-items: stretch; min-height: 360px;
+  height: calc(100dvh - 24rem);
+`
 const TreeCol = styled.div`
-  flex: 0 0 340px; display: flex; flex-direction: column; gap: 4px; min-width: 0;
-  max-height: calc(100dvh - 22rem);
+  flex: 0 0 400px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;
 `
 const TreeBox = styled.div`
   flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
 `
-const InspectorCol = styled.div`flex: 1; min-width: 0;`
+const InspectorCol = styled.div`
+  flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
+`
+// Cap the inspector form's width so on a wide screen the inputs aren't half-a-page wide. The
+// container still flexes (it can be narrower); this is just the upper bound.
+const InspectorInner = styled.div`max-width: 720px;`
+// The row shows [chev] [icon] [label] [id]  · on hover: actions appear and the id hides (the two
+// would otherwise fight for the same trailing space and the label would get truncated).
 const TreeRow = styled.button<{ $active?: boolean; $depth: number }>`
   display: flex; align-items: center; gap: 4px; width: 100%; padding: 5px 8px; padding-left: calc(${({ $depth }) => $depth * 16}px + 8px);
   text-align: left; border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
@@ -58,9 +71,10 @@ const TreeRow = styled.button<{ $active?: boolean; $depth: number }>`
   & .chev { width: 14px; flex-shrink: 0; color: ${colors.text.muted}; display: inline-flex; align-items: center; justify-content: center; }
   & .icon { flex-shrink: 0; color: ${colors.text.muted}; }
   & .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .id  { font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; margin-left: 6px; }
-  & .actions { display: none; align-items: center; gap: 2px; }
+  & .id  { font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; margin-left: 6px; flex-shrink: 0; }
+  & .actions { display: none; align-items: center; gap: 2px; flex-shrink: 0; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  &:hover .id, &:focus-within .id { display: none; }
   &:hover .actions, &:focus-within .actions { display: inline-flex; }
 `
 const IconBtn = styled.span`
@@ -428,28 +442,30 @@ export default function MenusBuilder() {
                   </Row>
                 </TreeCol>
                 <InspectorCol>
-                  {selItemRec && menuItemSchema ? (
-                    <Stack gap={10}>
-                      <Hint>{t('settings.menus.inspector.hint')}</Hint>
-                      <SchemaForm
-                        schema={{ ...menuItemSchema, $defs: defs }}
-                        defs={defs}
-                        value={selItemRec as unknown as Record<string, unknown>}
-                        onChange={(v) => {
-                          // SchemaForm gives the whole picked value back. Detect id rename so we
-                          // can also update children's `parent` refs (see renameItem).
-                          const nextId = typeof v.id === 'string' ? v.id : selItemRec.id
-                          if (nextId !== selItemRec.id) { renameItem(selItemRec.id, nextId); return }
-                          updateItems(items.map((it) => (it.id === selItemRec.id ? (v as unknown as MenuItem) : it)))
-                        }}
-                      />
-                      {safeParents.length > 0 && (
-                        <Hint>{t('settings.menus.inspector.parentHint', { ids: safeParents.join(', ') })}</Hint>
-                      )}
-                    </Stack>
-                  ) : (
-                    <Empty>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>
-                  )}
+                  <InspectorInner>
+                    {selItemRec && menuItemSchema ? (
+                      <Stack gap={10}>
+                        <Hint>{t('settings.menus.inspector.hint')}</Hint>
+                        <SchemaForm
+                          schema={{ ...menuItemSchema, $defs: defs }}
+                          defs={defs}
+                          value={selItemRec as unknown as Record<string, unknown>}
+                          onChange={(v) => {
+                            // SchemaForm gives the whole picked value back. Detect id rename so we
+                            // can also update children's `parent` refs (see renameItem).
+                            const nextId = typeof v.id === 'string' ? v.id : selItemRec.id
+                            if (nextId !== selItemRec.id) { renameItem(selItemRec.id, nextId); return }
+                            updateItems(items.map((it) => (it.id === selItemRec.id ? (v as unknown as MenuItem) : it)))
+                          }}
+                        />
+                        {safeParents.length > 0 && (
+                          <Hint>{t('settings.menus.inspector.parentHint', { ids: safeParents.join(', ') })}</Hint>
+                        )}
+                      </Stack>
+                    ) : (
+                      <Empty>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>
+                    )}
+                  </InspectorInner>
                 </InspectorCol>
               </TreeSplit>
             </Stack>
