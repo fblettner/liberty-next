@@ -67,7 +67,10 @@ function saveGrid(id: string, s: SavedGrid) {
 }
 
 // ── styled ──────────────────────────────────────────────────────────────────
-const Wrap = styled.div`display: flex; flex-direction: column; min-height: 0;`
+// The DataTable fills its parent vertically — toolbar stays put at the top, the data rows scroll
+// inside `TableScroll` below it. The parent (TableView's Stack) must be a flex column with
+// `flex: 1; min-height: 0` for the chain to work.
+const Wrap = styled.div`display: flex; flex-direction: column; min-height: 0; flex: 1;`
 const ToolbarRow = styled.div`display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1; min-width: 4px;`
 const ActionGroup = styled.div`display: flex; gap: 4px; align-items: center; flex-shrink: 0;`
@@ -137,14 +140,14 @@ const MiniLink = styled.button`
 // Cap at the space the table actually has below the page chrome (header + the run/toolbar rows +
 // the result-meta line + the pager) — `100dvh - ~14rem` — so a result that fits doesn't get a
 // (clipped) inner scrollbar, and a bigger one scrolls inside the box with its last row fully visible.
-// No overflow here — the grid grows with content and the *page* scrolls (PageContent's
-// `overflow-y: auto`). `<thead>` rows use `position: sticky` with `top: 0`; with no scroll
-// context on this wrapper the sticky bound is PageContent, so the column headers stay visible
-// as the user wheels through rows. (Setting any `overflow` other than `visible` here would
-// re-create a Y-scroll context on the wrapper — CSS computes the missing axis to `auto` — and
-// the sticky would bind to the wrapper, breaking the page-level behaviour.)
+// The data rows scroll *inside* the TanStack table — `flex: 1; min-height: 0` fills the
+// vertical space Wrap leaves after the ToolbarRow, and `overflow: auto` gives the rows their
+// own scrollbar so the filter panel, search row, etc. above the table stay fixed regardless
+// of how many rows-per-page the user picks. `<thead>` rows are `position: sticky; top: 0`
+// inside this box, so the column headers stay visible while the body scrolls.
 const TableScroll = styled.div`
-  border: 1px solid ${colors.border}; border-radius: ${radius.lg};
+  flex: 1; min-height: 0; overflow: auto;
+  border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
 `
 // `table-layout: auto` (the default): the browser sizes columns to their content — the best fit in
 // practice. (Column *resizing* was tried with `table-layout: fixed`, but that forced widths the

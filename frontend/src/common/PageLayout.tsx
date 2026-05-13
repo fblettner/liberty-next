@@ -8,6 +8,10 @@ const PageWrap = styled.div`
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* As a flex item itself (inside TabHost / Outlet area), default min-height is auto
+     (= content size); without this override the wrap would grow to the table's natural row
+     count and the page would scroll instead of the table. */
+  min-height: 0;
   overflow: hidden;
   padding: 16px;
 `
@@ -55,6 +59,13 @@ const ContextDesc = styled.div`
 const PageContent = styled.div`
   flex: 1;
   min-height: 0;
+  /* A flex column so a child can use 'flex: 1; min-height: 0' to claim the remaining space
+     (e.g. TableView's Stack → DataTable's Wrap → TableScroll all flex-fill, so the data rows
+     scroll inside the TanStack table while the filter panel / toolbar above stay put).
+     Block children take their natural size by default — pages that don't use the flex chain
+     are unaffected. */
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   padding: 18px;
   border: 1px solid ${colors.border};

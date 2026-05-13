@@ -190,7 +190,11 @@ export default function TableView({ connector, query }: { connector: string; que
       }
       description={<Mono>{connector}.{query}</Mono>}
     >
-      <Stack gap={14}>
+      {/* The Stack fills PageContent's height; the chrome above the grid (filter panel /
+          control bar / result meta line) takes its natural height, the DataTable below has
+          `flex: 1` and flexes into whatever's left. The TanStack table scrolls *inside*
+          itself — the filter panel and toolbar stay fixed. */}
+      <Stack gap={14} style={{ flex: 1, minHeight: 0 }}>
         {filterCols.length > 0 && (
           <FilterPanel
             cols={filterCols}
@@ -226,7 +230,12 @@ export default function TableView({ connector, query }: { connector: string; que
         {runErr && <Banner $tone="error">{runErr}</Banner>}
 
         {result && result.statement_type === 'SELECT' && (
-          <Stack gap={10}>
+          // The inner Stack is the one that wraps ResultMeta + ResultTable. It must also
+          // `flex: 1; minHeight: 0` so the chain reaches all the way down to DataTable —
+          // without this the inner Stack grows to its content's natural height (table rows ×
+          // row height), the outer Stack overflows PageContent, and the page scrolls instead
+          // of the table.
+          <Stack gap={10} style={{ flex: 1, minHeight: 0 }}>
             <Meta>
               {t(result.row_count === 1 ? 'table.rows_one' : 'table.rows_other', { count: result.row_count })} ·{' '}
               {result.duration_ms.toFixed(1)} {t('common.ms')}

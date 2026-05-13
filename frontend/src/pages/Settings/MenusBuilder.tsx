@@ -61,9 +61,12 @@ const InspectorCol = styled.div`
 // Cap the inspector form's width so on a wide screen the inputs aren't half-a-page wide. The
 // container still flexes (it can be narrower); this is just the upper bound.
 const InspectorInner = styled.div`max-width: 720px;`
-// The row shows [chev] [icon] [label] [id]  · on hover: actions appear and the id hides (the two
-// would otherwise fight for the same trailing space and the label would get truncated).
+// The row shows [chev] [icon] [label] [id]  · on hover an overlay [actions] fades in. The id and
+// actions are LAYOUT-stable — actions are absolutely positioned over the right edge with
+// `opacity` for show/hide, the id fades the opposite way. No `display` toggles, so the row
+// doesn't reflow on hover (which would cause the flicker / "elements jumping" effect).
 const TreeRow = styled.button<{ $active?: boolean; $depth: number }>`
+  position: relative;
   display: flex; align-items: center; gap: 4px; width: 100%; padding: 5px 8px; padding-left: calc(${({ $depth }) => $depth * 16}px + 8px);
   text-align: left; border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
@@ -72,11 +75,20 @@ const TreeRow = styled.button<{ $active?: boolean; $depth: number }>`
   & .chev { width: 14px; flex-shrink: 0; color: ${colors.text.muted}; display: inline-flex; align-items: center; justify-content: center; }
   & .icon { flex-shrink: 0; color: ${colors.text.muted}; }
   & .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .id  { font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; margin-left: 6px; flex-shrink: 0; }
-  & .actions { display: none; align-items: center; gap: 2px; flex-shrink: 0; }
+  & .id  {
+    font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; margin-left: 6px; flex-shrink: 0;
+    transition: opacity 0.12s ease;
+  }
+  & .actions {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
+    opacity: 0; pointer-events: none;
+    background: var(--hover-subtle); border-radius: ${radius.sm}; padding: 2px;
+    transition: opacity 0.12s ease;
+  }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-  &:hover .id, &:focus-within .id { display: none; }
-  &:hover .actions, &:focus-within .actions { display: inline-flex; }
+  &:hover .id, &:focus-within .id { opacity: 0; }
+  &:hover .actions, &:focus-within .actions { opacity: 1; pointer-events: auto; }
 `
 const IconBtn = styled.span`
   display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
