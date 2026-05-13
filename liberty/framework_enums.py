@@ -110,4 +110,11 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "delete", "label": "Delete"},
         ],
     },
+    "MENU_ITEM_TYPE": {
+        "label": "Menu Item Type",
+        "values": [
+            {"value": "query", "label": "Query (table / screen)"},
+            {"value": "endpoint", "label": "Endpoint (API call)"},
+        ],
+    },
 }

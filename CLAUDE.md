@@ -243,10 +243,11 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
 - Also (config editing — superuser): `GET /admin/config/connectors` (raw `connectors.toml` text) +
   `PUT /admin/config/connectors` (validates the TOML against the schema, then writes — does *not*
   reload; call `POST /admin/reload` after). And the **structured config builders** (Phase 7):
-  `GET /admin/config/schema` → `{pool, sql, api, dictionary}` = the `PoolConfig` /
-  `SqlConnectorConfig` / `ApiConnectorConfig` / `DictionaryFile` `model_json_schema()`s, each with
-  its own `$defs` (`QueryDef`/`ColumnHint`/`ParamDef`/`EndpointDef` / `DictionaryEntry`/`EnumDef`/
-  `LookupDef`/…) — the UI renders its forms from this ; `GET /admin/config/pools` →
+  `GET /admin/config/schema` → `{pool, sql, api, dictionary, menus, framework_enums}` = the
+  `PoolConfig` / `SqlConnectorConfig` / `ApiConnectorConfig` / `DictionaryFile` / `MenusFile`
+  `model_json_schema()`s, each with its own `$defs` (`QueryDef`/`ColumnHint`/`ParamDef`/`EndpointDef`
+  / `DictionaryEntry`/`EnumDef`/`LookupDef` / `AppMenu`/`MenuItem` / …) — the UI renders its forms
+  from this ; `GET /admin/config/pools` →
   `{path, pools: {name: PoolConfig dict}}` + `PUT /admin/config/pools` (`{pools: {name: dict}}`) —
   validates each against `PoolConfig`, drops default-valued keys, then **surgically rewrites only the
   `[pools.*]` tables** in `connectors.toml` via `tomlkit` (comments + the `[connectors.*]` tables +
@@ -260,7 +261,10 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   missing `dictionary.toml` → an empty dict) + `PUT /admin/config/dictionary/parsed` (`{dictionary:
   {…}}`) — validates the whole payload against `DictionaryFile`, then replaces each top-level section
   (`default_language`/`entries`/`enums`/`lookups`/`connectors`) wholesale via `tomlkit` (comments
-  outside those sections survive), re-parses the file before writing. PUT endpoints don't reload —
+  outside those sections survive), re-parses the file before writing ; `GET /admin/config/menus/parsed`
+  → `{path, menus: {<app>: AppMenu dict}}` (defaults dropped) + `PUT /admin/config/menus/parsed`
+  (validates the whole `MenusFile` — unique ids, parents exist, no cycles, folder-vs-leaf shape — then
+  replaces the top-level `[menus]` table wholesale via `tomlkit`; re-parses before writing). PUT endpoints don't reload —
   call `POST /admin/reload` after. (Dep: `tomlkit` — comment/format-preserving TOML edits.) The
   config models carry per-field metadata for the builder forms: `Field(description=…)` → form hints,
   `Field(json_schema_extra={"x_group": "…"})` → which tab the field goes in (e.g. a query's
@@ -428,10 +432,19 @@ replies), `@monaco-editor/react` (the connector-config editor).
   matching schema (`DictionaryEntry`/`EnumDef`/`LookupDef`; both `enums` and the framework overrides
   drill into `values: [{value, label, l}]`), search past ~6 records, each list row shows the
   record's `label` (or `description` for lookups) under the key so a numeric `[lookups.1]` is
-  findable, top-level `default_language` input — → `PUT /admin/config/dictionary/parsed` + Reload), and `RawEditor` = the
-  Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over `GET/PUT /admin/config/connectors`
-  + Reload — the escape hatch); the structured editors don't support rename yet — delete + re-add — the
-  Phase-7 builder slices), `Login` + `OidcCallback`.
+  findable, top-level `default_language` input — → `PUT /admin/config/dictionary/parsed` + Reload),
+  `MenusBuilder` = the structured `menus.toml` editor (a left list of apps + a right pane with an
+  indented tree of `[[menus.<app>.items]]` built from the flat `items[]` linked by `parent`, plus
+  a per-item inspector — SchemaForm over `MenuItem`, so `type` gets the `MENU_ITEM_TYPE` framework
+  dropdown, translations land in their tab, advanced bits like `parent`/`params`/`roles` are their
+  own tab). Per-row hover actions handle move ↑/↓, indent (reparent under the previous sibling),
+  outdent (move to the grand-parent), add-child and recursive delete; the inspector lets you
+  rename `id` and every child's `parent` ref follows. Filter past 6 items, search hits keep the
+  filtered tree expanded down to each hit. Save → `PUT /admin/config/menus/parsed` + Reload), and
+  `RawEditor` = the Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over `GET/PUT
+  /admin/config/connectors` + Reload — the escape hatch); the structured editors don't support
+  rename of the *top-level key* yet — delete + re-add — the Phase-7 builder slices), `Login` +
+  `OidcCallback`.
 - Backend wiring: `liberty/main.py` mounts a `SPAStaticFiles` (StaticFiles with index.html
   fallback for client routes) at `/` **last** (so it never shadows `/api`, `/auth`, `/ai`,
   `/admin`, `/health`, `/info`, `/docs`); only mounts if `[app] static_dir` exists (default

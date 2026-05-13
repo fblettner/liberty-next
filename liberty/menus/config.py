@@ -50,16 +50,42 @@ class MenuItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    parent: str | None = None  # the id of the parent item; None = a top-level item
-    label: str  # the default-language display label (v1's menu_label)
-    l: dict[str, str] = Field(default_factory=dict)  # language code → translated label (v1's ly_menus_l)
-    icon: str | None = None  # a lucide icon name — a UI hint, not interpreted here
-    type: ItemType | None = None  # None = folder
-    connector: str | None = None  # which connector the target lives in (defaults to the app)
-    target: str | None = None  # the query / endpoint name
-    params: dict[str, Any] = Field(default_factory=dict)  # fixed params handed to the target
-    roles: list[str] = Field(default_factory=list)  # if non-empty, visible only to these roles
+    id: str = Field(description="Stable unique id within the app — used by descendant items as their parent.")
+    parent: str | None = Field(
+        default=None,
+        description="Parent item id (blank = top-level). Normally managed by the tree UI.",
+        json_schema_extra={"x_group": "Advanced"},
+    )
+    label: str = Field(description="Default-language display label (v1's menu_label).")
+    l: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-language overrides: {language_code: translated_label} (v1's ly_menus_l).",
+        json_schema_extra={"x_group": "Translations"},
+    )
+    icon: str | None = Field(default=None, description="Lucide icon name (a UI hint — e.g. 'shield', 'users').")
+    type: ItemType | None = Field(
+        default=None,
+        description="Blank = folder. 'query' = TableView screen, 'endpoint' = HttpRunner.",
+        json_schema_extra={"x_enum_ref": "MENU_ITEM_TYPE"},
+    )
+    connector: str | None = Field(
+        default=None,
+        description="Connector the `target` lives in (blank → the app's own connector).",
+    )
+    target: str | None = Field(
+        default=None,
+        description="Query or endpoint name (required for leaves; ignored on folders).",
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Fixed params passed to the target on open.",
+        json_schema_extra={"x_group": "Advanced"},
+    )
+    roles: list[str] = Field(
+        default_factory=list,
+        description="Visibility filter — empty = visible to anyone allowed to run the target.",
+        json_schema_extra={"x_group": "Advanced"},
+    )
 
     def label_for(self, language: str | None) -> str:
         """The label in *language* if a translation exists, else the default label."""

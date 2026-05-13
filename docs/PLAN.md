@@ -526,11 +526,33 @@ the writable-companion batch-edit model, server-side filters. The form/dialog ve
   re-parses before writing. `model_json_schema()` carries the same per-field metadata (`description` for
   hints, `x_group` for tabs — entries get a "Rule" tab for `rules`/`rules_values`/`default` + a
   "Translations" tab for `l`; lookups group target fields under "Target").
-Verdict on the schema-driven approach: **it pays off** — the pool / connector / dictionary forms are
-essentially all generated; the bespoke code is `SchemaForm` + `SchemaNavigator` (~350 lines, grows slowly) +
-the per-builder list/nav/save wiring (~120 each, all reusable). Next: a **menus tree builder** (a DnD tree),
-a **SQL editor + "test run" preview** for queries. The general UI polish (modern look & feel — spacing,
-validation surfaced inline, etc.) rides along.
+- **`MenusBuilder`** (`config/menus.toml`) — apps list on the left + a per-app tree of items on the
+  right (indented rows reconstructed from the flat `items[]` linked by `parent`), with a per-item
+  inspector (SchemaForm over `MenuItem`: `type` is the `MENU_ITEM_TYPE` framework dropdown,
+  translations land in their tab, advanced bits like `parent`/`params`/`roles` are their own tab).
+  Per-row hover actions handle move ↑/↓, indent (reparent under the previous sibling), outdent
+  (move to the grand-parent), add-child and recursive delete. The inspector lets you rename `id` —
+  every child's `parent` ref follows. Search filters the tree (matched rows + their ancestors
+  visible). Save → `PUT /admin/config/menus/parsed` + Reload. The endpoint validates the whole
+  `MenusFile` (unique ids, parents exist, no cycles, folder-vs-leaf shape) and replaces the
+  top-level `[menus]` table wholesale via `tomlkit`.
+- **Framework enums** — `liberty/framework_enums.py` is v2's port of v1's `ly_enum`-for-the-framework
+  table (DICTIONARY_TYPE / DICTIONARY_RULES / DATASOURCE_TYPE / HTTP_METHOD / COLUMN_ALIGN /
+  AUTH_TYPE / QUERY_DEFINITION / MENU_ITEM_TYPE). A field with
+  `json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"}` renders as a themed two-column `SearchSelect`
+  (mono `value` + sans `label`); a free-text field stays a combobox (allowCustom — typing a value
+  the registry doesn't know commits, so v1's `numeric`/`decimal`/… aliases survive). Operator
+  overrides live in `dictionary.toml` `[framework_enums.<id>]` — a wholesale replace, merged on the
+  fly at the schema endpoint, surfaced in the DictionaryBuilder's *Framework* sub-tab.
+- **Sensitive fields** — `Field(json_schema_extra={"format": "password"})` (Pool password, API
+  connector `auth_password`/`auth_token`) renders through a masked Input with a reveal-eye toggle —
+  so an `ENC:` ciphertext doesn't sit in plain text in the builder.
+Verdict on the schema-driven approach: **it pays off** — every flat builder (pool / connector /
+dictionary / menus) is mostly generated; the bespoke code is `SchemaForm` + `SchemaNavigator`
+(~400 lines, grows slowly), `SearchSelect`'s combobox/2-column mode, and the per-builder
+list/nav/save wiring (~120-200 lines each, all reusable). Next: a **SQL editor + "test run" preview**
+for queries. The general UI polish (modern look & feel — spacing, validation surfaced inline, etc.)
+rides along.
 Replace raw-TOML editing with **structured UI builders** — what v1 did inside its DB ("the framework
 builds the framework"), but on v2's typed config + clean `GET/PUT /admin/config/*` + `/admin/reload`
 surface. **Architectural decision: a schema-driven builder shell, not N bespoke builders** — one

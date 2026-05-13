@@ -10,6 +10,7 @@ export interface ConfigSchemas {
   sql: JsonSchema
   api: JsonSchema
   dictionary: JsonSchema
+  menus: JsonSchema
   framework_enums: FrameworkEnums
 }
 
@@ -47,3 +48,31 @@ export interface DictionaryDoc {
 /** Which kind of dictionary record the builder is editing. `framework_enums` is the operator
  *  override for the bundled `liberty/framework_enums.py` registry — shared scope only. */
 export type DictionaryKind = 'entries' | 'enums' | 'lookups' | 'framework_enums'
+
+/** One flat menu item — matches `liberty/menus/config.py::MenuItem` on the wire. Folders have
+ *  no `type`; leaves carry `type` + `target`. The tree builder reconstructs the hierarchy from
+ *  `parent`. `params` and `roles` round-trip as-is but are rarely set in the builder. */
+export interface MenuItem {
+  id: string
+  parent?: string | null
+  label: string
+  l?: Record<string, string>
+  icon?: string
+  type?: 'query' | 'endpoint'
+  connector?: string
+  target?: string
+  params?: Record<string, unknown>
+  roles?: string[]
+}
+
+/** One `[menus.<app>]` block. */
+export interface AppMenu {
+  label?: string
+  items: MenuItem[]
+}
+
+/** GET /admin/config/menus/parsed. */
+export interface MenusDoc {
+  path: string
+  menus: Record<string, AppMenu>
+}

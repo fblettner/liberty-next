@@ -50,6 +50,7 @@ from liberty.connectors.dictionary import (
 from liberty.framework_enums import FRAMEWORK_ENUMS
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
+from liberty.menus.config import MenusFile, parse_menus
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -134,6 +135,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "sql": SqlConnectorConfig.model_json_schema(),
         "api": ApiConnectorConfig.model_json_schema(),
         "dictionary": DictionaryFile.model_json_schema(),
+        "menus": MenusFile.model_json_schema(),
         "framework_enums": bundled,
     }
 
@@ -291,6 +293,51 @@ async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Super
         parse_dictionary(tomllib.loads(new_text))   # belt-and-braces re-validation
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting dictionary is invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/menus/parsed")
+async def get_menus_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``menus.toml`` parsed and normalised — ``{path, menus: {<app>: AppMenu dict}}``.
+    A missing file → an empty menu set. Default-valued keys are dropped."""
+    path = Path(request.app.state.settings.menus.config_path)
+    cfg = load_menus(path)
+    return {"path": str(path), "menus": {name: app.model_dump(exclude_defaults=True) for name, app in cfg.menus.items()}}
+
+
+class MenusBody(BaseModel):
+    menus: dict[str, dict[str, Any]]
+
+
+@router.put("/config/menus/parsed")
+async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate each app against :class:`AppMenu` (which enforces the v1-style invariants —
+    unique ids, parents exist, no cycles, folder-vs-leaf shape), then rewrite ``menus.toml`` via
+    ``tomlkit`` — the top-level ``[menus]`` table is replaced wholesale (flat items round-trip
+    cleanly through ``tomli-w``-style array-of-tables, which is what `tomlkit` re-renders).
+    Re-parses the resulting file before writing. Does not reload — call ``POST /admin/reload``."""
+    try:
+        MenusFile.model_validate({"menus": body.menus})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid menus: {exc}") from exc
+
+    path = Path(request.app.state.settings.menus.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    # Replace the whole `[menus]` table — items are array-of-tables under each app, easier to
+    # re-render in one shot than to surgically diff.
+    if body.menus:
+        doc["menus"] = body.menus
+    elif "menus" in doc:
+        del doc["menus"]
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        parse_menus(tomllib.loads(new_text))   # belt-and-braces re-validation
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting menus are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}

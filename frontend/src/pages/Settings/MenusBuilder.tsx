@@ -1,0 +1,478 @@
+// Structured editor for `config/menus.toml` — v2's port of v1's ``ly_menus`` (per-app nav trees).
+// Left = the apps list (one chip per `[menus.<app>]`). Right = the selected app's tree + a per-item
+// inspector. The tree is built on the fly from the flat `items[]` linked by `parent`; clicking a
+// row selects it for editing in the inspector, the action buttons reorder (↑↓), reparent
+// (indent / outdent) or delete (recursive — drops the subtree). Add buttons create a new folder
+// or leaf, indented under the current selection. The inspector is a SchemaForm over the MenuItem
+// schema (so `type` becomes the MENU_ITEM_TYPE dropdown, translations land in their tab, etc.) —
+// hidden parent field is what tree ops mutate, the user shouldn't normally touch it.
+// Save validates the whole MenusFile + rewrites `menus.toml` via tomlkit (the `[menus]` table is
+// re-rendered wholesale — flat items round-trip cleanly), then reloads. No rename of an app's key
+// yet (delete + re-add) but the inspector lets you rename an item's `id` and the tree updates
+// every child's `parent` reference to match.
+import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import styled from '@emotion/styled'
+import { Save, RefreshCw, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { api, ApiError } from '../../api/client'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type JsonSchema } from '../../common'
+import type { AppMenu, ConfigSchemas, MenuItem, MenusDoc } from '../../types/config'
+import { colors, fontSize, fonts, radius } from '../../theme'
+
+type AppsMap = Record<string, AppMenu>
+
+// ── styled bits ──────────────────────────────────────────────────────────────
+const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
+const NavCol = styled.div`flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
+const NavItem = styled.button<{ $active?: boolean }>`
+  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
+  & svg { flex-shrink: 0; color: ${colors.text.muted}; }
+  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
+const FormCol = styled(Card)`flex: 1; min-width: 0;`
+const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
+const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
+
+const TreeSplit = styled.div`display: flex; gap: 14px; align-items: flex-start; min-height: 0;`
+const TreeCol = styled.div`
+  flex: 0 0 340px; display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  max-height: calc(100dvh - 22rem);
+`
+const TreeBox = styled.div`
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+`
+const InspectorCol = styled.div`flex: 1; min-width: 0;`
+const TreeRow = styled.button<{ $active?: boolean; $depth: number }>`
+  display: flex; align-items: center; gap: 4px; width: 100%; padding: 5px 8px; padding-left: calc(${({ $depth }) => $depth * 16}px + 8px);
+  text-align: left; border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; border-radius: ${radius.sm}; cursor: pointer;
+  & .chev { width: 14px; flex-shrink: 0; color: ${colors.text.muted}; display: inline-flex; align-items: center; justify-content: center; }
+  & .icon { flex-shrink: 0; color: ${colors.text.muted}; }
+  & .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .id  { font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; margin-left: 6px; }
+  & .actions { display: none; align-items: center; gap: 2px; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  &:hover .actions, &:focus-within .actions { display: inline-flex; }
+`
+const IconBtn = styled.span`
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: ${radius.sm}; color: ${colors.text.muted}; cursor: pointer;
+  &:hover { color: ${colors.text.primary}; background: var(--hover-subtle); }
+`
+const NavSearch = styled.div`
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
+`
+const AppHeader = styled(Row)`align-items: center; justify-content: space-between; gap: 10px;`
+const AppLabel = styled.strong`font-family: ${fonts.mono}; color: ${colors.text.primary};`
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+const isFolder = (it: MenuItem) => !it.type
+
+/** Group children by parent id (and a special `null` bucket for top-level). Preserves the order
+ *  of `items[]`, which is what's rendered top-down — every move operation mutates that order. */
+function groupByParent(items: MenuItem[]): Map<string | null, MenuItem[]> {
+  const out = new Map<string | null, MenuItem[]>()
+  for (const it of items) {
+    const k = it.parent ?? null
+    if (!out.has(k)) out.set(k, [])
+    out.get(k)!.push(it)
+  }
+  return out
+}
+
+/** Find the indices of `id`'s direct neighbours among siblings — `previous` and `next` (`null`
+ *  when at the start/end). Used by move ↑/↓ / indent (which reparents under the previous sibling). */
+function findSiblings(items: MenuItem[], id: string): { current: number; previous: string | null; next: string | null } {
+  const idx = items.findIndex((it) => it.id === id)
+  if (idx < 0) return { current: -1, previous: null, next: null }
+  const cur = items[idx]
+  const parent = cur.parent ?? null
+  let prev: string | null = null
+  let nxt: string | null = null
+  let found = false
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i]
+    if ((it.parent ?? null) !== parent) continue
+    if (it.id === id) { found = true; continue }
+    if (!found) prev = it.id
+    else if (nxt === null) nxt = it.id
+  }
+  return { current: idx, previous: prev, next: nxt }
+}
+
+/** Move `id`'s row in `items[]` so it lands immediately after `targetId` (or before, for `dir=before`).
+ *  We move the *whole subtree* together — collect descendants first, splice them as one block.
+ *  Without this, moving a folder up would leave its children behind in the flat order. */
+function moveBlock(items: MenuItem[], id: string, targetId: string, dir: 'before' | 'after'): MenuItem[] {
+  const block = collectSubtree(items, id)
+  const blockIds = new Set(block.map((b) => b.id))
+  const without = items.filter((it) => !blockIds.has(it.id))
+  const ti = without.findIndex((it) => it.id === targetId)
+  if (ti < 0) return items
+  const insertAt = dir === 'after' ? ti + 1 : ti
+  return [...without.slice(0, insertAt), ...block, ...without.slice(insertAt)]
+}
+
+function collectSubtree(items: MenuItem[], rootId: string): MenuItem[] {
+  const out: MenuItem[] = []
+  const root = items.find((it) => it.id === rootId)
+  if (!root) return out
+  out.push(root)
+  const queue: string[] = [rootId]
+  const seen = new Set<string>([rootId])
+  while (queue.length) {
+    const pid = queue.shift()!
+    for (const it of items) {
+      if (it.parent === pid && !seen.has(it.id)) {
+        out.push(it)
+        seen.add(it.id)
+        queue.push(it.id)
+      }
+    }
+  }
+  return out
+}
+
+function removeSubtree(items: MenuItem[], rootId: string): MenuItem[] {
+  const drop = new Set(collectSubtree(items, rootId).map((b) => b.id))
+  return items.filter((it) => !drop.has(it.id))
+}
+
+/** All ids that would become circular if we reparent `id` to them — `id` itself + its descendants. */
+function descendantIds(items: MenuItem[], id: string): Set<string> {
+  return new Set(collectSubtree(items, id).map((b) => b.id))
+}
+
+/** A fresh, unique id within `items`, derived from `seed` (a label or just "new"). */
+function freshId(items: MenuItem[], seed: string): string {
+  const base = seed.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'new'
+  if (!items.some((it) => it.id === base)) return base
+  for (let i = 2; i < 1000; i++) {
+    const cand = `${base}_${i}`
+    if (!items.some((it) => it.id === cand)) return cand
+  }
+  return `${base}_${Date.now()}`
+}
+
+// ── component ────────────────────────────────────────────────────────────────
+export default function MenusBuilder() {
+  const { t } = useTranslation()
+  const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
+  const [path, setPath] = useState('')
+  const [apps, setApps] = useState<AppsMap | null>(null)
+  const [original, setOriginal] = useState('')
+  const [selApp, setSelApp] = useState<string | null>(null)
+  const [selItem, setSelItem] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [appQ, setAppQ] = useState('')
+  const [treeQ, setTreeQ] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = () => {
+    setError(null); setStatus(null)
+    Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<MenusDoc>('/admin/config/menus/parsed')])
+      .then(([s, d]) => {
+        setSchemas(s); setPath(d.path); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
+        setSelApp((cur) => (cur && d.menus[cur] ? cur : Object.keys(d.menus)[0] ?? null))
+      })
+      .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
+  }
+  useEffect(load, [t])
+  useEffect(() => { setSelItem(null); setTreeQ(''); setExpanded(new Set()) }, [selApp])
+
+  const dirty = useMemo(() => apps != null && JSON.stringify(apps) !== original, [apps, original])
+
+  if (error && !apps) return <Banner $tone="error">{error}</Banner>
+  if (!apps || !schemas) return <Centered />
+
+  const menusSchema = schemas.menus
+  const defs = (menusSchema?.$defs ?? {}) as Record<string, JsonSchema>
+  const menuItemSchema: JsonSchema | null = defs.MenuItem ?? null
+  const appNames = Object.keys(apps)
+  const appNeedle = appQ.trim().toLowerCase()
+  const shownApps = appNeedle ? appNames.filter((n) => n.toLowerCase().includes(appNeedle)) : appNames
+
+  const currentApp: AppMenu | null = selApp ? apps[selApp] ?? null : null
+  const items: MenuItem[] = currentApp?.items ?? []
+  const treeNeedle = treeQ.trim().toLowerCase()
+  // Walk the tree once for rendering; the filter is *visibility-only* (a hit reveals its
+  // ancestors but doesn't change the underlying items[] order — saving still preserves it).
+  const matchesFilter = (it: MenuItem): boolean => {
+    if (!treeNeedle) return true
+    return it.id.toLowerCase().includes(treeNeedle) || it.label.toLowerCase().includes(treeNeedle)
+  }
+  const byParent = groupByParent(items)
+  const matchedIds = useMemo(() => {
+    if (!treeNeedle) return null
+    const direct = new Set(items.filter(matchesFilter).map((it) => it.id))
+    // include ancestors of every direct hit
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const it of items) {
+        if (direct.has(it.id) && it.parent && !direct.has(it.parent)) {
+          direct.add(it.parent); changed = true
+        }
+      }
+    }
+    return direct
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- depends on items + needle, computed inline
+  }, [items, treeNeedle])
+
+  const selItemRec = items.find((it) => it.id === selItem) ?? null
+
+  // ── mutations: every helper returns a new apps map ────────────────────────
+  const updateApp = (name: string, next: AppMenu) =>
+    setApps((p) => ({ ...(p ?? {}), [name]: next }))
+  const updateItems = (next: MenuItem[]) =>
+    selApp && currentApp && updateApp(selApp, { ...currentApp, items: next })
+
+  const addApp = () => {
+    const name = window.prompt(t('settings.menus.app.namePrompt'))?.trim()
+    if (!name) return
+    if (apps[name]) { setSelApp(name); return }
+    setApps((p) => ({ ...(p ?? {}), [name]: { items: [] } }))
+    setSelApp(name); setStatus(null)
+  }
+  const removeApp = (name: string) => {
+    if (!window.confirm(t('settings.menus.app.confirmDelete', { name }))) return
+    setApps((p) => { const n = { ...(p ?? {}) }; delete n[name]; return n })
+    setSelApp((s) => (s === name ? null : s)); setStatus(null)
+  }
+  const renameItem = (oldId: string, newId: string) => {
+    if (!newId || newId === oldId) return
+    if (items.some((it) => it.id === newId)) { window.alert(t('settings.menus.item.idExists', { id: newId })); return }
+    updateItems(items.map((it) => {
+      const next: MenuItem = { ...it }
+      if (next.id === oldId) next.id = newId
+      if (next.parent === oldId) next.parent = newId
+      return next
+    }))
+    setSelItem(newId)
+  }
+  const patchItem = (id: string, patch: Partial<MenuItem>) => {
+    if ('id' in patch && patch.id !== id) { renameItem(id, patch.id!); return }
+    updateItems(items.map((it) => (it.id === id ? { ...it, ...patch } : it)))
+  }
+  const addItem = (kind: 'folder' | 'leaf', parent: string | null = null) => {
+    const seed = kind === 'folder' ? 'folder' : 'item'
+    const newId = freshId(items, seed)
+    const next: MenuItem = kind === 'folder'
+      ? { id: newId, label: seed, parent: parent ?? undefined }
+      : { id: newId, label: seed, type: 'query', target: '', parent: parent ?? undefined }
+    // Insert right after the last child of `parent` so it appears in place; otherwise at the end.
+    const lastChild = [...items].reverse().find((it) => (it.parent ?? null) === parent)
+    if (lastChild) {
+      updateItems(moveBlock([...items, next], newId, lastChild.id, 'after'))
+    } else {
+      updateItems([...items, next])
+    }
+    if (parent) setExpanded((s) => new Set([...s, parent]))
+    setSelItem(newId)
+  }
+  const removeItem = (id: string) => {
+    const rec = items.find((it) => it.id === id)
+    if (!rec) return
+    const hasChildren = items.some((it) => it.parent === id)
+    if (hasChildren && !window.confirm(t('settings.menus.item.confirmDeleteSubtree', { name: rec.label || rec.id }))) return
+    updateItems(removeSubtree(items, id))
+    if (selItem === id) setSelItem(null)
+  }
+  const moveItem = (id: string, dir: 'up' | 'down') => {
+    const sib = findSiblings(items, id)
+    if (dir === 'up' && sib.previous) updateItems(moveBlock(items, id, sib.previous, 'before'))
+    else if (dir === 'down' && sib.next) updateItems(moveBlock(items, id, sib.next, 'after'))
+  }
+  const indentItem = (id: string) => {
+    // Reparent under the previous sibling. The previous sibling becomes a folder *de facto* —
+    // we don't auto-clear its type, so an item with type "query" + children is still allowed
+    // by the schema (the runtime treats it as a leaf, but the builder shows nested rows
+    // anyway — leave the validation to the user).
+    const sib = findSiblings(items, id)
+    if (!sib.previous) return
+    patchItem(id, { parent: sib.previous })
+    setExpanded((s) => new Set([...s, sib.previous!]))
+  }
+  const outdentItem = (id: string) => {
+    const rec = items.find((it) => it.id === id); if (!rec || !rec.parent) return
+    const parent = items.find((it) => it.id === rec.parent); if (!parent) return
+    patchItem(id, { parent: parent.parent ?? undefined })
+  }
+
+  async function save() {
+    if (!apps) return
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      await api.put<{ saved: boolean }>('/admin/config/menus/parsed', { menus: apps })
+      await api.post<{ menu_apps: string[] }>('/admin/reload')
+      setStatus(t('settings.menus.saved'))
+      load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+
+  // ── tree rendering ────────────────────────────────────────────────────────
+  const renderRow = (it: MenuItem, depth: number): ReactElement | null => {
+    if (matchedIds && !matchedIds.has(it.id)) return null
+    const folder = isFolder(it)
+    const kids = byParent.get(it.id) ?? []
+    const open = expanded.has(it.id)
+    const sib = findSiblings(items, it.id)
+    const isSel = it.id === selItem
+    const icon = folder
+      ? (open ? <FolderOpen size={14} /> : <Folder size={14} />)
+      : <FileText size={14} />
+    return (
+      <div key={it.id}>
+        <TreeRow type="button" $active={isSel} $depth={depth}
+          onClick={() => setSelItem(it.id)}
+          onDoubleClick={() => { if (folder) setExpanded((s) => { const n = new Set(s); n.has(it.id) ? n.delete(it.id) : n.add(it.id); return n }) }}
+        >
+          <span className="chev" onClick={(e) => { e.stopPropagation(); if (kids.length) setExpanded((s) => { const n = new Set(s); n.has(it.id) ? n.delete(it.id) : n.add(it.id); return n }) }}>
+            {kids.length > 0 ? (open ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
+          </span>
+          <span className="icon">{icon}</span>
+          <span className="lbl">{it.label || <em style={{ color: colors.text.muted }}>(no label)</em>}</span>
+          <span className="id">{it.id}</span>
+          <span className="actions" onClick={(e) => e.stopPropagation()}>
+            <IconBtn role="button" title={t('settings.menus.tree.up')} aria-disabled={!sib.previous} onClick={() => sib.previous && moveItem(it.id, 'up')} style={{ opacity: sib.previous ? 1 : 0.3 }}><ArrowUp size={12} /></IconBtn>
+            <IconBtn role="button" title={t('settings.menus.tree.down')} aria-disabled={!sib.next} onClick={() => sib.next && moveItem(it.id, 'down')} style={{ opacity: sib.next ? 1 : 0.3 }}><ArrowDown size={12} /></IconBtn>
+            <IconBtn role="button" title={t('settings.menus.tree.indent')} aria-disabled={!sib.previous} onClick={() => sib.previous && indentItem(it.id)} style={{ opacity: sib.previous ? 1 : 0.3 }}><ArrowRight size={12} /></IconBtn>
+            <IconBtn role="button" title={t('settings.menus.tree.outdent')} aria-disabled={!it.parent} onClick={() => it.parent && outdentItem(it.id)} style={{ opacity: it.parent ? 1 : 0.3 }}><ArrowLeft size={12} /></IconBtn>
+            <IconBtn role="button" title={t('settings.menus.tree.addChild')} onClick={() => addItem('leaf', it.id)}><Plus size={12} /></IconBtn>
+            <IconBtn role="button" title={t('common.delete')} onClick={() => removeItem(it.id)}><Trash2 size={12} /></IconBtn>
+          </span>
+        </TreeRow>
+        {kids.length > 0 && (open || !!matchedIds) && (
+          <div>
+            {kids.map((c) => renderRow(c, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── inspector — SchemaForm over MenuItem (the parent field's edits go through patchItem
+  // which detects an id rename; the form also writes label/type/target/etc. directly). The set
+  // of available `parent` ids excludes the current row's own descendants (preventing cycles)
+  // — surfaced as a help line; the user can pick any id from the inspector.
+  const safeParents = useMemo(() => {
+    if (!selItemRec) return [] as string[]
+    const forbidden = descendantIds(items, selItemRec.id)
+    return items.filter((it) => !forbidden.has(it.id)).map((it) => it.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, selItem])
+
+  return (
+    <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>
+    <Stack gap={12}>
+      <Mono>{path}</Mono>
+      <Split>
+        <NavCol>
+          {appNames.length > 6 && (
+            <NavSearch>
+              <Search size={13} />
+              <input value={appQ} onChange={(e) => setAppQ(e.target.value)} placeholder={`filter ${appNames.length}…`} />
+            </NavSearch>
+          )}
+          <NavList>
+            {shownApps.map((n) => (
+              <NavItem key={n} $active={n === selApp} onClick={() => { setSelApp(n); setStatus(null) }}>
+                <FolderTree size={13} /> <span className="name">{n}</span>
+              </NavItem>
+            ))}
+            {shownApps.length === 0 && <Empty>{appNames.length ? t('common.noMatches') : t('settings.menus.app.empty')}</Empty>}
+          </NavList>
+          <Button $variant="ghost" $size="sm" onClick={addApp} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
+            <Plus size={13} /> {t('settings.menus.app.add')}
+          </Button>
+        </NavCol>
+        <FormCol>
+          {selApp && currentApp ? (
+            <Stack gap={12}>
+              <AppHeader>
+                <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
+                <Button $variant="danger" $size="sm" onClick={() => removeApp(selApp)} disabled={busy}>
+                  <Trash2 size={13} /> {t('settings.menus.app.delete')}
+                </Button>
+              </AppHeader>
+              <TreeSplit>
+                <TreeCol>
+                  <NavSearch>
+                    <Search size={13} />
+                    <input value={treeQ} onChange={(e) => setTreeQ(e.target.value)} placeholder={t('settings.menus.tree.filterPlaceholder', { count: items.length })} />
+                  </NavSearch>
+                  <TreeBox>
+                    {(byParent.get(null) ?? []).map((it) => renderRow(it, 0))}
+                    {items.length === 0 && <Empty>{t('settings.menus.tree.empty')}</Empty>}
+                  </TreeBox>
+                  <Row gap={6} style={{ marginTop: 6 }}>
+                    <Button $variant="ghost" $size="sm" onClick={() => addItem('folder')} style={{ flex: 1, justifyContent: 'flex-start' }}>
+                      <Plus size={13} /> {t('settings.menus.tree.addFolder')}
+                    </Button>
+                    <Button $variant="ghost" $size="sm" onClick={() => addItem('leaf')} style={{ flex: 1, justifyContent: 'flex-start' }}>
+                      <Plus size={13} /> {t('settings.menus.tree.addLeaf')}
+                    </Button>
+                  </Row>
+                </TreeCol>
+                <InspectorCol>
+                  {selItemRec && menuItemSchema ? (
+                    <Stack gap={10}>
+                      <Hint>{t('settings.menus.inspector.hint')}</Hint>
+                      <SchemaForm
+                        schema={{ ...menuItemSchema, $defs: defs }}
+                        defs={defs}
+                        value={selItemRec as unknown as Record<string, unknown>}
+                        onChange={(v) => {
+                          // SchemaForm gives the whole picked value back. Detect id rename so we
+                          // can also update children's `parent` refs (see renameItem).
+                          const nextId = typeof v.id === 'string' ? v.id : selItemRec.id
+                          if (nextId !== selItemRec.id) { renameItem(selItemRec.id, nextId); return }
+                          updateItems(items.map((it) => (it.id === selItemRec.id ? (v as unknown as MenuItem) : it)))
+                        }}
+                      />
+                      {safeParents.length > 0 && (
+                        <Hint>{t('settings.menus.inspector.parentHint', { ids: safeParents.join(', ') })}</Hint>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Empty>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>
+                  )}
+                </InspectorCol>
+              </TreeSplit>
+            </Stack>
+          ) : (
+            <Empty>{appNames.length ? t('settings.menus.app.pickOne') : t('settings.menus.app.empty')}</Empty>
+          )}
+        </FormCol>
+      </Split>
+      <Row>
+        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
+        </Button>
+        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
+        </Button>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+      </Row>
+      <Hint>{t('settings.menus.hint')}</Hint>
+    </Stack>
+    </FrameworkEnumsContext.Provider>
+  )
+}

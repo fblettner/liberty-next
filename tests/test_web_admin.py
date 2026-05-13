@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
-from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, Settings
+from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, MenuSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -71,6 +71,7 @@ def env(tmp_path):
     settings = Settings(
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
+        menus=MenuSettings(config_path=tmp_path / "menus.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
@@ -270,6 +271,46 @@ def test_config_dictionary_parsed_get_and_put(env) -> None:
         assert sch2["framework_enums"]["DATASOURCE_TYPE"]["values"] == [{"value": "duckdb", "label": "DuckDB"}]
         # other ids still come from the bundled set (untouched)
         assert sch2["framework_enums"]["HTTP_METHOD"]["values"] == sch["framework_enums"]["HTTP_METHOD"]["values"]
+
+
+def test_config_menus_parsed_get_and_put(env) -> None:
+    app, conn_toml, _ = env
+    menus_toml = conn_toml.parent / "menus.toml"  # see env fixture — the same tmp_path
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # schema serves the MenusFile shape (with its $defs)
+        sch = client.get("/admin/config/schema", headers=h).json()
+        assert "menus" in sch["menus"]["properties"]
+        for nested in ("AppMenu", "MenuItem"):
+            assert nested in sch["menus"]["$defs"]
+        # a fresh tmp dir has no menus.toml → GET returns an empty dict (path still reported)
+        body = client.get("/admin/config/menus/parsed", headers=h).json()
+        assert body["path"] == str(menus_toml) and body["menus"] == {}
+        # permission gate + validation gate (an unknown parent / type mismatch is rejected)
+        assert client.put("/admin/config/menus/parsed", json={"menus": {}}, headers=_h(client, "reader")).status_code == 403
+        bad = {"app1": {"items": [{"id": "a", "label": "A", "parent": "nope"}]}}
+        assert client.put("/admin/config/menus/parsed", json={"menus": bad}, headers=h).status_code == 422
+        # valid: a folder + two leaves underneath
+        payload = {
+            "nomasx1": {
+                "label": "NOMASX-1",
+                "items": [
+                    {"id": "security", "label": "Security", "l": {"fr": "Sécurité"}, "icon": "shield"},
+                    {"id": "users", "parent": "security", "label": "Users", "type": "query", "target": "security_users_get"},
+                    {"id": "roles", "parent": "security", "label": "Roles", "type": "query", "target": "security_roles_get"},
+                ],
+            },
+        }
+        r = client.put("/admin/config/menus/parsed", json={"menus": payload}, headers=h)
+        assert r.status_code == 200 and r.json()["saved"] is True
+        text = menus_toml.read_text()
+        assert "[[menus.nomasx1.items]]" in text and 'id = "security"' in text and 'fr = "Sécurité"' in text
+        after = client.get("/admin/config/menus/parsed", headers=h).json()["menus"]
+        assert set(after) == {"nomasx1"}
+        assert after["nomasx1"]["label"] == "NOMASX-1"
+        assert [it["id"] for it in after["nomasx1"]["items"]] == ["security", "users", "roles"]
+        # Reload picks it up — the app's menu count goes from 0 to 1
+        assert client.post("/admin/reload", headers=h).json()["menu_apps"] == ["nomasx1"]
 
 
 def test_oidc_callback_fragment_redirect() -> None:
