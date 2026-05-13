@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
+import { groupQueriesByTable } from './connectorTables'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type AppsMap = Record<string, AppMenu>
@@ -278,20 +279,30 @@ export default function MenusBuilder() {
     }
     base.MENU_PARENT_IDS = { label: 'Available parents', values: parentValues }
 
-    // MENU_TARGETS — queries/endpoints of (the inspector's `connector` ?? the app). Filtered by
-    // the item's `type` (query → SQL connector's queries, endpoint → API connector's endpoints).
-    // Empty when type is blank (folder) or the connector / type is misaligned.
+    // MENU_TARGETS — *tables* (the read query for each base name, grouped by suffix) plus loose
+    // non-CRUD queries, OR endpoints. type=query → group the SQL connector's queries by table
+    // (the same `<base>_<get|put|post|delete>` rule the connector Tables view uses); the dropdown
+    // row shows mono="F0005" + label="Address Book Master" but stores value="f0005_get" — so the
+    // user picks the *screen* not a specific CRUD slot. Loose queries (no CRUD suffix — bespoke
+    // SELECTs that don't fit the table convention) are listed after the tables. type=endpoint →
+    // a flat list of endpoints (no table grouping there). Empty for folders.
     const selRec = appItems.find((it) => it.id === selItem)
     const connKey = (typeof selRec?.connector === 'string' && selRec.connector) ? selRec.connector : selApp
     const conn = connectors && connKey ? connectors[connKey] : undefined
-    const targets: { value: string; label: string }[] = []
+    const targets: { value: string; label: string; mono?: string }[] = []
     if (selRec?.type === 'query' && conn?.type === 'sql') {
       const qs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
-      for (const q of qs) {
-        const name = typeof q?.name === 'string' ? q.name : ''
-        if (!name) continue
+      const grouped = groupQueriesByTable(qs)
+      for (const g of grouped.tables) {
+        if (!g.slots.get) continue   // a table without a _get isn't a viewable target
+        const q = g.slots.get.query
         const desc = typeof q?.description === 'string' ? q.description : (typeof q?.label === 'string' ? q.label : '')
-        targets.push({ value: name, label: desc || name })
+        targets.push({ value: g.slots.get.name, label: desc || g.base, mono: g.base })
+      }
+      for (const ls of grouped.loose) {
+        if (!ls.name) continue
+        const desc = typeof ls.query?.description === 'string' ? ls.query.description : (typeof ls.query?.label === 'string' ? ls.query.label : '')
+        targets.push({ value: ls.name, label: desc || ls.name, mono: ls.name })
       }
     } else if (selRec?.type === 'endpoint' && conn?.type === 'api') {
       const es = Array.isArray(conn.endpoints) ? (conn.endpoints as Record<string, unknown>[]) : []

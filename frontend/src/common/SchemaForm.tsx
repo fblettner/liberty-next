@@ -51,8 +51,11 @@ export interface JsonSchema {
   x_key_enum_ref?: string
 }
 
-/** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema). */
-export interface FrameworkEnumValue { value: string; label: string }
+/** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema).
+ *  `mono` is an optional override for the SearchSelect's left mono column — defaults to `value`.
+ *  Used by `MENU_TARGETS` to show a table's base name in mono while storing the read-query
+ *  name as the value (e.g. mono="F0005", label="Address Book Master", value="f0005_get"). */
+export interface FrameworkEnumValue { value: string; label: string; mono?: string }
 export interface FrameworkEnum { label: string; values: FrameworkEnumValue[] }
 export type FrameworkEnums = Record<string, FrameworkEnum>
 
@@ -86,7 +89,7 @@ function enumFor(ref: string | null, enums: FrameworkEnums | null): FrameworkEnu
  *  (so a `Literal[…]` field driven by an enum drops values that aren't in its set). */
 function enumOptions(fe: FrameworkEnum, allowed: Set<string> | null): SearchSelectOption[] {
   const vals = allowed ? fe.values.filter((v) => allowed.has(v.value)) : fe.values
-  return vals.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
+  return vals.map((v) => ({ value: v.value, label: v.label, mono: v.mono ?? v.value }))
 }
 
 type Defs = Record<string, JsonSchema>
