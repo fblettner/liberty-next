@@ -564,6 +564,34 @@ def test_migrate_dictionary_lookup_params() -> None:
     _ = EnumDef  # silence unused-import warning when the helper isn't needed for an assertion path
 
 
+def test_migrate_dictionary_lookup_param_names() -> None:
+    """v1's ly_lkp_params declares which `:placeholder` params each lookup's query needs (one
+    row per (lkp_id, dd_id)). The migration attaches the ordered list to the lookup as
+    `params` so the builder UI can auto-surface the matching input fields."""
+    lookups = [
+        {"lkp_id": "1", "lkp_description": "Get UDC", "lkp_query_id": 7, "lkp_dd_id": "KY", "lkp_dd_label": "DL01"},
+        {"lkp_id": "2", "lkp_description": "No params", "lkp_query_id": 8, "lkp_dd_id": "C", "lkp_dd_label": "L"},
+    ]
+    # ly_qry_sql rows so the migrator can resolve lkp_query_id → a v2 query name.
+    sql_rows = [
+        {"query_id": 7, "query_label": "Get UDC Description", "query_crud": "GET", "query_pool": "ds"},
+        {"query_id": 8, "query_label": "Other", "query_crud": "GET", "query_pool": "ds"},
+    ]
+    lkp_params = [
+        {"lkp_id": "1", "dd_id": "SY"},
+        {"lkp_id": "1", "dd_id": "RT"},
+        # duplicates are filtered out (preserved order: first occurrence wins)
+        {"lkp_id": "1", "dd_id": "SY"},
+    ]
+    out = migrate_dictionary([], lookup_rows=lookups, sql_rows=sql_rows, lookup_params_rows=lkp_params)
+    assert out["lookups"]["1"]["params"] == ["SY", "RT"]
+    # Lookup 2 has no rows → `params` not emitted (Pydantic default_factory).
+    assert "params" not in out["lookups"]["2"]
+    from liberty.connectors.dictionary import parse_dictionary
+    d = parse_dictionary(tomllib.loads(render_toml(out)))
+    assert d.lookups["1"].params == ["SY", "RT"] and d.lookups["2"].params == []
+
+
 def test_migrate_sql_queries_with_column_hints() -> None:
     out = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres",
                               column_hints={3: [{"name": "F0101", "label": "Address Book"}]})
@@ -910,14 +938,14 @@ async def test_read_dictionary_rules_and_migrate(v1_engine) -> None:
     from liberty.connectors.dictionary import parse_dictionary
     from liberty.migrations import read_dictionary_rules
     dict_rows, dict_l_rows = await read_dictionary(v1_engine)
-    enum_rows, enum_val_rows, enum_val_l_rows, lookup_rows, sql_rows, filter_rows = await read_dictionary_rules(v1_engine)
+    enum_rows, enum_val_rows, enum_val_l_rows, lookup_rows, sql_rows, filter_rows, lkp_param_rows = await read_dictionary_rules(v1_engine)
     assert [r["enum_id"] for r in enum_rows] == [1]
     assert {(r["enum_id"], r["val_enum"]) for r in enum_val_rows} == {(1, "A"), (1, "I")}
     assert {r["lkp_id"] for r in lookup_rows} == {1}
-    # The fake v1 db has no ly_dictionary_filters table — _rows_or_empty returns [] with a warning.
-    assert filter_rows == []
+    # The fake v1 db has no ly_dictionary_filters / ly_lkp_params tables — _rows_or_empty returns [].
+    assert filter_rows == [] and lkp_param_rows == []
     out = migrate_dictionary(
-        dict_rows, dict_l_rows, enum_rows, enum_val_rows, enum_val_l_rows, lookup_rows, sql_rows, filter_rows,
+        dict_rows, dict_l_rows, enum_rows, enum_val_rows, enum_val_l_rows, lookup_rows, sql_rows, filter_rows, lkp_param_rows,
         connector_name="db",
     )
     d = parse_dictionary(tomllib.loads(render_toml(out)))
@@ -980,7 +1008,7 @@ async def test_read_applications_column_hints_dictionary_menus_missing_tables(tm
         assert await read_column_hints(engine) == ([], [])     # no ly_tbl_col/ly_dlg_col → ([], [])
         assert await read_dictionary(engine) == ([], [])       # no ly_dictionary/ly_dictionary_l → ([], [])
         assert await read_menus(engine) == ([], [], [], [], [])  # no ly_menus/… → all empty
-        assert await read_dictionary_rules(engine) == ([], [], [], [], [], [])  # no ly_enum/ly_lookup/ly_dictionary_filters → all empty
+        assert await read_dictionary_rules(engine) == ([], [], [], [], [], [], [])  # no ly_enum/ly_lookup/ly_dictionary_filters/ly_lkp_params → all empty
     finally:
         await engine.dispose()
 

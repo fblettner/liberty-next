@@ -92,9 +92,10 @@ class DictionaryEntry(BaseModel):
             "v1's ly_dictionary_filters (flt_type='VALUE'). Used when the lookup's query expects "
             "params to even run (e.g. UDC: SY='01', RT='LP' for the Languages table) — without "
             "these the query returns nothing or the wrong rows. Ignored for non-LOOKUP rules. "
-            "Table / dialog levels can override with dynamic-from-row values (Phase-7 follow-up)."
+            "The builder's key dropdown auto-shows the param names declared on the selected "
+            "lookup (LookupDef.params)."
         ),
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Rule", "x_key_enum_ref": "CURRENT_LOOKUP_PARAMS"},
     )
     l: dict[str, str] = Field(
         default_factory=dict,
@@ -173,6 +174,17 @@ class LookupDef(BaseModel):
         default=None,
         description="Optional secondary key (v1's lkp_dd_group — not used yet).",
         json_schema_extra={"x_group": "Advanced"},
+    )
+    params: list[str] = Field(
+        default_factory=list,
+        title="Params",
+        description=(
+            "The `:placeholder` parameter names the lookup's query expects (v1's ly_lkp_params). "
+            "Informational on the LookupDef itself — the entries that reference this lookup bind "
+            "values to these names via `DictionaryEntry.lookup_params` (the dictionary-builder's "
+            "Rule tab auto-surfaces one input per name when the entry's rule is LOOKUP)."
+        ),
+        json_schema_extra={"x_group": "Target"},
     )
 
 

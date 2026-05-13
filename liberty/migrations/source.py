@@ -108,6 +108,14 @@ _DICTIONARY_FILTERS = text("""
     FROM ly_dictionary_filters
     ORDER BY dd_id, flt_id
 """)
+# Declarative parameter names per lookup — v1's ly_lkp_params (one row per (lkp_id, dd_id)).
+# These tell the builder which `:placeholder` names the lookup's query expects, so an entry
+# that picks this lookup can auto-surface the bindable fields.
+_LOOKUP_PARAMS = text("""
+    SELECT lkp_id, dd_id
+    FROM ly_lkp_params
+    ORDER BY lkp_id, dd_id
+""")
 # App navigation: ly_menus (the tree, by menu_seq_ukid) + ly_menus_l (per-language labels) +
 # the lookup tables that resolve a node's menu_component/menu_component_id to a query
 # (ly_tables.tbl_id → tbl_query_id ; ly_dlg_frm.frm_id → frm_query_id ; ly_query → label).
@@ -217,14 +225,15 @@ async def read_dictionary_rules(
     engine: AsyncEngine,
 ) -> tuple[
     list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
-    list[dict[str, Any]], list[dict[str, Any]],
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
 ]:
     """Return (``ly_enum`` rows, ``ly_enum_val`` rows, ``ly_enum_val_l`` rows, ``ly_lookup`` rows,
-    ``ly_qry_sql⋈ly_query`` rows, ``ly_dictionary_filters`` rows) — the v1 data the dictionary's
-    display rules reference (``dd_rules = "ENUM"`` → ``ly_enum``/``ly_enum_val``;
-    ``dd_rules = "LOOKUP"`` → ``ly_lookup``, whose ``lkp_query_id`` resolves to a v2 query name
-    through the joined sql rows; ``ly_dictionary_filters`` supplies static parameter bindings
-    per dictionary entry for the lookup's query). Missing tables → empty lists. Passed alongside
+    ``ly_qry_sql⋈ly_query`` rows, ``ly_dictionary_filters`` rows, ``ly_lkp_params`` rows) — the
+    v1 data the dictionary's display rules reference (``dd_rules = "ENUM"`` →
+    ``ly_enum``/``ly_enum_val``; ``dd_rules = "LOOKUP"`` → ``ly_lookup``, whose ``lkp_query_id``
+    resolves to a v2 query name through the joined sql rows; ``ly_dictionary_filters`` supplies
+    static parameter bindings per dictionary entry; ``ly_lkp_params`` declares the param names
+    each lookup's query expects). Missing tables → empty lists. Passed alongside
     :func:`read_dictionary` into :func:`liberty.migrations.v1.migrate_dictionary`."""
     return (
         await _rows_or_empty(engine, _ENUMS, what="ly_enum"),
@@ -233,6 +242,7 @@ async def read_dictionary_rules(
         await _rows_or_empty(engine, _LOOKUPS, what="ly_lookup"),
         await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (lookup target → query name)"),
         await _rows_or_empty(engine, _DICTIONARY_FILTERS, what="ly_dictionary_filters (lookup static params)"),
+        await _rows_or_empty(engine, _LOOKUP_PARAMS, what="ly_lkp_params (lookup param-name declarations)"),
     )
 
 

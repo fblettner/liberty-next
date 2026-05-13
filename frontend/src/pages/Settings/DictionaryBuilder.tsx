@@ -261,6 +261,29 @@ export default function DictionaryBuilder() {
         : 'Dictionary entries',
       values: [...ddOut.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([value, label]) => ({ value, label })),
     }
+
+    // CURRENT_LOOKUP_PARAMS — used as `x_key_enum_ref` on DictionaryEntry.lookup_params. When the
+    // selected entry has `rules = "LOOKUP"`, this lists the param names declared by the chosen
+    // lookup (its `params` field from v1's ly_lkp_params). The translations-style key dropdown in
+    // StringMapEditor reads this and suggests the right names; param values stay free-text.
+    let lkpParamNames: string[] = []
+    if (kind === 'entries' && sel) {
+      const ent = (overlay?.entries?.[sel] ?? dict?.entries?.[sel]) as Record<string, unknown> | undefined
+      const ruleKind = typeof ent?.rules === 'string' ? ent.rules.toUpperCase() : ''
+      const ruleArg = typeof ent?.rules_values === 'string' ? ent.rules_values : ''
+      if (ruleKind === 'LOOKUP' && ruleArg) {
+        // Lookups follow the same resolution path as entries — scope's overlay first, then shared
+        const lkpRec = (overlay?.lookups?.[ruleArg] ?? dict?.lookups?.[ruleArg]) as Record<string, unknown> | undefined
+        const params = lkpRec?.params
+        if (Array.isArray(params)) lkpParamNames = params.filter((p): p is string => typeof p === 'string' && !!p)
+      }
+    }
+    base.CURRENT_LOOKUP_PARAMS = {
+      label: lkpParamNames.length > 0
+        ? `Lookup params — ${lkpParamNames.join(', ')}`
+        : 'Lookup params (pick a LOOKUP rule first)',
+      values: lkpParamNames.map((p) => ({ value: p, label: p })),
+    }
     return base
   }, [schemas, dict, scope, kind, sel, connectors])
 

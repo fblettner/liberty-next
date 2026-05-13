@@ -625,6 +625,7 @@ def migrate_dictionary(
     lookup_rows: Iterable[Mapping[str, Any]] = (),
     sql_rows: Iterable[Mapping[str, Any]] = (),
     dictionary_filters_rows: Iterable[Mapping[str, Any]] = (),
+    lookup_params_rows: Iterable[Mapping[str, Any]] = (),
     *,
     default_language: str = "en",
     connector_name: str | None = None,
@@ -757,6 +758,19 @@ def migrate_dictionary(
         c = str(r.get("query_crud") or "").upper()
         if c in _READ_CRUD and qid not in read_crud:
             read_crud[qid] = c
+    # Per-lookup parameter names — v1's ly_lkp_params (one row per (lkp_id, dd_id)). Declarative
+    # info: tells the dictionary builder which `:placeholder` names the lookup's query expects,
+    # so an entry that picks this lookup auto-surfaces the bindable fields. Preserve the v1 order.
+    lkp_param_names: dict[str, list[str]] = {}
+    for r in lookup_params_rows:
+        lid = str(r.get("lkp_id") or "").strip()
+        name = str(r.get("dd_id") or "").strip()
+        if not lid or not name:
+            continue
+        lst = lkp_param_names.setdefault(lid, [])
+        if name not in lst:
+            lst.append(name)
+
     lookups: dict[str, dict[str, Any]] = {}
     for r in lookup_rows:
         lid = str(r.get("lkp_id") or "").strip()
@@ -776,7 +790,7 @@ def migrate_dictionary(
                 lkp_connector = slugify(pool, fallback=pool)
         if not value_col or not label_col or not target:
             continue  # an unresolvable lookup — operator will fix it by hand or remove it
-        lookups[lid] = _drop_none({
+        out_lkp = _drop_none({
             "description": str(r.get("lkp_description") or "").strip() or None,
             "connector": lkp_connector,
             "query": target,
@@ -784,6 +798,9 @@ def migrate_dictionary(
             "label": label_col,
             "group": str(r.get("lkp_dd_group") or "").strip() or None,
         })
+        if lid in lkp_param_names:
+            out_lkp["params"] = lkp_param_names[lid]
+        lookups[lid] = out_lkp
 
     # output  --------------------------------------------------------------- #
     section: dict[str, Any] = {"entries": entries}
