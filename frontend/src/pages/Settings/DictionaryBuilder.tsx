@@ -235,21 +235,30 @@ export default function DictionaryBuilder() {
       label: effectiveConn ? `Read queries — ${effectiveConn}` : 'Read queries (pick a connector first)',
       values: lookupQueries,
     }
+    // LOOKUP_DD_FIELDS = union of dd entries from three places, ordered last-wins:
+    //   1. Shared bucket
+    //   2. The lookup's `connector` (where the query lives) — its columns are typically dd-named
+    //   3. The current SCOPE (where the lookup record itself lives) — same domain, often the same set
+    // Using the union covers the post-re-migration case where lookups live under one connector scope
+    // (e.g. jdedwards) but target queries on another (e.g. nomajde) — pulling from only one would
+    // leave the dropdown empty.
     const ddOut = new Map<string, string>()
-    if (effectiveConn) {
-      // shared first, then per-connector overlay — overlay wins on collision (runtime semantics).
-      for (const [id, rec] of Object.entries(dict?.entries ?? {})) {
-        const lbl = typeof (rec as Record<string, unknown>)?.label === 'string' ? (rec as Record<string, unknown>).label as string : id
-        ddOut.set(id, lbl)
-      }
-      const connEntries = ((dict?.connectors ?? {})[effectiveConn]?.entries) as Record<string, Record<string, unknown>> | undefined
-      for (const [id, rec] of Object.entries(connEntries ?? {})) {
-        const lbl = typeof rec?.label === 'string' ? (rec.label as string) : id
+    const ingestEntries = (m: Record<string, unknown> | undefined) => {
+      for (const [id, rec] of Object.entries(m ?? {})) {
+        const lbl = typeof (rec as Record<string, unknown>)?.label === 'string'
+          ? ((rec as Record<string, unknown>).label as string)
+          : id
         ddOut.set(id, lbl)
       }
     }
+    ingestEntries(dict?.entries)
+    if (effectiveConn) ingestEntries(((dict?.connectors ?? {})[effectiveConn]?.entries) as Record<string, unknown> | undefined)
+    if (scope && scope !== effectiveConn) ingestEntries(((dict?.connectors ?? {})[scope]?.entries) as Record<string, unknown> | undefined)
+    const ddLabelBits = ['shared', effectiveConn, scope].filter((s, i, arr) => s && arr.indexOf(s) === i)
     base.LOOKUP_DD_FIELDS = {
-      label: effectiveConn ? `Dictionary entries — ${effectiveConn}` : 'Dictionary entries (pick a connector first)',
+      label: ddLabelBits.length > 0
+        ? `Dictionary entries — ${ddLabelBits.join(' / ')}`
+        : 'Dictionary entries',
       values: [...ddOut.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([value, label]) => ({ value, label })),
     }
     return base
