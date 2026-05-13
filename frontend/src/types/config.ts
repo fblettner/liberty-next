@@ -1,13 +1,16 @@
 // Shapes of the structured-config admin endpoints (liberty/web/admin.py — the Phase-7 builders).
-import type { JsonSchema } from '../common/SchemaForm'
+import type { FrameworkEnums, JsonSchema } from '../common/SchemaForm'
 
 /** GET /admin/config/schema — JSON Schema of the config models the builder forms render from
- *  (`sql` / `api` carry their own `$defs` for QueryDef / ColumnHint / ParamDef / EndpointDef). */
+ *  (`sql` / `api` carry their own `$defs` for QueryDef / ColumnHint / ParamDef / EndpointDef),
+ *  plus `framework_enums` — v2's port of v1's `ly_enum`-for-the-framework registry, threaded into
+ *  the form via FrameworkEnumsContext so fields with `x_enum_ref` render as themed dropdowns. */
 export interface ConfigSchemas {
   pool: JsonSchema
   sql: JsonSchema
   api: JsonSchema
-  [section: string]: JsonSchema
+  dictionary: JsonSchema
+  framework_enums: FrameworkEnums
 }
 
 /** GET /admin/config/pools — the current `[pools.*]` as `{name: PoolConfig dict}`. */

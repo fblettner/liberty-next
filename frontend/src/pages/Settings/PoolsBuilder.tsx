@@ -8,7 +8,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -32,6 +32,7 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 export default function PoolsBuilder() {
   const { t } = useTranslation()
   const [schema, setSchema] = useState<JsonSchema | null>(null)
+  const [enums, setEnums] = useState<FrameworkEnums | null>(null)
   const [path, setPath] = useState('')
   const [pools, setPools] = useState<Pools | null>(null)
   const [original, setOriginal] = useState<string>('')   // JSON of the last-loaded pools, for the dirty check
@@ -44,7 +45,7 @@ export default function PoolsBuilder() {
     setError(null); setStatus(null)
     Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<PoolsDoc>('/admin/config/pools')])
       .then(([s, d]) => {
-        setSchema(s.pool); setPath(d.path); setPools(d.pools); setOriginal(JSON.stringify(d.pools))
+        setSchema(s.pool); setEnums(s.framework_enums); setPath(d.path); setPools(d.pools); setOriginal(JSON.stringify(d.pools))
         setSel((cur) => (cur && d.pools[cur] ? cur : Object.keys(d.pools)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -85,6 +86,7 @@ export default function PoolsBuilder() {
   const names = Object.keys(pools)
 
   return (
+    <FrameworkEnumsContext.Provider value={enums}>
     <Stack gap={12}>
       <Mono>{path}</Mono>
       <Split>
@@ -125,5 +127,6 @@ export default function PoolsBuilder() {
       </Row>
       <Hint>{t('settings.pools.hint')}</Hint>
     </Stack>
+    </FrameworkEnumsContext.Provider>
   )
 }

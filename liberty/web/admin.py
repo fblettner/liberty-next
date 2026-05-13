@@ -47,6 +47,7 @@ from liberty.connectors.dictionary import (
     load_dictionary,
     parse_dictionary,
 )
+from liberty.framework_enums import FRAMEWORK_ENUMS
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
 
@@ -113,12 +114,15 @@ async def put_connectors_config(body: ConfigBody, request: Request, _: Superuser
 @router.get("/config/schema")
 async def get_config_schema(_: Superuser) -> dict[str, Any]:
     """JSON Schema of the structured-config models — the builder UI renders forms from it.
-    Each carries its own ``$defs`` (QueryDef / ColumnHint / ParamDef / …) for the UI to resolve."""
+    Each carries its own ``$defs`` (QueryDef / ColumnHint / ParamDef / …) for the UI to resolve.
+    ``framework_enums`` is v2's port of v1's ``ly_enum``-for-the-framework (the reusable dropdowns
+    that power format/rules/dialect/method/… in the builder)."""
     return {
         "pool": PoolConfig.model_json_schema(),
         "sql": SqlConnectorConfig.model_json_schema(),
         "api": ApiConnectorConfig.model_json_schema(),
         "dictionary": DictionaryFile.model_json_schema(),
+        "framework_enums": FRAMEWORK_ENUMS,
     }
 
 

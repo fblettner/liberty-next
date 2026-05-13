@@ -78,7 +78,7 @@ class PoolConfig(BaseModel):
             "SQLAlchemy backend name (postgresql / oracle / sqlite / mysql / mssql / …). Empty → derived from "
             "the URL. Used to pick a query's per-dialect SQL variant."
         ),
-        examples=["", "postgresql", "oracle", "sqlite", "mysql", "mssql"],
+        json_schema_extra={"x_enum_ref": "DATASOURCE_TYPE"},
     )
     schemas: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Schemas"}, description=(
         "Schema-name map for `#SCHEMA.<NAME>#` placeholders in this pool's queries → the real schema name "
@@ -176,11 +176,12 @@ class ColumnHint(BaseModel):
     align: Literal["left", "right", "center"] | None = Field(
         default=None,
         description='"left" / "right" / "center" — blank auto-aligns (numbers right, booleans centred).',
+        json_schema_extra={"x_enum_ref": "COLUMN_ALIGN"},
     )
     format: str | None = Field(
         default=None,
         description='UI-interpreted format hint — "date" / "datetime" / "number" / "boolean" / "currency" / … — overrides the dictionary\'s. Free-text — the frontend tolerates v1\'s various aliases.',
-        examples=["text", "textarea", "date", "datetime", "timestamp", "number", "integer", "decimal", "boolean", "currency", "password", "email", "url"],
+        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
     )
 
     @property
@@ -280,6 +281,7 @@ class EndpointDef(BaseModel):
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] = Field(
         default="GET",
         description="HTTP method.",
+        json_schema_extra={"x_enum_ref": "HTTP_METHOD"},
     )
     path: str = Field(default="", description="Path appended to the connector's base_url. Supports {{placeholder}} substitution (params + built-ins {{username}}/{{password}}/{{token}}). An absolute http(s):// path overrides base_url.")
     headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Per-endpoint request headers (merged over the connector's default_headers); values support {{placeholders}}.")
@@ -299,7 +301,11 @@ class ApiConnectorConfig(BaseModel):
     type: Literal["api"]
     licensed: bool = Field(default=False, description="Gate this connector behind a valid [license] key — without one (the open framework) it isn't loaded.")
     base_url: str = Field(description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. (Leave blank only if every endpoint uses an absolute path.)")
-    auth_type: AuthType = Field(default="none", description="none / basic / bearer / api_key / oauth2.")
+    auth_type: AuthType = Field(
+        default="none",
+        description="none / basic / bearer / api_key / oauth2.",
+        json_schema_extra={"x_enum_ref": "AUTH_TYPE"},
+    )
     auth_username: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Username — for basic auth, and the {{username}} placeholder. May be an ENC: value.")
     auth_password: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Password — for basic auth, and {{password}}. May be an ENC: value (decrypted at runtime via the crypto master key).")
     auth_token: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Static bearer token / API key (for bearer & api_key auth), and the {{token}} placeholder. May be an ENC: value.")

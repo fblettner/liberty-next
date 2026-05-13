@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type JsonSchema } from '../../common'
 import type { ConfigSchemas, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -203,6 +203,7 @@ export default function DictionaryBuilder() {
   const scopeLabel = (s: string) => (s ? s : t('settings.dictionary.scope.shared'))
 
   return (
+    <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>
     <Stack gap={12}>
       <Header>
         <Mono>{path}</Mono>
@@ -296,5 +297,6 @@ export default function DictionaryBuilder() {
       </Row>
       <Hint>{t('settings.dictionary.hint')}</Hint>
     </Stack>
+    </FrameworkEnumsContext.Provider>
   )
 }

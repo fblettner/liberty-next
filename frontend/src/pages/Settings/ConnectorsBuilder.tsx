@@ -12,7 +12,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
@@ -191,6 +191,7 @@ export default function ConnectorsBuilder() {
   const allDefs = (selSchema?.$defs ?? {}) as Record<string, JsonSchema>
 
   return (
+    <FrameworkEnumsContext.Provider value={schemas.framework_enums ?? null}>
     <Stack gap={12}>
       <Mono>{path}</Mono>
       <Split>
@@ -312,5 +313,6 @@ export default function ConnectorsBuilder() {
       </Row>
       <Hint>{t('settings.connectors.hint')}</Hint>
     </Stack>
+    </FrameworkEnumsContext.Provider>
   )
 }

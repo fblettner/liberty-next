@@ -266,12 +266,21 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   `Field(json_schema_extra={"x_group": "…"})` → which tab the field goes in (e.g. a query's
   `params`/`columns` are their own tabs, the optional bits are an "Advanced" tab; a dictionary
   entry's `rules`/`rules_values`/`default` form a "Rule" tab, the `l` map is "Translations";
-  ungrouped → "General"). Field types pick the widget: a `Literal[…]`-typed field
-  (`ColumnHint.align`, `EndpointDef.method`, `ApiConnectorConfig.auth_type`) renders as a strict
-  `SearchSelect`; a free-text field with `Field(examples=[…])` (`DictionaryEntry.format`/`.rules`,
-  `ColumnHint.format`, `PoolConfig.dialect`) renders as a **combobox** (`<input list>` +
-  `<datalist>` — suggested values with auto-complete, free-text still accepted so a value migrated
-  from v1 isn't rejected).
+  ungrouped → "General"). Widget selection is driven by **framework enums** — v2's port of v1's
+  `ly_enum`-for-the-framework table — defined in `liberty/framework_enums.py` (`DICTIONARY_TYPE`,
+  `DICTIONARY_RULES`, `DATASOURCE_TYPE`, `HTTP_METHOD`, `COLUMN_ALIGN`, `AUTH_TYPE`, …) and shipped
+  via the same `GET /admin/config/schema` response under `framework_enums`. A field referencing one
+  (`json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"}` on `DictionaryEntry.format`,
+  `DictionaryEntry.rules`, `ColumnHint.format`, `ColumnHint.align`, `PoolConfig.dialect`,
+  `EndpointDef.method`, `ApiConnectorConfig.auth_type`, …) renders as a themed two-column
+  `SearchSelect` (mono `value` + sans `label` — so a "Dictionary Type" entry reads `number  Number`
+  not just `Number`). A `Literal[…]`-typed + `x_enum_ref` field becomes a **strict** SearchSelect
+  (option set narrowed to the Literal's enum); a free-text + `x_enum_ref` field is a **combobox**
+  (`allowCustom` — typing a value the registry doesn't know commits, so v1's `numeric`/`decimal`/…
+  aliases survive). Other strict `enum` fields without an `x_enum_ref` still render as a basic
+  SearchSelect. The values are threaded through `FrameworkEnumsContext` (in `common/SchemaForm.tsx`)
+  — each builder fetches once and wraps its render; deeply-nested SchemaForms (drill-in pages,
+  list-item editors) read the same context.
 OpenAPI auto-doc at `/docs` (`/openapi.json`) covers everything — replaces v1's
 hand-rolled "get screen metadata" endpoint. WebSocket: not needed yet (SSE covers AI).
 

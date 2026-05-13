@@ -7,11 +7,18 @@
 // or per-dialect textareas if the value is a map). Anything it can't make sense of → a "edit in the raw
 // editor" note. The Phase-7 config-builder shell: point it at a section's schema (with its `$defs`) +
 // add a custom widget here when a config model needs a shape it doesn't cover.
-import { useEffect, useId, useState, type ReactNode } from 'react'
+//
+// Dropdowns for `format` / `rules` / `dialect` / `method` / `align` / `auth_type` are driven by the
+// **framework enums** — v2's port of v1's `ly_enum`-for-the-framework table. The Pydantic field
+// carries `json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"}`; the enum values + descriptions come
+// from `GET /admin/config/schema → framework_enums`, threaded through `FrameworkEnumsContext`. A
+// Literal-typed `x_enum_ref` field renders as a strict SearchSelect (the value MUST be in the set);
+// a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
 import { Input, Textarea, Field } from './Input'
-import { SearchSelect } from './SearchSelect'
+import { SearchSelect, type SearchSelectOption } from './SearchSelect'
 import { colors, fontSize, fonts, radius } from '../theme'
 
 export interface JsonSchema {
@@ -31,25 +38,28 @@ export interface JsonSchema {
   x_group?: string   // from a Pydantic Field's json_schema_extra — groups the form into tabs
 }
 
-// A free-text Input with a `<datalist>` of suggestions (a Pydantic Field's `examples=[…]`) — used
-// for the canonical-but-not-strict fields like `format` / `rules` / `dialect`: the dropdown shows
-// the known values without rejecting whatever the migration emitted from v1.
-function ComboInput({ value, onChange, suggestions, placeholder }: {
-  value: string
-  onChange: (v: string) => void
-  suggestions: string[]
-  placeholder?: string
-}) {
-  const id = useId()
-  return (
-    <>
-      <Input type="text" list={id} value={value} placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)} />
-      <datalist id={id}>
-        {suggestions.map((s) => <option key={s} value={s} />)}
-      </datalist>
-    </>
-  )
+/** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema). */
+export interface FrameworkEnumValue { value: string; label: string }
+export interface FrameworkEnum { label: string; values: FrameworkEnumValue[] }
+export type FrameworkEnums = Record<string, FrameworkEnum>
+
+/** Threaded through the builder shell — `null` means "no enums available", fields fall back to their
+ *  Literal `enum` (strict SearchSelect) or to a plain Input. Provided by the Settings page once,
+ *  consumed deeply by every SchemaForm in the tree (nested ObjectListEditor / drill-in pages). */
+export const FrameworkEnumsContext = createContext<FrameworkEnums | null>(null)
+
+/** Pick the framework-enum referenced by a field's `x_enum_ref`, or `null` when there isn't one. */
+function enumFor(sub: JsonSchema, enums: FrameworkEnums | null): FrameworkEnum | null {
+  const ref = (sub as { x_enum_ref?: unknown }).x_enum_ref
+  if (typeof ref !== 'string' || !enums) return null
+  return enums[ref] ?? null
+}
+
+/** Build SearchSelect options from a framework enum, optionally constraining to a Literal's `enum`
+ *  (so a `Literal[…]` field driven by an enum drops values that aren't in its set). */
+function enumOptions(fe: FrameworkEnum, allowed: Set<string> | null): SearchSelectOption[] {
+  const vals = allowed ? fe.values.filter((v) => allowed.has(v.value)) : fe.values
+  return vals.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
 }
 
 type Defs = Record<string, JsonSchema>
@@ -298,6 +308,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reset to the first tab when the *model* changes
   useEffect(() => { setTab(groupNames[0]) }, [schema.title])
   const activeProps = groups.get(tab) ?? groups.get(groupNames[0]) ?? []
+  const enums = useContext(FrameworkEnumsContext)
 
   return (
     <div>
@@ -316,8 +327,20 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
         const cur = value[key]
         let control: ReactNode
 
+        // A field that points at a framework enum (json_schema_extra={"x_enum_ref": "…"}) — render
+        // with rich labels from the registry. If the field is *also* a Literal we constrain the
+        // option list to that Literal's enum (the strict shape wins); otherwise it's a combobox
+        // (allowCustom — typing a value the registry doesn't know commits).
+        const fe = enumFor(sub, enums)
         if (key === 'sql') {
           control = <SqlField value={cur} onChange={(v) => set(key, v)} />
+        } else if (fe) {
+          const literalSet = Array.isArray(sub.enum) ? new Set(sub.enum.map((e) => String(e))) : null
+          const opts = enumOptions(fe, literalSet)
+          control = (
+            <SearchSelect value={cur == null ? '' : String(cur)} onChange={(v) => set(key, v === '' ? undefined : v)}
+              options={opts} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" allowCustom={!literalSet} />
+          )
         } else if (Array.isArray(sub.enum)) {
           control = (
             <SearchSelect value={cur == null ? '' : String(cur)} onChange={(v) => set(key, v === '' ? undefined : v)}
@@ -360,11 +383,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
             onChange={(e) => { const txt = e.target.value; set(key, txt === '' ? undefined : sub.type === 'integer' ? Math.trunc(Number(txt)) : Number(txt)) }} />
         } else if (sub.type === 'string' || sub.type === undefined) {
           const placeholder = sub.default ? `default: ${sub.default}` : isReq ? 'required' : ''
-          const examples = Array.isArray(sub.examples) ? sub.examples.map((e) => String(e)) : null
-          control = examples && examples.length > 0 ? (
-            <ComboInput value={cur == null ? '' : String(cur)} suggestions={examples} placeholder={placeholder}
-              onChange={(v) => set(key, v === '' ? undefined : v)} />
-          ) : (
+          control = (
             <Input type="text" value={cur == null ? '' : String(cur)} placeholder={placeholder}
               onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
           )
