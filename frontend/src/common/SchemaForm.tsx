@@ -17,7 +17,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
-import { Input, Textarea, Field } from './Input'
+import { Input, PasswordInput, Textarea, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
 import { colors, fontSize, fonts, radius } from '../theme'
 
@@ -28,6 +28,9 @@ export interface JsonSchema {
   default?: unknown
   enum?: unknown[]
   examples?: unknown[]   // a Pydantic Field's `examples=[…]` — for free-text fields, surfaced as a combobox datalist
+  /** JSON Schema's standard `format` keyword — we honour `"password"` (renders as a masked input
+   *  with a reveal-eye toggle, for ENC: secrets like a pool password / API connector auth_token). */
+  format?: string
   properties?: Record<string, JsonSchema>
   required?: string[]
   anyOf?: JsonSchema[]
@@ -403,7 +406,13 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
             onChange={(e) => { const txt = e.target.value; set(key, txt === '' ? undefined : sub.type === 'integer' ? Math.trunc(Number(txt)) : Number(txt)) }} />
         } else if (sub.type === 'string' || sub.type === undefined) {
           const placeholder = sub.default ? `default: ${sub.default}` : isReq ? 'required' : ''
-          control = (
+          // `format: "password"` (set via Field(json_schema_extra={"format": "password"})) → masked
+          // input with a reveal toggle, so ENC: ciphertext / auth tokens / etc. don't sit in plain
+          // sight in the builder. The stored value is still the raw string — purely a visual mask.
+          control = sub.format === 'password' ? (
+            <PasswordInput value={cur == null ? '' : String(cur)} placeholder={placeholder}
+              onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
+          ) : (
             <Input type="text" value={cur == null ? '' : String(cur)} placeholder={placeholder}
               onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
           )

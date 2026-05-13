@@ -266,7 +266,12 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   `Field(json_schema_extra={"x_group": "…"})` → which tab the field goes in (e.g. a query's
   `params`/`columns` are their own tabs, the optional bits are an "Advanced" tab; a dictionary
   entry's `rules`/`rules_values`/`default` form a "Rule" tab, the `l` map is "Translations";
-  ungrouped → "General"). Widget selection is driven by **framework enums** — v2's port of v1's
+  ungrouped → "General"). **Sensitive fields** (`PoolConfig.password`,
+  `ApiConnectorConfig.auth_password` / `.auth_token`) carry
+  `Field(json_schema_extra={"format": "password"})` and render through `common/Input` `PasswordInput`
+  (masked, with a reveal-eye toggle) so an `ENC:` ciphertext doesn't sit in plain text in the
+  builder — the stored value is the raw string, purely a visual mask. Widget selection is driven by
+  **framework enums** — v2's port of v1's
   `ly_enum`-for-the-framework table — defined in `liberty/framework_enums.py` (`DICTIONARY_TYPE`,
   `DICTIONARY_RULES`, `DATASOURCE_TYPE`, `HTTP_METHOD`, `COLUMN_ALIGN`, `AUTH_TYPE`, …) and shipped
   via the same `GET /admin/config/schema` response under `framework_enums` (the operator can

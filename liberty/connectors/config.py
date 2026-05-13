@@ -66,12 +66,16 @@ class PoolConfig(BaseModel):
         "Supports ${ENV} / ${ENV:-default} refs. A URL-special password (@ / : / …) belongs in the "
         "separate `password` field, not here."
     ))
-    password: str | None = Field(default=None, description=(
-        "DB password kept *out of the URL* — substituted in (escaped) when the engine is built. May be "
-        "an ENC: value (decrypted at runtime via the crypto master key, like v1's apps_password), plain "
-        "text, or a ${ENV} ref. Leave empty if it's already in the URL (an ENC: password in the URL is "
-        "still decrypted)."
-    ))
+    password: str | None = Field(
+        default=None,
+        description=(
+            "DB password kept *out of the URL* — substituted in (escaped) when the engine is built. May be "
+            "an ENC: value (decrypted at runtime via the crypto master key, like v1's apps_password), plain "
+            "text, or a ${ENV} ref. Leave empty if it's already in the URL (an ENC: password in the URL is "
+            "still decrypted)."
+        ),
+        json_schema_extra={"format": "password"},
+    )
     dialect: str = Field(
         default="",
         description=(
@@ -307,8 +311,8 @@ class ApiConnectorConfig(BaseModel):
         json_schema_extra={"x_enum_ref": "AUTH_TYPE"},
     )
     auth_username: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Username — for basic auth, and the {{username}} placeholder. May be an ENC: value.")
-    auth_password: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Password — for basic auth, and {{password}}. May be an ENC: value (decrypted at runtime via the crypto master key).")
-    auth_token: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Static bearer token / API key (for bearer & api_key auth), and the {{token}} placeholder. May be an ENC: value.")
+    auth_password: str | None = Field(default=None, json_schema_extra={"x_group": "Auth", "format": "password"}, description="Password — for basic auth, and {{password}}. May be an ENC: value (decrypted at runtime via the crypto master key).")
+    auth_token: str | None = Field(default=None, json_schema_extra={"x_group": "Auth", "format": "password"}, description="Static bearer token / API key (for bearer & api_key auth), and the {{token}} placeholder. May be an ENC: value.")
     auth_api_key_header: str = Field(default="X-Api-Key", json_schema_extra={"x_group": "Auth"}, description="Header name for api_key auth.")
     auth_token_endpoint: str | None = Field(default=None, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: token-endpoint URL (POSTed to fetch a token).")
     auth_token_field: str | None = Field(default=None, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: dot-path to the token in the token-endpoint response (e.g. \"access_token\").")
