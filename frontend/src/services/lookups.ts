@@ -21,6 +21,12 @@ export interface LookupSpec {
   value: string
   /** result column whose values we display instead (the LOOKUP rule's `label`). */
   label: string
+  /** Static parameter bindings for the lookup query — `:name` placeholders bound to literals.
+   *  v1's ly_dictionary_filters (flt_type='VALUE'). Without these, queries that need params to
+   *  even run (e.g. UDC's :SY/:RT) return nothing or the wrong rows — every entry that points
+   *  at the same lookup with different SY/RT pairs (LMSG, LNGP, AT1, …) was sharing the same
+   *  result page before. Different param sets are cached separately. */
+  params?: Record<string, string>
 }
 
 export interface LookupData {
@@ -56,7 +62,12 @@ export function lookupOptions(data: LookupData, filter?: { column: string; value
 }
 
 function specKey(s: LookupSpec): string {
-  return `${s.connector}/${s.query}/${s.value}/${s.label}`
+  // Include the static params in the key so two entries that bind the SAME lookup query with
+  // different SY/RT cache separately (otherwise one would clobber the other's rows).
+  const p = s.params
+    ? Object.keys(s.params).sort().map((k) => `${k}=${s.params![k]}`).join('&')
+    : ''
+  return `${s.connector}/${s.query}/${s.value}/${s.label}?${p}`
 }
 
 // Shared promise cache — survives unmounts, lasts the session. A failed fetch
@@ -67,8 +78,16 @@ function fetchLookup(spec: LookupSpec): Promise<LookupData> {
   const key = specKey(spec)
   let p = cache.get(key)
   if (!p) {
+    // Bind the lookup's static params as :placeholders on the URL (the SQL connector reads
+    // them off the query string — same path the TableView's Run uses). Skip empty params so
+    // they bind to NULL rather than `""` (asyncpg sometimes can't infer the type for an empty
+    // string and ends up filtering nothing).
+    const url = `/api/sql/${encodeURIComponent(spec.connector)}/${encodeURIComponent(spec.query)}`
+    const qs = spec.params
+      ? new URLSearchParams(Object.entries(spec.params).filter(([, v]) => v !== '' && v != null)).toString()
+      : ''
     p = api
-      .get<QueryResult>(`/api/sql/${encodeURIComponent(spec.connector)}/${encodeURIComponent(spec.query)}`)
+      .get<QueryResult>(qs ? `${url}?${qs}` : url)
       .then((r) => {
         // v1's lkp_dd_id / lkp_dd_label are uppercase, but the DB may report the lookup query's
         // columns in another case (Postgres → lowercase) — resolve them against the result's columns.

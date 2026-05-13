@@ -127,7 +127,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
   const lookupSpecs = useMemo<LookupSpec[]>(
     () => cols.filter((c) => c.rule?.kind === 'lookup').map((c) => {
       const r = c.rule as LookupRule
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label }
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
     }),
     [cols],
   )
@@ -152,7 +152,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
   // (filter_from) whose source filter is set, narrow to the lookup rows whose `column` matches it.
   const lookupOptionsFor = (c: Column): SearchSelectOption[] | undefined => {
     if (c.rule?.kind !== 'lookup') return undefined
-    const data = lookupTables.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label }))
+    const data = lookupTables.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label, params: c.rule.params }))
     if (!data) return undefined
     const dep = c.filter_from?.find((d) => (values[d.source]?.val ?? '') !== '')
     const opts = lookupOptions(data, dep ? { column: dep.column, value: values[dep.source]!.val } : undefined)

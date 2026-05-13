@@ -624,6 +624,7 @@ def migrate_dictionary(
     enum_val_l_rows: Iterable[Mapping[str, Any]] = (),
     lookup_rows: Iterable[Mapping[str, Any]] = (),
     sql_rows: Iterable[Mapping[str, Any]] = (),
+    dictionary_filters_rows: Iterable[Mapping[str, Any]] = (),
     *,
     default_language: str = "en",
     connector_name: str | None = None,
@@ -666,6 +667,21 @@ def migrate_dictionary(
         if dd and lng and lbl:
             translations.setdefault(dd, {})[lng] = lbl
 
+    # Static lookup-param bindings per dictionary entry — v1's ly_dictionary_filters with
+    # flt_type='VALUE'. Other types (FIELD/DD/…) are dynamic and bind at form/table runtime;
+    # they're picked up by the table / form migrators when those land. Only VALUE rows live at
+    # the dictionary level — that's what feeds DictionaryEntry.lookup_params here.
+    lookup_params: dict[str, dict[str, str]] = {}
+    for r in dictionary_filters_rows:
+        if str(r.get("flt_type") or "").strip().upper() != "VALUE":
+            continue
+        dd = str(r.get("dd_id") or "").strip()
+        target = str(r.get("flt_target") or "").strip()
+        value = r.get("flt_value")
+        if not dd or not target or value is None or str(value).strip() == "":
+            continue
+        lookup_params.setdefault(dd, {})[target] = str(value)
+
     entries: dict[str, dict[str, Any]] = {}
     for r in dictionary_rows:
         dd = str(r.get("dd_id") or "").strip()
@@ -680,6 +696,8 @@ def migrate_dictionary(
         })
         if dd in translations:
             entry["l"] = translations[dd]
+        if dd in lookup_params:
+            entry["lookup_params"] = lookup_params[dd]
         entries[dd] = entry
     # entries that exist only as translations (no ly_dictionary row) — keep them too
     for dd, l in translations.items():

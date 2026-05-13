@@ -84,6 +84,18 @@ class DictionaryEntry(BaseModel):
         description="Default value (form-layer, pass-through — v1's dd_default).",
         json_schema_extra={"x_group": "Rule"},
     )
+    lookup_params: dict[str, str] = Field(
+        default_factory=dict,
+        title="Lookup params",
+        description=(
+            "Static parameter bindings for the LOOKUP rule's query — {param_name: literal_value}. "
+            "v1's ly_dictionary_filters (flt_type='VALUE'). Used when the lookup's query expects "
+            "params to even run (e.g. UDC: SY='01', RT='LP' for the Languages table) — without "
+            "these the query returns nothing or the wrong rows. Ignored for non-LOOKUP rules. "
+            "Table / dialog levels can override with dynamic-from-row values (Phase-7 follow-up)."
+        ),
+        json_schema_extra={"x_group": "Rule"},
+    )
     l: dict[str, str] = Field(
         default_factory=dict,
         title="Translations",
@@ -245,13 +257,19 @@ class DictionaryFile(BaseModel):
             lk = self._find_lookup(entry.rules_values or "", connector=connector)
             if lk is None:
                 return None
-            return {
+            wire: dict[str, Any] = {
                 "kind": "lookup",
                 "connector": lk.connector or connector,
                 "query": lk.query,
                 "value": lk.value,
                 "label": lk.label,
             }
+            # Pass through the entry's static parameter bindings (v1's ly_dictionary_filters).
+            # Without these the lookup query may return nothing (UDC queries need SY/RT to know
+            # which UDC table to read).
+            if entry.lookup_params:
+                wire["params"] = dict(entry.lookup_params)
+            return wire
         return None  # the form-layer rules (SEQUENCE/SYSDATE/LOGIN/PASSWORD/…) — not a display transform
 
 

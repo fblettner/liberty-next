@@ -57,7 +57,17 @@ export type ConnectorMeta = SqlConnectorMeta | ApiConnectorMeta
 export type DisplayRule =
   | { kind: 'boolean'; true_value: string }
   | { kind: 'enum'; values: { value: string; label: string }[] }
-  | { kind: 'lookup'; connector: string; query: string; value: string; label: string }
+  | {
+      kind: 'lookup'
+      connector: string
+      query: string
+      value: string
+      label: string
+      /** Static parameter bindings for the lookup's query (v1 ly_dictionary_filters flt_type='VALUE').
+       *  Required for queries that take `:placeholder` params to even run — without these a UDC
+       *  query returns nothing because SY/RT are NULL. The fetcher passes them as ?p=v on /api/sql. */
+      params?: Record<string, string>
+    }
 
 export interface Column {
   name: string

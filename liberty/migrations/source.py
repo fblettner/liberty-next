@@ -100,6 +100,14 @@ _LOOKUPS = text(
     "SELECT lkp_id, lkp_description, lkp_query_id, lkp_dd_id, lkp_dd_label, lkp_dd_group "
     "FROM ly_lookup ORDER BY lkp_id"
 )
+# Static parameter bindings per dictionary entry — v1's ly_dictionary_filters. Only the
+# `flt_type='VALUE'` rows carry literal bindings; other rows (FIELD/DD/…) are dynamic and bind
+# at form/table runtime — those are migrated separately (Phase 7 follow-up).
+_DICTIONARY_FILTERS = text("""
+    SELECT dd_id, flt_target, flt_value, flt_type
+    FROM ly_dictionary_filters
+    ORDER BY dd_id, flt_id
+""")
 # App navigation: ly_menus (the tree, by menu_seq_ukid) + ly_menus_l (per-language labels) +
 # the lookup tables that resolve a node's menu_component/menu_component_id to a query
 # (ly_tables.tbl_id → tbl_query_id ; ly_dlg_frm.frm_id → frm_query_id ; ly_query → label).
@@ -207,19 +215,24 @@ async def read_dictionary(engine: AsyncEngine) -> tuple[list[dict[str, Any]], li
 
 async def read_dictionary_rules(
     engine: AsyncEngine,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
+    list[dict[str, Any]], list[dict[str, Any]],
+]:
     """Return (``ly_enum`` rows, ``ly_enum_val`` rows, ``ly_enum_val_l`` rows, ``ly_lookup`` rows,
-    ``ly_qry_sql⋈ly_query`` rows) — the v1 data the dictionary's display rules reference
-    (``dd_rules = "ENUM"`` → ``ly_enum``/``ly_enum_val``; ``dd_rules = "LOOKUP"`` → ``ly_lookup``,
-    whose ``lkp_query_id`` resolves to a v2 query name through the joined sql rows). Missing
-    tables → empty lists. Passed alongside :func:`read_dictionary` into
-    :func:`liberty.migrations.v1.migrate_dictionary`."""
+    ``ly_qry_sql⋈ly_query`` rows, ``ly_dictionary_filters`` rows) — the v1 data the dictionary's
+    display rules reference (``dd_rules = "ENUM"`` → ``ly_enum``/``ly_enum_val``;
+    ``dd_rules = "LOOKUP"`` → ``ly_lookup``, whose ``lkp_query_id`` resolves to a v2 query name
+    through the joined sql rows; ``ly_dictionary_filters`` supplies static parameter bindings
+    per dictionary entry for the lookup's query). Missing tables → empty lists. Passed alongside
+    :func:`read_dictionary` into :func:`liberty.migrations.v1.migrate_dictionary`."""
     return (
         await _rows_or_empty(engine, _ENUMS, what="ly_enum"),
         await _rows_or_empty(engine, _ENUM_VAL, what="ly_enum_val"),
         await _rows_or_empty(engine, _ENUM_VAL_L, what="ly_enum_val_l translations"),
         await _rows_or_empty(engine, _LOOKUPS, what="ly_lookup"),
         await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (lookup target → query name)"),
+        await _rows_or_empty(engine, _DICTIONARY_FILTERS, what="ly_dictionary_filters (lookup static params)"),
     )
 
 

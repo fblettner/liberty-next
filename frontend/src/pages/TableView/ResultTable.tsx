@@ -349,7 +349,10 @@ export function ResultTable({
   const lookupSpecs = useMemo<LookupSpec[]>(
     () => result.columns.filter((c) => c.rule?.kind === 'lookup').map((c) => {
       const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label }
+      // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
+      // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
+      // cache separately in services/lookups (specKey folds the params in).
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
     }),
     [result.columns],
   )
@@ -394,7 +397,7 @@ export function ResultTable({
 
       if (c.rule?.kind === 'lookup') {
         const r = c.rule
-        const map = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label }))
+        const map = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
         out.push({
           id: c.name,
           header: colHeader(c) + idSuffix,
