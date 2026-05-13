@@ -16,9 +16,6 @@ import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
 import { FilterPanel, type ServerFilter } from './FilterPanel'
 
-const Sub = styled.span`
-  display: inline-flex; align-items: center; gap: 8px;
-`
 // Run / Max-rows controls — sized to sit inline with the grid's 28px-tall toolbar buttons
 // (Run goes just right of the search box, Max-rows at the far right before the Filters button).
 const RunBtn = styled.button`
@@ -191,12 +188,7 @@ export default function TableView({ connector, query }: { connector: string; que
           {meta.writable && <Tag $tone="orange">{t('table.writable')}</Tag>}
         </>
       }
-      description={
-        <Sub>
-          <Mono>{connector}.{query}</Mono>
-          {menuLabel && menuLabel !== friendlyName ? <span>· {menuLabel}</span> : null}
-        </Sub>
-      }
+      description={<Mono>{connector}.{query}</Mono>}
     >
       <Stack gap={14}>
         {filterCols.length > 0 && (
