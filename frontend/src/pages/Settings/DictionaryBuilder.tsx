@@ -68,22 +68,30 @@ const KIND_TO_DEF: Record<DictionaryKind, string> = {
   entries: 'DictionaryEntry',
   enums: 'EnumDef',
   lookups: 'LookupDef',
+  framework_enums: 'EnumDef',  // operator overrides reuse the EnumDef shape (label + values)
 }
+
+const KIND_ORDER: DictionaryKind[] = ['entries', 'enums', 'lookups', 'framework_enums']
+/** Framework enums are top-level only — there's no per-connector overlay. The scope chip strip is
+ *  hidden when this kind is active, and the section getters refuse the connector path. */
+const SHARED_ONLY: ReadonlySet<DictionaryKind> = new Set(['framework_enums'])
 
 /** A blank record for the chosen kind. Lookup needs `query`/`value`/`label` to validate, so we
  *  leave them empty strings (the user fills them in; SchemaForm flags required fields with `*`). */
 function newRecord(kind: DictionaryKind): Record<string, unknown> {
   if (kind === 'lookups') return { query: '', value: '', label: '' }
+  if (kind === 'framework_enums') return { values: [] }
   return {}
 }
 
-/** The current `entries` / `enums` / `lookups` map for `scope` (`''` = shared, else a connector). */
+/** The current `entries` / `enums` / `lookups` / `framework_enums` map for `scope` (`''` = shared,
+ *  else a connector). Framework-enum overrides live at the top level only. */
 function getSection(dict: DictionaryData, scope: string, kind: DictionaryKind): Record<string, Record<string, unknown>> {
-  if (!scope) {
+  if (SHARED_ONLY.has(kind) || !scope) {
     return (dict[kind] ?? {}) as Record<string, Record<string, unknown>>
   }
   const sec = (dict.connectors ?? {})[scope]
-  return ((sec?.[kind]) ?? {}) as Record<string, Record<string, unknown>>
+  return ((sec?.[kind as Exclude<DictionaryKind, 'framework_enums'>]) ?? {}) as Record<string, Record<string, unknown>>
 }
 
 /** Write back a section map; drops empty sections + empty connector scopes so the file stays terse. */
@@ -94,13 +102,14 @@ function setSection(
   next: Record<string, Record<string, unknown>>,
 ): DictionaryData {
   const out: DictionaryData = { ...dict }
-  if (!scope) {
+  if (SHARED_ONLY.has(kind) || !scope) {
     if (Object.keys(next).length === 0) delete out[kind]; else out[kind] = next
     return out
   }
+  const k = kind as Exclude<DictionaryKind, 'framework_enums'>
   const connectors: Record<string, DictionarySection> = { ...(out.connectors ?? {}) }
   const cur: DictionarySection = { ...(connectors[scope] ?? {}) }
-  if (Object.keys(next).length === 0) delete cur[kind]; else cur[kind] = next
+  if (Object.keys(next).length === 0) delete cur[k]; else cur[k] = next
   if (!cur.entries && !cur.enums && !cur.lookups) delete connectors[scope]
   else connectors[scope] = cur
   if (Object.keys(connectors).length === 0) delete out.connectors
@@ -213,21 +222,25 @@ export default function DictionaryBuilder() {
         </LangBox>
       </Header>
       <SubTabs>
-        {(['entries', 'enums', 'lookups'] as DictionaryKind[]).map((k) => (
-          <SubTab key={k} $active={kind === k} type="button" onClick={() => setKind(k)}>{t(`settings.dictionary.${k}.tab`)}</SubTab>
+        {KIND_ORDER.map((k) => (
+          <SubTab key={k} $active={kind === k} type="button" onClick={() => { setKind(k); if (SHARED_ONLY.has(k)) setScope(SCOPE_SHARED) }}>{t(`settings.dictionary.${k}.tab`)}</SubTab>
         ))}
       </SubTabs>
-      <ScopeBar>
-        <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.dictionary.scope.label')}</span>
-        {scopes.map((s) => (
-          <Chip key={s || '_shared'} $active={scope === s} type="button" onClick={() => setScope(s)}>
-            {s ? <Globe size={12} /> : <Layers size={12} />}{scopeLabel(s)}
+      {SHARED_ONLY.has(kind) ? (
+        <Hint>{t('settings.dictionary.framework_enums.scopeNote')}</Hint>
+      ) : (
+        <ScopeBar>
+          <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.dictionary.scope.label')}</span>
+          {scopes.map((s) => (
+            <Chip key={s || '_shared'} $active={scope === s} type="button" onClick={() => setScope(s)}>
+              {s ? <Globe size={12} /> : <Layers size={12} />}{scopeLabel(s)}
+            </Chip>
+          ))}
+          <Chip type="button" onClick={addScope} title={t('settings.dictionary.scope.addPrompt')}>
+            <Plus size={12} /> {t('settings.dictionary.scope.add')}
           </Chip>
-        ))}
-        <Chip type="button" onClick={addScope} title={t('settings.dictionary.scope.addPrompt')}>
-          <Plus size={12} /> {t('settings.dictionary.scope.add')}
-        </Chip>
-      </ScopeBar>
+        </ScopeBar>
+      )}
       <Split>
         <NavCol>
           {keys.length > 6 && (

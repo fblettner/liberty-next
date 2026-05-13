@@ -74,14 +74,34 @@ function deref(s: JsonSchema, defs: Defs): JsonSchema {
 }
 // Normalise a property schema: resolve $ref, then peel `anyOf` — an array branch wins (e.g. the
 // `T | list[T] | None` shape → treat as `list[T]`), else the single non-`null` branch, else leave as-is.
+// Outer-property metadata (`description`/`title`/`default`/`x_group`/`x_enum_ref`) lives at the
+// `anyOf` level for Pydantic Optional fields — fold it onto the chosen branch so the renderer
+// still sees `x_enum_ref` on a `str | None` field after the null branch is peeled.
+function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
+  // Branch wins on type-shape keys (`type`, `enum`, `items`, `properties`, `additionalProperties`,
+  // `$ref`); outer wins on metadata. Spread order: outer first, then branch — then the explicit
+  // overrides below restore outer's metadata where the branch left them blank.
+  return {
+    ...outer,
+    ...branch,
+    default: outer.default ?? branch.default,
+    description: outer.description ?? branch.description,
+    title: outer.title ?? branch.title,
+    x_group: outer.x_group ?? branch.x_group,
+    anyOf: undefined,
+    ...(((outer as { x_enum_ref?: unknown }).x_enum_ref !== undefined)
+      ? { x_enum_ref: (outer as { x_enum_ref?: unknown }).x_enum_ref }
+      : {}),
+  } as JsonSchema
+}
 function effective(s: JsonSchema, defs: Defs): JsonSchema {
   const r = deref(s, defs)
   if (!r.anyOf) return r
   const branches = r.anyOf.map((b) => deref(b, defs))
   const arr = branches.find((b) => b.type === 'array')
-  if (arr) return { ...arr, default: r.default ?? arr.default }
+  if (arr) return mergePeel(r, arr)
   const nonNull = branches.filter((b) => b.type !== 'null')
-  return nonNull.length === 1 ? { ...nonNull[0], default: r.default ?? nonNull[0].default } : r
+  return nonNull.length === 1 ? mergePeel(r, nonNull[0]) : r
 }
 const isObjectModel = (s: JsonSchema) => s.type === 'object' && !!s.properties
 const isStringMap = (s: JsonSchema) => s.type === 'object' && !!s.additionalProperties && typeof s.additionalProperties === 'object'

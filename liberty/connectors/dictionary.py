@@ -170,6 +170,11 @@ class DictionaryFile(BaseModel):
     enums: dict[str, EnumDef] = Field(default_factory=dict)
     lookups: dict[str, LookupDef] = Field(default_factory=dict)
     connectors: dict[str, DictionarySection] = Field(default_factory=dict)          # per-connector
+    # Operator overrides for the bundled `liberty/framework_enums.py` registry that powers the
+    # builder UI's dropdowns (DICTIONARY_TYPE / DATASOURCE_TYPE / HTTP_METHOD / …). An entry here
+    # *replaces* the bundled set for that id — let the operator add a new "Datasource Type" value
+    # without a code change. The merge happens at /admin/config/schema time.
+    framework_enums: dict[str, EnumDef] = Field(default_factory=dict)
 
     def find_entry(self, key: str, *, connector: str | None = None) -> DictionaryEntry | None:
         """The :class:`DictionaryEntry` for *key* — *connector*'s section first, then the shared pool."""

@@ -32,14 +32,18 @@ export interface DictionarySection {
   lookups?: Record<string, Record<string, unknown>>
 }
 
-/** GET /admin/config/dictionary/parsed — the current `dictionary.toml`, default keys dropped. */
+/** GET /admin/config/dictionary/parsed — the current `dictionary.toml`, default keys dropped.
+ *  `framework_enums` is top-level only (no per-connector overlay) — it overrides the bundled
+ *  framework registry that drives the builder dropdowns. */
 export interface DictionaryDoc {
   path: string
   dictionary: DictionarySection & {
     default_language?: string
     connectors?: Record<string, DictionarySection>
+    framework_enums?: Record<string, Record<string, unknown>>
   }
 }
 
-/** Which kind of dictionary record the builder is editing. */
-export type DictionaryKind = 'entries' | 'enums' | 'lookups'
+/** Which kind of dictionary record the builder is editing. `framework_enums` is the operator
+ *  override for the bundled `liberty/framework_enums.py` registry — shared scope only. */
+export type DictionaryKind = 'entries' | 'enums' | 'lookups' | 'framework_enums'

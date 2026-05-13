@@ -112,17 +112,29 @@ async def put_connectors_config(body: ConfigBody, request: Request, _: Superuser
 
 # ── structured config: the Phase-7 builders ───────────────────────────────────────────────
 @router.get("/config/schema")
-async def get_config_schema(_: Superuser) -> dict[str, Any]:
+async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
     """JSON Schema of the structured-config models — the builder UI renders forms from it.
     Each carries its own ``$defs`` (QueryDef / ColumnHint / ParamDef / …) for the UI to resolve.
     ``framework_enums`` is v2's port of v1's ``ly_enum``-for-the-framework (the reusable dropdowns
-    that power format/rules/dialect/method/… in the builder)."""
+    that power format/rules/dialect/method/… in the builder) — merged on the fly: the operator's
+    ``dictionary.toml`` ``[framework_enums.*]`` section *replaces* the bundled entry for that id,
+    so a new "Datasource Type" value can be added without a code change."""
+    bundled: dict[str, dict[str, Any]] = {k: dict(v) for k, v in FRAMEWORK_ENUMS.items()}
+    overrides = load_dictionary(_dictionary_path(request.app.state.settings)).framework_enums
+    for enum_id, ed in overrides.items():
+        bundled[enum_id] = {
+            "label": ed.label or enum_id,
+            "values": [
+                {"value": v.value, "label": v.label or v.value, **({"l": v.l} if v.l else {})}
+                for v in ed.values
+            ],
+        }
     return {
         "pool": PoolConfig.model_json_schema(),
         "sql": SqlConnectorConfig.model_json_schema(),
         "api": ApiConnectorConfig.model_json_schema(),
         "dictionary": DictionaryFile.model_json_schema(),
-        "framework_enums": FRAMEWORK_ENUMS,
+        "framework_enums": bundled,
     }
 
 
@@ -268,7 +280,7 @@ async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Super
         del doc["default_language"]
 
     # entries / enums / lookups / connectors — replace each section wholesale (tomlkit re-renders).
-    for section in ("entries", "enums", "lookups", "connectors"):
+    for section in ("entries", "enums", "lookups", "framework_enums", "connectors"):
         if section in normalized and normalized[section]:
             doc[section] = normalized[section]
         elif section in doc:

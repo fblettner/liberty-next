@@ -216,6 +216,16 @@ const fr: Resources = {
         empty: 'Aucun lookup pour cette portée.',
         pickOne: 'Choisissez un lookup à gauche.',
       },
+      framework_enums: {
+        tab: 'Framework',
+        add: 'Surcharger un enum framework',
+        delete: 'Retirer la surcharge',
+        namePrompt: "Identifiant de l'enum framework à surcharger (DICTIONARY_TYPE / DICTIONARY_RULES / DATASOURCE_TYPE / HTTP_METHOD / COLUMN_ALIGN / AUTH_TYPE / QUERY_DEFINITION …) :",
+        confirmDelete: 'Retirer la surcharge pour « {{name}} » (les valeurs livrées reviennent) ?',
+        empty: "Aucune surcharge — les enums livrés sont utilisés tels quels.",
+        pickOne: 'Choisissez une surcharge à gauche.',
+        scopeNote: "Les enums framework surchargent le registre livré (liberty/framework_enums.py) — ils alimentent les listes déroulantes des Paramètres (Datasource / HTTP Method / Dictionary Type / …). Portée Partagé uniquement ; une surcharge remplace entièrement la liste livrée.",
+      },
     },
     connectors: {
       addSql: 'Connecteur SQL',

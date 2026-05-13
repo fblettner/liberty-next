@@ -269,7 +269,10 @@ the model. **Use `claude-opus-4-7` unless the user names another model.**
   ungrouped → "General"). Widget selection is driven by **framework enums** — v2's port of v1's
   `ly_enum`-for-the-framework table — defined in `liberty/framework_enums.py` (`DICTIONARY_TYPE`,
   `DICTIONARY_RULES`, `DATASOURCE_TYPE`, `HTTP_METHOD`, `COLUMN_ALIGN`, `AUTH_TYPE`, …) and shipped
-  via the same `GET /admin/config/schema` response under `framework_enums`. A field referencing one
+  via the same `GET /admin/config/schema` response under `framework_enums` (the operator can
+  override a bundled entry by adding a `[framework_enums.<id>]` section to `dictionary.toml` —
+  full replace, merged on the fly at the schema endpoint, surfaced in the DictionaryBuilder's
+  *Framework* sub-tab). A field referencing one
   (`json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"}` on `DictionaryEntry.format`,
   `DictionaryEntry.rules`, `ColumnHint.format`, `ColumnHint.align`, `PoolConfig.dialect`,
   `EndpointDef.method`, `ApiConnectorConfig.auth_type`, …) renders as a themed two-column
@@ -414,12 +417,13 @@ replies), `@monaco-editor/react` (the connector-config editor).
   queries list and connector-level settings); API connectors only show Form. Saves go through
   `PUT /admin/config/connectors/parsed` + Reload),
   `DictionaryBuilder` = the structured `dictionary.toml` editor — sub-tabs for *Entries* / *Enums* /
-  *Lookups*, a scope chip strip (*Shared* + one chip per connector overlay; "+ Add connector scope"
-  for new), per-record `SchemaNavigator` over the matching schema (`DictionaryEntry`/`EnumDef`/
-  `LookupDef`; enums drill into their `values: [{value, label, l}]`), search past ~6 records, each
-  list row shows the record's `label` (or `description` for lookups) under the key so a numeric
-  `[lookups.1]` is findable, top-level `default_language` input — → `PUT /admin/config/dictionary/parsed`
-  + Reload), and `RawEditor` = the
+  *Lookups* / *Framework* (the last overrides the bundled `framework_enums` registry — Shared scope
+  only, hides the scope chips), a scope chip strip (*Shared* + one chip per connector overlay;
+  "+ Add connector scope" for new) on the first three, per-record `SchemaNavigator` over the
+  matching schema (`DictionaryEntry`/`EnumDef`/`LookupDef`; both `enums` and the framework overrides
+  drill into `values: [{value, label, l}]`), search past ~6 records, each list row shows the
+  record's `label` (or `description` for lookups) under the key so a numeric `[lookups.1]` is
+  findable, top-level `default_language` input — → `PUT /admin/config/dictionary/parsed` + Reload), and `RawEditor` = the
   Monaco `connectors.toml` editor (`language="ini"`, theme-aware, over `GET/PUT /admin/config/connectors`
   + Reload — the escape hatch); the structured editors don't support rename yet — delete + re-add — the
   Phase-7 builder slices), `Login` + `OidcCallback`.

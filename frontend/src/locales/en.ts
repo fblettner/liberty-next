@@ -214,6 +214,16 @@ const en = {
         empty: 'No lookups in this scope yet.',
         pickOne: 'Pick a lookup on the left.',
       },
+      framework_enums: {
+        tab: 'Framework',
+        add: 'Override framework enum',
+        delete: 'Remove override',
+        namePrompt: 'Framework enum id to override (DICTIONARY_TYPE / DICTIONARY_RULES / DATASOURCE_TYPE / HTTP_METHOD / COLUMN_ALIGN / AUTH_TYPE / QUERY_DEFINITION …):',
+        confirmDelete: 'Remove the override for “{{name}}” (the bundled values come back)?',
+        empty: 'No overrides yet — the bundled framework enums are used as-is.',
+        pickOne: 'Pick an override on the left.',
+        scopeNote: 'Framework enums override the bundled liberty/framework_enums.py registry — they power the Settings dropdowns (Datasource / HTTP Method / Dictionary Type / …). Shared scope only; an override replaces the bundled list wholesale.',
+      },
     },
     connectors: {
       addSql: 'SQL connector',

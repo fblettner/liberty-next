@@ -252,6 +252,25 @@ def test_config_dictionary_parsed_get_and_put(env) -> None:
         r = client.post("/admin/reload", headers=h).json()
         assert r["dictionary_entries"] == 2
 
+        # framework-enum override: a user-defined [framework_enums.DATASOURCE_TYPE] replaces the
+        # bundled values for that id, so /admin/config/schema merges the two on the fly.
+        bundled_count = len(sch["framework_enums"]["DATASOURCE_TYPE"]["values"])
+        assert bundled_count > 1  # the bundled DATASOURCE_TYPE ships several values
+        payload2 = {
+            **payload,
+            "framework_enums": {
+                "DATASOURCE_TYPE": {"label": "DB Engines", "values": [{"value": "duckdb", "label": "DuckDB"}]},
+            },
+        }
+        assert client.put("/admin/config/dictionary/parsed", json={"dictionary": payload2}, headers=h).json()["saved"] is True
+        assert "[framework_enums.DATASOURCE_TYPE]" in dict_toml.read_text()
+        sch2 = client.get("/admin/config/schema", headers=h).json()
+        # the override replaces the bundled list wholesale (label too)
+        assert sch2["framework_enums"]["DATASOURCE_TYPE"]["label"] == "DB Engines"
+        assert sch2["framework_enums"]["DATASOURCE_TYPE"]["values"] == [{"value": "duckdb", "label": "DuckDB"}]
+        # other ids still come from the bundled set (untouched)
+        assert sch2["framework_enums"]["HTTP_METHOD"]["values"] == sch["framework_enums"]["HTTP_METHOD"]["values"]
+
 
 def test_oidc_callback_fragment_redirect() -> None:
     from liberty.config import OIDCSettings
