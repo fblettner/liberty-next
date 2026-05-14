@@ -21,6 +21,12 @@ export const Modal = styled.div`
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid ${colors.border};
   border-radius: ${radius.lg};
+  /* Consistent footprint across every dialog — even a one-line Confirm has the same minimum
+     presence as a multi-field form. The min() with viewport units keeps it graceful on small
+     screens (the min-width drops below 480px when the viewport is narrower, so a 360px-wide
+     phone still gets a modal that fits — no horizontal scrollbar). */
+  min-width: min(480px, 95vw);
+  min-height: min(200px, 80vh);
   max-width: 95vw;
   max-height: 90vh;
   display: flex;
