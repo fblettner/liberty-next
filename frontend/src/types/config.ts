@@ -12,6 +12,8 @@ export interface ConfigSchemas {
   dictionary: JsonSchema
   menus: JsonSchema
   screens: JsonSchema
+  charts: JsonSchema
+  dashboards: JsonSchema
   framework_enums: FrameworkEnums
 }
 
@@ -159,4 +161,19 @@ export interface Screen {
 export interface ScreensDoc {
   path: string
   screens: Record<string, Record<string, Screen>>
+}
+
+/** GET /admin/config/charts/parsed — `[charts.<id>]` map (default-valued keys dropped). The
+ *  shape mirrors `liberty/charts/config.py::ChartConfig` + nested `ChartSpec` (`type`/`x`/`y`/…). */
+export interface ChartsDoc {
+  path: string
+  charts: Record<string, Record<string, unknown>>
+}
+
+/** GET /admin/config/dashboards/parsed — `[dashboards.<id>]` map. Each entry is a
+ *  `liberty/dashboards/config.py::Dashboard` shape (id injected from the key by the parser;
+ *  default-valued keys dropped). */
+export interface DashboardsDoc {
+  path: string
+  dashboards: Record<string, Record<string, unknown>>
 }

@@ -230,7 +230,7 @@ const en = {
     reloaded: 'Reloaded. Connectors: {{connectors}} · Pools: {{pools}}',
     superuserRequired: 'Superuser required',
     hint: 'Save validates the TOML before writing — invalid config is rejected. Reload rebuilds the connector registry; if the new config fails to load the previous one stays active.',
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', raw: 'connectors.toml (raw)' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', dashboards: 'Dashboards', raw: 'connectors.toml (raw)' },
     menus: {
       saved: 'Saved & reloaded.',
       hint: 'Save validates the whole MenusFile (unique ids, parents exist, no cycles, folder-vs-leaf shape), rewrites menus.toml — the [menus] table is replaced wholesale, then reloads.',
@@ -407,6 +407,16 @@ const en = {
         hint: 'Actions shown when the user right-clicks a row in the TableView. Each action\'s ParamBinds resolve against the clicked row\'s values (the column names match the result set, so a `{param: "USR_ID", source: "usr_id"}` bind feeds the row\'s USR_ID into the target query). Same Action shape as the dialog\'s on_save chain — only the firing context differs.',
         empty: 'No row-menu actions yet — right-click on a row does nothing on this screen.',
       },
+    },
+    dashboards: {
+      add: 'Add dashboard',
+      delete: 'Delete',
+      namePrompt: 'New dashboard id (slug-style, e.g. nomasx1_overview):',
+      confirmDelete: 'Delete dashboard "{{name}}"?',
+      empty: 'No dashboards yet. Add one to get started.',
+      pickOne: 'Pick a dashboard on the left.',
+      saved: 'Saved & reloaded. Dashboards: {{dashboards}}',
+      hint: 'Save validates the whole DashboardsFile (widget discriminator + grid bounds + filter options), rewrites dashboards.toml (the [dashboards] table is replaced wholesale via tomlkit), then reloads. Reference dashboards from menus.toml with `type = "dashboard"` and `target = "<id>"`.',
     },
     tables: {
       tablesView: 'Tables',

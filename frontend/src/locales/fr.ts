@@ -232,7 +232,7 @@ const fr: Resources = {
     reloaded: 'Rechargé. Connecteurs : {{connectors}} · Pools : {{pools}}',
     superuserRequired: 'Superutilisateur requis',
     hint: "Enregistrer valide le TOML avant écriture — une configuration invalide est rejetée. Recharger reconstruit le registre des connecteurs ; si la nouvelle configuration échoue, l'ancienne reste active.",
-    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', raw: 'connectors.toml (brut)' },
+    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', dashboards: 'Tableaux de bord', raw: 'connectors.toml (brut)' },
     menus: {
       saved: 'Enregistré et rechargé.',
       hint: "Enregistrer valide tout le fichier (ids uniques, parents existants, sans cycle, dossier vs feuille), réécrit menus.toml — la table [menus] est remplacée en bloc, puis recharge.",
@@ -409,6 +409,16 @@ const fr: Resources = {
         hint: "Actions affichées au clic droit sur une ligne du TableView. Les ParamBind de chaque action sont résolus contre les valeurs de la ligne cliquée. Même forme d'Action que la chaîne on_save du dialogue — seul le contexte de déclenchement diffère.",
         empty: 'Aucune action de menu contextuel — un clic droit ne fait rien sur cet écran.',
       },
+    },
+    dashboards: {
+      add: 'Ajouter un tableau de bord',
+      delete: 'Supprimer',
+      namePrompt: "Identifiant du nouveau tableau de bord (slug, ex. nomasx1_overview) :",
+      confirmDelete: 'Supprimer le tableau de bord « {{name}} » ?',
+      empty: "Aucun tableau de bord pour le moment. Ajoutez-en un pour commencer.",
+      pickOne: 'Choisissez un tableau de bord à gauche.',
+      saved: 'Enregistré et rechargé. Tableaux de bord : {{dashboards}}',
+      hint: "Save valide tout le DashboardsFile (discriminator des widgets + bornes de la grille + options de filtre), réécrit dashboards.toml (la table [dashboards] est remplacée intégralement via tomlkit), puis recharge. Référencez les tableaux de bord depuis menus.toml avec `type = \"dashboard\"` et `target = \"<id>\"`.",
     },
     tables: {
       tablesView: 'Tables',
