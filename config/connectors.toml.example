@@ -1,4 +1,4 @@
-# Liberty v2 — connector definitions  (TEMPLATE — copy to `config/connectors.toml`)
+# Liberty Next — connector definitions  (TEMPLATE — copy to `config/connectors.toml`)
 #
 # The real `config/connectors.toml` is *not* committed: it's per-deployment, and licensed apps
 # (e.g. nomasx1 / nomajde) ship it separately. A fresh checkout has none → the framework runs

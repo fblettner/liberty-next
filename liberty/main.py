@@ -91,7 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await app.state.ai.aclose()
             await app.state.connectors.aclose()
 
-    app = FastAPI(title="Liberty v2", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="Liberty Next", version=__version__, lifespan=lifespan)
 
     if settings.oidc.enabled:
         # Authlib's Starlette client stashes the OAuth state/nonce in the session.

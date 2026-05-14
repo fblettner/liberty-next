@@ -17,7 +17,7 @@ from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
 
 JWT_SECRET = "route-test-secret-key"
-ISSUER = "liberty-v2"
+ISSUER = "liberty-next"
 
 
 def _seed(db_url: str) -> None:

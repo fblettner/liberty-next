@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Liberty v2 — run / dev helper.
+# Liberty Next — run / dev helper.
 #
 #   ./start.sh            build the frontend if stale, then run FastAPI serving the
 #                         React SPA *and* the API on one port (default :8000). This is

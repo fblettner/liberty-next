@@ -17,7 +17,7 @@ def test_info() -> None:
         r = client.get("/info")
         assert r.status_code == 200
         body = r.json()
-        assert body["name"] == "Liberty v2"
+        assert body["name"] == "Liberty Next"
         # Reflects config/connectors.toml (loaded in the lifespan) — whatever it contains.
         assert body["connectors_loaded"] == len(body["connectors"])
         assert "default" in body["pools"]  # the framework pool is always there
@@ -28,5 +28,5 @@ def test_config_load() -> None:
     from liberty.config import load_settings
 
     settings = load_settings("config/app.toml")
-    assert settings.app.name == "Liberty v2"
+    assert settings.app.name == "Liberty Next"
     assert settings.app.port == 8000

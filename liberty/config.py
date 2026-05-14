@@ -42,7 +42,7 @@ def substitute_env(value: Any, *, env: dict[str, str] | None = None) -> Any:
 
 
 class AppSettings(BaseModel):
-    name: str = "Liberty v2"
+    name: str = "Liberty Next"
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
@@ -84,7 +84,7 @@ class AuthSettings(BaseModel):
     pool: str = "default"  # used when backend == "db" — which connector pool the ly2_* tables live on
     jwt_secret: str = ""  # ${LIBERTY_JWT_SECRET}; empty → ephemeral key generated at startup
     jwt_algorithm: str = "HS256"
-    jwt_issuer: str = "liberty-v2"
+    jwt_issuer: str = "liberty-next"
     access_token_ttl: int = 3600  # seconds
     refresh_token_ttl: int = 1_209_600  # seconds (14 days)
 

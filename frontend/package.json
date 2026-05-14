@@ -1,9 +1,9 @@
 {
-  "name": "liberty-v2-frontend",
+  "name": "liberty-next-frontend",
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Liberty v2 — schema-driven admin UI (served as static by the FastAPI backend)",
+  "description": "Liberty Next — schema-driven admin UI (served as static by the FastAPI backend)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

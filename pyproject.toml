@@ -1,7 +1,7 @@
 [project]
-name = "liberty-v2"
+name = "liberty-next"
 version = "0.0.1"
-description = "Liberty v2 — connector-driven low-code framework"
+description = "Liberty Next — connector-driven low-code framework"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -31,7 +31,7 @@ dev = [
 ]
 
 [project.scripts]
-liberty-v2 = "liberty.main:run"
+liberty-next = "liberty.main:run"
 liberty-connectors = "liberty.cli:main"
 liberty-admin = "liberty.admin_cli:main"
 liberty-migrate = "liberty.migrate_cli:main"

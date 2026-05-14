@@ -1,5 +1,5 @@
 [app]
-name = "Liberty v2"
+name = "Liberty Next"
 host = "0.0.0.0"
 port = 8000
 log_level = "info"
@@ -20,7 +20,7 @@ toml_path = "config/auth.toml"   # used when backend = "toml" — keep this file
 pool = "default"                 # used when backend = "db" — which connector pool holds ly2_*
 jwt_secret = "${LIBERTY_JWT_SECRET}"
 jwt_algorithm = "HS256"
-jwt_issuer = "liberty-v2"
+jwt_issuer = "liberty-next"
 access_token_ttl = 3600          # seconds
 refresh_token_ttl = 1209600      # seconds (14 days)
 

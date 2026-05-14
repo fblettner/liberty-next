@@ -33,7 +33,7 @@ class TokenError(Exception):
 class TokenConfig:
     secret: str
     algorithm: str = "HS256"
-    issuer: str = "liberty-v2"
+    issuer: str = "liberty-next"
     access_ttl: int = 3600
     refresh_ttl: int = 1_209_600
 

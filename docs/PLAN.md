@@ -1,4 +1,4 @@
-# Liberty v2 — Rebuild Plan
+# Liberty Next — Rebuild Plan
 
 > Living document. Update the **Status** markers as phases complete.
 
@@ -52,7 +52,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 | Existing apps (nomasx1, NOMAJDE) | **Must keep running on v1.** v2 ships migration tools (Phase 5); apps move one at a time. v1 source untouched. (The `AIRFLOW` app was never finalized — not migrated; but its *Python/Spark jobs* live in nomasx1/nomaubl and get a home in v2 — see Phase 10.) |
 | Language | **Python** — keep the Liberty stack (FastAPI + SQLAlchemy async). Port nomaubl's *patterns*, not its Java. |
 | Frontend | **Fresh React 19 + Vite + TS** in `frontend/`, built `dist/` served as static by FastAPI (`SPAStaticFiles` mounted at `/` last). No shared libraries with v1/nomaubl, but the *look* is ported from nomaubl: `@emotion/styled`, a dark default + light theme (CSS-var swap), `react-i18next` (EN/FR), `lucide-react` icons, DM Sans; shared primitives in `src/ui.tsx`. `react-router-dom` v7; `fetch` (no axios); Context for auth/state. Still post-MVP: Monaco config editor, `@tanstack/react-table`, `react-markdown`. |
-| Location | **Sibling directory** `../liberty-v2/`. |
+| Location | **Sibling directory** `../liberty-next/` (was `../liberty-v2/` during early dev). |
 | Config format | **TOML** files on disk (nomaubl uses flat XML properties — the flat-config insight stands, TOML is the Python-idiomatic form). |
 | AI | **Anthropic SDK** (`AsyncAnthropic`), drop OpenAI. Default model `claude-opus-4-7` (operator-overridable). Own `@tool` decorator + manual streaming loop — the SDK's `@beta_tool`/`tool_runner` returns complete messages, can't per-token stream (the SSE endpoint needs it). The `claude-api` skill is the source of SDK truth. |
 | Auth | Internal users (**argon2id**) + **OIDC via authlib** (Keycloak-ready); own JWTs (HS256). |
@@ -68,7 +68,7 @@ Connector configs live in `config/connectors.toml` (and friends), hot-reloadable
 ### Phase 0 — Foundation — ✅ DONE
 - `pyproject.toml` with the full dep set pinned; pip + venv (no uv/poetry on this machine).
 - `liberty/config.py` — TOML loader, Pydantic-validated `Settings`.
-- `liberty/main.py` — FastAPI app, `/health`, `/info`, `liberty-v2` CLI entry.
+- `liberty/main.py` — FastAPI app, `/health`, `/info`, `liberty-next` CLI entry.
 - `config/app.toml`, `config/connectors.toml` (placeholder).
 - `tests/test_health.py` — 3 passing tests.
 

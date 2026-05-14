@@ -1,4 +1,4 @@
-# Liberty v2 — shared field dictionary  (TEMPLATE — copy to `config/dictionary.toml`)
+# Liberty Next — shared field dictionary  (TEMPLATE — copy to `config/dictionary.toml`)
 #
 # The real `config/dictionary.toml` is *not* committed (per-deployment / licensed-app data). A
 # missing file = an empty dictionary, which is fine. To populate it:

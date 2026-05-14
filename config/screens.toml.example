@@ -1,4 +1,4 @@
-# Liberty v2 — per-app screen definitions  (TEMPLATE — copy to `config/screens.toml`)
+# Liberty Next — per-app screen definitions  (TEMPLATE — copy to `config/screens.toml`)
 #
 # The real `config/screens.toml` is *not* committed (per-deployment / licensed-app data). A missing
 # file = no screens, which is fine — the framework still serves the raw connector/query flow. To populate:

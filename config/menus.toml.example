@@ -1,4 +1,4 @@
-# Liberty v2 — per-app navigation trees  (TEMPLATE — copy to `config/menus.toml`)
+# Liberty Next — per-app navigation trees  (TEMPLATE — copy to `config/menus.toml`)
 #
 # The real `config/menus.toml` is *not* committed (per-deployment / licensed-app data). A missing
 # file = no menus, which is fine — every accessible connector then shows as its own "app". To populate:
