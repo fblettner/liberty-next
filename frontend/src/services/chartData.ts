@@ -41,6 +41,25 @@ export function isNumericColumn(col: Column): boolean {
   return !!col.type && NUMERIC_TYPE_RE.test(col.type)
 }
 
+/** Resolve a spec column name (which an operator might author in any case — uppercase to match the
+ *  TOML / dictionary conventions, lowercase to match what they saw in a Postgres CLI, …) to the
+ *  actual case used in the result rows. The backend keeps the *discovered* case from
+ *  `cursor.description` — Postgres lowercases unquoted identifiers, Oracle uppercases — so the row
+ *  dict's keys can differ from the chart spec's. Returns `name` unchanged when nothing matches
+ *  (the row lookup will then just return undefined, same as before). */
+export function resolveColumnName(result: QueryResult, name: string): string {
+  if (!name) return name
+  // Exact match short-circuits — by far the common case.
+  for (const c of result.columns) {
+    if (c.name === name) return name
+  }
+  const low = name.toLowerCase()
+  for (const c of result.columns) {
+    if (c.name.toLowerCase() === low) return c.name
+  }
+  return name
+}
+
 function applyAggregation(values: (number | null)[], agg: Aggregation): number | null {
   const nums = values.filter((v): v is number => v !== null)
   if (agg === 'count') return values.length // count *rows*, not just non-null values
@@ -61,11 +80,18 @@ function applyAggregation(values: (number | null)[], agg: Aggregation): number |
 
 export function buildChartData(result: QueryResult, spec: ChartSpec): ChartDatum[] {
   if (!spec.x || spec.y.length === 0) return []
+  // Resolve spec column names to the actual case used in result rows once, here. Postgres
+  // returns lowercase keys for unquoted identifiers; if the operator authored the spec with
+  // uppercase column names (matching v1's conventions), a direct `r[spec.x]` lookup would miss.
+  const xKey = resolveColumnName(result, spec.x)
+  const yKeys = spec.y.map((y) => resolveColumnName(result, y))
+  // Track each datum's Y values under both the canonical (spec.y) name and the resolved one,
+  // since Recharts indexes by the spec's literal `y` (`<Bar dataKey={y}>`).
   // No grouping → one datum per row, in input order.
   if (spec.aggregation === 'none') {
     return result.rows.map((r) => {
-      const datum: ChartDatum = { x: formatCategory(r[spec.x]) }
-      for (const y of spec.y) datum[y] = toNumber(r[y])
+      const datum: ChartDatum = { x: formatCategory(r[xKey]) }
+      spec.y.forEach((y, i) => { datum[y] = toNumber(r[yKeys[i]]) })
       return datum
     })
   }
@@ -73,7 +99,7 @@ export function buildChartData(result: QueryResult, spec: ChartSpec): ChartDatum
   const groups = new Map<string, Record<string, unknown>[]>()
   const order: string[] = []  // preserve first-occurrence order; `sortByX` re-sorts at the end
   for (const r of result.rows) {
-    const x = formatCategory(r[spec.x])
+    const x = formatCategory(r[xKey])
     let list = groups.get(x)
     if (!list) {
       list = []
@@ -86,10 +112,11 @@ export function buildChartData(result: QueryResult, spec: ChartSpec): ChartDatum
   return keys.map((x) => {
     const list = groups.get(x) ?? []
     const datum: ChartDatum = { x }
-    for (const y of spec.y) {
-      const values = list.map((r) => toNumber(r[y]))
+    spec.y.forEach((y, i) => {
+      const yKey = yKeys[i]
+      const values = list.map((r) => toNumber(r[yKey]))
       datum[y] = applyAggregation(values, spec.aggregation)
-    }
+    })
     return datum
   })
 }

@@ -19,7 +19,7 @@ import {
   XAxis, YAxis,
 } from 'recharts'
 import type { TooltipContentProps, TooltipPayloadEntry, TooltipValueType } from 'recharts'
-import { buildChartData } from '../../services/chartData'
+import { buildChartData, resolveColumnName } from '../../services/chartData'
 import { cellText, enumMap, ruleCell } from '../../services/cells'
 import { useLookupBatch, type LookupSpec } from '../../services/lookups'
 import type { Column, QueryResult } from '../../types/connectors'
@@ -79,8 +79,14 @@ export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessa
   const data = useMemo(() => buildChartData(result, spec), [result, spec])
   const showLegend = spec.showLegend ?? spec.y.length > 1
 
-  // LOOKUP fetch for the X column (one round-trip per connector/query, shared via the session cache).
-  const xCol = useMemo(() => allCols.find((c) => c.name === spec.x), [allCols, spec.x])
+  // LOOKUP fetch for the X column (one round-trip per connector/query, shared via the session
+  // cache). The spec's `x` may be authored in a different case than the result returned
+  // (Postgres lowercases unquoted identifiers, Oracle uppercases), so resolve through the result's
+  // own column names — without this the lookup misses and the chart shows raw IDs.
+  const xCol = useMemo(() => {
+    const actualName = resolveColumnName(result, spec.x)
+    return allCols.find((c) => c.name === actualName)
+  }, [allCols, result, spec.x])
   const lookupSpecs: LookupSpec[] = useMemo(() => {
     if (xCol?.rule?.kind !== 'lookup') return []
     const r = xCol.rule
