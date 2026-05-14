@@ -11,19 +11,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { Save } from 'lucide-react'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend,
   Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip,
   XAxis, YAxis,
 } from 'recharts'
 import type { TooltipContentProps, TooltipPayloadEntry, TooltipValueType } from 'recharts'
-import { Field, SearchSelect, type SearchSelectOption } from '../../common'
+import { useAuth } from '../../auth/AuthContext'
+import { Button, Field, SearchSelect, type SearchSelectOption } from '../../common'
 import { buildChartData, isNumericColumn } from '../../services/chartData'
 import { cellText, enumMap, ruleCell } from '../../services/cells'
 import { useLookupBatch, type LookupSpec } from '../../services/lookups'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Aggregation, ChartSpec, ChartType } from '../../types/charts'
 import { AGGREGATIONS, CHART_TYPES, defaultChartSpec } from '../../types/charts'
+import { SaveChartModal } from './SaveChartModal'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 
 const Frame = styled.div`
@@ -131,6 +134,12 @@ export function ChartView({ result, connector, query }: ChartViewProps) {
   /** A series' display name — the column's `label` (from the dictionary) if set, else its raw name. */
   const seriesName = useCallback((col: Column): string => col.label ?? col.name, [])
 
+  // Save-chart modal — only shown for superusers (the underlying admin endpoint is gated).
+  const { user } = useAuth()
+  const canSave = !!user?.is_superuser
+  const [saveOpen, setSaveOpen] = useState(false)
+  const canSubmit = canSave && !!cleanSpec.x && cleanSpec.y.length > 0
+
   return (
     <Frame>
       <SpecBar>
@@ -158,6 +167,17 @@ export function ChartView({ result, connector, query }: ChartViewProps) {
             <SearchSelect value={cleanSpec.aggregation} onChange={(v) => setSpec({ ...cleanSpec, aggregation: v as Aggregation })} options={aggOpts} />
           </Field>
         </SpecCell>
+        {canSave && (
+          // Pushed to the right end of the spec bar (`margin-left: auto`) so the four-dropdown
+          // group stays visually grouped at the start. Disabled when there's nothing to save
+          // (no X or no Y column picked yet).
+          <div style={{ marginLeft: 'auto', alignSelf: 'flex-end' }}>
+            <Button $size="sm" $variant="ghost" onClick={() => setSaveOpen(true)} disabled={!canSubmit}
+              title={canSubmit ? t('chart.save.buttonTitle') : t('chart.save.buttonDisabled')}>
+              <Save size={13} /> {t('chart.save.button')}
+            </Button>
+          </div>
+        )}
       </SpecBar>
 
       <ChartFrame>
@@ -171,8 +191,28 @@ export function ChartView({ result, connector, query }: ChartViewProps) {
           </ResponsiveContainer>
         )}
       </ChartFrame>
+      {saveOpen && (
+        // Default the label to a friendly suggestion built from the X / first-Y column labels —
+        // "Users per Application" rather than the operator typing it from scratch. They can edit.
+        <SaveChartModal
+          connector={connector} query={query} spec={cleanSpec}
+          defaultLabel={defaultSavedLabel(cleanSpec, allCols, seriesName)}
+          onSaved={() => setSaveOpen(false)}
+          onCancel={() => setSaveOpen(false)}
+        />
+      )}
     </Frame>
   )
+}
+
+/** Make a reasonable "Save as" label from the chart's X / Y columns — "Y per X" with the
+ *  resolved column labels. The operator edits it in the modal; this just saves a few keystrokes. */
+function defaultSavedLabel(spec: ChartSpec, allCols: Column[], seriesName: (c: Column) => string): string {
+  const xCol = allCols.find((c) => c.name === spec.x)
+  const yCol = allCols.find((c) => c.name === spec.y[0])
+  const xLabel = xCol ? seriesName(xCol) : spec.x
+  const yLabel = yCol ? seriesName(yCol) : spec.y[0]
+  return yLabel ? `${yLabel} per ${xLabel}` : ''
 }
 
 /** Custom Tooltip — themed dark/light, replaces Recharts' default white box. The `payload` array

@@ -31,3 +31,41 @@ export const AGGREGATIONS: Aggregation[] = ['sum', 'avg', 'count', 'min', 'max',
 export function defaultChartSpec(): ChartSpec {
   return { type: 'bar', x: '', y: [], aggregation: 'sum', stacked: false, showGrid: true, sortByX: false }
 }
+
+/** The wire shape of a saved chart (GET /api/charts, GET /api/charts/{id} — backend's
+ *  `ChartConfig.model_dump`). Pythonic snake_case fields are kept as-is so the runtime can
+ *  pass them straight through to the builder UI / dashboard widget. */
+export interface ChartConfig {
+  id: string
+  label: string
+  description?: string | null
+  connector: string
+  query: string
+  spec: SavedChartSpec
+}
+
+/** The persisted-side spec — same fields as the in-session `ChartSpec` but using the backend's
+ *  snake_case wire naming (the Pydantic model defaults to snake_case). Optional flags are
+ *  serialised as undefined when at their default, so a saved chart with stock settings is
+ *  terse on disk. */
+export interface SavedChartSpec {
+  type: ChartType
+  x: string
+  y: string[]
+  aggregation: Aggregation
+  stacked?: boolean | null
+  show_legend?: boolean | null
+  show_grid?: boolean | null
+  sort_by_x?: boolean | null
+}
+
+/** Translate the runtime ChartSpec (camelCase, with seeded defaults) into the persisted form
+ *  (snake_case, defaults stripped so the file stays diff-friendly). Used by SaveChartModal. */
+export function toSavedSpec(spec: ChartSpec): SavedChartSpec {
+  const out: SavedChartSpec = { type: spec.type, x: spec.x, y: spec.y, aggregation: spec.aggregation }
+  if (spec.stacked != null) out.stacked = spec.stacked
+  if (spec.showLegend != null) out.show_legend = spec.showLegend
+  if (spec.showGrid != null) out.show_grid = spec.showGrid
+  if (spec.sortByX != null) out.sort_by_x = spec.sortByX
+  return out
+}
