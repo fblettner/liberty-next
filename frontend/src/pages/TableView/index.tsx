@@ -102,12 +102,15 @@ export default function TableView({ connector, query }: { connector: string; que
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connector, query])
 
-  // Fetch the screen body iff a screen for this (connector, query) is in the workspace catalog
-  // *and* has a dialog. A 404 (e.g. the catalog raced ahead of a delete) silently degrades to
-  // "no screen" → inline editor; this is best-effort UX, not a security gate.
+  // Fetch the full screen body iff a screen for this (connector, query) is in the workspace
+  // catalog *and* carries at least one of the renderable bits (dialog / row_menu / toolbar
+  // actions). A 404 (e.g. the catalog raced ahead of a delete) silently degrades to "no screen"
+  // → inline editor; this is best-effort UX, not a security gate.
   useEffect(() => {
     const stub = findScreen(connector, query)
-    if (!stub || !stub.has_dialog) { setScreen(null); return }
+    if (!stub || (!stub.has_dialog && !stub.has_row_menu && !stub.has_actions)) {
+      setScreen(null); return
+    }
     let cancelled = false
     api
       .get<ScreenDetail>(`/api/screens/${encodeURIComponent(stub.app)}/${encodeURIComponent(stub.id)}`)

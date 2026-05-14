@@ -143,6 +143,9 @@ def test_list_screens_admin_sees_everything(app) -> None:
         assert users["label"] == "Users" and users["description"] == "User accounts"
         assert users["read_query"] == "users_get" and users["update_query"] == "users_get"
         assert users["audit"] is True and users["has_dialog"] is True
+        # Slice 6 follow-up — the catalog also flags row_menu / actions presence so the
+        # TableView fetches the full body even on screens without a dialog.
+        assert users["has_row_menu"] is False and users["has_actions"] is False
 
 
 def test_list_screens_pruned_by_permission(app) -> None:

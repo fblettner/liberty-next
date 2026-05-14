@@ -104,9 +104,9 @@ export interface ScreenDialog {
   on_save?: Action[]
 }
 
-/** List-view item — what `GET /api/screens` and `GET /api/screens/{app}` return. No dialog
- *  body, no actions; just enough to render the screen list / look up a screen by `(connector,
- *  read_query)`. */
+/** List-view item — what `GET /api/screens` and `GET /api/screens/{app}` return. No dialog /
+ *  actions / row_menu body, just enough for the frontend's screen list + the `has_*` flags
+ *  that decide whether to fetch the full body. */
 export interface ScreenListItem {
   id: string
   app: string
@@ -122,6 +122,8 @@ export interface ScreenListItem {
   editable: boolean
   uploadable: boolean
   has_dialog: boolean
+  has_row_menu: boolean
+  has_actions: boolean
 }
 
 /** Full screen detail — what `GET /api/screens/{app}/{id}` returns: list-view fields + the

@@ -54,8 +54,12 @@ def _label_for(screen: Screen, *, language: str | None) -> str:
 
 
 def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, Any]:
-    """The compact descriptor returned by ``GET /api/screens`` — no dialog body, no actions.
-    The frontend's screen list / picker only needs the queries and the flags."""
+    """The compact descriptor returned by ``GET /api/screens`` — no dialog / actions / row_menu
+    body, just enough for the frontend to (a) render the screen list and (b) decide whether to
+    fetch the full screen body for a given (connector, query). The three ``has_*`` flags are the
+    gate: when *any* is true the TableView fires ``GET /api/screens/{app}/{id}`` to pull the
+    full body in (so right-click row menus appear even on screens without a dialog, and toolbar
+    actions appear even without row menus, etc.)."""
     return {
         "id": screen.id,
         "app": app,
@@ -71,6 +75,8 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "editable": screen.editable,
         "uploadable": screen.uploadable,
         "has_dialog": screen.dialog is not None,
+        "has_row_menu": bool(screen.row_menu),
+        "has_actions": bool(screen.actions),
     }
 
 
