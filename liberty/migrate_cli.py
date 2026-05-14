@@ -45,6 +45,7 @@ from liberty.migrations import (
     migrate_api,
     migrate_column_hints,
     migrate_column_visibility,
+    migrate_context_menus,
     migrate_dictionary,
     migrate_key_columns,
     migrate_menus,
@@ -56,6 +57,7 @@ from liberty.migrations import (
     migrate_table_meta,
     read_api,
     read_applications,
+    read_context_menus,
     read_column_conditions,
     read_column_hints,
     read_db_schemas,
@@ -95,11 +97,26 @@ async def _build(args: argparse.Namespace) -> dict:
         if args.command == "menu":
             return migrate_menus(*await read_menus(engine), app_name=args.connector)
         if args.command == "screen":
-            # Pull ly_cdn_params alongside the screen tables so per-field `visible_when`
-            # conditions are populated from each ly_dlg_col.col_cdn_id.
+            # Pull ly_cdn_params for per-field `visible_when` conditions, plus the v1 context-menu
+            # tables (ly_ctxmenus / ly_ctx_val / ly_ctx_filters) so each screen with a
+            # ``tbl_ctx_id`` gets its row_menu populated with NavigateActions.
             screen_rows = await read_screens(engine)
             cdn_params = await read_column_conditions(engine)
-            return migrate_screens(*screen_rows, cdn_param_rows=cdn_params, app_name=args.connector)
+            ctx_rows, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
+            # The context-menu migrator needs ly_tables / ly_dlg_frm / ly_qry_sql — these are
+            # already in the screen_rows tuple at positions 0, 2, and 7 respectively (see the
+            # read_screens docstring for the layout).
+            tables_rows, _, dlg_frm_rows = screen_rows[0], screen_rows[1], screen_rows[2]
+            sql_rows = screen_rows[7]
+            row_menus = migrate_context_menus(
+                ctx_rows, ctx_val_rows, ctx_filter_rows,
+                tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
+                app_name=args.connector,
+            )
+            return migrate_screens(
+                *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
+                app_name=args.connector,
+            )
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -187,9 +204,14 @@ def _summary(data: dict, *, command: str) -> str:
             for f in (t.get("fields") or [])
             if f.get("visible_when")
         )
+        # Slice 6b: row_menu items migrated from v1's ly_ctxmenus + ly_ctx_val + ly_ctx_filters.
+        n_rowmenu_screens = sum(1 for s in screens.values() if s.get("row_menu"))
+        n_rowmenu_items = sum(len(s.get("row_menu") or []) for s in screens.values())
         return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "
                 f"{with_audit} with audit, {cross} cross-connector, {n_fields} dialog field(s), "
-                f"{n_binds} param-bind(s), {n_conds} conditional field(s) — put this at config/screens.toml")
+                f"{n_binds} param-bind(s), {n_conds} conditional field(s), "
+                f"{n_rowmenu_screens} with row-menu ({n_rowmenu_items} items) — "
+                f"put this at config/screens.toml")
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]

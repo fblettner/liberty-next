@@ -1125,6 +1125,236 @@ _SCREEN_CRUD_MAP: dict[str, str] = {
 }
 
 
+def migrate_context_menus(
+    ctx_rows: Iterable[Mapping[str, Any]],
+    val_rows: Iterable[Mapping[str, Any]] = (),
+    filter_rows: Iterable[Mapping[str, Any]] = (),
+    tables_rows: Iterable[Mapping[str, Any]] = (),
+    dlg_frm_rows: Iterable[Mapping[str, Any]] = (),
+    sql_rows: Iterable[Mapping[str, Any]] = (),
+    *,
+    app_name: str,
+) -> dict[int, list[dict[str, Any]]]:
+    """Build ``{ly_tables.tbl_id: [NavigateAction dict, …]}`` from v1's row-context-menu tables
+    (``ly_ctxmenus`` / ``ly_ctx_val`` / ``ly_ctx_filters``) — fed into :func:`migrate_screens` as
+    each screen's ``row_menu``.
+
+    v1 context menus are **shared** — one ``ctx_id`` can be referenced by several
+    ``ly_tables.tbl_ctx_id`` rows (e.g. libnsx1 reuses one menu across "Security - Roles" and
+    "Audit - Lookup"). v2's current ``Screen.row_menu`` is inline per-screen, so we **copy** the
+    resolved menu into each referencing screen — same actions land twice, no sharing on the wire
+    but identical behaviour. (Promoting to a shared ``[contextual_menus.<id>]`` pool is a later
+    follow-up if real config files start showing redundancy.)
+
+    Each ``ly_ctx_val`` row becomes a ``NavigateAction``:
+
+    * ``id``: ``slugify(val_label)`` (with a ``_2``/``_3`` dedupe inside the same menu)
+    * ``label``: ``val_label`` (translations in ``ly_ctx_val_l`` not migrated yet — v2's Action
+      union has no per-language label field; slice follow-up)
+    * ``to``: the v2 read query name of the target. Resolved by ``val_component``:
+
+      - ``FormsTable`` → ``val_component_id`` is a ``ly_tables.tbl_id``; its ``tbl_query_id``
+        + read CRUD verb (GET/SELECT/READ) → the migrated v2 name (same name
+        :func:`migrate_sql_queries` emits).
+      - ``FormsDialog`` → ``val_component_id`` is a ``ly_dlg_frm.frm_id``; its ``frm_query_id``
+        gives the underlying query name. v2 navigates to the destination screen's TableView
+        (the dialog opens via row-click once there — closest approximation we can give until
+        a dedicated "open dialog" action lands).
+
+    * ``connector``: the slug of that target query's ``query_pool`` — set explicitly so
+      cross-pool drills (e.g. NOMAJDE → jdedwards) keep working when the row menu is itself on
+      a screen of another connector.
+    * ``param_binds``: from ``ly_ctx_filters`` — ``flt_type='DD'`` → ``{param, source}``,
+      ``flt_type='VALUE'`` → ``{param, value}``. Same shape as :class:`ParamBind` everywhere
+      else in v2.
+
+    Items whose target can't be resolved (orphan ``val_component_id``, missing read CRUD in
+    ``ly_qry_sql``) are skipped with a logged warning rather than silently dropped — easier to
+    spot in the migration summary.
+
+    Args:
+        ctx_rows: rows from ``ly_ctxmenus``.
+        val_rows: rows from ``ly_ctx_val`` (menu items, in ``val_seq`` order).
+        filter_rows: rows from ``ly_ctx_filters`` (per-item ParamBinds).
+        tables_rows: rows from ``ly_tables`` — the table-id → query-id map for FormsTable items
+            *and* the ``tbl_ctx_id`` references that drive which tbl_id gets which row_menu.
+        dlg_frm_rows: rows from ``ly_dlg_frm`` — the frm-id → query-id map for FormsDialog items.
+        sql_rows: rows from ``ly_qry_sql`` joined with ``ly_query`` (query name + pool resolver).
+        app_name: only used to detect "same-pool" — a target pool equal to ``app_name`` lets us
+            *omit* the connector field from the emitted action (a no-op default), keeping the
+            migrated TOML terse.
+    """
+    # ── resolve query_id → (v2 read query name, pool slug) ──────────────────
+    # Mirrors migrate_screens' logic — but only the GET/SELECT/READ companion (a drill target
+    # is a *read*, never a write). The v2 name keeps the raw v1 ``query_crud`` verbatim, same
+    # as migrate_sql_queries (e.g. v1 SELECT → ``users_list_select``).
+    name_by_qid: dict[int, str] = {}
+    pool_by_qid: dict[int, str] = {}
+    label_by_qid: dict[int, str] = {}
+    for r in sql_rows:
+        qid = r.get("query_id")
+        if qid is None:
+            continue
+        try:
+            qid = int(qid)
+        except (TypeError, ValueError):
+            continue
+        label = (r.get("query_label") or "").strip()
+        if label:
+            label_by_qid.setdefault(qid, label)
+        raw_crud = str(r.get("query_crud") or "").upper()
+        our_crud = _SCREEN_CRUD_MAP.get(raw_crud)
+        if our_crud != "GET":
+            continue
+        name_crud = raw_crud or our_crud
+        v2_name = slugify(
+            f"{label_by_qid.get(qid) or f'q{qid}'}_{name_crud}",
+            fallback=f"q{qid}_{name_crud.lower()}",
+        )
+        name_by_qid.setdefault(qid, v2_name)
+        pool = (r.get("query_pool") or "").strip()
+        if pool:
+            pool_by_qid.setdefault(qid, slugify(pool, fallback=pool))
+
+    # ── tbl_id → query_id (for FormsTable items) ────────────────────────────
+    tbl_qid: dict[int, int] = {}
+    for r in tables_rows:
+        try:
+            tbl_id = int(r["tbl_id"])
+            qid = r.get("tbl_query_id")
+            if qid is not None:
+                tbl_qid[tbl_id] = int(qid)
+        except (KeyError, TypeError, ValueError):
+            continue
+    # ── frm_id → query_id (for FormsDialog items) ───────────────────────────
+    frm_qid: dict[int, int] = {}
+    for r in dlg_frm_rows:
+        try:
+            frm_id = int(r["frm_id"])
+            qid = r.get("frm_query_id")
+            if qid is not None:
+                frm_qid[frm_id] = int(qid)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    # ── group filters by (ctx_id, val_id) → list of bind dicts ──────────────
+    binds_by_val: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for r in filter_rows:
+        ctx_id_raw, val_id_raw = r.get("ctx_id"), r.get("val_id")
+        if ctx_id_raw is None or val_id_raw is None:
+            continue
+        target_p = (r.get("flt_target") or "").strip()
+        if not target_p:
+            continue
+        ftype = (r.get("flt_type") or "").strip().upper()
+        b: dict[str, Any] | None = None
+        if ftype == "VALUE":
+            v = r.get("flt_value")
+            if v is None or str(v).strip() == "":
+                continue
+            b = {"param": target_p, "value": str(v)}
+        elif ftype == "DD":
+            src = (r.get("flt_source") or "").strip()
+            if not src:
+                continue
+            b = {"param": target_p, "source": src}
+        # Other flt_type values (FIELD / etc.) — Phase 6 follow-up; skip for now.
+        if b is None:
+            continue
+        binds_by_val.setdefault((int(ctx_id_raw), int(val_id_raw)), []).append(b)
+
+    # ── per ctx_id, build the list of NavigateAction dicts ──────────────────
+    actions_by_ctx: dict[int, list[dict[str, Any]]] = {}
+    for v in val_rows:
+        ctx_id_raw, val_id_raw = v.get("ctx_id"), v.get("val_id")
+        if ctx_id_raw is None or val_id_raw is None:
+            continue
+        ctx_id, val_id = int(ctx_id_raw), int(val_id_raw)
+        comp = (v.get("val_component") or "").strip()
+        comp_id_raw = v.get("val_component_id")
+        if comp_id_raw is None:
+            continue
+        try:
+            comp_id = int(comp_id_raw)
+        except (TypeError, ValueError):
+            continue
+        # Resolve the target query
+        target_qid: int | None = None
+        if comp == "FormsTable":
+            target_qid = tbl_qid.get(comp_id)
+        elif comp == "FormsDialog":
+            target_qid = frm_qid.get(comp_id)
+        if target_qid is None:
+            _log.warning(
+                "migration: context menu %s/%s targets %s id %s — can't resolve to a v2 query, skipping",
+                ctx_id, val_id, comp or "(unknown)", comp_id,
+            )
+            continue
+        target_name = name_by_qid.get(target_qid)
+        if not target_name:
+            _log.warning(
+                "migration: context menu %s/%s target query_id %s has no GET/SELECT companion in ly_qry_sql, skipping",
+                ctx_id, val_id, target_qid,
+            )
+            continue
+        target_pool = pool_by_qid.get(target_qid)
+        label = (v.get("val_label") or "").strip()
+        # action id: slug of the label; dedupe within the same ctx menu
+        taken = {a["id"] for a in actions_by_ctx.get(ctx_id, [])}
+        action_id = _uniquify(slugify(label, fallback=f"val_{val_id}"), taken)
+        action: dict[str, Any] = {
+            "id": action_id,
+            "type": "navigate",
+            "to": target_name,
+        }
+        if label:
+            action["label"] = label
+        # Spell out `connector` only when it differs from the app — matches the migrate_screens
+        # convention (same-pool screens leave the field implicit).
+        if target_pool and target_pool != app_name:
+            action["connector"] = target_pool
+        binds = binds_by_val.get((ctx_id, val_id))
+        if binds:
+            action["param_binds"] = binds
+        actions_by_ctx.setdefault(ctx_id, []).append(action)
+
+    # ── per tbl_id (with tbl_ctx_id set), inline the resolved menu ──────────
+    # The lookup table contains *every* ctx_id even when no items resolved — emit an empty list
+    # rather than nothing, so the screen migration knows the screen had a menu (even if all
+    # items got dropped — the operator sees the empty row_menu in the builder and notices).
+    seen_ctx_ids: set[int] = set()
+    for c in ctx_rows:
+        cid = c.get("ctx_id")
+        if cid is not None:
+            try:
+                seen_ctx_ids.add(int(cid))
+            except (TypeError, ValueError):
+                pass
+    out: dict[int, list[dict[str, Any]]] = {}
+    for r in tables_rows:
+        try:
+            tbl_id = int(r["tbl_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        cid_raw = r.get("tbl_ctx_id")
+        if cid_raw is None:
+            continue
+        try:
+            cid = int(cid_raw)
+        except (TypeError, ValueError):
+            continue
+        if cid not in seen_ctx_ids:
+            _log.warning(
+                "migration: tbl_id %s references ctx_id %s but no matching ly_ctxmenus row — skipping",
+                tbl_id, cid,
+            )
+            continue
+        items = actions_by_ctx.get(cid, [])
+        if items:
+            out[tbl_id] = items
+    return out
+
+
 def migrate_screens(
     table_rows: Iterable[Mapping[str, Any]],
     dialog_rows: Iterable[Mapping[str, Any]] = (),
@@ -1135,6 +1365,7 @@ def migrate_screens(
     filter_rows: Iterable[Mapping[str, Any]] = (),
     sql_rows: Iterable[Mapping[str, Any]] = (),
     cdn_param_rows: Iterable[Mapping[str, Any]] = (),
+    row_menus: Mapping[int, list[dict[str, Any]]] | None = None,
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -1397,6 +1628,15 @@ def migrate_screens(
                     tabs.append(tab_out)
                 if tabs:
                     screen["dialog"] = {"tabs": tabs}
+
+        # Row context menu (slice 6 follow-up) — `tbl_ctx_id` points at a v1 ``ly_ctxmenus`` row
+        # whose items :func:`migrate_context_menus` has already resolved to NavigateActions keyed
+        # by ``tbl_id``. Inline the list onto the screen; an empty entry is left off so the
+        # builder shows "no row-menu actions yet".
+        if row_menus is not None and tbl_id in row_menus:
+            items = row_menus[tbl_id]
+            if items:
+                screen["row_menu"] = items
 
         screens[sid] = screen
 

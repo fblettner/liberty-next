@@ -893,13 +893,41 @@ schema.
   ``$def``, ``param_binds`` rendered inline. Each editor keeps its own expansion state.
 - `frontend/src/types/screens.ts` — ``ScreenDetail`` now carries ``actions`` and ``row_menu``
   (both ``Action[]``), so the runtime can read them off the catalog payload directly.
-- v1 had no schema-level row-menu attachment table — operators wire ``row_menu`` items via the
-  builder (a 4b-style "dump" migration of ``ly_actions`` could surface them as candidates, but
-  that's a follow-up if the user wants it).
+- v1's `ly_actions` (named workflows) **don't** auto-attach to screens (the `evt_component` /
+  `evt_component_id` columns are NULL across libnsx1 + libnjde) — those still need slice 4b's
+  hand-wiring "dump" subcommand. v1's **row context menus**, on the other hand, have a real
+  schema-level attachment: ``ly_tables.tbl_ctx_id`` → ``ly_ctxmenus`` → ``ly_ctx_val`` (items) →
+  ``ly_ctx_filters`` (per-item ParamBinds). Slice 6b (see below) migrates those automatically.
+
+**Phase 6 slice 6b (Row context menus — v1 migration) — DONE.**
+- `liberty/migrations/source.py` — new reader ``read_context_menus(engine)`` returns
+  ``(ly_ctxmenus, ly_ctx_val, ly_ctx_filters)`` rows. ``_SCREENS_TABLES`` now also reads
+  ``tbl_ctx_id`` so :func:`migrate_screens` can attach the resolved menus by ``tbl_id``.
+- `liberty/migrations/v1.py::migrate_context_menus` — collapses each ``ly_ctxmenus`` row into a
+  list of ``NavigateAction`` dicts, then maps it onto every referencing ``ly_tables`` row. Each
+  item's ``val_component`` decides how the target query resolves: ``FormsTable`` →
+  ``val_component_id`` is a ``ly_tables.tbl_id`` (→ ``tbl_query_id``); ``FormsDialog`` →
+  ``val_component_id`` is a ``ly_dlg_frm.frm_id`` (→ ``frm_query_id``). The migrated v2 name
+  matches what :func:`migrate_sql_queries` emits (raw v1 ``query_crud`` verbatim). ``connector``
+  is spelled out only when the target's pool differs from the app's (cross-pool drills like
+  NOMAJDE → jdedwards). ``ly_ctx_filters`` shape is identical to ``ly_dlg_filters``: ``flt_type=
+  'DD'`` → ``{param, source}``, ``flt_type='VALUE'`` → ``{param, value}``. v1 context menus are
+  *shared* (one ``ctx_id`` can be referenced by several tables) — v2's ``Screen.row_menu`` is
+  inline per-screen, so the resolved list is *copied* into each referencing screen. A future
+  ``[contextual_menus.<id>]`` shared pool is an option if redundancy becomes painful.
+- `liberty/migrations/v1.py::migrate_screens` — accepts a ``row_menus: Mapping[int, list[dict]]``
+  arg keyed by ``tbl_id``; inlines the matching items onto each screen's ``row_menu``.
+- `liberty/migrate_cli.py screen` subcommand — pulls + threads context menus through; the
+  ``# migrated:`` summary line gets ``N with row-menu (M items)`` at the end.
+- Real-data check: ``liberty-migrate screen`` on libnsx1 produces **15 screens with row-menu,
+  39 items total** (Security - Users / Roles / Matrix / SOD Summary / License - JD Edwards /
+  Oracle / etc.). libnjde has no context menus in v1; nothing emitted. Each migrated action
+  round-trips through the Pydantic ``NavigateAction`` shape; the runtime built in slice 6 picks
+  them up directly (right-click any row → menu of "Display Roles" / "Display Rights" / …).
 
 Phase 6 (Form/screen engine) is now feature-complete for the slices outlined in `docs/PLAN.md`.
 
-341 tests pass.
+343 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**

@@ -146,7 +146,7 @@ _DLG_FRM_META = text("SELECT frm_query_id, frm_label FROM ly_dlg_frm WHERE frm_q
 #     (flt_type=VALUE with flt_value), flt_target = the lookup query's :param name)
 _SCREENS_TABLES = text("""
     SELECT tbl_id, tbl_db_name, tbl_label, tbl_query_id, tbl_editable, tbl_uploadable,
-           tbl_audit, tbl_auto_load, tbl_frm_id
+           tbl_audit, tbl_auto_load, tbl_frm_id, tbl_ctx_id
     FROM ly_tables ORDER BY tbl_id
 """)
 _SCREENS_DIALOGS = text("SELECT dlg_id, dlg_label FROM ly_dialogs ORDER BY dlg_id")
@@ -171,6 +171,23 @@ _SCREENS_DLG_COL = text("""
 _SCREENS_DLG_FILTERS = text("""
     SELECT frm_id, col_id, flt_id, flt_type, flt_source, flt_target, flt_value
     FROM ly_dlg_filters ORDER BY frm_id, col_id, flt_id
+""")
+
+# Context-menu definitions (v1's row-click-anywhere "drill into another table" feature).
+# ly_ctxmenus is the named menu definition; ly_ctx_val carries its items (each item is one
+# action — either FormsTable or FormsDialog with a `val_component_id` referencing
+# ly_tables.tbl_id or ly_dlg_frm.frm_id); ly_ctx_filters carries the per-item parameter
+# bindings (same shape as ly_dlg_filters / ly_tbl_filters — DD = column source, VALUE = literal).
+# ly_ctx_val_l carries per-language translations of the item labels (not migrated yet — slice
+# follow-up since v2's Action union doesn't carry `l: dict[str, str]` on labels).
+_CTX_MENUS = text("SELECT ctx_id, ctx_description FROM ly_ctxmenus ORDER BY ctx_id")
+_CTX_VALS = text("""
+    SELECT ctx_id, val_id, val_seq, val_label, val_component, val_component_id
+    FROM ly_ctx_val ORDER BY ctx_id, COALESCE(val_seq, val_id)
+""")
+_CTX_FILTERS = text("""
+    SELECT ctx_id, val_id, flt_id, flt_type, flt_source, flt_target, flt_value
+    FROM ly_ctx_filters ORDER BY ctx_id, val_id, flt_id
 """)
 
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
@@ -335,6 +352,22 @@ async def read_screens(
         await _rows_or_empty(engine, _SCREENS_DLG_COL, what="ly_dlg_col"),
         await _rows_or_empty(engine, _SCREENS_DLG_FILTERS, what="ly_dlg_filters (field param binds)"),
         await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (screen query name resolution)"),
+    )
+
+
+async def read_context_menus(
+    engine: AsyncEngine,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_ctxmenus`` rows, ``ly_ctx_val`` rows, ``ly_ctx_filters`` rows) — v1's row
+    context-menu definitions. A v1 screen references one via ``ly_tables.tbl_ctx_id``; the menu
+    has a list of items (``ly_ctx_val``), each item can be FormsTable / FormsDialog targeting
+    a ``val_component_id`` (= ``ly_tables.tbl_id`` or ``ly_dlg_frm.frm_id``), with per-item
+    parameter bindings (``ly_ctx_filters`` — same shape as ``ly_dlg_filters``). Missing tables
+    → empty lists (old v1 schemas / non-libnsx1 deployments)."""
+    return (
+        await _rows_or_empty(engine, _CTX_MENUS, what="ly_ctxmenus"),
+        await _rows_or_empty(engine, _CTX_VALS, what="ly_ctx_val (context-menu items)"),
+        await _rows_or_empty(engine, _CTX_FILTERS, what="ly_ctx_filters (item param binds)"),
     )
 
 

@@ -18,6 +18,7 @@ from liberty.migrations import (
     migrate_dictionary,
     migrate_menus,
     migrate_pools,
+    migrate_context_menus,
     migrate_screens,
     migrate_sql_queries,
     migrate_key_columns,
@@ -998,6 +999,130 @@ def test_migrate_screens_visible_when_from_cdn() -> None:
     parse_screens(out)
 
 
+def test_migrate_context_menus_basic() -> None:
+    """v1's row context menus (``ly_ctxmenus`` + ``ly_ctx_val`` + ``ly_ctx_filters``) collapse
+    to a list of v2 ``NavigateAction``s per referencing screen — ``FormsTable`` items target a
+    table's read query, ``FormsDialog`` items target the screen behind a dialog form. ParamBinds
+    on each item land verbatim. Cross-pool targets carry an explicit ``connector``; same-pool
+    targets leave it implicit. An item whose target can't be resolved is skipped with a warning."""
+    ctx_rows = [
+        {"ctx_id": 1, "ctx_description": "Security - Users"},
+        {"ctx_id": 2, "ctx_description": "Cross-pool example"},
+    ]
+    val_rows = [
+        # ctx 1 — local FormsTable + FormsDialog drills
+        {"ctx_id": 1, "val_id": 1, "val_seq": 1, "val_label": "Display Roles",
+         "val_component": "FormsTable", "val_component_id": 100},
+        {"ctx_id": 1, "val_id": 2, "val_seq": 2, "val_label": "Display Properties",
+         "val_component": "FormsDialog", "val_component_id": 7},
+        # ctx 1 — points at a tbl_id that has no entry → skipped
+        {"ctx_id": 1, "val_id": 3, "val_seq": 3, "val_label": "Orphan",
+         "val_component": "FormsTable", "val_component_id": 999},
+        # ctx 2 — drill to a target on a different pool → emits `connector`
+        {"ctx_id": 2, "val_id": 1, "val_seq": 1, "val_label": "Drill JDE",
+         "val_component": "FormsTable", "val_component_id": 200},
+    ]
+    filter_rows = [
+        # ctx 1 / val 1 — two DD binds (column sources from the source row)
+        {"ctx_id": 1, "val_id": 1, "flt_id": 1, "flt_type": "DD",
+         "flt_source": "USR_APPS_ID", "flt_target": "RLU_APPS_ID", "flt_value": None},
+        {"ctx_id": 1, "val_id": 1, "flt_id": 2, "flt_type": "DD",
+         "flt_source": "USR_ID", "flt_target": "RLU_USER_ID", "flt_value": None},
+        # ctx 1 / val 2 — one VALUE literal
+        {"ctx_id": 1, "val_id": 2, "flt_id": 1, "flt_type": "VALUE",
+         "flt_source": None, "flt_target": "STATUS", "flt_value": "A"},
+        # ctx 1 / val 2 — missing flt_target → dropped
+        {"ctx_id": 1, "val_id": 2, "flt_id": 2, "flt_type": "VALUE",
+         "flt_source": None, "flt_target": None, "flt_value": "ignored"},
+    ]
+    tables_rows = [
+        # screen 5 references ctx 1 (Security - Users) — inline copy lands here on save
+        {"tbl_id": 5, "tbl_db_name": "security_users", "tbl_query_id": 10, "tbl_ctx_id": 1},
+        # the target table for ctx 1 / val 1 (FormsTable, val_component_id = 100) — query 20
+        {"tbl_id": 100, "tbl_db_name": "security_assignments", "tbl_query_id": 20},
+        # screen 6 references ctx 2 (cross-pool drill)
+        {"tbl_id": 6, "tbl_db_name": "settings", "tbl_query_id": 30, "tbl_ctx_id": 2},
+        # the target table for ctx 2 / val 1 — query 40 (lives on the `jdedwards` pool)
+        {"tbl_id": 200, "tbl_db_name": "f0005", "tbl_query_id": 40},
+        # screen 7 — no tbl_ctx_id → no row_menu in the result
+        {"tbl_id": 7, "tbl_db_name": "rights", "tbl_query_id": 50},
+    ]
+    dlg_frm_rows = [
+        # ctx 1 / val 2 (FormsDialog, val_component_id = 7) — frm 7 points at query 21
+        {"frm_id": 7, "frm_query_id": 21},
+    ]
+    sql_rows = [
+        {"query_id": 10, "query_label": "Users", "query_crud": "GET", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "SELECT * FROM users", "query_orderby": None},
+        {"query_id": 20, "query_label": "Assignments", "query_crud": "GET", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "SELECT * FROM assignments", "query_orderby": None},
+        {"query_id": 21, "query_label": "Users Props", "query_crud": "GET", "query_pool": "nomasx1",
+         "query_dbtype": "postgres", "query_sqlquery": "SELECT * FROM usr_props", "query_orderby": None},
+        # query 40 lives on a different pool — `connector` will be emitted on the action
+        {"query_id": 40, "query_label": "F0005", "query_crud": "GET", "query_pool": "jdedwards",
+         "query_dbtype": "oracle", "query_sqlquery": "SELECT * FROM f0005", "query_orderby": None},
+    ]
+    out = migrate_context_menus(
+        ctx_rows, val_rows, filter_rows,
+        tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
+        app_name="nomasx1",
+    )
+    # Two screens have a tbl_ctx_id → both get an inline row_menu copy. The orphan val_id 3 on
+    # ctx 1 is skipped (val_component_id 999 doesn't resolve to any ly_tables row).
+    assert set(out) == {5, 6}
+    sec_users = out[5]
+    assert [a["id"] for a in sec_users] == ["display_roles", "display_properties"]
+    # First item: FormsTable → screen 100 → query 20 → `assignments_get`; binds round-trip.
+    assert sec_users[0] == {
+        "id": "display_roles",
+        "type": "navigate",
+        "to": "assignments_get",
+        "label": "Display Roles",
+        "param_binds": [
+            {"param": "RLU_APPS_ID", "source": "USR_APPS_ID"},
+            {"param": "RLU_USER_ID", "source": "USR_ID"},
+        ],
+    }
+    # Second item: FormsDialog → frm 7 → query 21 → `users_props_get`; VALUE bind round-trips.
+    assert sec_users[1] == {
+        "id": "display_properties",
+        "type": "navigate",
+        "to": "users_props_get",
+        "label": "Display Properties",
+        "param_binds": [{"param": "STATUS", "value": "A"}],
+    }
+    # Screen 6 — cross-pool drill: target lives on `jdedwards`, the app is `nomasx1`, so
+    # `connector` is emitted explicitly. (Same-pool targets leave it implicit.)
+    drill = out[6]
+    assert drill == [
+        {"id": "drill_jde", "type": "navigate", "to": "f0005_get",
+         "connector": "jdedwards", "label": "Drill JDE"},
+    ]
+
+
+def test_migrate_screens_with_row_menus() -> None:
+    """`migrate_screens` accepts a pre-computed ``row_menus`` map and inlines the matching
+    actions onto each screen's ``row_menu`` field, keyed by ``tbl_id``."""
+    table_rows = [
+        {"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users"},
+        {"tbl_id": 2, "tbl_db_name": "no_menu", "tbl_query_id": 10, "tbl_label": "Plain"},
+    ]
+    row_menus = {
+        1: [
+            {"id": "act_a", "type": "navigate", "to": "things_get", "label": "Things"},
+        ],
+        # 2: nothing — the screen for tbl_id 2 ends up without row_menu, validating the per-tbl_id keying
+    }
+    out = migrate_screens(table_rows, sql_rows=_SCR_SQL, row_menus=row_menus, app_name="nomasx1")
+    screens = out["screens"]["nomasx1"]
+    assert screens["users"]["row_menu"] == [
+        {"id": "act_a", "type": "navigate", "to": "things_get", "label": "Things"},
+    ]
+    assert "row_menu" not in screens["no_menu"]
+    # Round-trips through the screens schema (NavigateAction validates).
+    parse_screens(out)
+
+
 # --------------------------------------------------------------------------- #
 # DB readers (against a minimal v1 schema in SQLite)
 # --------------------------------------------------------------------------- #
@@ -1012,7 +1137,7 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_enum_val (enum_id INTEGER, val_enum TEXT, val_label TEXT)",
     "CREATE TABLE ly_enum_val_l (enum_id INTEGER, val_enum TEXT, lng_id TEXT, lng_label TEXT)",
     "CREATE TABLE ly_lookup (lkp_id INTEGER PRIMARY KEY, lkp_description TEXT, lkp_query_id INTEGER, lkp_dd_id TEXT, lkp_dd_label TEXT, lkp_dd_group TEXT)",
-    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_db_name TEXT, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT, tbl_editable TEXT, tbl_uploadable TEXT, tbl_audit TEXT, tbl_frm_id INTEGER)",
+    "CREATE TABLE ly_tables (tbl_id INTEGER PRIMARY KEY, tbl_db_name TEXT, tbl_query_id INTEGER, tbl_label TEXT, tbl_auto_load TEXT, tbl_editable TEXT, tbl_uploadable TEXT, tbl_audit TEXT, tbl_frm_id INTEGER, tbl_ctx_id INTEGER)",
     "CREATE TABLE ly_tbl_col (tbl_id INTEGER, col_id INTEGER, col_seq INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_filter TEXT, col_key TEXT, col_cdn_id INTEGER)",
     "CREATE TABLE ly_dialogs (dlg_id INTEGER PRIMARY KEY, dlg_label TEXT)",
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
@@ -1548,6 +1673,9 @@ def test_cli_screen(tmp_path) -> None:
     # The CLI also reports conditional field counts (slice 3) — the seeded USR_EXTRA field's
     # col_cdn_id pulled visible_when through.
     assert "1 conditional field(s)" in txt
+    # Slice 6b — the seed has no ly_ctxmenus / ly_ctx_val tables (an older v1 schema is allowed),
+    # so the row-menu metric reads zero. Asserts the new line is in the summary regardless.
+    assert "0 with row-menu" in txt
     # Parses through both tomllib (comments are fine) and the screens schema.
     sf = parse_screens(tomllib.loads(txt))
     screens = sf.screens["nomasx1"]
