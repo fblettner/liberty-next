@@ -155,6 +155,24 @@ const en = {
     editNoUpdate: 'This query has no update companion — edited rows can’t be saved.',
     editNoInsert: 'This query has no insert companion — new rows can’t be saved.',
     editNoDelete: 'This query has no delete companion — deleted rows can’t be saved.',
+    viewToggle: 'View',
+    viewTable: 'Table',
+    viewChart: 'Chart',
+  },
+  chart: {
+    type: { bar: 'Bar', line: 'Line', area: 'Area', pie: 'Pie' },
+    agg: { sum: 'Sum', avg: 'Average', count: 'Count', min: 'Min', max: 'Max', none: 'None (per row)' },
+    spec: {
+      type: 'Chart',
+      x: 'X axis',
+      y: 'Y axis',
+      aggregation: 'Aggregate',
+      pick: 'Pick a column…',
+    },
+    empty: {
+      pickCols: 'Pick an X column and a Y column to chart.',
+      noData: 'No data to chart.',
+    },
   },
   dialog: {
     editTitle: 'Edit · {{title}}',

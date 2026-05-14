@@ -157,6 +157,24 @@ const fr: Resources = {
     editNoUpdate: 'Cette requête n’a pas de compagnon de mise à jour — les lignes modifiées ne peuvent pas être enregistrées.',
     editNoInsert: 'Cette requête n’a pas de compagnon d’insertion — les nouvelles lignes ne peuvent pas être enregistrées.',
     editNoDelete: 'Cette requête n’a pas de compagnon de suppression — les lignes supprimées ne peuvent pas être enregistrées.',
+    viewToggle: 'Affichage',
+    viewTable: 'Tableau',
+    viewChart: 'Graphique',
+  },
+  chart: {
+    type: { bar: 'Barres', line: 'Courbe', area: 'Aire', pie: 'Camembert' },
+    agg: { sum: 'Somme', avg: 'Moyenne', count: 'Compte', min: 'Min', max: 'Max', none: 'Aucune (par ligne)' },
+    spec: {
+      type: 'Graphique',
+      x: 'Axe X',
+      y: 'Axe Y',
+      aggregation: 'Agréger',
+      pick: 'Choisir une colonne…',
+    },
+    empty: {
+      pickCols: 'Choisissez une colonne X et une colonne Y pour tracer.',
+      noData: 'Aucune donnée à tracer.',
+    },
   },
   dialog: {
     editTitle: 'Modifier · {{title}}',

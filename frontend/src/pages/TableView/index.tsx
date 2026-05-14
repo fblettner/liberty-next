@@ -2,11 +2,11 @@
 // params/bind_params, then SELECT → a sortable/paged grid (ResultTable) or a
 // writable statement → confirm + affected-rows banner. Rendered inside a tab
 // (see components/TabHost) — `connector`/`query` come in as props, not route params.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { Table as TableIcon, Play } from 'lucide-react'
+import { Table as TableIcon, Play, BarChart3 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
 import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
@@ -17,6 +17,9 @@ import type { ScreenDetail } from '../../types/screens'
 import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
 import { FilterPanel, type ServerFilter } from './FilterPanel'
+// ChartView pulls in Recharts (~75 kB gz) — split into its own chunk so the table view's
+// initial load stays tight. The chunk only fetches when the operator toggles to Chart mode.
+const ChartView = lazy(() => import('./ChartView').then((m) => ({ default: m.ChartView })))
 
 // Run / Max-rows controls — sized to sit inline with the grid's 28px-tall toolbar buttons
 // (Run goes just right of the search box, Max-rows at the far right before the Filters button).
@@ -39,6 +42,20 @@ const MaxRowsBox = styled.label`
     &::-webkit-outer-spin-button, &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   }
   &:focus-within { border-color: ${colors.blue.border}; }
+`
+// A two-state segmented control: [Table | Chart]. Sits at the right of the Meta line above the
+// data area; the active half is highlighted. Always paired with a SELECT result — meaningless
+// for writes, so it's hidden in those cases by render condition (not by disabling).
+const ViewToggle = styled.div`
+  display: inline-flex; height: 24px; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
+  overflow: hidden; flex-shrink: 0;
+  & button {
+    display: inline-flex; align-items: center; gap: 4px; padding: 0 9px; border: none;
+    background: transparent; color: ${colors.text.muted}; cursor: pointer; font-size: ${fontSize.micro};
+    & + button { border-left: 1px solid ${colors.border}; }
+    &:hover { color: ${colors.text.primary}; }
+    &[aria-pressed='true'] { color: ${colors.blue.main}; background: ${colors.blue.bg}; }
+  }
 `
 
 export default function TableView({ connector, query }: { connector: string; query: string }) {
@@ -63,6 +80,10 @@ export default function TableView({ connector, query }: { connector: string; que
   // query). Carries the dialog body the ScreenDialog renders; null means no screen / no dialog,
   // and ResultTable falls back to its inline grid editor.
   const [screen, setScreen] = useState<ScreenDetail | null>(null)
+  // Table / Chart toggle (Phase 8 slice 1). The Chart side is lazy-imported (Recharts) so the
+  // chunk only loads when the operator toggles it. The toggle resets to 'table' each remount —
+  // chart-mode-as-default would surprise an operator opening a fresh tab.
+  const [view, setView] = useState<'table' | 'chart'>('table')
 
   useEffect(() => {
     setMeta(null)
@@ -285,15 +306,33 @@ export default function TableView({ connector, query }: { connector: string; que
           // row height), the outer Stack overflows PageContent, and the page scrolls instead
           // of the table.
           <Stack gap={10} style={{ flex: 1, minHeight: 0 }}>
-            <Meta>
-              {t(result.row_count === 1 ? 'table.rows_one' : 'table.rows_other', { count: result.row_count })} ·{' '}
-              {result.duration_ms.toFixed(1)} {t('common.ms')}
-              {result.truncated && (
-                <span style={{ color: colors.red.main }}> · {t('table.truncatedTo', { n: result.rows.length })}</span>
+            <Row align="center" style={{ justifyContent: 'space-between' }}>
+              <Meta style={{ flex: 1 }}>
+                {t(result.row_count === 1 ? 'table.rows_one' : 'table.rows_other', { count: result.row_count })} ·{' '}
+                {result.duration_ms.toFixed(1)} {t('common.ms')}
+                {result.truncated && (
+                  <span style={{ color: colors.red.main }}> · {t('table.truncatedTo', { n: result.rows.length })}</span>
+                )}
+              </Meta>
+              {result.columns.length > 0 && (
+                <ViewToggle role="group" aria-label={t('table.viewToggle')}>
+                  <button type="button" aria-pressed={view === 'table'} onClick={() => setView('table')} title={t('table.viewTable')}>
+                    <TableIcon size={12} /> {t('table.viewTable')}
+                  </button>
+                  <button type="button" aria-pressed={view === 'chart'} onClick={() => setView('chart')} title={t('table.viewChart')}>
+                    <BarChart3 size={12} /> {t('table.viewChart')}
+                  </button>
+                </ViewToggle>
               )}
-            </Meta>
+            </Row>
             {result.columns.length === 0 ? (
               <Meta>{t('table.noColumns')}</Meta>
+            ) : view === 'chart' ? (
+              // Suspense + lazy: the Recharts chunk only fetches when the operator first
+              // toggles to Chart mode. The fallback shows the existing centred spinner.
+              <Suspense fallback={<Centered />}>
+                <ChartView result={result} connector={connector} query={query} />
+              </Suspense>
             ) : (
               <ResultTable
                 key={result.columns.map((c) => c.name).join('|')}
