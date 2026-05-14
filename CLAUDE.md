@@ -770,17 +770,52 @@ linked tables into one flat result, the dialog renders tabs (General / JDE / LDA
 by the joined columns, and ``on_save`` then fans out to the write queries. No special
 ``compound_dialog`` shape — same ParamBind mechanism as lookups, actions, and row menus.
 
-Slices 3-6 still to do (per-field conditions, actions/events, AUD audit, row menus).
+**Phase 6 slice 3 (Per-field conditions) — DONE.**
+- `liberty/screens/config.py` — new ``FieldCondition`` shape (``{field, value: str | list[str]}``)
+  mirroring :class:`liberty.connectors.config.VisibleWhen` but for the form context: ``field``
+  names another field on the *same dialog* (not a server filter), and the predicate holds when
+  that field's current form value equals ``value`` (or is in ``value`` when a list). ``ScreenField``
+  grows three lists — ``visible_when`` / ``required_when`` / ``disabled_when`` — each AND-ed;
+  when a list is non-empty *and* every predicate holds, the rule fires (the field shows / is
+  required / is locked); the static flags act as the fallback when the corresponding ``*_when``
+  list is empty. (``default_when`` is form-rule territory — SEQUENCE / SYSDATE / LOGIN / CURRENT_DATE
+  derived defaults — and waits for a later slice.)
+- `liberty/migrations/v1.py` — the cdn-graph parser (``_cdn_to_field_groups`` / ``_cdn_resolve``)
+  is factored out and shared between :func:`migrate_column_visibility` (grid columns) and
+  :func:`migrate_screens` (dialog fields). ``migrate_screens(*, cdn_param_rows=…)`` resolves each
+  field's ``col_cdn_id`` to ``visible_when`` against a *per-frm* dd→target map (predicate's
+  ``cdn_dd_id`` resolves to the col_target of another field on the same form). Unsupported
+  operators (NOT_EQUAL / LIKE / …) leave the field unconstrained (always-visible) with a logged
+  warning — same conservative bias as the grid migration. ``liberty/migrations/source.py`` now
+  reads ``col_cdn_id`` on ``ly_dlg_col``. The CLI summary reports an extra ``N conditional
+  field(s)`` count.
+- ``required_when`` / ``disabled_when`` have no v1 source migrated yet — operators set them in
+  the Settings → Screens editor; the runtime evaluates them.
+- Frontend: ``ScreenDialog`` evaluates the three lists at render time against ``formValues`` —
+  fields hide / require / lock as the user types in their gating fields; a field hidden by
+  ``visible_when`` is also dropped from the submit body (so an irrelevant column keeps its
+  current DB value — same v1 behaviour). The condition evaluator matches field names
+  case-insensitively (Postgres lowercases identifiers, v1's migration emits uppercase).
+- ``ScreensBuilder``'s ``ScreenEditor`` now has a ``conditionsSchema`` SchemaForm in the
+  expanded field row alongside the existing props + binds editors; the collapsed row gets a
+  "conditional" orange badge when any of the three lists is non-empty.
+Real-data smoke: 0 conditional fields on nomasx1 (none of the migrated screens used
+``col_cdn_id``); **15** on nomajde — notably JDE F00950 (Security Workbench) where field
+visibility depends on SEC_TYPE / FSSETY pickers. Migrates cleanly; round-trips through the
+schema.
 
-335 tests pass.
+Slices 4-6 still to do (actions/events, AUD audit, row menus).
+
+337 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
 the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
 contextual menus — slice 1 (Screen + ParamBind + migration) **done**, slice 2 (dialog runtime —
-row click → modal form, lookup param-binds, save → update/insert) **done**; the
-`visible_when`/`filter_from` work is its table-side first slice; design it against real migrated
-screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
+row click → modal form, lookup param-binds, save → update/insert) **done**, slice 3
+(per-field `visible_when`/`required_when`/`disabled_when`, migrated from v1's `ly_cdn_params`)
+**done**; the `visible_when`/`filter_from` work is its table-side first slice; design it against
+real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
 the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed`

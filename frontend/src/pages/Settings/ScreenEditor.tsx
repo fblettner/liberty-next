@@ -89,6 +89,7 @@ const PlaceholderCard = styled.div`
 const TAB_PROPS_KEYS = ['label', 'l', 'cols', 'hide_on_add', 'hide_on_edit'] as const
 const FIELD_PROPS_KEYS = ['dd', 'label', 'hidden', 'disabled', 'required', 'colspan', 'default'] as const
 const FIELD_BINDS_KEY = 'lookup_param_binds'
+const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
 
 function pickFromDefs(defs: Record<string, JsonSchema>, name: string): JsonSchema {
   // Return the named $def as a self-contained schema (the parent's $defs ride along so nested
@@ -124,6 +125,14 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   const bindsSchema = useMemo<JsonSchema>(() => {
     const sf = pickFromDefs(defs, 'ScreenField')
     const out = pickSchemaProperties(sf, [FIELD_BINDS_KEY] as unknown as string[])
+    return { ...out, $defs: defs }
+  }, [defs])
+  // Field's per-field conditions (visible_when / required_when / disabled_when). Same trick as
+  // bindsSchema — the three list[FieldCondition] props render as inline editors with `$defs`
+  // resolving FieldCondition. Operators see all three side-by-side under the expanded field row.
+  const conditionsSchema = useMemo<JsonSchema>(() => {
+    const sf = pickFromDefs(defs, 'ScreenField')
+    const out = pickSchemaProperties(sf, FIELD_CONDITION_KEYS as unknown as string[])
     return { ...out, $defs: defs }
   }, [defs])
 
@@ -337,6 +346,11 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
                             {Array.isArray(f.lookup_param_binds) && (f.lookup_param_binds as unknown[]).length > 0 && (
                               <Badge>{t('settings.screens.field.binds', { count: (f.lookup_param_binds as unknown[]).length })}</Badge>
                             )}
+                            {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
+                              || (Array.isArray(f.required_when) && (f.required_when as unknown[]).length > 0)
+                              || (Array.isArray(f.disabled_when) && (f.disabled_when as unknown[]).length > 0)
+                              ? <Badge $tone="orange">{t('settings.screens.field.conditional')}</Badge>
+                              : null}
                           </span>
                         </FieldHeader>
                         {open && (
@@ -360,6 +374,18 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
                                   // SchemaForm wraps the picked subset back into an object; pull
                                   // out just the binds key so we don't accidentally write `name`/etc.
                                   updateField(i, { [FIELD_BINDS_KEY]: v[FIELD_BINDS_KEY] })
+                                }}
+                              />
+                              <SchemaForm
+                                schema={conditionsSchema}
+                                defs={defs}
+                                value={f}
+                                onChange={(v) => {
+                                  // Same trick as bindsSchema — pick only the three condition keys
+                                  // so static name/dd/etc. on the field aren't mass-overwritten.
+                                  const patch: Row = {}
+                                  for (const k of FIELD_CONDITION_KEYS) patch[k] = v[k]
+                                  updateField(i, patch)
                                 }}
                               />
                               <Row gap={8}>

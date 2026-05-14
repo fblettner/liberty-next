@@ -162,7 +162,7 @@ _SCREENS_DLG_TAB_L = text("""
 """)
 _SCREENS_DLG_COL = text("""
     SELECT frm_id, col_id, tab_id, col_seq, col_colspan, col_dd_id, col_label, col_target,
-           col_default, col_visible, col_disabled, col_required
+           col_default, col_visible, col_disabled, col_required, col_cdn_id
     FROM ly_dlg_col ORDER BY frm_id, COALESCE(col_seq, col_id)
 """)
 _SCREENS_DLG_FILTERS = text("""

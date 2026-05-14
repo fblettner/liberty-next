@@ -19,7 +19,7 @@ import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Field, Input, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Row, SearchSelect, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
-import type { ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { FieldCondition, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -73,6 +73,26 @@ function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt
 function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
 function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
 
+// Evaluate a list of FieldCondition predicates against the dialog's current form state. The list
+// AND-s — every predicate must hold. An empty list returns `false` (= no condition asserted; the
+// caller falls back to the static flag). A predicate's `field` is matched case-insensitively to
+// match how the rest of the dialog reads form values (Postgres lowercases identifiers, v1's
+// migration emits uppercase). `value` is either a literal (string match) or a list (membership).
+function evalConditions(rules: FieldCondition[] | undefined, formValues: Row): boolean {
+  if (!rules || rules.length === 0) return false
+  for (const r of rules) {
+    const key = Object.keys(formValues).find((k) => k.toLowerCase() === r.field.toLowerCase())
+    const live = key != null ? formValues[key] : undefined
+    const liveStr = live == null ? '' : String(live)
+    if (Array.isArray(r.value)) {
+      if (!r.value.includes(liveStr)) return false
+    } else if (liveStr !== r.value) {
+      return false
+    }
+  }
+  return true
+}
+
 // Resolve the field's `lookup_param_binds` against the current form state. `value` binds are
 // literals; `source` binds read the live value of another field on the same form (column name,
 // case-insensitive). Empty / missing values are dropped so the lookup falls back to "no narrowing"
@@ -93,22 +113,22 @@ function resolveBinds(field: ScreenField, formValues: Row): Record<string, strin
 }
 
 // One field row — a switch over the column's resolved rule (when present) + format/type to pick
-// the right widget. `disabled` from the field config locks the widget; `required` forwards HTML5
-// validation. Values are kept in the parent's `formValues` map by column name (the read result's
-// case — which is what the row already uses).
+// the right widget. `disabled` / `required` come pre-computed from the parent (they fold both the
+// static flag and the per-condition rule). Values are kept in the parent's `formValues` map by
+// column name (the read result's case — which is what the row already uses).
 function FieldRow({
-  field, column, formValues, onChange, disabled,
+  field, column, formValues, onChange, disabled, required,
 }: {
   field: ScreenField
   column: Column | null
   formValues: Row
   onChange: (name: string, v: unknown) => void
   disabled: boolean
+  required: boolean
 }) {
   const { t } = useTranslation()
   const value = formValues[field.name]
   const textValue = value === null || value === undefined ? '' : String(value)
-  const required = !!field.required
   const label = field.label ?? column?.label ?? field.name
 
   // For a LOOKUP field we need a live lookup spec — the *static* params from the rule plus the
@@ -299,15 +319,15 @@ export function ScreenDialog({
       setError(t(mode === 'edit' ? 'table.editNoUpdate' : 'table.editNoInsert'))
       return
     }
-    // Collect every value that's on a visible field on a non-hidden tab. Password fields with
-    // empty values are dropped — the user didn't change the password, so we must not overwrite
-    // the stored hash / ENC: ciphertext with NULL or "". On 'edit', the absence of the password
-    // key in `sent` means `savedRow`'s original (already stored, untouched) wins; on 'add', the
-    // INSERT runs without a password (the DB column may be nullable or get a default).
+    // Collect every value that's on a *currently visible* field on a non-hidden tab. Fields
+    // hidden by `visible_when` (or `hidden = true`) are dropped from the body so a now-irrelevant
+    // column keeps its current DB value (same behaviour as v1 — a hidden field on save isn't
+    // written). Password fields with empty values are also dropped so we don't overwrite the
+    // stored hash / ENC: ciphertext with NULL or "".
     const sent: Row = {}
     for (const tab of tabs) {
       for (const f of tab.fields ?? []) {
-        if (f.hidden) continue
+        if (!fieldStateOf(f).visible) continue
         if (!(f.name in formValues)) continue
         const v = formValues[f.name]
         const col = colByName.get(f.name.toLowerCase()) ?? null
@@ -345,11 +365,29 @@ export function ScreenDialog({
     }
   }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t, colByName])
 
+  // Resolve a field's effective hidden / required / disabled per render — `*_when` lists, when
+  // non-empty, override the static flags. The eval runs against the live `formValues`, so as the
+  // user types in field A, dependent fields B/C re-render with new visibility / requirement.
+  const fieldStateOf = (f: ScreenField) => {
+    const visibleByRule = (f.visible_when?.length ?? 0) > 0
+      ? evalConditions(f.visible_when, formValues)
+      : !f.hidden
+    const requiredByRule = (f.required_when?.length ?? 0) > 0
+      ? evalConditions(f.required_when, formValues)
+      : !!f.required
+    const disabledByRule = (f.disabled_when?.length ?? 0) > 0
+      ? evalConditions(f.disabled_when, formValues)
+      : !!f.disabled
+    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule }
+  }
+
   if (!open || !dlg) return null
   const currentTab = tabs[Math.min(tabIdx, tabs.length - 1)] ?? null
   const title = dlg.title || screen.label || screen.id
   const gridCols = Math.max(1, currentTab?.cols ?? 2)
-  const visibleFields = (currentTab?.fields ?? []).filter((f) => !f.hidden)
+  // Drop fields that don't pass their visibility rule. Their values stay in form state so a
+  // condition flipping back later restores them — but on submit, the same eval drops them again.
+  const visibleFields = (currentTab?.fields ?? []).filter((f) => fieldStateOf(f).visible)
 
   return (
     <Overlay onClick={onClose}>
@@ -373,16 +411,20 @@ export function ScreenDialog({
               )}
               {currentTab && (
                 <FieldGrid $cols={gridCols}>
-                  {visibleFields.map((f) => (
-                    <FieldRow
-                      key={f.name}
-                      field={f}
-                      column={colByName.get(f.name.toLowerCase()) ?? null}
-                      formValues={formValues}
-                      onChange={onFieldChange}
-                      disabled={!!f.disabled}
-                    />
-                  ))}
+                  {visibleFields.map((f) => {
+                    const st = fieldStateOf(f)
+                    return (
+                      <FieldRow
+                        key={f.name}
+                        field={f}
+                        column={colByName.get(f.name.toLowerCase()) ?? null}
+                        formValues={formValues}
+                        onChange={onFieldChange}
+                        disabled={st.disabled}
+                        required={st.required}
+                      />
+                    )
+                  })}
                   {visibleFields.length === 0 && (
                     <CellWrap $span={gridCols}>
                       <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>

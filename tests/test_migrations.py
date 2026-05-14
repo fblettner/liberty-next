@@ -929,6 +929,58 @@ def test_migrate_screens_no_dialog_when_frm_unresolved() -> None:
     assert "dialog" not in out["screens"]["nomasx1"]["users"]
 
 
+def test_migrate_screens_visible_when_from_cdn() -> None:
+    """A field with ``col_cdn_id`` picks up its conditional-visibility predicates from
+    ``ly_cdn_params`` — same shape as :func:`migrate_column_visibility`, but the dd→target
+    resolver runs *per frm* (a predicate's `cdn_dd_id` resolves to another field on the same
+    dialog). Unsupported operators (NOT_EQUAL / LIKE / …) leave the field unconstrained
+    (always-visible) — never accidentally hidden."""
+    table_rows = [{"tbl_id": 1, "tbl_db_name": "items", "tbl_query_id": 10, "tbl_label": "Items", "tbl_frm_id": 7}]
+    frm_rows = [{"frm_id": 7, "dlg_id": 1, "frm_query_id": 10, "frm_label": "Item"}]
+    tab_rows = [{"frm_id": 7, "tab_id": 1, "tab_seq": 1, "tab_label": "General", "tab_cols": None, "tab_disable_add": "N", "tab_disable_edit": "N"}]
+    col_rows = [
+        # Predicate source — a "type" picker that gates two other fields. Its own dd is `KIND`.
+        {"frm_id": 7, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_dd_id": "KIND", "col_target": "ITM_KIND", "col_visible": "Y"},
+        # Conditional field 1 — col_cdn_id 100; predicate KIND=PRODUCT keeps it visible.
+        {"frm_id": 7, "col_id": 2, "tab_id": 1, "col_seq": 2, "col_dd_id": "SKU", "col_target": "ITM_SKU",
+         "col_visible": "Y", "col_cdn_id": 100},
+        # Conditional field 2 — col_cdn_id 101; AND-ed predicates (KIND in [PRODUCT, SERVICE] AND TIER=PRO).
+        {"frm_id": 7, "col_id": 3, "tab_id": 1, "col_seq": 3, "col_dd_id": "PRICE", "col_target": "ITM_PRICE",
+         "col_visible": "Y", "col_cdn_id": 101},
+        # Field with cdn pointing at an unsupported operator → should be left unconstrained.
+        {"frm_id": 7, "col_id": 4, "tab_id": 1, "col_seq": 4, "col_dd_id": "SLA", "col_target": "ITM_SLA",
+         "col_visible": "Y", "col_cdn_id": 102},
+        # Helper field referenced by the cdn (KIND→ITM_KIND already; TIER→ITM_TIER here).
+        {"frm_id": 7, "col_id": 5, "tab_id": 1, "col_seq": 5, "col_dd_id": "TIER", "col_target": "ITM_TIER", "col_visible": "Y"},
+    ]
+    cdn_params = [
+        {"cdn_id": 100, "cdn_seq": 1, "cdn_dd_id": "KIND", "cdn_operator": "EQUAL", "cdn_value": "PRODUCT"},
+        {"cdn_id": 101, "cdn_seq": 1, "cdn_dd_id": "KIND", "cdn_operator": "EQUAL", "cdn_value": "PRODUCT"},
+        {"cdn_id": 101, "cdn_seq": 2, "cdn_dd_id": "KIND", "cdn_operator": "EQUAL", "cdn_value": "SERVICE"},
+        {"cdn_id": 101, "cdn_seq": 3, "cdn_dd_id": "TIER", "cdn_operator": "EQUAL", "cdn_value": "PRO"},
+        {"cdn_id": 102, "cdn_seq": 1, "cdn_dd_id": "KIND", "cdn_operator": "NOT_EQUAL", "cdn_value": "X"},  # unsupported
+    ]
+    out = migrate_screens(
+        table_rows, frm_rows=frm_rows, tab_rows=tab_rows, col_rows=col_rows,
+        cdn_param_rows=cdn_params, sql_rows=_SCR_SQL, app_name="nomasx1",
+    )
+    fields = {f["name"]: f for f in out["screens"]["nomasx1"]["items"]["dialog"]["tabs"][0]["fields"]}
+    # KIND has no cdn → no visible_when key emitted
+    assert "visible_when" not in fields["ITM_KIND"]
+    # cdn 100: one predicate, one allowed value → list with one rule, value sorted
+    assert fields["ITM_SKU"]["visible_when"] == [{"field": "ITM_KIND", "value": ["PRODUCT"]}]
+    # cdn 101: two AND-ed predicates — KIND in {PRODUCT, SERVICE} (sorted) and TIER == PRO,
+    # field names resolved to the on-frm col_targets.
+    assert fields["ITM_PRICE"]["visible_when"] == [
+        {"field": "ITM_KIND", "value": ["PRODUCT", "SERVICE"]},
+        {"field": "ITM_TIER", "value": ["PRO"]},
+    ]
+    # cdn 102: unsupported operator → left unconstrained (no visible_when emitted)
+    assert "visible_when" not in fields["ITM_SLA"]
+    # Round-trip through the screens schema (FieldCondition validates).
+    parse_screens(out)
+
+
 # --------------------------------------------------------------------------- #
 # DB readers (against a minimal v1 schema in SQLite)
 # --------------------------------------------------------------------------- #
@@ -1075,9 +1127,19 @@ async def _seed_v1(engine) -> None:
             [{"f": 7, "t": 1, "lng": "fr", "lab": "Général"}],
         )
         await conn.execute(
-            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_colspan, col_component, col_dd_id, col_label, col_target, col_type, col_visible, col_disabled, col_required, col_default, col_key)"
-                 " VALUES (:f, :c, :ta, :s, :cs, :cm, :dd, :lab, :tgt, :ty, :v, :di, :rq, :de, :k)"),
-            [{"f": 7, "c": 1, "ta": 1, "s": 1, "cs": 2, "cm": "input", "dd": None, "lab": "Id", "tgt": "USR_ID", "ty": "integer", "v": "Y", "di": "N", "rq": "Y", "de": "0", "k": "Y"}],
+            text("INSERT INTO ly_dlg_col (frm_id, col_id, tab_id, col_seq, col_colspan, col_component, col_dd_id, col_label, col_target, col_type, col_visible, col_disabled, col_required, col_default, col_key, col_cdn_id)"
+                 " VALUES (:f, :c, :ta, :s, :cs, :cm, :dd, :lab, :tgt, :ty, :v, :di, :rq, :de, :k, :cdn)"),
+            [
+                # field 1 — the always-visible identifier; carries the USR_ID dd → also acts as the
+                # cdn predicate's "field" target when resolving col_cdn_id on the next field.
+                {"f": 7, "c": 1, "ta": 1, "s": 1, "cs": 2, "cm": "input", "dd": "USR_ID", "lab": "Id", "tgt": "USR_ID",
+                 "ty": "integer", "v": "Y", "di": "N", "rq": "Y", "de": "0", "k": "Y", "cdn": None},
+                # field 2 — visible only when USR_ID == '42' (matches ly_cdn_params cdn_id 1 already
+                # seeded above for the grid columns; same cdn id is reused — exactly v1's pattern
+                # of sharing condition graphs across table + dialog screens).
+                {"f": 7, "c": 2, "ta": 1, "s": 2, "cs": None, "cm": "input", "dd": None, "lab": "Extra",
+                 "tgt": "USR_EXTRA", "ty": "text", "v": "Y", "di": "N", "rq": "N", "de": None, "k": "N", "cdn": 1},
+            ],
         )
         # Per-field param binds (v1 ly_dlg_filters): one VALUE literal + one DD column-bind on the same field.
         await conn.execute(
@@ -1164,12 +1226,20 @@ async def test_read_applications(v1_engine) -> None:
 async def test_read_column_hints(v1_engine) -> None:
     tbl_cols, dlg_cols = await read_column_hints(v1_engine)
     assert {(r["query_id"], r["col_target"]) for r in tbl_cols} == {(1, "USR_ID"), (1, "USR_NAME"), (1, "USR_PWD")}
-    assert {(r["query_id"], r["col_target"]) for r in dlg_cols} == {(2, "USR_ID")}
+    # The dialog has two fields now (the second one carries col_cdn_id to exercise slice 3's
+    # conditional-visibility wiring) — both live under frm 7, joined to query 2 by frm_query_id.
+    assert {(r["query_id"], r["col_target"]) for r in dlg_cols} == {(2, "USR_ID"), (2, "USR_EXTRA")}
     hints = migrate_column_hints(tbl_cols, dlg_cols)
     assert [h["name"] for h in hints[1]] == ["USR_ID", "USR_NAME", "USR_PWD"]
     assert hints[1][0] == {"name": "USR_ID", "filter": True, "format": "number"}  # col_dd_id == name → no `dd`; col_filter 'Y'
     assert hints[1][2] == {"name": "USR_PWD", "label": "Password", "hidden": True, "format": "password"}  # col_visible 'N', col_filter null
-    assert hints[2] == [{"name": "USR_ID", "label": "Id", "format": "integer"}]
+    assert hints[2] == [
+        # col_dd_id="USR_ID" matches `name` → no `dd`; col_type "integer" → format
+        {"name": "USR_ID", "label": "Id", "format": "integer"},
+        # second field: col_dd_id NULL → no `dd`; col_type "text" gets normalised away (the
+        # migrator drops dd_type "text" since it's the natural default)
+        {"name": "USR_EXTRA", "label": "Extra"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1194,8 +1264,13 @@ async def test_read_column_conditions(v1_engine) -> None:
     tbl_cols, dlg_cols = await read_column_hints(v1_engine)
     params = await read_column_conditions(v1_engine)
     assert {(r["cdn_id"], r["cdn_operator"]) for r in params} == {(1, "EQUAL"), (1, "EMPTY")}
-    # USR_NAME (col_cdn_id 1) → distils to: shows unless USR_ID is filtered to something ≠ '42'
-    assert migrate_column_visibility(tbl_cols, dlg_cols, params) == {1: {"USR_NAME": [{"field": "USR_ID", "value": ["42"]}]}}
+    # USR_NAME (col_cdn_id 1 on the table → query 1) and USR_EXTRA (col_cdn_id 1 on the dialog →
+    # query 2) share the same cdn graph — both distil to "shows unless USR_ID ≠ '42'", proving the
+    # cdn graph is reusable across table+dialog screens (exactly v1's pattern).
+    assert migrate_column_visibility(tbl_cols, dlg_cols, params) == {
+        1: {"USR_NAME": [{"field": "USR_ID", "value": ["42"]}]},
+        2: {"USR_EXTRA": [{"field": "USR_ID", "value": ["42"]}]},
+    }
 
 
 @pytest.mark.asyncio
@@ -1287,11 +1362,14 @@ async def test_read_screens(v1_engine) -> None:
     assert {r["frm_id"] for r in frm_rows} == {7}
     assert {(r["frm_id"], r["tab_id"]) for r in tab_rows} == {(7, 1)}
     assert {(r["frm_id"], r["tab_id"], r["lng_id"]) for r in tab_l_rows} == {(7, 1, "fr")}
-    assert {(r["frm_id"], r["col_id"], r["col_target"]) for r in col_rows} == {(7, 1, "USR_ID")}
+    assert {(r["frm_id"], r["col_id"], r["col_target"]) for r in col_rows} == {(7, 1, "USR_ID"), (7, 2, "USR_EXTRA")}
     assert {(r["frm_id"], r["col_id"], r["flt_type"]) for r in filter_rows} == {(7, 1, "VALUE"), (7, 1, "DD")}
     assert {r["query_id"] for r in sql_rows} == {1, 2}  # the join feeds CRUD → v2 name resolution
-    # Build the screens.toml fragment + round-trip through the screens schema.
-    out = migrate_screens(*rows, app_name="nomasx1")
+    # The cdn graph (ly_cdn_params) is read separately — same source the grid uses.
+    cdn_params = await read_column_conditions(v1_engine)
+    # Build the screens.toml fragment + round-trip through the screens schema (pass cdn_params so
+    # the field's col_cdn_id resolves to visible_when).
+    out = migrate_screens(*rows, cdn_param_rows=cdn_params, app_name="nomasx1")
     sf = parse_screens(out)
     screens = sf.screens["nomasx1"]
     s = screens["security_users"]
@@ -1306,16 +1384,25 @@ async def test_read_screens(v1_engine) -> None:
     assert [t.id for t in s.dialog.tabs] == ["general"]
     tab = s.dialog.tabs[0]
     assert tab.label == "General" and tab.cols == 2 and tab.l == {"fr": "Général"}
-    assert [f.name for f in tab.fields] == ["USR_ID"]
+    assert [f.name for f in tab.fields] == ["USR_ID", "USR_EXTRA"]
     field = tab.fields[0]
-    # col_label='Id' overrides the dictionary; col_dd_id None → `dd` left unset (falls back to `name`).
+    # col_label='Id' overrides the dictionary; col_dd_id == name → `dd` left unset (falls back to `name`).
     assert field.label == "Id" and field.dd is None and field.required is True and field.colspan == 2
     assert field.default == "0"
+    # field 1 has no col_cdn_id → no visible_when
+    assert field.visible_when == []
     # Both ParamBind flavours preserved: VALUE → {param, value}, DD → {param, source}.
     binds = [{"param": b.param, "value": b.value, "source": b.source} for b in field.lookup_param_binds]
     assert binds == [
         {"param": "STATUS", "value": "A", "source": None},
         {"param": "ROL_APPS_ID", "value": None, "source": "USR_APPS_ID"},
+    ]
+    # field 2 — the conditional one: col_cdn_id=1 → ly_cdn_params cdn_id 1 (USR_ID EQUAL '42'
+    # OR EMPTY). The EMPTY predicate is v2's default (no constraint); only EQUAL contributes a value.
+    extra = tab.fields[1]
+    assert extra.name == "USR_EXTRA"
+    assert [{"field": c.field, "value": c.value} for c in extra.visible_when] == [
+        {"field": "USR_ID", "value": ["42"]},
     ]
 
 
@@ -1441,6 +1528,9 @@ def test_cli_screen(tmp_path) -> None:
     # Pool of query 1 is 'default', not the app 'nomasx1' → flagged as cross-connector.
     assert "1 cross-connector" in txt
     assert "2 param-bind(s)" in txt
+    # The CLI also reports conditional field counts (slice 3) — the seeded USR_EXTRA field's
+    # col_cdn_id pulled visible_when through.
+    assert "1 conditional field(s)" in txt
     # Parses through both tomllib (comments are fine) and the screens schema.
     sf = parse_screens(tomllib.loads(txt))
     screens = sf.screens["nomasx1"]
@@ -1457,3 +1547,7 @@ def test_cli_screen(tmp_path) -> None:
         ("STATUS", "A", None),
         ("ROL_APPS_ID", None, "USR_APPS_ID"),
     ]
+    # Field 2 carries the migrated conditional visibility — the schema round-trips it cleanly.
+    extra = tab.fields[1]
+    assert extra.name == "USR_EXTRA"
+    assert [(c.field, c.value) for c in extra.visible_when] == [("USR_ID", ["42"])]

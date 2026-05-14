@@ -11,6 +11,15 @@ export interface ParamBind {
   source?: string | null
 }
 
+/** One per-field predicate evaluated against the dialog's live form state. `field` is another
+ *  ScreenField.name on the same dialog; `value` is the expected value (or list of allowed
+ *  values). A non-empty list of predicates AND-s — they must *all* hold for the parent rule
+ *  (visible / required / disabled) to fire. v2's port of v1's `ly_cdn_params`. */
+export interface FieldCondition {
+  field: string
+  value: string | string[]
+}
+
 /** One field on a dialog tab. `name` references a column of the screen's read query. */
 export interface ScreenField {
   name: string
@@ -22,6 +31,12 @@ export interface ScreenField {
   colspan?: number | null
   default?: string | null
   lookup_param_binds?: ParamBind[]
+  /** Conditional visibility (v2's port of v1's col_cdn_id) — evaluated against the form. */
+  visible_when?: FieldCondition[]
+  /** Conditional required — when non-empty, every predicate must hold for the field to be required. */
+  required_when?: FieldCondition[]
+  /** Conditional disabled — when non-empty, every predicate must hold for the field to be locked. */
+  disabled_when?: FieldCondition[]
 }
 
 /** One tab in a dialog (CSS-grid of fields, `cols` wide). */

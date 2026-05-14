@@ -86,6 +86,12 @@ export interface ParamBind {
   source?: string | null
 }
 
+/** One per-field condition predicate (matches `liberty/screens/config.py::FieldCondition`). */
+export interface FieldCondition {
+  field: string
+  value: string | string[]
+}
+
 /** One field on a dialog tab (matches `liberty/screens/config.py::ScreenField`). */
 export interface ScreenField {
   name: string
@@ -97,6 +103,9 @@ export interface ScreenField {
   colspan?: number | null
   default?: string | null
   lookup_param_binds?: ParamBind[]
+  visible_when?: FieldCondition[]
+  required_when?: FieldCondition[]
+  disabled_when?: FieldCondition[]
 }
 
 /** One tab in a dialog. */

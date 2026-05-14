@@ -8,6 +8,7 @@ import tomllib
 import pytest
 
 from liberty.screens import (
+    FieldCondition,
     ParamBind,
     Screen,
     ScreenDialog,
@@ -62,6 +63,35 @@ def test_screen_dialog_and_tab() -> None:
     bad_dlg = ScreenDialog(tabs=[ScreenTab(id="general"), ScreenTab(id="general")])
     with pytest.raises(Exception):
         Screen(id="x", read_query="q", dialog=bad_dlg)
+
+
+def test_field_condition_and_per_field_rules() -> None:
+    """``FieldCondition`` accepts a single value or a list (any matches). A field carries up to
+    three lists — ``visible_when`` / ``required_when`` / ``disabled_when`` — each AND-ed; an
+    empty list (the default) means "no condition, fall back to the static flag"."""
+    # single literal
+    FieldCondition(field="KIND", value="PRODUCT")
+    # list (membership) — what the migrator emits
+    cond = FieldCondition(field="KIND", value=["PRODUCT", "SERVICE"])
+    assert cond.value == ["PRODUCT", "SERVICE"]
+    # required arguments / extras rejected
+    with pytest.raises(Exception):
+        FieldCondition(value="x")  # type: ignore[call-arg]
+    with pytest.raises(Exception):
+        FieldCondition(field="X", value="y", typo=1)  # type: ignore[call-arg]
+    # Field plumbing: the three lists default to empty and round-trip when set.
+    f = ScreenField(
+        name="ITM_PRICE", required=True,
+        visible_when=[FieldCondition(field="KIND", value=["PRODUCT", "SERVICE"])],
+        required_when=[FieldCondition(field="TIER", value="PRO")],
+        disabled_when=[FieldCondition(field="LOCKED", value="Y")],
+    )
+    assert [c.value for c in f.visible_when] == [["PRODUCT", "SERVICE"]]
+    assert f.required_when[0].field == "TIER"
+    assert f.disabled_when[0].value == "Y"
+    # Defaults: empty lists when nothing is set.
+    bare = ScreenField(name="X")
+    assert bare.visible_when == [] and bare.required_when == [] and bare.disabled_when == []
 
 
 def test_parse_screens_injects_id_from_key() -> None:

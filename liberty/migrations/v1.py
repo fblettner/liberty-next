@@ -564,6 +564,71 @@ _CDN_EQUAL_OPS = {"EQUAL", "EQ", "=", "=="}              # operators the migrati
 _CDN_EMPTY_OPS = {"EMPTY", "ISNULL", "IS NULL", "NULL", "BLANK", ""}  # "or unset" — v2's default, no constraint
 
 
+def _cdn_to_field_groups(
+    cdn_param_rows: Iterable[Mapping[str, Any]],
+) -> tuple[dict[int, dict[str, set[str]]], dict[int, list[str]], set[int]]:
+    """Parse ``ly_cdn_params`` rows into a usable shape, *once* — both
+    :func:`migrate_column_visibility` (grid columns) and :func:`migrate_screens` (dialog fields)
+    consume the result.
+
+    Returns ``(values_per_cdn, order_per_cdn, bad_cdn_ids)``:
+
+    * ``values_per_cdn[cid][FIELD] = {v, …}`` — the EQUAL values seen for each field on cid.
+      ``FIELD`` is the upper-cased ``cdn_dd_id`` (resolution to a v2 column / field name happens
+      at the caller, with its own per-query / per-frm dd→target map).
+    * ``order_per_cdn[cid] = [FIELD, …]`` — first-seen order within each cdn, so AND-ed
+      predicates emit deterministically.
+    * ``bad_cdn_ids`` — cdns that mix in operators v2 can't represent (NOT_EQUAL / LIKE / …);
+      the caller leaves the parent column/field unconstrained (always-visible / static flag).
+    """
+    values: dict[int, dict[str, set[str]]] = {}
+    order: dict[int, list[str]] = {}
+    bad: set[int] = set()
+    for r in cdn_param_rows:
+        cid_raw, dd = r.get("cdn_id"), str(r.get("cdn_dd_id") or "").strip()
+        if cid_raw is None or not dd:
+            continue
+        cid = int(cid_raw)
+        fld = dd.upper()
+        if fld not in values.setdefault(cid, {}):
+            values[cid][fld] = set()
+            order.setdefault(cid, []).append(fld)
+        op = str(r.get("cdn_operator") or "").strip().upper()
+        val = r.get("cdn_value")
+        sval = "" if val is None else str(val).strip()
+        if op in _CDN_EQUAL_OPS:
+            if sval:                       # EQUAL '' ≈ EMPTY → contributes nothing
+                values[cid][fld].add(sval)
+        elif op in _CDN_EMPTY_OPS:
+            pass                            # "or unset" — already v2's default for an absent value
+        else:
+            bad.add(cid)                    # NOT_EQUAL / LIKE / range / … — we don't model these
+    return values, order, bad
+
+
+def _cdn_resolve(
+    cid: int,
+    values_per_cdn: Mapping[int, Mapping[str, set[str]]],
+    order_per_cdn: Mapping[int, list[str]],
+    bad_cdn_ids: set[int],
+    dd_to_name: Mapping[str, str],
+) -> list[dict[str, Any]] | None:
+    """Materialise one cdn_id into a list of ``{"field", "value"}`` predicates (AND-ed) using
+    a per-context ``dd_to_name`` resolver (column-on-the-same-query for grid, field-on-the-same-frm
+    for dialog). Returns ``None`` when ``cid`` is in *bad_cdn_ids* (parent stays unconstrained);
+    returns ``[]`` when the cdn parses cleanly but all its predicates are EMPTY-only (v2 default)."""
+    if cid in bad_cdn_ids:
+        return None
+    conds: list[dict[str, Any]] = []
+    for fld in order_per_cdn.get(cid, []):
+        vals = values_per_cdn.get(cid, {}).get(fld) or set()
+        if not vals:
+            continue
+        field = dd_to_name.get(fld) or fld
+        conds.append({"field": field, "value": sorted(vals)})
+    return conds
+
+
 def migrate_column_visibility(
     tbl_col_rows: Iterable[Mapping[str, Any]],
     dlg_col_rows: Iterable[Mapping[str, Any]] = (),
@@ -594,28 +659,8 @@ def migrate_column_visibility(
         cdn_param_rows: rows from :func:`liberty.migrations.source.read_column_conditions`
             (``ly_cdn_params``: ``cdn_id``, ``cdn_dd_id``, ``cdn_operator``, ``cdn_value``).
     """
-    # 1. per cdn_id → {field(upper): set_of_EQUAL_values, in first-seen order}; unsupported op → "bad"
-    cdn_fields: dict[int, dict[str, set[str]]] = {}
-    cdn_order: dict[int, list[str]] = {}     # field order within a cdn (= predicate order)
-    cdn_bad: set[int] = set()
-    for r in cdn_param_rows:
-        cid_raw, dd = r.get("cdn_id"), str(r.get("cdn_dd_id") or "").strip()
-        if cid_raw is None or not dd:
-            continue
-        cid = int(cid_raw); fld = dd.upper()
-        if fld not in cdn_fields.setdefault(cid, {}):
-            cdn_fields[cid][fld] = set()
-            cdn_order.setdefault(cid, []).append(fld)
-        op = str(r.get("cdn_operator") or "").strip().upper()
-        val = r.get("cdn_value")
-        sval = "" if val is None else str(val).strip()
-        if op in _CDN_EQUAL_OPS:
-            if sval:                       # EQUAL '' ≈ EMPTY → contributes nothing
-                cdn_fields[cid][fld].add(sval)
-        elif op in _CDN_EMPTY_OPS:
-            pass                            # "or unset" — already v2's default for an absent filter
-        else:
-            cdn_bad.add(cid)                # NOT_EQUAL / LIKE / range / … — we don't model these
+    # 1. parse the cdn graph once (shared with migrate_screens)
+    values, order, bad = _cdn_to_field_groups(cdn_param_rows)
     # 2. per query: {col_dd_id(upper): col_target} (for resolving a predicate's field to a screen column)
     dd_index: dict[int, dict[str, str]] = {}
     cols: list[tuple[int, str, int | None]] = []   # (query_id, col_target, col_cdn_id)
@@ -634,18 +679,12 @@ def migrate_column_visibility(
     for q, tgt, cid in cols:
         if cid is None:
             continue
-        if cid in cdn_bad:
+        resolved = _cdn_resolve(cid, values, order, bad, dd_index.get(q, {}))
+        if resolved is None:
             _log.warning("migration: column %s.%s uses a condition operator v2 can't model — left always-visible", q, tgt)
             continue
-        conds: list[dict[str, Any]] = []
-        for fld in cdn_order.get(cid, []):
-            vals = cdn_fields.get(cid, {}).get(fld) or set()
-            if not vals:                    # EMPTY-only field → no constraint
-                continue
-            field = dd_index.get(q, {}).get(fld) or fld
-            conds.append({"field": field, "value": sorted(vals)})
-        if conds:
-            out.setdefault(q, {}).setdefault(tgt, conds)
+        if resolved:
+            out.setdefault(q, {}).setdefault(tgt, resolved)
     return out
 
 
@@ -1083,6 +1122,7 @@ def migrate_screens(
     col_rows: Iterable[Mapping[str, Any]] = (),
     filter_rows: Iterable[Mapping[str, Any]] = (),
     sql_rows: Iterable[Mapping[str, Any]] = (),
+    cdn_param_rows: Iterable[Mapping[str, Any]] = (),
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -1098,7 +1138,10 @@ def migrate_screens(
 
     When ``tbl_frm_id`` is set, the screen also gets a ``dialog`` — tabs from *tab_rows* (in
     ``tab_seq`` order, translations from *tab_l_rows*), fields from *col_rows* (in ``col_seq``
-    order, skipping placeholder rows with no ``col_target``), and per-field ``lookup_param_binds``
+    order, skipping placeholder rows with no ``col_target``), per-field ``visible_when``
+    conditions from each field's ``col_cdn_id`` resolved against *cdn_param_rows* (same shape as
+    :func:`migrate_column_visibility`, but keyed by ``(frm_id, col_id)`` — the field-resolver
+    is each frm's own ``col_dd_id → col_target`` map), and per-field ``lookup_param_binds``
     from *filter_rows* (``flt_type='DD'`` → dynamic ``source``, ``flt_type='VALUE'`` → static
     ``value``). Without ``tbl_frm_id`` the screen is read-only / grid-edit only.
 
@@ -1175,6 +1218,21 @@ def migrate_screens(
         if frm_id is None or col_id is None:
             continue
         binds_by_col.setdefault((int(frm_id), int(col_id)), []).append(r)
+
+    # Per-frm `col_dd_id(upper) → col_target` index for resolving conditional-render predicates'
+    # cdn_dd_id back into a field name on the same form. Built once.
+    dd_to_target_by_frm: dict[int, dict[str, str]] = {}
+    for r in col_rows:
+        frm_id_raw = r.get("frm_id")
+        target = str(r.get("col_target") or "").strip()
+        dd_id = str(r.get("col_dd_id") or "").strip()
+        if frm_id_raw is None or not target or not dd_id:
+            continue
+        dd_to_target_by_frm.setdefault(int(frm_id_raw), {}).setdefault(dd_id.upper(), target)
+    # Parse the cdn graph once — both grid columns (migrate_column_visibility) and dialog fields
+    # share the same predicate engine; we just resolve the predicates' `cdn_dd_id` against the
+    # current frm's dd→target map instead of the query's column map.
+    cdn_values, cdn_order, cdn_bad = _cdn_to_field_groups(cdn_param_rows)
 
     # ── build one Screen per ly_tables row ────────────────────────────────────
     screens: dict[str, dict[str, Any]] = {}
@@ -1303,6 +1361,25 @@ def migrate_screens(
                             # Other flt_type values (FIELD / etc.) — Phase 6 follow-up; skip for now.
                         if binds:
                             field["lookup_param_binds"] = binds
+                        # Conditional visibility (v1 col_cdn_id → ly_cdn_params). The cdn graph is
+                        # shared with grid columns (migrate_column_visibility); for dialog fields
+                        # the dd→target resolver is the **per-frm** map built above so a predicate
+                        # referencing another field's col_dd_id resolves to that field's col_target.
+                        cid_raw = c.get("col_cdn_id")
+                        if cid_raw is not None:
+                            try:
+                                cid = int(cid_raw)
+                            except (TypeError, ValueError):
+                                cid = None
+                            if cid is not None:
+                                resolved = _cdn_resolve(cid, cdn_values, cdn_order, cdn_bad, dd_to_target_by_frm.get(frm_id, {}))
+                                if resolved is None:
+                                    _log.warning(
+                                        "migration: screen field %s on frm %s uses a condition operator v2 can't model — left unconditionally visible",
+                                        target, frm_id,
+                                    )
+                                elif resolved:
+                                    field["visible_when"] = resolved
                         fields.append(field)
                     tab_out["fields"] = fields
                     tabs.append(tab_out)

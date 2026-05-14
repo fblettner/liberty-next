@@ -95,7 +95,11 @@ async def _build(args: argparse.Namespace) -> dict:
         if args.command == "menu":
             return migrate_menus(*await read_menus(engine), app_name=args.connector)
         if args.command == "screen":
-            return migrate_screens(*await read_screens(engine), app_name=args.connector)
+            # Pull ly_cdn_params alongside the screen tables so per-field `visible_when`
+            # conditions are populated from each ly_dlg_col.col_cdn_id.
+            screen_rows = await read_screens(engine)
+            cdn_params = await read_column_conditions(engine)
+            return migrate_screens(*screen_rows, cdn_param_rows=cdn_params, app_name=args.connector)
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -177,9 +181,15 @@ def _summary(data: dict, *, command: str) -> str:
             for t in ((s.get("dialog") or {}).get("tabs") or [])
             for f in (t.get("fields") or [])
         )
+        n_conds = sum(
+            1 for s in screens.values()
+            for t in ((s.get("dialog") or {}).get("tabs") or [])
+            for f in (t.get("fields") or [])
+            if f.get("visible_when")
+        )
         return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "
                 f"{with_audit} with audit, {cross} cross-connector, {n_fields} dialog field(s), "
-                f"{n_binds} param-bind(s) — put this at config/screens.toml")
+                f"{n_binds} param-bind(s), {n_conds} conditional field(s) — put this at config/screens.toml")
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]

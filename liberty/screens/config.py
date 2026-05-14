@@ -82,11 +82,37 @@ class ParamBind(BaseModel):
     )
 
 
+class FieldCondition(BaseModel):
+    """One per-field predicate evaluated against the dialog's current form state (v2's port of
+    v1's ``ly_cdn_params``). Mirrors :class:`liberty.connectors.config.VisibleWhen` in shape but
+    the evaluation context is the *form*, not server filters: ``field`` names another field on
+    the same dialog (its v2 name, matching ``ScreenField.name``), and the predicate holds when
+    that field's current form value equals ``value`` (or is in ``value`` when it's a list). A
+    list of these AND-s: every predicate must hold for the parent rule to fire. An empty list
+    on a ``ScreenField.visible_when`` / ``required_when`` / ``disabled_when`` is "no condition"
+    (= the static ``hidden`` / ``required`` / ``disabled`` flag decides). v1's other operators
+    (NOT_EQUAL, LIKE, …) aren't representable; the migrator skips them with a warning."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(description="The other dialog field whose live value gates this rule.")
+    value: str | list[str] = Field(description="The expected value, or list of values (any one matches).")
+
+
 class ScreenField(BaseModel):
     """One field on a dialog tab. Maps to a column of the screen's read query (by ``name``) —
     same convention as ``ColumnHint.name``. ``dd`` overrides the dictionary entry lookup
-    (defaults to ``name`` when unset). Future per-field conditions / required / disabled
-    land here in slice 3."""
+    (defaults to ``name`` when unset).
+
+    **Conditional rules** (slice 3): ``visible_when`` / ``required_when`` / ``disabled_when``
+    each take a list of :class:`FieldCondition` predicates evaluated against the dialog's live
+    form state. When the list is non-empty *and* every predicate holds, the rule fires (the
+    field shows / is required / is read-only); the static ``hidden`` / ``required`` /
+    ``disabled`` flags act as the fallback when the corresponding ``*_when`` list is empty.
+    v1's ``col_cdn_id`` migrates into ``visible_when``; the ``required_when`` / ``disabled_when``
+    paths have no v1 source mass-migrated yet — operators set them via the builder.
+    (``default_when`` waits for the form-rule slice — v1's SEQUENCE / SYSDATE / LOGIN / CURRENT_DATE
+    derived defaults live in the same territory.)"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -106,6 +132,28 @@ class ScreenField(BaseModel):
         description=(
             "Parameter bindings for this field's *lookup* query (when the field's dd resolves "
             "to a LOOKUP rule). Same shape used by actions/menus. v1's ly_dlg_filters."
+        ),
+    )
+    visible_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description=(
+            "Conditional visibility (v2's port of v1's ``col_cdn_id``). When non-empty, every "
+            "predicate must hold against the form's live state for the field to render; "
+            "otherwise the static ``hidden`` flag decides."
+        ),
+    )
+    required_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description=(
+            "Conditional ``required``. When non-empty, every predicate must hold against the "
+            "live form state for the field to be required; otherwise ``required`` decides."
+        ),
+    )
+    disabled_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description=(
+            "Conditional read-only. When non-empty, every predicate must hold against the live "
+            "form state for the field to be locked; otherwise ``disabled`` decides."
         ),
     )
 

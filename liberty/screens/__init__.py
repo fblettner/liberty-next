@@ -19,6 +19,7 @@ binding mechanism, not three.
 from __future__ import annotations
 
 from liberty.screens.config import (
+    FieldCondition,
     ParamBind,
     Screen,
     ScreenAction,
@@ -31,6 +32,7 @@ from liberty.screens.config import (
 )
 
 __all__ = [
+    "FieldCondition",
     "ParamBind",
     "Screen",
     "ScreenAction",
