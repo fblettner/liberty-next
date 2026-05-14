@@ -521,13 +521,24 @@ replies), `@monaco-editor/react` (the connector-config editor).
   every `:<col>` → `:<col>_ORIGINAL` (`_rewrite_put_where`; the SET clause untouched — the new value) — so
   editing a key column still updates the right row (the TableView sends the row's pre-edit values under
   `:<col>_ORIGINAL`); `migrate_column_hints(ly_tbl_col rows,
-  ly_dlg_col rows)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
+  ly_dlg_col rows, *, extra_filter_cols=…)` → `{query_id: [ColumnHint dict]}` (each `col_target` → `{name, dd?` (= v1's
   `col_dd_id` — only when ≠ `name`; the connector looks the entry up under `name` otherwise),
   `label?` (only when an explicit `col_label` overrides the dictionary), `hidden?` (`col_visible`
-  reads false), `filter?` (`col_filter` reads true — table widgets only), `format?` (only when an explicit
-  `col_type` overrides the dictionary)`}`; table-widget
+  reads false), `filter?` (`col_filter` reads true — table widgets only — *or* the column is in
+  `extra_filter_cols[qid]` from `migrate_drill_filter_columns` below — without it the URL drill
+  emitted by `migrate_context_menus` would land in a destination with no filter slot and the
+  value would be silently dropped), `format?` (only when an explicit
+  `col_type` overrides the dictionary)`}`; a column referenced by `extra_filter_cols` but with no
+  v1 hint of its own gets a minimal `{name, filter}` row appended (case-insensitive match on
+  column name); table-widget
   columns beat form-field columns; first `(query, col)` wins → per-query list keeps `col_seq` order)
   — passed to `migrate_sql_queries(column_hints=…)`, attached to each *read* query's `columns`;
+  `migrate_drill_filter_columns(ly_ctx_val rows, ly_ctx_filters rows, tables_rows, dlg_frm_rows)`
+  → `{query_id: [col_target, …]}` — for every v1 row-context-menu drill, the columns on the
+  *destination* read query that the drill binds (the `ly_ctx_filters.flt_target` for `flt_type` ∈
+  `{DD, VALUE}`); fed into `migrate_column_hints(extra_filter_cols=…)` so each becomes filter-flagged
+  on the destination — `migrate_sql_queries`' `_wrap_with_filters` then binds `:COL` server-side
+  and the URL drill actually narrows the destination;
   `migrate_table_filters(ly_tbl_filters rows, ly_dlg_filters rows)` → `{query_id: {col_target: [{source, column}]}}`
   (v1's `flt_source` → `source`, `flt_target` → `column`; table-widget rows beat form rows per `(query, col)`,
   dup `(source, column)` dropped) — passed to `migrate_sql_queries(column_filters=…)`, merged onto the matching

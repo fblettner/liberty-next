@@ -16,6 +16,7 @@ from liberty.migrations import (
     migrate_column_hints,
     migrate_column_visibility,
     migrate_dictionary,
+    migrate_drill_filter_columns,
     migrate_menus,
     migrate_pools,
     migrate_context_menus,
@@ -506,6 +507,96 @@ def test_migrate_column_hints() -> None:
     assert hints[1][3] == {"name": "USR_LBL", "dd": "SOME_DD", "label": "Per-column override", "format": "currency"}  # dd ≠ name; col_label/col_type override
     assert hints[3] == [{"name": "F0101"}]
     assert hints[2] == [{"name": "USR_ID"}]  # only the form-field column
+
+
+def test_migrate_column_hints_extra_filter_cols() -> None:
+    """``extra_filter_cols`` promotes drill-destination columns to ``filter = True`` — both for
+    columns that already have a hint (the flag is OR-ed on) and for columns the migrator didn't
+    otherwise know about (a minimal ``{name, filter}`` row is appended so ``_wrap_with_filters``
+    still binds them). Case-insensitive match on the column name."""
+    extras = {1: ["USR_PWD", "EXTRA_COL"], 3: ["f0101"]}  # USR_PWD already a hint, EXTRA_COL new; lowercase f0101 still matches
+    hints = migrate_column_hints(_TBL_COLS, _DLG_COLS, extra_filter_cols=extras)
+    # query 1: existing USR_PWD now flagged; EXTRA_COL appended with just {name, filter}; the other rows unchanged.
+    by_name = {h["name"]: h for h in hints[1]}
+    assert by_name["USR_PWD"] == {"name": "USR_PWD", "hidden": True, "filter": True}
+    assert by_name["EXTRA_COL"] == {"name": "EXTRA_COL", "filter": True}
+    assert by_name["USR_ID"] == {"name": "USR_ID"}  # untouched
+    # query 3: f0101 (case-insensitive) flagged the existing F0101 — no duplicate row.
+    assert hints[3] == [{"name": "F0101", "filter": True}]
+
+
+def test_migrate_drill_filter_columns() -> None:
+    """Each ly_ctx_filters row resolves through (ctx_id, val_id) → ly_ctx_val → val_component(_id)
+    → destination query_id, then the row's flt_target becomes a filter column on that destination.
+    Both ``DD`` (dynamic) and ``VALUE`` (literal) flt_types behave the same: in either case the
+    URL drill (NavigateAction → /sql/c/q?COL=v) needs a filter slot on the destination to land in."""
+    val_rows = [
+        # FormsTable drill (val_component_id = tbl_id 100 → tbl_query_id 20)
+        {"ctx_id": 1, "val_id": 1, "val_label": "Display Roles",
+         "val_component": "FormsTable", "val_component_id": 100},
+        # FormsDialog drill (val_component_id = frm_id 7 → frm_query_id 21)
+        {"ctx_id": 1, "val_id": 2, "val_label": "Display Properties",
+         "val_component": "FormsDialog", "val_component_id": 7},
+        # Orphan — unknown tbl_id → no destination → filters under it are dropped
+        {"ctx_id": 1, "val_id": 3, "val_label": "Orphan",
+         "val_component": "FormsTable", "val_component_id": 999},
+    ]
+    filter_rows = [
+        # ctx 1 / val 1 — two DD binds → both flt_targets are columns on query 20
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "RLU_APPS_ID", "flt_source": "USR_APPS_ID"},
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "RLU_USER_ID", "flt_source": "USR_ID"},
+        # ctx 1 / val 2 — one VALUE literal → STATUS is a column on query 21
+        {"ctx_id": 1, "val_id": 2, "flt_type": "VALUE", "flt_target": "STATUS", "flt_value": "A"},
+        # dup ctx 1 / val 1 / RLU_APPS_ID — deduped (case-insensitive on flt_target)
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "rlu_apps_id", "flt_source": "USR_APPS_ID"},
+        # missing flt_target → dropped
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": None, "flt_source": "X"},
+        # orphan val (no destination) → dropped
+        {"ctx_id": 1, "val_id": 3, "flt_type": "DD", "flt_target": "X", "flt_source": "Y"},
+    ]
+    tables_rows = [
+        {"tbl_id": 100, "tbl_db_name": "security_assignments", "tbl_query_id": 20},
+    ]
+    dlg_frm_rows = [
+        {"frm_id": 7, "frm_query_id": 21},
+    ]
+    out = migrate_drill_filter_columns(val_rows, filter_rows, tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows)
+    assert out == {20: ["RLU_APPS_ID", "RLU_USER_ID"], 21: ["STATUS"]}
+
+
+def test_migrate_drill_filter_columns_end_to_end() -> None:
+    """End-to-end check: ``migrate_drill_filter_columns`` → ``migrate_column_hints`` →
+    ``migrate_sql_queries`` wraps the destination SQL with ``:RLU_APPS_ID``/``:RLU_USER_ID``
+    binds, so the URL drill emitted by ``migrate_context_menus`` actually filters server-side."""
+    val_rows = [
+        {"ctx_id": 1, "val_id": 1, "val_label": "Display Roles",
+         "val_component": "FormsTable", "val_component_id": 100},
+    ]
+    filter_rows = [
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "RLU_APPS_ID", "flt_source": "USR_APPS_ID"},
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "RLU_USER_ID", "flt_source": "USR_ID"},
+    ]
+    tables_rows = [
+        {"tbl_id": 100, "tbl_db_name": "security_assignments", "tbl_query_id": 20},
+    ]
+    drill = migrate_drill_filter_columns(val_rows, filter_rows, tables_rows=tables_rows)
+    assert drill == {20: ["RLU_APPS_ID", "RLU_USER_ID"]}
+    # The destination had no v1 column hints at all — the drill-filter pass still emits hints so
+    # the SQL gets wrapped. (Real-world libnsx1 case for `security_assignments_get`.)
+    hints = migrate_column_hints((), (), extra_filter_cols=drill)
+    assert hints[20] == [
+        {"name": "RLU_APPS_ID", "filter": True},
+        {"name": "RLU_USER_ID", "filter": True},
+    ]
+    queries = [{"query_id": 20, "query_label": "Assignments"}]
+    sql_rows = [{
+        "query_id": 20, "query_crud": "GET", "query_pool": "nomasx1", "query_dbtype": "postgres",
+        "query_sqlquery": "SELECT * FROM assignments", "query_orderby": None,
+    }]
+    out = migrate_sql_queries(queries, sql_rows, column_hints=hints)
+    sql = out["connectors"]["nomasx1"]["queries"][0]["sql"]
+    assert ":RLU_APPS_ID" in sql and ":RLU_USER_ID" in sql  # _wrap_with_filters bound both
+    assert "lib_flt" in sql  # wrapped, not raw
 
 
 _DICTIONARY = [

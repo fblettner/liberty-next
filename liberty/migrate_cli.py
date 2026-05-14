@@ -47,6 +47,7 @@ from liberty.migrations import (
     migrate_column_visibility,
     migrate_context_menus,
     migrate_dictionary,
+    migrate_drill_filter_columns,
     migrate_key_columns,
     migrate_menus,
     migrate_screens,
@@ -127,9 +128,20 @@ async def _build(args: argparse.Namespace) -> dict:
             # Pull ly_lookup + ly_lkp_params so each lookup-target query gets its WHERE wrap +
             # declared params (UDC etc. — v1's SQL didn't carry its own WHERE).
             _, _, _, lookup_rows, _, _, lookup_params_rows = await read_dictionary_rules(engine)
+            # Pull ly_ctx_val + ly_ctx_filters so any column that's a row-context-menu drill
+            # target on a destination query gets `filter = True` on that destination — the
+            # frontend's URL drill (NavigateAction) then actually filters server-side via
+            # `_wrap_with_filters`. Needs ly_tables / ly_dlg_frm to resolve the destination.
+            _, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
+            screen_rows = await read_screens(engine)
+            ctx_tables_rows, ctx_dlg_frm_rows = screen_rows[0], screen_rows[2]
+            drill_cols = migrate_drill_filter_columns(
+                ctx_val_rows, ctx_filter_rows,
+                tables_rows=ctx_tables_rows, dlg_frm_rows=ctx_dlg_frm_rows,
+            )
             parts.append(migrate_sql_queries(
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
-                column_hints=migrate_column_hints(tbl_cols, dlg_cols),
+                column_hints=migrate_column_hints(tbl_cols, dlg_cols, extra_filter_cols=drill_cols),
                 column_filters=migrate_table_filters(tbl_flt, dlg_flt),
                 column_visibility=migrate_column_visibility(tbl_cols, dlg_cols, cdn_params),
                 table_meta=migrate_table_meta(tbl_meta, frm_meta),

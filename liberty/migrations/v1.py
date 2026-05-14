@@ -449,6 +449,8 @@ def migrate_lookup_param_names(
 def migrate_column_hints(
     tbl_col_rows: Iterable[Mapping[str, Any]],
     dlg_col_rows: Iterable[Mapping[str, Any]] = (),
+    *,
+    extra_filter_cols: Mapping[int, Iterable[str]] | None = None,
 ) -> dict[int, list[dict[str, Any]]]:
     """Build ``{query_id: [column-hint dict]}`` from v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows.
 
@@ -467,6 +469,12 @@ def migrate_column_hints(
         tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
             (``query_id``, ``col_target``, ``col_dd_id``, ``col_label``, ``col_seq``,
             ``col_visible``, ``col_type``, ``col_filter``, ``col_id``).
+        extra_filter_cols: optional ``{query_id: [col_target, …]}`` from
+            :func:`migrate_drill_filter_columns` — every named column is forced to
+            ``filter = True`` on its destination's read query, regardless of v1's
+            ``col_filter`` flag. A column with no existing hint gets a minimal one
+            (``{name, filter}``) so the migrator's ``_wrap_with_filters`` still binds it.
+            Matching is case-insensitive on ``col_target``.
     """
     out: dict[int, list[dict[str, Any]]] = {}
     seen: set[tuple[int, str]] = set()
@@ -495,6 +503,116 @@ def migrate_column_hints(
         if fmt:
             hint["format"] = fmt  # explicit per-column override of the dictionary's format
         out.setdefault(qid, []).append(hint)
+
+    # Force `filter = True` on each drill-target column — these are the column names the
+    # v1 context menu uses as `flt_target` (the param on the destination), so the URL drill
+    # (`?COL=value` from ResultTable's NavigateAction) actually lands in the destination's
+    # filter panel. A column with no existing hint gets a minimal `{name, filter}` row, so
+    # `_wrap_with_filters` still picks it up and binds `:COL` server-side.
+    if extra_filter_cols:
+        for qid, cols in extra_filter_cols.items():
+            try:
+                qid_i = int(qid)
+            except (TypeError, ValueError):
+                continue
+            hints = out.setdefault(qid_i, [])
+            by_lower = {str(h["name"]).lower(): h for h in hints}
+            for c in cols:
+                cn = str(c or "").strip()
+                if not cn:
+                    continue
+                existing = by_lower.get(cn.lower())
+                if existing is not None:
+                    existing["filter"] = True
+                else:
+                    new = {"name": cn, "filter": True}
+                    hints.append(new)
+                    by_lower[cn.lower()] = new
+    return out
+
+
+def migrate_drill_filter_columns(
+    val_rows: Iterable[Mapping[str, Any]],
+    filter_rows: Iterable[Mapping[str, Any]] = (),
+    tables_rows: Iterable[Mapping[str, Any]] = (),
+    dlg_frm_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, list[str]]:
+    """``{query_id: [col_target, …]}`` — for every v1 context-menu drill, the columns on the
+    *destination* read query that the drill binds (``ly_ctx_filters.flt_target``). Fed into
+    :func:`migrate_column_hints` (as ``extra_filter_cols``) so each becomes ``filter = True``
+    on the destination, which makes :func:`migrate_sql_queries`' ``_wrap_with_filters`` actually
+    bind ``:COL`` server-side. Without this, the frontend's URL drill (``/sql/{c}/{q}?COL=value``,
+    emitted by :func:`migrate_context_menus` as a NavigateAction) would land in a TableView with
+    no filter slot and the value would be silently dropped.
+
+    Both ``flt_type='DD'`` (dynamic — copied from the firing row) and ``flt_type='VALUE'`` (static
+    literal from the menu item) are treated the same: in both cases the destination must accept
+    a bind for ``flt_target``. The columns are deduped per query, in first-seen order.
+
+    Args:
+        val_rows: rows from ``ly_ctx_val`` — gives us ``(ctx_id, val_id) → val_component,
+            val_component_id`` so we can resolve each drill's destination ``query_id``.
+        filter_rows: rows from ``ly_ctx_filters`` — ``(ctx_id, val_id, flt_target)``.
+        tables_rows: rows from ``ly_tables`` — for ``FormsTable`` items: ``tbl_id → tbl_query_id``.
+        dlg_frm_rows: rows from ``ly_dlg_frm`` — for ``FormsDialog`` items: ``frm_id → frm_query_id``.
+    """
+    # Resolve each (ctx_id, val_id) → destination query_id via tbl_qid / frm_qid maps.
+    tbl_qid: dict[int, int] = {}
+    for r in tables_rows:
+        try:
+            tbl_id = int(r["tbl_id"])
+            qid = r.get("tbl_query_id")
+            if qid is not None:
+                tbl_qid[tbl_id] = int(qid)
+        except (KeyError, TypeError, ValueError):
+            continue
+    frm_qid: dict[int, int] = {}
+    for r in dlg_frm_rows:
+        try:
+            frm_id = int(r["frm_id"])
+            qid = r.get("frm_query_id")
+            if qid is not None:
+                frm_qid[frm_id] = int(qid)
+        except (KeyError, TypeError, ValueError):
+            continue
+    target_qid_by_val: dict[tuple[int, int], int] = {}
+    for v in val_rows:
+        ctx_id_raw, val_id_raw = v.get("ctx_id"), v.get("val_id")
+        comp = (v.get("val_component") or "").strip()
+        comp_id_raw = v.get("val_component_id")
+        if ctx_id_raw is None or val_id_raw is None or comp_id_raw is None:
+            continue
+        try:
+            ctx_id, val_id, comp_id = int(ctx_id_raw), int(val_id_raw), int(comp_id_raw)
+        except (TypeError, ValueError):
+            continue
+        target_qid: int | None = None
+        if comp == "FormsTable":
+            target_qid = tbl_qid.get(comp_id)
+        elif comp == "FormsDialog":
+            target_qid = frm_qid.get(comp_id)
+        if target_qid is not None:
+            target_qid_by_val[(ctx_id, val_id)] = target_qid
+
+    out: dict[int, list[str]] = {}
+    seen: dict[int, set[str]] = {}
+    for r in filter_rows:
+        ctx_id_raw, val_id_raw = r.get("ctx_id"), r.get("val_id")
+        target = str(r.get("flt_target") or "").strip()
+        if ctx_id_raw is None or val_id_raw is None or not target:
+            continue
+        try:
+            ctx_id, val_id = int(ctx_id_raw), int(val_id_raw)
+        except (TypeError, ValueError):
+            continue
+        target_qid = target_qid_by_val.get((ctx_id, val_id))
+        if target_qid is None:
+            continue
+        s = seen.setdefault(target_qid, set())
+        if target.lower() in s:
+            continue
+        s.add(target.lower())
+        out.setdefault(target_qid, []).append(target)
     return out
 
 
