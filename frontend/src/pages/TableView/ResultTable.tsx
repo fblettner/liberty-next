@@ -16,8 +16,9 @@ import { useTranslation } from 'react-i18next'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Pencil, Check, X, Plus, Copy, ClipboardPaste, Upload } from 'lucide-react'
+import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3 } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
+import type { ScreenDetail } from '../../types/screens'
 import { api, ApiError } from '../../api/client'
 import { Banner } from '../../common'
 import { DataTable } from '../../common/DataTable'
@@ -26,6 +27,7 @@ import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
+import { ScreenDialog, type DialogMode } from './ScreenDialog'
 
 type DataRow = Record<string, unknown>
 type Align = CSSProperties['textAlign']
@@ -164,7 +166,7 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen,
 }: {
   result: QueryResult
   connector: string
@@ -177,9 +179,25 @@ export function ResultTable({
   runControl?: React.ReactNode    // the Run button — sits just right of the grid's search box
   maxRowsControl?: React.ReactNode  // the Max-rows input — sits at the far right, before the Filters button
   activeFilters?: Record<string, string>  // current server-filter values — drives `visible_when` columns
+  /** Screen detail (with dialog body) for this (connector, query) — when present, the toolbar
+   *  shows Add Row / Edit Row buttons that open the ScreenDialog form instead of the inline
+   *  grid editor. When null/missing the existing inline batch-edit flow is the only path. */
+  screen?: ScreenDetail | null
 }) {
   const { t } = useTranslation()
   const canEdit = !!(updateQuery || insertQuery)
+  const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
+  // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
+  // initial values; `mode='edit'` also drives the `:<COL>_ORIGINAL` binds inside ScreenDialog.
+  const [dlgOpen, setDlgOpen] = useState(false)
+  const [dlgMode, setDlgMode] = useState<DialogMode>('edit')
+  const [dlgRow, setDlgRow] = useState<Record<string, unknown>>({})
+  const openDialogForRow = useCallback((row: Record<string, unknown>) => {
+    setDlgRow(row); setDlgMode('edit'); setDlgOpen(true)
+  }, [])
+  const openDialogForAdd = useCallback(() => {
+    setDlgRow({}); setDlgMode('add'); setDlgOpen(true)
+  }, [])
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across re-renders).
   const shownColumns = useMemo(() => result.columns.filter((c) => columnVisibleNow(c, activeFilters ?? {})), [result.columns, activeFilters])
@@ -547,11 +565,19 @@ export function ResultTable({
         toolbarRight={maxRowsControl}
         initialColumnVisibility={initialVisibility}
         rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : dirtyRows.has(row) ? 'dt-row-dirty' : undefined)}
+        // Row click opens the screen dialog (when a dialog exists *and* we're not in batch-edit mode)
+        // — same v1 affordance: click a row to edit it via the form.
+        onRowClick={hasDialog && !editMode ? (row) => openDialogForRow(row) : undefined}
         toolbar={
           !canEdit ? undefined : !editMode ? (
             <>
+              {hasDialog && screen?.insert_query && (
+                <TbBtn $tone="primary" onClick={openDialogForAdd} title={t('dialog.addTooltip')}>
+                  <Plus size={13} /> {t('table.addRow')}
+                </TbBtn>
+              )}
               <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
-                <Pencil size={13} /> {t('table.edit')}
+                <Edit3 size={13} /> {hasDialog ? t('table.bulkEdit') : t('table.edit')}
               </TbBtn>
               {insertQuery && (
                 <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
@@ -589,6 +615,19 @@ export function ResultTable({
           )
         }
       />
+      {/* Mount the dialog only when needed — keeps lookups from firing on screens without a form. */}
+      {hasDialog && screen && dlgOpen && (
+        <ScreenDialog
+          open={dlgOpen}
+          mode={dlgMode}
+          screen={screen}
+          columns={result.columns}
+          row={dlgRow}
+          connector={connector}
+          onClose={() => setDlgOpen(false)}
+          onSaved={() => { setDlgOpen(false); onSaved?.() }}
+        />
+      )}
     </>
   )
 }

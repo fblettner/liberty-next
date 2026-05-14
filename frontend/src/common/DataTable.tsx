@@ -53,6 +53,11 @@ export interface DataTableProps<T extends object> {
   initialColumnVisibility?: VisibilityState
   /** Per-row CSS class on the `<tr>` — e.g. `dt-row-new` / `dt-row-deleted` to tint edited rows. */
   rowClassName?: (row: T) => string | undefined
+  /** When provided, clicking a (non-grouped) row's body fires this. Clicks on interactive cell
+   *  children (links, buttons, inputs) still take precedence — the handler bails when the click
+   *  target lives inside such a control, so the user can copy text and use cell widgets normally.
+   *  The TableView wires this to "open the screen dialog on the clicked row" when a dialog exists. */
+  onRowClick?: (row: T) => void
 }
 
 interface SavedGrid {
@@ -221,7 +226,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName,
+  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName, onRowClick,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -531,8 +536,19 @@ export function DataTable<T extends object>({
               table.getRowModel().rows.map((row) => {
                 const RowEl = row.getIsGrouped() ? GroupTr : Tr
                 const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
+                // Whole-row click → onRowClick. Bail if the click landed on an interactive child
+                // (input/button/a/select/textarea — the edit-mode cells, copy buttons, group toggles,
+                // etc.) so those keep working without firing the screen dialog underneath. Group
+                // rows never trigger — they're a grouping affordance, not a real record.
+                const clickable = !row.getIsGrouped() && onRowClick != null
+                const onClick = clickable
+                  ? (e: React.MouseEvent<HTMLTableRowElement>) => {
+                      if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
+                      onRowClick!(row.original)
+                    }
+                  : undefined
                 return (
-                  <RowEl key={row.id} className={cls}>
+                  <RowEl key={row.id} className={cls} onClick={onClick} style={clickable ? { cursor: 'pointer' } : undefined}>
                     {row.getVisibleCells().map((cell) => (
                       <Td
                         key={cell.id}

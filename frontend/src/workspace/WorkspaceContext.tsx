@@ -22,6 +22,7 @@ import { useLocation } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
+import type { ScreenListItem, ScreensByApp } from '../types/screens'
 import { type LicenseInfo, RESTRICTED } from '../types/license'
 import { useAuth } from '../auth/AuthContext'
 
@@ -35,12 +36,17 @@ interface WorkspaceState {
   connectors: ConnectorMeta[] | null // every accessible connector (null while loading / signed out)
   apps: ConnectorMeta[] | null // the subset that are "apps" (have a menu) — what the header picker offers
   menus: MenusByApp | null // app → its (permission-pruned, localized) menu tree
+  screens: Record<string, ScreenListItem[]> | null // app → its accessible screens (list view; no dialog body)
   license: LicenseInfo // `full` (licensed connectors loaded) or `restricted` (they weren't); defaults restricted
   error: string | null
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
   currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
   setCurrentApp: (name: string | null) => void
   refresh: () => void
+  /** Find the screen (across every app) whose effective connector + read_query match. Returns
+   *  null when no screen / multiple matches found. The TableView uses this to decide whether to
+   *  open a dialog on row click instead of going through the inline grid editor. */
+  findScreen: (connector: string, readQuery: string) => ScreenListItem | null
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null)
@@ -68,6 +74,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
+  const [screens, setScreens] = useState<Record<string, ScreenListItem[]> | null>(null)
   const [license, setLicense] = useState<LicenseInfo>(RESTRICTED)
   const [error, setError] = useState<string | null>(null)
   const [currentApp, setCurrentAppState] = useState<string | null>(readApp)
@@ -77,6 +84,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!ready || !user) {
       setConnectors(null)
       setMenus(null)
+      setScreens(null)
       setLicense(RESTRICTED)
       setError(null)
       return
@@ -88,11 +96,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     Promise.all([
       api.get<{ connectors: ConnectorMeta[] }>('/api/connectors'),
       api.get<{ menus: MenusByApp }>('/api/menus'),
+      // Screens are best-effort: a deployment without screens.toml just returns an empty map and
+      // the dialog-runtime falls back to the existing inline grid editor.
+      api.get<ScreensByApp>('/api/screens').catch((): ScreensByApp => ({ screens: {} })),
     ])
-      .then(([c, m]) => {
+      .then(([c, m, s]) => {
         if (cancelled) return
         setConnectors(c.connectors)
         setMenus(m.menus)
+        setScreens(s.screens)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e))
@@ -144,9 +156,32 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return (app && menus[app]) || null
   }, [menus, apps, currentApp])
 
+  // A connector + read_query → ScreenListItem lookup. The map is rebuilt only when `screens` changes
+  // (login, reload, refresh); same connector + same read query under several apps is ambiguous → null
+  // (a screen referenced from two apps is a config bug, but pinging the user a 404 is safer than
+  // silently guessing). Case-insensitive on both keys to match the runtime's resolver.
+  const screenIndex = useMemo(() => {
+    const idx = new Map<string, ScreenListItem | 'AMBIGUOUS'>()
+    if (!screens) return idx
+    for (const list of Object.values(screens)) {
+      for (const s of list) {
+        const k = `${s.connector.toLowerCase()}/${s.read_query.toLowerCase()}`
+        idx.set(k, idx.has(k) ? 'AMBIGUOUS' : s)
+      }
+    }
+    return idx
+  }, [screens])
+  const findScreen = useCallback(
+    (connector: string, readQuery: string): ScreenListItem | null => {
+      const hit = screenIndex.get(`${connector.toLowerCase()}/${readQuery.toLowerCase()}`)
+      return hit && hit !== 'AMBIGUOUS' ? hit : null
+    },
+    [screenIndex],
+  )
+
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, license, error, currentApp, currentMenu, setCurrentApp, refresh }),
-    [connectors, apps, menus, license, error, currentApp, currentMenu, setCurrentApp, refresh],
+    () => ({ connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen }),
+    [connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

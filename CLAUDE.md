@@ -722,15 +722,47 @@ migrate cleanly.
   + Reload. (No frontend *consumer* for ``GET /api/screens`` yet — that's slice 2's job, the
   TableView opens the dialog from it.)
 
-Slices 2-6 still to do (dialog runtime, per-field conditions, actions/events, AUD audit, row menus).
+**Phase 6 slice 2 (Dialog runtime) — DONE.** Lives in `frontend/src/pages/TableView/`:
+- `ScreenDialog.tsx` — the modal form. Built from a Screen's `dialog`: tabs (filtered by
+  `hide_on_add` / `hide_on_edit` for the current mode), each tab a CSS grid `cols` wide, each
+  field's widget picked from the matching read-result `column.rule`: BOOLEAN → checkbox, ENUM →
+  `SearchSelect`, LOOKUP → `SearchSelect` whose options come from `useLookupTables` (with
+  `lookup_param_binds` resolved at call time — `value` literal + `source` reading the live form
+  state, fed into the lookup spec's `params`, so a UDC-style WHERE narrows correctly), date /
+  number / text from the column's `format`/`type`. `hidden` skips the field; `disabled` renders
+  a read-only echo; `required` flags the label; `colspan` widens; `default` seeds on `add`. Save
+  POSTs to `/api/sql/{connector}/{update_query|insert_query}` with the row's values (uppercased
+  + `:<COL>_ORIGINAL` keys on edit — same convention the inline grid editor uses). Form state is
+  keyed by `ScreenField.name` (whatever case the screen uses), and seeding reads from the DB row
+  case-insensitively (Postgres folds unquoted identifiers to lowercase; v1 migration emits
+  uppercase) so the form picks the right initial value either way.
+- `ResultTable.tsx` — when the workspace's `findScreen(connector, query)` returns a hit *and*
+  the screen has a dialog, the toolbar gains a primary "Add row" (opens the dialog in `add`
+  mode) and clicking a non-grouped row opens the dialog in `edit` mode for that row. The
+  existing inline "Edit" (now "Bulk edit") batch flow stays as the fallback / power-user path.
+  `onSaved` refetches the query so the grid reflects the new state.
+- `frontend/src/common/DataTable.tsx` — adds an `onRowClick` prop; the click handler bails on
+  interactive children (`input/button/a/select/textarea/label`) so cell widgets and the column-
+  header menus keep working without firing the dialog underneath.
+- `frontend/src/workspace/WorkspaceContext.tsx` — fetches `GET /api/screens` after login and
+  exposes `screens` (list-view, no dialog body) plus a `findScreen(connector, read_query)`
+  helper. A connector + read_query appearing in two screens (a config bug) → `null` (safer than
+  silently picking one).
+- `frontend/src/types/screens.ts` — the runtime shapes (`ScreenListItem` / `ScreenDetail` /
+  `ScreenTab` / `ScreenField` / `ParamBind` / `ScreensByApp`); see also the Settings-builder
+  shapes in `types/config.ts`.
+- EN/FR i18n strings added (`table.bulkEdit`, `common.no`/`common.pick`, `dialog.*`).
+Slices 3-6 still to do (per-field conditions, actions/events, AUD audit, row menus).
 
 335 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
 the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
-contextual menus — slice 1 (Screen + ParamBind + migration) **done**; the `visible_when`/`filter_from`
-work is its table-side first slice; design it against real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
+contextual menus — slice 1 (Screen + ParamBind + migration) **done**, slice 2 (dialog runtime —
+row click → modal form, lookup param-binds, save → update/insert) **done**; the
+`visible_when`/`filter_from` work is its table-side first slice; design it against real migrated
+screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
 the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed`

@@ -12,6 +12,7 @@ import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Spin
 import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
+import type { ScreenDetail } from '../../types/screens'
 import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
 import { FilterPanel, type ServerFilter } from './FilterPanel'
@@ -41,7 +42,7 @@ const MaxRowsBox = styled.label`
 
 export default function TableView({ connector, query }: { connector: string; query: string }) {
   const { t } = useTranslation()
-  const { menus } = useWorkspace()
+  const { menus, findScreen } = useWorkspace()
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
@@ -50,11 +51,16 @@ export default function TableView({ connector, query }: { connector: string; que
   const [result, setResult] = useState<QueryResult | null>(null)
   const [runErr, setRunErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Full screen detail — fetched lazily when the workspace flags a screen for this (connector,
+  // query). Carries the dialog body the ScreenDialog renders; null means no screen / no dialog,
+  // and ResultTable falls back to its inline grid editor.
+  const [screen, setScreen] = useState<ScreenDetail | null>(null)
 
   useEffect(() => {
     setMeta(null)
     setMetaErr(null)
     setResult(null)
+    setScreen(null)
     api
       .get<ConnectorMeta>(`/api/connectors/${encodeURIComponent(connector)}`)
       .then((c) => {
@@ -69,6 +75,20 @@ export default function TableView({ connector, query }: { connector: string; que
       })
       .catch((e) => setMetaErr(e instanceof ApiError ? e.message : String(e)))
   }, [connector, query])
+
+  // Fetch the screen body iff a screen for this (connector, query) is in the workspace catalog
+  // *and* has a dialog. A 404 (e.g. the catalog raced ahead of a delete) silently degrades to
+  // "no screen" → inline editor; this is best-effort UX, not a security gate.
+  useEffect(() => {
+    const stub = findScreen(connector, query)
+    if (!stub || !stub.has_dialog) { setScreen(null); return }
+    let cancelled = false
+    api
+      .get<ScreenDetail>(`/api/screens/${encodeURIComponent(stub.app)}/${encodeURIComponent(stub.id)}`)
+      .then((s) => { if (!cancelled) setScreen(s) })
+      .catch(() => { if (!cancelled) setScreen(null) })
+    return () => { cancelled = true }
+  }, [findScreen, connector, query])
 
   // Server-filter fields: result columns flagged `filter` in the query's `columns` config (v1's
   // col_filter). The migrated SQL is wrapped in `SELECT * FROM (…) _flt WHERE …` with a `:<col>` +
@@ -259,6 +279,7 @@ export default function TableView({ connector, query }: { connector: string; que
                 runControl={runBtn}
                 maxRowsControl={maxRowsField}
                 activeFilters={activeFilters}
+                screen={screen}
               />
             )}
           </Stack>
