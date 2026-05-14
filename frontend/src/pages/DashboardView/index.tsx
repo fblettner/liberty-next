@@ -11,8 +11,9 @@ import { useTranslation } from 'react-i18next'
 import { LayoutDashboard } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
-import type { Dashboard, DashboardWidget } from '../../types/dashboards'
+import type { Dashboard, DashboardFilterWire, DashboardWidget } from '../../types/dashboards'
 import { ChartWidget } from './ChartWidget'
+import { FilterBar } from './FilterBar'
 import { KpiWidget } from './KpiWidget'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -52,17 +53,32 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   const { t } = useTranslation()
   const [dashboard, setDashboard] = useState<Dashboard | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Filter state: `{[filter.id]: pickedValue}`. Empty string === "all" (no filter). Seeded from
+  // `default_value` once when the dashboard loads.
+  const [filterValues, setFilterValues] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
     setDashboard(null)
     setError(null)
+    setFilterValues({})
     api
       .get<Dashboard>(`/api/dashboards/${encodeURIComponent(dashboardId)}`)
-      .then((d) => { if (!cancelled) setDashboard(d) })
+      .then((d) => {
+        if (cancelled) return
+        setDashboard(d)
+        // Seed the filter state from each filter's `default_value`. The user can clear it via "All".
+        if (d.filters?.length) {
+          const seeded: Record<string, string> = {}
+          for (const f of d.filters) if (f.default_value) seeded[f.id] = f.default_value
+          setFilterValues(seeded)
+        }
+      })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
   }, [dashboardId])
+
+  const filters = dashboard?.filters ?? []
 
   if (error) return <PageLayout title={dashboardId}><Banner $tone="error">{error}</Banner></PageLayout>
   if (!dashboard) return <Centered />
@@ -74,12 +90,19 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
       description={dashboard.description ? <span>{dashboard.description}</span> : <Mono>{dashboardId}</Mono>}
     >
       <Stack gap={14} style={{ flex: 1, minHeight: 0 }}>
+        {filters.length > 0 && (
+          <FilterBar
+            filters={filters}
+            values={filterValues}
+            onChange={(id, value) => setFilterValues((cur) => ({ ...cur, [id]: value }))}
+          />
+        )}
         {dashboard.widgets.length === 0 ? (
           <EmptyState>{t('dashboard.empty')}</EmptyState>
         ) : (
           <Grid>
             {dashboard.widgets.map((w, i) => (
-              <WidgetCell key={i} widget={w} />
+              <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} />
             ))}
           </Grid>
         )}
@@ -88,12 +111,22 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   )
 }
 
-/** One cell in the grid. Picks the renderer by widget kind; both renderers fetch their own query. */
-function WidgetCell({ widget }: { widget: DashboardWidget }) {
+/** One cell in the grid. Picks the renderer by widget kind; both renderers fetch their own query.
+ *  `filters` + `filterValues` thread down so each widget can resolve its own column-by-`dd` and
+ *  append URL params on the data fetch. */
+function WidgetCell({
+  widget, filters, filterValues,
+}: {
+  widget: DashboardWidget
+  filters: DashboardFilterWire[]
+  filterValues: Record<string, string>
+}) {
   return (
     <WidgetFrame $cs={widget.col_span} $rs={widget.row_span}>
       {widget.label && <WidgetTitle>{widget.label}</WidgetTitle>}
-      {widget.type === 'chart' ? <ChartWidget widget={widget} /> : <KpiWidget widget={widget} />}
+      {widget.type === 'chart'
+        ? <ChartWidget widget={widget} filters={filters} filterValues={filterValues} />
+        : <KpiWidget widget={widget} filters={filters} filterValues={filterValues} />}
     </WidgetFrame>
   )
 }

@@ -161,6 +161,10 @@ const en = {
   },
   dashboard: {
     empty: 'No widgets you can read on this dashboard yet.',
+    filter: {
+      all: 'All',
+      loading: 'Loading…',
+    },
   },
   chart: {
     type: { bar: 'Bar', line: 'Line', area: 'Area', pie: 'Pie' },

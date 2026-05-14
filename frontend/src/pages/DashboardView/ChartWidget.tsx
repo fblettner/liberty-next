@@ -6,14 +6,16 @@
 // chrome allowance for the title + the canvas's own border/padding). Passing a fixed height
 // keeps Recharts' ResponsiveContainer happy even when the widget's parent briefly measures 0 ×
 // 0 during the loading → loaded transition or when sitting in a hidden tab.
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { api, ApiError } from '../../api/client'
 import { Banner, SpinnerRing } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartCanvas } from '../TableView/ChartCanvas'
 import type { QueryResult } from '../../types/connectors'
-import type { ChartWidgetWire } from '../../types/dashboards'
+import type { ChartWidgetWire, DashboardFilterWire } from '../../types/dashboards'
 import type { ChartSpec } from '../../types/charts'
+import { buildWidgetFilterParams } from './widgetFilters'
 import { colors, glass, radius, shadow } from '../../theme'
 
 // Mirrors ChartCanvas's Frame so the loading placeholder looks identical to the loaded chart —
@@ -30,20 +32,44 @@ const Placeholder = styled.div<{ $h: number }>`
 const ROW_PX = 150          // matches DashboardView's `grid-auto-rows`
 const FRAME_CHROME = 50     // title + gap + the canvas's own border/padding + legend
 
-export function ChartWidget({ widget }: { widget: ChartWidgetWire }) {
+export interface ChartWidgetProps {
+  widget: ChartWidgetWire
+  /** Dashboard filter defs (the per-dashboard `filters` array). Empty → no filter bar; this
+   *  widget just fetches unfiltered. */
+  filters: DashboardFilterWire[]
+  /** Current filter selections (`{[filter.id]: pickedValue}`). Empty values = "All", no bind. */
+  filterValues: Record<string, string>
+}
+
+export function ChartWidget({ widget, filters, filterValues }: ChartWidgetProps) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { connectors } = useWorkspace()
+
+  // Resolve dashboard filters → URL params for this widget's specific query. Memoized so we
+  // don't refetch on every render — only when the actual bound params change.
+  const filterParams = useMemo(
+    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, connectors),
+    [widget.connector, widget.query, filters, filterValues, connectors],
+  )
+  // Stable key for the useEffect deps — JSON-stringify the params so object identity changes
+  // don't trigger a refetch unless the actual values changed.
+  const filterParamsKey = JSON.stringify(filterParams)
 
   useEffect(() => {
     let cancelled = false
     setResult(null)
     setError(null)
+    const qs = new URLSearchParams(filterParams).toString()
+    const url = `/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}${qs ? `?${qs}` : ''}`
     api
-      .get<QueryResult>(`/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}`)
+      .get<QueryResult>(url)
       .then((r) => { if (!cancelled) setResult(r) })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [widget.connector, widget.query])
+    // filterParamsKey covers filterParams; eslint can't follow that, hence the disable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widget.connector, widget.query, filterParamsKey])
 
   const chartHeight = Math.max(180, widget.row_span * ROW_PX - FRAME_CHROME)
 

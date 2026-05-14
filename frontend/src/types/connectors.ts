@@ -90,6 +90,10 @@ export interface Column {
   format?: string
   /** Resolved BOOLEAN / ENUM / LOOKUP display rule from the field dictionary (the v2 form of v1's dd_rules). */
   rule?: DisplayRule
+  /** Dictionary key the column was hinted with (v1's ``col_dd_id``). Surfaced so dashboard
+   *  filters can cross-map columns by dd — one `APPS_ID` filter targets USR_APPS_ID,
+   *  RLU_APPS_ID, CFD_APPS_ID, etc. across queries. Absent when the operator never set `dd`. */
+  dd?: string
 }
 
 export interface QueryResult {

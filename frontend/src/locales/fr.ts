@@ -163,6 +163,10 @@ const fr: Resources = {
   },
   dashboard: {
     empty: 'Aucun widget lisible sur ce tableau de bord pour le moment.',
+    filter: {
+      all: 'Tous',
+      loading: 'Chargement…',
+    },
   },
   chart: {
     type: { bar: 'Barres', line: 'Courbe', area: 'Aire', pie: 'Camembert' },

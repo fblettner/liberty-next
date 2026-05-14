@@ -8,9 +8,11 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, SpinnerRing } from '../../common'
 import { resolveColumnName, toNumber } from '../../services/chartData'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { QueryResult } from '../../types/connectors'
-import type { KpiWidgetWire } from '../../types/dashboards'
+import type { DashboardFilterWire, KpiWidgetWire } from '../../types/dashboards'
 import type { Aggregation } from '../../types/charts'
+import { buildWidgetFilterParams } from './widgetFilters'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
 // Liquid-glass KPI card — backdrop blur over a slightly-translucent base, soft drop shadow, a
@@ -40,21 +42,37 @@ const Sub = styled.div`
 `
 const Pending = styled.div`color: ${colors.text.muted};`
 
-export function KpiWidget({ widget }: { widget: KpiWidgetWire }) {
+export interface KpiWidgetProps {
+  widget: KpiWidgetWire
+  filters: DashboardFilterWire[]
+  filterValues: Record<string, string>
+}
+
+export function KpiWidget({ widget, filters, filterValues }: KpiWidgetProps) {
   const { t } = useTranslation()
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { connectors } = useWorkspace()
+
+  const filterParams = useMemo(
+    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, connectors),
+    [widget.connector, widget.query, filters, filterValues, connectors],
+  )
+  const filterParamsKey = JSON.stringify(filterParams)
 
   useEffect(() => {
     let cancelled = false
     setResult(null)
     setError(null)
+    const qs = new URLSearchParams(filterParams).toString()
+    const url = `/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}${qs ? `?${qs}` : ''}`
     api
-      .get<QueryResult>(`/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}`)
+      .get<QueryResult>(url)
       .then((r) => { if (!cancelled) setResult(r) })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [widget.connector, widget.query])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterParamsKey covers filterParams
+  }, [widget.connector, widget.query, filterParamsKey])
 
   const value: number | null = useMemo(() => {
     if (!result) return null

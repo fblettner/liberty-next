@@ -32,10 +32,31 @@ export interface KpiWidgetWire {
 
 export type DashboardWidget = ChartWidgetWire | KpiWidgetWire
 
+export interface DashboardFilterOptionsWire {
+  connector: string
+  query: string
+  value_column: string
+  label_column: string
+}
+
+/** A dashboard-level filter — appears as a dropdown above the widget grid. When the user picks a
+ *  value, each widget whose query has a column with `dd === dictionary_key` refetches with that
+ *  column bound to the chosen value. Widgets without a matching column ignore the filter. */
+export interface DashboardFilterWire {
+  id: string
+  label: string
+  dictionary_key: string
+  default_value?: string
+  options: DashboardFilterOptionsWire
+}
+
 export interface Dashboard {
   id: string
   label: string
   description?: string | null
+  /** Empty / absent → no filter bar rendered. The backend only includes filters the caller can
+   *  read (the options query gates on `sql:<conn>:<query>`). */
+  filters?: DashboardFilterWire[]
   widgets: DashboardWidget[]
 }
 
