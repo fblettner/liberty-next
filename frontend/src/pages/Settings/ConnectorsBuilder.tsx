@@ -60,8 +60,13 @@ const TableList = styled.div`display: flex; flex-direction: column; gap: 6px; ma
 const TableRow = styled.button`
   display: flex; align-items: center; gap: 10px; padding: 9px 11px; width: 100%; text-align: left;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
-  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  & .base { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  color: ${colors.text.primary};
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & .base { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .desc {
+    font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted};
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
 `
 const Slot = styled.span<{ $on?: boolean }>`
@@ -320,22 +325,35 @@ export default function ConnectorsBuilder() {
                       <Empty>{t('settings.tables.emptyConnector')}</Empty>
                     )}
                     <TableList>
-                      {shownTables.map((g) => (
-                        <TableRow key={g.base} type="button" onClick={() => setSelTable(g.base)}>
-                          <span className="base">{g.base}</span>
-                          {CRUD_KINDS.map((c) => (
-                            <Slot key={c} $on={!!g.slots[c]} title={g.slots[c]?.name ?? `${g.base}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
-                          ))}
-                          <RowAction
-                            role="button"
-                            aria-label={t('settings.tables.duplicate')}
-                            title={t('settings.tables.duplicate')}
-                            onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, g.base) }}
-                          >
-                            <Copy size={13} />
-                          </RowAction>
-                        </TableRow>
-                      ))}
+                      {shownTables.map((g) => {
+                        // Friendly description for the table — read query's `description`
+                        // (v1's tbl_label, e.g. "Security - Users"), falls back to `label`.
+                        // Same fallback chain as TableView's title resolver and the main
+                        // /connectors page; sits below the technical base name on a second row.
+                        const getQ = g.slots.get?.query as Record<string, unknown> | undefined
+                        const desc = (typeof getQ?.description === 'string' && getQ.description)
+                                  || (typeof getQ?.label === 'string' && getQ.label)
+                                  || null
+                        return (
+                          <TableRow key={g.base} type="button" onClick={() => setSelTable(g.base)}>
+                            <span className="text">
+                              <span className="base">{g.base}</span>
+                              {desc && <span className="desc">{desc}</span>}
+                            </span>
+                            {CRUD_KINDS.map((c) => (
+                              <Slot key={c} $on={!!g.slots[c]} title={g.slots[c]?.name ?? `${g.base}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
+                            ))}
+                            <RowAction
+                              role="button"
+                              aria-label={t('settings.tables.duplicate')}
+                              title={t('settings.tables.duplicate')}
+                              onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, g.base) }}
+                            >
+                              <Copy size={13} />
+                            </RowAction>
+                          </TableRow>
+                        )
+                      })}
                     </TableList>
                     <Row gap={6}>
                       <Button $variant="ghost" $size="sm" onClick={() => sel && addTable(sel)}>
