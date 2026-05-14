@@ -111,6 +111,29 @@ def _can_read(principal: Principal, widget_dict: dict[str, Any]) -> bool:
     return principal.has_permission(f"sql:{target[0]}:{target[1]}")
 
 
+def _resolve_filters(dashboard: Dashboard, principal: Principal) -> list[dict[str, Any]]:
+    """Build the wire shape for the dashboard's filter bar. A filter is included iff the caller
+    holds the permission for its options query (the dropdown can't render otherwise); the rest
+    of the dashboard is unaffected."""
+    out: list[dict[str, Any]] = []
+    for f in dashboard.filters:
+        if not principal.has_permission(f"sql:{f.options.connector}:{f.options.query}"):
+            continue
+        out.append({
+            "id": f.id,
+            "label": f.label,
+            "dictionary_key": f.dictionary_key,
+            **({"default_value": f.default_value} if f.default_value else {}),
+            "options": {
+                "connector": f.options.connector,
+                "query": f.options.query,
+                "value_column": f.options.value_column,
+                "label_column": f.options.label_column,
+            },
+        })
+    return out
+
+
 def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Principal) -> dict[str, Any]:
     """Build the wire shape for one dashboard — resolves chart references, applies the
     per-widget permission gate, drops what the caller can't see. The dashboard itself is
@@ -131,6 +154,9 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
     out: dict[str, Any] = {"id": dashboard.id, "label": dashboard.label, "widgets": resolved}
     if dashboard.description:
         out["description"] = dashboard.description
+    filters = _resolve_filters(dashboard, principal)
+    if filters:
+        out["filters"] = filters
     return out
 
 

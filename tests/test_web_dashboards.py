@@ -228,3 +228,76 @@ def test_reload_rereads_dashboards(app, tmp_path) -> None:
         r = client.post("/admin/reload", headers=h)
         assert r.status_code == 200 and r.json()["dashboards"] == []
         assert client.get("/api/dashboards", headers=h).json()["dashboards"] == []
+
+
+# --- dashboard filters (Phase 8 slice 3b) ---------------------------------- #
+
+
+def test_filter_surfaced_when_caller_can_read_options(tmp_path) -> None:
+    """The filter bar appears for callers who can read its options query (and have at least
+    one readable widget). Caller without permission on the options query → filter dropped; the
+    dashboard itself still renders with its widgets."""
+    import asyncio
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
+    (tmp_path / "charts.toml").write_text("")  # no charts; filter is inline
+    (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
+        [dashboards.ov]
+        label = "Overview"
+
+          [[dashboards.ov.filters]]
+          id = "app"
+          label = "Application"
+          dictionary_key = "APPS_ID"
+
+            [dashboards.ov.filters.options]
+            connector = "app1"
+            query = "users_get"
+            value_column = "APPS_ID"
+            label_column = "APPS_NAME"
+
+          [[dashboards.ov.widgets]]
+          type = "kpi"
+          label = "Users"
+          connector = "app1"
+          query = "users_get"
+          column = "USR_ID"
+          aggregation = "count"
+    """))
+
+    async def go() -> None:
+        pools = PoolRegistry({"default": PoolConfig(url=db_url)})
+        db = AuthDatabase(pools, "default")
+        await db.create_schema()
+        async with db.session() as s:
+            svc = AuthService(s)
+            await svc.get_or_create_role("admin", permissions=["*"])
+            await svc.get_or_create_role("user", permissions=["sql:app1:users_get"])
+            await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
+            await svc.create_user("user", password="userpw", roles=["user"])
+            await svc.create_user("nobody", password="nobodypw")
+        await pools.dispose()
+
+    asyncio.run(go())
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
+        charts=ChartSettings(config_path=Path(tmp_path / "charts.toml")),
+        dashboards=DashboardSettings(config_path=Path(tmp_path / "dashboards.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        # Admin: filter surfaces with full options block
+        d = client.get("/api/dashboards/ov", headers=_h(client, "admin")).json()
+        assert "filters" in d and len(d["filters"]) == 1
+        f = d["filters"][0]
+        assert f["id"] == "app" and f["dictionary_key"] == "APPS_ID"
+        assert f["options"]["value_column"] == "APPS_ID" and f["options"]["label_column"] == "APPS_NAME"
+        # user: can read users_get → both widget AND filter (filter's options query == widget's query)
+        d = client.get("/api/dashboards/ov", headers=_h(client, "user")).json()
+        assert len(d["filters"]) == 1 and len(d["widgets"]) == 1
+        # nobody: neither → no filter (key omitted), no widgets
+        d = client.get("/api/dashboards/ov", headers=_h(client, "nobody")).json()
+        assert "filters" not in d and d["widgets"] == []

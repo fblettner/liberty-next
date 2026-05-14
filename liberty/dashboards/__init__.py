@@ -9,6 +9,8 @@ from __future__ import annotations
 from liberty.dashboards.config import (
     ChartWidget,
     Dashboard,
+    DashboardFilter,
+    DashboardFilterOptions,
     DashboardsFile,
     KpiWidget,
     Widget,
@@ -20,6 +22,8 @@ from liberty.dashboards.config import (
 __all__ = [
     "ChartWidget",
     "Dashboard",
+    "DashboardFilter",
+    "DashboardFilterOptions",
     "DashboardsFile",
     "KpiWidget",
     "Widget",

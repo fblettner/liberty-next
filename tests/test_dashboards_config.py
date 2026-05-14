@@ -155,3 +155,58 @@ description = "User counts + assignments at a glance"
     assert d.description == "User counts + assignments at a glance"
     assert len(d.widgets) == 2
     assert isinstance(d.widgets[1], KpiWidget) and d.widgets[1].label == "Active users"
+
+
+# --- dashboard filters (Phase 8 slice 3b) ---------------------------------- #
+
+
+def test_parse_dashboard_filter() -> None:
+    """A dashboard can declare optional filters; each carries an `options` block describing the
+    lookup query. The model_validator enforces the options shape (every field required)."""
+    from liberty.dashboards import DashboardFilter, DashboardFilterOptions
+    data = {
+        "dashboards": {
+            "ov": {
+                "label": "Overview",
+                "filters": [{
+                    "id": "app", "label": "Application", "dictionary_key": "APPS_ID",
+                    "options": {
+                        "connector": "nomasx1",
+                        "query": "get_apps_id_from_settings_applications_get",
+                        "value_column": "APPS_ID", "label_column": "APPS_NAME",
+                    },
+                }],
+                "widgets": [],
+            },
+        },
+    }
+    df = parse_dashboards(data)
+    d = df.dashboards["ov"]
+    assert len(d.filters) == 1
+    f = d.filters[0]
+    assert isinstance(f, DashboardFilter) and f.id == "app" and f.dictionary_key == "APPS_ID"
+    assert f.default_value is None
+    assert isinstance(f.options, DashboardFilterOptions)
+    assert f.options.connector == "nomasx1" and f.options.value_column == "APPS_ID"
+
+
+def test_dashboard_filter_options_required() -> None:
+    """Filter must have an options block — without it the frontend can't render the dropdown."""
+    data = {
+        "dashboards": {
+            "ov": {
+                "label": "Overview",
+                "filters": [{"id": "app", "label": "Application", "dictionary_key": "APPS_ID"}],
+                "widgets": [],
+            },
+        },
+    }
+    with pytest.raises(Exception):  # pydantic ValidationError — options is required
+        parse_dashboards(data)
+
+
+def test_dashboards_without_filters_default_to_empty() -> None:
+    """The `filters` field defaults to [] so existing dashboards keep working unchanged."""
+    data = {"dashboards": {"ov": {"label": "Overview", "widgets": []}}}
+    df = parse_dashboards(data)
+    assert df.dashboards["ov"].filters == []

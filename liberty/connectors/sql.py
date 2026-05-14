@@ -117,7 +117,12 @@ class Column:
     plus optional display hints carried over from the query's ``columns`` config
     (label/hidden/width/align/format — see :class:`~liberty.connectors.config.ColumnHint`)
     and an optional ``rule`` (resolved from the dictionary entry — BOOLEAN's true-value, an ENUM's
-    value→label map, or a LOOKUP reference; see :meth:`DictionaryFile.resolve_rule`)."""
+    value→label map, or a LOOKUP reference; see :meth:`DictionaryFile.resolve_rule`).
+
+    ``dd`` is the dictionary key the column was resolved against (the v1 ``col_dd_id``). The wire
+    payload exposes it so the frontend can do cross-table mapping — Phase 8 slice 3b's dashboard
+    filters use it to find which column to bind on each widget's query (``dd = "APPS_ID"`` on
+    ``USR_APPS_ID`` / ``RLU_APPS_ID`` / ``CFD_APPS_ID``, etc., share one filter)."""
 
     name: str
     type: str | None = None
@@ -130,6 +135,7 @@ class Column:
     align: str | None = None
     format: str | None = None
     rule: dict[str, Any] | None = None
+    dd: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "type": self.type}
@@ -147,6 +153,8 @@ class Column:
             d["width"] = self.width
         if self.align is not None:
             d["align"] = self.align
+        if self.dd is not None:
+            d["dd"] = self.dd
         if self.format is not None:
             d["format"] = self.format
         if self.rule is not None:
@@ -550,6 +558,12 @@ def _resolve_hint(
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         width=h.width, align=h.align, format=fmt, rule=rule,
+        # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
+        # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator
+        # opted out of the dictionary), don't pollute the wire. Phase-8 dashboard filters key on
+        # this to cross-map columns by dictionary key (`APPS_ID` matches USR_APPS_ID / RLU_APPS_ID
+        # / CFD_APPS_ID across queries).
+        dd=h.dd if h.dd else None,
     )
 
 

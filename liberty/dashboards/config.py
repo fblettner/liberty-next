@@ -119,14 +119,61 @@ class KpiWidget(WidgetBase):
 Widget = Annotated[Union[ChartWidget, KpiWidget], Field(discriminator="type")]
 
 
+class DashboardFilterOptions(BaseModel):
+    """How to populate a dashboard filter's value picker — a lookup query whose result drives the
+    dropdown options. The frontend renders the dropdown as a SearchSelect over ``{value, label}``
+    pairs taken from each row's ``value_column`` and ``label_column``. The caller must hold
+    ``sql:<connector>:<query>`` to populate the dropdown (the filter is hidden if they don't —
+    same convention the rest of the routes use)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    connector: str = Field(description="SQL connector hosting the options query.")
+    query: str = Field(description="Read query whose rows populate the dropdown options.")
+    value_column: str = Field(description="Result column whose value becomes the filter's bound value.")
+    label_column: str = Field(description="Result column whose value is shown in the dropdown.")
+
+
+class DashboardFilter(BaseModel):
+    """A dashboard-level filter — picks a value, every widget whose query has a column with the
+    matching ``dictionary_key`` is refetched with that column bound to the picked value. Widgets
+    whose query has no matching column ignore the filter (no SQL change). For nomasx1, a single
+    ``APPS_ID`` filter cross-maps to ``USR_APPS_ID`` / ``RLU_APPS_ID`` / ``CFD_APPS_ID`` etc. via
+    the column hints' ``dd = "APPS_ID"`` annotation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Stable id (used as the state key on the frontend).")
+    label: str = Field(description="Display label shown above the dropdown.")
+    dictionary_key: str = Field(
+        description=(
+            "Cross-table glue — every widget's query column whose ``dd`` hint matches this is the "
+            "one that gets bound. For nomasx1's ``APPS_ID`` filter, that's USR_APPS_ID / "
+            "RLU_APPS_ID / CFD_APPS_ID / ..."
+        ),
+    )
+    default_value: str | None = Field(
+        default=None,
+        description="Pre-selected value when the dashboard opens. Blank = no filter (show all).",
+    )
+    options: DashboardFilterOptions = Field(description="Where the dropdown's choices come from.")
+
+
 class Dashboard(BaseModel):
-    """One ``[dashboards.<id>]`` — title + description + the widget list."""
+    """One ``[dashboards.<id>]`` — title + description + the widget list + optional filters."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(default="", description="Stable id (matches the TOML key).", json_schema_extra={"x_group": "Advanced"})
     label: str = Field(description="Display label — the dashboard's title in lists and menus.")
     description: str | None = Field(default=None, description="Optional longer description.")
+    filters: list[DashboardFilter] = Field(
+        default_factory=list,
+        description=(
+            "Optional dashboard-level filters — render as a bar above the widget grid; picking "
+            "a value refetches every applicable widget with that bind. Empty = no bar shown."
+        ),
+    )
     widgets: list[Widget] = Field(default_factory=list, description="Widgets, in display order.")
 
 
