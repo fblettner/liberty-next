@@ -16,11 +16,20 @@ import { ChartWidget } from './ChartWidget'
 import { KpiWidget } from './KpiWidget'
 import { colors, fontSize, radius } from '../../theme'
 
-// 12-column grid; each widget claims col_span x row_span cells. We use `grid-auto-rows` so the
-// row height is predictable (charts need a fixed canvas to lay out their axes against).
+// CSS-grid layout: 12 cols on desktop, collapse to 6 on tablet, 1 on mobile so dashboards stay
+// useful on a phone. Each row is 180px tall by default — fits a KPI card snugly; charts in the
+// dashboard config get `row_span = 2` (→ 360px) so they have a decent canvas. A widget whose
+// `col_span` is larger than the available track count simply spans the full row (CSS Grid clamps
+// `span N` to "to end of row" when N > remaining tracks).
+const ROW_PX = 180  // matches DashboardView/ChartWidget's `ROW_PX` so chart height computes right
 const Grid = styled.div`
   display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px;
-  grid-auto-rows: 320px;
+  grid-auto-rows: ${ROW_PX}px;
+  @media (max-width: 1100px) { grid-template-columns: repeat(6, 1fr); }
+  @media (max-width: 700px) {
+    grid-template-columns: 1fr;
+    & > * { grid-column: 1 / -1 !important; }
+  }
 `
 const WidgetFrame = styled.div<{ $cs: number; $rs: number }>`
   grid-column: span ${({ $cs }) => $cs};

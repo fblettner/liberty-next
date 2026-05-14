@@ -25,8 +25,8 @@ const Placeholder = styled.div<{ $h: number }>`
   display: flex; align-items: center; justify-content: center;
 `
 
-const ROW_PX = 320          // matches DashboardView's `grid-auto-rows`
-const FRAME_CHROME = 50     // title + gap + the canvas's own border/padding
+const ROW_PX = 180          // matches DashboardView's `grid-auto-rows`
+const FRAME_CHROME = 40     // title + gap + the canvas's own border/padding
 
 export function ChartWidget({ widget }: { widget: ChartWidgetWire }) {
   const [result, setResult] = useState<QueryResult | null>(null)

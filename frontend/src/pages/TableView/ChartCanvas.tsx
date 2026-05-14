@@ -168,8 +168,11 @@ export function renderChart(
       <PieChart>
         {tooltip}
         {opts.showLegend && <Legend verticalAlign="bottom" formatter={() => yLabels[0]} />}
-        <Pie data={data} dataKey={y} nameKey="x" name={yLabels[0]} outerRadius="80%"
-          label={(entry) => opts.formatX(entry.x)}
+        <Pie data={data} dataKey={y} nameKey="x" name={yLabels[0]} outerRadius="75%"
+          /* Recharts injects {cx, cy, midAngle, name, value, …} into the label callback — `name`
+             is the nameKey value (here our datum's `x`). Resolving it via `formatX` shows the
+             BOOLEAN/ENUM/LOOKUP label (e.g. "Active" / "Blocked"), not the raw "01" / "N". */
+          label={({ name }) => opts.formatX(name as unknown)}
           animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200}>
           {data.map((_, i) => <Cell key={i} fill={seriesColor(i)} />)}
         </Pie>

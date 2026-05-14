@@ -15,15 +15,17 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 
 const Frame = styled.div`
   flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: center;
-  gap: 6px; padding: 16px; border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  gap: 4px; padding: 12px; border: 1px solid ${colors.border}; border-radius: ${radius.md};
   background: ${colors.bg.input};
 `
+// Big-number sized via `clamp()` so it scales with the card's width — looks reasonable from a
+// 3-col card (~150px wide) up to a full-width KPI (~1200px) without ever overflowing.
 const Value = styled.div`
-  font-size: 2.6rem; font-weight: 700; font-family: ${fonts.sans}; color: ${colors.text.primary};
-  font-variant-numeric: tabular-nums; line-height: 1.1; text-align: center;
+  font-size: clamp(1.6rem, 4.2vw, 2.4rem); font-weight: 700; font-family: ${fonts.sans};
+  color: ${colors.text.primary}; font-variant-numeric: tabular-nums; line-height: 1.1; text-align: center;
 `
 const Sub = styled.div`
-  font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.mono}; text-transform: uppercase;
+  font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.mono}; text-transform: uppercase;
   letter-spacing: 0.04em;
 `
 const Pending = styled.div`color: ${colors.text.muted};`
