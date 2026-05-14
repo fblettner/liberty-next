@@ -58,6 +58,12 @@ export interface DataTableProps<T extends object> {
    *  target lives inside such a control, so the user can copy text and use cell widgets normally.
    *  The TableView wires this to "open the screen dialog on the clicked row" when a dialog exists. */
   onRowClick?: (row: T) => void
+  /** When provided, right-clicking a (non-grouped) row fires this — the consumer typically opens
+   *  a positioned overlay menu at the click coords (the TableView wires this to ``Screen.row_menu``,
+   *  the slice-4 ``Action`` chain bound to each row). ``event.preventDefault()`` is called for you
+   *  so the browser's native context menu doesn't appear; we don't suppress it on the table chrome
+   *  itself, so headers / pagination still get their native menu. */
+  onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLTableRowElement>) => void
 }
 
 interface SavedGrid {
@@ -226,7 +232,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName, onRowClick,
+  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName, onRowClick, onRowContextMenu,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -547,8 +553,24 @@ export function DataTable<T extends object>({
                       onRowClick!(row.original)
                     }
                   : undefined
+                // Right-click on a (non-grouped) row → onRowContextMenu(row, event). We
+                // preventDefault so the browser's native menu doesn't fight the consumer's
+                // overlay; the consumer is expected to read `event.clientX`/`clientY` to
+                // position the menu. Headers + pagination keep their native menu (we don't
+                // attach this on <th> or the toolbar).
+                const contextable = !row.getIsGrouped() && onRowContextMenu != null
+                const onContextMenu = contextable
+                  ? (e: React.MouseEvent<HTMLTableRowElement>) => {
+                      e.preventDefault()
+                      onRowContextMenu!(row.original, e)
+                    }
+                  : undefined
                 return (
-                  <RowEl key={row.id} className={cls} onClick={onClick} style={clickable ? { cursor: 'pointer' } : undefined}>
+                  <RowEl
+                    key={row.id} className={cls}
+                    onClick={onClick} onContextMenu={onContextMenu}
+                    style={clickable ? { cursor: 'pointer' } : undefined}
+                  >
                     {row.getVisibleCells().map((cell) => (
                       <Td
                         key={cell.id}

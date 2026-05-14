@@ -125,9 +125,13 @@ export interface ScreenListItem {
 }
 
 /** Full screen detail — what `GET /api/screens/{app}/{id}` returns: list-view fields + the
- *  dialog body (when present) + actions / row_menu (placeholders until slice 4 / 6). */
+ *  dialog body + the toolbar (`actions`) and right-click (`row_menu`) action lists. Each
+ *  carries the slice-4 `Action` discriminated union. The runtime fires `row_menu` items on
+ *  right-click on a TableView row (slice 6); `actions` (toolbar) wires up in a later slice. */
 export interface ScreenDetail extends ScreenListItem {
   dialog?: ScreenDialog | null
+  actions?: Action[]
+  row_menu?: Action[]
 }
 
 /** `GET /api/screens` reply — apps → list view. */

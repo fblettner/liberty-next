@@ -18,7 +18,7 @@ import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
 import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3 } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { ScreenDetail } from '../../types/screens'
+import type { Action, ScreenDetail } from '../../types/screens'
 import { api, ApiError } from '../../api/client'
 import { Banner } from '../../common'
 import { DataTable } from '../../common/DataTable'
@@ -81,6 +81,28 @@ function originalKeys(row: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(row).map(([k, v]) => [`${k}_ORIGINAL`, v]))
 }
 
+// Slice 6 — row context menu action runner: resolve a list of ParamBinds against a row's live
+// values. `value` binds are literal; `source` binds read another column on the same row
+// (case-insensitive — the read result is lowercased by Postgres, ParamBinds usually carry the
+// uppercase v1 column name). Reserved built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) are skipped here;
+// they're wired in a future auth slice. Mirrors ScreenDialog's `resolveBindList` but bound
+// against a row dict rather than the dialog's form state — same shape, different context.
+function resolveRowBinds(
+  binds: ReadonlyArray<{ param: string; value?: string | null; source?: string | null }> | undefined,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const b of binds ?? []) {
+    if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
+    if (b.source && !b.source.startsWith('#')) {
+      const key = Object.keys(row).find((k) => k.toLowerCase() === b.source!.toLowerCase())
+      const v = key != null ? row[key] : undefined
+      if (v != null && String(v) !== '') out[b.param] = v
+    }
+  }
+  return out
+}
+
 // ── edit-mode controls ──────────────────────────────────────────────────────
 const EditInput = styled.input`
   width: 100%; box-sizing: border-box; background: ${colors.bg.input};
@@ -124,6 +146,31 @@ const TbBtn = styled.button<{ $tone?: 'primary' }>`
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   &:hover:not(:disabled) { background: var(--hover-subtle); color: ${colors.text.primary}; }
   &:disabled { opacity: 0.4; cursor: default; }
+`
+
+// Row context menu (slice 6) — a small floating panel anchored at the right-click coords.
+// `position: fixed` so the page scroll doesn't drift the menu out of place mid-action; sized to
+// the content with a sane min/max so a single-action menu doesn't shrink to a sliver.
+const RowMenuBox = styled.div`
+  position: fixed; z-index: 500; min-width: 200px; max-width: 320px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  background: ${colors.bg.dropdown}; color: ${colors.text.primary};
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+  display: flex; flex-direction: column; padding: 4px 0;
+`
+const RowMenuItem = styled.button<{ $busy?: boolean }>`
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px; border: none; background: transparent;
+  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  cursor: ${({ $busy }) => ($busy ? 'default' : 'pointer')};
+  opacity: ${({ $busy }) => ($busy ? 0.5 : 1)};
+  text-align: left;
+  & .id { font-family: ${fonts.mono}; color: ${colors.text.muted}; font-size: ${fontSize.micro}; margin-left: auto; }
+  &:hover { background: var(--hover-subtle); }
+  &:disabled { opacity: 0.4; cursor: default; }
+`
+const RowMenuErr = styled.div`
+  padding: 6px 14px 8px; color: ${colors.red.main};
+  font-size: ${fontSize.micro}; font-family: ${fonts.sans}; max-width: 320px; word-break: break-word;
 `
 
 function EditCell({ ctrl, column, defaultText, onChange }: {
@@ -198,12 +245,97 @@ export function ResultTable({
   const openDialogForAdd = useCallback(() => {
     setDlgRow({}); setDlgMode('add'); setDlgOpen(true)
   }, [])
+  // Row context menu (slice 6) — fires `Screen.row_menu` actions on right-click. The menu is a
+  // floating overlay anchored at the click coords. We store the row + position; the menu component
+  // closes on click-outside / Escape. Each item's ParamBinds resolve against the row's values
+  // (the v2 form of v1's row-level action context — same Action shape used by dialog on_save).
+  const rowMenu: Action[] = useMemo(
+    () => (Array.isArray(screen?.row_menu) ? (screen!.row_menu as Action[]) : []),
+    [screen],
+  )
+  const [menuState, setMenuState] = useState<{ row: DataRow; x: number; y: number } | null>(null)
+  const closeMenu = useCallback(() => setMenuState(null), [])
+  // `editMode` is declared further down; we read it via a ref so the openRowMenu callback can sit
+  // here (next to its peers) without a TDZ issue. The ref is kept in sync below via a small effect.
+  const editModeRef = useRef(false)
+  const openRowMenu = useCallback((row: DataRow, e: React.MouseEvent<HTMLTableRowElement>) => {
+    if (rowMenu.length === 0 || editModeRef.current) return
+    setMenuState({ row, x: e.clientX, y: e.clientY })
+  }, [rowMenu.length])
+  // Action runner — sequentially runs the picked row-menu action(s); for v1 parity we run *one*
+  // selected action per right-click, but the helper is list-based so a future "multi-fire" item
+  // can reuse it. ParamBinds resolve against `ctx` (the row); run_query POSTs to /api/sql with
+  // bound + uppercased params (falls back to the screen's effective connector); notify is
+  // collected; refresh signals the parent. Unimplemented variants (call_api / navigate /
+  // set_field / confirm) log a warning and stop the chain unless ``stop_on_error = false`` —
+  // same convention the dialog on_save runner uses.
+  const [menuBusy, setMenuBusy] = useState<string | null>(null)  // action id while it's running
+  const [menuError, setMenuError] = useState<string | null>(null)
+  const runRowAction = useCallback(async (a: Action, ctx: DataRow) => {
+    setMenuBusy(a.id); setMenuError(null)
+    try {
+      switch (a.type) {
+        case 'run_query': {
+          const target = a.connector || connector
+          const bound = resolveRowBinds(a.param_binds, ctx)
+          await api.post(
+            `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
+            { params: withUpper(bound) },
+          )
+          break
+        }
+        case 'notify': {
+          // No global toast surface yet — surface in the menu's status line for now.
+          setMenuError(null)
+          // eslint-disable-next-line no-console
+          console.info('row-menu notify:', a.message)
+          break
+        }
+        case 'refresh': {
+          // implied by the onSaved() at the end of the success path
+          break
+        }
+        case 'call_api':
+        case 'navigate':
+        case 'set_field':
+        case 'confirm': {
+          const msg = `row-menu action '${a.id}' (${a.type}) — runtime not implemented yet`
+          // eslint-disable-next-line no-console
+          console.warn(msg)
+          if (a.stop_on_error !== false) {
+            setMenuError(msg); setMenuBusy(null); return
+          }
+          break
+        }
+      }
+      setMenuBusy(null); closeMenu(); onSaved?.()
+    } catch (e) {
+      setMenuBusy(null)
+      setMenuError(`${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`)
+    }
+  }, [connector, onSaved, closeMenu])
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across re-renders).
   const shownColumns = useMemo(() => result.columns.filter((c) => columnVisibleNow(c, activeFilters ?? {})), [result.columns, activeFilters])
 
   // ── batch-edit state ──
   const [editMode, setEditMode] = useState(false)
+  // keep the row-menu-side editMode ref in sync (declared earlier so openRowMenu can read it
+  // without a TDZ on `editMode`).
+  useEffect(() => { editModeRef.current = editMode }, [editMode])
+  // Close the row context menu on Escape / click-outside. The overlay itself stops propagation
+  // (see the menu render below), so clicking *inside* the menu doesn't close it.
+  useEffect(() => {
+    if (!menuState) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu() }
+    const onClick = () => closeMenu()
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onClick)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onClick)
+    }
+  }, [menuState, closeMenu])
   const [dirtyRows, setDirtyRows] = useState<Set<DataRow>>(new Set())   // existing rows that were edited (markers + Save count)
   const [newRows, setNewRows] = useState<DataRow[]>([])                  // rows to insert — shown at the top, newest first
   const [deleted, setDeleted] = useState<Set<DataRow>>(new Set())        // existing rows marked for deletion
@@ -568,6 +700,9 @@ export function ResultTable({
         // Row click opens the screen dialog (when a dialog exists *and* we're not in batch-edit mode)
         // — same v1 affordance: click a row to edit it via the form.
         onRowClick={hasDialog && !editMode ? (row) => openDialogForRow(row) : undefined}
+        // Right-click → row context menu when the screen carries any `row_menu` actions and
+        // we're not in batch-edit mode (in batch mode the row controls are the actions).
+        onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
         toolbar={
           !canEdit ? undefined : !editMode ? (
             <>
@@ -627,6 +762,31 @@ export function ResultTable({
           onClose={() => setDlgOpen(false)}
           onSaved={() => { setDlgOpen(false); onSaved?.() }}
         />
+      )}
+      {/* Row context menu (slice 6) — a floating panel anchored at the right-click coords. Each
+          item runs its action against the picked row; `mousedown` inside the menu is stopped from
+          bubbling so the document-level click-outside listener doesn't close it underneath us. */}
+      {menuState && (
+        <RowMenuBox
+          style={{ top: menuState.y, left: menuState.x }}
+          onMouseDown={(e) => e.stopPropagation()}
+          role="menu"
+        >
+          {rowMenu.map((a) => (
+            <RowMenuItem
+              key={a.id}
+              role="menuitem"
+              disabled={menuBusy != null && menuBusy !== a.id}
+              $busy={menuBusy === a.id}
+              onClick={() => runRowAction(a, menuState.row)}
+              title={a.id}
+            >
+              <span>{a.label || a.id}</span>
+              <span className="id">{a.type}</span>
+            </RowMenuItem>
+          ))}
+          {menuError && <RowMenuErr>{menuError}</RowMenuErr>}
+        </RowMenuBox>
       )}
     </>
   )

@@ -361,6 +361,11 @@ const fr: Resources = {
         type: 'Type',
         unknownType: 'Type d\'action inconnu : « {{type}} ».',
       },
+      rowmenu: {
+        heading: 'Menu contextuel de ligne',
+        hint: "Actions affichées au clic droit sur une ligne du TableView. Les ParamBind de chaque action sont résolus contre les valeurs de la ligne cliquée. Même forme d'Action que la chaîne on_save du dialogue — seul le contexte de déclenchement diffère.",
+        empty: 'Aucune action de menu contextuel — un clic droit ne fait rien sur cet écran.',
+      },
     },
     tables: {
       tablesView: 'Tables',

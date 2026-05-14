@@ -275,48 +275,9 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     </>
   )
 
-  // ── on_save action chain (slice 4) ────────────────────────────────────────
-  // Per-action SchemaForm is driven by the matching $def (RunQueryAction / NotifyAction / …) —
-  // the discriminated `type` is rendered as a small SearchSelect; switching type seeds a new
-  // minimum-viable object via blankActionOfType so required keys exist immediately.
-  const [expandedAction, setExpandedAction] = useState<number | null>(null)
-  const onSave: Row[] = useMemo(
-    () => (Array.isArray((dialog as Row | null)?.on_save) ? ((dialog as Row).on_save as Row[]) : []),
-    [dialog],
-  )
-  const setOnSave = (next: Row[]) => setDialog({ ...(dialog ?? {}), on_save: next } as { title?: string; tabs?: Row[]; on_save?: Row[] })
-  const updateAction = (idx: number, patch: Row) => {
-    const next = onSave.slice()
-    next[idx] = { ...next[idx], ...patch }
-    for (const k of Object.keys(patch)) {
-      if (patch[k] === undefined || patch[k] === null || patch[k] === '' || patch[k] === false) delete (next[idx] as Row)[k]
-    }
-    setOnSave(next)
-  }
-  const addAction = () => {
-    const id = window.prompt(t('settings.screens.action.namePrompt'))?.trim()
-    if (!id) return
-    if (onSave.some((a) => a.id === id)) { window.alert(t('settings.screens.action.idExists', { id })); return }
-    setOnSave([...onSave, blankActionOfType('run_query', id)])
-    setExpandedAction(onSave.length)
-  }
-  const deleteAction = (idx: number) => {
-    if (!window.confirm(t('settings.screens.action.confirmDelete', { id: onSave[idx]?.id }))) return
-    const next = onSave.slice(); next.splice(idx, 1)
-    setOnSave(next)
-    setExpandedAction((cur) => (cur === idx ? null : cur != null && cur > idx ? cur - 1 : cur))
-  }
-  const changeActionType = (idx: number, newType: ActionType) => {
-    const cur = onSave[idx] ?? {}
-    if (cur.type === newType) return
-    // Preserve id + label + stop_on_error; reset the rest to the new variant's minimum shape.
-    const seeded = blankActionOfType(newType, String(cur.id ?? ''))
-    if (cur.label != null) seeded.label = cur.label
-    if (cur.stop_on_error != null) seeded.stop_on_error = cur.stop_on_error
-    const next = onSave.slice()
-    next[idx] = seeded
-    setOnSave(next)
-  }
+  // ── shared action-list editor (slice 4: dialog `on_save`; slice 6: screen `row_menu`) ────
+  // One editor for any `list[Action]` attachment point. Tracks its own expansion state so two
+  // editors on the same screen (one for on_save, one for row_menu) don't share open rows.
   // Per-type SchemaForm subset — common fields (id/label/stop_on_error) are *also* rendered by
   // SchemaForm from the variant's $def, so the action form is one block. We exclude `type` from
   // the form (it's the picker above) by removing the property from the resolved schema.
@@ -329,73 +290,153 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     return { ...v, properties: props, $defs: defs }
   }
 
-  const renderOnSave = (): ReactNode => (
-    <Stack gap={8} style={{ marginTop: 14 }}>
-      <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>
-        {t('settings.screens.action.heading')}
-      </strong>
-      <Sub>{t('settings.screens.action.hint')}</Sub>
-      <FieldList>
-        {onSave.length === 0 && <Empty>{t('settings.screens.action.empty')}</Empty>}
-        {onSave.map((a, i) => {
-          const open = expandedAction === i
-          const aType = String(a.type ?? 'run_query') as ActionType
-          const schema = actionVariantSchema(a)
-          return (
-            <div key={i}>
-              <FieldHeader $open={open} onClick={() => setExpandedAction(open ? null : i)}>
-                {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <FileText size={13} />
-                <span className="name">{String(a.id ?? '')}</span>
-                <span className="dd">{aType}</span>
-                {a.label != null && a.label !== '' && <span className="dd">· {String(a.label)}</span>}
-              </FieldHeader>
-              {open && (
-                <FieldBody>
-                  <Stack gap={12}>
-                    <Row gap={8} style={{ alignItems: 'center' }}>
-                      <span style={{ color: colors.text.muted, fontSize: fontSize.sm, minWidth: 60 }}>
-                        {t('settings.screens.action.type')}
-                      </span>
-                      <select
-                        value={aType}
-                        onChange={(e) => changeActionType(i, e.target.value as ActionType)}
-                        style={{
-                          height: 30, padding: '0 8px', borderRadius: 6,
-                          border: `1px solid ${colors.border}`, background: colors.bg.input,
-                          color: colors.text.primary, fontFamily: fonts.sans, fontSize: fontSize.sm,
-                        }}
-                      >
-                        {ACTION_TYPES.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
-                      </select>
-                    </Row>
-                    {schema ? (
-                      <SchemaForm
-                        schema={schema}
-                        defs={defs}
-                        value={a}
-                        onChange={(v) => updateAction(i, v)}
-                      />
-                    ) : (
-                      <Empty>{t('settings.screens.action.unknownType', { type: aType })}</Empty>
-                    )}
-                    <Row gap={8}>
-                      <Button $variant="danger" $size="sm" onClick={() => deleteAction(i)}>
-                        <Trash2 size={13} /> {t('settings.screens.action.delete')}
-                      </Button>
-                    </Row>
-                  </Stack>
-                </FieldBody>
-              )}
-            </div>
-          )
-        })}
-      </FieldList>
-      <Button $variant="ghost" $size="sm" onClick={addAction} style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}>
-        <Plus size={13} /> {t('settings.screens.action.add')}
-      </Button>
-    </Stack>
+  // The list is keyed by a label string so each editor (on_save / row_menu) keeps its own
+  // expansion state across re-renders. `Map<key, openIdx>` — small enough to live in one piece.
+  const [expandedByKey, setExpandedByKey] = useState<Record<string, number | null>>({})
+  const renderActionList = (opts: {
+    listKey: string                  // unique-per-editor key for expansion state
+    actions: Row[]
+    setActions: (next: Row[]) => void
+    heading: string
+    hint: string
+    emptyMessage: string
+  }): ReactNode => {
+    const { listKey, actions, setActions, heading, hint, emptyMessage } = opts
+    const expanded = expandedByKey[listKey] ?? null
+    const setExpanded = (v: number | null) =>
+      setExpandedByKey((prev) => ({ ...prev, [listKey]: v }))
+    const update = (idx: number, patch: Row) => {
+      const next = actions.slice()
+      next[idx] = { ...next[idx], ...patch }
+      for (const k of Object.keys(patch)) {
+        if (patch[k] === undefined || patch[k] === null || patch[k] === '' || patch[k] === false) delete (next[idx] as Row)[k]
+      }
+      setActions(next)
+    }
+    const add = () => {
+      const id = window.prompt(t('settings.screens.action.namePrompt'))?.trim()
+      if (!id) return
+      if (actions.some((a) => a.id === id)) { window.alert(t('settings.screens.action.idExists', { id })); return }
+      setActions([...actions, blankActionOfType('run_query', id)])
+      setExpanded(actions.length)
+    }
+    const remove = (idx: number) => {
+      if (!window.confirm(t('settings.screens.action.confirmDelete', { id: actions[idx]?.id }))) return
+      const next = actions.slice(); next.splice(idx, 1)
+      setActions(next)
+      setExpanded(expanded === idx ? null : expanded != null && expanded > idx ? expanded - 1 : expanded)
+    }
+    const changeType = (idx: number, newType: ActionType) => {
+      const cur = actions[idx] ?? {}
+      if (cur.type === newType) return
+      // Preserve id + label + stop_on_error; reset the rest to the new variant's minimum shape.
+      const seeded = blankActionOfType(newType, String(cur.id ?? ''))
+      if (cur.label != null) seeded.label = cur.label
+      if (cur.stop_on_error != null) seeded.stop_on_error = cur.stop_on_error
+      const next = actions.slice()
+      next[idx] = seeded
+      setActions(next)
+    }
+    return (
+      <Stack gap={8} style={{ marginTop: 14 }}>
+        <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>{heading}</strong>
+        <Sub>{hint}</Sub>
+        <FieldList>
+          {actions.length === 0 && <Empty>{emptyMessage}</Empty>}
+          {actions.map((a, i) => {
+            const open = expanded === i
+            const aType = String(a.type ?? 'run_query') as ActionType
+            const schema = actionVariantSchema(a)
+            return (
+              <div key={i}>
+                <FieldHeader $open={open} onClick={() => setExpanded(open ? null : i)}>
+                  {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <FileText size={13} />
+                  <span className="name">{String(a.id ?? '')}</span>
+                  <span className="dd">{aType}</span>
+                  {a.label != null && a.label !== '' && <span className="dd">· {String(a.label)}</span>}
+                </FieldHeader>
+                {open && (
+                  <FieldBody>
+                    <Stack gap={12}>
+                      <Row gap={8} style={{ alignItems: 'center' }}>
+                        <span style={{ color: colors.text.muted, fontSize: fontSize.sm, minWidth: 60 }}>
+                          {t('settings.screens.action.type')}
+                        </span>
+                        <select
+                          value={aType}
+                          onChange={(e) => changeType(i, e.target.value as ActionType)}
+                          style={{
+                            height: 30, padding: '0 8px', borderRadius: 6,
+                            border: `1px solid ${colors.border}`, background: colors.bg.input,
+                            color: colors.text.primary, fontFamily: fonts.sans, fontSize: fontSize.sm,
+                          }}
+                        >
+                          {ACTION_TYPES.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
+                        </select>
+                      </Row>
+                      {schema ? (
+                        <SchemaForm
+                          schema={schema}
+                          defs={defs}
+                          value={a}
+                          onChange={(v) => update(i, v)}
+                        />
+                      ) : (
+                        <Empty>{t('settings.screens.action.unknownType', { type: aType })}</Empty>
+                      )}
+                      <Row gap={8}>
+                        <Button $variant="danger" $size="sm" onClick={() => remove(i)}>
+                          <Trash2 size={13} /> {t('settings.screens.action.delete')}
+                        </Button>
+                      </Row>
+                    </Stack>
+                  </FieldBody>
+                )}
+              </div>
+            )
+          })}
+        </FieldList>
+        <Button $variant="ghost" $size="sm" onClick={add} style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}>
+          <Plus size={13} /> {t('settings.screens.action.add')}
+        </Button>
+      </Stack>
+    )
+  }
+
+  // Dialog `on_save` chain (slice 4) — fires sequentially after the main update/insert succeeds.
+  const onSave: Row[] = useMemo(
+    () => (Array.isArray((dialog as Row | null)?.on_save) ? ((dialog as Row).on_save as Row[]) : []),
+    [dialog],
   )
+  const setOnSave = (next: Row[]) =>
+    setDialog({ ...(dialog ?? {}), on_save: next } as { title?: string; tabs?: Row[]; on_save?: Row[] })
+  const renderOnSave = (): ReactNode => renderActionList({
+    listKey: 'on_save', actions: onSave, setActions: setOnSave,
+    heading: t('settings.screens.action.heading'),
+    hint: t('settings.screens.action.hint'),
+    emptyMessage: t('settings.screens.action.empty'),
+  })
+
+  // Screen `row_menu` (slice 6) — actions shown when the user right-clicks a row in the TableView.
+  // ParamBinds resolve against the clicked row's values (not the dialog form state) — the runtime
+  // uses the same Action shape; only the firing context differs.
+  const rowMenu: Row[] = useMemo(
+    () => (Array.isArray((value as Row).row_menu) ? ((value as Row).row_menu as Row[]) : []),
+    [value],
+  )
+  const setRowMenu = (next: Row[]) => {
+    const v = { ...value }
+    if (next.length === 0) delete v.row_menu
+    else v.row_menu = next
+    onChange(v)
+  }
+  const renderRowMenu = (): ReactNode => renderActionList({
+    listKey: 'row_menu', actions: rowMenu, setActions: setRowMenu,
+    heading: t('settings.screens.rowmenu.heading'),
+    hint: t('settings.screens.rowmenu.hint'),
+    emptyMessage: t('settings.screens.rowmenu.empty'),
+  })
 
   const renderDialog = (): ReactNode => {
     if (!dialog) {
@@ -579,7 +620,7 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       case 'queries': return renderQueries()
       case 'dialog':  return renderDialog()
       case 'actions': return renderPlaceholder(t('settings.screens.editor.sliceActions'))
-      case 'rowmenu': return renderPlaceholder(t('settings.screens.editor.sliceRowMenu'))
+      case 'rowmenu': return renderRowMenu()
     }
   }
 

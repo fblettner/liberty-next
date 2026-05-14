@@ -871,12 +871,35 @@ schema.
   …). The matching ``AUD_<TABLE>`` tables already exist in the v1 DB — v2 just keeps writing
   to them.
 
-Slice 6 still to do (row context menus — `Screen.row_menu` already uses the slice 4 ``Action``
-type; the slice wires the right-click runtime + permission-prunes the menu items).
+**Phase 6 slice 6 (Row context menus) — DONE.**
+- `frontend/src/common/DataTable.tsx` — new ``onRowContextMenu`` callback. Right-click on a
+  non-grouped row fires it (group rows skip); ``preventDefault()`` is called for you so the
+  native browser menu doesn't fight the consumer's overlay. Headers and pagination keep their
+  native menu.
+- `frontend/src/pages/TableView/ResultTable.tsx` — when ``screen.row_menu`` is non-empty *and*
+  the user isn't in batch-edit mode, right-click opens a floating ``RowMenuBox`` at the click
+  coords with one item per action. ``runRowAction`` runs the picked action's task against the
+  clicked row's values (the shared ``resolveRowBinds`` helper case-folds ``source`` lookups —
+  Postgres lowercases identifiers, ParamBinds usually carry v1's uppercase column names).
+  ``run_query`` POSTs to ``/api/sql/{c}/{q}`` with bound + uppercased params (falls back to the
+  screen's effective connector); ``notify`` is logged; ``refresh`` is implied by ``onSaved()``.
+  Stubbed variants (``call_api`` / ``navigate`` / ``set_field`` / ``confirm``) warn and abort
+  unless ``stop_on_error = false`` — same convention as the dialog ``on_save`` runner.
+  Click-outside / Escape close the menu; click *inside* doesn't bubble out.
+- `frontend/src/pages/Settings/ScreenEditor.tsx` — the **Row menu** tab is now a real editor
+  (was a "coming soon" placeholder). The slice refactored the dialog ``on_save`` editor into a
+  shared ``renderActionList`` helper so both attachment points use the same UX: list of
+  expandable action rows, type picker (one of 7), per-action SchemaForm over the matching
+  ``$def``, ``param_binds`` rendered inline. Each editor keeps its own expansion state.
+- `frontend/src/types/screens.ts` — ``ScreenDetail`` now carries ``actions`` and ``row_menu``
+  (both ``Action[]``), so the runtime can read them off the catalog payload directly.
+- v1 had no schema-level row-menu attachment table — operators wire ``row_menu`` items via the
+  builder (a 4b-style "dump" migration of ``ly_actions`` could surface them as candidates, but
+  that's a follow-up if the user wants it).
+
+Phase 6 (Form/screen engine) is now feature-complete for the slices outlined in `docs/PLAN.md`.
 
 341 tests pass.
-
-338 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
@@ -888,9 +911,11 @@ row click → modal form, lookup param-binds, save → update/insert) **done**, 
 union; run_query / notify / refresh implemented, others stubbed) **done**, slice 5 (AUD
 audit trail — `QueryDef.audit = "AUD_<table>"` + SQL-connector interceptor that mirrors the
 row + action + user + timestamp into the named table, in the same transaction; migrated from
-v1's `tbl_audit = 'Y'`) **done** — v1's `ly_actions` migration deferred to slice 4b; the
-`visible_when`/`filter_from` work is its table-side first slice; design it against real
-migrated screens) → **Phase 7** the config builders (a *schema-driven*
+v1's `tbl_audit = 'Y'`) **done**, slice 6 (row context menus — right-click on a TableView row
+opens a `Screen.row_menu` overlay; same Action shape, ParamBinds against the row) **done** —
+v1's `ly_actions` migration deferred to slice 4b; the `visible_when`/`filter_from` work is
+its table-side first slice; design it against real migrated screens) → **Phase 7** the config
+builders (a *schema-driven*
 UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
@@ -900,6 +925,19 @@ a SQL editor + "test run" preview for queries, plus rename support; + git-backed
 frontend tests/CI) → **Phase 8** charts & dashboards →
 **Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement (in-project
 Python/local-Spark jobs & scheduling).
+
+**Big-grid scaling (deferred, no phase yet — track when a screen actually needs it):** the
+TableView today loads up to `max_rows` rows into the browser (default 1000) and TanStack does
+*every* filter / sort / search / group / paginate in-memory over that array. That stays
+responsive into the ~10K row range; a screen that genuinely needs more wants two things together:
+**(a) `@tanstack/react-virtual` on the grid** so the DOM only mounts the visible rows (already
+on the standing "still TODO toward full nomaubl parity" list in the Phase-4 frontend block), and
+**(b) cursor-based server pagination** on the SQL connector — a new request shape that takes a
+`{cursor, limit}` and returns `{rows, next_cursor}`, with the frontend feeding the cursor when
+the virtualizer scrolls past a high-water mark. v2's `FilterPanel` already does the
+"pre-narrow on the server" half of this story (the v1 `col_filter` columns); the missing
+half is just the pagination cursor. Both pieces are independent of every form-engine phase
+above — pull this in whenever a real screen hits the wall, not before.
 
 ## Run it
 

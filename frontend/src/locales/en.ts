@@ -359,6 +359,11 @@ const en = {
         type: 'Type',
         unknownType: 'Unknown action type "{{type}}".',
       },
+      rowmenu: {
+        heading: 'Row context menu',
+        hint: 'Actions shown when the user right-clicks a row in the TableView. Each action\'s ParamBinds resolve against the clicked row\'s values (the column names match the result set, so a `{param: "USR_ID", source: "usr_id"}` bind feeds the row\'s USR_ID into the target query). Same Action shape as the dialog\'s on_save chain — only the firing context differs.',
+        empty: 'No row-menu actions yet — right-click on a row does nothing on this screen.',
+      },
     },
     tables: {
       tablesView: 'Tables',
