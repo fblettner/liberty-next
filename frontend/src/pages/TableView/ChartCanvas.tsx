@@ -217,9 +217,13 @@ export function renderChart(
     // slice (keyed by `nameKey`); the `formatter` callback resolves the raw value (e.g. "01")
     // into the BOOLEAN/ENUM/LOOKUP label ("Active") via the same display-rule pipeline the X
     // axis ticks use, so the legend reads cleanly without us having to hand-build the payload.
+    //
+    // Each slice gets its own linear gradient (same vocabulary as the bar / area fills) so the
+    // pie reads as part of the same family — not a flat-colour outlier.
     const y = spec.y[0]
     return (
       <PieChart>
+        <GradientDefs count={data.length} gradId={opts.gradId} seriesColor={seriesColor} />
         {tooltip}
         <Legend verticalAlign="bottom" iconType="circle" iconSize={8}
           wrapperStyle={{ fontSize: 11, color: colors.text.muted, paddingTop: 6 }}
@@ -227,7 +231,7 @@ export function renderChart(
         <Pie data={data} dataKey={y} nameKey="x" name={yLabels[0]}
           outerRadius="70%" innerRadius="42%" paddingAngle={1.5} stroke="none"
           animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200}>
-          {data.map((_, i) => <Cell key={i} fill={seriesColor(i)} />)}
+          {data.map((_, i) => <Cell key={i} fill={`url(#${opts.gradId}-${i})`} />)}
         </Pie>
       </PieChart>
     )
