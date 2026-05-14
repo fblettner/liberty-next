@@ -65,6 +65,12 @@ export type FrameworkEnums = Record<string, FrameworkEnum>
  *  consumed deeply by every SchemaForm in the tree (nested ObjectListEditor / drill-in pages). */
 export const FrameworkEnumsContext = createContext<FrameworkEnums | null>(null)
 
+/** The currently-edited SQL connector — when set, the `sql` field's Monaco editor enables
+ *  schema-aware autocomplete against that connector's pool (GET /api/sql/{c}/_schema). Threaded
+ *  via context so nested SchemaForms (drill-in list items, accordions) all pick it up without
+ *  having to pass `sqlConnector` through every helper. `ConnectorsTableEditor` provides it. */
+export const SqlConnectorContext = createContext<string | undefined>(undefined)
+
 /** Resolve a field's effective enum ref: prefer `x_enum_ref_when` (which switches by a sibling
  *  field's current value) over plain `x_enum_ref`. Returns `null` when no ref applies (the
  *  conditional rule fell through, or neither annotation is set). */
@@ -224,13 +230,15 @@ function StringListEditor({ value, onChange }: { value: string[]; onChange: (v: 
 // as a Monaco SQL editor (registered in services/monaco.ts) — keyword colouring, comments, theme-aware;
 // the `rows` prop mirrors the old `<Textarea rows={n}>` sizing so the form's vertical rhythm is unchanged.
 // An empty editor maps to `undefined` (an absent `sql` field) to match the old textarea's behaviour.
+// Reads the active connector from `SqlConnectorContext` (when set, schema-aware autocomplete is on).
 function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+  const connector = useContext(SqlConnectorContext)
   const isMap = value != null && typeof value === 'object' && !Array.isArray(value)
   if (!isMap) {
     const text = value == null ? '' : String(value)
     return (
       <div>
-        <SqlEditor value={text} rows={6} onChange={(v) => onChange(v === '' ? undefined : v)} />
+        <SqlEditor value={text} rows={6} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} />
         <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
       </div>
     )
@@ -245,7 +253,7 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
           <Row style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
-              <SqlEditor value={map[d] ?? ''} rows={4} onChange={(v) => set(d, v)} />
+              <SqlEditor value={map[d] ?? ''} rows={4} onChange={(v) => set(d, v)} connector={connector} />
             </div>
             {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>

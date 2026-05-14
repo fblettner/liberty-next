@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { Button, Row, SchemaForm, SchemaNavigator, Stack, type JsonSchema } from '../../common'
+import { Button, Row, SchemaForm, SchemaNavigator, SqlConnectorContext, Stack, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
   CRUD_KINDS,
@@ -67,6 +67,9 @@ const WRITE_BODY_KEYS = ['sql', 'params', 'writable', 'audit']
 
 export interface ConnectorsTableEditorProps {
   base: string
+  /** The connector this table lives in — threaded into `SqlConnectorContext` so every SQL
+   *  editor in the form enables schema-aware autocomplete against that connector's pool. */
+  connectorName: string
   slots: Partial<Record<CrudKind, QuerySlot>>
   queries: Record<string, unknown>[]
   queryDefSchema: JsonSchema
@@ -81,7 +84,7 @@ export interface ConnectorsTableEditorProps {
 }
 
 export default function ConnectorsTableEditor({
-  base, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, screenLink,
+  base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, screenLink,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>(slots.get ? 'general' : 'get')
@@ -220,6 +223,7 @@ export default function ConnectorsTableEditor({
   }
 
   return (
+    <SqlConnectorContext.Provider value={connectorName}>
     <div>
       <Header>
         <BackBtn type="button" onClick={onBack}><ArrowLeft size={13} /> {t('settings.tables.backToTables')}</BackBtn>
@@ -261,5 +265,6 @@ export default function ConnectorsTableEditor({
       </TabsBar>
       {renderTab()}
     </div>
+    </SqlConnectorContext.Provider>
   )
 }

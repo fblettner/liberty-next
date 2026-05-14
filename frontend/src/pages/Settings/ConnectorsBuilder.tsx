@@ -12,7 +12,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -287,7 +287,13 @@ export default function ConnectorsBuilder() {
                 </Row>
               </Row>
               {effectiveMode === 'form' && (
-                <SchemaNavigator root={{ label: sel!, schema: selSchema, value: selConn, onChange: (v) => update(sel!, v) }} />
+                // For a SQL connector, thread its name into SqlConnectorContext so every
+                // SQL editor inside the navigator (queries → drill-in body → per-dialect maps)
+                // enables schema-aware autocomplete. API connectors don't have a pool to
+                // introspect — context stays undefined (the default).
+                <SqlConnectorContext.Provider value={isSql ? sel ?? undefined : undefined}>
+                  <SchemaNavigator root={{ label: sel!, schema: selSchema, value: selConn, onChange: (v) => update(sel!, v) }} />
+                </SqlConnectorContext.Provider>
               )}
               {effectiveMode === 'tables' && (
                 selTable && queryDefSchema ? (() => {
@@ -300,6 +306,7 @@ export default function ConnectorsBuilder() {
                   return (
                     <ConnectorsTableEditor
                       base={selTable}
+                      connectorName={sel!}
                       slots={slotsForSel}
                       queries={queriesArr}
                       queryDefSchema={queryDefSchema}

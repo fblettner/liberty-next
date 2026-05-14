@@ -6,13 +6,20 @@
 // but it only lands on the Settings chunk (already where Monaco lives via RawEditor) — no entry-bundle
 // regression.
 //
+// With a `connector` prop set, the editor fetches that connector's pool schema (GET /api/sql/{c}/_schema)
+// and wires schema-aware autocomplete — typing `FROM ` offers a list of tables, `<table>.` offers
+// columns. The fetch is cached per-session (services/poolSchema.ts) so multiple editor instances on
+// the same connector share one request.
+//
 // NOT re-exported from `common/index.ts` — consumers (SchemaForm's SqlField, the future test-runner)
 // import this file directly, so the Monaco worker import stays inside the Settings chunk.
 import '../services/monaco' // side effect: register Monaco + the SQL language; no-op when already loaded
-import MonacoEditor, { type OnChange } from '@monaco-editor/react'
+import MonacoEditor, { type OnChange, type OnMount } from '@monaco-editor/react'
 import styled from '@emotion/styled'
 import { useIsLight } from './useIsLight'
 import { Centered } from './Spinner'
+import { getPoolSchema } from '../services/poolSchema'
+import { attachPoolSchema } from '../services/sqlCompletion'
 import { colors, fontSize, fonts, radius } from '../theme'
 
 const Frame = styled.div<{ $h: number }>`
@@ -26,6 +33,10 @@ export interface SqlEditorProps {
   /** Pixel height per row, matched to `<Textarea rows={n}>`'s feel. Default ~6 rows. */
   rows?: number
   readOnly?: boolean
+  /** When set, schema-aware autocomplete kicks in: tables after FROM/JOIN/INTO/UPDATE,
+   *  columns after `<table>.`, plus the columns of any table referenced earlier in the
+   *  statement when typing inside a SELECT clause. */
+  connector?: string
 }
 
 // One "row" is ~20px (Monaco's default line height at our font size) + 18px chrome for the gutter
@@ -34,9 +45,19 @@ export interface SqlEditorProps {
 const ROW_PX = 20
 const CHROME_PX = 18
 
-export function SqlEditor({ value, onChange, rows = 6, readOnly }: SqlEditorProps) {
+export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: SqlEditorProps) {
   const isLight = useIsLight()
   const handleChange: OnChange = (v) => onChange(v ?? '')
+  const handleMount: OnMount = (editor, monaco) => {
+    if (!connector) return
+    const model = editor.getModel()
+    if (!model) return
+    // Schema fetch is async — by the time it resolves the editor may have been unmounted, but
+    // attaching to a disposed model is harmless (the WeakMap entry just never gets read).
+    void getPoolSchema(connector).then((schema) => {
+      if (schema) attachPoolSchema(monaco, model, schema)
+    })
+  }
   return (
     <Frame $h={rows * ROW_PX + CHROME_PX}>
       <MonacoEditor
@@ -46,6 +67,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly }: SqlEditorProp
         value={value}
         loading={<Centered />}
         onChange={handleChange}
+        onMount={handleMount}
         options={{
           fontSize: parseInt(fontSize.base, 10),
           fontFamily: fonts.mono,
@@ -59,6 +81,10 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly }: SqlEditorProp
           // Tighten the gutter for the small per-field embed; full-screen RawEditor keeps the defaults.
           lineNumbersMinChars: 3,
           folding: false,
+          // Show the suggestion widget on Ctrl-Space (or auto on trigger chars); a small editor
+          // doesn't need word-based suggestions polluting the schema list.
+          quickSuggestions: { other: 'on', strings: false, comments: false },
+          wordBasedSuggestions: 'off',
         }}
       />
     </Frame>
