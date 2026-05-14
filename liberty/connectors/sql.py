@@ -46,6 +46,12 @@ from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryFile
 
+# Internal sentinel raised by `test_run(dry_run=True)` on a write — forces `engine.begin()`'s
+# context manager to roll back; caught outside the `async with`. Not part of the public surface.
+class _DryRunRollback(Exception):
+    pass
+
+
 # `#SCHEMA.<NAME>#` (or bare `#SCHEMA#`) in a query's SQL, replaced at execution time with the pool's
 # `schemas` mapping (v1's ly_db_schema). Case-insensitive on the literal and the name.
 _SCHEMA_PLACEHOLDER = re.compile(r"#SCHEMA(?:\.([A-Za-z0-9_]+))?#", re.IGNORECASE)
@@ -400,6 +406,80 @@ class SQLConnector:
             statement_type=stmt_type,
             rowcount=rowcount,
             duration_ms=duration_ms,
+        )
+
+    async def test_run(
+        self, sql_text: str, params: dict[str, Any] | None = None, *,
+        max_rows: int | None = None, dry_run: bool = True,
+    ) -> QueryResult:
+        """Run a **free-form SQL string** against this connector's pool — no name lookup, no
+        ``writable`` gate (the caller's privilege is the gate; the route is superuser-only).
+        The same safety floor as :meth:`execute` applies: the leading keyword must be in
+        :data:`~liberty.connectors.base.ALLOWED_STATEMENTS` (``DROP``/``ALTER``/``TRUNCATE``
+        rejected). ``#SCHEMA.<NAME>#`` placeholders are still substituted, so the operator can
+        paste the same SQL they keep in the TOML and have it run.
+
+        *dry_run* is the safety net for the editor's "Run" button: a write statement runs
+        inside a transaction that's rolled back on completion — same effect as a DBA's
+        ``BEGIN; …; ROLLBACK;``, so the operator can see the rowcount + verify the statement
+        parses without actually mutating the database. SELECTs ignore it (read-only). Set to
+        ``False`` to commit a test write (typically when the operator clicks a second
+        "Commit" confirmation).
+
+        Returns the same :class:`QueryResult` shape as :meth:`execute` — but the ``query``
+        field is the literal ``"<test-run>"`` so the result is obviously not a named query.
+        """
+        sql_text = _apply_schema_placeholders(
+            sql_text, self._pools.schemas(self.pool_name),
+            connector=self.name, query="<test-run>", pool=self.pool_name,
+        )
+        stmt_type = detect_statement_type(sql_text)
+        if stmt_type not in ALLOWED_STATEMENTS:
+            raise StatementNotAllowedError(
+                f"{self.name} test-run: statement type {stmt_type or '(unknown)'!r} is not allowed "
+                f"(allowed: {', '.join(sorted(ALLOWED_STATEMENTS))})."
+            )
+        cap = max(1, min(int(max_rows if max_rows is not None else self.max_rows), self.HARD_MAX_ROWS))
+        # Bind every :name token from the SQL — missing values default to SQL NULL, same as execute()
+        bound = {name: (params or {}).get(name) for name in find_bind_params(sql_text)}
+        stmt = text(sql_text)
+        is_select = stmt_type == "SELECT"
+        engine = self._pools.engine(self.pool_name)
+        started = time.perf_counter()
+        if is_select:
+            async with engine.connect() as conn:
+                result = await conn.execute(stmt, bound)
+                # No QueryDef → no column hints to overlay; we still expose discovered names + types.
+                columns = _columns_from_result(result)
+                rows: list[dict[str, Any]] = []
+                truncated = False
+                for row in result.mappings():
+                    if len(rows) >= cap:
+                        truncated = True
+                        break
+                    rows.append(dict(row))
+            duration_ms = (time.perf_counter() - started) * 1000.0
+            return QueryResult(
+                connector=self.name, query="<test-run>", statement_type=stmt_type,
+                columns=columns, rows=rows, rowcount=-1, duration_ms=duration_ms, truncated=truncated,
+            )
+        # Write — wrap in a transaction. With `dry_run`, raising `_DryRunRollback` out of
+        # `engine.begin()`'s context manager triggers a rollback (SQLAlchemy's documented behaviour
+        # when the block exits with an exception); we catch it outside and report the rowcount.
+        # Without dry_run the block exits normally and the transaction commits.
+        rowcount = -1
+        try:
+            async with engine.begin() as conn:
+                result = await conn.execute(stmt, bound)
+                rowcount = result.rowcount
+                if dry_run:
+                    raise _DryRunRollback()
+        except _DryRunRollback:
+            pass
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        return QueryResult(
+            connector=self.name, query="<test-run>", statement_type=stmt_type,
+            rowcount=rowcount, duration_ms=duration_ms,
         )
 
     async def _write_audit(

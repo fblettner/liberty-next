@@ -203,3 +203,39 @@ def test_sql_post_param_forms(app) -> None:
         assert [r["id"] for r in client.post("/api/sql/db/items", json={"status": "on"}, headers=h).json()["rows"]] == [1]
         # no body → no params
         assert [r["id"] for r in client.post("/api/sql/db/items", headers=h).json()["rows"]] == [1, 2]
+
+
+# --- SQL: pool schema introspection (Phase 7 — SQL editor / wizard) -------- #
+
+
+def test_pool_schema_lists_tables_and_columns(app) -> None:
+    """``GET /api/sql/{c}/_schema`` returns the connector's pool's tables/views + columns —
+    powers the SQL editor's autocomplete and the wizard's table picker. Superuser only; the
+    `item` table seeded by _seed() must appear with its three columns."""
+    with TestClient(app) as client:
+        r = client.get("/api/sql/db/_schema", headers=_h(client, "admin"))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["pool"] == "default" and body["dialect"] == "sqlite" and body["truncated"] is False
+        by_name = {t["name"]: t for t in body["tables"]}
+        item = by_name["item"]
+        assert item["kind"] == "table"
+        assert [c["name"] for c in item["columns"]] == ["id", "name", "status"]
+        # types come through best-effort (the in-memory dialect labels INTEGER/TEXT)
+        assert all("type" in c for c in item["columns"])
+
+
+def test_pool_schema_requires_superuser(app) -> None:
+    """The introspection leaks every table on the pool — non-superusers should not see it,
+    even if they hold ``sql:db:*`` (which only authorizes named queries). 403 either way."""
+    with TestClient(app) as client:
+        # dbuser holds `sql:db:*` (every named query) — still no — schema endpoint is admin-only
+        assert client.get("/api/sql/db/_schema", headers=_h(client, "dbuser")).status_code == 403
+        assert client.get("/api/sql/db/_schema", headers=_h(client, "nobody")).status_code == 403
+        # unauth → 401
+        assert client.get("/api/sql/db/_schema").status_code == 401
+
+
+def test_pool_schema_404_when_connector_missing(app) -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/sql/ghost/_schema", headers=_h(client, "admin")).status_code == 404

@@ -403,3 +403,80 @@ def test_oidc_callback_fragment_redirect() -> None:
     assert s.frontend_redirect == "https://app.test/oidc/callback"
     # (the full OIDC flow needs a real IdP; this just pins the new setting + that the
     # callback route now returns a redirect when frontend_redirect is set — see liberty/auth/routes.py)
+
+
+# --- POST /admin/config/connectors/{c}/test-sql --------------------------- #
+
+
+def _seed_item_table(db_url: str) -> None:
+    """Drop an ``item`` table on the test DB so test-sql has something to run against —
+    the env fixture only sets up the auth schema, no user table to play with."""
+    from sqlalchemy import text as _text
+
+    async def go() -> None:
+        pools = PoolRegistry({"default": PoolConfig(url=db_url)})
+        engine = pools.engine("default")
+        async with engine.begin() as conn:
+            await conn.execute(_text("CREATE TABLE IF NOT EXISTS item (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"))
+            await conn.execute(_text("DELETE FROM item"))
+            await conn.execute(_text("INSERT INTO item (id, name, status) VALUES (1,'a','on'),(2,'b','off')"))
+        await pools.dispose()
+
+    asyncio.run(go())
+
+
+def test_test_sql_select_with_params(env) -> None:
+    """A SELECT runs and returns rows; the same ``:param`` binds the named-query path uses
+    work here too — the operator can paste the same SQL they keep in the TOML and it just runs."""
+    app, _, db_url = env
+    _seed_item_table(db_url)
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {"sql": "SELECT id, name FROM item WHERE (:status IS NULL OR status = :status) ORDER BY id", "params": {"status": "on"}}
+        r = client.post("/admin/config/connectors/db/test-sql", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["statement_type"] == "SELECT" and j["row_count"] == 1
+        assert j["rows"] == [{"id": 1, "name": "a"}]
+        assert j["truncated"] is False and "duration_ms" in j
+        # max_rows truncates
+        body2 = {"sql": "SELECT id FROM item ORDER BY id", "max_rows": 1}
+        r2 = client.post("/admin/config/connectors/db/test-sql", json=body2, headers=h).json()
+        assert r2["row_count"] == 1 and r2["truncated"] is True
+
+
+def test_test_sql_dry_run_rolls_back_write(env) -> None:
+    """An INSERT/UPDATE/DELETE with dry_run=True (the default) reports its rowcount but
+    the row never lands — the operator gets to verify a `_put` parses and the WHERE matches
+    before committing it."""
+    app, _, db_url = env
+    _seed_item_table(db_url)
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # default dry_run=True
+        body = {"sql": "INSERT INTO item (id, name, status) VALUES (99, 'test', 'on')"}
+        j = client.post("/admin/config/connectors/db/test-sql", json=body, headers=h).json()
+        assert j["statement_type"] == "INSERT" and j["rowcount"] == 1 and "rows" not in j or j["rows"] == []
+        # the row didn't land — verify via a follow-up SELECT
+        rows = client.post("/admin/config/connectors/db/test-sql", json={"sql": "SELECT id FROM item ORDER BY id"}, headers=h).json()["rows"]
+        assert [r["id"] for r in rows] == [1, 2]
+        # explicit dry_run=False commits
+        body2 = {"sql": "INSERT INTO item (id, name, status) VALUES (99, 'test', 'on')", "dry_run": False}
+        client.post("/admin/config/connectors/db/test-sql", json=body2, headers=h)
+        rows2 = client.post("/admin/config/connectors/db/test-sql", json={"sql": "SELECT id FROM item ORDER BY id"}, headers=h).json()["rows"]
+        assert [r["id"] for r in rows2] == [1, 2, 99]
+
+
+def test_test_sql_rejects_disallowed_and_requires_superuser(env) -> None:
+    app, _, _ = env
+    with TestClient(app) as client:
+        # non-superuser → 403
+        assert client.post("/admin/config/connectors/db/test-sql", json={"sql": "SELECT 1"}, headers=_h(client, "reader")).status_code == 403
+        # unauth → 401
+        assert client.post("/admin/config/connectors/db/test-sql", json={"sql": "SELECT 1"}).status_code == 401
+        h = _h(client, "admin")
+        # unknown connector → 404
+        assert client.post("/admin/config/connectors/ghost/test-sql", json={"sql": "SELECT 1"}, headers=h).status_code == 404
+        # DROP not in the statement allow-list → 422 (parity with the named-query path)
+        r = client.post("/admin/config/connectors/db/test-sql", json={"sql": "DROP TABLE item"}, headers=h)
+        assert r.status_code == 422
