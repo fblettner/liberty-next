@@ -17,8 +17,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
-import { Input, PasswordInput, Textarea, Field } from './Input'
+import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
+import { SqlEditor } from './SqlEditor'
 import { colors, fontSize, fonts, radius } from '../theme'
 
 export interface JsonSchema {
@@ -219,14 +220,18 @@ function StringListEditor({ value, onChange }: { value: string[]; onChange: (v: 
   )
 }
 
-// the `sql` field: a single string, or a per-dialect map { default = "…", oracle = "…" }
+// the `sql` field: a single string, or a per-dialect map { default = "…", oracle = "…" }. Renders
+// as a Monaco SQL editor (registered in services/monaco.ts) — keyword colouring, comments, theme-aware;
+// the `rows` prop mirrors the old `<Textarea rows={n}>` sizing so the form's vertical rhythm is unchanged.
+// An empty editor maps to `undefined` (an absent `sql` field) to match the old textarea's behaviour.
 function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const isMap = value != null && typeof value === 'object' && !Array.isArray(value)
   if (!isMap) {
+    const text = value == null ? '' : String(value)
     return (
       <div>
-        <Textarea rows={6} value={value == null ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} style={{ fontFamily: fonts.mono }} />
-        <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: value == null ? '' : String(value) })}><Plus size={12} /> per-dialect variants</MiniBtn>
+        <SqlEditor value={text} rows={6} onChange={(v) => onChange(v === '' ? undefined : v)} />
+        <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
       </div>
     )
   }
@@ -237,10 +242,12 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
     <div>
       {dialects.map((d) => (
         <div key={d}>
-          <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
-          <Row>
-            <Textarea rows={4} value={map[d] ?? ''} onChange={(e) => set(d, e.target.value)} style={{ fontFamily: fonts.mono, flex: 1 }} />
-            {d !== 'default' && <SmallX type="button" title="remove variant" onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
+          <Row style={{ alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
+              <SqlEditor value={map[d] ?? ''} rows={4} onChange={(v) => set(d, v)} />
+            </div>
+            {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>
         </div>
       ))}
