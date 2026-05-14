@@ -22,13 +22,13 @@ import {
   Stack,
   SpinnerRing,
   Mono,
-  SchemaNavigator,
   FrameworkEnumsContext,
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
 import type { ConfigSchemas, ScreensDoc, Screen } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import ScreenEditor from './ScreenEditor'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
@@ -282,13 +282,12 @@ export default function ScreensBuilder() {
                   <Trash2 size={13} /> {t('settings.screens.delete')}
                 </Button>
               </Row>
-              <SchemaNavigator
-                root={{
-                  label: selId,
-                  schema: screenSchema,
-                  value: selScreen as unknown as Record<string, unknown>,
-                  onChange: (v) => updateScreen(selApp, selId, v),
-                }}
+              <ScreenEditor
+                app={selApp}
+                id={selId}
+                value={selScreen as unknown as Record<string, unknown>}
+                schema={screenSchema}
+                onChange={(v) => updateScreen(selApp, selId, v)}
               />
             </Stack>
           ) : (
