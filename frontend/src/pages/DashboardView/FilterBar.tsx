@@ -13,7 +13,14 @@ import type { QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire } from '../../types/dashboards'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
+// `position: relative; z-index: 20` is non-obvious but necessary: every dashboard card below
+// uses `backdrop-filter: blur(...)` (`glass.surface`), which creates its OWN stacking context.
+// Inside that context, a sibling card painted later in the DOM sits in front of the FilterBar's
+// inner SearchSelect popover (z-index: 300 *within* the FilterBar's local stacking context, not
+// document-global). Lifting the FilterBar itself to `z-index: 20` in the surrounding Stack
+// promotes its stacking context above the Grid's, so the popover paints on top.
 const Bar = styled.div`
+  position: relative; z-index: 20;
   display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
   padding: 12px 16px; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   background: ${colors.bg.card};
