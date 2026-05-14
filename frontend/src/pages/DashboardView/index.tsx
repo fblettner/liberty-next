@@ -14,7 +14,7 @@ import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
 import type { Dashboard, DashboardWidget } from '../../types/dashboards'
 import { ChartWidget } from './ChartWidget'
 import { KpiWidget } from './KpiWidget'
-import { colors, fontSize, radius } from '../../theme'
+import { colors, fontSize, fonts, radius } from '../../theme'
 
 // CSS-grid layout: 12 cols on desktop, collapse to 6 on tablet, 1 on mobile so dashboards stay
 // useful on a phone. Each row is 180px tall by default — fits a KPI card snugly; charts in the
@@ -37,12 +37,15 @@ const WidgetFrame = styled.div<{ $cs: number; $rs: number }>`
   display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0;
 `
 const WidgetTitle = styled.div`
-  font-size: ${fontSize.sm}; color: ${colors.text.secondary}; font-weight: 600;
+  /* Small caps-y label above each card — matches the rest of the app's section headers
+     (Tag/Sub typography), reads as a quiet caption rather than competing with the card. */
+  font-size: ${fontSize.micro}; color: ${colors.text.muted};
+  font-family: ${fonts.sans}; font-weight: 600; letter-spacing: 0.04em;
   padding: 0 4px; flex-shrink: 0;
 `
 const EmptyState = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm};
-  border: 1px dashed ${colors.border}; border-radius: ${radius.md}; padding: 30px; text-align: center;
+  border: 1px dashed ${colors.border}; border-radius: ${radius.lg}; padding: 30px; text-align: center;
 `
 
 export default function DashboardView({ dashboardId }: { dashboardId: string }) {

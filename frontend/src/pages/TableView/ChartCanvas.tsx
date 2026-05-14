@@ -24,11 +24,18 @@ import { cellText, enumMap, ruleCell } from '../../services/cells'
 import { useLookupBatch, type LookupSpec } from '../../services/lookups'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { ChartSpec } from '../../types/charts'
-import { colors, fontSize, fonts, radius, shadow } from '../../theme'
+import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
+// Liquid-glass chart canvas — same vocabulary as the KPI card so the dashboard reads as one
+// floating set of frosted panels. The backdrop blur + inset highlight + soft shadow give the
+// card the macOS-style depth; the subtle radial gradient (top-left → fade) adds a hint of
+// directional light without painting a full gradient layer.
 const Frame = styled.div`
   flex: 1; min-height: 220px; min-width: 0; border: 1px solid ${colors.border};
-  border-radius: ${radius.md}; padding: 12px; background: ${colors.bg.input};
+  border-radius: ${radius.lg}; padding: 14px; background: ${colors.bg.card};
+  ${glass.surface}
+  box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background-image: radial-gradient(120% 100% at 0% 0%, rgba(255, 255, 255, 0.04), transparent 60%);
   display: flex; flex-direction: column;
 `
 const EmptyHint = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 8px 4px;`

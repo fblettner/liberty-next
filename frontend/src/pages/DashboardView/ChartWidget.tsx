@@ -14,14 +14,16 @@ import { ChartCanvas } from '../TableView/ChartCanvas'
 import type { QueryResult } from '../../types/connectors'
 import type { ChartWidgetWire } from '../../types/dashboards'
 import type { ChartSpec } from '../../types/charts'
-import { colors, radius } from '../../theme'
+import { colors, glass, radius, shadow } from '../../theme'
 
-// Same shape ChartCanvas's own Frame uses — keeps the loading placeholder visually identical to
-// the loaded chart, no layout shift when the data lands.
+// Mirrors ChartCanvas's Frame so the loading placeholder looks identical to the loaded chart —
+// no visible flash when data lands. Glass surface + shadow + inset highlight = same depth.
 const Placeholder = styled.div<{ $h: number }>`
   height: ${({ $h }) => $h}px; min-width: 0;
-  border: 1px solid ${colors.border}; border-radius: ${radius.md};
-  background: ${colors.bg.input};
+  border: 1px solid ${colors.border}; border-radius: ${radius.lg};
+  background: ${colors.bg.card};
+  ${glass.surface}
+  box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
   display: flex; align-items: center; justify-content: center;
 `
 
