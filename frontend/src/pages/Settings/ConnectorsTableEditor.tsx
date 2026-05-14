@@ -61,7 +61,9 @@ const GENERAL_KEYS = ['label', 'description', 'auto_load', 'max_rows', 'key_colu
 const COLUMNS_KEYS = ['columns']
 // per-query body — `name` is left out (renames break grouping); writable hidden for read.
 const READ_BODY_KEYS = ['sql', 'params']
-const WRITE_BODY_KEYS = ['sql', 'params', 'writable']
+// `audit` (slice 5) — names the AUD_<table> the SQL connector mirrors this writable query into;
+// only meaningful on write companions, so it's grouped alongside `writable` on the Update/Insert/Delete tabs.
+const WRITE_BODY_KEYS = ['sql', 'params', 'writable', 'audit']
 
 export interface ConnectorsTableEditorProps {
   base: string

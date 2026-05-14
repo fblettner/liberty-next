@@ -127,7 +127,10 @@ _MENUS_L = text("SELECT lng_id, lng_seq_ukid, lng_label FROM ly_menus_l ORDER BY
 _TABLES = text("SELECT tbl_id, tbl_query_id FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id")
 _DLG_FRM = text("SELECT frm_id, frm_query_id FROM ly_dlg_frm WHERE frm_query_id IS NOT NULL ORDER BY frm_id")
 # table/form *display* metadata: friendly label → v2 query.description ; auto-load flag → query.auto_load
-_TABLE_META = text("SELECT tbl_query_id, tbl_label, tbl_auto_load FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id")
+_TABLE_META = text(
+    "SELECT tbl_query_id, tbl_label, tbl_auto_load, tbl_audit, tbl_db_name "
+    "FROM ly_tables WHERE tbl_query_id IS NOT NULL ORDER BY tbl_id"
+)
 _DLG_FRM_META = text("SELECT frm_query_id, frm_label FROM ly_dlg_frm WHERE frm_query_id IS NOT NULL ORDER BY frm_id")
 # Screens-side reads (slice 1 of phase 6). v1 has the chain:
 #   ly_tables (the list/grid widget — links its dialog form via tbl_frm_id and its read

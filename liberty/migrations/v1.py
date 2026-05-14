@@ -348,7 +348,9 @@ def migrate_sql_queries(
                 rules = (cvis or {}).get(h["name"])
                 if rules:
                     h["visible_when"] = [dict(r) for r in rules]
-        tm = tmeta.get(qid) if is_read else None  # v1 ly_tables: friendly label + auto-load
+        tm_full = tmeta.get(qid)  # v1 ly_tables row meta (label/auto-load on reads, audit on writes)
+        tm = tm_full if is_read else None  # display hints only apply to the read companion
+        audit_table = (tm_full or {}).get("audit_table") if not is_read else None  # AUD_<table> on writes only
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
         # Lookup-target params (v1 ly_lkp_params) — declarative names the lookup callers bind. We
@@ -388,6 +390,7 @@ def migrate_sql_queries(
                 "auto_load": True if (tm or {}).get("auto_load") else None,
                 "key_columns": (kcs or None),  # omit when empty — used by the Excel-import match-by-key
                 "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
+                "audit": audit_table or None,  # v1 tbl_audit='Y' → "AUD_<TBL_DB_NAME>" on each writable companion
                 "sql": _sql_value(variants),
                 "params": (param_defs or None),
                 "columns": (hints or None),  # omit when empty
@@ -721,6 +724,15 @@ def migrate_table_meta(
             entry["description"] = label
         if str(r.get("tbl_auto_load") or "").strip() in _YES_FLAGS:
             entry["auto_load"] = True
+        # AUD audit (slice 5): tbl_audit = 'Y' → propagate the AUD table name onto the table's
+        # writable companion queries (`_put` / `_post` / `_delete`). The SQL connector reads
+        # ``QueryDef.audit`` at execute time and mirrors the bound row into ``AUD_<TBL_DB_NAME>``.
+        # When tbl_db_name is missing (a v1 screen wired only to a query, no underlying table
+        # name) the migrator skips audit — the operator can fill it in via the Connectors builder.
+        if str(r.get("tbl_audit") or "").strip() in _YES_FLAGS:
+            db_name = str(r.get("tbl_db_name") or "").strip()
+            if db_name:
+                entry["audit_table"] = f"AUD_{db_name.upper()}"
         if entry:
             out[qid] = entry  # table widget wins; an empty row leaves any form label in place
     return out

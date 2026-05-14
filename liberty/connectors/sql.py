@@ -20,10 +20,14 @@ Safety model (also from nomaubl):
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -318,7 +322,7 @@ class SQLConnector:
 
     async def execute(
         self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
-        max_rows: int | None = None,
+        max_rows: int | None = None, user: str | None = None,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
@@ -326,7 +330,9 @@ class SQLConnector:
         Result-column display hints (``QueryDef.columns``) are resolved against the shared
         dictionary in *language* (default: the dictionary's ``default_language``). *max_rows*
         overrides the configured row cap for this call (query → connector → pool → 1000), clamped
-        to ``[1, HARD_MAX_ROWS]``. Raises :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`,
+        to ``[1, HARD_MAX_ROWS]``. *user* is the caller's username — recorded on the audit row
+        when ``QueryDef.audit`` is set; defaults to ``"anonymous"`` for unauthenticated paths.
+        Raises :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`,
         :class:`WriteNotAllowedError`, or :class:`UnknownPoolError`; database errors propagate as the
         underlying SQLAlchemy exception.
         """
@@ -382,6 +388,11 @@ class SQLConnector:
         async with engine.begin() as conn:
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
+            # AUD audit (v1's tbl_audit = 'Y' → migrated as QueryDef.audit = "AUD_<table>"). The
+            # mirror INSERT runs in the *same* transaction so a successful write + failing audit
+            # rolls back together — a missing/misshapen AUD table is loud, not silently dropped.
+            if qdef.audit:
+                await self._write_audit(conn, qdef, stmt_type, params or {}, user)
         duration_ms = (time.perf_counter() - started) * 1000.0
         return QueryResult(
             connector=self.name,
@@ -390,6 +401,47 @@ class SQLConnector:
             rowcount=rowcount,
             duration_ms=duration_ms,
         )
+
+    async def _write_audit(
+        self, conn, qdef: QueryDef, stmt_type: str, params: dict[str, Any], user: str | None,
+    ) -> None:
+        """Mirror a writable execute into ``qdef.audit`` (v1's AUD_<table> pattern). Logs the
+        bound row's *uppercase* params (the v1 convention — the migrated _put/_post/_delete SQLs
+        bind columns as ``:USR_ID`` etc.) and three audit columns:
+
+        * ``AUD_ACTION`` — the statement type (``INSERT`` / ``UPDATE`` / ``DELETE``)
+        * ``AUD_USER`` — the caller's username (or ``"anonymous"`` if the call wasn't authenticated)
+        * ``AUD_DATE`` — UTC timestamp captured server-side
+
+        Columns are taken from ``params`` (uppercase keys, not ending in ``_ORIGINAL`` — those are
+        only WHERE rebinds for the main UPDATE). The AUD table must already exist with a matching
+        schema; the migration emits ``audit = "AUD_<TBL_DB_NAME>"`` on writable companions when v1's
+        ``tbl_audit = 'Y'`` is set, so the names line up. Operators using mixed-case quoted columns
+        will need a custom audit query on ``dialog.on_save`` instead — slice 4 covers that path."""
+        cols: dict[str, Any] = {}
+        for k, v in (params or {}).items():
+            if not k or not k.isupper() or k.endswith("_ORIGINAL"):
+                continue
+            cols.setdefault(k, v)
+        if not cols and stmt_type != "DELETE":
+            # nothing to audit — leave a footprint so an operator who expected audit knows why nothing landed
+            _log.warning(
+                "audit: %s.%s — no uppercase params to log into %s; skipping the audit row",
+                self.name, qdef.name, qdef.audit,
+            )
+            return
+        # Build `INSERT INTO <audit> (col1, col2, …, AUD_ACTION, AUD_USER, AUD_DATE)
+        #                    VALUES (:col1, :col2, …, :_AUD_ACTION, :_AUD_USER, :_AUD_DATE)`
+        # Reserved bind names start with `_aud_` so they can't collide with the row's columns.
+        col_list = list(cols)
+        bind_params = {**cols, "_aud_action": stmt_type, "_aud_user": user or "anonymous", "_aud_date": datetime.now(timezone.utc)}
+        col_sql = ", ".join([*col_list, "AUD_ACTION", "AUD_USER", "AUD_DATE"])
+        val_sql = ", ".join([f":{c}" for c in col_list] + [":_aud_action", ":_aud_user", ":_aud_date"])
+        # qdef.audit is the table name; we don't validate it here — it's operator config, same as
+        # other table names embedded in SQL. The migration only ever emits ``AUD_<UPPER>`` so the
+        # surface is small in practice.
+        audit_sql = f"INSERT INTO {qdef.audit} ({col_sql}) VALUES ({val_sql})"
+        await conn.execute(text(audit_sql), bind_params)
 
 
 def _resolve_hint(

@@ -262,6 +262,10 @@ def test_migrate_table_meta() -> None:
             {"tbl_query_id": 4, "tbl_label": "Twin Table", "tbl_auto_load": "N"},
             {"tbl_query_id": 7, "tbl_label": "", "tbl_auto_load": "Y"},  # no label, still auto-load
             {"tbl_query_id": None, "tbl_label": "Orphan", "tbl_auto_load": "Y"},  # no query → skipped
+            # Slice 5 — tbl_audit='Y' + tbl_db_name → audit_table for the writable companions
+            {"tbl_query_id": 10, "tbl_label": "Apps", "tbl_db_name": "settings_apps", "tbl_audit": "Y"},
+            # tbl_audit='Y' but no tbl_db_name → no audit (operator can fill in via the builder)
+            {"tbl_query_id": 11, "tbl_label": "Anon", "tbl_db_name": "", "tbl_audit": "Y"},
         ],
         dlg_frm_rows=[
             {"frm_query_id": 2, "frm_label": "Delete User"},
@@ -272,6 +276,9 @@ def test_migrate_table_meta() -> None:
     assert meta[4] == {"description": "Twin Table"}            # auto_load N → omitted
     assert meta[7] == {"auto_load": True}                       # label-less, flag only
     assert meta[2] == {"description": "Delete User"}            # form-only
+    assert meta[10] == {"description": "Apps", "audit_table": "AUD_SETTINGS_APPS"}  # tbl_audit → AUD_<UPPER(db_name)>
+    assert meta[11] == {"description": "Anon"}                  # no db_name → no audit
+    assert 12 not in meta                                       # nothing for the orphan
     assert None not in meta
 
 
@@ -363,7 +370,11 @@ def test_migrate_sql_queries_visible_when() -> None:
 def test_migrate_sql_queries_with_table_meta() -> None:
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
-        table_meta={1: {"description": "Users List Screen", "auto_load": True}, 2: {"description": "Should be ignored — write query"}},
+        table_meta={
+            1: {"description": "Users List Screen", "auto_load": True},
+            # description on a write-only query gets ignored; audit_table propagates to the write variants
+            2: {"description": "Should be ignored — write query", "audit_table": "AUD_LY_USERS"},
+        },
     )
     by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
     assert by_name["users_list_select"]["description"] == "Users List Screen"
@@ -371,10 +382,16 @@ def test_migrate_sql_queries_with_table_meta() -> None:
     # a write query (DELETE) gets no description/auto_load even if a table_meta entry exists
     assert "description" not in by_name["delete_user_delete"]
     assert "auto_load" not in by_name["delete_user_delete"]
+    # Slice 5 — the write companion picks up `audit = "AUD_LY_USERS"` from table_meta; the
+    # read companion gets *no* audit (it never mutates anything to mirror).
+    assert by_name["delete_user_delete"]["audit"] == "AUD_LY_USERS"
+    assert "audit" not in by_name["users_list_select"]
     # round-trips through the v2 loader
     reparsed = parse_connectors(tomllib.loads(render_toml(out)))
     q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
+    qd = next(q for q in reparsed.connectors["default"].queries if q.name == "delete_user_delete")
     assert q1.description == "Users List Screen" and q1.auto_load is True
+    assert qd.audit == "AUD_LY_USERS" and q1.audit is None
 
 
 # --------------------------------------------------------------------------- #

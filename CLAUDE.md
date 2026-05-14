@@ -841,7 +841,40 @@ schema.
   ``liberty-migrate actions --connector <app>`` subcommand that dumps them into a
   ``[migrated_actions.<app>]`` block for the operator to wire by hand via the builder.
 
-Slices 5-6 still to do (AUD audit, row menus).
+**Phase 6 slice 5 (AUD audit trail) — DONE.**
+- `liberty/connectors/config.py` — new ``QueryDef.audit: str | None``. When set on a writable
+  query it names the audit table the SQL connector mirrors writes into. Lives in the
+  ``Advanced`` group of the builder (the per-write tabs of the Connectors → Tables editor now
+  surface it alongside ``writable``, ``sql``, ``params``).
+- `liberty/connectors/sql.py::SQLConnector.execute()` — new ``user: str | None`` kwarg + a
+  ``_write_audit`` helper. After a writable execute succeeds, if ``qdef.audit`` is set, the
+  connector runs a generic ``INSERT INTO <audit_table> (col1, col2, …, AUD_ACTION, AUD_USER,
+  AUD_DATE) VALUES (:col1, :col2, …, :_aud_action, :_aud_user, :_aud_date)`` **in the same
+  transaction** — a failing audit rolls the main write back, loud rather than silent. Columns
+  are taken from the bound params (uppercase keys, ``_ORIGINAL`` suffixes skipped — those are
+  WHERE rebinds for ``_put``, not row data). ``AUD_ACTION`` is the statement type
+  (``INSERT``/``UPDATE``/``DELETE``); ``AUD_USER`` is the caller's username (or
+  ``"anonymous"`` when unauthenticated); ``AUD_DATE`` is the server's UTC timestamp.
+- `liberty/web/connectors.py` — ``_run_sql`` now threads ``principal.username`` into
+  ``execute(user=…)`` from both ``GET /api/sql`` and ``POST /api/sql``. The username comes
+  from the JWT — never from the request body.
+- `liberty/migrations/v1.py::migrate_table_meta` — emits ``audit_table = "AUD_<TBL_DB_NAME>"``
+  when ``tbl_audit = 'Y'`` and ``tbl_db_name`` is set. ``migrate_sql_queries`` picks it up via
+  the existing ``table_meta`` plumb and attaches ``audit = …`` to each **writable** companion
+  of the audited screen (`_put` / `_post` / `_delete`); read companions never get an audit field.
+  ``read_table_meta`` now reads ``tbl_audit`` + ``tbl_db_name`` so this lands without extra
+  CLI flags.
+- Frontend: the per-write tab of the Connectors → Tables editor now picks ``audit`` from
+  ``WRITE_BODY_KEYS``, so operators see + edit it directly.
+- Real-data smoke: ``liberty-migrate all`` on libnsx1 emits 13 ``audit`` fields across the
+  6 audited screens (each writable companion of LICENSE_CSI / SOD_PROCESS / SOD_ACTIVITIES /
+  …). The matching ``AUD_<TABLE>`` tables already exist in the v1 DB — v2 just keeps writing
+  to them.
+
+Slice 6 still to do (row context menus — `Screen.row_menu` already uses the slice 4 ``Action``
+type; the slice wires the right-click runtime + permission-prunes the menu items).
+
+341 tests pass.
 
 338 tests pass.
 
@@ -852,9 +885,12 @@ contextual menus — slice 1 (Screen + ParamBind + migration) **done**, slice 2 
 row click → modal form, lookup param-binds, save → update/insert) **done**, slice 3
 (per-field `visible_when`/`required_when`/`disabled_when`, migrated from v1's `ly_cdn_params`)
 **done**, slice 4 (actions & events — dialog `on_save` chain with the 7-variant `Action`
-union; run_query / notify / refresh implemented, others stubbed) **done** — v1's `ly_actions`
-migration deferred to slice 4b; the `visible_when`/`filter_from` work is its table-side first
-slice; design it against real migrated screens) → **Phase 7** the config builders (a *schema-driven*
+union; run_query / notify / refresh implemented, others stubbed) **done**, slice 5 (AUD
+audit trail — `QueryDef.audit = "AUD_<table>"` + SQL-connector interceptor that mirrors the
+row + action + user + timestamp into the named table, in the same transaction; migrated from
+v1's `tbl_audit = 'Y'`) **done** — v1's `ly_actions` migration deferred to slice 4b; the
+`visible_when`/`filter_from` work is its table-side first slice; design it against real
+migrated screens) → **Phase 7** the config builders (a *schema-driven*
 UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),

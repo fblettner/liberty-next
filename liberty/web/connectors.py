@@ -80,11 +80,13 @@ def _as_int(v: Any) -> int | None:
 
 async def _run_sql(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
-    language: str | None = None, max_rows: int | None = None,
+    language: str | None = None, max_rows: int | None = None, user: str | None = None,
 ) -> dict[str, Any]:
     try:
         conn = connectors.sql(connector)  # UnknownConnectorError if missing / wrong type
-        result = await conn.execute(query, params, language=language, max_rows=max_rows)
+        # `user` is recorded on the audit row when the query is flagged `audit = "AUD_<table>"`;
+        # otherwise it's ignored. Pulled from the JWT principal — never the request body.
+        result = await conn.execute(query, params, language=language, max_rows=max_rows, user=user)
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
@@ -106,7 +108,10 @@ async def sql_query_get(
         raise HTTPException(status.HTTP_405_METHOD_NOT_ALLOWED, detail="Non-SELECT queries must be run with POST")
     qp = dict(request.query_params)
     limit = _as_int(qp.pop("_limit", None))  # ?_limit=N overrides the row cap; the rest are query params
-    return await _run_sql(connectors, connector, query, qp, language=request_language(request), max_rows=limit)
+    return await _run_sql(
+        connectors, connector, query, qp,
+        language=request_language(request), max_rows=limit, user=principal.username,
+    )
 
 
 @router.post("/sql/{connector}/{query}")
@@ -116,7 +121,10 @@ async def sql_query_post(
 ) -> dict[str, Any]:
     require_permission(principal, f"sql:{connector}:{query}")
     limit = _as_int(body.get("max_rows")) if body else None  # body {"params": …, "max_rows": N}
-    return await _run_sql(connectors, connector, query, _params_from_body(body), language=request_language(request), max_rows=limit)
+    return await _run_sql(
+        connectors, connector, query, _params_from_body(body),
+        language=request_language(request), max_rows=limit, user=principal.username,
+    )
 
 
 # --------------------------------------------------------------------------- #

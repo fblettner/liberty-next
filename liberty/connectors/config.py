@@ -242,6 +242,19 @@ class QueryDef(BaseModel):
     update_query: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="A `writable` query on this connector that UPDATEs a row of this result (the TableView's batch-edit). Blank → auto-derived from the `<base>_get` → `<base>_put` naming convention.")
     insert_query: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="A `writable` query that INSERTs a new row. Blank → auto-derived (`<base>_post`).")
     delete_query: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="A `writable` query that DELETEs a row. Blank → auto-derived (`<base>_delete`).")
+    audit: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Advanced"},
+        description=(
+            "Name of the audit table to mirror this writable query's row into (v2's port of v1's "
+            "`tbl_audit = 'Y'`). When set on a writable query, after the main write succeeds the SQL "
+            "connector INSERTs into ``<audit>`` the bound params (uppercased) plus three audit "
+            "columns: ``AUD_ACTION`` (INSERT/UPDATE/DELETE), ``AUD_USER`` (the caller's username), "
+            "``AUD_DATE`` (server timestamp). The audit table must exist with a matching schema — "
+            "the migration emits ``audit = \"AUD_<TBL_DB_NAME>\"`` on each writable companion of "
+            "screens flagged ``tbl_audit = 'Y'``."
+        ),
+    )
 
     @field_validator("sql")
     @classmethod

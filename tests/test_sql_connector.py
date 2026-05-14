@@ -330,6 +330,86 @@ async def test_write_when_writable(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
+async def test_audit_mirrors_writes_into_aud_table(pools: PoolRegistry) -> None:
+    """A writable query with ``audit = "AUD_<table>"`` set mirrors each write into the named
+    table — same transaction (a failing mirror rolls back the main write too), capturing the
+    bound row's UPPERCASE params + ``AUD_ACTION`` / ``AUD_USER`` / ``AUD_DATE``. ``_ORIGINAL``
+    keys (the rebound WHERE for `_put`s) are skipped on the audit row — they're context for
+    finding the row to update, not the row's data."""
+    # The audit target — operator-provided in real deployments; here we create it inline. SQLite
+    # preserves DDL case in result keys, so we use lowercase to match the existing `item` fixture
+    # (Postgres / Oracle would fold unquoted identifiers their own way; this test is environment-
+    # agnostic because the assertions use lowercase end-user keys).
+    async with pools.engine("test").begin() as c:
+        await c.execute(text(
+            "CREATE TABLE aud_item ("
+            "id INTEGER, name TEXT, status TEXT, aud_action TEXT, aud_user TEXT, aud_date TIMESTAMP)"
+        ))
+
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", writable=True, audit="aud_item",
+                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+        QueryDef(name="upd", writable=True, audit="aud_item",
+                 sql="UPDATE item SET name = :NAME WHERE id = :ID_ORIGINAL"),
+        QueryDef(name="aud_all", sql="SELECT * FROM aud_item ORDER BY rowid"),
+    )
+
+    # INSERT — full row in params (uppercase, matching the migrated _post convention).
+    r = await conn.execute("ins", {"ID": 100, "NAME": "alpha", "STATUS": "on"}, user="bob")
+    assert r.statement_type == "INSERT" and r.rowcount == 1
+
+    # UPDATE — new value for NAME, plus :ID_ORIGINAL to find the row (the v2 _put convention).
+    # The audit row should record the *new* values (NAME) and skip the _ORIGINAL key.
+    r = await conn.execute("upd", {"NAME": "alpha-2", "ID_ORIGINAL": 100}, user="alice")
+    assert r.statement_type == "UPDATE" and r.rowcount == 1
+
+    aud = await conn.execute("aud_all")
+    rows = aud.rows
+    assert len(rows) == 2
+    # INSERT audit row — all bound columns logged, action + user threaded through.
+    assert rows[0]["aud_action"] == "INSERT" and rows[0]["aud_user"] == "bob"
+    assert rows[0]["id"] == 100 and rows[0]["name"] == "alpha" and rows[0]["status"] == "on"
+    assert rows[0]["aud_date"] is not None
+    # UPDATE audit row — only NAME was in the new-value params; ID_ORIGINAL is skipped.
+    assert rows[1]["aud_action"] == "UPDATE" and rows[1]["aud_user"] == "alice"
+    assert rows[1]["name"] == "alpha-2" and rows[1]["id"] is None  # ID wasn't in the params (only ID_ORIGINAL)
+
+
+@pytest.mark.asyncio
+async def test_audit_failure_rolls_back_the_main_write(pools: PoolRegistry) -> None:
+    """A misconfigured audit table (or any audit failure) rolls back the main write — the
+    audit INSERT runs in the same transaction. Loud rather than silently dropped, so an
+    operator notices their AUD table needs fixing."""
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", writable=True, audit="aud_does_not_exist",
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+        QueryDef(name="count", sql="SELECT COUNT(*) AS n FROM item"),
+    )
+    before = (await conn.execute("count")).rows[0]["n"]
+    with pytest.raises(Exception):  # underlying SQLAlchemy error — the AUD table is missing
+        await conn.execute("ins", {"ID": 200, "NAME": "z"}, user="x")
+    assert (await conn.execute("count")).rows[0]["n"] == before  # the main write rolled back too
+
+
+@pytest.mark.asyncio
+async def test_audit_anonymous_when_no_user(pools: PoolRegistry) -> None:
+    """``execute()`` without a ``user`` (an unauthenticated path / internal call) records
+    ``"anonymous"`` on ``AUD_USER`` — the column is never NULL."""
+    async with pools.engine("test").begin() as c:
+        await c.execute(text("CREATE TABLE aud_item2 (id INTEGER, aud_action TEXT, aud_user TEXT, aud_date TIMESTAMP)"))
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", writable=True, audit="aud_item2",
+                 sql="INSERT INTO item (id) VALUES (:ID)"),
+        QueryDef(name="all", sql="SELECT aud_user FROM aud_item2"),
+    )
+    await conn.execute("ins", {"ID": 7})  # no user kwarg
+    assert (await conn.execute("all")).rows == [{"aud_user": "anonymous"}]
+
+
+@pytest.mark.asyncio
 async def test_disallowed_statement_rejected_before_connecting(pools: PoolRegistry) -> None:
     conn = _connector(pools, QueryDef(name="bad", sql="DROP TABLE item", writable=True))
     with pytest.raises(StatementNotAllowedError):
