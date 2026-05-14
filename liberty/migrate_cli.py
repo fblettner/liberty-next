@@ -135,9 +135,14 @@ async def _build(args: argparse.Namespace) -> dict:
             _, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
             screen_rows = await read_screens(engine)
             ctx_tables_rows, ctx_dlg_frm_rows = screen_rows[0], screen_rows[2]
+            # Threads tbl_col/dlg_col rows in too — used to resolve `flt_target` when it names a
+            # dictionary key (col_dd_id) rather than a column (col_target). Without this, queries
+            # whose drill-target column has dd_id ≠ col_target (e.g. CFD_APPS_ID with dd APPS_ID)
+            # get wrapped with a bogus filter that points at a non-existent column.
             drill_cols = migrate_drill_filter_columns(
                 ctx_val_rows, ctx_filter_rows,
                 tables_rows=ctx_tables_rows, dlg_frm_rows=ctx_dlg_frm_rows,
+                tbl_col_rows=tbl_cols, dlg_col_rows=dlg_cols,
             )
             parts.append(migrate_sql_queries(
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,

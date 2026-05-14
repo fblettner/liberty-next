@@ -136,6 +136,127 @@ def _wrap_with_filters(base_sql: str, cols: list[str], *, dialect: str = "defaul
     return f"SELECT * FROM (\n{base_sql}\n) lib_flt\nWHERE 1=1\n{preds}"
 
 
+def _outermost_select_columns(sql: str) -> set[str] | None:
+    """Best-effort extractor for the column names a SELECT exposes — used to validate that
+    each ``filter = true`` hint references a column the result actually has. Returns ``None``
+    when the SQL is too complex to parse (then the caller skips the validation and emits the
+    filter as-is — preserving the old behaviour rather than dropping a potentially-valid one).
+
+    Handles the shapes the v1 migration produces: a single top-level SELECT (or SELECT DISTINCT)
+    with comma-separated column expressions, each of which is either ``COL``, ``T.COL``,
+    ``expr AS ALIAS``, ``expr ALIAS``, or ``(subquery) ALIAS``. The alias is the last identifier
+    in the entry (after AS if present). FROM nesting inside parens is handled by tracking depth.
+    """
+    # Find the outer SELECT keyword (skipping nested SELECTs inside parens — track depth).
+    # We're looking for ``SELECT[DISTINCT] <cols> FROM`` where both keywords are at depth 0.
+    depth = 0
+    select_start = -1
+    i = 0
+    sl = sql
+    sl_upper = sl.upper()
+    while i < len(sl):
+        c = sl[i]
+        if c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+        elif depth == 0 and select_start < 0:
+            # Match SELECT as a whole word — followed by whitespace, not part of a longer ident.
+            if sl_upper.startswith("SELECT", i) and (i == 0 or not (sl[i - 1].isalnum() or sl[i - 1] == "_")):
+                after = i + len("SELECT")
+                if after < len(sl) and (sl[after].isspace() or sl[after] == "\n"):
+                    select_start = after
+                    break
+        i += 1
+    if select_start < 0:
+        return None
+    # Skip an optional DISTINCT/ALL right after SELECT.
+    rest = sl[select_start:].lstrip()
+    for kw in ("DISTINCT", "ALL"):
+        if rest.upper().startswith(kw) and len(rest) > len(kw) and rest[len(kw)].isspace():
+            rest = rest[len(kw):].lstrip()
+            break
+    # Find the matching FROM at depth 0 from where we are now.
+    depth = 0
+    from_pos = -1
+    for j in range(len(rest)):
+        c = rest[j]
+        if c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+        elif depth == 0 and rest.upper().startswith("FROM", j) and (j == 0 or not (rest[j - 1].isalnum() or rest[j - 1] == "_")):
+            after = j + len("FROM")
+            if after < len(rest) and (rest[after].isspace() or rest[after] == "\n"):
+                from_pos = j
+                break
+    if from_pos < 0:
+        return None
+    cols_text = rest[:from_pos]
+    # Split on top-level commas (skip commas inside parens — function args, CASTs, …).
+    parts: list[str] = []
+    buf: list[str] = []
+    d = 0
+    for ch in cols_text:
+        if ch == '(':
+            d += 1
+        elif ch == ')':
+            d -= 1
+        if ch == ',' and d == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    out: set[str] = set()
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        # Strip a trailing AS alias clause and use the alias.
+        m = re.search(r"\bAS\s+([A-Za-z_]\w*)\s*$", p, re.IGNORECASE)
+        if m:
+            out.add(m.group(1))
+            continue
+        # Else the last identifier in the entry is the alias / column name. Handles `T.COL`,
+        # `expr ALIAS`, and bare `COL`. Anything purely expression-like (no trailing identifier)
+        # ends up with no alias — we skip it; that column won't be filter-able anyway.
+        m = re.search(r"([A-Za-z_]\w*)\s*$", p)
+        if m:
+            out.add(m.group(1))
+    return out if out else None
+
+
+def _drop_filter_for_missing_cols(
+    hints: list[dict[str, Any]], sql_variants: dict[str, str], *, connector: str, query: str,
+) -> None:
+    """Mutate *hints* — strip ``filter = true`` from any hint whose ``name`` doesn't appear in
+    every dialect variant's outer SELECT. v1's metadata occasionally points at a column not in the
+    result (operator edited the SQL but not the column hint, or the migrator's drill-resolution
+    landed on the wrong column for a multi-column dd) — without this check, ``_wrap_with_filters``
+    binds ``lib_flt.<missing>`` and the SQL parser errors at run time. When the SQL is too complex
+    to parse, the hint is left alone (the runtime might still fail but we don't know any better)."""
+    exposed_by_dia: dict[str, set[str] | None] = {dia: _outermost_select_columns(s) for dia, s in sql_variants.items()}
+    # Use the intersection of every dialect's columns — only keep `filter` for a column that
+    # exists in *every* dialect's SELECT.
+    dia_sets = [s for s in exposed_by_dia.values() if s is not None]
+    if not dia_sets:
+        return  # couldn't parse — leave hints alone
+    exposed = set.intersection(*dia_sets) if len(dia_sets) > 1 else dia_sets[0]
+    # Case-insensitive set — Postgres folds unquoted identifiers, Oracle uppercases. Match either way.
+    exposed_lower = {c.lower() for c in exposed}
+    for h in hints:
+        if not h.get("filter"):
+            continue
+        if str(h.get("name") or "").lower() not in exposed_lower:
+            _log.warning(
+                "column hints: %s.%s — filter column %r is not in the query's SELECT output; "
+                "dropping `filter = true` to avoid a broken `lib_flt.%s` WHERE clause at run time",
+                connector, query, h.get("name"), h.get("name"),
+            )
+            del h["filter"]
+
+
 # A read query used as a lookup target (v1 ly_lookup.lkp_query_id) needs its declared params
 # (ly_lkp_params) to *actually filter* — v1's SQLs return every row and the framework narrowed
 # them in code. Wrap with `SELECT * FROM (…) lib_lkp WHERE (param IS NULL OR <col> = param)` per
@@ -352,6 +473,12 @@ def migrate_sql_queries(
         tm = tm_full if is_read else None  # display hints only apply to the read companion
         audit_table = (tm_full or {}).get("audit_table") if not is_read else None  # AUD_<table> on writes only
         kcs = (key_columns or {}).get(qid, []) if is_read else []  # the result's identity (v1 col_key)
+        # Sanity-check the filter columns against the actual SELECT output — a hint that names a
+        # column the SQL doesn't expose would produce a broken `lib_flt.X` WHERE clause that errors
+        # at run time (502 on the route). This catches inconsistencies between v1's `ly_tbl_col`
+        # and the v1 SQL itself, plus any flt_target the drill-filter resolver couldn't translate.
+        if hints:
+            _drop_filter_for_missing_cols(hints, groups[key], connector=conn_name, query=base)
         filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
         # Lookup-target params (v1 ly_lkp_params) — declarative names the lookup callers bind. We
         # wrap the read SQL with `(:P IS NULL OR <col> = :P)` so they actually narrow server-side
@@ -536,6 +663,8 @@ def migrate_drill_filter_columns(
     filter_rows: Iterable[Mapping[str, Any]] = (),
     tables_rows: Iterable[Mapping[str, Any]] = (),
     dlg_frm_rows: Iterable[Mapping[str, Any]] = (),
+    tbl_col_rows: Iterable[Mapping[str, Any]] = (),
+    dlg_col_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[int, list[str]]:
     """``{query_id: [col_target, …]}`` — for every v1 context-menu drill, the columns on the
     *destination* read query that the drill binds (``ly_ctx_filters.flt_target``). Fed into
@@ -549,12 +678,24 @@ def migrate_drill_filter_columns(
     literal from the menu item) are treated the same: in both cases the destination must accept
     a bind for ``flt_target``. The columns are deduped per query, in first-seen order.
 
+    **Dictionary-key resolution.** ``ly_ctx_filters.flt_target`` is the dictionary key (``dd_id``)
+    on the destination, *not* always the SQL column name. v1's framework resolved that via
+    ``ly_tbl_col.col_dd_id`` at runtime; v2's wrapper has to bind ``lib_flt.<col_target>`` literally,
+    so we translate at migration time: when ``flt_target`` matches an existing column hint's
+    ``col_dd_id`` (and *not* an actual ``col_target`` on that query — that hits first), we substitute
+    the column's ``col_target``. Without this, queries like ``sod_summary_users_get`` (column
+    ``CFD_APPS_ID`` with ``dd_id = APPS_ID``) get wrapped with a bogus ``lib_flt.APPS_ID`` filter
+    and the SQL parser errors at run time (502 from the route).
+
     Args:
         val_rows: rows from ``ly_ctx_val`` — gives us ``(ctx_id, val_id) → val_component,
             val_component_id`` so we can resolve each drill's destination ``query_id``.
         filter_rows: rows from ``ly_ctx_filters`` — ``(ctx_id, val_id, flt_target)``.
         tables_rows: rows from ``ly_tables`` — for ``FormsTable`` items: ``tbl_id → tbl_query_id``.
         dlg_frm_rows: rows from ``ly_dlg_frm`` — for ``FormsDialog`` items: ``frm_id → frm_query_id``.
+        tbl_col_rows / dlg_col_rows: rows from ``ly_tbl_col`` / ``ly_dlg_col`` — the column hints
+            for each query (``query_id``, ``col_target``, ``col_dd_id``). Used to resolve a
+            ``flt_target`` that names a dictionary key rather than a column.
     """
     # Resolve each (ctx_id, val_id) → destination query_id via tbl_qid / frm_qid maps.
     tbl_qid: dict[int, int] = {}
@@ -594,12 +735,58 @@ def migrate_drill_filter_columns(
         if target_qid is not None:
             target_qid_by_val[(ctx_id, val_id)] = target_qid
 
+    # Build per-query maps from the destination's column hints — used to translate `flt_target`
+    # when it's a dictionary key rather than a column name. Two maps so the lookup is cheap:
+    # `cols_by_qid[qid] = {col_target_lower: col_target}` for "is this already a column?",
+    # `dd_by_qid[qid] = {dd_id_lower: col_target}` for "which column has this dictionary key?".
+    cols_by_qid: dict[int, dict[str, str]] = {}
+    dd_by_qid: dict[int, dict[str, str]] = {}
+    for r in (*tbl_col_rows, *dlg_col_rows):
+        qid_raw = r.get("query_id")
+        col = str(r.get("col_target") or "").strip()
+        if qid_raw is None or not col:
+            continue
+        try:
+            qid = int(qid_raw)
+        except (TypeError, ValueError):
+            continue
+        cols_by_qid.setdefault(qid, {}).setdefault(col.lower(), col)
+        dd = str(r.get("col_dd_id") or "").strip()
+        if dd and dd.lower() != col.lower():
+            # First-occurrence wins — if two columns share a dd, the earlier one is used. This
+            # matches the v1 ordering (col_seq); ambiguity is rare in practice.
+            dd_by_qid.setdefault(qid, {}).setdefault(dd.lower(), col)
+
+    def _resolve(target_qid: int, raw: str) -> str:
+        """Translate `raw` (the v1 flt_target) into a SQL column name on the destination."""
+        cols = cols_by_qid.get(target_qid, {})
+        # 1) If `raw` is already a real column on the destination, use it as-is.
+        hit = cols.get(raw.lower())
+        if hit:
+            return hit
+        # 2) If `raw` matches a dictionary key, swap to that column's col_target.
+        via_dd = dd_by_qid.get(target_qid, {}).get(raw.lower())
+        if via_dd:
+            _log.warning(
+                "drill filter: destination query %s — `flt_target = %r` matches `col_dd_id` for "
+                "column %r; using the column name (without this the wrapper would bind a non-existent column)",
+                target_qid, raw, via_dd,
+            )
+            return via_dd
+        # 3) Fall through with a warning — the operator will need to hand-fix this SQL.
+        _log.warning(
+            "drill filter: destination query %s — `flt_target = %r` doesn't match any known column "
+            "or dictionary key on it; emitting as-is (the resulting SQL may fail at run time)",
+            target_qid, raw,
+        )
+        return raw
+
     out: dict[int, list[str]] = {}
     seen: dict[int, set[str]] = {}
     for r in filter_rows:
         ctx_id_raw, val_id_raw = r.get("ctx_id"), r.get("val_id")
-        target = str(r.get("flt_target") or "").strip()
-        if ctx_id_raw is None or val_id_raw is None or not target:
+        raw_target = str(r.get("flt_target") or "").strip()
+        if ctx_id_raw is None or val_id_raw is None or not raw_target:
             continue
         try:
             ctx_id, val_id = int(ctx_id_raw), int(val_id_raw)
@@ -608,6 +795,7 @@ def migrate_drill_filter_columns(
         target_qid = target_qid_by_val.get((ctx_id, val_id))
         if target_qid is None:
             continue
+        target = _resolve(target_qid, raw_target)
         s = seen.setdefault(target_qid, set())
         if target.lower() in s:
             continue

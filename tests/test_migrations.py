@@ -564,6 +564,60 @@ def test_migrate_drill_filter_columns() -> None:
     assert out == {20: ["RLU_APPS_ID", "RLU_USER_ID"], 21: ["STATUS"]}
 
 
+def test_migrate_drill_filter_columns_resolves_dd_to_col_target() -> None:
+    """v1's ``flt_target`` is the dictionary key (``col_dd_id``), not always the SQL column.
+    On a query like ``sod_summary_users_get`` the destination column is ``CFD_APPS_ID`` with
+    ``col_dd_id = APPS_ID`` — a drill referencing ``APPS_ID`` must be translated to
+    ``CFD_APPS_ID`` so the migrated wrapper binds the real column, not a phantom one. (The bug
+    surfaced in production as 502s on the dashboard's SOD widgets.)"""
+    val_rows = [
+        {"ctx_id": 1, "val_id": 1, "val_label": "Drill",
+         "val_component": "FormsTable", "val_component_id": 100},
+    ]
+    filter_rows = [
+        # v1 stored `flt_target = "APPS_ID"` (the dictionary key); the destination's real column
+        # is `CFD_APPS_ID`. Without translation the migrator emits `lib_flt.APPS_ID` and the SQL
+        # parser barfs.
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "APPS_ID", "flt_source": "USR_APPS_ID"},
+        # A flt_target that's also a real column name on the destination — should stay as-is
+        # (the col_target match wins over the dd lookup).
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "CFD_USER_ID", "flt_source": "USR_ID"},
+        # An flt_target with no matching column or dd — fall through with a warning (no crash).
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "UNKNOWN", "flt_source": "X"},
+    ]
+    tables_rows = [{"tbl_id": 100, "tbl_query_id": 20}]
+    # Destination's column hints — CFD_APPS_ID has dd_id = APPS_ID (the v1 dictionary key).
+    tbl_cols = [
+        {"query_id": 20, "col_target": "CFD_APPS_ID", "col_dd_id": "APPS_ID", "col_seq": 1},
+        {"query_id": 20, "col_target": "CFD_USER_ID", "col_dd_id": "USR_ID", "col_seq": 2},
+    ]
+    out = migrate_drill_filter_columns(
+        val_rows, filter_rows, tables_rows=tables_rows, tbl_col_rows=tbl_cols,
+    )
+    # APPS_ID → CFD_APPS_ID (via dd lookup); CFD_USER_ID kept (real column); UNKNOWN kept (warned)
+    assert out == {20: ["CFD_APPS_ID", "CFD_USER_ID", "UNKNOWN"]}
+
+
+def test_migrate_drill_filter_columns_dd_resolution_first_occurrence_wins() -> None:
+    """If two columns share the same ``col_dd_id``, the lower ``col_seq`` wins. Pathological but
+    possible — the v1 convention is one dd per column, so this is rare."""
+    val_rows = [
+        {"ctx_id": 1, "val_id": 1, "val_component": "FormsTable", "val_component_id": 100},
+    ]
+    filter_rows = [
+        {"ctx_id": 1, "val_id": 1, "flt_type": "DD", "flt_target": "APPS_ID", "flt_source": "USR_APPS_ID"},
+    ]
+    tables_rows = [{"tbl_id": 100, "tbl_query_id": 20}]
+    tbl_cols = [
+        # col_seq 1: USR_APPS_ID has dd APPS_ID — picked first
+        {"query_id": 20, "col_target": "USR_APPS_ID", "col_dd_id": "APPS_ID", "col_seq": 1},
+        # col_seq 2: SAME dd — ignored (first occurrence wins)
+        {"query_id": 20, "col_target": "CFD_APPS_ID", "col_dd_id": "APPS_ID", "col_seq": 2},
+    ]
+    out = migrate_drill_filter_columns(val_rows, filter_rows, tables_rows=tables_rows, tbl_col_rows=tbl_cols)
+    assert out == {20: ["USR_APPS_ID"]}
+
+
 def test_migrate_drill_filter_columns_end_to_end() -> None:
     """End-to-end check: ``migrate_drill_filter_columns`` → ``migrate_column_hints`` →
     ``migrate_sql_queries`` wraps the destination SQL with ``:RLU_APPS_ID``/``:RLU_USER_ID``
@@ -597,6 +651,58 @@ def test_migrate_drill_filter_columns_end_to_end() -> None:
     sql = out["connectors"]["nomasx1"]["queries"][0]["sql"]
     assert ":RLU_APPS_ID" in sql and ":RLU_USER_ID" in sql  # _wrap_with_filters bound both
     assert "lib_flt" in sql  # wrapped, not raw
+
+
+def test_migrate_sql_queries_drops_filter_for_missing_columns() -> None:
+    """A `filter = true` hint that names a column the SQL doesn't expose generates a
+    ``lib_flt.<missing>`` WHERE clause that errors at run time (the bug behind the dashboard's
+    SOD widget 502s). The migrator now strips the flag with a logged warning so the wrapper
+    only binds real columns. The hint itself stays — only `filter` goes away — so the column
+    still gets its label/format/etc."""
+    queries = [{"query_id": 20, "query_label": "Foo"}]
+    sql_rows = [{
+        "query_id": 20, "query_crud": "GET", "query_pool": "nomasx1", "query_dbtype": "postgres",
+        # SELECT exposes JDEO_APPS_ID + CPT_ID + USERS_COUNT — NOT LUSR_APPS_ID.
+        "query_sqlquery": "SELECT JDEO_APPS_ID, CPT_ID, USERS_COUNT FROM some_table",
+        "query_orderby": None,
+    }]
+    column_hints = {20: [
+        # `filter = true` on a column not in the SELECT → should be dropped
+        {"name": "LUSR_APPS_ID", "dd": "APPS_ID", "filter": True},
+        # `filter = true` on a real column → kept
+        {"name": "JDEO_APPS_ID", "dd": "APPS_ID", "filter": True},
+        # No `filter` flag at all → untouched (case-insensitive match against the SELECT)
+        {"name": "cpt_id"},
+    ]}
+    out = migrate_sql_queries(queries, sql_rows, column_hints=column_hints)
+    q = out["connectors"]["nomasx1"]["queries"][0]
+    cols = {c["name"]: c for c in q["columns"]}
+    # The broken filter is gone; the other one remains; the third is unchanged.
+    assert "filter" not in cols["LUSR_APPS_ID"]
+    assert cols["JDEO_APPS_ID"].get("filter") is True
+    # The wrapped SQL only references the real column in its WHERE.
+    sql = q["sql"]
+    assert ":JDEO_APPS_ID" in sql and ":LUSR_APPS_ID" not in sql
+    assert "lib_flt.JDEO_APPS_ID" in sql and "lib_flt.LUSR_APPS_ID" not in sql
+
+
+def test_outermost_select_columns_handles_nested_selects() -> None:
+    """The parser used by `_drop_filter_for_missing_cols` walks the SQL respecting paren depth —
+    nested SELECTs inside subqueries / CASE expressions / function args don't fool it. Output
+    column names are picked from the *outermost* SELECT's column list."""
+    from liberty.migrations.v1 import _outermost_select_columns
+    sql = """
+        SELECT
+            t.A,
+            t.B AS RENAMED,
+            (SELECT COUNT(*) FROM other) AS CNT,
+            CASE WHEN t.X > 0 THEN 1 ELSE 0 END FLAG
+        FROM main t
+        WHERE t.Z > 0
+    """
+    cols = _outermost_select_columns(sql)
+    assert cols is not None
+    assert cols == {"A", "RENAMED", "CNT", "FLAG"}
 
 
 _DICTIONARY = [
