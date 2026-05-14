@@ -7,7 +7,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, SpinnerRing } from '../../common'
-import { toNumber } from '../../services/chartData'
+import { resolveColumnName, toNumber } from '../../services/chartData'
 import type { QueryResult } from '../../types/connectors'
 import type { KpiWidgetWire } from '../../types/dashboards'
 import type { Aggregation } from '../../types/charts'
@@ -60,12 +60,15 @@ export function KpiWidget({ widget }: { widget: KpiWidgetWire }) {
 }
 
 /** Apply *aggregation* to *column*'s values across the result's rows. `count` returns the row
- *  count (matches SELECT COUNT(*)); the others sum/avg/min/max the parsable numeric cells. */
+ *  count (matches SELECT COUNT(*)); the others sum/avg/min/max the parsable numeric cells.
+ *  Resolves the column name case-insensitively against the result so a Pg-lowercased key
+ *  doesn't drop every value to null. */
 function computeKpi(result: QueryResult, column: string, agg: Aggregation): number | null {
   if (agg === 'count') return result.rows.length
+  const actualName = resolveColumnName(result, column)
   const values: number[] = []
   for (const r of result.rows) {
-    const n = toNumber(r[column])
+    const n = toNumber(r[actualName])
     if (n !== null) values.push(n)
   }
   if (!values.length) return null
