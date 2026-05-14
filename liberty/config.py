@@ -74,6 +74,16 @@ class ScreenSettings(BaseModel):
     config_path: Path = Path("config/screens.toml")
 
 
+class ChartSettings(BaseModel):
+    """Saved chart definitions — Phase 8 slice 2 (see :mod:`liberty.charts`). Per-session
+    chart specs from the TableView's chart toggle persist client-side in localStorage; this
+    file holds the ones an operator has saved for sharing."""
+
+    # `[charts.<id>]` per chart; a missing file is fine (no shared charts → the runtime still
+    # works via localStorage specs).
+    config_path: Path = Path("config/charts.toml")
+
+
 class AuthSettings(BaseModel):
     """Internal-user auth: where users/roles live (a TOML file or the DB), JWT signing."""
 
@@ -155,6 +165,7 @@ class Settings(BaseModel):
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     menus: MenuSettings = Field(default_factory=MenuSettings)
     screens: ScreenSettings = Field(default_factory=ScreenSettings)
+    charts: ChartSettings = Field(default_factory=ChartSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)

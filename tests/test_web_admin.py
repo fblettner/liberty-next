@@ -13,6 +13,7 @@ from liberty.config import (
     AISettings,
     AppSettings,
     AuthSettings,
+    ChartSettings,
     ConnectorSettings,
     MenuSettings,
     ScreenSettings,
@@ -81,6 +82,7 @@ def env(tmp_path):
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
         menus=MenuSettings(config_path=tmp_path / "menus.toml"),
         screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
+        charts=ChartSettings(config_path=tmp_path / "charts.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
@@ -480,3 +482,70 @@ def test_test_sql_rejects_disallowed_and_requires_superuser(env) -> None:
         # DROP not in the statement allow-list → 422 (parity with the named-query path)
         r = client.post("/admin/config/connectors/db/test-sql", json={"sql": "DROP TABLE item"}, headers=h)
         assert r.status_code == 422
+
+
+# --- /admin/config/charts/parsed ------------------------------------------- #
+
+
+def test_config_charts_parsed_get_and_put(env) -> None:
+    """GET → an empty dict when no charts.toml; PUT validates + writes; reload picks it up."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # GET: empty
+        r = client.get("/admin/config/charts/parsed", headers=h).json()
+        assert r["charts"] == {}
+        assert r["path"].endswith("charts.toml")
+        # PUT: save one chart
+        body = {"charts": {
+            "users_per_app": {
+                "label": "Users per app",
+                "connector": "db",
+                "query": "answer",
+                "spec": {"type": "bar", "x": "X", "y": ["Y"], "aggregation": "count"},
+            },
+        }}
+        s = client.put("/admin/config/charts/parsed", json=body, headers=h)
+        assert s.status_code == 200 and s.json()["saved"] is True
+        # GET round-trip: the chart is there. The GET uses `exclude_defaults=True` so default
+        # values (type='bar', aggregation='sum') are stripped — only non-default fields land in
+        # the response (and on disk), which keeps charts.toml diff-friendly.
+        after = client.get("/admin/config/charts/parsed", headers=h).json()["charts"]
+        assert set(after) == {"users_per_app"}
+        c = after["users_per_app"]
+        assert c["label"] == "Users per app"
+        assert c["spec"]["x"] == "X" and c["spec"]["y"] == ["Y"] and c["spec"]["aggregation"] == "count"
+        # Reload picks it up — the chart shows up in /admin/reload's reply + /api/charts
+        reload_resp = client.post("/admin/reload", headers=h).json()
+        assert reload_resp["charts"] == ["users_per_app"]
+        listed = client.get("/api/charts", headers=h).json()["charts"]
+        assert [c["id"] for c in listed] == ["users_per_app"]
+
+
+def test_config_charts_parsed_rejects_invalid(env) -> None:
+    """A chart missing its X or Y column → 422 from the PUT (the model validator catches it)."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {"charts": {
+            "broken": {
+                "label": "B", "connector": "c", "query": "q",
+                "spec": {"type": "bar", "x": "X", "y": []},  # empty Y
+            },
+        }}
+        r = client.put("/admin/config/charts/parsed", json=body, headers=h)
+        assert r.status_code == 422 and "spec.y" in r.json()["detail"]
+
+
+def test_config_schema_includes_charts(env) -> None:
+    """The /admin/config/schema bundle now carries the ChartsFile JSON Schema so the
+    (future) ChartsBuilder can render its forms from it."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        schema = client.get("/admin/config/schema", headers=h).json()
+        assert "charts" in schema
+        assert "properties" in schema["charts"]
+        # The ChartConfig + ChartSpec $defs are reachable for SchemaNavigator drill-in
+        defs = schema["charts"].get("$defs") or {}
+        assert "ChartConfig" in defs and "ChartSpec" in defs

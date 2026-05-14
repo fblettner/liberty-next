@@ -1,0 +1,55 @@
+# config/charts.toml — saved chart definitions (Phase 8).
+#
+# A chart is a named, version-controlled view of a connector's query, rendered as a bar /
+# line / area / pie. The TableView's chart toggle persists each operator's local choices
+# to localStorage; this file holds the ones an operator has saved (via the chart panel's
+# "Save chart" button) so they can be shared, diffed in git, and (later slice) referenced
+# from a menu / dashboard by id.
+#
+# A chart inherits its underlying query's permission: a caller can see a chart iff they
+# hold ``sql:<connector>:<query>``. Nothing else to configure.
+#
+# Schema (see liberty/charts/config.py):
+#
+#   [charts.<id>]                   # <id> is stable per-deployment (slug-style)
+#   label = "..."                   # required; display title
+#   description = "..."             # optional; longer description
+#   connector = "..."               # the SQL connector backing this chart
+#   query = "..."                   # its read query (must exist on the connector)
+#
+#     [charts.<id>.spec]
+#     type = "bar"                  # bar | line | area | pie
+#     x = "COLUMN_NAME"             # X axis (slice label on pie)
+#     y = ["COLUMN_NAME"]           # Y axis (series — pie collapses to the first entry)
+#     aggregation = "count"         # sum | avg | count | min | max | none
+#     stacked = false               # bar/area only — stack the series rather than place side-by-side
+#     show_legend = true            # default: only when multiple series
+#     show_grid = true              # default on; pie ignores
+#     sort_by_x = false             # default: input order
+#
+# Reload after editing: POST /admin/reload (or use the Reload button in Settings).
+
+# ── examples (uncomment + adapt) ───────────────────────────────────────────────────
+
+# [charts.users_per_app]
+# label = "Users per application"
+# description = "Active user count grouped by application"
+# connector = "nomasx1"
+# query = "security_users_get"
+#
+#   [charts.users_per_app.spec]
+#   type = "bar"
+#   x = "APPS_ID"
+#   y = ["USR_ID"]
+#   aggregation = "count"
+
+# [charts.users_by_status]
+# label = "Users by status"
+# connector = "nomasx1"
+# query = "security_users_get"
+#
+#   [charts.users_by_status.spec]
+#   type = "pie"
+#   x = "USR_STATUS"
+#   y = ["USR_ID"]
+#   aggregation = "count"

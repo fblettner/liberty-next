@@ -22,9 +22,10 @@ from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
 from liberty.connectors.base import ConnectorError
 from liberty.licensing import verify_license
+from liberty.charts import load_charts
 from liberty.menus import load_menus
 from liberty.screens import load_screens
-from liberty.web import admin_router, connectors_router, license_router, menus_router, screens_router
+from liberty.web import admin_router, charts_router, connectors_router, license_router, menus_router, screens_router
 
 _log = logging.getLogger("liberty")
 
@@ -80,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
+        app.state.charts = load_charts(settings.charts.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
         app.state.token_service = _build_token_service(settings.auth)
         app.state.oidc = build_oidc(settings.oidc)
@@ -112,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connectors_router)
     app.include_router(menus_router)
     app.include_router(screens_router)
+    app.include_router(charts_router)
     app.include_router(license_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
@@ -140,6 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "apps": list(app.state.screens.screens),
                 "total": sum(len(scr) for scr in app.state.screens.screens.values()),
             },
+            "charts": {"total": len(app.state.charts.charts)},
             "auth": {
                 "backend": s.auth.backend,
                 **({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)}),

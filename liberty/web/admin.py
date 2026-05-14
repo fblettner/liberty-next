@@ -53,6 +53,8 @@ from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
 from liberty.screens import load_screens
 from liberty.screens.config import ScreensFile, parse_screens
+from liberty.charts import load_charts
+from liberty.charts.config import ChartsFile, parse_charts
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -74,6 +76,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     request.app.state.connectors = new
     request.app.state.menus = load_menus(settings.menus.config_path)
     request.app.state.screens = load_screens(settings.screens.config_path)
+    request.app.state.charts = load_charts(settings.charts.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
     await old.aclose()
     return {
@@ -83,6 +86,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "dictionary_entries": len(new.dictionary.entries),
         "menu_apps": list(request.app.state.menus.menus),
         "screen_apps": list(request.app.state.screens.screens),
+        "charts": list(request.app.state.charts.charts),
         "license_mode": license_result.mode,
     }
 
@@ -190,6 +194,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "dictionary": DictionaryFile.model_json_schema(),
         "menus": MenusFile.model_json_schema(),
         "screens": ScreensFile.model_json_schema(),
+        "charts": ChartsFile.model_json_schema(),
         "framework_enums": bundled,
     }
 
@@ -446,6 +451,54 @@ async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) 
         parse_screens(tomllib.loads(new_text))   # belt-and-braces re-validation
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting screens are invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/charts/parsed")
+async def get_charts_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``charts.toml`` parsed and normalised — ``{path, charts: {<id>: ChartConfig
+    dict}}``. A missing file → an empty chart set. Default-valued keys are dropped (so a saved
+    chart with all spec defaults round-trips cleanly without empty noise)."""
+    path = Path(request.app.state.settings.charts.config_path)
+    cfg = load_charts(path)
+    return {
+        "path": str(path),
+        "charts": {cid: c.model_dump(exclude_defaults=True, exclude_none=True) for cid, c in cfg.charts.items()},
+    }
+
+
+class ChartsBody(BaseModel):
+    charts: dict[str, dict[str, Any]]
+
+
+@router.put("/config/charts/parsed")
+async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted dict against :class:`ChartsFile` (each chart's ``id`` injected from
+    its dict key), then rewrite ``charts.toml`` via ``tomlkit`` (replacing the top-level ``[charts]``
+    table wholesale). Re-parses the resulting file before writing. Does not reload — call ``POST
+    /admin/reload`` afterwards. Same shape as the other ``/admin/config/<name>/parsed`` endpoints."""
+    try:
+        parse_charts({"charts": body.charts})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid charts: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid charts: {exc}") from exc
+
+    path = Path(request.app.state.settings.charts.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    if body.charts:
+        doc["charts"] = body.charts
+    elif "charts" in doc:
+        del doc["charts"]
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        parse_charts(tomllib.loads(new_text))   # belt-and-braces re-validation
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting charts are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}

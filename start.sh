@@ -14,7 +14,7 @@
 #   ./start.sh init-db    bootstrap the auth store + an `admin` user (creates config/auth.toml with
 #                         the default `[auth] backend = "toml"`; with `backend = "db"` it creates the
 #                         ly2_* tables on the configured pool instead — needs that DB reachable).
-#   ./start.sh init-config  copy config/{connectors,dictionary,menus,screens}.toml.example → the real files
+#   ./start.sh init-config  copy config/{connectors,dictionary,menus,screens,charts}.toml.example → the real files
 #                         if they don't exist (these aren't committed — per-deployment / licensed-app
 #                         config; run `liberty-migrate` to fill them from a v1 DB). `serve`/`dev` do
 #                         this automatically too.
@@ -62,7 +62,7 @@ maybe_build_frontend() {
 
 init_config() {  # copy the *.example templates to the real (uncommitted) config files when absent
   local f changed=0
-  for f in connectors dictionary menus screens; do
+  for f in connectors dictionary menus screens charts; do
     if [ ! -f "config/$f.toml" ] && [ -f "config/$f.toml.example" ]; then
       cp "config/$f.toml.example" "config/$f.toml"
       echo "==> created config/$f.toml from the template (edit it, or run liberty-migrate to fill it)"
