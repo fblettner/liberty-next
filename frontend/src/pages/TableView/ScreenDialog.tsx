@@ -71,6 +71,7 @@ const Checkbox = styled.label`
 // ── widget choice mirrors ResultTable.editCtrlOf — keep both in sync. ─────────
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
 function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
+function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
 
 // Resolve the field's `lookup_param_binds` against the current form state. `value` binds are
 // literals; `source` binds read the live value of another field on the same form (column name,
@@ -169,6 +170,22 @@ function FieldRow({
         placeholder={t('common.pick')}
       />
     )
+  } else if (isPassword(column)) {
+    // Never round-trip the stored value: it's an ``ENC:`` blob and showing it in the dialog
+    // leaks ciphertext (and, when it's a plain hash, lets a casual observer copy it). Render
+    // a masked input with a placeholder that hints "leave blank to keep". Seeding code skips
+    // password fields, so `textValue` here is always empty when the dialog opens — the user
+    // types a new value if they want to change the password, or leaves it blank to keep the
+    // current one. (The submit path only includes a password field when the user typed
+    // something — see ScreenDialog.submit.)
+    widget = (
+      <Input
+        type="password" autoComplete="new-password" required={required}
+        value={textValue}
+        placeholder={t('dialog.passwordPlaceholder')}
+        onChange={(e) => onChange(field.name, e.target.value === '' ? null : e.target.value)}
+      />
+    )
   } else {
     const fmt = (column?.format ?? '').toLowerCase()
     const typ = (column?.type ?? '').toLowerCase()
@@ -237,35 +254,44 @@ export function ScreenDialog({
     return undefined
   }, [])
 
-  // Re-seed when the dialog (re-)opens or the underlying row changes. The form state is keyed by
-  // ScreenField.name (whatever case the screen uses) so on save we can post `{NAME: v}` with the
-  // case the migrated update_query expects. `add` mode also applies field defaults.
-  useEffect(() => {
-    if (!open || !dlg) return
-    const seeded: Row = {}
-    for (const tab of dlg.tabs) {
-      for (const f of tab.fields ?? []) {
-        const v = valueFor(f.name, row)
-        if (v !== undefined) seeded[f.name] = v
-        else if (mode === 'add' && f.default != null && f.default !== '') seeded[f.name] = f.default
-      }
-    }
-    setFormValues(seeded)
-    setSavedRow(seeded)
-    setTabIdx(0)
-    setError(null)
-  }, [open, mode, row, dlg, valueFor])
-
-  const onFieldChange = useCallback((name: string, v: unknown) => {
-    setFormValues((p) => ({ ...p, [name]: v }))
-  }, [])
-
   // Resolve each ScreenField.name to its read-result column (case-insensitive), once per change.
+  // Hoisted above the seeding effect so we can skip password fields when seeding.
   const colByName = useMemo(() => {
     const m = new Map<string, Column>()
     for (const c of columns) m.set(c.name.toLowerCase(), c)
     return m
   }, [columns])
+
+  // Re-seed when the dialog (re-)opens or the underlying row changes. The form state is keyed by
+  // ScreenField.name (whatever case the screen uses) so on save we can post `{NAME: v}` with the
+  // case the migrated update_query expects. `add` mode also applies field defaults. Password
+  // fields are NEVER seeded with the stored value — that's a hash / ENC: ciphertext, and putting
+  // it in the form means it (a) shows up in the masked input as long-look-alike dots, (b) gets
+  // posted back on save, overwriting whatever the user might have set elsewhere. The seeded
+  // `savedRow` still carries the original for non-password `:<COL>_ORIGINAL` binds.
+  useEffect(() => {
+    if (!open || !dlg) return
+    const seeded: Row = {}
+    const original: Row = {}
+    for (const tab of dlg.tabs) {
+      for (const f of tab.fields ?? []) {
+        const col = colByName.get(f.name.toLowerCase()) ?? null
+        const v = valueFor(f.name, row)
+        if (v !== undefined) original[f.name] = v
+        if (isPassword(col)) continue   // seeded blank — user types a new password to change it
+        if (v !== undefined) seeded[f.name] = v
+        else if (mode === 'add' && f.default != null && f.default !== '') seeded[f.name] = f.default
+      }
+    }
+    setFormValues(seeded)
+    setSavedRow(original)
+    setTabIdx(0)
+    setError(null)
+  }, [open, mode, row, dlg, valueFor, colByName])
+
+  const onFieldChange = useCallback((name: string, v: unknown) => {
+    setFormValues((p) => ({ ...p, [name]: v }))
+  }, [])
 
   const submit = useCallback(async () => {
     const targetQuery = mode === 'edit' ? screen.update_query : screen.insert_query
@@ -273,18 +299,38 @@ export function ScreenDialog({
       setError(t(mode === 'edit' ? 'table.editNoUpdate' : 'table.editNoInsert'))
       return
     }
-    // Collect every value that's on a visible field on a non-hidden tab.
+    // Collect every value that's on a visible field on a non-hidden tab. Password fields with
+    // empty values are dropped — the user didn't change the password, so we must not overwrite
+    // the stored hash / ENC: ciphertext with NULL or "". On 'edit', the absence of the password
+    // key in `sent` means `savedRow`'s original (already stored, untouched) wins; on 'add', the
+    // INSERT runs without a password (the DB column may be nullable or get a default).
     const sent: Row = {}
     for (const tab of tabs) {
       for (const f of tab.fields ?? []) {
         if (f.hidden) continue
-        if (f.name in formValues) sent[f.name] = formValues[f.name]
+        if (!(f.name in formValues)) continue
+        const v = formValues[f.name]
+        const col = colByName.get(f.name.toLowerCase()) ?? null
+        if (isPassword(col) && (v == null || v === '')) continue
+        sent[f.name] = v
       }
     }
     setSaving(true); setError(null)
     try {
+      // For password fields we never had the original ciphertext in the form (seeded blank), so
+      // dropping them from `savedRow` keeps the update-query's SET clause from binding `:PASSWORD`
+      // to undefined — text() omits unmentioned params, but a key with the wrong value would still
+      // overwrite. The migrated _put queries reference :PASSWORD only in their SET clause; not
+      // sending it means the column keeps its current DB value. (When the user *did* type a new
+      // password, `sent` carries it and overrides.)
+      const baseSaved: Row = mode === 'edit'
+        ? Object.fromEntries(Object.entries(savedRow).filter(([k]) => {
+            const c = colByName.get(k.toLowerCase()) ?? null
+            return !isPassword(c)
+          }))
+        : {}
       const params = mode === 'edit'
-        ? { ...savedRow, ...sent, ...originalKeys(savedRow) }
+        ? { ...baseSaved, ...sent, ...originalKeys(baseSaved) }
         : sent
       await api.post(
         `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
@@ -297,7 +343,7 @@ export function ScreenDialog({
       setSaving(false)
       setError(e instanceof ApiError ? e.message : String(e))
     }
-  }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t])
+  }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t, colByName])
 
   if (!open || !dlg) return null
   const currentTab = tabs[Math.min(tabIdx, tabs.length - 1)] ?? null

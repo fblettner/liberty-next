@@ -15,6 +15,7 @@ import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
 import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, tableExists } from './connectorTables'
 
@@ -80,6 +81,7 @@ const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.
 
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
+  const { findScreen } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
   // the DD_ENTRIES dropdown that drives `ColumnHint.dd` and `FilterDep.source/column`.
@@ -283,18 +285,27 @@ export default function ConnectorsBuilder() {
                 <SchemaNavigator root={{ label: sel!, schema: selSchema, value: selConn, onChange: (v) => update(sel!, v) }} />
               )}
               {effectiveMode === 'tables' && (
-                selTable && queryDefSchema ? (
-                  <ConnectorsTableEditor
-                    base={selTable}
-                    slots={grouped.tables.find((g) => g.base === selTable)?.slots ?? {}}
-                    queries={queriesArr}
-                    queryDefSchema={queryDefSchema}
-                    defs={allDefs}
-                    onChangeQueries={(next) => updateQueries(sel!, next)}
-                    onBack={() => setSelTable(null)}
-                    onDuplicate={() => sel && duplicateTable(sel, selTable)}
-                  />
-                ) : (
+                selTable && queryDefSchema ? (() => {
+                  // The corresponding Screen (if any) is keyed by (connector, get-slot name).
+                  // The cross-link only shows when both are present + a screen with a dialog is
+                  // actually registered for this read query.
+                  const slotsForSel = grouped.tables.find((g) => g.base === selTable)?.slots ?? {}
+                  const getName = slotsForSel.get?.name
+                  const matchedScreen = sel && getName ? findScreen(sel, getName) : null
+                  return (
+                    <ConnectorsTableEditor
+                      base={selTable}
+                      slots={slotsForSel}
+                      queries={queriesArr}
+                      queryDefSchema={queryDefSchema}
+                      defs={allDefs}
+                      onChangeQueries={(next) => updateQueries(sel!, next)}
+                      onBack={() => setSelTable(null)}
+                      onDuplicate={() => sel && duplicateTable(sel, selTable)}
+                      screenLink={matchedScreen ? { app: matchedScreen.app, id: matchedScreen.id } : null}
+                    />
+                  )
+                })() : (
                   <Stack gap={10}>
                     {grouped.tables.length > 6 && (
                       <NavSearch>

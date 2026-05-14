@@ -161,6 +161,7 @@ const fr: Resources = {
     addTooltip: 'Ouvrir le formulaire pour ajouter une ligne',
     noVisibleTabs: 'Aucun onglet n’est visible dans ce mode.',
     noVisibleFields: 'Aucun champ sur cet onglet.',
+    passwordPlaceholder: 'laisser vide pour conserver la valeur actuelle',
   },
   http: {
     ok: 'OK',
@@ -322,6 +323,7 @@ const fr: Resources = {
       duplicateSameName: "Choisissez un nom différent de l'original.",
       duplicateExists: 'Une table « {{name}} » existe déjà dans ce connecteur.',
       duplicateNoSource: "Aucune requête CRUD trouvée pour « {{name}} » — rien à copier.",
+      openInScreens: 'Ouvrir dans Écrans',
       backToTables: 'Toutes les tables',
       emptyConnector: "Aucune table. Ajoutez-en une pour créer une requête de lecture.",
       slot_one: 'requête présente',

@@ -1,9 +1,12 @@
 // Settings page = a tab switcher over the config editors: a structured builder per config section
 // (Pools, Connectors, Dictionary — Phase 7) and the raw `connectors.toml` Monaco editor as the
-// escape hatch.
-import { lazy, Suspense, useState } from 'react'
+// escape hatch. The active tab + the per-tab selection (app/screen) ride on the URL search
+// params so a deep link like `/settings?tab=screens&app=nomasx1&screen=security_users` opens
+// straight to the right place — used by the Connectors → Screens cross-link.
+import { lazy, Suspense } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal } from 'lucide-react'
 import { PageLayout, Centered } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -15,7 +18,9 @@ const MenusBuilder = lazy(() => import('./MenusBuilder'))
 const ScreensBuilder = lazy(() => import('./ScreensBuilder'))
 const RawEditor = lazy(() => import('./RawEditor'))
 
-type Tab = 'pools' | 'connectors' | 'dictionary' | 'menus' | 'screens' | 'raw'
+const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'raw'] as const
+type Tab = typeof TABS[number]
+const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
 const Tabs = styled.div`display: flex; gap: 4px; margin-bottom: 14px;`
 const TabBtn = styled.button<{ $active?: boolean }>`
@@ -29,7 +34,19 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 
 export default function Settings() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<Tab>('pools')
+  // Tab + per-tab selection live in the URL search params. Switching tab clears the per-tab
+  // selection (it's tab-scoped) — the builders read the params on mount to pre-select. A wholly
+  // missing `tab` param defaults to `pools`. Anything else (invalid value) is silently coerced.
+  const [params, setParams] = useSearchParams()
+  const rawTab = params.get('tab')
+  const tab: Tab = isTab(rawTab) ? rawTab : 'pools'
+  const setTab = (next: Tab) => {
+    const np = new URLSearchParams(params)
+    np.set('tab', next)
+    // Drop the tab-scoped selectors when switching — they belong to the previous tab.
+    for (const k of ['app', 'screen']) np.delete(k)
+    setParams(np, { replace: true })
+  }
   return (
     <PageLayout icon={<SlidersHorizontal size={18} />} title={t('settings.title')}>
       <Tabs>

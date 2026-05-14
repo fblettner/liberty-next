@@ -159,6 +159,7 @@ const en = {
     addTooltip: 'Open the form to add a new row',
     noVisibleTabs: 'No tabs are visible for this mode.',
     noVisibleFields: 'No fields on this tab.',
+    passwordPlaceholder: 'leave blank to keep the current value',
   },
   http: {
     ok: 'OK',
@@ -320,6 +321,7 @@ const en = {
       duplicateSameName: 'Pick a different name from the original.',
       duplicateExists: 'A table named “{{name}}” already exists in this connector.',
       duplicateNoSource: 'No CRUD queries found for “{{name}}” — nothing to copy.',
+      openInScreens: 'Open in Screens',
       backToTables: 'All tables',
       emptyConnector: 'No tables yet. Add one to scaffold a read query.',
       slot_one: 'slot filled',

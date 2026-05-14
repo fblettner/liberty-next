@@ -752,6 +752,24 @@ migrate cleanly.
   `ScreenTab` / `ScreenField` / `ParamBind` / `ScreensByApp`); see also the Settings-builder
   shapes in `types/config.ts`.
 - EN/FR i18n strings added (`table.bulkEdit`, `common.no`/`common.pick`, `dialog.*`).
+- Password fields (a column with ``format = "password"``, v1's PASSWORD rule) are *never* seeded
+  with the stored value (the column holds a hash / ``ENC:`` blob — leaking that in the dialog is
+  a security issue). They render as ``<input type="password">`` with a "leave blank to keep"
+  placeholder; submit drops blank password fields *and* strips them from the ``:<COL>_ORIGINAL``
+  binds (the migrated ``_put``'s SET only binds ``:PASSWORD`` if the user typed a new one — the
+  DB column keeps its current value when blank).
+
+**Multi-table writes from one dialog (v1's ``FormsDialog`` — deferred to slice 4).** v1's
+NOMASX1 ``settings_applications`` screen actually wrote to 3-4 tables on save (the apps row + its
+JDE settings + its LDAP settings, all on one PK), orchestrated by ``liberty-core``'s
+``FormsDialog``. v2's plan for this is to use **slice 4 actions**: a screen's dialog will gain an
+``on_save`` event that runs a list of ``run_query`` actions in order, each receiving the same
+form state via ``ParamBind`` (so each action picks the columns it needs and writes its own
+table). The read side already works in v2 today — the screen's ``read_query`` can JOIN the
+linked tables into one flat result, the dialog renders tabs (General / JDE / LDAP / …) backed
+by the joined columns, and ``on_save`` then fans out to the write queries. No special
+``compound_dialog`` shape — same ParamBind mechanism as lookups, actions, and row menus.
+
 Slices 3-6 still to do (per-field conditions, actions/events, AUD audit, row menus).
 
 335 tests pass.

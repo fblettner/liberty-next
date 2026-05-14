@@ -7,10 +7,11 @@
 // tomlkit (the `[screens]` table is replaced wholesale — nested per-app/per-screen tables round-
 // trip cleanly), then reloads. No rename of the app key yet (delete + re-add) — the inspector
 // does let you rename a screen's `id` (the dict key follows).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, FolderOpen, FileText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
 import {
   Button,
@@ -68,6 +69,12 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 
 export default function ScreensBuilder() {
   const { t } = useTranslation()
+  // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
+  // here). We consume each query param exactly once: clear it from the URL after applying so a
+  // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
+  // target. A ref tracks "already consumed" across the load → set selection re-render dance.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const consumed = useRef(false)
   // The schema we navigate is the `Screen` definition from the ScreensFile's $defs — that's where
   // dialog/tabs/fields/param-binds live. We pass the *whole* $defs along so SchemaNavigator can
   // resolve refs into ScreenDialog / ScreenTab / ScreenField / ParamBind / ScreenAction at the
@@ -99,9 +106,24 @@ export default function ScreensBuilder() {
         setScreenSchema(merged)
         setEnums(s.framework_enums)
         setPath(d.path); setDoc(d.screens); setOriginal(JSON.stringify(d.screens))
-        // Preserve the picked app/screen when reloading; default to the first available.
         const apps = Object.keys(d.screens)
-        setSelApp((cur) => (cur && d.screens[cur] ? cur : apps[0] ?? null))
+        // Deep-link: `?app=X&screen=Y` (e.g. from ConnectorsBuilder) pre-selects the screen.
+        // Only honoured once per mount and only when the requested screen actually exists; we
+        // then strip the params from the URL so a manual tab-switch doesn't lock the user into
+        // that selection on subsequent visits.
+        const linkApp = !consumed.current ? searchParams.get('app') : null
+        const linkScreen = !consumed.current ? searchParams.get('screen') : null
+        if (linkApp && d.screens[linkApp]) {
+          consumed.current = true
+          setSelApp(linkApp)
+          if (linkScreen && d.screens[linkApp][linkScreen]) setSelId(linkScreen)
+          const np = new URLSearchParams(searchParams)
+          np.delete('app'); np.delete('screen')
+          setSearchParams(np, { replace: true })
+        } else {
+          // Preserve the picked app/screen when reloading; default to the first available.
+          setSelApp((cur) => (cur && d.screens[cur] ? cur : apps[0] ?? null))
+        }
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }

@@ -8,8 +8,9 @@
 // No rename yet (delete + re-add), matching the rest of the Phase-7 builders.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, Copy, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 import { Button, Row, SchemaForm, SchemaNavigator, Stack, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
@@ -71,10 +72,14 @@ export interface ConnectorsTableEditorProps {
   onChangeQueries: (next: Record<string, unknown>[]) => void
   onBack: () => void
   onDuplicate?: () => void
+  /** When the parent finds a Screen whose `read_query` matches this table's `_get`, it passes
+   *  `{app, id}` here so the header shows an "Open in Screens" link that switches the Settings
+   *  tab and pre-selects the screen. Absent → no link (no matching screen for this table). */
+  screenLink?: { app: string; id: string } | null
 }
 
 export default function ConnectorsTableEditor({
-  base, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate,
+  base, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, screenLink,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>(slots.get ? 'general' : 'get')
@@ -218,6 +223,19 @@ export default function ConnectorsTableEditor({
         <BackBtn type="button" onClick={onBack}><ArrowLeft size={13} /> {t('settings.tables.backToTables')}</BackBtn>
         <Title>{base} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
         <Row gap={6}>
+          {screenLink && (
+            // `Link` keeps the SPA navigation in-app (no full reload) and threads the search
+            // params Settings/index.tsx reads to switch tabs + pre-select the screen.
+            <Button
+              as={Link as unknown as React.ElementType}
+              $variant="ghost" $size="sm"
+              // @ts-expect-error -- Button's polymorphic prop forwarding doesn't know `to`.
+              to={`/settings?tab=screens&app=${encodeURIComponent(screenLink.app)}&screen=${encodeURIComponent(screenLink.id)}`}
+              title={t('settings.tables.openInScreens')}
+            >
+              <ExternalLink size={13} /> {t('settings.tables.openInScreens')}
+            </Button>
+          )}
           {onDuplicate && (
             <Button $variant="ghost" $size="sm" onClick={onDuplicate}>
               <Copy size={13} /> {t('settings.tables.duplicate')}
