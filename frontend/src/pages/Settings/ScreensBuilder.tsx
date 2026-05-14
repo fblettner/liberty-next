@@ -36,14 +36,22 @@ const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
 // Left = two stacked columns: the apps chip strip + the chosen app's screens list. Both scroll on
 // their own — a deployment with dozens of screens for one app shouldn't drag the whole page.
 const NavCol = styled.div`flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+// Filter / search bar between the app-chip strip and the screen list. Made deliberately
+// substantial — 38px tall with `radius.md`, generous side padding, larger search icon — so it
+// reads as a primary control next to the chunky app chips above it and the two-line screen
+// rows below it. The other builders (Connectors / Menus) use a tighter 28px bar; Screens is
+// different because the surrounding list items are double-height (id + description) and a thin
+// search bar looked dwarfed.
 const NavSearch = styled.div`
-  display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; margin: 4px 0 2px;
+  display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; margin: 6px 0 4px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  & svg { flex-shrink: 0; }
   & input {
     flex: 1; min-width: 0; height: 100%; border: none; background: transparent; outline: none;
     color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
     &::placeholder { color: ${colors.text.muted}; }
   }
+  &:focus-within { border-color: ${colors.blue.border}; }
 `
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 4px;`
 const Chip = styled.button<{ $active?: boolean }>`
@@ -254,7 +262,7 @@ export default function ScreensBuilder() {
             <>
               {ids.length > 6 && (
                 <NavSearch>
-                  <Search size={13} />
+                  <Search size={15} />
                   <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${ids.length}…`} />
                 </NavSearch>
               )}
