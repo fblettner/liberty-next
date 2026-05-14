@@ -37,6 +37,9 @@ interface WorkspaceState {
   apps: ConnectorMeta[] | null // the subset that are "apps" (have a menu) — what the header picker offers
   menus: MenusByApp | null // app → its (permission-pruned, localized) menu tree
   screens: Record<string, ScreenListItem[]> | null // app → its accessible screens (list view; no dialog body)
+  /** Every dashboard the caller may open (each carries label + widget list; widgets the caller can't
+   *  read have already been filtered server-side). `null` while loading; `[]` when there are none. */
+  dashboards: DashboardListItem[] | null
   license: LicenseInfo // `full` (licensed connectors loaded) or `restricted` (they weren't); defaults restricted
   error: string | null
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
@@ -52,6 +55,15 @@ interface WorkspaceState {
    *  `/sql/{connector}/{read_query}` it should open. Returns null when the app or screen id is
    *  unknown to the current workspace. */
   findScreenById: (app: string, id: string) => ScreenListItem | null
+}
+
+/** Lightweight dashboard summary — id + label + description. Used by the sidebar to render a
+ *  menu leaf's label without a second fetch. The widgets themselves come back on `GET
+ *  /api/dashboards/{id}` (which the DashboardView page fetches on mount). */
+export interface DashboardListItem {
+  id: string
+  label: string
+  description?: string | null
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null)
@@ -80,6 +92,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
   const [screens, setScreens] = useState<Record<string, ScreenListItem[]> | null>(null)
+  const [dashboards, setDashboards] = useState<DashboardListItem[] | null>(null)
   const [license, setLicense] = useState<LicenseInfo>(RESTRICTED)
   const [error, setError] = useState<string | null>(null)
   const [currentApp, setCurrentAppState] = useState<string | null>(readApp)
@@ -90,6 +103,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setConnectors(null)
       setMenus(null)
       setScreens(null)
+      setDashboards(null)
       setLicense(RESTRICTED)
       setError(null)
       return
@@ -101,15 +115,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     Promise.all([
       api.get<{ connectors: ConnectorMeta[] }>('/api/connectors'),
       api.get<{ menus: MenusByApp }>('/api/menus'),
-      // Screens are best-effort: a deployment without screens.toml just returns an empty map and
-      // the dialog-runtime falls back to the existing inline grid editor.
+      // Screens / dashboards are best-effort: deployments without the matching config files
+      // return empty payloads, and the UI gracefully degrades (the dialog runtime keeps its
+      // inline grid editor; the sidebar's dashboard menu items collapse if their target
+      // isn't in the catalog).
       api.get<ScreensByApp>('/api/screens').catch((): ScreensByApp => ({ screens: {} })),
+      api.get<{ dashboards: DashboardListItem[] }>('/api/dashboards').catch(() => ({ dashboards: [] as DashboardListItem[] })),
     ])
-      .then(([c, m, s]) => {
+      .then(([c, m, s, d]) => {
         if (cancelled) return
         setConnectors(c.connectors)
         setMenus(m.menus)
         setScreens(s.screens)
+        setDashboards(d.dashboards)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e))
@@ -196,8 +214,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById }),
-    [connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById],
+    () => ({ connectors, apps, menus, screens, dashboards, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById }),
+    [connectors, apps, menus, screens, dashboards, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

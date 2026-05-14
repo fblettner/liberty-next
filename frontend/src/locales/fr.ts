@@ -161,6 +161,9 @@ const fr: Resources = {
     viewTable: 'Tableau',
     viewChart: 'Graphique',
   },
+  dashboard: {
+    empty: 'Aucun widget lisible sur ce tableau de bord pour le moment.',
+  },
   chart: {
     type: { bar: 'Barres', line: 'Courbe', area: 'Aire', pie: 'Camembert' },
     agg: { sum: 'Somme', avg: 'Moyenne', count: 'Compte', min: 'Min', max: 'Max', none: 'Aucune (par ligne)' },

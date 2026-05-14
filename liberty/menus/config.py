@@ -42,7 +42,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ItemType = Literal["query", "endpoint"]  # a leaf's kind; ``None`` = a folder/group node
+ItemType = Literal["query", "endpoint", "dashboard"]  # a leaf's kind; ``None`` = a folder/group node
 
 
 class MenuItem(BaseModel):
@@ -66,7 +66,7 @@ class MenuItem(BaseModel):
     icon: str | None = Field(default=None, description="Lucide icon name (a UI hint — e.g. 'shield', 'users').")
     type: ItemType | None = Field(
         default=None,
-        description="Blank = folder. 'query' = TableView screen, 'endpoint' = HttpRunner.",
+        description="Blank = folder. 'query' = TableView screen, 'endpoint' = HttpRunner, 'dashboard' = DashboardView.",
         json_schema_extra={"x_enum_ref": "MENU_ITEM_TYPE"},
     )
     connector: str | None = Field(
@@ -103,6 +103,10 @@ class MenuItem(BaseModel):
                 raise ValueError(f"menu item {self.id!r}: a folder (no `type`) cannot carry target/connector/params")
         elif not self.target:  # leaf
             raise ValueError(f"menu item {self.id!r}: a {self.type!r} item needs a `target`")
+        elif self.type == "dashboard" and self.connector is not None:
+            # Dashboards live in their own flat namespace (config/dashboards.toml, keyed by id);
+            # they don't belong to a connector. A `connector` field here is a misconfiguration.
+            raise ValueError(f"menu item {self.id!r}: a 'dashboard' item must not carry a `connector` (target = the dashboard id)")
         return self
 
 
@@ -181,11 +185,14 @@ def build_menu_tree(
                 return None  # an empty folder collapses away
             d["items"] = kids
             return d
-        connector = it.connector or app  # leaf
+        # Dashboard leaves carry just `target` (the dashboard id) — no connector. The validator
+        # already rejected a connector on dashboard items, so we don't need to handle a stray one.
+        connector = "" if it.type == "dashboard" else (it.connector or app)
         if keep is not None and not keep(it, connector):
             return None
         d["type"] = it.type
-        d["connector"] = connector
+        if it.type != "dashboard":
+            d["connector"] = connector
         d["target"] = it.target
         if it.params:
             d["params"] = it.params

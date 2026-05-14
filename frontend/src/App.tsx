@@ -23,12 +23,17 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 // A `/sql/:connector/:target` or `/http/:connector/:target` route — just opens/activates the
-// tab for it; the TabHost (in Layout) does the actual rendering.
+// tab for it; the TabHost (in Layout) does the actual rendering. Dashboards live at
+// `/dashboard/:target` (no connector segment in the URL); we open them as dashboard-kind tabs.
 function TabRoute({ kind }: { kind: TabKind }) {
   const { connector = "", target = "" } = useParams();
   const { openOrActivate } = useTabs();
   useEffect(() => {
-    if (connector && target) openOrActivate({ kind, connector, target });
+    if (kind === "dashboard" && target) {
+      openOrActivate({ kind, connector: "", target });
+    } else if (connector && target) {
+      openOrActivate({ kind, connector, target });
+    }
   }, [kind, connector, target, openOrActivate]);
   return null;
 }
@@ -49,6 +54,7 @@ export default function App() {
         <Route index element={<Connectors />} />
         <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
+        <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
         <Route path="chat" element={<Chat />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

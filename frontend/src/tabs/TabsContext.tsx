@@ -7,17 +7,21 @@
 // tab persist to sessionStorage, so a page refresh restores them.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-export type TabKind = 'sql' | 'http'
+export type TabKind = 'sql' | 'http' | 'dashboard'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind
+  /** Empty for dashboard tabs (a dashboard is identified by `target` alone). */
   connector: string
-  target: string // the query name (sql) or endpoint name (http)
+  /** The query name (sql), endpoint name (http), or dashboard id (dashboard). */
+  target: string
 }
 export function tabId(kind: TabKind, connector: string, target: string): string {
   return `${kind}:${connector}:${target}`
 }
 export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
+  // Dashboards have no connector segment in the URL — just /dashboard/<id>.
+  if (t.kind === 'dashboard') return `/dashboard/${encodeURIComponent(t.target)}`
   return `/${t.kind}/${encodeURIComponent(t.connector)}/${encodeURIComponent(t.target)}`
 }
 

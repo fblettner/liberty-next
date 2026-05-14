@@ -173,3 +173,72 @@ def test_reload_rereads_menus(app, tmp_path) -> None:
         r = client.post("/admin/reload", headers=h)
         assert r.status_code == 200 and r.json()["menu_apps"] == []
         assert client.get("/api/menus", headers=h).json()["menus"] == {}
+
+
+# --- type = "dashboard" leaf ---------------------------------------------- #
+
+
+def test_menu_with_dashboard_leaf(tmp_path) -> None:
+    """A `type = "dashboard"` menu leaf surfaces iff its target dashboard exists in
+    config/dashboards.toml. Same patternas the connector-backed leaves use sql:c:q."""
+    import asyncio
+    from liberty.config import ChartSettings, DashboardSettings
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
+    (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
+        [dashboards.overview]
+        label = "Overview"
+        widgets = []
+    """))
+    (tmp_path / "menus.toml").write_text(textwrap.dedent("""
+        [menus.app1]
+        label = "App One"
+
+        [[menus.app1.items]]
+        id = "dash"
+        label = "Dashboards"
+
+        [[menus.app1.items]]
+        id = "dash.overview"
+        parent = "dash"
+        label = "Overview"
+        type = "dashboard"
+        target = "overview"
+
+        [[menus.app1.items]]
+        id = "dash.missing"
+        parent = "dash"
+        label = "Missing"
+        type = "dashboard"
+        target = "ghost"
+    """))
+
+    async def go() -> None:
+        pools = PoolRegistry({"default": PoolConfig(url=db_url)})
+        db = AuthDatabase(pools, "default")
+        await db.create_schema()
+        async with db.session() as s:
+            svc = AuthService(s)
+            await svc.get_or_create_role("admin", permissions=["*"])
+            await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
+        await pools.dispose()
+
+    asyncio.run(go())
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
+        menus=MenuSettings(config_path=Path(tmp_path / "menus.toml")),
+        charts=ChartSettings(config_path=Path(tmp_path / "_no_charts.toml")),
+        dashboards=DashboardSettings(config_path=Path(tmp_path / "dashboards.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        tree = client.get("/api/menus/app1", headers=_h(client, "admin")).json()
+        folder = tree["items"][0]
+        # The dashboard leaf shows when the target exists; the orphan leaf with `target = "ghost"` is pruned.
+        leaves = [i for i in folder["items"] if i["type"] == "dashboard"]
+        assert [l["target"] for l in leaves] == ["overview"]
+        # `connector` is absent on a dashboard leaf (the catalog is flat, no connector segment).
+        assert "connector" not in leaves[0]

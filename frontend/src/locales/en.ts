@@ -159,6 +159,9 @@ const en = {
     viewTable: 'Table',
     viewChart: 'Chart',
   },
+  dashboard: {
+    empty: 'No widgets you can read on this dashboard yet.',
+  },
   chart: {
     type: { bar: 'Bar', line: 'Line', area: 'Area', pie: 'Pie' },
     agg: { sum: 'Sum', avg: 'Average', count: 'Count', min: 'Min', max: 'Max', none: 'None (per row)' },

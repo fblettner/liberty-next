@@ -150,9 +150,12 @@ const LeafLabel = styled.span`
 `
 
 function leafPath(node: MenuNode): string | null {
-  if (!node.connector || !node.target) return null
-  const c = encodeURIComponent(node.connector)
+  if (!node.target) return null
   const t = encodeURIComponent(node.target)
+  // Dashboards have no connector segment — the catalog is flat (keyed by id).
+  if (node.type === 'dashboard') return `/dashboard/${t}`
+  if (!node.connector) return null
+  const c = encodeURIComponent(node.connector)
   return node.type === 'endpoint' ? `/http/${c}/${t}` : `/sql/${c}/${t}`
 }
 

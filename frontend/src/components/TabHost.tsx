@@ -10,6 +10,7 @@ import { useTabs } from '../tabs/TabsContext'
 
 const TableView = lazy(() => import('../pages/TableView'))
 const HttpRunner = lazy(() => import('../pages/HttpRunner'))
+const DashboardView = lazy(() => import('../pages/DashboardView'))
 
 export default function TabHost({ hidden }: { hidden: boolean }) {
   const { tabs, activeId } = useTabs()
@@ -22,9 +23,13 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
           style={{ display: tab.id === activeId ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
         >
           <Suspense fallback={<Centered />}>
-            {tab.kind === 'http'
-              ? <HttpRunner connector={tab.connector} endpoint={tab.target} />
-              : <TableView connector={tab.connector} query={tab.target} />}
+            {tab.kind === 'http' ? (
+              <HttpRunner connector={tab.connector} endpoint={tab.target} />
+            ) : tab.kind === 'dashboard' ? (
+              <DashboardView dashboardId={tab.target} />
+            ) : (
+              <TableView connector={tab.connector} query={tab.target} />
+            )}
           </Suspense>
         </div>
       ))}

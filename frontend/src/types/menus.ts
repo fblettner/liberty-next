@@ -9,8 +9,11 @@ export interface MenuNode {
   // folder:
   items?: MenuNode[]
   // leaf:
-  type?: 'query' | 'endpoint'
+  type?: 'query' | 'endpoint' | 'dashboard'
+  /** Connector name. Absent on `dashboard` leaves (dashboards have a flat namespace, no
+   *  connector); always present on `query` / `endpoint` leaves. */
   connector?: string
+  /** The query / endpoint name (sql / api) or the dashboard id (dashboard). */
   target?: string
   params?: Record<string, unknown>
 }
