@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Centered } from '../../common'
+import { Banner, SpinnerRing } from '../../common'
 import { toNumber } from '../../services/chartData'
 import type { QueryResult } from '../../types/connectors'
 import type { KpiWidgetWire } from '../../types/dashboards'
@@ -50,7 +50,7 @@ export function KpiWidget({ widget }: { widget: KpiWidgetWire }) {
   }, [result, widget.column, widget.aggregation])
 
   if (error) return <Frame><Banner $tone="error">{error}</Banner></Frame>
-  if (!result) return <Frame><Pending><Centered /></Pending></Frame>
+  if (!result) return <Frame><Pending><SpinnerRing size={18} thickness={2} /></Pending></Frame>
   return (
     <Frame>
       <Value>{value === null ? '∅' : formatValue(value, widget.format)}</Value>

@@ -64,11 +64,17 @@ export interface ChartCanvasProps {
   /** Shown when the spec is unfit (no X, no Y) — the empty-data path uses a generic message. */
   emptyMessage?: string
   noDataMessage?: string
+  /** Explicit pixel height for the chart's `<ResponsiveContainer>`. Default `"100%"` keeps the
+   *  TableView behaviour (fills the parent's flex space). Dashboard widgets pass a fixed pixel
+   *  value derived from `row_span` so ResponsiveContainer never measures into a transient 0
+   *  (which triggers Recharts' "width(0) and height(0)" warning during loading transitions).
+   *  Recharts' own type narrows percentage strings to the `${number}%` template; we mirror it. */
+  height?: number | `${number}%`
 }
 
 /** The rendering half of a chart — used by ChartView (with an editable spec above) and
  *  DashboardView's chart widget (no editing). */
-export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessage }: ChartCanvasProps) {
+export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessage, height = '100%' }: ChartCanvasProps) {
   const allCols = useMemo(() => result.columns.filter((c) => !c.hidden), [result])
   const data = useMemo(() => buildChartData(result, spec), [result, spec])
   const showLegend = spec.showLegend ?? spec.y.length > 1
@@ -96,7 +102,7 @@ export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessa
   if (data.length === 0) return <Frame><EmptyHint>{noDataMessage ?? 'No data.'}</EmptyHint></Frame>
   return (
     <Frame>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={height}>
         {renderChart(spec, data, allCols, { showLegend, formatX, seriesName })}
       </ResponsiveContainer>
     </Frame>
