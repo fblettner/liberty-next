@@ -125,7 +125,7 @@ export interface ScreenTab {
 export type Action =
   | { id: string; label?: string | null; stop_on_error?: boolean; type: 'run_query'; connector?: string | null; query: string; param_binds?: ParamBind[] }
   | { id: string; label?: string | null; stop_on_error?: boolean; type: 'call_api'; connector: string; endpoint: string; param_binds?: ParamBind[] }
-  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'navigate'; to: string; app?: string | null; param_binds?: ParamBind[] }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'navigate'; to: string; connector?: string | null; param_binds?: ParamBind[] }
   | { id: string; label?: string | null; stop_on_error?: boolean; type: 'set_field'; target: string; value?: string | null; source?: string | null }
   | { id: string; label?: string | null; stop_on_error?: boolean; type: 'confirm'; message: string; confirm_label?: string | null; cancel_label?: string | null }
   | { id: string; label?: string | null; stop_on_error?: boolean; type: 'notify'; message: string; tone?: 'info' | 'ok' | 'warn' | 'error' }

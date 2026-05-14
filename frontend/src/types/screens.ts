@@ -68,8 +68,8 @@ export type Action =
     })
   | (ActionCommon & {
       type: 'navigate'
-      to: string
-      app?: string | null
+      to: string             // target query name on `connector`
+      connector?: string | null  // blank → the firing screen's effective connector
       param_binds?: ParamBind[]
     })
   | (ActionCommon & {

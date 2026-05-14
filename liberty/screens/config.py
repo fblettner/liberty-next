@@ -221,12 +221,20 @@ class CallApiAction(_ActionBase):
 
 
 class NavigateAction(_ActionBase):
-    """Open another screen / a route. ``to`` is a screen id (resolved within the same app unless
-    ``app`` overrides) or an explicit URL/route. ``param_binds`` forwards filter values."""
+    """Open another TableView (v1's "drill into another table" pattern) — the row-menu staple.
+    ``to`` names the target query (matching a ``QueryDef.name`` on ``connector``); the URL the
+    runtime opens is ``/sql/{connector}/{to}`` with ``param_binds`` resolved against the firing
+    context and forwarded as ``?<param>=<value>`` query-string entries. The destination's
+    TableView seeds its param form from those — so a row-menu item "View this user's roles"
+    becomes ``{to: "roles_get", connector: "nomasx1", param_binds: [{param: "USR_ID", source:
+    "usr_id"}]}`` and ends up opening ``/sql/nomasx1/roles_get?USR_ID=<the-clicked-user-id>``."""
 
     type: Literal["navigate"] = "navigate"
-    to: str = Field(description="Target screen id (within ``app`` or the current app) or a /route.")
-    app: str | None = Field(default=None, description="Target app (when navigating cross-app).")
+    to: str = Field(description="Target query name on ``connector`` (e.g. ``roles_get``) — the destination's URL is ``/sql/{connector}/{to}``.")
+    connector: str | None = Field(
+        default=None,
+        description="Connector that holds the target query; blank → the firing screen's effective connector.",
+    )
     param_binds: list[ParamBind] = Field(default_factory=list)
 
 

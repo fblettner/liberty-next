@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import { Table as TableIcon, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
@@ -43,6 +44,13 @@ const MaxRowsBox = styled.label`
 export default function TableView({ connector, query }: { connector: string; query: string }) {
   const { t } = useTranslation()
   const { menus, findScreen } = useWorkspace()
+  // URL search params seed the param form / filter panel on initial load — that's how the
+  // row-menu's NavigateAction drill-down works ("?USR_ID=42" → the destination's USR_ID param
+  // is pre-filled, then auto_load fires the query against that value). Also makes screens
+  // deep-linkable / shareable. Only consumed once per (connector, query) mount; subsequent
+  // user edits to the param form are not reflected back into the URL (the form is the source
+  // of truth after that point).
+  const [searchParams] = useSearchParams()
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
@@ -68,12 +76,30 @@ export default function TableView({ connector, query }: { connector: string; que
         const q = c.queries.find((x) => x.name === query)
         if (!q) throw new Error(`query ${query} not found on ${connector}`)
         setMeta(q)
+        // Seed the param form: declared `default`s first, then overlay any matching URL search
+        // params (NavigateAction's drill-down vehicle). Filter-flagged columns also flow into
+        // the FilterPanel below — keyed by column name on the result, set both maps so whichever
+        // gate the destination uses picks the value up.
         const init: Record<string, string> = {}
+        const filterInit: Record<string, ServerFilter> = {}
         for (const p of q.params) if (p.default != null) init[p.name] = p.default
+        const declared = new Set([...q.params.map((p) => p.name), ...q.bind_params])
+        const filterCols = new Set((q.columns ?? []).filter((c) => c.filter).map((c) => c.name))
+        searchParams.forEach((v, k) => {
+          if (declared.has(k)) init[k] = v
+          // The FilterPanel uses `equals` as the natural op for choice-like (ENUM/LOOKUP) columns
+          // and the migrated SQL wrap accepts it; that matches NavigateAction's "filter by this value"
+          // intent. Operators wiring a fancier op via URL params would need a separate convention.
+          if (filterCols.has(k)) filterInit[k] = { val: v, op: 'equals' }
+        })
         setParams(init)
-        setFilters({})
+        setFilters(filterInit)
       })
       .catch((e) => setMetaErr(e instanceof ApiError ? e.message : String(e)))
+    // searchParams intentionally NOT in deps — we capture its value at load time (effect re-runs
+    // only when the tab switches to a different query). A back-button navigation that changes
+    // ?USR_ID without changing (connector, query) won't re-seed; the user can hit Run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connector, query])
 
   // Fetch the screen body iff a screen for this (connector, query) is in the workspace catalog

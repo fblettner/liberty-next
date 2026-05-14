@@ -13,6 +13,7 @@
 // filter kind so DataTable's per-column filter row shows the right control.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
@@ -232,6 +233,9 @@ export function ResultTable({
   screen?: ScreenDetail | null
 }) {
   const { t } = useTranslation()
+  // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
+  // which keeps the workspace's tab manager in charge (no full page reload).
+  const navigate = useNavigate()
   const canEdit = !!(updateQuery || insertQuery)
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -295,8 +299,28 @@ export function ResultTable({
           // implied by the onSaved() at the end of the success path
           break
         }
+        case 'navigate': {
+          // v1's "drill into another table" pattern: open the target TableView with the
+          // source row's values bound as URL search params. The destination's TableView reads
+          // those on mount and seeds its param form — so the destination opens already
+          // filtered to whatever the row carries (e.g. "View this user's roles" → opens the
+          // roles screen with USR_ID=<the-clicked-user-id>).
+          const targetConnector = a.connector || connector
+          const bound = resolveRowBinds(a.param_binds, ctx)
+          const qs = new URLSearchParams()
+          for (const [k, v] of Object.entries(bound)) {
+            if (v != null && String(v) !== '') qs.set(k, String(v))
+          }
+          const url =
+            `/sql/${encodeURIComponent(targetConnector)}/${encodeURIComponent(a.to)}` +
+            (qs.toString() ? `?${qs.toString()}` : '')
+          // Close the menu *before* navigating — leaving it open during the route change makes the
+          // overlay flicker on the destination page until the document-mousedown listener fires.
+          setMenuBusy(null); closeMenu()
+          navigate(url)
+          return
+        }
         case 'call_api':
-        case 'navigate':
         case 'set_field':
         case 'confirm': {
           const msg = `row-menu action '${a.id}' (${a.type}) — runtime not implemented yet`
@@ -313,7 +337,7 @@ export function ResultTable({
       setMenuBusy(null)
       setMenuError(`${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`)
     }
-  }, [connector, onSaved, closeMenu])
+  }, [connector, onSaved, closeMenu, navigate])
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across re-renders).
   const shownColumns = useMemo(() => result.columns.filter((c) => columnVisibleNow(c, activeFilters ?? {})), [result.columns, activeFilters])

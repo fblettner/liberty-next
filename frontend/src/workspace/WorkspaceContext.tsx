@@ -47,6 +47,11 @@ interface WorkspaceState {
    *  null when no screen / multiple matches found. The TableView uses this to decide whether to
    *  open a dialog on row click instead of going through the inline grid editor. */
   findScreen: (connector: string, readQuery: string) => ScreenListItem | null
+  /** Look up a screen by its `(app, id)` pair — used by `NavigateAction` runtime to resolve
+   *  a row-menu drill target ("open the roles screen filtered to this user") into the URL
+   *  `/sql/{connector}/{read_query}` it should open. Returns null when the app or screen id is
+   *  unknown to the current workspace. */
+  findScreenById: (app: string, id: string) => ScreenListItem | null
 }
 
 const WorkspaceContext = createContext<WorkspaceState | null>(null)
@@ -178,10 +183,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [screenIndex],
   )
+  // Forward index: app → id → ScreenListItem (case-insensitive on both keys to mirror findScreen).
+  // Built lazily; cheap to walk the screens map even on the largest deployments (~hundreds of items).
+  const findScreenById = useCallback(
+    (app: string, id: string): ScreenListItem | null => {
+      const appKey = Object.keys(screens ?? {}).find((k) => k.toLowerCase() === app.toLowerCase())
+      const list = appKey ? screens?.[appKey] : null
+      if (!list) return null
+      return list.find((s) => s.id.toLowerCase() === id.toLowerCase()) ?? null
+    },
+    [screens],
+  )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen }),
-    [connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen],
+    () => ({ connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById }),
+    [connectors, apps, menus, screens, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }
