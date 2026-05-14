@@ -11,7 +11,7 @@
 //
 // The renderChart function (the per-type chart picker) lives here too so it stays next to the
 // helpers it depends on. ChartView's `renderChart` (used by its preview path) re-imports.
-import { useCallback, useMemo } from 'react'
+import { useCallback, useId, useMemo } from 'react'
 import styled from '@emotion/styled'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend,
@@ -111,12 +111,17 @@ export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessa
   }, [xCol, enums, lookupMap])
   const seriesName = useCallback((col: Column): string => col.label ?? col.name, [])
 
+  // React-generated id, unique per ChartCanvas instance — used to scope the SVG `<linearGradient>`
+  // defs we emit for the bar / area fills. Multiple charts on the same page would otherwise share
+  // the same `#chart-gradient-0` def and the first chart's gradient would leak onto the others.
+  const gradId = useId()
+
   if (!spec.x || spec.y.length === 0) return <Frame><EmptyHint>{emptyMessage ?? 'Pick X and Y columns.'}</EmptyHint></Frame>
   if (data.length === 0) return <Frame><EmptyHint>{noDataMessage ?? 'No data.'}</EmptyHint></Frame>
   return (
     <Frame>
       <ResponsiveContainer width="100%" height={height}>
-        {renderChart(spec, data, allCols, { showLegend, formatX, seriesName })}
+        {renderChart(spec, data, allCols, { showLegend, formatX, seriesName, gradId })}
       </ResponsiveContainer>
     </Frame>
   )
@@ -151,6 +156,34 @@ interface RenderOpts {
   showLegend: boolean
   formatX: (raw: unknown) => string
   seriesName: (col: Column) => string
+  /** Per-canvas id (from React's `useId`) used to namespace the SVG gradient defs we emit so
+   *  multiple charts on the same page don't share / overwrite each other's `<linearGradient>`. */
+  gradId: string
+}
+
+// Shared axis / tick / grid styling — flat, minimal, modern. Same vocabulary across line / bar /
+// area so a Notion/Linear-style dashboard reads as one consistent family rather than three
+// different chart libraries pasted together.
+const TICK_STYLE = { fontSize: 11, fill: colors.text.muted }
+const AXIS_LINE = false       // no harsh black axis line — modern dashboards lean on the grid
+const TICK_LINE = false       // ditto for tick marks
+const CHART_MARGIN = { top: 12, right: 12, left: -8, bottom: 0 }  // negative left tightens the YAxis gutter
+
+/** Emit one `<linearGradient>` per series, top → bottom fading from ~85% to ~15% opacity of the
+ *  series colour. Used by Bar/Area fills to give the modern soft-block look (instead of flat
+ *  solid colour). Stops carry slight opacity differences so a stacked / overlapping render still
+ *  feels layered. */
+function GradientDefs({ count, gradId, seriesColor }: { count: number; gradId: string; seriesColor: (i: number) => string }) {
+  return (
+    <defs>
+      {Array.from({ length: count }).map((_, i) => (
+        <linearGradient key={i} id={`${gradId}-${i}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={seriesColor(i)} stopOpacity={0.9} />
+          <stop offset="100%" stopColor={seriesColor(i)} stopOpacity={0.25} />
+        </linearGradient>
+      ))}
+    </defs>
+  )
 }
 
 /** The per-type chart picker — same shape across consumers so an axis tweak only needs one edit. */
@@ -169,17 +202,30 @@ export function renderChart(
       content={(props) => <ThemedTooltip {...props} formatLabel={opts.formatX} />}
     />
   )
+  // Horizontal-only dashed grid — feels lighter, lets the bars own the vertical rhythm.
+  const cartesianGrid = grid && (
+    <CartesianGrid strokeDasharray="3 6" stroke={colors.border} vertical={false} strokeOpacity={0.6} />
+  )
+  const legend = opts.showLegend && (
+    <Legend verticalAlign="bottom" iconType="circle" iconSize={8}
+      wrapperStyle={{ fontSize: 11, color: colors.text.muted, paddingTop: 6 }} />
+  )
+
   if (spec.type === 'pie') {
+    // Use a donut (inner radius) rather than a full pie — modern, hides the noisy slice-label
+    // problem when the X column has lots of categories. Recharts derives one legend entry per
+    // slice (keyed by `nameKey`); the `formatter` callback resolves the raw value (e.g. "01")
+    // into the BOOLEAN/ENUM/LOOKUP label ("Active") via the same display-rule pipeline the X
+    // axis ticks use, so the legend reads cleanly without us having to hand-build the payload.
     const y = spec.y[0]
     return (
       <PieChart>
         {tooltip}
-        {opts.showLegend && <Legend verticalAlign="bottom" formatter={() => yLabels[0]} />}
-        <Pie data={data} dataKey={y} nameKey="x" name={yLabels[0]} outerRadius="75%"
-          /* Recharts injects {cx, cy, midAngle, name, value, …} into the label callback — `name`
-             is the nameKey value (here our datum's `x`). Resolving it via `formatX` shows the
-             BOOLEAN/ENUM/LOOKUP label (e.g. "Active" / "Blocked"), not the raw "01" / "N". */
-          label={({ name }) => opts.formatX(name as unknown)}
+        <Legend verticalAlign="bottom" iconType="circle" iconSize={8}
+          wrapperStyle={{ fontSize: 11, color: colors.text.muted, paddingTop: 6 }}
+          formatter={(value) => opts.formatX(value)} />
+        <Pie data={data} dataKey={y} nameKey="x" name={yLabels[0]}
+          outerRadius="70%" innerRadius="42%" paddingAngle={1.5} stroke="none"
           animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200}>
           {data.map((_, i) => <Cell key={i} fill={seriesColor(i)} />)}
         </Pie>
@@ -188,14 +234,16 @@ export function renderChart(
   }
   if (spec.type === 'line') {
     return (
-      <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-        {grid && <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />}
-        <XAxis dataKey="x" stroke={colors.text.muted} tickFormatter={opts.formatX} />
-        <YAxis stroke={colors.text.muted} />
+      <LineChart data={data} margin={CHART_MARGIN}>
+        {cartesianGrid}
+        <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
+        <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
         {tooltip}
-        {opts.showLegend && <Legend />}
+        {legend}
         {spec.y.map((y, i) => (
-          <Line key={y} dataKey={y} name={yLabels[i]} stroke={seriesColor(i)} dot={data.length <= 50}
+          <Line key={y} dataKey={y} name={yLabels[i]} stroke={seriesColor(i)} strokeWidth={2}
+            dot={data.length <= 50 ? { r: 3, strokeWidth: 0, fill: seriesColor(i) } : false}
+            activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--bg-base)', fill: seriesColor(i) }}
             animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200} />
         ))}
       </LineChart>
@@ -203,14 +251,17 @@ export function renderChart(
   }
   if (spec.type === 'area') {
     return (
-      <AreaChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-        {grid && <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />}
-        <XAxis dataKey="x" stroke={colors.text.muted} tickFormatter={opts.formatX} />
-        <YAxis stroke={colors.text.muted} />
+      <AreaChart data={data} margin={CHART_MARGIN}>
+        <GradientDefs count={spec.y.length} gradId={opts.gradId} seriesColor={seriesColor} />
+        {cartesianGrid}
+        <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
+        <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
         {tooltip}
-        {opts.showLegend && <Legend />}
+        {legend}
         {spec.y.map((y, i) => (
-          <Area key={y} dataKey={y} name={yLabels[i]} type="monotone" stroke={seriesColor(i)} fill={seriesColor(i)} fillOpacity={0.35}
+          <Area key={y} dataKey={y} name={yLabels[i]} type="monotone"
+            stroke={seriesColor(i)} strokeWidth={2}
+            fill={`url(#${opts.gradId}-${i})`}
             stackId={spec.stacked ? 'stack' : undefined}
             animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200} />
         ))}
@@ -218,14 +269,16 @@ export function renderChart(
     )
   }
   return (
-    <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-      {grid && <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />}
-      <XAxis dataKey="x" stroke={colors.text.muted} tickFormatter={opts.formatX} />
-      <YAxis stroke={colors.text.muted} />
+    <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="22%">
+      <GradientDefs count={spec.y.length} gradId={opts.gradId} seriesColor={seriesColor} />
+      {cartesianGrid}
+      <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
+      <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
       {tooltip}
-      {opts.showLegend && <Legend />}
+      {legend}
       {spec.y.map((y, i) => (
-        <Bar key={y} dataKey={y} name={yLabels[i]} fill={seriesColor(i)}
+        <Bar key={y} dataKey={y} name={yLabels[i]} fill={`url(#${opts.gradId}-${i})`}
+          radius={[6, 6, 0, 0]}                 // rounded top corners — modern bar look
           stackId={spec.stacked ? 'stack' : undefined}
           animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200} />
       ))}

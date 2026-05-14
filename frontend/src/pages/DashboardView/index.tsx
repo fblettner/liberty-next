@@ -21,7 +21,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 // dashboard config get `row_span = 2` (→ 360px) so they have a decent canvas. A widget whose
 // `col_span` is larger than the available track count simply spans the full row (CSS Grid clamps
 // `span N` to "to end of row" when N > remaining tracks).
-const ROW_PX = 180  // matches DashboardView/ChartWidget's `ROW_PX` so chart height computes right
+const ROW_PX = 150  // matches DashboardView/ChartWidget's `ROW_PX` so chart height computes right
 const Grid = styled.div`
   display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px;
   grid-auto-rows: ${ROW_PX}px;
