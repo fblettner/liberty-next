@@ -105,7 +105,7 @@ const fr: Resources = {
     affected_other: '{{count}} lignes affectées',
     ok: '{{stmt}} OK',
     search: 'Rechercher…',
-    filters: 'Filtres',
+    filters: 'Filtres avancés',
     clearFilters: 'Effacer les filtres',
     columns: 'Colonnes',
     group: 'Grouper',

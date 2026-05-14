@@ -103,7 +103,7 @@ const en = {
     affected_other: '{{count}} rows affected',
     ok: '{{stmt}} OK',
     search: 'Search…',
-    filters: 'Filters',
+    filters: 'Advanced filters',
     clearFilters: 'Clear filters',
     columns: 'Columns',
     group: 'Group',
