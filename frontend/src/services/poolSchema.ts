@@ -63,3 +63,20 @@ export function findTable(schema: PoolSchema, name: string): PoolTable | undefin
   const low = name.toLowerCase()
   return schema.tables.find((t) => t.name.toLowerCase() === low)
 }
+
+/** Walk an arbitrary SQL string for `FROM <ident>` / `JOIN <ident>` patterns and return the first
+ *  identifier that matches a table on *schema*. Used by the SQL editor's wizard to pre-seed the
+ *  table picker from the query being edited — for the v2-migrated wrapper `SELECT * FROM (...)
+ *  lib_flt WHERE ...`, the inner real table inside the parens is what surfaces here. Returns
+ *  undefined when nothing matches (the wizard then falls back to the first table). */
+export function findFirstReferencedTable(sql: string, schema: PoolSchema): string | undefined {
+  if (!sql) return undefined
+  const re = /\b(?:FROM|JOIN|INTO|UPDATE)\s+([A-Za-z_][\w.]*)/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(sql)) !== null) {
+    const ident = (m[1] ?? '').split('.').pop() ?? m[1]
+    const t = findTable(schema, ident)
+    if (t) return t.name
+  }
+  return undefined
+}

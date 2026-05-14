@@ -57,6 +57,9 @@ const fr: Resources = {
     darkMode: 'Mode sombre',
     true: 'vrai',
     false: 'faux',
+    selectAll: 'Tout sélectionner',
+    selectNone: 'Tout désélectionner',
+    remove: 'Retirer',
   },
   login: {
     title: 'Connexion',
@@ -145,7 +148,6 @@ const fr: Resources = {
     pasteRows: 'Coller',
     selectAll: 'Tout sélectionner',
     selectNone: 'Tout désélectionner',
-    remove: 'Retirer',
     selectRow: 'Sélectionner la ligne',
     import: 'Importer',
     importNoMatch: 'Aucune colonne de {{file}} ne correspond à cette requête.',

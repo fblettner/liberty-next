@@ -21,15 +21,19 @@ import { Play, Wand2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsLight } from './useIsLight'
 import { Centered } from './Spinner'
-import { getPoolSchema, type PoolSchema } from '../services/poolSchema'
+import { findFirstReferencedTable, getPoolSchema, type PoolSchema } from '../services/poolSchema'
 import { attachPoolSchema } from '../services/sqlCompletion'
 import { SqlWizardModal } from './SqlWizardModal'
 import { SqlTestRunner } from './SqlTestRunner'
 import { colors, fontSize, fonts, radius } from '../theme'
 
+// `resize: vertical` lets the operator drag-resize the editor; Monaco's `automaticLayout: true`
+// repaints as the box grows / shrinks. The default `$h` is the *initial* height — after the user
+// drags it, the browser remembers the new height per-mount.
 const Frame = styled.div<{ $h: number }>`
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;
-  background: ${colors.bg.input}; height: ${({ $h }) => $h}px; min-height: 80px;
+  background: ${colors.bg.input}; height: ${({ $h }) => $h}px; min-height: 120px; max-height: 80vh;
+  resize: vertical;
 `
 const Toolbar = styled.div`
   display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 4px;
@@ -133,6 +137,11 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
       )}
       {wizardOpen && schema && (
         <SqlWizardModal schema={schema}
+          // Best-effort seeding from the current SQL — the table being edited is usually the
+          // first one mentioned after FROM/JOIN (works for v2's `SELECT * FROM (<orig>) lib_flt`
+          // wrapper too — the inner real table is what matches the schema). Undefined → the
+          // wizard falls back to its first table.
+          initialTable={findFirstReferencedTable(value, schema)}
           onInsert={(sql) => { onChange(sql); setWizardOpen(false) }}
           onCancel={() => setWizardOpen(false)} />
       )}

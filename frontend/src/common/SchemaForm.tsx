@@ -238,7 +238,7 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
     const text = value == null ? '' : String(value)
     return (
       <div>
-        <SqlEditor value={text} rows={6} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} />
+        <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} />
         <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
       </div>
     )
@@ -253,7 +253,7 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
           <Row style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
-              <SqlEditor value={map[d] ?? ''} rows={4} onChange={(v) => set(d, v)} connector={connector} />
+              <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} />
             </div>
             {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>

@@ -55,6 +55,9 @@ const en = {
     darkMode: 'Dark mode',
     true: 'true',
     false: 'false',
+    selectAll: 'Select all',
+    selectNone: 'Select none',
+    remove: 'Remove',
   },
   login: {
     title: 'Sign in',
@@ -143,7 +146,6 @@ const en = {
     pasteRows: 'Paste',
     selectAll: 'Select all',
     selectNone: 'Select none',
-    remove: 'Remove',
     selectRow: 'Select row',
     import: 'Import',
     importNoMatch: 'No columns in {{file}} matched this query.',
