@@ -15,6 +15,7 @@ from liberty.config import (
     AuthSettings,
     ChartSettings,
     ConnectorSettings,
+    DashboardSettings,
     MenuSettings,
     ScreenSettings,
     Settings,
@@ -83,6 +84,7 @@ def env(tmp_path):
         menus=MenuSettings(config_path=tmp_path / "menus.toml"),
         screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
         charts=ChartSettings(config_path=tmp_path / "charts.toml"),
+        dashboards=DashboardSettings(config_path=tmp_path / "dashboards.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
@@ -549,3 +551,61 @@ def test_config_schema_includes_charts(env) -> None:
         # The ChartConfig + ChartSpec $defs are reachable for SchemaNavigator drill-in
         defs = schema["charts"].get("$defs") or {}
         assert "ChartConfig" in defs and "ChartSpec" in defs
+
+
+# --- /admin/config/dashboards/parsed -------------------------------------- #
+
+
+def test_config_dashboards_parsed_get_and_put(env) -> None:
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # GET empty
+        assert client.get("/admin/config/dashboards/parsed", headers=h).json()["dashboards"] == {}
+        # PUT a dashboard with a chart-reference widget + a KPI
+        body = {"dashboards": {
+            "overview": {
+                "label": "Overview",
+                "widgets": [
+                    {"type": "chart", "chart": "saved_chart", "col_span": 12, "row_span": 1},
+                    {"type": "kpi", "label": "Rows", "connector": "db", "query": "answer",
+                     "column": "answer", "aggregation": "count", "col_span": 3},
+                ],
+            },
+        }}
+        r = client.put("/admin/config/dashboards/parsed", json=body, headers=h)
+        assert r.status_code == 200 and r.json()["saved"] is True
+        # Reload + GET round-trip
+        reload_resp = client.post("/admin/reload", headers=h).json()
+        assert reload_resp["dashboards"] == ["overview"]
+        # /api/dashboards surfaces it (with the orphan chart-ref dropped — `saved_chart` doesn't exist)
+        ds = client.get("/api/dashboards", headers=h).json()["dashboards"]
+        assert [d["id"] for d in ds] == ["overview"]
+        # Two widgets in TOML → one survives (the chart-ref drops because there's no charts.toml)
+        assert [w["type"] for w in ds[0]["widgets"]] == ["kpi"]
+
+
+def test_config_dashboards_parsed_rejects_invalid(env) -> None:
+    """A chart widget with both `chart` id and an inline spec → 422 (the validator catches it)."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {"dashboards": {
+            "x": {"label": "X", "widgets": [{
+                "type": "chart", "chart": "c", "connector": "c", "query": "q",
+                "spec": {"type": "bar", "x": "X", "y": ["Y"], "aggregation": "count"},
+            }]},
+        }}
+        r = client.put("/admin/config/dashboards/parsed", json=body, headers=h)
+        assert r.status_code == 422 and "either" in r.json()["detail"]
+
+
+def test_config_schema_includes_dashboards(env) -> None:
+    app, _, _ = env
+    with TestClient(app) as client:
+        schema = client.get("/admin/config/schema", headers=_h(client, "admin")).json()
+        assert "dashboards" in schema
+        defs = schema["dashboards"].get("$defs") or {}
+        assert "Dashboard" in defs
+        # The widget discriminated union ships its variants
+        assert "ChartWidget" in defs and "KpiWidget" in defs

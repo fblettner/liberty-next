@@ -1,0 +1,50 @@
+# config/dashboards.toml — operator-curated dashboards (Phase 8 slice 3).
+#
+# A dashboard is a layout of widgets on a 12-column grid, surfaced through the menu system
+# (a `type = "dashboard"` menu leaf with `target = "<dashboard_id>"`). Slice 3a (this file)
+# ships two widget kinds:
+#
+#   chart  — a saved chart by id (from charts.toml) *or* an inline connector/query/spec.
+#   kpi    — a single big number (aggregation of one column over a query's rows).
+#
+# Each widget claims `col_span` × `row_span` cells; widgets land in declaration order.
+# Permission: each widget gates on its underlying query's `sql:<connector>:<query>`. An
+# unreadable widget is hidden, the rest of the dashboard still renders.
+#
+# Reload after editing: POST /admin/reload (or use the Reload button in Settings).
+
+# ── example (uncomment + adapt) ────────────────────────────────────────────────────
+
+# [dashboards.security_overview]
+# label = "Security Overview"
+# description = "User counts + assignments at a glance"
+#
+#   [[dashboards.security_overview.widgets]]
+#   type = "chart"
+#   chart = "users_per_app"     # reference a saved chart by id (charts.toml)
+#   col_span = 6
+#   row_span = 1
+#
+#   [[dashboards.security_overview.widgets]]
+#   type = "chart"              # inline mode — no `chart` id
+#   label = "Users by status"
+#   connector = "nomasx1"
+#   query = "security_users_get"
+#   col_span = 6
+#   row_span = 1
+#
+#     [dashboards.security_overview.widgets.spec]
+#     type = "pie"
+#     x = "USR_STATUS"
+#     y = ["USR_ID"]
+#     aggregation = "count"
+#
+#   [[dashboards.security_overview.widgets]]
+#   type = "kpi"
+#   label = "Active users"
+#   connector = "nomasx1"
+#   query = "security_users_get"
+#   column = "USR_ID"
+#   aggregation = "count"
+#   col_span = 3
+#   row_span = 1

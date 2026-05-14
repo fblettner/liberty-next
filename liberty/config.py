@@ -84,6 +84,13 @@ class ChartSettings(BaseModel):
     config_path: Path = Path("config/charts.toml")
 
 
+class DashboardSettings(BaseModel):
+    """Dashboard layouts — Phase 8 slice 3 (see :mod:`liberty.dashboards`). A dashboard is a
+    grid of widgets (chart, kpi, …) surfaced through the menu system like any other screen."""
+
+    config_path: Path = Path("config/dashboards.toml")
+
+
 class AuthSettings(BaseModel):
     """Internal-user auth: where users/roles live (a TOML file or the DB), JWT signing."""
 
@@ -166,6 +173,7 @@ class Settings(BaseModel):
     menus: MenuSettings = Field(default_factory=MenuSettings)
     screens: ScreenSettings = Field(default_factory=ScreenSettings)
     charts: ChartSettings = Field(default_factory=ChartSettings)
+    dashboards: DashboardSettings = Field(default_factory=DashboardSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)

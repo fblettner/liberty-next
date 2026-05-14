@@ -55,6 +55,8 @@ from liberty.screens import load_screens
 from liberty.screens.config import ScreensFile, parse_screens
 from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
+from liberty.dashboards import load_dashboards
+from liberty.dashboards.config import DashboardsFile, parse_dashboards
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -77,6 +79,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     request.app.state.menus = load_menus(settings.menus.config_path)
     request.app.state.screens = load_screens(settings.screens.config_path)
     request.app.state.charts = load_charts(settings.charts.config_path)
+    request.app.state.dashboards = load_dashboards(settings.dashboards.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
     await old.aclose()
     return {
@@ -87,6 +90,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "menu_apps": list(request.app.state.menus.menus),
         "screen_apps": list(request.app.state.screens.screens),
         "charts": list(request.app.state.charts.charts),
+        "dashboards": list(request.app.state.dashboards.dashboards),
         "license_mode": license_result.mode,
     }
 
@@ -195,6 +199,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "menus": MenusFile.model_json_schema(),
         "screens": ScreensFile.model_json_schema(),
         "charts": ChartsFile.model_json_schema(),
+        "dashboards": DashboardsFile.model_json_schema(),
         "framework_enums": bundled,
     }
 
@@ -499,6 +504,52 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
         parse_charts(tomllib.loads(new_text))   # belt-and-braces re-validation
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting charts are invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/dashboards/parsed")
+async def get_dashboards_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``dashboards.toml`` parsed and normalised — ``{path, dashboards: {<id>: dict}}``.
+    A missing file → an empty dict. Defaults are dropped so the wire payload stays terse."""
+    path = Path(request.app.state.settings.dashboards.config_path)
+    cfg = load_dashboards(path)
+    return {
+        "path": str(path),
+        "dashboards": {did: d.model_dump(exclude_defaults=True, exclude_none=True) for did, d in cfg.dashboards.items()},
+    }
+
+
+class DashboardsBody(BaseModel):
+    dashboards: dict[str, dict[str, Any]]
+
+
+@router.put("/config/dashboards/parsed")
+async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate against :class:`DashboardsFile` (each dashboard's ``id`` injected from its key,
+    each widget's discriminator + grid bounds enforced), then rewrite ``dashboards.toml`` via
+    ``tomlkit`` — same pattern as ``charts/parsed``. Does not reload — call ``POST /admin/reload``."""
+    try:
+        parse_dashboards({"dashboards": body.dashboards})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dashboards: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dashboards: {exc}") from exc
+
+    path = Path(request.app.state.settings.dashboards.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    if body.dashboards:
+        doc["dashboards"] = body.dashboards
+    elif "dashboards" in doc:
+        del doc["dashboards"]
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        parse_dashboards(tomllib.loads(new_text))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting dashboards are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
