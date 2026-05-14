@@ -9,7 +9,10 @@ import pytest
 
 from liberty.screens import (
     FieldCondition,
+    NotifyAction,
     ParamBind,
+    RefreshAction,
+    RunQueryAction,
     Screen,
     ScreenDialog,
     ScreenField,
@@ -63,6 +66,57 @@ def test_screen_dialog_and_tab() -> None:
     bad_dlg = ScreenDialog(tabs=[ScreenTab(id="general"), ScreenTab(id="general")])
     with pytest.raises(Exception):
         Screen(id="x", read_query="q", dialog=bad_dlg)
+
+
+def test_action_discriminated_union_round_trips() -> None:
+    """Each action variant validates via its ``type`` literal — Pydantic picks the right subclass.
+    Cross-variant fields (e.g. ``query`` on a notify action) are rejected (``extra="forbid"``)."""
+    # run_query: the multi-table FormsDialog workhorse — required `query`, optional connector +
+    # param_binds. ParamBind shape carries through (param + value-or-source).
+    rq = RunQueryAction(
+        id="write_apps_jde", label="Write apps_jde", query="apps_jde_post",
+        param_binds=[ParamBind(param="APP_ID", source="apps_id")],
+    )
+    assert rq.type == "run_query" and rq.stop_on_error is True
+    assert rq.param_binds[0].source == "apps_id"
+    # notify (`message` required, `tone` literal-restricted) — and refresh (no extra fields)
+    NotifyAction(id="ok", message="Saved related rows.", tone="ok")
+    RefreshAction(id="reload")
+    # Bad: invalid tone literal
+    with pytest.raises(Exception):
+        NotifyAction(id="x", message="y", tone="bogus")  # type: ignore[arg-type]
+    # Bad: extra key on a variant
+    with pytest.raises(Exception):
+        RunQueryAction(id="x", query="q", message="oops")  # type: ignore[call-arg]
+    # Round-trip a full dialog with on_save through ScreensFile — the discriminator picks each
+    # variant by its `type` literal. parse_screens injects the screen id from its dict key.
+    raw = {
+        "screens": {
+            "myapp": {
+                "settings_applications": {
+                    "read_query": "apps_get",
+                    "update_query": "apps_put",
+                    "dialog": {
+                        "tabs": [{"id": "general", "fields": [{"name": "APP_ID"}]}],
+                        "on_save": [
+                            {"id": "write_apps_jde", "type": "run_query", "query": "apps_jde_post",
+                             "param_binds": [{"param": "APP_ID", "source": "apps_id"}]},
+                            {"id": "write_apps_ldap", "type": "run_query", "query": "apps_ldap_post"},
+                            {"id": "notify_ok", "type": "notify", "message": "Saved.", "tone": "ok"},
+                            {"id": "reload", "type": "refresh"},
+                        ],
+                    },
+                },
+            },
+        },
+    }
+    sf = parse_screens(raw)
+    actions = sf.screens["myapp"]["settings_applications"].dialog.on_save  # type: ignore[union-attr]
+    assert [a.type for a in actions] == ["run_query", "run_query", "notify", "refresh"]
+    # First action's binds round-trip — same ParamBind shape used elsewhere.
+    rq0 = actions[0]
+    assert rq0.type == "run_query" and rq0.query == "apps_jde_post"  # type: ignore[union-attr]
+    assert rq0.param_binds == [ParamBind(param="APP_ID", source="apps_id")]  # type: ignore[union-attr]
 
 
 def test_field_condition_and_per_field_rules() -> None:

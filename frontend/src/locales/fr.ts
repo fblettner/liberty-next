@@ -162,6 +162,7 @@ const fr: Resources = {
     noVisibleTabs: 'Aucun onglet n’est visible dans ce mode.',
     noVisibleFields: 'Aucun champ sur cet onglet.',
     passwordPlaceholder: 'laisser vide pour conserver la valeur actuelle',
+    onSaveFailed: 'La ligne principale a été enregistrée, mais une action de suivi a échoué : {{message}}',
   },
   http: {
     ok: 'OK',
@@ -347,6 +348,18 @@ const fr: Resources = {
         conditional: 'conditionnel',
         binds_one: '{{count}} lien',
         binds_other: '{{count}} liens',
+      },
+      action: {
+        heading: 'À la sauvegarde (chaîne d\'actions)',
+        hint: "Les actions s'exécutent séquentiellement après le succès de l'update_query / insert_query principal du dialogue. Les ParamBind de chaque action sont résolus contre l'état vivant du formulaire. Port v2 de ly_act_tasks de v1 pour le flux de sauvegarde — les écritures multi-tables (FormsDialog) vivent ici.",
+        add: 'Ajouter une action',
+        delete: 'Supprimer l\'action',
+        empty: 'Aucune action à la sauvegarde — le dialogue écrit juste la ligne principale et ferme.',
+        namePrompt: 'Identifiant de la nouvelle action (ex. write_apps_jde) :',
+        idExists: 'Une action avec l\'identifiant « {{id}} » existe déjà.',
+        confirmDelete: 'Supprimer l\'action « {{id}} » ?',
+        type: 'Type',
+        unknownType: 'Type d\'action inconnu : « {{type}} ».',
       },
     },
     tables: {

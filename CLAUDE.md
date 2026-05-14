@@ -804,9 +804,46 @@ Real-data smoke: 0 conditional fields on nomasx1 (none of the migrated screens u
 visibility depends on SEC_TYPE / FSSETY pickers. Migrates cleanly; round-trips through the
 schema.
 
-Slices 4-6 still to do (actions/events, AUD audit, row menus).
+**Phase 6 slice 4 (Actions & events — dialog `on_save`) — DONE.**
+- `liberty/screens/config.py` — new ``Action`` discriminated union with 7 variants:
+  ``RunQueryAction`` / ``CallApiAction`` / ``NavigateAction`` / ``SetFieldAction`` /
+  ``ConfirmAction`` / ``NotifyAction`` / ``RefreshAction``. Each carries the common
+  ``{id, label?, stop_on_error=true}`` plus type-specific fields; the ParamBind-bearing
+  variants (run_query / call_api / navigate) reuse the same :class:`ParamBind` shape used for
+  lookups + cascading filters. ``ScreenDialog.on_save: list[Action]`` is the attachment point;
+  ``Screen.actions`` and ``Screen.row_menu`` now use the same ``Action`` type (they were
+  ``ScreenAction`` placeholders before — now properly shaped).
+- Frontend runtime (`ScreenDialog.tsx`) — after the main ``update_query`` / ``insert_query``
+  succeeds, ``runOnSaveActions`` iterates ``dialog.on_save`` sequentially against a snapshot of
+  the form (``savedRow ∪ sent``, so ParamBind ``source`` can reach the PK + untouched columns).
+  Each action's ParamBinds resolve via the shared ``resolveBindList`` helper. Implemented now:
+  ``run_query`` (POST /api/sql/{c}/{q} with bound + uppercased params, falls back to the
+  screen's effective connector), ``notify`` (collected as warnings), ``refresh`` (implied by
+  the existing onSaved call). Stubbed: ``call_api`` / ``navigate`` / ``set_field`` / ``confirm``
+  log a console.warn and abort the chain if ``stop_on_error=true`` (the default) — so an operator
+  who wires a not-yet-implemented action sees a clear message instead of silent skip. A failing
+  action surfaces ``dialog.onSaveFailed`` with the message; the main row is still saved.
+- Builder (`ScreenEditor.tsx`) — new **On save** panel under the Dialog tab: a list of
+  expandable action rows, each with a ``type`` picker (SearchSelect over the 7 variants;
+  switching seeds a minimum-viable shape via ``blankActionOfType`` so required keys exist) and
+  the matching ``$def``-driven SchemaForm beneath. The Pydantic union's ``$defs`` for every
+  variant ride along on ``GET /admin/config/schema`` so the builder can resolve them; the
+  same ``ParamBind`` ``$def`` powers the per-action ``param_binds`` editor.
+- Multi-table writes (v1's NOMASX1 ``settings_applications`` writing to apps + apps_jde +
+  apps_ldap on one PK): now expressible as one ``update_query`` (the apps row) + two
+  ``run_query`` actions on ``dialog.on_save``, each binding the PK via ParamBind. No special
+  ``compound_dialog`` shape — same mechanism as field lookups and (slice 6) row menus.
+- Migration from v1's ``ly_actions`` / ``ly_act_tasks`` / ``ly_act_branch`` is **deferred**:
+  the libnsx1 dataset has none; libnjde carries 7 named actions (Create Role / Delete Role /
+  Import Security / Merge Roles / Create User / Delete User / Reset Password) wired to
+  toolbar buttons in v1's frontend code rather than to a screen via the schema (the
+  ``evt_component`` / ``evt_component_id`` join columns are all NULL). Slice 4b will add a
+  ``liberty-migrate actions --connector <app>`` subcommand that dumps them into a
+  ``[migrated_actions.<app>]`` block for the operator to wire by hand via the builder.
 
-337 tests pass.
+Slices 5-6 still to do (AUD audit, row menus).
+
+338 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
@@ -814,8 +851,11 @@ the form/screen engine (dialogs + conditions + actions/events + `call_api` from 
 contextual menus — slice 1 (Screen + ParamBind + migration) **done**, slice 2 (dialog runtime —
 row click → modal form, lookup param-binds, save → update/insert) **done**, slice 3
 (per-field `visible_when`/`required_when`/`disabled_when`, migrated from v1's `ly_cdn_params`)
-**done**; the `visible_when`/`filter_from` work is its table-side first slice; design it against
-real migrated screens) → **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm`
+**done**, slice 4 (actions & events — dialog `on_save` chain with the 7-variant `Action`
+union; run_query / notify / refresh implemented, others stubbed) **done** — v1's `ly_actions`
+migration deferred to slice 4b; the `visible_when`/`filter_from` work is its table-side first
+slice; design it against real migrated screens) → **Phase 7** the config builders (a *schema-driven*
+UI shell — `SchemaForm`
 over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
 (sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
 the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed`

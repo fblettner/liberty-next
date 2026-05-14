@@ -91,6 +91,32 @@ const FIELD_PROPS_KEYS = ['dd', 'label', 'hidden', 'disabled', 'required', 'cols
 const FIELD_BINDS_KEY = 'lookup_param_binds'
 const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
 
+// Action discriminated union — maps the v2 `type` literal to its $def name (capitalised + "Action"
+// suffix). Used by the on_save editor to pick the right per-type form when the user changes type.
+const ACTION_TYPES = ['run_query', 'call_api', 'navigate', 'set_field', 'confirm', 'notify', 'refresh'] as const
+type ActionType = typeof ACTION_TYPES[number]
+const ACTION_DEF_NAME: Record<ActionType, string> = {
+  run_query: 'RunQueryAction',
+  call_api: 'CallApiAction',
+  navigate: 'NavigateAction',
+  set_field: 'SetFieldAction',
+  confirm: 'ConfirmAction',
+  notify: 'NotifyAction',
+  refresh: 'RefreshAction',
+}
+// Minimum-viable seed when the operator switches type — keeps required keys present so the form
+// validates immediately and the SchemaForm doesn't render a sea of red.
+function blankActionOfType(t: ActionType, id: string): Row {
+  const base: Row = { id, type: t }
+  if (t === 'run_query') base.query = ''
+  if (t === 'call_api') { base.connector = ''; base.endpoint = '' }
+  if (t === 'navigate') base.to = ''
+  if (t === 'set_field') base.target = ''
+  if (t === 'confirm') base.message = ''
+  if (t === 'notify') { base.message = ''; base.tone = 'info' }
+  return base
+}
+
 function pickFromDefs(defs: Record<string, JsonSchema>, name: string): JsonSchema {
   // Return the named $def as a self-contained schema (the parent's $defs ride along so nested
   // refs — ParamBind under ScreenField — still resolve when SchemaForm walks them).
@@ -247,6 +273,128 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         }}
       />
     </>
+  )
+
+  // ── on_save action chain (slice 4) ────────────────────────────────────────
+  // Per-action SchemaForm is driven by the matching $def (RunQueryAction / NotifyAction / …) —
+  // the discriminated `type` is rendered as a small SearchSelect; switching type seeds a new
+  // minimum-viable object via blankActionOfType so required keys exist immediately.
+  const [expandedAction, setExpandedAction] = useState<number | null>(null)
+  const onSave: Row[] = useMemo(
+    () => (Array.isArray((dialog as Row | null)?.on_save) ? ((dialog as Row).on_save as Row[]) : []),
+    [dialog],
+  )
+  const setOnSave = (next: Row[]) => setDialog({ ...(dialog ?? {}), on_save: next } as { title?: string; tabs?: Row[]; on_save?: Row[] })
+  const updateAction = (idx: number, patch: Row) => {
+    const next = onSave.slice()
+    next[idx] = { ...next[idx], ...patch }
+    for (const k of Object.keys(patch)) {
+      if (patch[k] === undefined || patch[k] === null || patch[k] === '' || patch[k] === false) delete (next[idx] as Row)[k]
+    }
+    setOnSave(next)
+  }
+  const addAction = () => {
+    const id = window.prompt(t('settings.screens.action.namePrompt'))?.trim()
+    if (!id) return
+    if (onSave.some((a) => a.id === id)) { window.alert(t('settings.screens.action.idExists', { id })); return }
+    setOnSave([...onSave, blankActionOfType('run_query', id)])
+    setExpandedAction(onSave.length)
+  }
+  const deleteAction = (idx: number) => {
+    if (!window.confirm(t('settings.screens.action.confirmDelete', { id: onSave[idx]?.id }))) return
+    const next = onSave.slice(); next.splice(idx, 1)
+    setOnSave(next)
+    setExpandedAction((cur) => (cur === idx ? null : cur != null && cur > idx ? cur - 1 : cur))
+  }
+  const changeActionType = (idx: number, newType: ActionType) => {
+    const cur = onSave[idx] ?? {}
+    if (cur.type === newType) return
+    // Preserve id + label + stop_on_error; reset the rest to the new variant's minimum shape.
+    const seeded = blankActionOfType(newType, String(cur.id ?? ''))
+    if (cur.label != null) seeded.label = cur.label
+    if (cur.stop_on_error != null) seeded.stop_on_error = cur.stop_on_error
+    const next = onSave.slice()
+    next[idx] = seeded
+    setOnSave(next)
+  }
+  // Per-type SchemaForm subset — common fields (id/label/stop_on_error) are *also* rendered by
+  // SchemaForm from the variant's $def, so the action form is one block. We exclude `type` from
+  // the form (it's the picker above) by removing the property from the resolved schema.
+  const actionVariantSchema = (a: Row): JsonSchema | null => {
+    const defName = ACTION_DEF_NAME[(a.type as ActionType) || 'run_query']
+    const v = defs[defName] as JsonSchema | undefined
+    if (!v) return null
+    const props: Record<string, JsonSchema> = { ...(v.properties ?? {}) }
+    delete props.type
+    return { ...v, properties: props, $defs: defs }
+  }
+
+  const renderOnSave = (): ReactNode => (
+    <Stack gap={8} style={{ marginTop: 14 }}>
+      <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>
+        {t('settings.screens.action.heading')}
+      </strong>
+      <Sub>{t('settings.screens.action.hint')}</Sub>
+      <FieldList>
+        {onSave.length === 0 && <Empty>{t('settings.screens.action.empty')}</Empty>}
+        {onSave.map((a, i) => {
+          const open = expandedAction === i
+          const aType = String(a.type ?? 'run_query') as ActionType
+          const schema = actionVariantSchema(a)
+          return (
+            <div key={i}>
+              <FieldHeader $open={open} onClick={() => setExpandedAction(open ? null : i)}>
+                {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <FileText size={13} />
+                <span className="name">{String(a.id ?? '')}</span>
+                <span className="dd">{aType}</span>
+                {a.label != null && a.label !== '' && <span className="dd">· {String(a.label)}</span>}
+              </FieldHeader>
+              {open && (
+                <FieldBody>
+                  <Stack gap={12}>
+                    <Row gap={8} style={{ alignItems: 'center' }}>
+                      <span style={{ color: colors.text.muted, fontSize: fontSize.sm, minWidth: 60 }}>
+                        {t('settings.screens.action.type')}
+                      </span>
+                      <select
+                        value={aType}
+                        onChange={(e) => changeActionType(i, e.target.value as ActionType)}
+                        style={{
+                          height: 30, padding: '0 8px', borderRadius: 6,
+                          border: `1px solid ${colors.border}`, background: colors.bg.input,
+                          color: colors.text.primary, fontFamily: fonts.sans, fontSize: fontSize.sm,
+                        }}
+                      >
+                        {ACTION_TYPES.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
+                      </select>
+                    </Row>
+                    {schema ? (
+                      <SchemaForm
+                        schema={schema}
+                        defs={defs}
+                        value={a}
+                        onChange={(v) => updateAction(i, v)}
+                      />
+                    ) : (
+                      <Empty>{t('settings.screens.action.unknownType', { type: aType })}</Empty>
+                    )}
+                    <Row gap={8}>
+                      <Button $variant="danger" $size="sm" onClick={() => deleteAction(i)}>
+                        <Trash2 size={13} /> {t('settings.screens.action.delete')}
+                      </Button>
+                    </Row>
+                  </Stack>
+                </FieldBody>
+              )}
+            </div>
+          )
+        })}
+      </FieldList>
+      <Button $variant="ghost" $size="sm" onClick={addAction} style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}>
+        <Plus size={13} /> {t('settings.screens.action.add')}
+      </Button>
+    </Stack>
   )
 
   const renderDialog = (): ReactNode => {
@@ -409,6 +557,9 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
             )}
           </TabBody>
         </DialogSplit>
+        {/* On-save action chain — fires sequentially after the main update/insert succeeds.
+            v2's port of v1's ly_act_tasks for the form-save flow; multi-table writes land here. */}
+        {renderOnSave()}
       </Stack>
     )
   }

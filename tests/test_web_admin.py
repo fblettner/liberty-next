@@ -330,7 +330,13 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         # schema serves the ScreensFile shape with its $defs
         sch = client.get("/admin/config/schema", headers=h).json()
         assert "screens" in sch["screens"]["properties"]
-        for nested in ("Screen", "ScreenDialog", "ScreenTab", "ScreenField", "ParamBind"):
+        # The action discriminated union (slice 4) exposes every variant as its own $def so the
+        # builder's ActionEditor can render the right per-type form when the operator picks one.
+        for nested in (
+            "Screen", "ScreenDialog", "ScreenTab", "ScreenField", "ParamBind",
+            "RunQueryAction", "CallApiAction", "NavigateAction", "SetFieldAction",
+            "ConfirmAction", "NotifyAction", "RefreshAction",
+        ):
             assert nested in sch["screens"]["$defs"]
         # a fresh tmp dir has no screens.toml → GET returns an empty dict (path still reported)
         body = client.get("/admin/config/screens/parsed", headers=h).json()

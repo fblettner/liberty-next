@@ -50,10 +50,58 @@ export interface ScreenTab {
   fields: ScreenField[]
 }
 
+/** One action attached to a dialog / screen / row. Discriminated union by `type` — every variant
+ *  shares `id`, optional `label`, and `stop_on_error`. ParamBind-bearing variants resolve their
+ *  binds at call time against the firing context (dialog form state, selected row, …). */
+export type Action =
+  | (ActionCommon & {
+      type: 'run_query'
+      connector?: string | null
+      query: string
+      param_binds?: ParamBind[]
+    })
+  | (ActionCommon & {
+      type: 'call_api'
+      connector: string
+      endpoint: string
+      param_binds?: ParamBind[]
+    })
+  | (ActionCommon & {
+      type: 'navigate'
+      to: string
+      app?: string | null
+      param_binds?: ParamBind[]
+    })
+  | (ActionCommon & {
+      type: 'set_field'
+      target: string
+      value?: string | null
+      source?: string | null
+    })
+  | (ActionCommon & {
+      type: 'confirm'
+      message: string
+      confirm_label?: string | null
+      cancel_label?: string | null
+    })
+  | (ActionCommon & {
+      type: 'notify'
+      message: string
+      tone?: 'info' | 'ok' | 'warn' | 'error'
+    })
+  | (ActionCommon & { type: 'refresh' })
+
+interface ActionCommon {
+  id: string
+  label?: string | null
+  stop_on_error?: boolean
+}
+
 /** The form shown for add / edit — optional on a screen. */
 export interface ScreenDialog {
   title?: string | null
   tabs: ScreenTab[]
+  on_save?: Action[]
 }
 
 /** List-view item — what `GET /api/screens` and `GET /api/screens/{app}` return. No dialog

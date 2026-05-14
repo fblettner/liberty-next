@@ -160,6 +160,7 @@ const en = {
     noVisibleTabs: 'No tabs are visible for this mode.',
     noVisibleFields: 'No fields on this tab.',
     passwordPlaceholder: 'leave blank to keep the current value',
+    onSaveFailed: 'The main row was saved, but a follow-up action failed: {{message}}',
   },
   http: {
     ok: 'OK',
@@ -345,6 +346,18 @@ const en = {
         conditional: 'conditional',
         binds_one: '{{count}} bind',
         binds_other: '{{count}} binds',
+      },
+      action: {
+        heading: 'On save (action chain)',
+        hint: 'Actions run sequentially after the dialog\'s main update_query / insert_query succeeds. Each action\'s ParamBinds resolve against the form\'s live state. v2\'s port of v1\'s ly_act_tasks for the form-save flow — multi-table writes (FormsDialog) live here.',
+        add: 'Add action',
+        delete: 'Delete action',
+        empty: 'No on-save actions yet — the dialog just writes the main row and closes.',
+        namePrompt: 'New action id (e.g. write_apps_jde):',
+        idExists: 'An action with id "{{id}}" already exists.',
+        confirmDelete: 'Delete action "{{id}}"?',
+        type: 'Type',
+        unknownType: 'Unknown action type "{{type}}".',
       },
     },
     tables: {

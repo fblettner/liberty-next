@@ -119,10 +119,23 @@ export interface ScreenTab {
   fields?: ScreenField[]
 }
 
+/** One action attached to a dialog / screen / row — mirrors the Pydantic discriminated union
+ *  in `liberty/screens/config.py`. Used by the SchemaForm-driven builder; the runtime types in
+ *  `types/screens.ts` are equivalent. */
+export type Action =
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'run_query'; connector?: string | null; query: string; param_binds?: ParamBind[] }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'call_api'; connector: string; endpoint: string; param_binds?: ParamBind[] }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'navigate'; to: string; app?: string | null; param_binds?: ParamBind[] }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'set_field'; target: string; value?: string | null; source?: string | null }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'confirm'; message: string; confirm_label?: string | null; cancel_label?: string | null }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'notify'; message: string; tone?: 'info' | 'ok' | 'warn' | 'error' }
+  | { id: string; label?: string | null; stop_on_error?: boolean; type: 'refresh' }
+
 /** Optional dialog body — the form shown for adding / editing a row. */
 export interface ScreenDialog {
   title?: string | null
   tabs?: ScreenTab[]
+  on_save?: Action[]
 }
 
 /** One screen — collapses v1's table + dialog into a single entity. */

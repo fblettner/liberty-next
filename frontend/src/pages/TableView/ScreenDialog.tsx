@@ -19,7 +19,7 @@ import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Field, Input, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Row, SearchSelect, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
-import type { FieldCondition, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, FieldCondition, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -93,14 +93,17 @@ function evalConditions(rules: FieldCondition[] | undefined, formValues: Row): b
   return true
 }
 
-// Resolve the field's `lookup_param_binds` against the current form state. `value` binds are
-// literals; `source` binds read the live value of another field on the same form (column name,
-// case-insensitive). Empty / missing values are dropped so the lookup falls back to "no narrowing"
-// rather than filtering away everything. Reserved built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) wait
-// for slice 4 — for now those `source` binds are skipped with a noop.
-function resolveBinds(field: ScreenField, formValues: Row): Record<string, string> {
+// Resolve a list of ParamBinds against the current form state. `value` binds are literals;
+// `source` binds read the live value of another field on the same form (column name,
+// case-insensitive). Empty / missing values are dropped — the caller decides whether that means
+// "no narrowing" (a lookup), or "this column keeps its current DB value" (a writable query).
+// Reserved built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) are skipped — wired in a future auth slice.
+function resolveBindList(
+  binds: ReadonlyArray<{ param: string; value?: string | null; source?: string | null }> | undefined,
+  formValues: Row,
+): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const b of field.lookup_param_binds ?? []) {
+  for (const b of binds ?? []) {
     if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
     if (b.source && !b.source.startsWith('#')) {
       // case-insensitive on the source name (read columns are lowercased by Postgres)
@@ -110,6 +113,11 @@ function resolveBinds(field: ScreenField, formValues: Row): Record<string, strin
     }
   }
   return out
+}
+
+// Field-lookup shim — keeps the old call site stable while the shared helper grows uses.
+function resolveBinds(field: ScreenField, formValues: Row): Record<string, string> {
+  return resolveBindList(field.lookup_param_binds, formValues)
 }
 
 // One field row — a switch over the column's resolved rule (when present) + format/type to pick
@@ -313,6 +321,61 @@ export function ScreenDialog({
     setFormValues((p) => ({ ...p, [name]: v }))
   }, [])
 
+  // Run a list of post-save actions sequentially against a *snapshot* of the form state — the
+  // dialog has just written its main update_query / insert_query; on_save actions are the v2 form
+  // of v1's `ly_act_tasks` for the form-save flow (multi-table writes, audit calls, post-save
+  // notifications). Each action's ParamBinds resolve against `ctx`; run_query POSTs to
+  // /api/sql/{c}/{q}; notify appends to the local status banner; refresh signals the caller (via
+  // the returned flag) to re-run the read query. Unimplemented variants log a console.warn and,
+  // when ``stop_on_error`` is false, are skipped — otherwise they abort the chain with a clear
+  // error so the operator knows their config references a not-yet-implemented runtime feature.
+  // Returns the (possibly empty) list of human-readable warnings to append to the success status.
+  const runOnSaveActions = useCallback(async (actions: Action[], ctx: Row): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
+    const warnings: string[] = []
+    let refresh = false
+    for (const a of actions) {
+      try {
+        switch (a.type) {
+          case 'run_query': {
+            const target = a.connector || connector
+            const bound = resolveBindList(a.param_binds, ctx)
+            await api.post(
+              `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
+              { params: withUpper(bound) },
+            )
+            break
+          }
+          case 'notify': {
+            warnings.push(a.message)
+            break
+          }
+          case 'refresh': {
+            refresh = true
+            break
+          }
+          case 'call_api':
+          case 'navigate':
+          case 'set_field':
+          case 'confirm': {
+            // Stubbed — model is in place but the runtime wires up in a later slice. The
+            // builder lets you create them already; an unsupported runtime is a console.warn
+            // rather than a hard fail unless `stop_on_error = true` (the default).
+            const msg = `on_save action '${a.id}' (${a.type}) — runtime not implemented yet`
+            console.warn(msg)  // eslint-disable-line no-console
+            if (a.stop_on_error !== false) return { ok: false, warnings, refresh, error: msg }
+            warnings.push(msg)
+            break
+          }
+        }
+      } catch (e) {
+        const msg = `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`
+        if (a.stop_on_error !== false) return { ok: false, warnings, refresh, error: msg }
+        warnings.push(msg)
+      }
+    }
+    return { ok: true, warnings, refresh }
+  }, [connector])
+
   const submit = useCallback(async () => {
     const targetQuery = mode === 'edit' ? screen.update_query : screen.insert_query
     if (!targetQuery) {
@@ -356,14 +419,36 @@ export function ScreenDialog({
         `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
         { params: withUpper(params) },
       )
+      // Run on_save actions against a snapshot of the full form (sent values + savedRow merged so
+      // ParamBind `source` can reach untouched columns too, e.g. the PK on the main row).
+      const ctx: Row = { ...savedRow, ...sent }
+      const actions = (screen.dialog?.on_save ?? []) as Action[]
+      const result = actions.length > 0
+        ? await runOnSaveActions(actions, ctx)
+        : { ok: true, warnings: [], refresh: false }
       setSaving(false)
+      if (!result.ok) {
+        // The *main* save succeeded; only the action chain failed. Tell the user clearly that the
+        // primary row is written but some follow-up did not — they decide whether to retry, edit,
+        // or close.
+        setError(t('dialog.onSaveFailed', { message: result.error || '' }))
+        onSaved()  // refresh anyway so the user sees the new primary state
+        return
+      }
+      // success — surface any non-fatal warnings (notify messages, skipped stubs with
+      // stop_on_error=false) but proceed to close + refresh.
+      if (result.warnings.length > 0) {
+        // eslint-disable-next-line no-console
+        console.info('on_save warnings:', result.warnings)
+      }
       onSaved()
       onClose()
+      void result.refresh  // refresh is implied by onSaved() — the caller (TableView) re-runs the read.
     } catch (e) {
       setSaving(false)
       setError(e instanceof ApiError ? e.message : String(e))
     }
-  }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t, colByName])
+  }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t, colByName, runOnSaveActions])
 
   // Resolve a field's effective hidden / required / disabled per render — `*_when` lists, when
   // non-empty, override the static flags. The eval runs against the live `formValues`, so as the

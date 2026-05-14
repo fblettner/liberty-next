@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -175,6 +175,113 @@ class ScreenTab(BaseModel):
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown on this tab, in display order.")
 
 
+class _ActionBase(BaseModel):
+    """Fields shared by every action variant. The ``type`` discriminator selects the variant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Stable id within the screen.")
+    label: str | None = Field(default=None, description="Display label (button caption / log line).")
+    stop_on_error: bool = Field(
+        default=True,
+        description="When this action raises, abort the rest of the action list. Set false to make this action best-effort.",
+    )
+
+
+class RunQueryAction(_ActionBase):
+    """Execute a connector query (the most common action — v1's ``ly_act_tasks evt_type='QUERY'``).
+    ``param_binds`` resolves at call time against the firing context (the dialog form's live values,
+    or the row for a row-menu action): same :class:`ParamBind` shape used for lookups.
+
+    The v2 form of v1's ``FormsDialog``: a screen whose main ``update_query`` writes one table can
+    list extra ``RunQueryAction``s on its ``dialog.on_save`` to write related tables that share a
+    PK (e.g. NOMASX1's ``settings_applications`` → apps + apps_jde + apps_ldap)."""
+
+    type: Literal["run_query"] = "run_query"
+    connector: str | None = Field(
+        default=None,
+        description="Connector the query lives on; blank → the screen's effective connector (or app name).",
+    )
+    query: str = Field(description="Name of the connector query to run (e.g. ``apps_jde_post``).")
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Parameter bindings — same shape as ``ScreenField.lookup_param_binds`` / row menu binds.",
+    )
+
+
+class CallApiAction(_ActionBase):
+    """Call an API endpoint on a configured API connector — v1's ``evt_type='API'``. The
+    endpoint's own ``{{placeholder}}`` template wins; ``param_binds`` is for the *query string /
+    body* parameters the endpoint declares as bindable."""
+
+    type: Literal["call_api"] = "call_api"
+    connector: str = Field(description="API connector name (must be of ``type = \"api\"``).")
+    endpoint: str = Field(description="Endpoint name on that connector.")
+    param_binds: list[ParamBind] = Field(default_factory=list)
+
+
+class NavigateAction(_ActionBase):
+    """Open another screen / a route. ``to`` is a screen id (resolved within the same app unless
+    ``app`` overrides) or an explicit URL/route. ``param_binds`` forwards filter values."""
+
+    type: Literal["navigate"] = "navigate"
+    to: str = Field(description="Target screen id (within ``app`` or the current app) or a /route.")
+    app: str | None = Field(default=None, description="Target app (when navigating cross-app).")
+    param_binds: list[ParamBind] = Field(default_factory=list)
+
+
+class SetFieldAction(_ActionBase):
+    """Change the value of a field on the current form (only meaningful from a dialog context).
+    ``target`` is the destination field; ``value`` is a literal or ``source`` reads from another
+    field's current value (the same ParamBind value-vs-source dichotomy)."""
+
+    type: Literal["set_field"] = "set_field"
+    target: str = Field(description="Field name to write into (matches ``ScreenField.name``).")
+    value: str | None = Field(default=None, description="Literal value (mode A).")
+    source: str | None = Field(
+        default=None,
+        description="Source field name to read from at call time (mode B). Reserved built-ins start with ``#``.",
+    )
+
+
+class ConfirmAction(_ActionBase):
+    """Prompt the user for confirmation before continuing. The action list pauses on this entry; if
+    the user cancels, the rest of the list is skipped (an inline `confirm` is best-effort — see
+    ``stop_on_error``)."""
+
+    type: Literal["confirm"] = "confirm"
+    message: str = Field(description="Prompt text shown to the user.")
+    confirm_label: str | None = Field(default=None)
+    cancel_label: str | None = Field(default=None)
+
+
+class NotifyAction(_ActionBase):
+    """Surface a toast / banner. Cheap, side-effect-free — useful after a run_query writes to log
+    "Saved related rows: 3" or to flag an unusual response."""
+
+    type: Literal["notify"] = "notify"
+    message: str = Field(description="Text shown to the user.")
+    tone: Literal["info", "ok", "warn", "error"] = Field(default="info")
+
+
+class RefreshAction(_ActionBase):
+    """Re-run the screen's read query so the table picks up changes. Common closer for an
+    on_save chain that wrote to several tables."""
+
+    type: Literal["refresh"] = "refresh"
+
+
+# Discriminated union — every Action variant carries a ``type`` literal; Pydantic picks the right
+# subclass when validating a raw dict (so screens.toml's `[[on_save]] type = "run_query"` validates).
+Action = Annotated[
+    Union[
+        RunQueryAction, CallApiAction, NavigateAction, SetFieldAction,
+        ConfirmAction, NotifyAction, RefreshAction,
+    ],
+    Field(discriminator="type"),
+]
+
+
 class ScreenDialog(BaseModel):
     """The form shown when the user adds / edits a row of this screen. Optional — a screen
     with no dialog renders as a read-only / grid-edit table."""
@@ -183,19 +290,15 @@ class ScreenDialog(BaseModel):
 
     title: str | None = Field(default=None, description="Dialog title (falls back to the screen's label).")
     tabs: list[ScreenTab] = Field(default_factory=list, description="Tabs, in display order. At least one.")
-
-
-class ScreenAction(BaseModel):
-    """Placeholder for an action / event handler — fully shaped in slice 4. For now we capture
-    just the id + label so screens can carry actions through migration round-trips without the
-    runtime having to interpret them yet. Slice 4 will add ``trigger`` (on_load / on_save /
-    toolbar / row_menu / …), the action body (run_query / call_api / set_field / …), and a
-    ``param_binds: list[ParamBind]`` for feeding arguments at call time."""
-
-    model_config = ConfigDict(extra="allow")  # forward-compat — slice 4 adds more fields
-
-    id: str = Field(description="Stable id within the screen.")
-    label: str | None = Field(default=None, description="Button / menu label.")
+    on_save: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Actions to run sequentially *after* the dialog's main update_query / insert_query "
+            "succeeds. Each action's ParamBinds resolve against the form's live state. Stops on "
+            "the first failure unless an action sets ``stop_on_error = false``. v2's port of v1's "
+            "``ly_act_tasks`` for the form-save flow — multi-table writes (FormsDialog) land here."
+        ),
+    )
 
 
 class Screen(BaseModel):
@@ -219,13 +322,17 @@ class Screen(BaseModel):
     editable: bool = Field(default=True, description="Allow inline grid editing (v1's tbl_editable).")
     uploadable: bool = Field(default=False, description="Show the Excel/CSV import button (v1's tbl_uploadable).")
     dialog: ScreenDialog | None = Field(default=None, description="Form for adding / editing a row — optional.")
-    actions: list[ScreenAction] = Field(
+    actions: list[Action] = Field(
         default_factory=list,
-        description="Toolbar buttons and event handlers (slice 4).",
+        description=(
+            "Toolbar buttons on the screen (above the table) — each fires its action list when "
+            "clicked. ParamBinds resolve against the currently-selected row (or empty when none). "
+            "Common pattern: a ``run_query`` to run a report, then ``refresh`` to reload the grid."
+        ),
     )
-    row_menu: list[ScreenAction] = Field(
+    row_menu: list[Action] = Field(
         default_factory=list,
-        description="Right-click menu entries on a row (slice 6).",
+        description="Right-click menu entries on a row (slice 6) — uses the same action shape.",
     )
 
     @model_validator(mode="after")
