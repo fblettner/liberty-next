@@ -1,7 +1,7 @@
 // English UI strings. The French set (fr.ts) mirrors these keys.
 const en = {
   app: {
-    title: 'Liberty',
+    title: 'Liberty Next',
     subtitle: 'low-code framework',
   },
   nav: {

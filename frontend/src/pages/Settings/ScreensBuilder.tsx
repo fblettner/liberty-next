@@ -37,9 +37,13 @@ const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
 // their own — a deployment with dozens of screens for one app shouldn't drag the whole page.
 const NavCol = styled.div`flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
 const NavSearch = styled.div`
-  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
-  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
+  display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; margin: 4px 0 2px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  & input {
+    flex: 1; min-width: 0; height: 100%; border: none; background: transparent; outline: none;
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+    &::placeholder { color: ${colors.text.muted}; }
+  }
 `
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 4px;`
 const Chip = styled.button<{ $active?: boolean }>`
@@ -52,15 +56,26 @@ const Chip = styled.button<{ $active?: boolean }>`
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
+// The screen row stacks id (mono) and label (sans) vertically — long labels were colliding with
+// the id when they shared a line. The icon stays centered against the two-line text block; the
+// label clamps to two lines so a "Security - Roles Matrix (combination roles for users)" type
+// description never blows the row's height past three lines.
 const NavItem = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
+  display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
-  & svg { flex-shrink: 0; color: ${colors.text.muted}; }
-  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .lbl { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  cursor: pointer;
+  & > svg { flex-shrink: 0; color: ${colors.text.muted}; margin-top: 2px; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & .name { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .lbl {
+    font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted};
+    /* clamp the friendly description to two lines so a long label can't blow the row height up
+       — the rest is truncated with an ellipsis. */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; line-height: 1.3;
+  }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0;`
@@ -249,8 +264,15 @@ export default function ScreensBuilder() {
                   return (
                     <NavItem key={id} $active={id === selId} onClick={() => { setSelId(id); setStatus(null) }}>
                       <FileText size={13} />
-                      <span className="name">{id}</span>
-                      {s.label && <span className="lbl">{s.label}</span>}
+                      <span className="text">
+                        <span className="name">{id}</span>
+                        {/* Friendly label / description below the id. Falls back to description
+                            for screens whose label is blank but description is set. Two-line
+                            clamp lives on the CSS so a long label doesn't blow the row's height. */}
+                        {(s.label || s.description) && (
+                          <span className="lbl">{s.label || s.description}</span>
+                        )}
+                      </span>
                     </NavItem>
                   )
                 })}

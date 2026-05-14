@@ -40,20 +40,16 @@ const Brand = styled.div<{ $collapsed: boolean }>`
   margin-bottom: 12px;
 `
 
-const BrandMark = styled.div`
+// The brand icon — same gradient SVG mark we use as the favicon, served from /favicon.svg
+// (frontend/public/favicon.svg). The wrapper is just a sized box; the actual mark is the SVG.
+const BrandMark = styled.span`
   width: 26px;
   height: 26px;
   flex-shrink: 0;
-  border-radius: 7px;
-  background: ${colors.blue.bg};
-  border: 1px solid ${colors.blue.border};
-  color: ${colors.blue.main};
-  font-family: ${fonts.mono};
-  font-weight: 700;
-  font-size: 14px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  & img { width: 22px; height: 22px; display: block; }
 `
 
 const BrandName = styled.span`
@@ -234,7 +230,7 @@ export default function Sidebar() {
   return (
     <Nav $collapsed={collapsed}>
       <Brand $collapsed={collapsed}>
-        <BrandMark>L</BrandMark>
+        <BrandMark><img src="/favicon.svg" alt={t('app.title')} /></BrandMark>
         {!collapsed && <BrandName>{t('app.title')}</BrandName>}
       </Brand>
 

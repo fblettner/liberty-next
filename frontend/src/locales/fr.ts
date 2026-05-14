@@ -3,7 +3,7 @@ import type { Resources } from './en'
 
 const fr: Resources = {
   app: {
-    title: 'Liberty',
+    title: 'Liberty Next',
     subtitle: 'framework low-code',
   },
   nav: {
