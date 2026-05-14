@@ -151,12 +151,13 @@ export default function Layout() {
     setLang(l)
   }
 
-  // a `/sql/...` or `/http/...` route → show the tab host (and the matching tab is active); a
-  // framework route → show its page through <Outlet/>, with the tab host hidden underneath.
-  // (both useMatch calls must run unconditionally — Rules of Hooks)
+  // a `/sql/...`, `/http/...`, or `/dashboard/...` route → show the tab host (and the matching
+  // tab is active); a framework route → show its page through <Outlet/>, with the tab host hidden
+  // underneath. (all useMatch calls must run unconditionally — Rules of Hooks)
   const sqlMatch = useMatch('/sql/:connector/:target')
   const httpMatch = useMatch('/http/:connector/:target')
-  const onTabRoute = !!(sqlMatch || httpMatch)
+  const dashboardMatch = useMatch('/dashboard/:target')
+  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch)
 
   return (
     <Shell>
