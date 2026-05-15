@@ -1957,6 +1957,174 @@ def migrate_actions(
     return {"migrated_actions": {app_name: actions}}
 
 
+def attach_actions_to_screens(
+    screens_data: dict[str, Any],
+    actions_data: dict[str, Any],
+    *,
+    app_name: str,
+) -> dict[str, Any]:
+    """Auto-attach the migrated v1 actions to v2 screens by **query-base matching**: each task's
+    query (e.g. ``f0092_put``) shares a base name with a screen's read_query (``f0092_get`` →
+    base ``f0092``). The most common base across the action's tasks decides the target screen
+    (ties go to the first matching screen in iteration order). The attached entry is a single
+    ``run_query`` ``Screen.actions`` item using the action's **first task with a query** — v2's
+    Action union is flat, no built-in multi-step chain, so multi-task v1 actions only get their
+    primary step wired here; the full chain stays in ``migrated_actions.toml`` for the operator
+    to hand-wire via the builder (or to chain manually in ``Dialog.on_save``).
+
+    Modifies ``screens_data`` in place and returns it. Idempotent: re-running drops any prior
+    auto-attached entry (matched by the ``id`` we stamp — ``migrated_<v1_act_id>``) before
+    re-attaching, so multiple migration runs don't duplicate buttons.
+    """
+    screens = (screens_data.get("screens") or {}).get(app_name) or {}
+    actions = (actions_data.get("migrated_actions") or {}).get(app_name) or {}
+    if not screens or not actions:
+        return screens_data
+    # Build a base → screen-id index (first match wins on ties). The base of a query is
+    # ``<base>_<crud>`` split on the last underscore — ``f0092_get`` → ``f0092``,
+    # ``security_users_get`` → ``security_users``.
+    sid_by_base: dict[str, str] = {}
+    for sid, scr in screens.items():
+        rq = scr.get("read_query")
+        if not rq or "_" not in rq:
+            continue
+        sid_by_base.setdefault(rq.rsplit("_", 1)[0], sid)
+
+    def _base_of(query: str | None) -> str | None:
+        if not query or "_" not in query:
+            return None
+        return query.rsplit("_", 1)[0]
+
+    # Fallback strategy: when query-base matching fails (the action's tasks touch tables that
+    # aren't the screen's read-query target — common when one v1 action writes across several
+    # related tables), match by **keyword overlap between the action label and each screen's
+    # id+label**. NOMAJDE's "Reset Password for User" doesn't reference user_management's read
+    # query directly, but the keyword "user" matches the screen's label "User Management".
+    # Stop-words + verbs are filtered; trivial singularisation strips a trailing "s".
+    _ACTION_STOP = {
+        "in", "all", "the", "for", "of", "to", "from", "by", "with", "on", "at",
+        "and", "or", "a", "an", "is", "be", "are", "tables", "table",
+    }
+    _ACTION_VERBS = {
+        "create", "delete", "update", "insert", "get", "set", "import", "export",
+        "merge", "reset", "change", "remove", "add", "drop",
+    }
+
+    def _tokens(text: str) -> set[str]:
+        out: set[str] = set()
+        for w in text.lower().replace("_", " ").replace("-", " ").split():
+            w = "".join(c for c in w if c.isalnum())
+            if not w or len(w) < 3 or w in _ACTION_STOP or w in _ACTION_VERBS:
+                continue
+            out.add(w)
+            if w.endswith("s") and len(w) > 3:
+                out.add(w[:-1])
+        return out
+
+    # Pre-compute each screen's id-tokens and label-tokens separately so we can score id
+    # matches higher than label matches (a screen whose *id* contains "user" is more strongly
+    # a user-management screen than one whose label merely mentions "user" — NOMAJDE's
+    # ``f0005`` is "User Defined Code" but the proper target for "Reset Password for User"
+    # is ``user_management``).
+    screen_tokens: list[tuple[str, set[str], set[str]]] = []
+    for sid, scr in screens.items():
+        screen_tokens.append((
+            sid,
+            _tokens(sid),
+            _tokens(str(scr.get("label") or "")),
+        ))
+
+    # First, scrub any previously auto-attached entries (id starts with ``migrated_<v1_act_id>``)
+    # so re-running the migration is idempotent.
+    for scr in screens.values():
+        existing = scr.get("actions")
+        if isinstance(existing, list) and existing:
+            kept = [a for a in existing if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
+            if kept:
+                scr["actions"] = kept
+            else:
+                scr.pop("actions", None)
+
+    for slug, a in actions.items():
+        tasks = a.get("tasks") or []
+        # Pick the most-common base across this action's tasks (only ones that resolved to a v2
+        # query); that's the screen the action "belongs to".
+        bases: list[str] = []
+        for t in tasks:
+            b = _base_of(t.get("query"))
+            if b:
+                bases.append(b)
+        target_sid: str | None = None
+        target_base: str | None = None
+        if bases:
+            # Strategy A: most-common task-base; pick the screen sharing that base.
+            seen: dict[str, int] = {}
+            for b in bases:
+                seen[b] = seen.get(b, 0) + 1
+            target_base = max(seen, key=lambda b: (seen[b], -bases.index(b)))
+            target_sid = sid_by_base.get(target_base)
+        if not target_sid:
+            # Strategy B (fallback): label-keyword overlap. NOMAJDE's "Reset Password for User"
+            # has no task whose query base matches user_management's read_query, but the
+            # *labels* share "user" — close enough to wire so the operator sees a button.
+            keywords = _tokens(a.get("label") or slug)
+            best_sid: str | None = None
+            best_score = 0
+            for sid, id_toks, label_toks in screen_tokens:
+                # ID overlap is 2x more valuable than label overlap — a screen named
+                # ``user_management`` outranks one merely labelled "User Defined Code".
+                score = 2 * len(keywords & id_toks) + len(keywords & label_toks)
+                if score > best_score:
+                    best_score, best_sid = score, sid
+            if best_sid:
+                target_sid = best_sid
+        if not target_sid:
+            continue
+        # Find the representative task: prefer one whose query base matches the screen we
+        # picked (Strategy A); fall back to the first task with any query (Strategy B — the
+        # keyword match doesn't constrain query choice, so the first task is as good as any).
+        primary = None
+        if target_base:
+            primary = next((t for t in tasks if _base_of(t.get("query")) == target_base), None)
+        if primary is None:
+            primary = next((t for t in tasks if t.get("query")), None)
+        v1_act_id = a.get("v1_act_id")
+        if v1_act_id is None:
+            continue
+        # Multi-task hint: when the v1 action has more than one query-task, surface the count
+        # in the button label so the operator notices the chain isn't fully wired.
+        query_count = sum(1 for t in tasks if t.get("query"))
+        label = a.get("label") or slug
+        if query_count > 1:
+            label = f"{label} (1/{query_count})"
+        attached: dict[str, Any]
+        if primary:
+            # Strategy A or B: at least one task has a v2 query — emit a run_query button.
+            attached = {
+                "id": f"migrated_{v1_act_id}",
+                "type": "run_query",
+                "label": label,
+                "query": primary["query"],
+            }
+            pb = primary.get("param_binds")
+            if pb:
+                attached["param_binds"] = list(pb)
+        else:
+            # API-only or fully unresolved (NOMAJDE's "Reset Password for User" uses ly_api
+            # tasks). Emit a notify placeholder so the button still appears with a clear
+            # "needs wiring" message — the operator opens migrated_actions.toml + wires
+            # the real call_api / chain via the builder. Better than silently dropping.
+            attached = {
+                "id": f"migrated_{v1_act_id}",
+                "type": "notify",
+                "label": f"{label} (needs wiring)",
+                "message": f"v1 action {slug!r} — see migrated_actions.toml and wire via the builder.",
+                "tone": "warn",
+            }
+        screens[target_sid].setdefault("actions", []).append(attached)
+    return screens_data
+
+
 def migrate_screens(
     table_rows: Iterable[Mapping[str, Any]],
     dialog_rows: Iterable[Mapping[str, Any]] = (),

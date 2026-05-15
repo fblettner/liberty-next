@@ -14,6 +14,7 @@ from liberty.migrations import (
     merge_connectors,
     migrate_api,
     migrate_column_hints,
+    attach_actions_to_screens,
     migrate_actions,
     migrate_column_visibility,
     migrate_dictionary,
@@ -1415,6 +1416,100 @@ def test_migrate_actions_dumps_v1_workflows() -> None:
         {"param": "FROMUSER", "source": "ROLE"},
         {"param": "TOUSER", "value": "ADMIN"},
     ]
+
+
+def test_attach_actions_to_screens_query_base_match() -> None:
+    """The auto-attach matches an action to a screen when one of its task queries shares a
+    base name with the screen's read_query (``f0092_put`` → screen with read_query
+    ``f0092_get``). The first task with that base is the representative — its query becomes
+    the run_query action's target, its param_binds carry verbatim."""
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {"id": "f0092", "label": "Role Description", "read_query": "f0092_get"},
+        "user_management": {"id": "user_management", "label": "User Management", "read_query": "user_management_get"},
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "create_role": {
+            "id": "create_role", "v1_act_id": 1, "label": "Create Role in all tables",
+            "tasks": [
+                {"seq": 1, "v1_evt_id": 1, "type": "QUERY", "query": "f0092_put",
+                 "param_binds": [{"param": "ULUSER", "source": "AUUSER"}]},
+                {"seq": 2, "v1_evt_id": 2, "type": "QUERY", "query": "f00921_put"},
+            ],
+        },
+    }}}
+    out = attach_actions_to_screens(screens_data, actions_data, app_name="nomajde")
+    actions = out["screens"]["nomajde"]["f0092"]["actions"]
+    assert len(actions) == 1
+    assert actions[0] == {
+        "id": "migrated_1",
+        "type": "run_query",
+        "label": "Create Role in all tables (1/2)",   # 1/N hint flags the multi-task chain
+        "query": "f0092_put",
+        "param_binds": [{"param": "ULUSER", "source": "AUUSER"}],
+    }
+    # No action attached to user_management.
+    assert "actions" not in out["screens"]["nomajde"]["user_management"]
+
+
+def test_attach_actions_to_screens_label_keyword_fallback() -> None:
+    """When no task query base matches a screen, fall back to label-keyword overlap. NOMAJDE's
+    "Reset Password for User" runs only API tasks (no query base to match) — keyword "user"
+    overlaps user_management's id, so it attaches there as a *notify* placeholder (no
+    runnable query → notify-on-click with a "wire manually" message)."""
+    screens_data = {"screens": {"nomajde": {
+        "f0005": {"id": "f0005", "label": "User Defined Code", "read_query": "f0005_get"},
+        "user_management": {"id": "user_management", "label": "User Management", "read_query": "user_management_get"},
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "reset_password": {
+            "id": "reset_password", "v1_act_id": 7, "label": "Reset Password for User",
+            "tasks": [
+                {"seq": 1, "v1_evt_id": 1, "type": "API", "v1_api_id": 1},
+                {"seq": 2, "v1_evt_id": 2, "type": "API", "v1_api_id": 2},
+            ],
+        },
+    }}}
+    out = attach_actions_to_screens(screens_data, actions_data, app_name="nomajde")
+    # Despite f0005 ("User Defined Code") also containing "user" in its label, the score
+    # weighting (2× for id-overlap vs 1× for label-overlap) sends the action to
+    # user_management (whose *id* contains "user").
+    assert "actions" not in out["screens"]["nomajde"].get("f0005", {})
+    user_actions = out["screens"]["nomajde"]["user_management"]["actions"]
+    assert len(user_actions) == 1
+    a = user_actions[0]
+    assert a["id"] == "migrated_7"
+    # API-only → notify placeholder with a clear "needs wiring" message.
+    assert a["type"] == "notify"
+    assert a["tone"] == "warn"
+    assert "needs wiring" in a["label"]
+
+
+def test_attach_actions_to_screens_idempotent() -> None:
+    """Re-running drops any prior auto-attached entries (matched by ``migrated_`` id prefix)
+    before re-attaching, so multiple migration runs don't duplicate buttons. Hand-wired
+    entries (without the ``migrated_`` prefix) survive."""
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {
+            "id": "f0092", "label": "Role Description", "read_query": "f0092_get",
+            "actions": [
+                # Hand-wired entry — must survive re-attachment.
+                {"id": "hand_wired", "type": "notify", "message": "hi", "tone": "info"},
+                # Prior auto-attached entry — must be dropped + replaced.
+                {"id": "migrated_1", "type": "run_query", "query": "stale_query"},
+            ],
+        },
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "create_role": {
+            "id": "create_role", "v1_act_id": 1, "label": "Create Role",
+            "tasks": [{"seq": 1, "v1_evt_id": 1, "type": "QUERY", "query": "f0092_put"}],
+        },
+    }}}
+    out = attach_actions_to_screens(screens_data, actions_data, app_name="nomajde")
+    actions = out["screens"]["nomajde"]["f0092"]["actions"]
+    assert [a["id"] for a in actions] == ["hand_wired", "migrated_1"]
+    # The replaced entry uses the fresh query name, not the stale one.
+    assert next(a for a in actions if a["id"] == "migrated_1")["query"] == "f0092_put"
 
 
 def test_migrate_actions_unresolvable_query_keeps_warning() -> None:

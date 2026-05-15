@@ -40,6 +40,7 @@ import asyncio
 import sys
 
 from liberty.migrations import (
+    attach_actions_to_screens,
     make_engine,
     merge_connectors,
     migrate_actions,
@@ -126,11 +127,27 @@ async def _build(args: argparse.Namespace) -> dict:
                 tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
                 app_name=args.connector,
             )
-            return migrate_screens(
+            screens_data = migrate_screens(
                 *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
                 promotable_dialogs=promotable_dialogs,
                 app_name=args.connector,
             )
+            # Auto-attach v1 named actions (NOMAJDE's Create Role / Reset Password / etc.) to
+            # the matching v2 screens — match by query-base (an action's task running
+            # ``f0092_put`` belongs to the screen whose ``read_query`` is ``f0092_get``).
+            # libnsx1 has no rows in ly_actions, so this is a no-op there. The reference dump
+            # (full v1 shape including branches / loops / IF / multi-task chains) still requires
+            # ``liberty-migrate actions`` to be run separately.
+            try:
+                act_rows = await read_actions(engine)
+            except Exception:
+                act_rows = ([], [], [], [], [], [])
+            if act_rows[0]:
+                actions_data = migrate_actions(
+                    *act_rows, sql_rows=sql_rows, app_name=args.connector,
+                )
+                attach_actions_to_screens(screens_data, actions_data, app_name=args.connector)
+            return screens_data
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -267,12 +284,20 @@ def _summary(data: dict, *, command: str) -> str:
         # Promoted row-click targets — screens whose v1 ctx menu had a "Display Properties"-style
         # FormsDialog item; the migrator promoted it to ``row_click_screen`` + dropped the menu entry.
         n_row_click = sum(1 for s in screens.values() if s.get("row_click_screen"))
+        # Auto-attached actions — v1 ly_actions wired to a v2 screen via query-base matching
+        # (NOMAJDE's "Create Role" → role_management). Each attached entry has an ``id`` that
+        # starts with ``migrated_`` so the count is unambiguous.
+        n_attached_actions = sum(
+            1 for s in screens.values()
+            for a in (s.get("actions") or [])
+            if isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_")
+        )
         return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "
                 f"{with_audit} with audit, {cross} cross-connector, {n_fields} dialog field(s), "
                 f"{n_binds} param-bind(s), {n_conds} conditional field(s), "
                 f"{n_nested_form} nested form tab(s), {n_nested_table} nested table tab(s), "
                 f"{n_rowmenu_screens} with row-menu ({n_rowmenu_items} items), "
-                f"{n_row_click} promoted row-click(s) — "
+                f"{n_row_click} promoted row-click(s), {n_attached_actions} auto-attached action(s) — "
                 f"put this at config/screens.toml")
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}

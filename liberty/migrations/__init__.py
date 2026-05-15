@@ -18,6 +18,7 @@ from liberty.migrations.source import (
     read_table_meta,
 )
 from liberty.migrations.v1 import (
+    attach_actions_to_screens,
     merge_connectors,
     migrate_actions,
     migrate_api,
@@ -39,6 +40,7 @@ from liberty.migrations.v1 import (
 )
 
 __all__ = [
+    "attach_actions_to_screens",
     "make_engine",
     "merge_connectors",
     "migrate_actions",
