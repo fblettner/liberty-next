@@ -339,8 +339,18 @@ export function ResultTable({
     }
   }, [connector, onSaved, closeMenu, navigate])
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
-  // (TableView passes a memoized `activeFilters`, so this stays referentially stable across re-renders).
-  const shownColumns = useMemo(() => result.columns.filter((c) => columnVisibleNow(c, activeFilters ?? {})), [result.columns, activeFilters])
+  // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
+  // re-renders). Also drop password-typed columns globally — a stored hash / ENC: blob should
+  // never appear as a cleartext cell in any grid (the audit table on settings_applications
+  // exposed this — v1 marked it visible because the audit log records the ENC value, but in
+  // v2 we render it as "•••" everywhere it'd otherwise show). The ScreenDialog still lets the
+  // user *set* a new password via its masked input — table is read-only context only.
+  const shownColumns = useMemo(
+    () => result.columns.filter(
+      (c) => columnVisibleNow(c, activeFilters ?? {}) && (c.format ?? '').toLowerCase() !== 'password',
+    ),
+    [result.columns, activeFilters],
+  )
 
   // ── batch-edit state ──
   const [editMode, setEditMode] = useState(false)

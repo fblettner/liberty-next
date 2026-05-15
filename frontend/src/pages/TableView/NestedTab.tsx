@@ -19,40 +19,27 @@
 // Both wait for their bound params to resolve before fetching — a not-yet-saved "add"
 // parent (APPS_ID still undefined) shows an inert empty state instead of firing a request
 // that would return everything in the table.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Plus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, SpinnerRing } from '../../common'
 import { DataTable } from '../../common/DataTable'
-import { enumMap, ruleCell } from '../../services/cells'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { NestedFormTab, NestedTableTab, ScreenDetail, ScreenField } from '../../types/screens'
-import { resolveBindList, type Row, valueFor } from './dialogHelpers'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import type { NestedFormTab, NestedTableTab, ScreenDetail } from '../../types/screens'
+import { evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
+import { CellWrap, FieldRow, isPassword } from './FieldRow'
+import { colors, fontSize } from '../../theme'
 // Circular import: ScreenDialog also imports NestedFormView/NestedTableView. ESM resolves
 // these at module-evaluation time but the binding is only *used* at render time (inside
 // JSX), so by the time React calls the sub-dialog the import has fully resolved. Same
 // pattern ResultTable uses to render ScreenDialog without a circle (ResultTable → ScreenDialog
 // is one-way, this one's two-way but both consume the binding lazily through JSX).
-import { ScreenDialog, type DialogMode } from './ScreenDialog'
+import { NestedSaversContext, ScreenDialog, type DialogMode } from './ScreenDialog'
 
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
-`
-const Cell = styled.div`
-  display: flex; flex-direction: column; gap: 4px; min-width: 0;
-`
-const CellLabel = styled.div`
-  font-size: ${fontSize.micro}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-  color: ${colors.text.muted};
-`
-const ReadOnlyBox = styled.div`
-  display: block; width: 100%; box-sizing: border-box; padding: 6px 10px; min-height: 32px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-  color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  white-space: pre-wrap; overflow-wrap: anywhere;
 `
 const Hint = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 6px 0;
@@ -80,8 +67,15 @@ function effectiveConnector(tab: { connector?: string | null }, parentConnector:
 }
 
 // ── NestedFormView ──────────────────────────────────────────────────────────
-// A child-record form embedded inline in this tab. Loads the linked row via the nested
-// `read_query` narrowed by `param_binds` resolved against parent form state.
+// A child-record form embedded inline in this tab — v2's port of v1's "FormsDialog inside
+// FormsDialog". Loads the linked row via the nested `read_query` narrowed by `param_binds`
+// resolved against parent form state, then renders the configured fields with FieldRow
+// (same widget set as the top-level dialog: BOOLEAN → Checkbox, ENUM/LOOKUP → SearchSelect,
+// password → masked input, numeric/date/text). The user edits in place; the save runs
+// **after the parent's main update** via the NestedSaversContext — register a save fn on
+// mount, the parent's submit() walks the registry and awaits each. A failing nested save
+// surfaces on the parent's banner without rolling back the main row (idempotent at the
+// nested layer: retrying re-fires update/insert with the current form state).
 
 export function NestedFormView({
   tab, parentFormValues, parentConnector,
@@ -94,6 +88,8 @@ export function NestedFormView({
 }) {
   const { t } = useTranslation()
   const connector = effectiveConnector(tab, parentConnector)
+  const savers = useContext(NestedSaversContext)
+
   // Resolve bound params against the live parent state. JSON-stringified key drives the
   // fetch effect — re-running the read query when the parent's PK / context changes.
   const bound = useMemo(() => resolveBindList(tab.param_binds, parentFormValues), [tab.param_binds, parentFormValues])
@@ -105,10 +101,20 @@ export function NestedFormView({
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Local form state — separate from the parent's so editing in JD Edwards doesn't pollute
+  // the main `formValues`. Each nested form owns its own fields' values.
+  const [formValues, setFormValues] = useState<Row>({})
+  const [savedRow, setSavedRow] = useState<Row>({})  // pre-edit values keyed by field name (for `:_ORIGINAL` binds)
+  // True once a linked row has been loaded (i.e. there's something to UPDATE). Drives
+  // update_query vs insert_query selection on save.
+  const isExistingRef = useRef(false)
+  // User-touched flag — only fire insert when add-mode and the user actually typed
+  // something (otherwise navigating to a never-used JD Edwards tab would insert empty rows).
+  const touchedRef = useRef(false)
 
   useEffect(() => {
     if (!hasBinds) {
-      setResult(null); setError(null); return
+      setResult(null); setError(null); isExistingRef.current = false; return
     }
     setLoading(true); setError(null)
     api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(tab.read_query)}${bindsToQuery(bound)}`)
@@ -118,59 +124,151 @@ export function NestedFormView({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boundKey is the stable serialization of bound
   }, [connector, tab.read_query, boundKey, hasBinds])
 
-  const row: Row | null = result?.rows?.[0] ?? null
   const colByName = useMemo(() => {
     const m = new Map<string, Column>()
     for (const c of result?.columns ?? []) m.set(c.name.toLowerCase(), c)
     return m
   }, [result])
 
+  // Seed local form state from the loaded row (edit mode) or from the bind values + field
+  // defaults (add mode — no linked record yet). Password fields are NEVER seeded: same rule
+  // as the top-level dialog (the stored value is a hash / ENC: blob — leaking it into the
+  // form means it gets posted back). `savedRow` keeps the original (sans-password) for
+  // `:_ORIGINAL` rebinds.
+  useEffect(() => {
+    if (!result) return
+    const row = result.rows?.[0] ?? null
+    isExistingRef.current = row != null
+    touchedRef.current = false
+    const seeded: Row = {}
+    const original: Row = {}
+    if (row) {
+      for (const f of tab.fields) {
+        const col = colByName.get(f.name.toLowerCase()) ?? null
+        const v = valueFor(f.name, row)
+        if (v !== undefined) original[f.name] = v
+        if (isPassword(col)) continue
+        if (v !== undefined) seeded[f.name] = v
+      }
+    } else {
+      // Add mode — seed FK columns from bind values + field defaults.
+      for (const f of tab.fields) {
+        const fromBind = bound[f.name] ?? bound[f.name.toUpperCase()]
+        if (fromBind !== undefined) seeded[f.name] = fromBind
+        else if (f.default != null && f.default !== '') seeded[f.name] = f.default
+      }
+    }
+    setFormValues(seeded)
+    setSavedRow(original)
+  }, [result, tab.fields, colByName, bound])
+
+  const onFieldChange = useCallback((name: string, v: unknown) => {
+    touchedRef.current = true
+    setFormValues((p) => ({ ...p, [name]: v }))
+  }, [])
+
+  // Visibility / required / disabled (same rule engine as the top-level dialog) — re-eval
+  // every render against the current formValues so a field gating on a sibling reacts live.
+  const fieldStateOf = useCallback((f: typeof tab.fields[number]) => {
+    const visibleByRule = (f.visible_when?.length ?? 0) > 0
+      ? evalConditions(f.visible_when, formValues)
+      : !f.hidden
+    const requiredByRule = (f.required_when?.length ?? 0) > 0
+      ? evalConditions(f.required_when, formValues)
+      : !!f.required
+    const disabledByRule = (f.disabled_when?.length ?? 0) > 0
+      ? evalConditions(f.disabled_when, formValues)
+      : !!f.disabled
+    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule }
+  }, [formValues])
+
+  // Register the save fn with the parent ScreenDialog. Re-registers each render so the
+  // closure captures the *latest* formValues / mode — the registry is a `Map`, so a
+  // re-register simply overwrites the previous entry. Unregister on unmount.
+  useEffect(() => {
+    if (!savers) return
+    const save = async () => {
+      // Add-mode + the user never touched the form: skip insert. Otherwise we'd create
+      // empty rows just because the user opened the parent dialog and ignored this tab.
+      const isExisting = isExistingRef.current
+      if (!isExisting && !touchedRef.current) return
+
+      // Collect values from visible fields only (a hidden field on save isn't written —
+      // same convention the top-level dialog uses). Drop empty password values.
+      const sent: Row = {}
+      for (const f of tab.fields) {
+        if (!fieldStateOf(f).visible) continue
+        if (!(f.name in formValues)) continue
+        const v = formValues[f.name]
+        const col = colByName.get(f.name.toLowerCase()) ?? null
+        if (isPassword(col) && (v == null || v === '')) continue
+        sent[f.name] = v
+      }
+      // Bound FK columns (e.g. APPS_ID) — make sure they're posted so an insert ties the
+      // child to its parent and an update's WHERE on a key column has the right value.
+      for (const [k, v] of Object.entries(bound)) {
+        if (!(k in sent) && !(k.toLowerCase() in sent)) sent[k] = v
+      }
+
+      const targetQuery = isExisting ? tab.update_query : tab.insert_query
+      if (!targetQuery) {
+        throw new Error(t(isExisting ? 'table.editNoUpdate' : 'table.editNoInsert'))
+      }
+      // For an update, also bind `:<COL>_ORIGINAL` for the migrated _put's WHERE rebind.
+      // Same handling as the top-level dialog — skip password originals (we don't have the
+      // ciphertext on hand) and skip empty originals.
+      const baseSaved: Row = isExisting
+        ? Object.fromEntries(Object.entries(savedRow).filter(([k]) => {
+            const c = colByName.get(k.toLowerCase()) ?? null
+            return !isPassword(c)
+          }))
+        : {}
+      const params = isExisting
+        ? { ...baseSaved, ...sent, ...originalKeys(baseSaved) }
+        : sent
+      await api.post(
+        `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
+        { params: withUpper(params) },
+      )
+    }
+    savers.register(tab.id, save)
+    return () => savers.unregister(tab.id)
+  }, [savers, tab.id, tab.fields, tab.update_query, tab.insert_query, formValues, savedRow, bound, colByName, connector, fieldStateOf, t])
+
   const cols = Math.max(1, tab.cols ?? 2)
   if (!hasBinds) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (loading && !result) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   if (error) return <Banner $tone="error">{error}</Banner>
-  if (!row) return <Hint>{t('dialog.nested.noRecord')}</Hint>
-
+  // Even in add mode (no linked row) we render the form — the user can type values and
+  // saving will fire insert_query (binding the FK columns from `bound`). The Hint banner
+  // surfaces the "no record yet" state so it's not invisible.
   return (
-    <FieldGrid $cols={cols}>
-      {tab.fields
-        .filter((f) => !f.hidden)
-        .map((f) => (
-          <NestedFieldCell key={f.name} field={f} column={colByName.get(f.name.toLowerCase()) ?? null} row={row} cols={cols} />
-        ))}
-    </FieldGrid>
-  )
-}
-
-function NestedFieldCell({ field, column, row, cols }: {
-  field: ScreenField; column: Column | null; row: Row; cols: number
-}) {
-  const label = field.label ?? column?.label ?? field.name
-  const raw = valueFor(field.name, row)
-  // Apply the dictionary's display rule the same way the grid does: BOOLEAN → ✓/✗,
-  // ENUM → resolved label, password → mask (the format check, since password isn't a
-  // ``rule``). LOOKUP stays raw for now — fully resolving labels needs the same lookup
-  // batch the grid uses (useLookupBatch); slice 2 territory when nested forms become
-  // editable and the field-row pipeline takes over wholesale.
-  const isPwd = (column?.format ?? '').toLowerCase() === 'password'
-  let display: string
-  if (raw == null) {
-    display = '—'
-  } else if (isPwd) {
-    display = '••••••••'
-  } else if (column) {
-    const enums = column.rule?.kind === 'enum' ? enumMap(column.rule) : undefined
-    const cell = ruleCell(raw, column, enums)
-    display = cell.text
-  } else {
-    display = String(raw)
-  }
-  const span = Math.min(cols, Math.max(1, field.colspan ?? 1))
-  return (
-    <Cell style={{ gridColumn: `span ${span}` }}>
-      <CellLabel>{label}</CellLabel>
-      <ReadOnlyBox>{display}</ReadOnlyBox>
-    </Cell>
+    <div>
+      {!isExistingRef.current && result && <Hint>{t('dialog.nested.noRecord')}</Hint>}
+      <FieldGrid $cols={cols}>
+        {tab.fields
+          .filter((f) => fieldStateOf(f).visible)
+          .map((f) => {
+            const st = fieldStateOf(f)
+            return (
+              <FieldRow
+                key={f.name}
+                field={f}
+                column={colByName.get(f.name.toLowerCase()) ?? null}
+                formValues={formValues}
+                onChange={onFieldChange}
+                disabled={st.disabled}
+                required={st.required}
+              />
+            )
+          })}
+        {tab.fields.filter((f) => fieldStateOf(f).visible).length === 0 && (
+          <CellWrap $span={cols}>
+            <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
+          </CellWrap>
+        )}
+      </FieldGrid>
+    </div>
   )
 }
 
@@ -229,10 +327,14 @@ export function NestedTableView({
   // No rules (BOOLEAN / ENUM / LOOKUP), no filters, no batch edit yet — that lands when /
   // if the user asks for more. Read display is enough for activity_log / audit_trail and
   // good enough for editable rules tables since clicking a row opens the full ScreenDialog.
+  // Password-typed columns are dropped entirely — never display a stored hash / ENC: blob
+  // in a grid cell, regardless of whether the migration flagged it ``hidden`` (v1's audit
+  // tables didn't always do so). The full ScreenDialog still lets the user *set* a new
+  // password through its masked input; the grid is read-only context.
   const columns = useMemo(() => {
     const cols = result?.columns ?? []
     return cols
-      .filter((c) => !c.hidden)
+      .filter((c) => !c.hidden && (c.format ?? '').toLowerCase() !== 'password')
       .map((c) => ({
         id: c.name,
         accessorFn: (r: Row) => r[c.name] ?? r[c.name.toLowerCase()],

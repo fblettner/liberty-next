@@ -12,17 +12,17 @@
 // are skipped; `disabled=true` renders read-only; `required=true` triggers HTML5 validation; a
 // `colspan` widens the field across the tab's CSS grid (`cols` wide). When a screen has no dialog
 // the TableView falls back to its existing inline grid-edit flow.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Checkbox, Field, Input, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SearchSelect, SpinnerRing } from '../../common'
+import { Banner, Button, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { Action, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
-import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, fonts } from '../../theme'
 import { evalConditions, originalKeys, resolveBindList, type Row, withUpper } from './dialogHelpers'
+import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
 
 /** Narrow a ScreenTab to FormTab — the original "grid of fields" kind. A tab without a
@@ -34,6 +34,20 @@ function isFormTab(tab: ScreenTab): tab is FormTab {
 }
 
 export type DialogMode = 'edit' | 'add'
+
+/** A NestedFormView registers a save function with its parent ScreenDialog via this context.
+ *  After the parent's own update/insert succeeds, ``submit()`` walks the registry and awaits
+ *  each entry sequentially — same as v1's FormsDialog flow (main first, then sub-dialogs,
+ *  each contributing their own write). A throwing save aborts the chain and surfaces on the
+ *  parent's error banner; the dialog stays open so the operator can retry. */
+export type NestedSaver = () => Promise<void>
+export interface NestedSaversCtx {
+  /** Mount a saver under *tabId*. Idempotent — re-registering replaces the previous fn (which
+   *  is exactly what we want when NestedFormView's closure captures a new `formValues`). */
+  register: (tabId: string, fn: NestedSaver) => void
+  unregister: (tabId: string) => void
+}
+export const NestedSaversContext = createContext<NestedSaversCtx | null>(null)
 
 const TabStrip = styled.div`
   display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid ${colors.border};
@@ -49,141 +63,6 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
 `
-const CellWrap = styled.div<{ $span: number }>`
-  grid-column: span ${({ $span }) => $span}; min-width: 0;
-`
-const ReadOnlyBox = styled.div`
-  display: block; width: 100%; box-sizing: border-box; padding: 6px 10px; min-height: 32px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  white-space: pre-wrap; overflow-wrap: anywhere;
-`
-// ── widget choice mirrors ResultTable.editCtrlOf — keep both in sync. ─────────
-function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
-function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
-function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
-
-// Field-lookup shim — keeps the old call site stable while the shared helper grows uses.
-function resolveBinds(field: ScreenField, formValues: Row): Record<string, string> {
-  return resolveBindList(field.lookup_param_binds, formValues)
-}
-
-// One field row — a switch over the column's resolved rule (when present) + format/type to pick
-// the right widget. `disabled` / `required` come pre-computed from the parent (they fold both the
-// static flag and the per-condition rule). Values are kept in the parent's `formValues` map by
-// column name (the read result's case — which is what the row already uses).
-function FieldRow({
-  field, column, formValues, onChange, disabled, required,
-}: {
-  field: ScreenField
-  column: Column | null
-  formValues: Row
-  onChange: (name: string, v: unknown) => void
-  disabled: boolean
-  required: boolean
-}) {
-  const { t } = useTranslation()
-  const value = formValues[field.name]
-  const textValue = value === null || value === undefined ? '' : String(value)
-  const label = field.label ?? column?.label ?? field.name
-
-  // For a LOOKUP field we need a live lookup spec — the *static* params from the rule plus the
-  // dynamic ones from the field's lookup_param_binds (resolved against the current form values).
-  const lookupSpec: LookupSpec | null = useMemo(() => {
-    if (!column?.rule || column.rule.kind !== 'lookup') return null
-    const dyn = resolveBinds(field, formValues)
-    return {
-      connector: column.rule.connector,
-      query: column.rule.query,
-      value: column.rule.value,
-      label: column.rule.label,
-      params: { ...(column.rule.params ?? {}), ...dyn },
-    }
-  }, [column, field, formValues])
-  // Mount a single-spec hook unconditionally (React requires stable hook order). The spec list is
-  // either [lookupSpec] (lookup field) or [] (everything else); the lookup service caches per spec
-  // key so re-renders that don't change the key don't refetch.
-  const lookupMaps = useLookupTables(lookupSpec ? [lookupSpec] : [])
-  const lookupData = lookupSpec ? lookupMaps.get(lookupKey(lookupSpec)) : undefined
-
-  let widget: React.ReactNode
-  if (disabled) {
-    // Read-only echo — keep the value visible (and copyable). Boolean shows its raw code, same as
-    // every other type; no special widget here so the user sees exactly what's in the column.
-    widget = <ReadOnlyBox aria-readonly>{textValue || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
-  } else if (column?.rule?.kind === 'boolean') {
-    const trueV = column.rule.true_value
-    const checked = textValue === trueV
-    widget = (
-      <Checkbox
-        checked={checked}
-        onChange={(v) => onChange(field.name, v ? trueV : null)}
-        label={checked ? trueV : t('common.no')}
-      />
-    )
-  } else if (column?.rule?.kind === 'enum') {
-    const options = column.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
-    widget = (
-      <SearchSelect
-        value={textValue}
-        onChange={(v) => onChange(field.name, v === '' ? null : v)}
-        options={options}
-        anyLabel={required ? undefined : t('common.none')}
-        placeholder={t('common.pick')}
-      />
-    )
-  } else if (column?.rule?.kind === 'lookup' && lookupSpec) {
-    const opts = lookupData ? lookupOptions(lookupData).map((o) => ({ value: o.value, label: o.label, mono: o.value })) : []
-    widget = (
-      <SearchSelect
-        value={textValue}
-        onChange={(v) => onChange(field.name, v === '' ? null : v)}
-        options={opts}
-        anyLabel={required ? undefined : t('common.none')}
-        loading={!lookupData}
-        placeholder={t('common.pick')}
-      />
-    )
-  } else if (isPassword(column)) {
-    // Never round-trip the stored value: it's an ``ENC:`` blob and showing it in the dialog
-    // leaks ciphertext (and, when it's a plain hash, lets a casual observer copy it). Render
-    // a masked input with a placeholder that hints "leave blank to keep". Seeding code skips
-    // password fields, so `textValue` here is always empty when the dialog opens — the user
-    // types a new value if they want to change the password, or leaves it blank to keep the
-    // current one. (The submit path only includes a password field when the user typed
-    // something — see ScreenDialog.submit.)
-    widget = (
-      <Input
-        type="password" autoComplete="new-password" required={required}
-        value={textValue}
-        placeholder={t('dialog.passwordPlaceholder')}
-        onChange={(e) => onChange(field.name, e.target.value === '' ? null : e.target.value)}
-      />
-    )
-  } else {
-    const fmt = (column?.format ?? '').toLowerCase()
-    const typ = (column?.type ?? '').toLowerCase()
-    const type = isDateish(fmt, typ) ? 'date' : isNumericish(fmt, typ) ? 'number' : 'text'
-    const dv = type === 'date' && textValue ? textValue.slice(0, 10) : textValue
-    widget = (
-      <Input
-        type={type} required={required} value={dv}
-        onChange={(e) => {
-          const raw = e.target.value
-          if (raw === '') onChange(field.name, null)
-          else if (type === 'number') onChange(field.name, Number(raw))
-          else onChange(field.name, raw)
-        }}
-      />
-    )
-  }
-
-  return (
-    <CellWrap $span={Math.max(1, field.colspan ?? 1)}>
-      <Field label={`${label}${required ? ' *' : ''}`}>{widget}</Field>
-    </CellWrap>
-  )
-}
 
 export function ScreenDialog({
   open, mode, screen, columns, row, connector, onClose, onSaved, nested = false,
@@ -220,6 +99,16 @@ export function ScreenDialog({
   const [savedRow, setSavedRow] = useState<Row>({})  // the *original* values keyed by field name (for `:<FIELD>_ORIGINAL`)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Nested-form save coordination — NestedFormView components mount inside the dialog body
+  // (one per ``nested_form`` tab) and register their own save function here. Stored in a ref
+  // so re-registers (each time the nested form's closure captures a new ``formValues``) don't
+  // re-render the parent; the registry is only walked when the parent's submit() fires.
+  const nestedSaversRef = useRef<Map<string, NestedSaver>>(new Map())
+  const nestedSaversCtx = useMemo<NestedSaversCtx>(() => ({
+    register: (id, fn) => { nestedSaversRef.current.set(id, fn) },
+    unregister: (id) => { nestedSaversRef.current.delete(id) },
+  }), [])
 
   // Case-insensitive lookup: the DB result rows have lowercase keys (Postgres folds unquoted
   // identifiers); a ScreenField.name from the migration is uppercase (col_target). Match by
@@ -373,6 +262,24 @@ export function ScreenDialog({
         `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
         { params: withUpper(params) },
       )
+      // Nested-form saves — v1's FormsDialog inside FormsDialog flow. Walk the registry of
+      // NestedFormView savers in registration order (Map iteration is insertion order), each
+      // contributing its own ``update_query`` / ``insert_query`` against its own connector.
+      // A throwing saver aborts the chain and surfaces on the parent's banner; the main row
+      // is already written so the user can retry the nested save without re-doing the parent.
+      for (const [tabId, save] of nestedSaversRef.current) {
+        try {
+          await save()
+        } catch (e) {
+          setSaving(false)
+          setError(t('dialog.nestedSaveFailed', {
+            tab: tabId,
+            message: e instanceof ApiError ? e.message : String(e),
+          }))
+          onSaved()  // main row was written — refresh so the user sees the new primary state
+          return
+        }
+      }
       // Run on_save actions against a snapshot of the full form (sent values + savedRow merged so
       // ParamBind `source` can reach untouched columns too, e.g. the PK on the main row).
       const ctx: Row = { ...savedRow, ...sent }
@@ -439,6 +346,7 @@ export function ScreenDialog({
   const OverlayEl = nested ? NestedOverlay : Overlay
   const ModalEl = nested ? NestedScreenDialogModal : ScreenDialogModal
   return (
+    <NestedSaversContext.Provider value={nestedSaversCtx}>
     <OverlayEl onClick={onClose}>
       <ModalEl onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
@@ -458,35 +366,55 @@ export function ScreenDialog({
                   ))}
                 </TabStrip>
               )}
-              {currentTab && currentTab.type === 'nested_form' && (
-                <NestedFormView tab={currentTab} parentFormValues={formValues} parentConnector={connector} />
-              )}
-              {currentTab && currentTab.type === 'nested_table' && (
-                <NestedTableView tab={currentTab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
-              )}
-              {currentTab && isFormTab(currentTab) && (
-                <FieldGrid $cols={gridCols}>
-                  {visibleFields.map((f) => {
-                    const st = fieldStateOf(f)
-                    return (
-                      <FieldRow
-                        key={f.name}
-                        field={f}
-                        column={colByName.get(f.name.toLowerCase()) ?? null}
-                        formValues={formValues}
-                        onChange={onFieldChange}
-                        disabled={st.disabled}
-                        required={st.required}
-                      />
-                    )
-                  })}
-                  {visibleFields.length === 0 && (
-                    <CellWrap $span={gridCols}>
-                      <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
-                    </CellWrap>
-                  )}
-                </FieldGrid>
-              )}
+              {/* Render every tab, hide inactive ones via CSS — nested-form / nested-table tabs
+                  need to stay MOUNTED across tab switches so their formValues / fetch state
+                  persists (otherwise a user editing JD Edwards, switching to Connexion, and
+                  coming back would lose their edits). FormTab content reads from the parent's
+                  shared `formValues` so it can render only the active tab safely. */}
+              {tabs.map((tab, i) => {
+                const active = i === tabIdx
+                if (tab.type === 'nested_form') {
+                  return (
+                    <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
+                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} />
+                    </div>
+                  )
+                }
+                if (tab.type === 'nested_table') {
+                  return (
+                    <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
+                      <NestedTableView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
+                    </div>
+                  )
+                }
+                // FormTab — lazy render: only mount when active. The state (formValues) lives
+                // on the parent, so switching tabs keeps the values intact. Filters its fields
+                // through `fieldStateOf` (visible_when / required_when / disabled_when).
+                if (!active) return null
+                return (
+                  <FieldGrid key={tab.id} $cols={gridCols}>
+                    {visibleFields.map((f) => {
+                      const st = fieldStateOf(f)
+                      return (
+                        <FieldRow
+                          key={f.name}
+                          field={f}
+                          column={colByName.get(f.name.toLowerCase()) ?? null}
+                          formValues={formValues}
+                          onChange={onFieldChange}
+                          disabled={st.disabled}
+                          required={st.required}
+                        />
+                      )
+                    })}
+                    {visibleFields.length === 0 && (
+                      <CellWrap $span={gridCols}>
+                        <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
+                      </CellWrap>
+                    )}
+                  </FieldGrid>
+                )
+              })}
             </>
           )}
           {error && <Banner $tone="error">{error}</Banner>}
@@ -503,5 +431,6 @@ export function ScreenDialog({
         </ModalFooter>
       </ModalEl>
     </OverlayEl>
+    </NestedSaversContext.Provider>
   )
 }
