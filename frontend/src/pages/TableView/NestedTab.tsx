@@ -19,16 +19,23 @@
 // Both wait for their bound params to resolve before fetching — a not-yet-saved "add"
 // parent (APPS_ID still undefined) shows an inert empty state instead of firing a request
 // that would return everything in the table.
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { Plus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, SpinnerRing } from '../../common'
+import { Banner, Button, SpinnerRing } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { NestedFormTab, NestedTableTab, ScreenDetail, ScreenField } from '../../types/screens'
 import { resolveBindList, type Row, valueFor } from './dialogHelpers'
 import { colors, fontSize, fonts, radius } from '../../theme'
+// Circular import: ScreenDialog also imports NestedFormView/NestedTableView. ESM resolves
+// these at module-evaluation time but the binding is only *used* at render time (inside
+// JSX), so by the time React calls the sub-dialog the import has fully resolved. Same
+// pattern ResultTable uses to render ScreenDialog without a circle (ResultTable → ScreenDialog
+// is one-way, this one's two-way but both consume the binding lazily through JSX).
+import { ScreenDialog, type DialogMode } from './ScreenDialog'
 
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
@@ -177,8 +184,14 @@ export function NestedTableView({
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Sub-dialog state — set by row click (edit mode) or by the "Add" button (add mode with the
+  // bind values pre-filled on the FK columns so the dialog opens already tied to this parent).
+  const [subDialog, setSubDialog] = useState<{ mode: DialogMode; row: Row } | null>(null)
+  // A simple counter to force a refetch after the sub-dialog saves.
+  const [refreshTick, setRefreshTick] = useState(0)
 
-  // Fetch the nested screen's detail once — we need its read_query name.
+  // Fetch the nested screen's detail once — we need its read_query name, columns hints, and
+  // dialog body to open on row click.
   useEffect(() => {
     setError(null)
     api.get<ScreenDetail>(`/api/screens/${encodeURIComponent(app)}/${encodeURIComponent(tab.screen)}`)
@@ -195,10 +208,12 @@ export function NestedTableView({
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boundKey serializes bound
-  }, [nestedScreen, connector, boundKey, hasBinds])
+  }, [nestedScreen, connector, boundKey, hasBinds, refreshTick])
 
   // Minimal column defs — one TanStack column per result column, displaying the raw value.
-  // No rules (BOOLEAN / ENUM / LOOKUP), no filters, no batch edit — slice 2 territory.
+  // No rules (BOOLEAN / ENUM / LOOKUP), no filters, no batch edit yet — that lands when /
+  // if the user asks for more. Read display is enough for activity_log / audit_trail and
+  // good enough for editable rules tables since clicking a row opens the full ScreenDialog.
   const columns = useMemo(() => {
     const cols = result?.columns ?? []
     return cols
@@ -214,17 +229,58 @@ export function NestedTableView({
       }))
   }, [result])
 
+  // Open the sub-dialog in "add" mode with the FK columns pre-filled from the bind values
+  // (e.g. parent's APPS_ID = 7 → ACL_APPS_ID = 7 on the activity-log row). The dialog's
+  // valueFor() lookup is case-insensitive, so binds named `ACL_APPS_ID` will still be picked
+  // up if the read result column comes back lowercased.
+  const handleAdd = useCallback(() => {
+    if (!nestedScreen?.dialog) return
+    const seed: Row = { ...bound }   // bind keys are the v1 uppercase column names
+    setSubDialog({ mode: 'add', row: seed })
+  }, [nestedScreen, bound])
+
+  const handleRowClick = useCallback((r: Row) => {
+    if (!nestedScreen?.dialog) return
+    setSubDialog({ mode: 'edit', row: r })
+  }, [nestedScreen])
+
+  // The nested screen's connector — falls back to the explicit `tab.connector` and then to
+  // the parent's. (The nested screen's own `connector` is sourced from the catalog response.)
+  const nestedConnector = nestedScreen?.connector || connector
+
   if (!hasBinds) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (error) return <Banner $tone="error">{error}</Banner>
   if (loading && !result) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   if (!result) return null
+
+  const canAdd = !!(nestedScreen?.dialog && nestedScreen?.insert_query)
+  const canEdit = !!(nestedScreen?.dialog && nestedScreen?.update_query)
+
   return (
     <TableWrap>
       <DataTable
         tableId={`nested-${app}-${tab.screen}`}
         data={(result.rows as Row[]) ?? []}
         columns={columns}
+        toolbar={canAdd ? (
+          <Button $size="sm" $variant="primary" onClick={handleAdd}>
+            <Plus size={13} /> {t('table.addRow')}
+          </Button>
+        ) : undefined}
+        onRowClick={canEdit ? handleRowClick : undefined}
       />
+      {subDialog && nestedScreen && (
+        <ScreenDialog
+          open
+          mode={subDialog.mode}
+          screen={nestedScreen}
+          columns={result.columns}
+          row={subDialog.row}
+          connector={nestedConnector}
+          onClose={() => setSubDialog(null)}
+          onSaved={() => { setSubDialog(null); setRefreshTick((n) => n + 1) }}
+        />
+      )}
     </TableWrap>
   )
 }
