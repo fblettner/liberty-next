@@ -1116,10 +1116,20 @@ def migrate_dictionary(
         dd = str(r.get("dd_id") or "").strip()
         if not dd:
             continue
+        rules = str(r.get("dd_rules") or "").strip() or None
+        fmt = _column_format(r.get("dd_type"))
+        # v1's `dd_rules = "PASSWORD"` marks a credential column. v2's frontend keys the masked
+        # widget (PasswordInput, "leave blank to keep" placeholder, blank-on-submit skip) off the
+        # entry's `format = "password"`, not the `rules` field — see ScreenDialog's `isPassword`
+        # and SchemaForm's `sub.format === 'password'` branch. Setting both keeps the rule's intent
+        # (a future PASSWORD rule could trigger validation / strength meter / etc.) while letting
+        # the existing masking path fire automatically — no per-field hand-edit needed.
+        if rules == "PASSWORD" and not fmt:
+            fmt = "password"
         entry = _drop_none({
             "label": str(r.get("dd_label") or "").strip() or None,
-            "format": _column_format(r.get("dd_type")),
-            "rules": str(r.get("dd_rules") or "").strip() or None,
+            "format": fmt,
+            "rules": rules,
             "rules_values": str(r.get("dd_rules_values") or "").strip() or None,
             "default": str(r.get("dd_default") or "").strip() or None,
         })

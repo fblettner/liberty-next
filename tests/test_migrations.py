@@ -741,6 +741,26 @@ def test_migrate_dictionary() -> None:
     assert d2.resolve("USR_NAME", "fr") == (None, None)  # nothing at the top level
 
 
+def test_migrate_dictionary_password_rule_sets_password_format() -> None:
+    """v1's ``dd_rules = "PASSWORD"`` marks a credential column. v2's frontend keys the masked
+    widget (PasswordInput, "leave blank to keep" placeholder) off the entry's
+    ``format = "password"`` — not ``rules`` — so the migrator sets both. Without this the
+    dictionary entry would carry only the rule and the dialog would render a plain text input,
+    leaking the ENC: blob into the form (the bug security_applications hit before this fix)."""
+    rows = [
+        {"dd_id": "APPS_PASSWORD", "dd_label": "Password", "dd_type": None, "dd_rules": "PASSWORD",
+         "dd_rules_values": None, "dd_default": None},
+        # Existing `format` from a non-empty dd_type wins — only fill in when format is unset.
+        {"dd_id": "PWD_TEXTAREA", "dd_label": "Notes", "dd_type": "textarea", "dd_rules": "PASSWORD",
+         "dd_rules_values": None, "dd_default": None},
+    ]
+    out = migrate_dictionary(rows, ())
+    e = out["entries"]
+    assert e["APPS_PASSWORD"] == {"label": "Password", "format": "password", "rules": "PASSWORD"}
+    # `dd_type` set → keep it (the operator picked a specific format); rule still carried.
+    assert e["PWD_TEXTAREA"] == {"label": "Notes", "format": "textarea", "rules": "PASSWORD"}
+
+
 def test_migrate_dictionary_lookup_params() -> None:
     """v1's ly_dictionary_filters (flt_type='VALUE') → DictionaryEntry.lookup_params per entry.
     Several entries can reuse the same lookup (e.g. UDC) with different SY/RT pairs — that's the
