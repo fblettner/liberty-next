@@ -160,6 +160,14 @@ export interface ScreenListItem {
   has_dialog: boolean
   has_row_menu: boolean
   has_actions: boolean
+  /** Promoted-from-ctx-menu row-click target. When this screen has no own ``dialog`` and the
+   *  user clicks a row, the frontend opens *the named screen's* dialog as a modal — the
+   *  ``row_click_binds`` map this row's columns to the target read_query's params, the
+   *  resolved row populates the target's dialog. v2's port of v1's "Display Properties"
+   *  pattern on ``ly_ctxmenus`` (NOMASX1's security_users → security_users_prop). */
+  row_click_screen?: string | null
+  row_click_connector?: string | null
+  row_click_binds?: ParamBind[]
 }
 
 /** Full screen detail — what `GET /api/screens/{app}/{id}` returns: list-view fields + the

@@ -1450,10 +1450,18 @@ def migrate_context_menus(
     sql_rows: Iterable[Mapping[str, Any]] = (),
     *,
     app_name: str,
-) -> dict[int, list[dict[str, Any]]]:
-    """Build ``{ly_tables.tbl_id: [NavigateAction dict, …]}`` from v1's row-context-menu tables
-    (``ly_ctxmenus`` / ``ly_ctx_val`` / ``ly_ctx_filters``) — fed into :func:`migrate_screens` as
-    each screen's ``row_menu``.
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, dict[str, Any]]]:
+    """Build ``({tbl_id: [NavigateAction dict, …]}, {tbl_id: promotable-dialog})`` from v1's
+    row-context-menu tables (``ly_ctxmenus`` / ``ly_ctx_val`` / ``ly_ctx_filters``).
+
+    The first dict feeds :func:`migrate_screens` as each screen's ``row_menu``. The second is a
+    *candidate* for ``Screen.row_click_screen`` promotion: when a screen has no own ``tbl_frm_id``
+    and its ctx menu carries a **single** ``FormsDialog`` item, that item is the conventional
+    v1 "Display Properties" / "Edit details" action — migrate_screens converts it into a row-click
+    target (the row's PK columns bind into the named target screen's read_query, the dialog opens
+    as a modal) and drops it from the menu. The shape is ``{action_id, target_qid, binds}`` —
+    target_qid is the FormsDialog's resolved v2 query_id and ``action_id`` is the slug
+    migrate_context_menus assigned the item so migrate_screens can drop it by id.
 
     v1 context menus are **shared** — one ``ctx_id`` can be referenced by several
     ``ly_tables.tbl_ctx_id`` rows (e.g. libnsx1 reuses one menu across "Security - Roles" and
@@ -1581,6 +1589,11 @@ def migrate_context_menus(
 
     # ── per ctx_id, build the list of NavigateAction dicts ──────────────────
     actions_by_ctx: dict[int, list[dict[str, Any]]] = {}
+    # Track FormsDialog candidates per ctx_id so we can decide "exactly one ⇒ promotable" after
+    # the loop. Each entry mirrors what migrate_screens needs: the action's slug id (to drop the
+    # menu item), the target's resolved v2 query_id (to find the matching v2 screen), and the
+    # resolved binds (the parent-row → target-:param mapping).
+    dialog_candidates_by_ctx: dict[int, list[dict[str, Any]]] = {}
     for v in val_rows:
         ctx_id_raw, val_id_raw = v.get("ctx_id"), v.get("val_id")
         if ctx_id_raw is None or val_id_raw is None:
@@ -1633,6 +1646,14 @@ def migrate_context_menus(
         if binds:
             action["param_binds"] = binds
         actions_by_ctx.setdefault(ctx_id, []).append(action)
+        # Record FormsDialog items for the post-loop "single-FormsDialog → promotable" check.
+        if comp == "FormsDialog":
+            dialog_candidates_by_ctx.setdefault(ctx_id, []).append({
+                "action_id": action_id,
+                "target_qid": target_qid,
+                "binds": list(binds or []),
+                "target_pool": target_pool,
+            })
 
     # ── per tbl_id (with tbl_ctx_id set), inline the resolved menu ──────────
     # The lookup table contains *every* ctx_id even when no items resolved — emit an empty list
@@ -1647,6 +1668,7 @@ def migrate_context_menus(
             except (TypeError, ValueError):
                 pass
     out: dict[int, list[dict[str, Any]]] = {}
+    promotable_by_tbl: dict[int, dict[str, Any]] = {}
     for r in tables_rows:
         try:
             tbl_id = int(r["tbl_id"])
@@ -1668,7 +1690,13 @@ def migrate_context_menus(
         items = actions_by_ctx.get(cid, [])
         if items:
             out[tbl_id] = items
-    return out
+        # A FormsDialog candidate is promotable when it's the *only* FormsDialog on the ctx menu —
+        # if there are several, picking one is ambiguous and the operator should hand-wire via the
+        # builder. (We still keep the menu items as-is in that case.)
+        dialogs = dialog_candidates_by_ctx.get(cid, [])
+        if len(dialogs) == 1:
+            promotable_by_tbl[tbl_id] = dialogs[0]
+    return out, promotable_by_tbl
 
 
 def migrate_screens(
@@ -1682,6 +1710,7 @@ def migrate_screens(
     sql_rows: Iterable[Mapping[str, Any]] = (),
     cdn_param_rows: Iterable[Mapping[str, Any]] = (),
     row_menus: Mapping[int, list[dict[str, Any]]] | None = None,
+    promotable_dialogs: Mapping[int, Mapping[str, Any]] | None = None,
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -2145,6 +2174,58 @@ def migrate_screens(
                 screen["row_menu"] = items
 
         screens[sid] = screen
+
+    # ── post-pass: promote a "Display Properties"-style ctx menu item into a row-click target ──
+    # When a screen has no own dialog and its v1 ctx menu carries *exactly one* FormsDialog item
+    # (the conventional v1 pattern — e.g. NOMASX1 security_users → "Display Properties"), promote
+    # that item to ``Screen.row_click_screen`` + ``row_click_binds`` so the row click opens the
+    # target screen's dialog as a modal, and drop the now-redundant menu entry. The target must be
+    # an *existing* v2 screen with a dialog (and an update_query) — otherwise leave the menu alone.
+    if promotable_dialogs:
+        # Map v2 read_query name → screen id, for the "find a screen by its read query" lookup.
+        # Built once, used to resolve the target qid below.
+        sid_by_read_query: dict[str, str] = {}
+        for sid, scr in screens.items():
+            rq = scr.get("read_query")
+            if rq:
+                sid_by_read_query[rq] = sid
+        for tbl_id_promote, cand in promotable_dialogs.items():
+            sid = sid_by_tbl_id.get(int(tbl_id_promote))
+            if not sid or sid not in screens:
+                continue
+            scr = screens[sid]
+            if scr.get("dialog"):
+                continue  # parent has its own dialog — promotion is a fallback only
+            try:
+                target_qid = int(cand["target_qid"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            target_get = (crud_by_qid.get(target_qid) or {}).get("GET")
+            target_sid = sid_by_read_query.get(target_get) if target_get else None
+            if not target_sid:
+                # The target query isn't an own v2 screen (maybe the migrator dropped it for lack
+                # of CRUD companions). Without a target screen there's nothing to render — leave
+                # the ctx menu alone, the operator can wire something via the builder.
+                continue
+            target_screen = screens[target_sid]
+            if not target_screen.get("dialog") or not target_screen.get("update_query"):
+                continue
+            scr["row_click_screen"] = target_sid
+            # `connector` only when it differs from this screen's effective connector
+            # (matches the menus / row-menu convention).
+            target_pool = cand.get("target_pool")
+            own_eff_conn = scr.get("connector") or app_name
+            if target_pool and target_pool != own_eff_conn:
+                scr["row_click_connector"] = target_pool
+            binds = cand.get("binds") or []
+            if binds:
+                scr["row_click_binds"] = list(binds)
+            # Drop the redundant menu item — same id the migrate_context_menus loop assigned.
+            action_id = cand.get("action_id")
+            if action_id and isinstance(scr.get("row_menu"), list):
+                scr["row_menu"] = [a for a in scr["row_menu"] if a.get("id") != action_id]
+                if not scr["row_menu"]:
+                    del scr["row_menu"]
 
     return {"screens": {app_name: screens}}
 

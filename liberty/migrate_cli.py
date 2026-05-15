@@ -109,13 +109,14 @@ async def _build(args: argparse.Namespace) -> dict:
             # read_screens docstring for the layout).
             tables_rows, _, dlg_frm_rows = screen_rows[0], screen_rows[1], screen_rows[2]
             sql_rows = screen_rows[7]
-            row_menus = migrate_context_menus(
+            row_menus, promotable_dialogs = migrate_context_menus(
                 ctx_rows, ctx_val_rows, ctx_filter_rows,
                 tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
                 app_name=args.connector,
             )
             return migrate_screens(
                 *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
+                promotable_dialogs=promotable_dialogs,
                 app_name=args.connector,
             )
         parts: list[dict] = []
@@ -236,11 +237,15 @@ def _summary(data: dict, *, command: str) -> str:
             for t in ((s.get("dialog") or {}).get("tabs") or [])
             if t.get("type") == "nested_table"
         )
+        # Promoted row-click targets — screens whose v1 ctx menu had a "Display Properties"-style
+        # FormsDialog item; the migrator promoted it to ``row_click_screen`` + dropped the menu entry.
+        n_row_click = sum(1 for s in screens.values() if s.get("row_click_screen"))
         return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "
                 f"{with_audit} with audit, {cross} cross-connector, {n_fields} dialog field(s), "
                 f"{n_binds} param-bind(s), {n_conds} conditional field(s), "
                 f"{n_nested_form} nested form tab(s), {n_nested_table} nested table tab(s), "
-                f"{n_rowmenu_screens} with row-menu ({n_rowmenu_items} items) — "
+                f"{n_rowmenu_screens} with row-menu ({n_rowmenu_items} items), "
+                f"{n_row_click} promoted row-click(s) — "
                 f"put this at config/screens.toml")
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}

@@ -77,6 +77,12 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "has_dialog": screen.dialog is not None,
         "has_row_menu": bool(screen.row_menu),
         "has_actions": bool(screen.actions),
+        # Row-click → sibling-screen dialog (the v1 "Display Properties" promotion). Carried on
+        # the list view too so the frontend's TableView can wire row clicks without fetching the
+        # full screen body (the property is only set on screens that need it; absent for most).
+        "row_click_screen": screen.row_click_screen,
+        "row_click_connector": screen.row_click_connector,
+        "row_click_binds": [b.model_dump(mode="json", exclude_none=True) for b in screen.row_click_binds],
     }
 
 

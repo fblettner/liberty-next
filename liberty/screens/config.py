@@ -415,6 +415,34 @@ class Screen(BaseModel):
         default_factory=list,
         description="Right-click menu entries on a row (slice 6) — uses the same action shape.",
     )
+    # Row-click → sibling-screen dialog. v2's port of v1's "FormsDialog inside a ly_ctxmenus"
+    # pattern: a screen that itself has no ``tbl_frm_id`` but whose context menu carried a single
+    # FormsDialog entry (the conventional "Display Properties" / "Edit details" action). The
+    # migrator promotes that entry to a row-click target — the row's PK columns bind into the
+    # named screen's read_query, the resulting row opens in that screen's dialog as a modal.
+    # The redundant ctx-menu entry is dropped in the same migration step. Set together: id, the
+    # optional connector override (blank → parent screen's), and the bind list (parent-row column
+    # → target read-query :param).
+    row_click_screen: str | None = Field(
+        default=None,
+        description=(
+            "ID of a sibling v2 screen to open as a row-click dialog when *this* screen has "
+            "no own ``dialog``. The target screen's read_query is fetched narrowed by "
+            "``row_click_binds``, then opened in its dialog as a modal."
+        ),
+    )
+    row_click_connector: str | None = Field(
+        default=None,
+        description="Connector hosting the target screen; blank → this screen's effective connector.",
+    )
+    row_click_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description=(
+            "Bind the clicked row's columns into the target screen's read_query. ``source`` reads "
+            "a column on this screen's row; ``value`` is a literal. Same shape as field / action / "
+            "row-menu binds."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check(self) -> Screen:

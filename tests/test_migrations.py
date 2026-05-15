@@ -1398,7 +1398,7 @@ def test_migrate_context_menus_basic() -> None:
         {"query_id": 40, "query_label": "F0005", "query_crud": "GET", "query_pool": "jdedwards",
          "query_dbtype": "oracle", "query_sqlquery": "SELECT * FROM f0005", "query_orderby": None},
     ]
-    out = migrate_context_menus(
+    out, promotable = migrate_context_menus(
         ctx_rows, val_rows, filter_rows,
         tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
         app_name="nomasx1",
@@ -1406,6 +1406,11 @@ def test_migrate_context_menus_basic() -> None:
     # Two screens have a tbl_ctx_id → both get an inline row_menu copy. The orphan val_id 3 on
     # ctx 1 is skipped (val_component_id 999 doesn't resolve to any ly_tables row).
     assert set(out) == {5, 6}
+    # Promotable candidates — sec_users' menu has exactly one FormsDialog item (Display
+    # Properties), so it's a candidate for row_click promotion. Drill (tbl_id 6) has only a
+    # FormsTable item, so nothing to promote there.
+    assert set(promotable) == {5}
+    assert promotable[5]["action_id"] == "display_properties"
     sec_users = out[5]
     assert [a["id"] for a in sec_users] == ["display_roles", "display_properties"]
     # First item: FormsTable → screen 100 → query 20 → `assignments_get`; binds round-trip.
@@ -1457,6 +1462,118 @@ def test_migrate_screens_with_row_menus() -> None:
     assert "row_menu" not in screens["no_menu"]
     # Round-trips through the screens schema (NavigateAction validates).
     parse_screens(out)
+
+
+def test_migrate_screens_promotes_single_forms_dialog_ctx_menu_item() -> None:
+    """v1's NOMASX1 ``SECURITY_USERS`` table has no ``tbl_frm_id`` of its own; instead its ctx
+    menu carried a single ``FormsDialog`` item ("Display Properties") that pointed at a sibling
+    table's form. The migrator promotes that item to ``Screen.row_click_screen`` so the row click
+    opens the target screen's dialog as a modal — and drops the now-redundant menu entry. Other
+    items (FormsTable drills) survive untouched."""
+    table_rows = [
+        # Parent screen: read query 10 → ``users_get``. No tbl_frm_id → no own dialog.
+        {"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": None, "tbl_auto_load": "Y",
+         "tbl_frm_id": None},
+        # Target screen — owns the properties dialog (frm 2 → query 20 → users_props_get).
+        # Has tbl_frm_id=2 so the migrator builds the dialog from frm 2.
+        {"tbl_id": 38, "tbl_db_name": "users_props", "tbl_query_id": 20, "tbl_label": "Properties",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": None, "tbl_auto_load": "Y",
+         "tbl_frm_id": 2},
+    ]
+    frm_rows = [{"frm_id": 2, "dlg_id": 1, "frm_query_id": 20, "frm_label": "Properties"}]
+    tab_rows = [
+        {"frm_id": 2, "tab_id": 1, "tab_seq": 1, "tab_label": "General", "tab_cols": 2,
+         "tab_disable_add": "N", "tab_disable_edit": "N"},
+    ]
+    col_rows = [
+        {"frm_id": 2, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_target": "USRP_ID",
+         "col_visible": "Y", "col_disabled": "Y", "col_required": "Y"},
+        {"frm_id": 2, "col_id": 2, "tab_id": 1, "col_seq": 2, "col_target": "USRP_NAME",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "Y"},
+    ]
+    # sql_rows: query 10 is the parent read; query 20 has GET+PUT (so the target screen has a
+    # writable dialog — promotion requires both ``dialog`` and ``update_query`` on the target).
+    sql_rows = [
+        {"query_id": 10, "query_crud": "GET", "query_label": "users", "query_pool": "nomasx1"},
+        {"query_id": 20, "query_crud": "GET", "query_label": "users_props", "query_pool": "nomasx1"},
+        {"query_id": 20, "query_crud": "PUT", "query_label": "users_props", "query_pool": "nomasx1"},
+    ]
+    row_menus = {
+        1: [
+            # The promotable: FormsDialog (its v1 val_label was "Display Properties"). After
+            # promotion, this entry is dropped from the row menu.
+            {"id": "display_properties", "type": "navigate", "to": "users_props_get",
+             "label": "Display Properties",
+             "param_binds": [
+                 {"param": "USRP_ID", "source": "USR_ID"},
+                 {"param": "USRP_APPS_ID", "source": "USR_APPS_ID"},
+             ]},
+            # A normal FormsTable drill — survives.
+            {"id": "display_roles", "type": "navigate", "to": "roles_get", "label": "Display Roles"},
+        ],
+    }
+    # Promotable map — what migrate_context_menus would have returned for tbl_id=1.
+    promotable = {
+        1: {
+            "action_id": "display_properties",
+            "target_qid": 20,
+            "binds": [
+                {"param": "USRP_ID", "source": "USR_ID"},
+                {"param": "USRP_APPS_ID", "source": "USR_APPS_ID"},
+            ],
+            "target_pool": "nomasx1",
+        },
+    }
+    out = migrate_screens(
+        table_rows, frm_rows=frm_rows, tab_rows=tab_rows, col_rows=col_rows,
+        sql_rows=sql_rows, row_menus=row_menus, promotable_dialogs=promotable,
+        app_name="nomasx1",
+    )
+    screens = out["screens"]["nomasx1"]
+    users = screens["users"]
+    # Promotion landed: row_click_screen points at the sibling, binds carried, connector implicit
+    # (same as parent's effective). The redundant "Display Properties" menu item is gone; the
+    # FormsTable drill survives.
+    assert users["row_click_screen"] == "users_props"
+    assert "row_click_connector" not in users  # same connector as parent
+    assert users["row_click_binds"] == [
+        {"param": "USRP_ID", "source": "USR_ID"},
+        {"param": "USRP_APPS_ID", "source": "USR_APPS_ID"},
+    ]
+    assert [a["id"] for a in users["row_menu"]] == ["display_roles"]
+    # Sibling screen unchanged — still has its own dialog + update_query.
+    assert screens["users_props"]["update_query"] == "users_props_put"
+    assert screens["users_props"]["dialog"]["tabs"][0]["fields"][0]["name"] == "USRP_ID"
+    parse_screens(out)
+
+
+def test_migrate_screens_skips_promotion_when_parent_has_own_dialog() -> None:
+    """Promotion is a *fallback*: it only fires when the parent has no own dialog
+    (``tbl_frm_id`` was unset). If the parent already has a dialog, leave the row menu alone —
+    the ctx menu entry is genuine drill-away."""
+    table_rows = [
+        {"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": None, "tbl_auto_load": "Y",
+         "tbl_frm_id": 7},  # has own dialog
+    ]
+    frm_rows = [{"frm_id": 7, "dlg_id": 1, "frm_query_id": 10, "frm_label": "User"}]
+    tab_rows = [{"frm_id": 7, "tab_id": 1, "tab_seq": 1, "tab_label": "G", "tab_cols": 1,
+                 "tab_disable_add": "N", "tab_disable_edit": "N"}]
+    col_rows = [{"frm_id": 7, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_target": "USR_ID",
+                 "col_visible": "Y", "col_disabled": "N", "col_required": "Y"}]
+    promotable = {1: {"action_id": "display_properties", "target_qid": 20, "binds": [], "target_pool": "nomasx1"}}
+    row_menus = {1: [{"id": "display_properties", "type": "navigate", "to": "users_props_get",
+                       "label": "Display Properties"}]}
+    out = migrate_screens(
+        table_rows, frm_rows=frm_rows, tab_rows=tab_rows, col_rows=col_rows,
+        sql_rows=_SCR_SQL, row_menus=row_menus, promotable_dialogs=promotable,
+        app_name="nomasx1",
+    )
+    users = out["screens"]["nomasx1"]["users"]
+    # Parent has its own dialog → no promotion; row_menu kept as-is.
+    assert "row_click_screen" not in users
+    assert [a["id"] for a in users["row_menu"]] == ["display_properties"]
 
 
 def test_migrate_screens_drops_self_referential_row_menu_items() -> None:

@@ -29,6 +29,7 @@ import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/looku
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
+import { resolveBindList } from './dialogHelpers'
 
 type DataRow = Record<string, unknown>
 type Align = CSSProperties['textAlign']
@@ -249,6 +250,58 @@ export function ResultTable({
   const openDialogForAdd = useCallback(() => {
     setDlgRow({}); setDlgMode('add'); setDlgOpen(true)
   }, [])
+
+  // Row-click → sibling-screen dialog (v1's "Display Properties" pattern, promoted at migration
+  // time on screens without their own dialog). When ``screen.row_click_screen`` is set and the
+  // user clicks a row, we:
+  //   1. fetch the target screen's detail (so we know its dialog / read_query / CRUD names)
+  //   2. fetch the target row by binding the clicked row's columns into the target read_query
+  //   3. open the target's ScreenDialog (in edit mode if a row came back, add mode otherwise)
+  // The target screen's own connector is used for the queries (falls back to the parent's, then
+  // app name). The proxy state lives here, independent of the main ``dlgOpen`` flow above.
+  const [proxyScreen, setProxyScreen] = useState<ScreenDetail | null>(null)
+  const [proxyColumns, setProxyColumns] = useState<Column[]>([])
+  const [proxyRow, setProxyRow] = useState<Record<string, unknown>>({})
+  const [proxyMode, setProxyMode] = useState<DialogMode>('edit')
+  const [proxyOpen, setProxyOpen] = useState(false)
+  const [proxyLoading, setProxyLoading] = useState(false)
+  const [proxyError, setProxyError] = useState<string | null>(null)
+
+  const hasRowClickProxy = !hasDialog && !!screen?.row_click_screen
+  const openProxyForRow = useCallback(async (row: Record<string, unknown>) => {
+    if (!screen?.row_click_screen) return
+    setProxyOpen(true); setProxyLoading(true); setProxyError(null)
+    try {
+      // Effective connector + app of the target screen. ``row_click_connector`` is only set
+      // when it differs from the parent — same convention the migrator uses.
+      const targetConn = screen.row_click_connector || screen.connector || connector
+      const detail = await api.get<ScreenDetail>(
+        `/api/screens/${encodeURIComponent(screen.app)}/${encodeURIComponent(screen.row_click_screen)}`,
+      )
+      // Resolve the row_click binds against the clicked row. The dialog needs both the row
+      // (matching its own columns) AND the binds to set up :ORIGINAL keys on save.
+      const bound = resolveBindList(screen.row_click_binds, row)
+      const qs = Object.entries(bound)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&')
+      const url = `/api/sql/${encodeURIComponent(targetConn)}/${encodeURIComponent(detail.read_query)}${qs ? `?${qs}` : ''}`
+      const res = await api.get<QueryResult>(url)
+      setProxyScreen(detail)
+      setProxyColumns(res.columns)
+      // 1 row → edit; 0 rows → add (seed the FK columns from the binds so insert ties to parent)
+      if (res.rows.length > 0) {
+        setProxyRow(res.rows[0] as Record<string, unknown>)
+        setProxyMode('edit')
+      } else {
+        setProxyRow({ ...bound })
+        setProxyMode('add')
+      }
+    } catch (e) {
+      setProxyError(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setProxyLoading(false)
+    }
+  }, [screen, connector])
   // Row context menu (slice 6) — fires `Screen.row_menu` actions on right-click. The menu is a
   // floating overlay anchored at the click coords. We store the row + position; the menu component
   // closes on click-outside / Escape. Each item's ParamBinds resolve against the row's values
@@ -733,7 +786,15 @@ export function ResultTable({
         rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : dirtyRows.has(row) ? 'dt-row-dirty' : undefined)}
         // Row click opens the screen dialog (when a dialog exists *and* we're not in batch-edit mode)
         // — same v1 affordance: click a row to edit it via the form.
-        onRowClick={hasDialog && !editMode ? (row) => openDialogForRow(row) : undefined}
+        onRowClick={
+          !editMode
+            ? hasDialog
+              ? (row) => openDialogForRow(row)
+              : hasRowClickProxy
+                ? (row) => { void openProxyForRow(row) }
+                : undefined
+            : undefined
+        }
         // Right-click → row context menu when the screen carries any `row_menu` actions and
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
@@ -796,6 +857,27 @@ export function ResultTable({
           onClose={() => setDlgOpen(false)}
           onSaved={() => { setDlgOpen(false); onSaved?.() }}
         />
+      )}
+      {/* Proxy row-click → sibling-screen dialog (v1's "Display Properties" promotion). Renders
+          a ScreenDialog backed by the *target* screen's catalog + the bind-fetched row. While
+          the GETs are in flight we keep the dialog mounted (it'll be empty briefly); on error,
+          a small overlay banner explains the failure. ``nested`` styles the modal smaller so
+          it visually sits "on top" of the parent screen's TableView. */}
+      {proxyOpen && !proxyLoading && !proxyError && proxyScreen && (
+        <ScreenDialog
+          open
+          nested
+          mode={proxyMode}
+          screen={proxyScreen}
+          columns={proxyColumns}
+          row={proxyRow}
+          connector={proxyScreen.connector || connector}
+          onClose={() => { setProxyOpen(false); setProxyScreen(null) }}
+          onSaved={() => { setProxyOpen(false); setProxyScreen(null); onSaved?.() }}
+        />
+      )}
+      {proxyOpen && proxyError && (
+        <Banner $tone="error">{proxyError}</Banner>
       )}
       {/* Row context menu (slice 6) — a floating panel anchored at the right-click coords. Each
           item runs its action against the picked row; `mousedown` inside the menu is stopped from
