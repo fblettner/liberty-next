@@ -5,11 +5,12 @@
 // Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
+import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Pools = Record<string, Record<string, unknown>>
@@ -70,6 +71,22 @@ export default function PoolsBuilder() {
     setPools((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
   }
+  // Rename the selected pool's dict key. Order-preserving (the renamed item stays in place in the
+  // left nav). Validation: non-empty, not colliding with another existing pool. Cross-file refs
+  // (`[connectors.<X>] pool = "<old>"` in connectors.toml) are **not** auto-updated — that's a
+  // separate file, owned by a different PUT endpoint; doing a multi-document write here would
+  // need partial-failure handling. A hint at the bottom of the builder reminds the operator.
+  const renamePool = (oldName: string) => {
+    if (!pools) return
+    const next = window.prompt(t('settings.pools.renamePrompt', { name: oldName }), oldName)?.trim()
+    if (!next) return
+    const err = validateRename(oldName, next, Object.keys(pools))
+    if (err === 'unchanged') return
+    if (err === 'empty') { window.alert(t('settings.rename.empty')); return }
+    if (err === 'exists') { window.alert(t('settings.rename.exists', { name: next })); return }
+    setPools((p) => renameKey(p ?? {}, oldName, next))
+    setSel(next); setStatus(null)
+  }
 
   async function save() {
     if (!pools) return
@@ -108,9 +125,14 @@ export default function PoolsBuilder() {
             <Stack gap={12}>
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>[pools.{sel}]</strong>
-                <Button $variant="danger" $size="sm" onClick={() => removePool(sel)} disabled={busy}>
-                  <Trash2 size={13} /> {t('settings.pools.delete')}
-                </Button>
+                <Row gap={6}>
+                  <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
+                    <Edit3 size={13} /> {t('settings.rename.button')}
+                  </Button>
+                  <Button $variant="danger" $size="sm" onClick={() => removePool(sel)} disabled={busy}>
+                    <Trash2 size={13} /> {t('settings.pools.delete')}
+                  </Button>
+                </Row>
               </Row>
               <SchemaForm schema={schema} value={pools[sel]} onChange={(v) => update(sel, v)} />
             </Stack>

@@ -8,11 +8,12 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
+import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { groupQueriesByTable } from './connectorTables'
 
@@ -321,6 +322,51 @@ export default function DictionaryBuilder() {
     setDict(setSection(dict, scope, kind, next))
     setSel((s) => (s === key ? null : s)); setStatus(null)
   }
+  // Rename a record's dict key. Order-preserving. **Intra-scope cascade**: renaming an enum or
+  // lookup also rewrites any same-scope ``DictionaryEntry.rules_values`` references that pointed
+  // at it (matching by the entry's `rules` kind — only an ENUM rule's ``rules_values`` cascades
+  // when an enum is renamed, etc.). Cross-scope and cross-file refs (``ScreenField.dd`` in
+  // screens.toml, ``ColumnHint.dd`` in connectors.toml) are **not** auto-updated — the operator
+  // sees a status banner reminding them. Framework-enum overrides have no cascade.
+  const renameRecord = (oldKey: string) => {
+    if (!dict) return
+    const next = window.prompt(
+      t(`settings.dictionary.${kind}.renamePrompt`, { name: oldKey }),
+      oldKey,
+    )?.trim()
+    if (!next) return
+    const err = validateRename(oldKey, next, Object.keys(section))
+    if (err === 'unchanged') return
+    if (err === 'empty') { window.alert(t('settings.rename.empty')); return }
+    if (err === 'exists') { window.alert(t('settings.rename.exists', { name: next })); return }
+    let updated = setSection(dict, scope, kind, renameKey(section, oldKey, next))
+    let cascaded = 0
+    if (kind === 'enums' || kind === 'lookups') {
+      const ruleKind = kind === 'enums' ? 'ENUM' : 'LOOKUP'
+      const entries = getSection(updated, scope, 'entries')
+      const nextEntries: Record<string, Record<string, unknown>> = {}
+      for (const [eid, rec] of Object.entries(entries)) {
+        const r = typeof (rec as Record<string, unknown>)?.rules === 'string'
+          ? ((rec as Record<string, unknown>).rules as string).toUpperCase()
+          : ''
+        const rv = (rec as Record<string, unknown>)?.rules_values
+        if (r === ruleKind && rv === oldKey) {
+          nextEntries[eid] = { ...(rec as Record<string, unknown>), rules_values: next }
+          cascaded++
+        } else {
+          nextEntries[eid] = rec as Record<string, unknown>
+        }
+      }
+      if (cascaded > 0) updated = setSection(updated, scope, 'entries', nextEntries)
+    }
+    setDict(updated)
+    setSel(next)
+    setStatus(
+      cascaded > 0
+        ? t('settings.dictionary.renamedCascaded', { from: oldKey, to: next, count: cascaded })
+        : t('settings.dictionary.renamed', { from: oldKey, to: next }),
+    )
+  }
   const addScope = () => {
     const name = window.prompt(t('settings.dictionary.scope.addPrompt'))?.trim()
     if (!name) return
@@ -423,9 +469,14 @@ export default function DictionaryBuilder() {
                 <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
                   {scope ? `[connectors.${scope}.${kind}.${sel}]` : `[${kind}.${sel}]`}
                 </strong>
-                <Button $variant="danger" $size="sm" onClick={() => removeRecord(sel)} disabled={busy}>
-                  <Trash2 size={13} /> {t(`settings.dictionary.${kind}.delete`)}
-                </Button>
+                <Row gap={6}>
+                  <Button $variant="ghost" $size="sm" onClick={() => renameRecord(sel)} disabled={busy}>
+                    <Edit3 size={13} /> {t('settings.rename.button')}
+                  </Button>
+                  <Button $variant="danger" $size="sm" onClick={() => removeRecord(sel)} disabled={busy}>
+                    <Trash2 size={13} /> {t(`settings.dictionary.${kind}.delete`)}
+                  </Button>
+                </Row>
               </Row>
               <SchemaNavigator
                 root={{

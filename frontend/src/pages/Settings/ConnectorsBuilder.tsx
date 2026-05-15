@@ -9,11 +9,12 @@
 // No rename yet — delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
+import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
@@ -172,6 +173,24 @@ export default function ConnectorsBuilder() {
     setConns((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
   }
+  // Rename the selected connector's dict key. Order-preserving (renamed item stays in place).
+  // Cross-file refs (Screen.connector / NestedFormTab.connector / NestedTableTab.connector /
+  // Action.connector in screens.toml, MenuItem.connector in menus.toml, LookupDef.connector in
+  // dictionary.toml) are **not** auto-updated — those live in separate files behind different
+  // PUT endpoints. A persistent banner reminds the operator after the rename. (A future slice
+  // can fetch + scan + cross-file batch update, with proper failure handling.)
+  const renameConnector = (oldName: string) => {
+    if (!conns) return
+    const next = window.prompt(t('settings.connectors.renamePrompt', { name: oldName }), oldName)?.trim()
+    if (!next) return
+    const err = validateRename(oldName, next, Object.keys(conns))
+    if (err === 'unchanged') return
+    if (err === 'empty') { window.alert(t('settings.rename.empty')); return }
+    if (err === 'exists') { window.alert(t('settings.rename.exists', { name: next })); return }
+    setConns((p) => renameKey(p ?? {}, oldName, next))
+    setSel(next)
+    setStatus(t('settings.connectors.renamed', { from: oldName, to: next }))
+  }
   const addTable = (connectorName: string) => {
     const base = window.prompt(t('settings.tables.namePrompt'))?.trim()
     if (!base) return
@@ -281,6 +300,9 @@ export default function ConnectorsBuilder() {
                       </ModeBtn>
                     </ModeBar>
                   )}
+                  <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
+                    <Edit3 size={13} /> {t('settings.rename.button')}
+                  </Button>
                   <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
                     <Trash2 size={13} /> {t('settings.connectors.delete')}
                   </Button>

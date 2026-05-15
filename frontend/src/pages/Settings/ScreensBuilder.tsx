@@ -164,12 +164,42 @@ export default function ScreensBuilder() {
   // ── mutators ────────────────────────────────────────────────────────────────────
   const updateScreen = (app: string, id: string, v: Record<string, unknown>) =>
     setDoc((p) => {
-      // SchemaNavigator may have renamed `id` — when it does, the dict key follows.
+      // SchemaNavigator may have renamed `id` — when it does, the dict key follows + every
+      // same-app sibling screen's references to the old id are rewritten (``row_click_screen``
+      // at the top level, ``NestedTableTab.screen`` inside each screen's ``dialog.tabs``).
+      // Cross-app + cross-file refs are NOT touched — those live in different files behind
+      // different PUTs and a multi-document write is out of scope.
       const cur = p ?? {}
       const appCur = { ...(cur[app] ?? {}) }
       const newId = typeof v.id === 'string' && v.id.trim() ? v.id.trim() : id
       if (newId !== id) delete appCur[id]
       appCur[newId] = { ...(v as unknown as Screen), id: newId }
+      if (newId !== id) {
+        for (const [otherId, otherScreen] of Object.entries(appCur)) {
+          if (otherId === newId) continue
+          const sc = otherScreen as unknown as Record<string, unknown>
+          let mut: Record<string, unknown> | null = null
+          if (sc.row_click_screen === id) {
+            mut = { ...sc, row_click_screen: newId }
+          }
+          const dlg = sc.dialog as Record<string, unknown> | undefined
+          if (dlg && Array.isArray(dlg.tabs)) {
+            const tabs = dlg.tabs as Record<string, unknown>[]
+            let tabsChanged = false
+            const nextTabs = tabs.map((tab) => {
+              if (tab?.type === 'nested_table' && tab.screen === id) {
+                tabsChanged = true
+                return { ...tab, screen: newId }
+              }
+              return tab
+            })
+            if (tabsChanged) {
+              mut = { ...(mut ?? sc), dialog: { ...dlg, tabs: nextTabs } }
+            }
+          }
+          if (mut) appCur[otherId] = mut as unknown as Screen
+        }
+      }
       const next = { ...cur, [app]: appCur }
       // Keep the selection pinned to the (possibly renamed) screen.
       if (newId !== id) setSelId(newId)
