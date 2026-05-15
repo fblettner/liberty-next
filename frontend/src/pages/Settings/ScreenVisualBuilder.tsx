@@ -143,6 +143,21 @@ const AddSlot = styled.button`
 const TabActionsRow = styled.div`
   display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px dashed ${colors.border};
 `
+// Collapsible group for hidden fields — closed by default so the 20+ migration-kept columns
+// don't flood the visible canvas. Same <details>/<summary> pattern as the inspector's Advanced
+// block; chevron rotates when the group opens.
+const HiddenGroup = styled.details`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; padding: 10px 12px;
+  background: ${colors.bg.input}; margin-top: 6px;
+  & summary {
+    list-style: none; cursor: pointer; color: ${colors.text.secondary}; font-size: ${fontSize.sm};
+    font-family: ${fonts.sans}; font-weight: 600; padding: 2px 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+  & summary::-webkit-details-marker { display: none; }
+  & summary > svg:first-of-type { color: ${colors.text.muted}; transition: transform 0.15s; }
+  &[open] summary > svg:first-of-type { transform: rotate(90deg); }
+`
 const TabActionBadge = styled.div`
   display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: ${radius.sm};
   border: 1px solid ${colors.border}; background: ${colors.bg.card}; color: ${colors.text.secondary};
@@ -567,75 +582,115 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
           </Button>
         </CanvasTabsStrip>
         <CanvasBody>
-          {selTab ? (
-            <>
-              <FieldGrid $cols={cols}>
-                {fields.map((f, i) => {
-                  const name = String(f.name ?? '')
-                  const ddId = (f.dd as string | undefined) || name
-                  const dd = ddEntries?.get(ddId) ?? null
-                  const preview = previewFor(f, dd)
-                  const label = (f.label as string | undefined) ?? dd?.label ?? name
-                  const span = Math.max(1, Number(f.colspan ?? 1))
-                  const Icon = preview.Icon
-                  return (
-                    <Card
-                      key={`${name}_${i}`}
-                      $selected={selFieldIdx === i}
-                      $hidden={!!f.hidden}
-                      $span={span}
-                      $dragOver={dragOverIdx === i && dragIdx !== i}
-                      draggable
-                      onDragStart={onDragStart(i)}
-                      onDragEnter={onDragEnter(i)}
-                      onDragLeave={onDragLeave}
-                      onDragOver={onDragOver}
-                      onDrop={onDrop(i)}
-                      onClick={() => setSelFieldIdx(i)}
-                    >
-                      <div className="lbl">
-                        <Icon size={13} className="icon" />
-                        <span>{label}</span>
-                        {(f.required as boolean) && <span style={{ color: colors.orange.main }}>*</span>}
-                      </div>
-                      <div className="preview"><Icon size={11} /> {preview.sample}</div>
-                      <div className="badges">
-                        <span className="name">{name}</span>
-                        {f.dd != null && f.dd !== '' && f.dd !== name && <Badge>dd:{String(f.dd)}</Badge>}
-                        {!!f.hidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
-                        {!!f.disabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
-                        {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
-                          || (Array.isArray(f.required_when) && (f.required_when as unknown[]).length > 0)
-                          || (Array.isArray(f.disabled_when) && (f.disabled_when as unknown[]).length > 0)
-                          ? <Badge $tone="orange"><Filter size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.conditional')}</Badge>
-                          : null}
-                        {Array.isArray(f.lookup_param_binds) && (f.lookup_param_binds as unknown[]).length > 0 && (
-                          <Badge $tone="green">{t('settings.screens.field.binds', { count: (f.lookup_param_binds as unknown[]).length })}</Badge>
-                        )}
-                      </div>
-                    </Card>
-                  )
-                })}
-                <AddSlot onClick={() => {
-                  const name = window.prompt(t('settings.screens.field.namePrompt'))?.trim()
-                  if (name) addFieldFromName(name)
-                }}>
-                  <Plus size={13} /> {t('settings.screens.field.add')}
-                </AddSlot>
-              </FieldGrid>
-              {tabActions.length > 0 && (
-                <TabActionsRow>
-                  {tabActions.map((a, i) => (
-                    <TabActionBadge key={`${a.id}_${i}`} title={String(a.id ?? '')}>
-                      <Zap size={11} />
-                      {String(a.label ?? a.id ?? '?')}
-                      <span style={{ color: colors.text.muted, fontFamily: fonts.mono, fontSize: fontSize.micro }}>· {String(a.type ?? 'run_query')}</span>
-                    </TabActionBadge>
-                  ))}
-                </TabActionsRow>
-              )}
-            </>
-          ) : (
+          {selTab ? (() => {
+            // Split fields into visible vs hidden so the canvas doesn't drown in the 20+ hidden
+            // columns the v1 migrator carries through (every column the read query returns has to
+            // sit somewhere in the dialog — otherwise the migrated _put/_post queries' :NAME
+            // binds resolve to NULL on save, nulling out columns the operator never touched).
+            // Hidden fields stay in the data model (no behaviour change), they just visually
+            // group into a collapsible block at the bottom of the canvas.
+            const visibleFields: { f: Row; idx: number }[] = []
+            const hiddenFields: { f: Row; idx: number }[] = []
+            fields.forEach((f, idx) => {
+              if (f.hidden) hiddenFields.push({ f, idx })
+              else visibleFields.push({ f, idx })
+            })
+            // Per-field card renderer — factored so the visible group + hidden group reuse the
+            // same chrome (selection, drag, badges, previews). ``idx`` is the field's index in
+            // the original ``fields`` array; drag/select/delete all key off that — moving a
+            // field between groups means flipping its ``hidden`` flag in the inspector, not
+            // moving it inside the array.
+            const renderCard = ({ f, idx: i }: { f: Row; idx: number }) => {
+              const name = String(f.name ?? '')
+              const ddId = (f.dd as string | undefined) || name
+              const dd = ddEntries?.get(ddId) ?? null
+              const preview = previewFor(f, dd)
+              const label = (f.label as string | undefined) ?? dd?.label ?? name
+              const span = Math.max(1, Number(f.colspan ?? 1))
+              const Icon = preview.Icon
+              return (
+                <Card
+                  key={`${name}_${i}`}
+                  $selected={selFieldIdx === i}
+                  $hidden={!!f.hidden}
+                  $span={span}
+                  $dragOver={dragOverIdx === i && dragIdx !== i}
+                  draggable
+                  onDragStart={onDragStart(i)}
+                  onDragEnter={onDragEnter(i)}
+                  onDragLeave={onDragLeave}
+                  onDragOver={onDragOver}
+                  onDrop={onDrop(i)}
+                  onClick={() => setSelFieldIdx(i)}
+                >
+                  <div className="lbl">
+                    <Icon size={13} className="icon" />
+                    <span>{label}</span>
+                    {(f.required as boolean) && <span style={{ color: colors.orange.main }}>*</span>}
+                  </div>
+                  <div className="preview"><Icon size={11} /> {preview.sample}</div>
+                  <div className="badges">
+                    <span className="name">{name}</span>
+                    {f.dd != null && f.dd !== '' && f.dd !== name && <Badge>dd:{String(f.dd)}</Badge>}
+                    {!!f.hidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
+                    {!!f.disabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
+                    {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
+                      || (Array.isArray(f.required_when) && (f.required_when as unknown[]).length > 0)
+                      || (Array.isArray(f.disabled_when) && (f.disabled_when as unknown[]).length > 0)
+                      ? <Badge $tone="orange"><Filter size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.conditional')}</Badge>
+                      : null}
+                    {Array.isArray(f.lookup_param_binds) && (f.lookup_param_binds as unknown[]).length > 0 && (
+                      <Badge $tone="green">{t('settings.screens.field.binds', { count: (f.lookup_param_binds as unknown[]).length })}</Badge>
+                    )}
+                  </div>
+                </Card>
+              )
+            }
+            return (
+              <>
+                <FieldGrid $cols={cols}>
+                  {visibleFields.map(renderCard)}
+                  <AddSlot onClick={() => {
+                    const name = window.prompt(t('settings.screens.field.namePrompt'))?.trim()
+                    if (name) addFieldFromName(name)
+                  }}>
+                    <Plus size={13} /> {t('settings.screens.field.add')}
+                  </AddSlot>
+                </FieldGrid>
+                {/* Hidden fields — collapsible group at the bottom. Migrated v1 screens often
+                    have 20+ hidden columns kept around so the _put / _post queries' :NAME binds
+                    don't null out untouched columns; this lets the operator see them without
+                    flooding the visible canvas. Click a card to edit; in the inspector flip
+                    ``hidden`` off to promote it into the visible group above. */}
+                {hiddenFields.length > 0 && (
+                  <HiddenGroup>
+                    <summary>
+                      <ChevronRightIcon size={12} />
+                      <EyeOff size={12} />
+                      {t('settings.screens.visual.canvas.hidden', { count: hiddenFields.length })}
+                    </summary>
+                    <FieldGrid $cols={cols} style={{ marginTop: 10 }}>
+                      {hiddenFields.map(renderCard)}
+                    </FieldGrid>
+                    <div style={{ color: colors.text.muted, fontSize: fontSize.micro, lineHeight: 1.4, marginTop: 8 }}>
+                      {t('settings.screens.visual.canvas.hiddenHint')}
+                    </div>
+                  </HiddenGroup>
+                )}
+                {tabActions.length > 0 && (
+                  <TabActionsRow>
+                    {tabActions.map((a, i) => (
+                      <TabActionBadge key={`${a.id}_${i}`} title={String(a.id ?? '')}>
+                        <Zap size={11} />
+                        {String(a.label ?? a.id ?? '?')}
+                        <span style={{ color: colors.text.muted, fontFamily: fonts.mono, fontSize: fontSize.micro }}>· {String(a.type ?? 'run_query')}</span>
+                      </TabActionBadge>
+                    ))}
+                  </TabActionsRow>
+                )}
+              </>
+            )
+          })() : (
             <Empty>{t('settings.screens.tab.pickOne')}</Empty>
           )}
         </CanvasBody>

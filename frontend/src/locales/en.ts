@@ -413,6 +413,9 @@ const en = {
         },
         canvas: {
           title: 'Dialog',
+          hidden_one: 'Hidden field — {{count}}',
+          hidden_other: 'Hidden fields — {{count}}',
+          hiddenHint: 'These columns are kept in the dialog so the migrated insert/update queries can bind their values on save — removing them would null-out their column on every edit. Flip ``hidden`` off in the inspector to promote a field into the visible canvas.',
         },
         inspector: {
           title: 'Inspector',

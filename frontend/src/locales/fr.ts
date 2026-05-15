@@ -415,6 +415,9 @@ const fr: Resources = {
         },
         canvas: {
           title: 'Dialogue',
+          hidden_one: 'Champ masqué — {{count}}',
+          hidden_other: 'Champs masqués — {{count}}',
+          hiddenHint: "Ces colonnes restent dans le dialogue pour que les requêtes d'insert / update migrées puissent lier leurs valeurs à l'enregistrement — les retirer mettrait leur colonne à NULL à chaque édition. Décochez ``hidden`` dans l'inspecteur pour promouvoir un champ dans le canevas visible.",
         },
         inspector: {
           title: 'Inspecteur',

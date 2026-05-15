@@ -20,7 +20,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Code2, Eye, FileText, Layers, Plus, Trash2, X } from 'lucide-react'
 import {
-  Button, ModalBody, ModalFooter, ModalHeader, Overlay, Row, SchemaForm, Stack,
+  Button, ModalBody, ModalHeader, Overlay, Row, SchemaForm, Stack,
   VisualBuilderModal, type JsonSchema,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -645,11 +645,9 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
                 <ModalBody>
                   <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
                 </ModalBody>
-                <ModalFooter>
-                  <Button $variant="ghost" $size="sm" onClick={() => setVisualOpen(false)}>
-                    <X size={13} /> {t('common.close')}
-                  </Button>
-                </ModalFooter>
+                {/* No footer — the header carries the only Close button so we don't show two
+                    redundant "Close"s. Edits are saved by the parent ScreensBuilder's main Save
+                    bar after closing this modal; nothing to commit here. */}
               </VisualBuilderModal>
             </Overlay>,
             document.body,
