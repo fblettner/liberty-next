@@ -29,6 +29,74 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
+# ── Oracle write-time null coalesce helpers ────────────────────────────────────────────────
+# When the pool flag ``coalesce_nulls`` is set (auto-on for Oracle), the SQL connector inspects
+# the target table once and replaces ``None`` bind values with type-appropriate sentinels —
+# ``''`` for CHAR/NCHAR/VARCHAR2/NVARCHAR2/CLOB, ``0`` for NUMBER/BINARY_FLOAT/INTEGER. That's
+# v1's behaviour for JDE (whose NCHAR columns are NOT NULL with implicit space-padding; a NULL
+# bind would either fail the constraint or be coerced to NULL — Oracle treats ``''`` and NULL
+# as identical for VARCHAR2 anyway, so the coalesce is a no-op there; it's strictly meaningful
+# for CHAR/NCHAR and NUMBER NOT NULL columns).
+
+# Match the target table in a write statement. Handles unquoted / "quoted" identifiers and an
+# optional schema prefix. The pattern is intentionally narrow — multi-statement queries or
+# unusual DML shapes return None and the coalesce step is skipped (the operator can still use
+# COALESCE / NVL in the SQL by hand).
+_ORACLE_TARGET_RE = re.compile(
+    r"\b(?:INSERT\s+INTO|UPDATE|MERGE\s+INTO|DELETE\s+FROM)\s+"
+    r'(?:"?(?P<owner>[A-Za-z_][\w$]*)"?\s*\.\s*)?'
+    r'"?(?P<table>[A-Za-z_][\w$]*)"?',
+    re.IGNORECASE,
+)
+
+
+def _oracle_target_table(sql: str) -> tuple[str | None, str] | None:
+    m = _ORACLE_TARGET_RE.search(sql)
+    if not m:
+        return None
+    owner = m.group("owner")
+    table = m.group("table")
+    return (owner.upper() if owner else None, table.upper())
+
+
+# Per-(pool, owner, table) cache of {column_name: simple_type} where simple_type is one of
+# "char" / "number" / "other". Populated lazily on first write to a table — refreshed on
+# registry rebuild via :func:`reset_oracle_column_cache`. Module-level so all SQLConnectors
+# sharing a pool also share the cache.
+_ORACLE_COL_TYPES_CACHE: dict[tuple[str, str | None, str], dict[str, str]] = {}
+
+
+def reset_oracle_column_cache() -> None:
+    """Drop the Oracle column-type cache. Called by ``ConnectorRegistry.aclose`` so a reload
+    sees fresh column metadata after a hot-reload that may swap pools or schemas."""
+    _ORACLE_COL_TYPES_CACHE.clear()
+
+
+_ORACLE_CHAR_TYPES = {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
+_ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT"}
+
+
+def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> dict[str, Any]:
+    """Replace ``None`` values in *bound* with type-appropriate sentinels based on *col_types*.
+    Bind names that don't match any column pass through unchanged (filter operator binds,
+    extras the migration added, etc.). The migration's ``:<COL>_ORIGINAL`` rebind for ``_put``
+    queries' WHERE strips the suffix to find the source column type."""
+    if not col_types:
+        return bound
+    out = dict(bound)
+    for k, v in list(out.items()):
+        if v is not None:
+            continue
+        base = k.upper()
+        if base.endswith("_ORIGINAL"):
+            base = base[: -len("_ORIGINAL")]
+        t = col_types.get(base)
+        if t == "char":
+            out[k] = ""
+        elif t == "number":
+            out[k] = 0
+    return out
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -387,6 +455,16 @@ class SQLConnector:
                         truncated = True
                         break
                     rows.append(dict(row))
+            # Oracle CHAR/NCHAR columns are space-padded to their declared width; the trailing
+            # spaces leak into UI labels and form fields and make editing painful (cursor lands
+            # after the padding, search/sort sees "Test    " ≠ "Test"). v1 stripped automatically;
+            # v2 does the same when the pool flag is set (auto-on for Oracle, see ``PoolRegistry.
+            # trim_strings``). The trim only touches strings — numbers, dates, bytes pass through.
+            if self._pools.trim_strings(self.pool_name):
+                for row in rows:
+                    for k, v in row.items():
+                        if isinstance(v, str):
+                            row[k] = v.rstrip()
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name,
@@ -398,6 +476,49 @@ class SQLConnector:
                 duration_ms=duration_ms,
                 truncated=truncated,
             )
+
+        # Oracle write-time null coalesce — see the helpers at the top of the module. Lookup
+        # the target table's column types once (cached), replace None bind values with the
+        # right sentinel. Skipped silently if the SQL shape doesn't match a single-target
+        # write (the operator can still hand-roll COALESCE / NVL in unusual shapes).
+        if self._pools.coalesce_nulls(self.pool_name):
+            target = _oracle_target_table(sql_text)
+            if target is not None:
+                owner, table = target
+                key = (self.pool_name, owner, table)
+                col_types = _ORACLE_COL_TYPES_CACHE.get(key)
+                if col_types is None:
+                    try:
+                        introspect_sql = (
+                            "SELECT column_name, data_type FROM all_tab_columns "
+                            "WHERE table_name = :t"
+                        ) + (" AND owner = :o" if owner else "")
+                        introspect_params: dict[str, Any] = {"t": table}
+                        if owner:
+                            introspect_params["o"] = owner
+                        async with engine.connect() as introspect_conn:
+                            r = await introspect_conn.execute(text(introspect_sql), introspect_params)
+                            col_types = {}
+                            for row in r.mappings():
+                                cname = str(row.get("column_name") or "").upper()
+                                dtype = str(row.get("data_type") or "").upper()
+                                if not cname:
+                                    continue
+                                if dtype in _ORACLE_CHAR_TYPES:
+                                    col_types[cname] = "char"
+                                elif dtype in _ORACLE_NUMBER_TYPES:
+                                    col_types[cname] = "number"
+                                else:
+                                    col_types[cname] = "other"
+                            _ORACLE_COL_TYPES_CACHE[key] = col_types
+                    except Exception as e:
+                        _log.warning(
+                            "oracle column introspection failed for %s.%s on pool %r: %s — "
+                            "writes proceed without null coalesce",
+                            owner or "?", table, self.pool_name, e,
+                        )
+                        col_types = {}
+                bound = _coalesce_oracle_nulls(bound, col_types)
 
         async with engine.begin() as conn:
             result = await conn.execute(stmt, bound)

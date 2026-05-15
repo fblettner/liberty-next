@@ -102,6 +102,11 @@ class ConnectorRegistry:
             if isinstance(conn, APIConnector):
                 await conn.aclose()
         await self.pools.dispose()
+        # Drop the Oracle column-type introspection cache so a hot-reload that swaps pools or
+        # schemas gets fresh metadata on the next write. Imported lazily to keep ``sql`` an
+        # internal detail of the registry's clients, not a top-level dep here.
+        from liberty.connectors.sql import reset_oracle_column_cache
+        reset_oracle_column_cache()
 
 
 def load_connectors(

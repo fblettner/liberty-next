@@ -491,3 +491,97 @@ def test_describe_lists_metadata(pools: PoolRegistry) -> None:
     assert q["name"] == "all"
     assert q["statement_type"] == "SELECT"
     assert q["bind_params"] == ["status"]
+
+
+# --------------------------------------------------------------------------- #
+# Oracle compat — trim on read + null coalesce on write (v1's NCHAR/NUMBER quirks)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_trim_strings_strips_trailing_whitespace_when_enabled() -> None:
+    """v1's automatic trim for Oracle CHAR/NCHAR — re-enable on any pool via the explicit
+    ``trim_strings = true`` flag. SQLite (used in tests) doesn't space-pad on its own, so we
+    feed pre-padded values to verify the strip logic runs."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE lbl (id INTEGER PRIMARY KEY, name TEXT)"))
+        await c.execute(text("INSERT INTO lbl VALUES (1, 'role   '), (2, 'demo')"))
+    pools = PoolRegistry({"on": PoolConfig(url="sqlite://", trim_strings=True)})
+    pools.register_engine("on", engine)
+    conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="on", queries=[
+        QueryDef(name="all", sql="SELECT id, name FROM lbl ORDER BY id"),
+    ]), pools)
+    r = await conn.execute("all")
+    assert [row["name"] for row in r.rows] == ["role", "demo"]   # trailing spaces stripped
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_trim_strings_off_keeps_whitespace() -> None:
+    """Explicit ``trim_strings = false`` (or non-Oracle pool with no override) preserves the
+    raw cell value. Required for pools where trailing whitespace is data, not padding."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE lbl (id INTEGER PRIMARY KEY, name TEXT)"))
+        await c.execute(text("INSERT INTO lbl VALUES (1, 'role   ')"))
+    pools = PoolRegistry({"off": PoolConfig(url="sqlite://", trim_strings=False)})
+    pools.register_engine("off", engine)
+    conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="off", queries=[
+        QueryDef(name="all", sql="SELECT id, name FROM lbl"),
+    ]), pools)
+    r = await conn.execute("all")
+    assert r.rows[0]["name"] == "role   "   # untouched
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
+    """``coalesce_nulls = true`` introspects ``ALL_TAB_COLUMNS`` and replaces ``None`` bind
+    values with ``''`` (char) or ``0`` (number) before the bind. SQLite can't impersonate
+    Oracle's all_tab_columns, so the test sets the cache manually via the helpers and
+    verifies the coalesce step transforms the params dict."""
+    from liberty.connectors.sql import _coalesce_oracle_nulls, _oracle_target_table
+
+    # Target-table extraction handles unquoted, quoted, schema-prefixed names + MERGE / DELETE.
+    assert _oracle_target_table("INSERT INTO foo VALUES (:a, :b)") == (None, "FOO")
+    assert _oracle_target_table('INSERT INTO "MyTbl" VALUES (:a)') == (None, "MYTBL")
+    assert _oracle_target_table("update prodlib.f0092 SET ulnam = :n WHERE ulid = :id") == ("PRODLIB", "F0092")
+    assert _oracle_target_table("MERGE INTO crp.f00921 t USING (...)") == ("CRP", "F00921")
+    assert _oracle_target_table("DELETE FROM prodlib.f0093 WHERE id = :id") == ("PRODLIB", "F0093")
+    # Garbage in → None out (skip coalesce; operator hand-rolls NVL).
+    assert _oracle_target_table("/* hello */ SELECT 1") is None
+
+    # Coalesce: None values get the column's sentinel; non-None values + unknown columns pass
+    # through. The migration's `:<COL>_ORIGINAL` rebind on _put queries resolves to the source
+    # column's type — so a None on a CHAR column's ORIGINAL bind becomes ''.
+    col_types = {"NAME": "char", "AMOUNT": "number", "STATUS": "char"}
+    bound = {"NAME": None, "AMOUNT": None, "STATUS": "active", "EXTRA": None, "NAME_ORIGINAL": None}
+    out = _coalesce_oracle_nulls(bound, col_types)
+    assert out == {
+        "NAME": "",                # CHAR null → ''
+        "AMOUNT": 0,               # NUMBER null → 0
+        "STATUS": "active",        # non-None untouched
+        "EXTRA": None,             # column unknown — pass through
+        "NAME_ORIGINAL": "",       # _ORIGINAL suffix strip → still CHAR → ''
+    }
+
+
+def test_coalesce_nulls_auto_on_for_oracle_dialect() -> None:
+    """``PoolRegistry.coalesce_nulls`` mirrors ``trim_strings``'s auto-on logic: explicit
+    flag wins; otherwise enabled on Oracle dialect, disabled elsewhere."""
+    cfgs = {
+        "ora_auto":   PoolConfig(url="oracle+oracledb://x@h/?service_name=s"),   # dialect derived → auto-on
+        "ora_off":    PoolConfig(url="oracle+oracledb://x@h/?service_name=s", coalesce_nulls=False),
+        "pg_auto":    PoolConfig(url="postgresql+asyncpg://x@h/db"),             # auto-off
+        "pg_on":      PoolConfig(url="postgresql+asyncpg://x@h/db", coalesce_nulls=True),
+    }
+    pools = PoolRegistry(cfgs)
+    assert pools.coalesce_nulls("ora_auto") is True
+    assert pools.coalesce_nulls("ora_off") is False
+    assert pools.coalesce_nulls("pg_auto") is False
+    assert pools.coalesce_nulls("pg_on") is True
+    # Same default-auto pattern for trim_strings — pinning both side-by-side so a future change
+    # to one doesn't accidentally diverge.
+    assert pools.trim_strings("ora_auto") is True
+    assert pools.trim_strings("pg_auto") is False

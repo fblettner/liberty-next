@@ -100,6 +100,20 @@ class PoolConfig(BaseModel):
         "cap. A connector's max_rows, a query's max_rows, or a per-request override each take precedence in "
         "that order; the absolute fallback is 1000."
     ))
+    trim_strings: bool | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
+        "Strip trailing whitespace from every string cell returned by SELECTs on this pool. v1 did this "
+        "automatically for Oracle so editing a label on a CHAR/NCHAR column (space-padded to its declared "
+        "width) didn't drag a long tail of trailing spaces into the dialog field. Default is auto: enabled "
+        "on Oracle dialect, disabled elsewhere. Set explicitly to ``true`` / ``false`` to override."
+    ))
+    coalesce_nulls: bool | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
+        "On Oracle, INSERT/UPDATE binds with ``None`` get type-appropriate sentinels before the bind "
+        "(``''`` for CHAR/NCHAR/VARCHAR2/NVARCHAR2, ``0`` for NUMBER). v1 did this so Oracle's NCHAR "
+        "(which can't store '' as distinct from NULL) accepted a 'no value' write as an empty/zero "
+        "instead of failing on a NOT NULL column. The connector introspects ``ALL_TAB_COLUMNS`` once per "
+        "(schema, table) and caches the result. Default is auto: enabled on Oracle dialect, disabled "
+        "elsewhere. Set explicitly to override."
+    ))
 
 
 # --------------------------------------------------------------------------- #

@@ -64,6 +64,29 @@ class PoolRegistry:
             return cfg.dialect
         return make_url(cfg.url).get_backend_name()
 
+    def trim_strings(self, name: str) -> bool:
+        """Whether the SQL connector should strip trailing whitespace from string cells on this
+        pool's reads. Honours the pool's explicit ``trim_strings`` flag; auto-enables on Oracle
+        dialect (where CHAR/NCHAR columns are space-padded — v1's behaviour); off elsewhere.
+        Unknown pools default to off."""
+        cfg = self._configs.get(name)
+        if cfg is None:
+            return False
+        if cfg.trim_strings is not None:
+            return cfg.trim_strings
+        return self.dialect(name) == "oracle"
+
+    def coalesce_nulls(self, name: str) -> bool:
+        """Whether the SQL connector should replace ``None`` bind values with type-appropriate
+        sentinels (``''`` for char columns, ``0`` for number columns) on INSERT / UPDATE / MERGE
+        against this pool. Honours the explicit flag; auto-enables on Oracle. Off elsewhere."""
+        cfg = self._configs.get(name)
+        if cfg is None:
+            return False
+        if cfg.coalesce_nulls is not None:
+            return cfg.coalesce_nulls
+        return self.dialect(name) == "oracle"
+
     def _resolved_url(self, name: str, cfg: PoolConfig):
         """The pool's URL with its password resolved: a separate ``password`` (or an ``ENC:``
         password embedded in the URL) is decrypted via the crypto master key and re-set on the URL
