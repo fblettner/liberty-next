@@ -393,12 +393,42 @@ const fr: Resources = {
         generalHint: "Affichage + indicateurs de comportement pour cet écran. `audit` câble les écritures AUD_<table> (slice 5) ; `connector` n'est défini que si l'écran tourne sur un connecteur différent de l'application.",
         queriesHint: "Références aux requêtes CRUD — la requête de lecture est obligatoire ; les autres sont optionnelles et utilisées par le dialogue / l'éditeur en grille pour enregistrer/insérer/supprimer.",
         dialogHint: "Le formulaire affiché pour ajouter/modifier. Un écran sans dialogue se rend en table lecture seule / édition en grille.",
+        dialogVisualHint: "Designer visuel — sélectionnez un champ dans la palette à gauche, cliquez sur une carte pour modifier ses propriétés à droite. Glissez une carte pour réordonner, ou sur un autre onglet pour la déplacer. Les chaînes de hooks (on_load / on_save / on_cancel) et les actions d'onglet sont en dessous.",
         dialogEmpty: "Aucun dialogue — l'écran est en lecture seule / édition en grille.",
         dialogCreate: 'Créer un dialogue',
         comingSoon: 'Bientôt disponible',
         comingSoonHint: 'Cette section arrive en {{slice}}.',
         sliceActions: 'slice 4 (actions & événements)',
         sliceRowMenu: 'slice 6 (menus contextuels de ligne)',
+      },
+      visual: {
+        modeVisual: 'Visuel',
+        modeSchema: 'Schéma',
+        palette: {
+          title: 'Ajouter un champ',
+          dict: 'Dictionnaire',
+          cols: 'Colonnes',
+          search: 'filtrer…',
+          hint: "Cliquez sur un élément pour l'ajouter à l'onglet courant. Les entrées du dictionnaire pré-remplissent `dd` afin que le widget reprenne la bonne règle ; les colonnes ajoutent un champ brut lié à la requête de lecture.",
+        },
+        canvas: {
+          title: 'Dialogue',
+        },
+        inspector: {
+          title: 'Inspecteur',
+          empty: "Sélectionnez un champ sur le canevas pour modifier ses propriétés.",
+        },
+        bindsTitle: 'Liaisons de lookup',
+        dialog: {
+          title: 'Titre du dialogue',
+          titlePlaceholder: "Par défaut, le libellé de l'écran",
+        },
+        events: {
+          title: 'Événements',
+          none: 'Aucun hook câblé sur cet écran.',
+          hint: 'Modifiez les chaînes de hooks via la vue Schéma (bascule au-dessus).',
+          colsWarning: "Impossible de charger les colonnes de la requête de lecture — la palette Colonnes restera vide.",
+        },
       },
       tab: {
         add: 'Ajouter un onglet',

@@ -391,12 +391,42 @@ const en = {
         generalHint: 'Display + behaviour flags for this screen. `audit` wires AUD_<table> writes (slice 5); `connector` is set only when the screen runs against a different connector than the app.',
         queriesHint: 'CRUD query refs — the read query is required; the rest are optional and used by the dialog / inline grid editor for save/insert/delete.',
         dialogHint: 'The form shown for add/edit. A screen with no dialog renders as a read-only / grid-edit table.',
+        dialogVisualHint: 'Visual designer — pick a field from the left palette, click a card to edit its properties on the right. Drag a card to reorder, or drag onto another tab to move it. Hook chains (on_load / on_save / on_cancel) and per-tab actions live below.',
         dialogEmpty: 'No dialog yet — the screen is read-only / grid-edit only.',
         dialogCreate: 'Create dialog',
         comingSoon: 'Coming soon',
         comingSoonHint: 'This section lands in {{slice}}.',
         sliceActions: 'slice 4 (actions & events)',
         sliceRowMenu: 'slice 6 (row context menus)',
+      },
+      visual: {
+        modeVisual: 'Visual',
+        modeSchema: 'Schema',
+        palette: {
+          title: 'Add a field',
+          dict: 'Dictionary',
+          cols: 'Columns',
+          search: 'filter…',
+          hint: 'Click an item to add it to the current tab. Dictionary entries pre-fill `dd` so the widget picks up the right rule; columns add a plain field bound to the read query.',
+        },
+        canvas: {
+          title: 'Dialog',
+        },
+        inspector: {
+          title: 'Inspector',
+          empty: 'Pick a field on the canvas to edit its properties.',
+        },
+        bindsTitle: 'Lookup bindings',
+        dialog: {
+          title: 'Dialog title',
+          titlePlaceholder: 'Falls back to the screen label',
+        },
+        events: {
+          title: 'Events',
+          none: 'No hooks wired on this screen.',
+          hint: 'Edit the hook chains via the Schema view (toggle above).',
+          colsWarning: 'Could not load the read query\'s columns — the Columns palette will be empty.',
+        },
       },
       tab: {
         add: 'Add tab',

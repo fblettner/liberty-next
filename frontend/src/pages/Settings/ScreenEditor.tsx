@@ -17,10 +17,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, FileText, Layers, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Code2, Eye, FileText, Layers, Plus, Trash2 } from 'lucide-react'
 import { Button, Row, SchemaForm, Stack, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import ScreenVisualBuilder from './ScreenVisualBuilder'
 
 type Row = Record<string, unknown>
 
@@ -69,6 +70,17 @@ const FieldHeader = styled.button<{ $open?: boolean }>`
   & .badges { display: inline-flex; gap: 4px; }
   & svg { flex-shrink: 0; color: ${colors.text.muted}; }
   &:hover { border-color: ${colors.blue.border}; }
+`
+// Visual/Schema mode toggle for the Dialog tab — same shape ConnectorsBuilder uses, kept here
+// instead of refactoring out to a shared primitive since this is the only other consumer for now.
+const ModeBar = styled.div`display: inline-flex; gap: 4px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};`
+const ModeBtn = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
+  border: none; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  background: ${({ $active }) => ($active ? colors.bg.card : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
+  &:hover { color: ${colors.text.primary}; }
 `
 const Badge = styled.span<{ $tone?: 'orange' | 'red' | 'muted' }>`
   display: inline-block; padding: 1px 6px; border-radius: ${radius.sm}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
@@ -134,6 +146,13 @@ export interface ScreenEditorProps {
 export default function ScreenEditor({ app, id, value, schema, onChange }: ScreenEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('general')
+  // The Dialog tab can render in two modes:
+  //   - 'visual'  — Figma-style canvas + palette + inspector (ScreenVisualBuilder; default)
+  //   - 'schema'  — the original tabs + field accordion + on_save lists (kept as the escape
+  //                 hatch for hooks the visual mode doesn't surface inline — e.g. on_save chains).
+  // Toggle persists per ScreenEditor instance; switching modes is non-destructive (same data
+  // model). Visual is the default since the user asked for it; switching to Schema is one click.
+  const [dialogMode, setDialogMode] = useState<'visual' | 'schema'>('visual')
 
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
   // Pre-pick the per-tab sub-schemas; the General/Queries tabs use a SchemaForm over these
@@ -559,9 +578,44 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         </Stack>
       )
     }
+    // Visual mode renders the WYSIWYG canvas + palette + inspector. The on_load / on_save /
+    // on_cancel chain editors stay BELOW the visual builder — those are screen-wide hooks the
+    // operator wires once, not per-field; keeping them in one place avoids hiding them when the
+    // visual mode shows. Same accessor + setter helpers are reused.
+    if (dialogMode === 'visual') {
+      return (
+        <Stack gap={14}>
+          <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <Sub style={{ margin: 0 }}>{t('settings.screens.editor.dialogVisualHint')}</Sub>
+            <ModeBar>
+              <ModeBtn type="button" $active={true}>
+                <Eye size={13} /> {t('settings.screens.visual.modeVisual')}
+              </ModeBtn>
+              <ModeBtn type="button" $active={false} onClick={() => setDialogMode('schema')}>
+                <Code2 size={13} /> {t('settings.screens.visual.modeSchema')}
+              </ModeBtn>
+            </ModeBar>
+          </Row>
+          <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
+          {renderOnLoad()}
+          {renderOnSave()}
+          {renderOnCancel()}
+        </Stack>
+      )
+    }
     return (
       <Stack gap={10}>
-        <Sub>{t('settings.screens.editor.dialogHint')}</Sub>
+        <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Sub style={{ margin: 0 }}>{t('settings.screens.editor.dialogHint')}</Sub>
+          <ModeBar>
+            <ModeBtn type="button" $active={false} onClick={() => setDialogMode('visual')}>
+              <Eye size={13} /> {t('settings.screens.visual.modeVisual')}
+            </ModeBtn>
+            <ModeBtn type="button" $active={true}>
+              <Code2 size={13} /> {t('settings.screens.visual.modeSchema')}
+            </ModeBtn>
+          </ModeBar>
+        </Row>
         {/* Top-level dialog props — currently just `title`; kept compact above the split. */}
         <Row gap={10} style={{ alignItems: 'flex-end' }}>
           <SchemaForm
