@@ -339,16 +339,59 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_output(data: dict, path: str | None, command: str, summary: str) -> tuple[str, bool]:
+    """Produce the TOML text to write. Returns ``(text, merged)`` — ``merged=True`` means the
+    output is a comment-preserving merge into an existing file (so other apps' sections survive),
+    ``False`` means a fresh render.
+
+    Per-app commands (``dictionary`` / ``menu`` / ``screen`` / ``actions``) migrate one app at a
+    time and naturally need merging when the operator targets the same file for several apps:
+    nomasx1 first, then nomajde, then a re-run of nomasx1 to pick up new fields, etc. Without
+    this, each run **silently replaces** the file — that's how the user lost their nomajde
+    screens when we re-ran the nomasx1 migration to test row_click promotion.
+
+    Whole-file commands (``sql`` / ``api`` / ``all``) migrate everything in one go from a single
+    v1 DB, so merging doesn't apply — the previous behaviour of replacing the file is kept.
+    """
+    PER_APP = {"dictionary", "menu", "screen", "actions"}
+    fresh = f"{summary}\n\n{render_toml(data)}"
+    if not path or command not in PER_APP:
+        return fresh, False
+    from pathlib import Path as _P
+    p = _P(path)
+    if not p.exists():
+        return fresh, False
+    import tomlkit
+    existing = tomlkit.parse(p.read_text())
+    # 2-level merge: a top-level table in the new data has its children merged in (e.g.
+    # ``screens.<app>`` replaces just that app, leaving every other app intact); a scalar at
+    # the top (e.g. ``default_language`` on the dictionary) gets replaced wholesale.
+    for top_key, top_val in data.items():
+        if not isinstance(top_val, dict):
+            existing[top_key] = top_val
+            continue
+        if top_key not in existing or not hasattr(existing[top_key], "__setitem__"):
+            existing[top_key] = top_val
+            continue
+        for sub_key, sub_val in top_val.items():
+            existing[top_key][sub_key] = sub_val
+    # No `# migrated: …` header is prepended on merge — the existing file may carry an older
+    # header line (or operator-added prose) we don't want to double-up on. The latest summary
+    # still prints to stderr from main().
+    return tomlkit.dumps(existing), True
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     data = asyncio.run(_build(args))
     summary = _summary(data, command=args.command)
-    text = f"{summary}\n\n{render_toml(data)}"
+    text, merged = _build_output(data, args.out, args.command, summary)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(text)
         print(summary.replace("# ", ""), file=sys.stderr)
-        print(f"wrote {args.out}", file=sys.stderr)
+        action = "merged into" if merged else "wrote"
+        print(f"{action} {args.out}", file=sys.stderr)
     else:
         sys.stdout.write(text)
     return 0

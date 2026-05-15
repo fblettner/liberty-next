@@ -2281,3 +2281,34 @@ def test_cli_screen(tmp_path) -> None:
     extra = tab.fields[1]
     assert extra.name == "USR_EXTRA"
     assert [(c.field, c.value) for c in extra.visible_when] == [("USR_ID", ["42"])]
+
+
+def test_cli_screen_merges_into_existing_file(tmp_path) -> None:
+    """Re-running ``liberty-migrate screen --connector <other-app> -o <existing>`` merges the
+    new app's section into the existing screens.toml — the previous app's section survives.
+    The user lost their nomajde screens when we re-ran nomasx1 because the previous behaviour
+    was to *replace* the file; this test pins the new merge behaviour so it can't regress."""
+    url = _make_v1_db(tmp_path)
+    out = tmp_path / "screens.toml"
+
+    # First write — nomasx1 → fresh file with one screen.
+    assert migrate_main(["screen", "--source-url", url, "--connector", "nomasx1", "-o", str(out)]) == 0
+    first = out.read_text()
+    assert "1 screen(s) for [screens.nomasx1]" in first
+    assert "[screens.nomasx1.security_users]" in first
+
+    # Inject a hand-added section under a *different* app name into the file to simulate the
+    # multi-app deployment case (the user had nomajde screens here from an earlier migration).
+    out.write_text(first + "\n[screens.nomajde.role_management]\nid = \"role_management\"\nread_query = \"roles_get\"\n")
+
+    # Second write — re-run for the same nomasx1. With merge mode, nomasx1's section gets
+    # updated (replaced with the latest migration) but the hand-added nomajde section survives.
+    assert migrate_main(["screen", "--source-url", url, "--connector", "nomasx1", "-o", str(out)]) == 0
+    merged = out.read_text()
+    assert "[screens.nomasx1.security_users]" in merged
+    assert "[screens.nomajde.role_management]" in merged
+    assert 'read_query = "roles_get"' in merged
+    # The merge re-parses through the screens schema — both apps land in the final result.
+    sf = parse_screens(tomllib.loads(merged))
+    assert set(sf.screens) == {"nomasx1", "nomajde"}
+    assert "role_management" in sf.screens["nomajde"]
