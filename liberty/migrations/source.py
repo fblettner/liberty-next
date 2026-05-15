@@ -191,6 +191,33 @@ _CTX_FILTERS = text("""
     FROM ly_ctx_filters ORDER BY ctx_id, val_id, flt_id
 """)
 
+# Named workflows (v1's "Actions" — toolbar buttons in libnjde for things like "Create User",
+# "Reset Password"). Branching with IF / LOOP / QUERY / API tasks, action-level input params,
+# per-task param bindings, and an optional branch graph. v2 doesn't model the branching shape
+# (its ``Action`` union is flat sequential), so the migrator dumps each action into a
+# documented ``[migrated_actions.<app>]`` block for the operator to hand-wire via the builder.
+_ACTIONS = text("SELECT act_id, act_label FROM ly_actions ORDER BY act_id")
+_ACT_TASKS = text("""
+    SELECT act_id, evt_id, evt_seq, evt_type, evt_label, evt_query_id, evt_query_crud, evt_api_id,
+           evt_component, evt_component_id, evt_brc_id, evt_brc_true, evt_brc_false,
+           evt_loop, evt_loop_array
+    FROM ly_act_tasks ORDER BY act_id, COALESCE(evt_seq, evt_id)
+""")
+_ACT_BRANCHES = text("SELECT act_id, brc_id, brc_label FROM ly_act_branch ORDER BY act_id, brc_id")
+_ACT_PARAMS = text("""
+    SELECT act_id, map_var, map_dir, map_display, map_rules, map_rules_values, map_default
+    FROM ly_act_params ORDER BY act_id, map_var
+""")
+_ACT_TASKS_PARAMS = text("""
+    SELECT act_id, evt_id, map_id, map_type, map_dir, map_var, map_label, map_var_type,
+           map_value, map_rules, map_rules_values, map_default
+    FROM ly_act_tasks_params ORDER BY act_id, evt_id, map_id
+""")
+_ACT_PARAMS_FILTERS = text("""
+    SELECT act_id, map_var, flt_id, flt_type, flt_source, flt_target, flt_value
+    FROM ly_act_params_filters ORDER BY act_id, map_var, flt_id
+""")
+
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
 _APIS = text("SELECT api_id, api_label, api_source, api_method, api_url, api_user, api_password, api_body, api_conn_id FROM ly_api ORDER BY api_id")
 _API_HEADERS = text("SELECT api_id, hdr_id, hdr_key, hdr_value FROM ly_api_header ORDER BY api_id, hdr_id")
@@ -369,6 +396,28 @@ async def read_context_menus(
         await _rows_or_empty(engine, _CTX_MENUS, what="ly_ctxmenus"),
         await _rows_or_empty(engine, _CTX_VALS, what="ly_ctx_val (context-menu items)"),
         await _rows_or_empty(engine, _CTX_FILTERS, what="ly_ctx_filters (item param binds)"),
+    )
+
+
+async def read_actions(
+    engine: AsyncEngine,
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]],
+]:
+    """Return v1's named-action tables: ``(ly_actions, ly_act_tasks, ly_act_branch, ly_act_params,
+    ly_act_tasks_params, ly_act_params_filters)``. v2 doesn't model the branching shape; the
+    migrator dumps each row into a documented ``[migrated_actions.<app>]`` TOML block for the
+    operator to hand-wire via the builder. A v1 schema that doesn't ship the workflow tables
+    (libnsx1 — toolbar buttons live in the frontend code there, not the schema) just returns six
+    empty lists."""
+    return (
+        await _rows_or_empty(engine, _ACTIONS, what="ly_actions"),
+        await _rows_or_empty(engine, _ACT_TASKS, what="ly_act_tasks"),
+        await _rows_or_empty(engine, _ACT_BRANCHES, what="ly_act_branch"),
+        await _rows_or_empty(engine, _ACT_PARAMS, what="ly_act_params"),
+        await _rows_or_empty(engine, _ACT_TASKS_PARAMS, what="ly_act_tasks_params"),
+        await _rows_or_empty(engine, _ACT_PARAMS_FILTERS, what="ly_act_params_filters"),
     )
 
 

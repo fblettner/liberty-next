@@ -14,6 +14,7 @@ from liberty.migrations import (
     merge_connectors,
     migrate_api,
     migrate_column_hints,
+    migrate_actions,
     migrate_column_visibility,
     migrate_dictionary,
     migrate_drill_filter_columns,
@@ -1333,6 +1334,106 @@ def test_migrate_screens_visible_when_from_cdn() -> None:
     assert "visible_when" not in fields["ITM_SLA"]
     # Round-trip through the screens schema (FieldCondition validates).
     parse_screens(out)
+
+
+def test_migrate_actions_dumps_v1_workflows() -> None:
+    """v1's named-action workflows (``ly_actions`` + ``ly_act_tasks`` + ``ly_act_branch`` + the
+    params + per-task-param tables) get **dumped** into a documented ``[migrated_actions.<app>]``
+    block — v2's flat ``Action`` union can't model the branch graph, so the migrator captures
+    every v1 field faithfully and a human re-implements via the screen builder. QUERY tasks
+    resolve to v2 query names via ``ly_qry_sql`` (matching what ``migrate_sql_queries`` emits);
+    unresolvable ones keep a ``warning`` so the operator notices."""
+    # Mirrors libnjde's "Import Security" action (act_id 3) shape: an IF with branches, a
+    # QUERY referencing query 23 with crud DELETE, then a QUERY for crud POST.
+    action_rows = [
+        {"act_id": 3, "act_label": "Import Security from User / Role"},
+    ]
+    task_rows = [
+        {"act_id": 3, "evt_id": 2, "evt_seq": 1, "evt_type": "IF",
+         "evt_label": "Check if import security workbench",
+         "evt_query_id": None, "evt_query_crud": None, "evt_api_id": None,
+         "evt_brc_id": None, "evt_brc_true": 1, "evt_brc_false": None,
+         "evt_loop": "N", "evt_loop_array": None},
+        {"act_id": 3, "evt_id": 3, "evt_seq": 2, "evt_type": "QUERY",
+         "evt_label": "Delete Security Workbench",
+         "evt_query_id": 23, "evt_query_crud": "DELETE", "evt_api_id": None,
+         "evt_brc_id": 1, "evt_brc_true": None, "evt_brc_false": None,
+         "evt_loop": "N", "evt_loop_array": None},
+        {"act_id": 3, "evt_id": 1, "evt_seq": 3, "evt_type": "QUERY",
+         "evt_label": "Import Security Workbench",
+         "evt_query_id": 23, "evt_query_crud": "POST", "evt_api_id": None,
+         "evt_brc_id": 1, "evt_brc_true": None, "evt_brc_false": None,
+         "evt_loop": "N", "evt_loop_array": None},
+    ]
+    branch_rows = [
+        {"act_id": 3, "brc_id": 1, "brc_label": "Import Security Workbench"},
+    ]
+    param_rows = [
+        {"act_id": 3, "map_var": "ROLE", "map_dir": "IN", "map_display": "Y",
+         "map_rules": None, "map_rules_values": None, "map_default": None},
+        {"act_id": 3, "map_var": "USER", "map_dir": "IN", "map_display": "Y",
+         "map_rules": None, "map_rules_values": None, "map_default": None},
+    ]
+    task_param_rows = [
+        # Reference to an action-level INPUT param (libnjde's convention: map_value = "INPUT.<var>")
+        {"act_id": 3, "evt_id": 1, "map_id": 1, "map_type": "DD", "map_dir": "IN",
+         "map_var": "FROMUSER", "map_label": None, "map_var_type": None,
+         "map_value": "INPUT.ROLE", "map_rules": None, "map_rules_values": None, "map_default": None},
+        # A literal VALUE
+        {"act_id": 3, "evt_id": 1, "map_id": 2, "map_type": "VALUE", "map_dir": "IN",
+         "map_var": "TOUSER", "map_label": None, "map_var_type": None,
+         "map_value": "ADMIN", "map_rules": None, "map_rules_values": None, "map_default": None},
+    ]
+    param_filter_rows = []
+    sql_rows = [
+        {"query_id": 23, "query_crud": "DELETE", "query_label": "f00950", "query_pool": "jdedwards"},
+        {"query_id": 23, "query_crud": "POST", "query_label": "f00950", "query_pool": "jdedwards"},
+    ]
+    out = migrate_actions(
+        action_rows, task_rows, branch_rows, param_rows, task_param_rows, param_filter_rows,
+        sql_rows=sql_rows, app_name="nomajde",
+    )
+    actions = out["migrated_actions"]["nomajde"]
+    assert set(actions) == {"import_security_from_user_role"}
+    a = actions["import_security_from_user_role"]
+    assert a["label"] == "Import Security from User / Role"
+    assert a["v1_act_id"] == 3
+    # Action-level params carried through.
+    assert [p["name"] for p in a["params"]] == ["ROLE", "USER"]
+    # Branches surfaced for the operator.
+    assert a["branches"] == [{"id": 1, "label": "Import Security Workbench"}]
+    # Tasks in seq order; IF task has on_true_branch + no v2 query; QUERY tasks resolve to v2
+    # names following the migrate_sql_queries naming convention (raw crud verbatim).
+    tasks = a["tasks"]
+    assert len(tasks) == 3
+    assert tasks[0]["type"] == "IF" and tasks[0]["on_true_branch"] == 1 and "query" not in tasks[0]
+    assert tasks[1]["type"] == "QUERY" and tasks[1]["query"] == "f00950_delete"
+    assert tasks[1]["belongs_to_branch"] == 1
+    assert tasks[2]["query"] == "f00950_post"
+    # Per-task param binds — INPUT.X collapses to a `source` reference; literal VALUE → `value`.
+    assert tasks[2]["param_binds"] == [
+        {"param": "FROMUSER", "source": "ROLE"},
+        {"param": "TOUSER", "value": "ADMIN"},
+    ]
+
+
+def test_migrate_actions_unresolvable_query_keeps_warning() -> None:
+    """A task whose ``evt_query_id`` doesn't appear in ``ly_qry_sql`` (or whose crud isn't a
+    SCREEN_CRUD_MAP value) keeps the v1 ids + a ``warning`` field so the operator can re-route
+    it. v1 schemas occasionally reference queries that were renamed / dropped — failing loudly
+    here is better than silently dropping a task."""
+    out = migrate_actions(
+        [{"act_id": 1, "act_label": "Orphan"}],
+        [{"act_id": 1, "evt_id": 1, "evt_seq": 1, "evt_type": "QUERY", "evt_label": "ghost",
+          "evt_query_id": 999, "evt_query_crud": "GET", "evt_api_id": None,
+          "evt_brc_id": None, "evt_brc_true": None, "evt_brc_false": None,
+          "evt_loop": "N", "evt_loop_array": None}],
+        sql_rows=[],  # 999 doesn't exist
+        app_name="nomajde",
+    )
+    task = out["migrated_actions"]["nomajde"]["orphan"]["tasks"][0]
+    assert task["v1_query_id"] == 999 and task["v1_query_crud"] == "GET"
+    assert "warning" in task and "no matching v2 query" in task["warning"]
 
 
 def test_migrate_context_menus_basic() -> None:

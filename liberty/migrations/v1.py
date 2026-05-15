@@ -1699,6 +1699,264 @@ def migrate_context_menus(
     return out, promotable_by_tbl
 
 
+def migrate_actions(
+    action_rows: Iterable[Mapping[str, Any]],
+    task_rows: Iterable[Mapping[str, Any]] = (),
+    branch_rows: Iterable[Mapping[str, Any]] = (),
+    param_rows: Iterable[Mapping[str, Any]] = (),
+    task_param_rows: Iterable[Mapping[str, Any]] = (),
+    param_filter_rows: Iterable[Mapping[str, Any]] = (),
+    sql_rows: Iterable[Mapping[str, Any]] = (),
+    *,
+    app_name: str,
+) -> dict[str, Any]:
+    """Dump v1's named-action workflows into a ``[migrated_actions.<app>.<slug>]`` block per
+    action. **Not loadable by v2 at runtime** — v2's :class:`Action` discriminated union is flat
+    sequential (run_query / call_api / navigate / set_field / confirm / notify / refresh), with
+    no branch graph or LOOP construct. v1's actions are richer (IF tasks fork to branch ids,
+    LOOP tasks iterate over arrays, action-level params with type rules). The migrator captures
+    the v1 shape faithfully as documented TOML so an operator can read each workflow and hand-
+    wire the parts v2 supports as ``on_save`` / toolbar action chains in the screen builder.
+
+    libnsx1 has no rows in these tables — toolbar buttons live in v1's frontend code there.
+    libnjde carries the 7 NOMAJDE actions: Create Role / Delete Role / Import Security from
+    User / Merge Roles / Create User / Delete User / Reset Password.
+
+    Args:
+        action_rows: ``ly_actions`` — one per workflow (``act_id``, ``act_label``).
+        task_rows: ``ly_act_tasks`` — sequence of tasks per action (``evt_id``, ``evt_seq``,
+            ``evt_type``, ``evt_label``, ``evt_query_id``, ``evt_query_crud``, ``evt_api_id``,
+            ``evt_brc_id``, ``evt_brc_true``, ``evt_brc_false``, ``evt_loop``, ``evt_loop_array``).
+        branch_rows: ``ly_act_branch`` — branch ids → labels (referenced by ``evt_brc_id`` /
+            ``evt_brc_true`` / ``evt_brc_false`` on tasks).
+        param_rows: ``ly_act_params`` — action-level input params (the workflow's "arguments").
+        task_param_rows: ``ly_act_tasks_params`` — per-task param bindings (resolve to an action
+            param or a literal). Same shape used everywhere else for parameter passing.
+        param_filter_rows: ``ly_act_params_filters`` — filter rules for the input params (the
+            value pickers' WHERE binds — same shape as ly_dlg_filters).
+        sql_rows: ``ly_qry_sql`` joined with ``ly_query`` — used to resolve ``evt_query_id`` +
+            ``evt_query_crud`` to a v2 query name (matching what :func:`migrate_sql_queries`
+            emits). An unresolvable task keeps just the v1 ids + a ``warning`` field so the
+            operator notices.
+        app_name: the app these actions belong to — the TOML block is keyed under it.
+    """
+    # ── resolve (query_id, raw_crud) → v2 query name (matches migrate_sql_queries) ─────────
+    name_by_qid_crud: dict[tuple[int, str], str] = {}
+    label_by_qid: dict[int, str] = {}
+    for r in sql_rows:
+        qid = r.get("query_id")
+        if qid is None:
+            continue
+        try:
+            qid = int(qid)
+        except (TypeError, ValueError):
+            continue
+        label = (r.get("query_label") or "").strip()
+        if label:
+            label_by_qid.setdefault(qid, label)
+        raw_crud = str(r.get("query_crud") or "").strip().upper()
+        our_crud = _SCREEN_CRUD_MAP.get(raw_crud)
+        if not our_crud:
+            continue
+        # v2 name uses the **raw** crud, same as migrate_sql_queries (so a v1 SELECT becomes
+        # `..._select`, not `..._get`).
+        name_crud = raw_crud or our_crud
+        v2_name = slugify(f"{label_by_qid.get(qid) or f'q{qid}'}_{name_crud}", fallback=f"q{qid}_{name_crud.lower()}")
+        name_by_qid_crud.setdefault((qid, raw_crud), v2_name)
+
+    # ── group rows by action ────────────────────────────────────────────────────────────────
+    tasks_by_act: dict[int, list[Mapping[str, Any]]] = {}
+    for r in task_rows:
+        aid = r.get("act_id")
+        if aid is None:
+            continue
+        tasks_by_act.setdefault(int(aid), []).append(r)
+    branches_by_act: dict[int, dict[int, str]] = {}    # {act_id: {brc_id: label}}
+    for r in branch_rows:
+        aid, bid = r.get("act_id"), r.get("brc_id")
+        if aid is None or bid is None:
+            continue
+        label = (r.get("brc_label") or "").strip()
+        branches_by_act.setdefault(int(aid), {})[int(bid)] = label
+    params_by_act: dict[int, list[Mapping[str, Any]]] = {}
+    for r in param_rows:
+        aid = r.get("act_id")
+        if aid is None:
+            continue
+        params_by_act.setdefault(int(aid), []).append(r)
+    task_params_by_evt: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+    for r in task_param_rows:
+        aid, eid = r.get("act_id"), r.get("evt_id")
+        if aid is None or eid is None:
+            continue
+        task_params_by_evt.setdefault((int(aid), int(eid)), []).append(r)
+    param_filters_by_var: dict[tuple[int, str], list[Mapping[str, Any]]] = {}
+    for r in param_filter_rows:
+        aid = r.get("act_id")
+        var = (r.get("map_var") or "").strip()
+        if aid is None or not var:
+            continue
+        param_filters_by_var.setdefault((int(aid), var), []).append(r)
+
+    # ── build the TOML dict, action by action ──────────────────────────────────────────────
+    actions: dict[str, dict[str, Any]] = {}
+    taken: set[str] = set()
+    for ar in action_rows:
+        try:
+            act_id = int(ar["act_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        label = (ar.get("act_label") or "").strip()
+        sid = _uniquify(slugify(label, fallback=f"action_{act_id}"), taken)
+        out: dict[str, Any] = {"id": sid, "v1_act_id": act_id}
+        if label:
+            out["label"] = label
+
+        # Branches: a flat list of {brc_id, brc_label} so the operator can read the graph.
+        branches = branches_by_act.get(act_id, {})
+        if branches:
+            out["branches"] = [{"id": bid, "label": branches[bid]} for bid in sorted(branches)]
+
+        # Action-level input params — the workflow's "arguments". Carry the v1 metadata verbatim;
+        # the operator decides whether each becomes a ScreenField or a constant on the wired action.
+        params = params_by_act.get(act_id, [])
+        if params:
+            params_out: list[dict[str, Any]] = []
+            for p in params:
+                var = (p.get("map_var") or "").strip()
+                if not var:
+                    continue
+                entry: dict[str, Any] = {"name": var}
+                for src, dst in (
+                    ("map_dir", "direction"), ("map_display", "display"),
+                    ("map_rules", "rules"), ("map_rules_values", "rules_values"),
+                    ("map_default", "default"),
+                ):
+                    v = (p.get(src) or "")
+                    if isinstance(v, str):
+                        v = v.strip()
+                    if v:
+                        entry[dst] = v
+                # Filter rules (ly_act_params_filters) — same VALUE/DD shape as ly_dlg_filters.
+                flts = param_filters_by_var.get((act_id, var), [])
+                if flts:
+                    fbinds: list[dict[str, Any]] = []
+                    for f in flts:
+                        ftype = (f.get("flt_type") or "").strip().upper()
+                        target_p = (f.get("flt_target") or "").strip()
+                        if not target_p:
+                            continue
+                        if ftype == "VALUE":
+                            v = f.get("flt_value")
+                            if v is None or str(v).strip() == "":
+                                continue
+                            fbinds.append({"param": target_p, "value": str(v)})
+                        elif ftype == "DD":
+                            src_p = (f.get("flt_source") or "").strip()
+                            if not src_p:
+                                continue
+                            fbinds.append({"param": target_p, "source": src_p})
+                    if fbinds:
+                        entry["filters"] = fbinds
+                params_out.append(entry)
+            if params_out:
+                out["params"] = params_out
+
+        # Tasks: in seq order, each carries the v1 evt_type + label + branch refs + query-or-api
+        # resolution. Querying gets ``query = "<v2-name>"`` (when resolvable) so the operator can
+        # paste it into a run_query action. An unresolvable task keeps ``v1_query_id`` + a warning.
+        tasks_out: list[dict[str, Any]] = []
+        for t in tasks_by_act.get(act_id, []):
+            try:
+                evt_id = int(t["evt_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            ttype = (t.get("evt_type") or "").strip().upper()
+            task: dict[str, Any] = {"seq": int(t.get("evt_seq") or 0), "v1_evt_id": evt_id}
+            if ttype:
+                task["type"] = ttype
+            tlabel = (t.get("evt_label") or "").strip()
+            if tlabel:
+                task["label"] = tlabel
+            # Branch membership / IF jumps (only present on tasks that have them).
+            brc_id = t.get("evt_brc_id")
+            if brc_id is not None and str(brc_id).strip() != "":
+                try:
+                    task["belongs_to_branch"] = int(brc_id)
+                except (TypeError, ValueError):
+                    pass
+            for src, dst in (("evt_brc_true", "on_true_branch"), ("evt_brc_false", "on_false_branch")):
+                v = t.get(src)
+                if v is not None and str(v).strip() != "":
+                    try:
+                        task[dst] = int(v)
+                    except (TypeError, ValueError):
+                        pass
+            # LOOP: carry the array source verbatim so the operator can re-implement (v2 has no
+            # built-in LOOP; the manual translation is "iterate in the calling code").
+            loop = str(t.get("evt_loop") or "").upper()
+            if loop in _YES_FLAGS:
+                task["loop"] = True
+                arr = (t.get("evt_loop_array") or "").strip()
+                if arr:
+                    task["loop_over"] = arr
+
+            # Resolve the query / api target — same convention as migrate_sql_queries' naming.
+            qid_raw = t.get("evt_query_id")
+            if qid_raw is not None and str(qid_raw).strip() != "":
+                try:
+                    qid = int(qid_raw)
+                except (TypeError, ValueError):
+                    qid = None
+                if qid is not None:
+                    raw_crud = (t.get("evt_query_crud") or "").strip().upper()
+                    v2 = name_by_qid_crud.get((qid, raw_crud))
+                    if v2:
+                        task["query"] = v2
+                    else:
+                        task["v1_query_id"] = qid
+                        task["v1_query_crud"] = raw_crud or None
+                        task["warning"] = f"v1 query_id {qid} (crud={raw_crud!r}) — no matching v2 query in connectors.toml"
+            api_id = t.get("evt_api_id")
+            if api_id is not None and str(api_id).strip() != "":
+                try:
+                    task["v1_api_id"] = int(api_id)
+                except (TypeError, ValueError):
+                    pass
+
+            # Per-task param bindings — value vs source vs reference-to-action-param. The
+            # convention varies on v1 (map_type can be DD / VALUE / FIELD / INPUT etc.); we
+            # capture the raw shape so the operator can read it.
+            tparams = task_params_by_evt.get((act_id, evt_id), [])
+            if tparams:
+                pb_out: list[dict[str, Any]] = []
+                for p in tparams:
+                    var = (p.get("map_var") or "").strip()
+                    if not var:
+                        continue
+                    mt = (p.get("map_type") or "").strip().upper()
+                    mv = (p.get("map_value") or "").strip()
+                    entry: dict[str, Any] = {"param": var}
+                    # Treat ``INPUT.<...>`` map_value as a reference to an action-level input param.
+                    if mv.upper().startswith("INPUT."):
+                        entry["source"] = mv.split(".", 1)[1] or mv
+                    elif mt == "DD" and mv:
+                        entry["source"] = mv
+                    elif mv:
+                        entry["value"] = mv
+                    if mt and mt not in ("DD", "VALUE"):
+                        entry["v1_map_type"] = mt   # FIELD / INPUT / etc. — operator decides
+                    pb_out.append(entry)
+                if pb_out:
+                    task["param_binds"] = pb_out
+            tasks_out.append(task)
+        if tasks_out:
+            out["tasks"] = tasks_out
+
+        actions[sid] = out
+    return {"migrated_actions": {app_name: actions}}
+
+
 def migrate_screens(
     table_rows: Iterable[Mapping[str, Any]],
     dialog_rows: Iterable[Mapping[str, Any]] = (),

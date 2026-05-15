@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from liberty.migrations.source import (
     make_engine,
+    read_actions,
     read_api,
     read_applications,
     read_column_hints,
@@ -18,6 +19,7 @@ from liberty.migrations.source import (
 )
 from liberty.migrations.v1 import (
     merge_connectors,
+    migrate_actions,
     migrate_api,
     migrate_column_hints,
     migrate_column_visibility,
@@ -39,6 +41,7 @@ from liberty.migrations.v1 import (
 __all__ = [
     "make_engine",
     "merge_connectors",
+    "migrate_actions",
     "migrate_api",
     "migrate_column_hints",
     "migrate_column_visibility",
@@ -53,6 +56,7 @@ __all__ = [
     "migrate_sql_queries",
     "migrate_table_filters",
     "migrate_table_meta",
+    "read_actions",
     "read_api",
     "read_applications",
     "read_context_menus",

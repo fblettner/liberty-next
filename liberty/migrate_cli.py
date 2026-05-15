@@ -42,6 +42,7 @@ import sys
 from liberty.migrations import (
     make_engine,
     merge_connectors,
+    migrate_actions,
     migrate_api,
     migrate_column_hints,
     migrate_column_visibility,
@@ -56,6 +57,7 @@ from liberty.migrations import (
     migrate_lookup_param_names,
     migrate_table_filters,
     migrate_table_meta,
+    read_actions,
     read_api,
     read_applications,
     read_context_menus,
@@ -97,6 +99,16 @@ async def _build(args: argparse.Namespace) -> dict:
             )
         if args.command == "menu":
             return migrate_menus(*await read_menus(engine), app_name=args.connector)
+        if args.command == "actions":
+            # Pull every v1 actions table + ly_qry_sql (so QUERY tasks resolve to v2 query names).
+            action_rows, task_rows, branch_rows, param_rows, task_param_rows, param_filter_rows = (
+                await read_actions(engine)
+            )
+            _, sql_rows = await read_sql_queries(engine)
+            return migrate_actions(
+                action_rows, task_rows, branch_rows, param_rows, task_param_rows, param_filter_rows,
+                sql_rows=sql_rows, app_name=args.connector,
+            )
         if args.command == "screen":
             # Pull ly_cdn_params for per-field `visible_when` conditions, plus the v1 context-menu
             # tables (ly_ctxmenus / ly_ctx_val / ly_ctx_filters) so each screen with a
@@ -169,6 +181,21 @@ async def _build(args: argparse.Namespace) -> dict:
 
 
 def _summary(data: dict, *, command: str) -> str:
+    if command == "actions":
+        apps = data.get("migrated_actions") or {}
+        app = next(iter(apps), "?")
+        actions = apps.get(app) or {}
+        n = len(actions)
+        n_tasks = sum(len(a.get("tasks") or []) for a in actions.values())
+        n_branches = sum(len(a.get("branches") or []) for a in actions.values())
+        n_params = sum(len(a.get("params") or []) for a in actions.values())
+        n_warnings = sum(1 for a in actions.values() for t in (a.get("tasks") or []) if t.get("warning"))
+        return (f"# migrated: {n} action(s) for [migrated_actions.{app}] — {n_tasks} task(s), "
+                f"{n_branches} branch(es), {n_params} action-level param(s), "
+                f"{n_warnings} unresolved task target(s) — "
+                f"REVIEW: v2 has no IF/LOOP/branch runtime; the operator hand-wires the parts that "
+                f"v2's Action union supports (run_query / call_api / notify / refresh) via the "
+                f"screen builder. Put this at config/migrated_actions.toml as a reference dump.")
     if command == "dictionary":
         conns = data.get("connectors") or {}
         scope, section = (
@@ -283,6 +310,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("dictionary", "migrate ly_dictionary (+ ly_dictionary_l) → dictionary.toml"),
         ("menu", "migrate ly_menus (+ ly_menus_l) → menus.toml"),
         ("screen", "migrate ly_tables + ly_dlg_frm/_tab/_col/_filters → screens.toml"),
+        ("actions", "dump ly_actions named workflows → migrated_actions.toml (for hand-wiring)"),
     ]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
@@ -296,6 +324,9 @@ def build_parser() -> argparse.ArgumentParser:
             p.set_defaults(prefix="", dbtype=None, default_language="en")
         elif name == "screen":
             p.add_argument("--connector", required=True, help="the app/connector these screens belong to ([screens.<name>])")
+            p.set_defaults(prefix="", dbtype=None, default_language="en")
+        elif name == "actions":
+            p.add_argument("--connector", required=True, help="the app/connector these actions belong to ([migrated_actions.<name>])")
             p.set_defaults(prefix="", dbtype=None, default_language="en")
         else:
             p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
