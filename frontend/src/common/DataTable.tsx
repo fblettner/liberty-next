@@ -467,7 +467,13 @@ export function DataTable<T extends object>({
       </ToolbarRow>
 
       <TableScroll>
-        <Table style={{ width: table.getTotalSize() }}>
+        {/* Stretch-when-narrow, scroll-when-wide. ``minWidth`` = sum of natural column widths
+            keeps each column at least content-fit, but the styled ``width: 100%`` lets the
+            table fill the scroll container when the total is *less* than the viewport — no
+            empty space on the right of narrow results. Wider-than-viewport tables overflow
+            past 100% (minWidth wins) and the surrounding TableScroll handles the horizontal
+            scrollbar. */}
+        <Table style={{ minWidth: table.getTotalSize() }}>
           <thead>
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
