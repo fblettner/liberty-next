@@ -17,7 +17,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Field, Input, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Row, SearchSelect, SpinnerRing } from '../../common'
+import { Banner, Button, Checkbox, Field, Input, ModalBody, ModalFooter, ModalHeader, Overlay, Row, ScreenDialogModal, SearchSelect, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { Action, FieldCondition, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
@@ -62,12 +62,6 @@ const ReadOnlyBox = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
   white-space: pre-wrap; overflow-wrap: anywhere;
 `
-const Checkbox = styled.label`
-  display: inline-flex; align-items: center; gap: 8px; height: 32px;
-  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & input { width: 16px; height: 16px; cursor: pointer; }
-`
-
 // ── widget choice mirrors ResultTable.editCtrlOf — keep both in sync. ─────────
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
 function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
@@ -167,13 +161,11 @@ function FieldRow({
     const trueV = column.rule.true_value
     const checked = textValue === trueV
     widget = (
-      <Checkbox>
-        <input
-          type="checkbox" checked={checked}
-          onChange={(e) => onChange(field.name, e.target.checked ? trueV : null)}
-        />
-        <span>{checked ? trueV : t('common.no')}</span>
-      </Checkbox>
+      <Checkbox
+        checked={checked}
+        onChange={(v) => onChange(field.name, v ? trueV : null)}
+        label={checked ? trueV : t('common.no')}
+      />
     )
   } else if (column?.rule?.kind === 'enum') {
     const options = column.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
@@ -476,7 +468,7 @@ export function ScreenDialog({
 
   return (
     <Overlay onClick={onClose}>
-      <Modal style={{ width: 720, maxWidth: '95vw' }} onClick={(e) => e.stopPropagation()}>
+      <ScreenDialogModal onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           {mode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
         </ModalHeader>
@@ -531,7 +523,7 @@ export function ScreenDialog({
             </Button>
           </Row>
         </ModalFooter>
-      </Modal>
+      </ScreenDialogModal>
     </Overlay>
   )
 }

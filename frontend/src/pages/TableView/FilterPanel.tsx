@@ -167,7 +167,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
         <HeadToggle type="button" onClick={() => setOpen((o) => !o)}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Filter size={13} />
-          {t('table.filters')}{activeCount ? <span className="count"> ({activeCount})</span> : null}
+          {t('table.advancedFilters')}{activeCount ? <span className="count"> ({activeCount})</span> : null}
         </HeadToggle>
         {activeCount > 0 && (
           <ClearBtn type="button" onClick={onClearAll} title={t('table.clearFilters')}>

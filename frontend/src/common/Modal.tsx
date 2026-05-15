@@ -55,6 +55,20 @@ export const ModalBody = styled.div`
   color: ${colors.text.secondary};
 `
 
+/** A Modal preset for long, multi-tab forms (ScreenDialog and any future "fill out a record"
+ *  flow). Locks the frame's dimensions so switching tabs scrolls the body instead of jolting
+ *  the dialog up/down — the user complained about chasing a moving Save button when tabs had
+ *  different field counts. Uses a fixed height (not min-height) for that reason: tab A with
+ *  3 fields and tab B with 15 fields render in the same envelope, ModalBody scrolls when needed. */
+export const ScreenDialogModal = styled(Modal)`
+  width: min(900px, 95vw);
+  height: min(700px, 90vh);
+  /* Override Modal's flexible min-* so the locked size wins on small content (an "Add row" with
+     only required fields filled-in keeps the same footprint as a full Edit). */
+  min-width: 0;
+  min-height: 0;
+`
+
 export const ModalFooter = styled.div`
   display: flex;
   justify-content: flex-end;

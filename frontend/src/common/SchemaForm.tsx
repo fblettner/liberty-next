@@ -17,6 +17,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
+import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
 import { SqlEditor } from './SqlEditor'
@@ -188,7 +189,6 @@ function resolveUnionBranch(s: JsonSchema, value: Record<string, unknown> | unde
 
 // ── small styled bits ───────────────────────────────────────────────────────
 const Hint = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 3px; line-height: 1.4;`
-const Bool = styled.label`display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: ${fontSize.base}; color: ${colors.text.secondary}; & input { accent-color: ${colors.blue.main}; }`
 const Row = styled.div`display: flex; gap: 6px; align-items: center; margin-bottom: 5px;`
 const MiniBtn = styled.button`
   display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border-radius: ${radius.sm};
@@ -555,7 +555,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           )
         } else if (sub.type === 'boolean') {
           const checked = cur === undefined ? Boolean(sub.default) : Boolean(cur)
-          control = <Bool><input type="checkbox" checked={checked} onChange={(e) => set(key, e.target.checked)} /> {checked ? 'enabled' : 'disabled'}</Bool>
+          control = <Checkbox checked={checked} onChange={(v) => set(key, v)} label={checked ? 'enabled' : 'disabled'} />
         } else if (sub.type === 'array') {
           const items = effective(sub.items ?? {}, allDefs)
           // `cur` may be a single object for the `T | list[T] | None` shape (a hand-written single rule)

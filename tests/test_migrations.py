@@ -1320,6 +1320,34 @@ def test_migrate_screens_with_row_menus() -> None:
     parse_screens(out)
 
 
+def test_migrate_screens_drops_self_referential_row_menu_items() -> None:
+    """v1's contextual menu often carried a "Display Properties" entry pointing at the same
+    FormsDialog the row click also opens. In v2 a row click opens the Screen's own dialog, so a
+    NavigateAction targeting this screen's own ``read_query`` (on the same connector) is
+    redundant — strip it. A genuine drill-away (different ``to``, or a cross-connector hop) survives."""
+    table_rows = [
+        # Screen "users" reads from query 10 → migrate_sql_queries names that `users_get`
+        # (the raw v1 `query_crud` rides through). The redundant ctx menu item targets the
+        # same query — drop it. The other items survive.
+        {"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users"},
+    ]
+    row_menus = {
+        1: [
+            # Redundant — same connector (implicit), same query as the screen's own read.
+            {"id": "display_properties", "type": "navigate", "to": "users_get", "label": "Display Properties"},
+            # Survives — different query on the same connector.
+            {"id": "display_roles", "type": "navigate", "to": "roles_get", "label": "Display Roles"},
+            # Survives — same query but a *different* connector (cross-pool drill).
+            {"id": "see_in_other", "type": "navigate", "to": "users_get", "connector": "jdedwards",
+             "label": "See in JDE"},
+        ],
+    }
+    out = migrate_screens(table_rows, sql_rows=_SCR_SQL, row_menus=row_menus, app_name="nomasx1")
+    screens = out["screens"]["nomasx1"]
+    assert [a["id"] for a in screens["users"]["row_menu"]] == ["display_roles", "see_in_other"]
+    parse_screens(out)
+
+
 # --------------------------------------------------------------------------- #
 # DB readers (against a minimal v1 schema in SQLite)
 # --------------------------------------------------------------------------- #

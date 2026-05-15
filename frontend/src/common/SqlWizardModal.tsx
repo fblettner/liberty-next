@@ -13,6 +13,7 @@ import styled from '@emotion/styled'
 import { Plus, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from './Button'
+import { Checkbox } from './Checkbox'
 import { Field, Input, PasswordInput as _pw } from './Input'  // PasswordInput unused — silence the re-export
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from './Modal'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
@@ -41,10 +42,9 @@ const ColGrid = styled.div`
   gap: 4px 12px; max-height: 200px; overflow-y: auto; padding: 6px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
 `
-const ColCheck = styled.label`
-  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-family: ${fonts.mono};
+const ColCheck = styled.div`
+  display: inline-flex; align-items: center; gap: 6px; font-family: ${fonts.mono};
   font-size: ${fontSize.sm}; color: ${colors.text.secondary};
-  & input { accent-color: ${colors.blue.main}; }
   & .type { color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
 `
 const RowBar = styled.div`display: flex; gap: 6px; align-items: center;`
@@ -118,11 +118,9 @@ export function SqlWizardModal({ schema, initialTable, onInsert, onCancel }: Sql
                   const on = cols.has(c.name)
                   return (
                     <ColCheck key={c.name}>
-                      <input type="checkbox" checked={on} onChange={() => {
+                      <Checkbox checked={on} onChange={() => {
                         const next = new Set(cols); if (on) next.delete(c.name); else next.add(c.name); setCols(next)
-                      }} />
-                      {c.name}
-                      {c.type && <span className="type">· {c.type}</span>}
+                      }} label={<>{c.name}{c.type && <span className="type"> · {c.type}</span>}</>} />
                     </ColCheck>
                   )
                 })}

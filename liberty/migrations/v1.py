@@ -1939,8 +1939,25 @@ def migrate_screens(
         # whose items :func:`migrate_context_menus` has already resolved to NavigateActions keyed
         # by ``tbl_id``. Inline the list onto the screen; an empty entry is left off so the
         # builder shows "no row-menu actions yet".
+        #
+        # Drop self-referential entries: v1's contextual menu often carried a "Display Properties"
+        # item that opened the same FormsDialog the row click *also* opens. In v2 a row click
+        # opens the Screen's own dialog, so a NavigateAction targeting this screen's own
+        # ``read_query`` (on the same connector) is now redundant — strip it so the menu only
+        # holds genuine drill-aways (other queries / cross-connector navigation).
         if row_menus is not None and tbl_id in row_menus:
-            items = row_menus[tbl_id]
+            own_query = screen.get("read_query")
+            own_conn = screen.get("connector")  # None when same as app_name (implicit)
+            items = [
+                it for it in row_menus[tbl_id]
+                # Same shape as ``NavigateAction.model_dump`` — keys may be absent. A non-navigate
+                # action can't be self-referential by definition (no `to`), so it always survives.
+                if not (
+                    it.get("type") == "navigate"
+                    and it.get("to") == own_query
+                    and it.get("connector") == own_conn
+                )
+            ]
             if items:
                 screen["row_menu"] = items
 
