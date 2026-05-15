@@ -8,12 +8,15 @@ import tomllib
 import pytest
 
 from liberty.screens import (
+    CallApiAction,
     FieldCondition,
     FormTab,
+    NavigateAction,
     NestedFormTab,
     NestedTableTab,
     NotifyAction,
     ParamBind,
+    PromptField,
     RefreshAction,
     RunQueryAction,
     Screen,
@@ -145,6 +148,81 @@ def test_action_discriminated_union_round_trips() -> None:
     rq0 = actions[0]
     assert rq0.type == "run_query" and rq0.query == "apps_jde_post"  # type: ignore[union-attr]
     assert rq0.param_binds == [ParamBind(param="APP_ID", source="apps_id")]  # type: ignore[union-attr]
+
+
+def test_prompt_field_shape_and_round_trip() -> None:
+    """``PromptField`` mirrors ``ScreenField`` (same ``dd``/``label``/``required``/``colspan``/
+    ``default``/``lookup_param_binds``/conditional rules) but stands on its own — no backing
+    column. ``name`` is required (becomes the ParamBind source target). Conditional rules carry
+    through. ``extra='forbid'`` keeps the shape tight."""
+    pf = PromptField(
+        name="MUSE",
+        dd="USR_ID",
+        label="User",
+        format="text",
+        required=True,
+        colspan=2,
+        default="ANON",
+        lookup_param_binds=[ParamBind(param="POOL", value="JDE")],
+        visible_when=[FieldCondition(field="TYPE", value="USER")],
+    )
+    assert pf.name == "MUSE" and pf.required and pf.colspan == 2
+    assert pf.lookup_param_binds[0].value == "JDE"
+    assert pf.visible_when[0].field == "TYPE"
+    # name required
+    with pytest.raises(Exception):
+        PromptField()  # type: ignore[call-arg]
+    # extra fields rejected — keeps the wire shape tight
+    with pytest.raises(Exception):
+        PromptField(name="X", oops=True)  # type: ignore[call-arg]
+
+
+def test_promptable_actions_carry_prompt_fields() -> None:
+    """The three ParamBind-bearing variants (``run_query`` / ``call_api`` / ``navigate``) accept
+    a ``prompt_fields`` list, an optional ``prompt_title`` / ``prompt_l`` / ``prompt_cols`` /
+    ``prompt_submit_label``. Non-ParamBind-bearing variants (notify / refresh / confirm / set_field)
+    don't — ``extra='forbid'`` rejects them."""
+    rq = RunQueryAction(
+        id="create_role", label="Create Role", query="roles_post",
+        prompt_title="New role", prompt_cols=2,
+        prompt_l={"fr": "Nouveau rôle"},
+        prompt_fields=[PromptField(name="MUSE", required=True), PromptField(name="UPMJ")],
+        param_binds=[ParamBind(param="muse", source="MUSE")],
+    )
+    assert [pf.name for pf in rq.prompt_fields] == ["MUSE", "UPMJ"]
+    assert rq.prompt_title == "New role" and rq.prompt_l == {"fr": "Nouveau rôle"}
+    # call_api + navigate carry the same mixin
+    ca = CallApiAction(id="x", connector="srv", endpoint="ping", prompt_fields=[PromptField(name="A")])
+    nav = NavigateAction(id="y", to="users_get", prompt_fields=[PromptField(name="B")])
+    assert ca.prompt_fields[0].name == "A" and nav.prompt_fields[0].name == "B"
+    # notify / refresh / etc. reject prompt_fields (no mixin) — keeps stub variants clean
+    with pytest.raises(Exception):
+        NotifyAction(id="n", message="m", prompt_fields=[])  # type: ignore[call-arg]
+    with pytest.raises(Exception):
+        RefreshAction(id="r", prompt_fields=[])  # type: ignore[call-arg]
+    # Round-trip through ScreensFile so the discriminated union resolves correctly via TOML.
+    raw = {
+        "screens": {
+            "njde": {
+                "users_screen": {
+                    "read_query": "users_get",
+                    "actions": [
+                        {
+                            "id": "create_user", "type": "run_query", "query": "users_post",
+                            "prompt_title": "New user",
+                            "prompt_fields": [{"name": "USR_ID", "required": True}, {"name": "EMAIL"}],
+                            "param_binds": [{"param": "usr_id", "source": "USR_ID"}],
+                        },
+                    ],
+                },
+            },
+        },
+    }
+    sf = parse_screens(raw)
+    a = sf.screens["njde"]["users_screen"].actions[0]
+    assert a.type == "run_query" and a.prompt_title == "New user"
+    assert [pf.name for pf in a.prompt_fields] == ["USR_ID", "EMAIL"]  # type: ignore[union-attr]
+    assert a.prompt_fields[0].required is True  # type: ignore[union-attr]
 
 
 def test_field_condition_and_per_field_rules() -> None:

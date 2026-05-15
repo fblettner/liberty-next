@@ -185,6 +185,124 @@ def test_get_one_screen_returns_full_body_and_hides_unreadable(app) -> None:
 def test_screens_route_requires_auth(app) -> None:
     with TestClient(app) as client:
         assert client.get("/api/screens").status_code == 401
+
+
+def _connectors_with_lookup_query(db_url: str) -> str:
+    """Like ``_connectors_toml`` but also exposes a ``roles_lookup`` query the dictionary's
+    LOOKUP rule below references — so the prompt-resolution test can ask the screens API to
+    resolve a PromptField.dd whose rule references it."""
+    return textwrap.dedent(
+        f"""
+        [pools.default]
+        url = "{db_url}"
+
+        [connectors.app1]
+        type = "sql"
+        pool = "default"
+        [[connectors.app1.queries]]
+        name = "users_get"
+        sql = "SELECT 1 AS id"
+        [[connectors.app1.queries]]
+        name = "roles_lookup"
+        sql = "SELECT 1 AS id"
+        [[connectors.app1.queries]]
+        name = "create_user_run"
+        sql = "INSERT INTO ghost VALUES (:USR_ID, :ROLE)"
+        writable = true
+        """
+    )
+
+
+def _screens_with_prompt_action() -> str:
+    return textwrap.dedent(
+        """
+        [screens.app1.users]
+        label = "Users"
+        read_query = "users_get"
+        # A toolbar action with prompt_fields. The dd on each PromptField tells the screens
+        # API to resolve a display rule against the dictionary below — USR_ID has format='text',
+        # ROLE has a LOOKUP rule.
+        [[screens.app1.users.actions]]
+        id = "create_user"
+        type = "run_query"
+        label = "Create User"
+        query = "create_user_run"
+        prompt_title = "New user"
+        prompt_cols = 2
+        [[screens.app1.users.actions.prompt_fields]]
+        name = "USR_ID"
+        dd = "USR_ID"
+        required = true
+        [[screens.app1.users.actions.prompt_fields]]
+        name = "ROLE"
+        dd = "ROLE_ID"
+        """
+    )
+
+
+def _dictionary_toml() -> str:
+    return textwrap.dedent(
+        """
+        default_language = "en"
+
+        [entries.USR_ID]
+        label = "User id"
+        format = "text"
+
+        [entries.ROLE_ID]
+        label = "Role"
+        rules = "LOOKUP"
+        rules_values = "ROLES"
+
+        [lookups.ROLES]
+        query = "roles_lookup"
+        connector = "app1"
+        value = "ROLE_ID"
+        label = "ROLE_NAME"
+        """
+    )
+
+
+@pytest.fixture
+def app_with_prompts(tmp_path):
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_with_lookup_query(db_url))
+    (tmp_path / "screens.toml").write_text(_screens_with_prompt_action())
+    (tmp_path / "dictionary.toml").write_text(_dictionary_toml())
+    _seed(db_url)
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(
+            config_path=Path(tmp_path / "connectors.toml"),
+            dictionary_path=Path(tmp_path / "dictionary.toml"),
+        ),
+        screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    return create_app(settings)
+
+
+def test_get_screen_resolves_prompt_field_rules(app_with_prompts) -> None:
+    """Each action's ``prompt_fields`` get their ``dd`` resolved against the shared dictionary
+    at ``GET /api/screens/{app}/{id}`` time — same enrichment ``Column`` carries on read-result
+    columns. The frontend uses ``rule.kind`` to pick the widget (text / number / LOOKUP-combo),
+    so this resolution lets a prompt render a SearchSelect for a ROLE_ID dd without any extra
+    plumbing on the frontend."""
+    with TestClient(app_with_prompts) as client:
+        body = client.get("/api/screens/app1/users", headers=_h(client, "admin")).json()
+        actions = body["actions"]
+        assert len(actions) == 1
+        fields = actions[0]["prompt_fields"]
+        usr, role = fields
+        # USR_ID — plain text entry, label resolved from the dictionary.
+        assert usr["name"] == "USR_ID" and usr["label"] == "User id" and usr["format"] == "text"
+        assert "rule" not in usr  # text format has no display rule
+        # ROLE — LOOKUP rule shipped wire-ready, frontend renders a SearchSelect.
+        assert role["name"] == "ROLE" and role["label"] == "Role"
+        assert role["rule"]["kind"] == "lookup"
+        assert role["rule"]["connector"] == "app1" and role["rule"]["query"] == "roles_lookup"
+        assert role["rule"]["value"] == "ROLE_ID" and role["rule"]["label"] == "ROLE_NAME"
         assert client.get("/api/screens/app1").status_code == 401
         assert client.get("/api/screens/app1/users").status_code == 401
 

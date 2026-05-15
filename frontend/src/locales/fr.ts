@@ -223,6 +223,10 @@ const fr: Resources = {
       noRows: 'Aucune ligne liée.',
     },
   },
+  prompt: {
+    required: 'Veuillez renseigner tous les champs obligatoires.',
+    noFields: 'Aucune saisie requise — cliquez sur Confirmer pour continuer.',
+  },
   http: {
     ok: 'OK',
     failed: 'ÉCHEC',

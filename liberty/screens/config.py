@@ -260,6 +260,76 @@ class NestedTableTab(_ScreenTabBase):
 ScreenTab = Annotated[Union[FormTab, NestedFormTab, NestedTableTab], Field(discriminator="type")]
 
 
+class PromptField(BaseModel):
+    """One input field on the *prompt dialog* shown before an action with ``prompt_fields`` fires —
+    v2's port of v1's ``ly_act_params``. The action declares the inputs it needs from the user (a
+    JDE "Create Role" workflow needs AUUSER / JOBN / MUSE / PID / UPMJ); the runtime opens a small
+    sub-dialog, collects the values, and threads them into the chain's resolution context — every
+    later ``ParamBind`` whose ``source`` matches a prompt field's ``name`` reads from the prompt
+    instead of the parent form / row.
+
+    Shape mirrors :class:`ScreenField` (so the migrator and the builder can reuse the same widgets),
+    but with two practical differences:
+
+    * **No backing column** — ``name`` is the prompt's *own* key (becomes the ParamBind source
+      target); the widget comes from ``dd``/``format`` rather than a read-result column. The
+      backend's screens-API resolves ``dd`` against the shared dictionary and attaches the
+      resulting display rule (BOOLEAN / ENUM / LOOKUP) so the frontend renders the right combo.
+    * **No grid context** — the prompt dialog is its own modal; ``colspan`` still controls the
+      grid spread inside the prompt.
+
+    Conditional rules (``visible_when`` / ``required_when`` / ``disabled_when``) evaluate against
+    *the prompt's own form state*, not the parent dialog's — so a JDE param shown only when
+    another JDE param is "AC" stays consistent inside the sub-dialog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description=(
+            "The prompt field's internal key. Acts as the ParamBind ``source`` target so a sibling "
+            "task in the same chain can read it (e.g. ``{param: 'muse', source: 'MUSE'}``)."
+        ),
+    )
+    dd: str | None = Field(
+        default=None,
+        description="Dictionary entry override (blank → looked up under ``name``).",
+    )
+    label: str | None = Field(default=None, description="Display label on the prompt dialog (overrides the dictionary).")
+    format: str | None = Field(
+        default=None,
+        description=(
+            "Display format override — only used when ``dd`` is unset or the entry has no "
+            "``format``. Same values the dictionary uses (``text`` / ``number`` / ``date`` / "
+            "``password`` / …)."
+        ),
+    )
+    hidden: bool = Field(default=False, description="Hide this prompt field by default (paired with a ``visible_when`` rule).")
+    disabled: bool = Field(default=False, description="Render the prompt field read-only (only meaningful with a ``default``).")
+    required: bool = Field(default=False, description="Prompt cannot be confirmed without a value.")
+    colspan: int | None = Field(default=None, description="How many columns of the prompt grid this field spans.")
+    default: str | None = Field(default=None, description="Pre-fill the prompt with this value.")
+    lookup_param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description=(
+            "Parameter bindings for this prompt field's own *lookup* query — when the field's "
+            "dd resolves to a LOOKUP rule. ``source`` reads another prompt field on the same "
+            "prompt dialog; ``value`` is a literal. v2's port of v1's ``ly_act_params_filters``."
+        ),
+    )
+    visible_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description="Conditional visibility, evaluated against the prompt dialog's own live state.",
+    )
+    required_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description="Conditional required, evaluated against the prompt dialog's own live state.",
+    )
+    disabled_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description="Conditional read-only, evaluated against the prompt dialog's own live state.",
+    )
+
+
 class _ActionBase(BaseModel):
     """Fields shared by every action variant. The ``type`` discriminator selects the variant."""
 
@@ -273,7 +343,41 @@ class _ActionBase(BaseModel):
     )
 
 
-class RunQueryAction(_ActionBase):
+class _PromptableMixin(BaseModel):
+    """Shared by the three ParamBind-bearing action variants (``run_query``, ``call_api``,
+    ``navigate``) — declares the *prompt-before-fire* dialog. When ``prompt_fields`` is non-empty
+    the runtime opens a small sub-dialog *before* this action fires, collects the operator's input,
+    and merges the values into the chain's resolution context (so this action's own ``param_binds``
+    *and* every later action in the same chain can refer to a prompt field via
+    ``source: "<NAME>"``). Cancelling the prompt aborts the chain — the runtime treats it as a soft
+    cancel, no error surfaced; same convention as :class:`ConfirmAction`."""
+
+    prompt_fields: list[PromptField] = Field(
+        default_factory=list,
+        description=(
+            "Inputs to collect from the operator before this action fires (v2's port of v1's "
+            "``ly_act_params``). Empty = no prompt; the action fires immediately."
+        ),
+    )
+    prompt_title: str | None = Field(
+        default=None,
+        description="Title of the prompt sub-dialog (falls back to the action's ``label``).",
+    )
+    prompt_l: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-language overrides for ``prompt_title``: ``{language_code: translated}``.",
+    )
+    prompt_cols: int | None = Field(
+        default=None,
+        description="CSS grid column count for the prompt dialog's fields (default: 2).",
+    )
+    prompt_submit_label: str | None = Field(
+        default=None,
+        description="Caption on the prompt's primary button (default: the action's ``label`` or i18n ``common.confirm``).",
+    )
+
+
+class RunQueryAction(_PromptableMixin, _ActionBase):
     """Execute a connector query (the most common action — v1's ``ly_act_tasks evt_type='QUERY'``).
     ``param_binds`` resolves at call time against the firing context (the dialog form's live values,
     or the row for a row-menu action): same :class:`ParamBind` shape used for lookups.
@@ -294,7 +398,7 @@ class RunQueryAction(_ActionBase):
     )
 
 
-class CallApiAction(_ActionBase):
+class CallApiAction(_PromptableMixin, _ActionBase):
     """Call an API endpoint on a configured API connector — v1's ``evt_type='API'``. The
     endpoint's own ``{{placeholder}}`` template wins; ``param_binds`` is for the *query string /
     body* parameters the endpoint declares as bindable."""
@@ -305,7 +409,7 @@ class CallApiAction(_ActionBase):
     param_binds: list[ParamBind] = Field(default_factory=list)
 
 
-class NavigateAction(_ActionBase):
+class NavigateAction(_PromptableMixin, _ActionBase):
     """Open another TableView (v1's "drill into another table" pattern) — the row-menu staple.
     ``to`` names the target query (matching a ``QueryDef.name`` on ``connector``); the URL the
     runtime opens is ``/sql/{connector}/{to}`` with ``param_binds`` resolved against the firing

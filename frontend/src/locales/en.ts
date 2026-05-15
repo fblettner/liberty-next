@@ -221,6 +221,10 @@ const en = {
       noRows: 'No related rows.',
     },
   },
+  prompt: {
+    required: 'Please fill all required fields.',
+    noFields: 'No inputs required — click Confirm to continue.',
+  },
   http: {
     ok: 'OK',
     failed: 'FAILED',

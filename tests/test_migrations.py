@@ -1532,6 +1532,70 @@ def test_attach_actions_to_screens_scrubs_prior_heuristic_entries() -> None:
     assert [a["id"] for a in scr["dialog"]["on_save"]] == ["user_added_notify"]
 
 
+def test_attach_actions_to_screens_carries_prompt_fields() -> None:
+    """v1 ``ly_act_params`` (a workflow's input arguments) → v2 ``prompt_fields`` on the **first
+    emitted task** of the chain. The runtime opens a sub-dialog before that task fires; the
+    operator's input merges into the chain's resolution context so every subsequent task's
+    ``ParamBind {source: '<NAME>'}`` reads from the prompt values.
+
+    Output-only params (``map_dir = 'OUT'``) are skipped — SP returns, not user inputs.
+    ``map_display = 'N'`` becomes ``hidden = true`` so the field still threads through but
+    doesn't show. ``filters`` (ly_act_params_filters) → ``lookup_param_binds`` on the prompt
+    field, so a LOOKUP-typed prompt field cascades correctly once the operator picks a dd."""
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {
+            "id": "f0092", "read_query": "f0092_get", "update_query": "f0092_put",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+        },
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "create_role": {
+            "id": "create_role", "v1_act_id": 1, "label": "Create Role",
+            # The five inputs the v1 "Create Role" workflow declared. Two flavours mixed:
+            # an IN with a default + filters (the LOOKUP-style picker); a hidden technical
+            # param; an OUT (skipped); a plain INOUT.
+            "params": [
+                {"name": "AUUSER", "direction": "IN", "default": "ADMIN",
+                 "filters": [{"param": "POOL", "value": "JDE"}]},
+                {"name": "JOBN", "direction": "IN"},
+                {"name": "MUSE", "direction": "IN", "display": "N"},  # hidden
+                {"name": "PID", "direction": "INOUT"},
+                {"name": "UPMJ", "direction": "OUT"},   # SP return → skipped
+            ],
+            "tasks": [
+                # Skipped — duplicates update_query, the dialog Save already runs it.
+                {"seq": 1, "type": "QUERY", "query": "f0092_put",
+                 "param_binds": [{"param": "ULUSER", "source": "AUUSER"}]},
+                # The follow-up — this is where prompt_fields land.
+                {"seq": 2, "type": "QUERY", "query": "f00921_put",
+                 "param_binds": [{"param": "MUSE_BIND", "source": "MUSE"}]},
+                {"seq": 3, "type": "QUERY", "query": "f0093_put"},
+            ],
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 1}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f0092", "tbl_label": "Role Description", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
+    assert [a["query"] for a in on_save] == ["f00921_put", "f0093_put"]
+    # Prompt fields land on the FIRST emitted task only — fires once per chain. Subsequent
+    # tasks resolve `source: 'MUSE'` against the merged context (the prompt values).
+    assert "prompt_fields" in on_save[0]
+    assert "prompt_fields" not in on_save[1]
+    names = [pf["name"] for pf in on_save[0]["prompt_fields"]]
+    assert names == ["AUUSER", "JOBN", "MUSE", "PID"]   # OUT 'UPMJ' skipped
+    pf_by_name = {pf["name"]: pf for pf in on_save[0]["prompt_fields"]}
+    assert pf_by_name["AUUSER"]["default"] == "ADMIN"
+    assert pf_by_name["AUUSER"]["lookup_param_binds"] == [{"param": "POOL", "value": "JDE"}]
+    assert pf_by_name["MUSE"].get("hidden") is True
+    # JOBN has no extras — just `name` is enough.
+    assert pf_by_name["JOBN"] == {"name": "JOBN"}
+
+
 def test_migrate_actions_unresolvable_query_keeps_warning() -> None:
     """A task whose ``evt_query_id`` doesn't appear in ``ly_qry_sql`` (or whose crud isn't a
     SCREEN_CRUD_MAP value) keeps the v1 ids + a ``warning`` field so the operator can re-route

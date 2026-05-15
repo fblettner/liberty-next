@@ -20,6 +20,51 @@ export interface FieldCondition {
   value: string | string[]
 }
 
+/** A column-like display rule resolved server-side from a dictionary entry — same shape the
+ *  read-result `Column.rule` carries. Used on a PromptField so the prompt sub-dialog can pick
+ *  the right widget without round-tripping the dictionary lookup. */
+export type DisplayRule =
+  | { kind: 'boolean'; true_value: string }
+  | { kind: 'enum'; values: { value: string; label: string }[] }
+  | {
+      kind: 'lookup'
+      connector: string
+      query: string
+      value: string
+      label: string
+      params?: Record<string, string>
+    }
+
+/** One input field on the *prompt sub-dialog* shown before an action with `prompt_fields` fires.
+ *  v2's port of v1's `ly_act_params`. Shape mirrors `ScreenField`, but with two practical
+ *  differences:
+ *
+ *  - **No backing column** — `name` is the prompt's own key (becomes the ParamBind `source`
+ *    target). The widget comes from `dd` / `format`, resolved server-side on the screens API
+ *    into `label` / `format` / `rule` keys (same shape a Column carries).
+ *  - **No grid context** — the prompt dialog is its own modal; `colspan` controls the grid
+ *    spread inside the prompt.
+ *
+ *  Conditional rules evaluate against the prompt dialog's own form state, not the parent's. */
+export interface PromptField {
+  name: string
+  dd?: string | null
+  label?: string | null
+  format?: string | null
+  /** Server-resolved display rule (BOOLEAN / ENUM / LOOKUP). Absent when the entry has no
+   *  display-relevant rule (or no dd). */
+  rule?: DisplayRule | null
+  hidden?: boolean
+  disabled?: boolean
+  required?: boolean
+  colspan?: number | null
+  default?: string | null
+  lookup_param_binds?: ParamBind[]
+  visible_when?: FieldCondition[]
+  required_when?: FieldCondition[]
+  disabled_when?: FieldCondition[]
+}
+
 /** One field on a dialog tab. `name` references a column of the screen's read query. */
 export interface ScreenField {
   name: string
@@ -91,23 +136,37 @@ export interface NestedTableTab extends TabCommon {
  *  TypeScript's narrowing on `tab.type` gives compile-time exhaustiveness checks. */
 export type ScreenTab = FormTab | NestedFormTab | NestedTableTab
 
+/** Shared by the three ParamBind-bearing variants (`run_query`, `call_api`, `navigate`) — opts
+ *  the action into the *prompt-before-fire* flow. When `prompt_fields` is non-empty the runtime
+ *  opens a sub-dialog before this action runs, collects the user's input, and merges those
+ *  values into the chain's resolution context — every later ParamBind whose `source` matches
+ *  a prompt field's `name` reads from the prompt instead of the parent context. v2's port of
+ *  v1's `ly_act_params`. */
+interface PromptableAction {
+  prompt_fields?: PromptField[]
+  prompt_title?: string | null
+  prompt_l?: Record<string, string>
+  prompt_cols?: number | null
+  prompt_submit_label?: string | null
+}
+
 /** One action attached to a dialog / screen / row. Discriminated union by `type` — every variant
  *  shares `id`, optional `label`, and `stop_on_error`. ParamBind-bearing variants resolve their
  *  binds at call time against the firing context (dialog form state, selected row, …). */
 export type Action =
-  | (ActionCommon & {
+  | (ActionCommon & PromptableAction & {
       type: 'run_query'
       connector?: string | null
       query: string
       param_binds?: ParamBind[]
     })
-  | (ActionCommon & {
+  | (ActionCommon & PromptableAction & {
       type: 'call_api'
       connector: string
       endpoint: string
       param_binds?: ParamBind[]
     })
-  | (ActionCommon & {
+  | (ActionCommon & PromptableAction & {
       type: 'navigate'
       to: string             // target query name on `connector`
       connector?: string | null  // blank → the firing screen's effective connector

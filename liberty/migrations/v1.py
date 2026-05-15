@@ -1699,6 +1699,52 @@ def migrate_context_menus(
     return out, promotable_by_tbl
 
 
+def _params_to_prompt_fields(params: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Convert a v1 action's migrated ``ly_act_params`` rows (as :func:`migrate_actions`
+    emits them under ``[migrated_actions.<app>.<slug>].params``) into v2 :class:`PromptField`
+    dicts ready to attach to a ``RunQueryAction`` / ``CallApiAction`` / ``NavigateAction``.
+
+    Mapping:
+
+    * ``map_dir = 'OUT'`` → skipped (SP return value, not an input).
+    * ``map_display = 'N'`` → ``hidden = True`` (still posted to the action, just not shown).
+    * ``map_default`` → ``default``.
+    * ``filters`` (the v1 ly_act_params_filters rows already collapsed by ``migrate_actions``
+      into ``{param, source}`` / ``{param, value}`` dicts) → ``lookup_param_binds``. v2 only
+      uses these when the prompt field's ``dd`` resolves to a LOOKUP rule — but the bind list
+      survives so the operator picks a LOOKUP-typed dd and gets the cascading filter for free.
+
+    What we **don't** auto-carry: ``map_rules`` / ``map_rules_values`` (LOOKUP / ENUM / SEQUENCE
+    / SYSDATE / …). v1 declared these inline on the param; v2 wires them through the shared
+    dictionary via :attr:`PromptField.dd`. Auto-creating dictionary entries on the fly is out
+    of scope for this slice — the operator picks the right dd in the builder. The widget defaults
+    to plain text until they do.
+    """
+    out: list[dict[str, Any]] = []
+    for p in params:
+        if not isinstance(p, dict):
+            continue
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+        direction = (p.get("direction") or "").strip().upper()
+        if direction == "OUT":
+            continue
+        entry: dict[str, Any] = {"name": name}
+        if (p.get("display") or "").strip().upper() == "N":
+            entry["hidden"] = True
+        default = p.get("default")
+        if default not in (None, ""):
+            entry["default"] = str(default)
+        filters = p.get("filters")
+        if isinstance(filters, list):
+            binds = [f for f in filters if isinstance(f, dict) and f.get("param")]
+            if binds:
+                entry["lookup_param_binds"] = [dict(b) for b in binds]
+        out.append(entry)
+    return out
+
+
 def migrate_actions(
     action_rows: Iterable[Mapping[str, Any]],
     task_rows: Iterable[Mapping[str, Any]] = (),
@@ -2069,9 +2115,17 @@ def attach_actions_to_screens(
     def _action_chain(a: Mapping[str, Any], skip_query: str | None = None) -> list[dict[str, Any]]:
         """Convert a migrated v1 action's tasks into a list of v2 ``Action`` dicts. ``skip_query``
         drops the first task whose query matches (used to avoid re-running the screen's own
-        update/insert when the dialog's main save is already the action's first step)."""
+        update/insert when the dialog's main save is already the action's first step).
+
+        v1 action-level ``ly_act_params`` (the workflow's "arguments") become
+        :class:`PromptField`\\ s on the **first emitted task**: the operator fills the inputs
+        once, the values feed into the chain's resolution context, and every subsequent task's
+        ``ParamBind {source: '<NAME>'}`` reads from the merged prompt values. Output-only
+        params (``map_dir = 'OUT'``) are skipped — those are SP returns, not user inputs."""
         v1_act_id = int(a["v1_act_id"])
         slug = a.get("id") or f"action_{v1_act_id}"
+        prompt_fields = _params_to_prompt_fields(a.get("params") or [])
+        prompt_attached = False
         out: list[dict[str, Any]] = []
         skip_consumed = False
         step = 0
@@ -2104,8 +2158,15 @@ def attach_actions_to_screens(
             pb = t.get("param_binds")
             if pb:
                 entry["param_binds"] = list(pb)
+            if prompt_fields and not prompt_attached:
+                # Attach prompts to the first task only — fires once per chain.
+                entry["prompt_fields"] = list(prompt_fields)
+                prompt_attached = True
             out.append(entry)
             step += 1
+        # Edge case: a chain with prompt_fields but every task either skipped or non-query (API-only).
+        # The notify placeholder above carries no prompt_fields (it's a stub variant). The prompt is
+        # silently dropped — operator notices via the warning + migrated_actions.toml entry.
         return out
 
     # ── walk the event junction; attach each action's chain to the right screen ────────────
@@ -2504,6 +2565,13 @@ def migrate_screens(
             pb = primary.get("param_binds")
             if pb:
                 entry["param_binds"] = list(pb)
+            # v1 ``ly_act_params`` → v2 ``prompt_fields``: the manual workflow asks the operator
+            # for its inputs before firing (NOMAJDE "Create Role" needs AUUSER/JOBN/MUSE/PID/UPMJ).
+            # See :func:`_params_to_prompt_fields` for the mapping caveats — output params drop,
+            # inline rules (LOOKUP/ENUM) need a dd in the builder for richer widgets.
+            prompts = _params_to_prompt_fields(a.get("params") or [])
+            if prompts:
+                entry["prompt_fields"] = prompts
             return entry
         # API-only / fully unresolved — notify placeholder pointing the operator at the dump.
         return {

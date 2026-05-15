@@ -19,11 +19,26 @@ import { Save, Trash2, X, Zap } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
-import type { Action, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
 import { evalConditions, originalKeys, resolveBindList, type Row, withUpper } from './dialogHelpers'
+import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
+
+/** A ParamBind-bearing action with a non-empty ``prompt_fields`` list. The runner pauses on
+ *  these to collect operator input and merge the result into the chain's running context. */
+function actionPrompt(a: Action): { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null } | null {
+  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'navigate') return null
+  const fields = a.prompt_fields ?? []
+  if (fields.length === 0) return null
+  return {
+    fields,
+    title: a.prompt_title ?? a.label ?? null,
+    cols: a.prompt_cols ?? null,
+    submitLabel: a.prompt_submit_label ?? a.label ?? null,
+  }
+}
 
 /** Narrow a ScreenTab to FormTab — the original "grid of fields" kind. A tab without a
  *  ``type`` discriminator is treated as a form (matches `parse_screens` backward compat).
@@ -162,6 +177,39 @@ export function ScreenDialog({
     setFormValues((p) => ({ ...p, [name]: v }))
   }, [])
 
+  // Imperative-from-async prompt plumbing. The chain runner pauses on actions with
+  // ``prompt_fields`` and awaits ``requestPrompt`` — which sets ``pendingPrompt`` state +
+  // stows a resolver in the ref. The mounted ActionPromptDialog reads the state; its onSubmit
+  // resolves with the entered values, its onCancel resolves with ``null`` (chain aborts soft —
+  // no error banner). The ref pattern keeps ``requestPrompt`` referentially stable so the
+  // runner's useCallback deps don't churn on every state change.
+  const [pendingPrompt, setPendingPrompt] = useState<
+    | { fields: PromptField[]; title: string; cols: number | null; submitLabel: string | null }
+    | null
+  >(null)
+  const promptResolveRef = useRef<((v: Row | null) => void) | null>(null)
+  const requestPrompt = useCallback((spec: { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null }, fallbackTitle: string): Promise<Row | null> => {
+    return new Promise<Row | null>((resolve) => {
+      promptResolveRef.current = resolve
+      setPendingPrompt({
+        fields: spec.fields,
+        title: spec.title || fallbackTitle,
+        cols: spec.cols,
+        submitLabel: spec.submitLabel,
+      })
+    })
+  }, [])
+  const handlePromptSubmit = useCallback((v: Row) => {
+    const r = promptResolveRef.current; promptResolveRef.current = null
+    setPendingPrompt(null)
+    r?.(v)
+  }, [])
+  const handlePromptCancel = useCallback(() => {
+    const r = promptResolveRef.current; promptResolveRef.current = null
+    setPendingPrompt(null)
+    r?.(null)
+  }, [])
+
   // Run a list of post-save actions sequentially against a *snapshot* of the form state — the
   // dialog has just written its main update_query / insert_query; on_save actions are the v2 form
   // of v1's `ly_act_tasks` for the form-save flow (multi-table writes, audit calls, post-save
@@ -170,11 +218,26 @@ export function ScreenDialog({
   // the returned flag) to re-run the read query. Unimplemented variants log a console.warn and,
   // when ``stop_on_error`` is false, are skipped — otherwise they abort the chain with a clear
   // error so the operator knows their config references a not-yet-implemented runtime feature.
-  // Returns the (possibly empty) list of human-readable warnings to append to the success status.
-  const runOnSaveActions = useCallback(async (actions: Action[], ctx: Row): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
+  //
+  // **Prompt-before-fire** (v2's port of v1's ``ly_act_params``): an action with non-empty
+  // ``prompt_fields`` opens the ActionPromptDialog *before* it runs; the operator's input merges
+  // into the running ctx, so this action's binds *and* every later one in the chain can reach
+  // the prompt values via ``source: "<NAME>"``. Cancelling the prompt aborts the chain (soft —
+  // no error). Returns the (possibly empty) list of human-readable warnings.
+  const runOnSaveActions = useCallback(async (actions: Action[], baseCtx: Row): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
     const warnings: string[] = []
     let refresh = false
+    let ctx: Row = { ...baseCtx }
     for (const a of actions) {
+      // Prompt-before-fire — pause and collect input; cancel aborts the chain soft.
+      const prompt = actionPrompt(a)
+      if (prompt) {
+        const v = await requestPrompt(prompt, a.label || a.id)
+        if (v == null) {
+          return { ok: true, warnings, refresh }   // soft cancel — no error surfaced
+        }
+        ctx = { ...ctx, ...v }
+      }
       try {
         switch (a.type) {
           case 'run_query': {
@@ -215,7 +278,7 @@ export function ScreenDialog({
       }
     }
     return { ok: true, warnings, refresh }
-  }, [connector])
+  }, [connector, requestPrompt])
 
   // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —
   // the v1 model attaches actions either to *events* (``ly_evt_cpt`` → ``dialog.on_save``,
@@ -676,6 +739,20 @@ export function ScreenDialog({
         variant="danger"
         onConfirm={() => { setConfirmDelete(false); void handleDelete() }}
         onCancel={() => setConfirmDelete(false)}
+      />
+    )}
+    {/* Prompt-before-fire sub-dialog (v2's port of v1's ly_act_params). Mounted at top level so
+        it sits above the parent dialog's modal but below any further nested confirm. The runner
+        awaits the resolver; Submit returns the values, Cancel returns null → chain aborts soft. */}
+    {pendingPrompt && (
+      <ActionPromptDialog
+        open
+        title={pendingPrompt.title}
+        fields={pendingPrompt.fields}
+        cols={pendingPrompt.cols}
+        submitLabel={pendingPrompt.submitLabel}
+        onSubmit={handlePromptSubmit}
+        onCancel={handlePromptCancel}
       />
     )}
     </NestedSaversContext.Provider>

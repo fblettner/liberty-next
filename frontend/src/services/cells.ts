@@ -31,8 +31,13 @@ export function ruleCell(
   const rule = column.rule
   if (!rule) return { text: raw, isNull: false, kind: 'plain' }
   if (rule.kind === 'boolean') {
+    // Filled bullet for both states — color does the work (green = true, red = false). Reads
+    // as a status indicator at a glance instead of needing to parse ✓ vs ✗ glyphs. The caller
+    // should pass a hover ``title`` ("yes"/"no") so the value stays accessible. (v1 parity:
+    // the screenshot review prompted this — the previous ✓/✗ chars inherited the cell's plain
+    // text color, since the styled.ts CSS class names didn't actually match the kind names.)
     const truthy = raw === rule.true_value
-    return { text: truthy ? '✓' : '✗', isNull: false, kind: truthy ? 'boolean-true' : 'boolean-false' }
+    return { text: '●', isNull: false, kind: truthy ? 'boolean-true' : 'boolean-false' }
   }
   if (rule.kind === 'enum') {
     const hit = enumMaps?.get(raw)

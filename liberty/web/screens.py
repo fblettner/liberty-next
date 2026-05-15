@@ -26,12 +26,109 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
+from liberty.connectors import ConnectorRegistry
+from liberty.connectors.dictionary import DictionaryFile
 from liberty.screens import Screen, ScreensFile
-from liberty.web.deps import get_screens, request_language
+from liberty.web.deps import get_connectors, get_screens, request_language
 
 router = APIRouter(prefix="/api", tags=["screens"])
 
 Screens = Annotated[ScreensFile, Depends(get_screens)]
+Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
+
+
+def _resolve_prompt_field(
+    raw: dict[str, Any], *, connector: str, language: str | None, dictionary: DictionaryFile,
+) -> dict[str, Any]:
+    """Resolve one ``PromptField``'s ``dd`` against the shared dictionary in *language* and
+    return a wire-ready dict the frontend can hand straight to its FieldRow renderer.
+
+    Adds three keys alongside the raw fields (kept as-is):
+      * ``label`` — the dictionary entry's translated label, when not already explicit.
+      * ``format`` — the entry's format (``text`` / ``date`` / ``password`` / …) when not
+        already explicit.
+      * ``rule`` — the BOOLEAN / ENUM / LOOKUP display rule, or ``None`` if not display-relevant.
+
+    Same convention :class:`liberty.connectors.sql.SQLConnector` uses to enrich result columns —
+    so a prompt field renders with the exact same widget set (Checkbox / SearchSelect / Input)."""
+    out = dict(raw)
+    key = (out.get("dd") or out.get("name") or "").strip()
+    if not key:
+        return out  # nothing to look up — frontend falls back to plain-text widget
+    entry = dictionary.find_entry(key, connector=connector)
+    if entry is None:
+        return out
+    if not out.get("label"):
+        lbl = entry.label_for(language)
+        if lbl:
+            out["label"] = lbl
+    if not out.get("format") and entry.format:
+        out["format"] = entry.format
+    rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+    if rule is not None:
+        out["rule"] = rule
+    return out
+
+
+def _resolve_prompts_in_actions(
+    actions: list[dict[str, Any]] | None,
+    *,
+    connector: str,
+    language: str | None,
+    dictionary: DictionaryFile,
+) -> list[dict[str, Any]] | None:
+    """In-place rewrite each action's ``prompt_fields`` to its resolved form (see
+    :func:`_resolve_prompt_field`). Actions without prompts pass through untouched; non-list
+    inputs (or ``None``) are returned as-is so this composes cleanly over ``model_dump``."""
+    if not actions:
+        return actions
+    out: list[dict[str, Any]] = []
+    for a in actions:
+        if not isinstance(a, dict):
+            out.append(a)
+            continue
+        fields = a.get("prompt_fields")
+        if not fields:
+            out.append(a)
+            continue
+        a = dict(a)
+        a["prompt_fields"] = [
+            _resolve_prompt_field(f, connector=connector, language=language, dictionary=dictionary)
+            for f in fields
+            if isinstance(f, dict)
+        ]
+        out.append(a)
+    return out
+
+
+def _resolve_dialog_prompts(
+    dialog: dict[str, Any] | None,
+    *,
+    connector: str,
+    language: str | None,
+    dictionary: DictionaryFile,
+) -> dict[str, Any] | None:
+    """Walk a dumped ``ScreenDialog`` and resolve every action's prompt fields — the three lifecycle
+    hooks (``on_load`` / ``on_save`` / ``on_cancel``) and each tab's per-tab ``actions``."""
+    if not dialog:
+        return dialog
+    out = dict(dialog)
+    for hook in ("on_load", "on_save", "on_cancel"):
+        if hook in out:
+            out[hook] = _resolve_prompts_in_actions(
+                out.get(hook), connector=connector, language=language, dictionary=dictionary,
+            )
+    tabs = out.get("tabs")
+    if isinstance(tabs, list):
+        new_tabs = []
+        for tab in tabs:
+            if isinstance(tab, dict) and "actions" in tab:
+                tab = {**tab, "actions": _resolve_prompts_in_actions(
+                    tab.get("actions"), connector=connector, language=language, dictionary=dictionary,
+                )}
+            new_tabs.append(tab)
+        out["tabs"] = new_tabs
+    return out
 
 
 def _screen_connector(screen: Screen, *, app: str) -> str:
@@ -86,11 +183,30 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
     }
 
 
-def _full_view(screen: Screen, *, app: str, language: str | None) -> dict[str, Any]:
+def _full_view(
+    screen: Screen, *, app: str, language: str | None, dictionary: DictionaryFile,
+) -> dict[str, Any]:
     """The full screen descriptor — ``GET /api/screens/{app}/{id}``. Includes the dialog/actions/row_menu
     body so the frontend can render the form. ``model_dump(mode='json')`` drops Pydantic's defaults that
-    weren't set and gives us plain dicts ready to ship over JSON."""
+    weren't set and gives us plain dicts ready to ship over JSON.
+
+    Each action with ``prompt_fields`` gets its prompt fields enriched with their dictionary-resolved
+    label / format / rule (BOOLEAN / ENUM / LOOKUP) so the frontend renders the prompt sub-dialog
+    with the same widget set used for read-result columns. The screen's effective connector
+    drives the dictionary lookup (matches how :class:`SQLConnector` resolves read-result hints)."""
     body = screen.model_dump(mode="json", exclude_none=True)
+    connector = _screen_connector(screen, app=app)
+    # Resolve prompts on every attachment point that can carry actions: screen-level actions /
+    # row_menu / on_insert / on_update / on_delete, and the dialog's hooks + per-tab buttons.
+    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
+        if hook in body:
+            body[hook] = _resolve_prompts_in_actions(
+                body.get(hook), connector=connector, language=language, dictionary=dictionary,
+            )
+    if "dialog" in body:
+        body["dialog"] = _resolve_dialog_prompts(
+            body.get("dialog"), connector=connector, language=language, dictionary=dictionary,
+        )
     return {**_list_view(screen, app=app, language=language), **body}
 
 
@@ -130,7 +246,12 @@ async def list_app_screens(
 
 @router.get("/screens/{app}/{screen_id}")
 async def get_screen(
-    app: str, screen_id: str, request: Request, principal: CurrentPrincipal, screens: Screens
+    app: str,
+    screen_id: str,
+    request: Request,
+    principal: CurrentPrincipal,
+    screens: Screens,
+    connectors: Connectors,
 ) -> dict[str, Any]:
     app_screens = screens.screens.get(app) or {}
     screen = app_screens.get(screen_id)
@@ -140,4 +261,9 @@ async def get_screen(
         # 404 (not 403) so we don't leak the existence of screens the caller can't open —
         # same convention the connector routes use.
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown screen {app!r}/{screen_id!r}")
-    return _full_view(screen, app=app, language=request_language(request))
+    return _full_view(
+        screen,
+        app=app,
+        language=request_language(request),
+        dictionary=connectors.dictionary,
+    )

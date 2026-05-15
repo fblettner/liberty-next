@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
 import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { Action, ScreenDetail } from '../../types/screens'
+import type { Action, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError } from '../../api/client'
 import { Banner } from '../../common'
 import { DataTable } from '../../common/DataTable'
@@ -29,7 +29,23 @@ import { lookupKey, useLookupBatch, type LookupSpec } from '../../services/looku
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
-import { resolveBindList } from './dialogHelpers'
+import { ActionPromptDialog } from './ActionPromptDialog'
+import { resolveBindList, type Row as CtxRow } from './dialogHelpers'
+
+/** A ParamBind-bearing action with a non-empty ``prompt_fields`` list — same predicate the
+ *  ScreenDialog uses. Pulled out so both row-menu and toolbar action runners hit the same
+ *  prompt-before-fire flow when the migrator emits ly_act_params. */
+function actionPrompt(a: Action): { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null } | null {
+  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'navigate') return null
+  const fields = a.prompt_fields ?? []
+  if (fields.length === 0) return null
+  return {
+    fields,
+    title: a.prompt_title ?? a.label ?? null,
+    cols: a.prompt_cols ?? null,
+    submitLabel: a.prompt_submit_label ?? a.label ?? null,
+  }
+}
 
 type DataRow = Record<string, unknown>
 type Align = CSSProperties['textAlign']
@@ -319,6 +335,37 @@ export function ResultTable({
     if (rowMenu.length === 0 || editModeRef.current) return
     setMenuState({ row, x: e.clientX, y: e.clientY })
   }, [rowMenu.length])
+  // Prompt-before-fire plumbing — shared by ``runRowAction`` and ``runScreenAction``. Same
+  // imperative-from-async pattern the ScreenDialog uses: the action's ``prompt_fields`` opens a
+  // sub-dialog, the resolver returns the entered values (or null on cancel), and the runner
+  // merges them into the resolution context before the action's ParamBinds run.
+  const [pendingPrompt, setPendingPrompt] = useState<
+    | { fields: PromptField[]; title: string; cols: number | null; submitLabel: string | null }
+    | null
+  >(null)
+  const promptResolveRef = useRef<((v: CtxRow | null) => void) | null>(null)
+  const requestPrompt = useCallback((spec: { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null }, fallbackTitle: string): Promise<CtxRow | null> => {
+    return new Promise<CtxRow | null>((resolve) => {
+      promptResolveRef.current = resolve
+      setPendingPrompt({
+        fields: spec.fields,
+        title: spec.title || fallbackTitle,
+        cols: spec.cols,
+        submitLabel: spec.submitLabel,
+      })
+    })
+  }, [])
+  const handlePromptSubmit = useCallback((v: CtxRow) => {
+    const r = promptResolveRef.current; promptResolveRef.current = null
+    setPendingPrompt(null)
+    r?.(v)
+  }, [])
+  const handlePromptCancel = useCallback(() => {
+    const r = promptResolveRef.current; promptResolveRef.current = null
+    setPendingPrompt(null)
+    r?.(null)
+  }, [])
+
   // Action runner — sequentially runs the picked row-menu action(s); for v1 parity we run *one*
   // selected action per right-click, but the helper is list-based so a future "multi-fire" item
   // can reuse it. ParamBinds resolve against `ctx` (the row); run_query POSTs to /api/sql with
@@ -326,15 +373,28 @@ export function ResultTable({
   // collected; refresh signals the parent. Unimplemented variants (call_api / navigate /
   // set_field / confirm) log a warning and stop the chain unless ``stop_on_error = false`` —
   // same convention the dialog on_save runner uses.
+  //
+  // **Prompt-before-fire** (v2's port of v1's ``ly_act_params``): an action with non-empty
+  // ``prompt_fields`` opens the ActionPromptDialog *before* it runs; the operator's input merges
+  // into ``ctx`` so this action's binds (and any cascading nested-context use) can read it.
+  // Cancelling the prompt aborts the row action soft — no error surfaced.
   const [menuBusy, setMenuBusy] = useState<string | null>(null)  // action id while it's running
   const [menuError, setMenuError] = useState<string | null>(null)
   const runRowAction = useCallback(async (a: Action, ctx: DataRow) => {
     setMenuBusy(a.id); setMenuError(null)
+    // Prompt-before-fire — merge the operator's input into ctx; cancel aborts soft.
+    let runCtx: DataRow = ctx
+    const prompt = actionPrompt(a)
+    if (prompt) {
+      const v = await requestPrompt(prompt, a.label || a.id)
+      if (v == null) { setMenuBusy(null); closeMenu(); return }
+      runCtx = { ...runCtx, ...v }
+    }
     try {
       switch (a.type) {
         case 'run_query': {
           const target = a.connector || connector
-          const bound = resolveRowBinds(a.param_binds, ctx)
+          const bound = resolveRowBinds(a.param_binds, runCtx)
           await api.post(
             `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
             { params: withUpper(bound) },
@@ -359,7 +419,7 @@ export function ResultTable({
           // filtered to whatever the row carries (e.g. "View this user's roles" → opens the
           // roles screen with USR_ID=<the-clicked-user-id>).
           const targetConnector = a.connector || connector
-          const bound = resolveRowBinds(a.param_binds, ctx)
+          const bound = resolveRowBinds(a.param_binds, runCtx)
           const qs = new URLSearchParams()
           for (const [k, v] of Object.entries(bound)) {
             if (v != null && String(v) !== '') qs.set(k, String(v))
@@ -390,7 +450,7 @@ export function ResultTable({
       setMenuBusy(null)
       setMenuError(`${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`)
     }
-  }, [connector, onSaved, closeMenu, navigate])
+  }, [connector, onSaved, closeMenu, navigate, requestPrompt])
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
   // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
   // ParamBinds resolve to literal `value`s only — a `source` bind against an unset form falls
@@ -401,12 +461,22 @@ export function ResultTable({
   const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
   const runScreenAction = useCallback(async (a: Action) => {
     setActionBusy(a.id); setActionStatus(null)
+    // Toolbar actions have no row context — but with ``prompt_fields`` the operator supplies
+    // the inputs the workflow needs (NOMAJDE "Create Role" / "Reset Password" / …). Merge the
+    // entered values into the resolution context so ParamBinds with ``source: "<NAME>"`` pick
+    // them up; cancel aborts soft (no error surfaced — operator clicked Cancel).
+    let runCtx: DataRow = {}
+    const prompt = actionPrompt(a)
+    if (prompt) {
+      const v = await requestPrompt(prompt, a.label || a.id)
+      if (v == null) { setActionBusy(null); return }
+      runCtx = v as DataRow
+    }
     try {
       switch (a.type) {
         case 'run_query': {
           const target = a.connector || connector
-          // No row context — ParamBinds with `source` against an empty {} silently drop.
-          const bound = resolveRowBinds(a.param_binds, {})
+          const bound = resolveRowBinds(a.param_binds, runCtx)
           await api.post(
             `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
             { params: withUpper(bound) },
@@ -424,7 +494,15 @@ export function ResultTable({
         }
         case 'navigate': {
           const targetConnector = a.connector || connector
-          const url = `/sql/${encodeURIComponent(targetConnector)}/${encodeURIComponent(a.to)}`
+          // Prompt values feed the URL query string (mirrors row-menu navigate).
+          const bound = resolveRowBinds(a.param_binds, runCtx)
+          const qs = new URLSearchParams()
+          for (const [k, v] of Object.entries(bound)) {
+            if (v != null && String(v) !== '') qs.set(k, String(v))
+          }
+          const url =
+            `/sql/${encodeURIComponent(targetConnector)}/${encodeURIComponent(a.to)}` +
+            (qs.toString() ? `?${qs.toString()}` : '')
           navigate(url)
           return
         }
@@ -445,7 +523,7 @@ export function ResultTable({
       setActionBusy(null)
       setActionStatus({ message: `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`, tone: 'error' })
     }
-  }, [connector, onSaved, navigate])
+  }, [connector, onSaved, navigate, requestPrompt])
 
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
@@ -789,7 +867,15 @@ export function ResultTable({
           if (editMode && !isGroupRow(info)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
           const { text, kind: rk, isNull } = ruleCell(v, c, enumMapForCol, undefined)
-          return span(text, isNull ? 'null' : rk, align, rk === 'enum' && !isNull ? String(v ?? '') : undefined)
+          // Hover title: for ENUM cells, the raw code (the visible text is the label); for
+          // BOOLEAN cells (now rendered as a colored bullet), the localized "yes"/"no" so the
+          // value stays accessible to keyboard / screen-reader / colorblind users.
+          const titleVal = isNull ? undefined
+            : rk === 'enum' ? String(v ?? '')
+            : rk === 'boolean-true' ? t('common.true')
+            : rk === 'boolean-false' ? t('common.false')
+            : undefined
+          return span(text, isNull ? 'null' : rk, align, titleVal)
         },
       })
     }
@@ -1017,6 +1103,20 @@ export function ResultTable({
       )}
       {proxyOpen && proxyError && (
         <Banner $tone="error">{proxyError}</Banner>
+      )}
+      {/* Action-prompt sub-dialog (v2's port of v1's ly_act_params). Mounted at the page level so
+          it floats above both the row menu and the toolbar; the runner awaits the resolver, the
+          dialog returns the entered values on Confirm and null on Cancel (soft abort). */}
+      {pendingPrompt && (
+        <ActionPromptDialog
+          open
+          title={pendingPrompt.title}
+          fields={pendingPrompt.fields}
+          cols={pendingPrompt.cols}
+          submitLabel={pendingPrompt.submitLabel}
+          onSubmit={handlePromptSubmit}
+          onCancel={handlePromptCancel}
+        />
       )}
       {/* Row context menu (slice 6) — a floating panel anchored at the right-click coords. Each
           item runs its action against the picked row; `mousedown` inside the menu is stopped from
