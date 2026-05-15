@@ -1073,6 +1073,125 @@ def test_migrate_screens_with_dialog() -> None:
     parse_screens(out)
 
 
+def test_migrate_screens_with_nested_tabs() -> None:
+    """v1 marked a tab as nested by putting one ly_dlg_col on it whose ``col_component`` was
+    ``FormsDialog`` (child editable form) or ``FormsTable`` (child related-rows table). v2's
+    migrator turns those into ``nested_form`` / ``nested_table`` ScreenTab variants — the
+    operator complaint (empty JD Edwards / Activity Log tabs in security_applications) came
+    from these tabs being dropped silently before this slice landed.
+
+    The fixture mirrors v1's NOMASX1 SETTINGS_APPLICATIONS dialog shape: tab 1 a plain field
+    grid (the parent's own columns), tab 2 a FormsDialog → nested form, tab 3 a FormsTable →
+    nested table. Param-binds (ly_dlg_filters on the host dlg_col) carry parent → nested column
+    mapping; v2 reuses the same ParamBind dicts."""
+    # The "Activity Log" nested-table target — a sibling ly_tables row so :func:`migrate_screens`
+    # assigns it a slug we can reference. (settings_applications + settings_activity_log share
+    # the dataset; the nested_table tab points at the latter by id.)
+    table_rows = [
+        {"tbl_id": 31, "tbl_db_name": "settings_applications", "tbl_query_id": 31,
+         "tbl_label": "Applications", "tbl_editable": "Y", "tbl_uploadable": "N",
+         "tbl_audit": None, "tbl_auto_load": "Y", "tbl_frm_id": 1},
+        {"tbl_id": 84, "tbl_db_name": "settings_activity_log", "tbl_query_id": 107,
+         "tbl_label": "Activity Log", "tbl_editable": "N", "tbl_uploadable": "N",
+         "tbl_audit": None, "tbl_auto_load": "Y", "tbl_frm_id": None},
+    ]
+    frm_rows = [
+        {"frm_id": 1, "dlg_id": 1, "frm_query_id": 31, "frm_label": "Application"},
+        # Nested editable form (jdedwards on the same APPS_ID PK).
+        {"frm_id": 8, "dlg_id": 1, "frm_query_id": 97, "frm_label": "JD Edwards"},
+    ]
+    tab_rows = [
+        {"frm_id": 1, "tab_id": 1, "tab_seq": 1, "tab_label": "General", "tab_cols": 1,
+         "tab_disable_add": "N", "tab_disable_edit": "N"},
+        {"frm_id": 1, "tab_id": 2, "tab_seq": 2, "tab_label": "JD Edwards", "tab_cols": 1,
+         "tab_disable_add": "N", "tab_disable_edit": "N"},
+        {"frm_id": 1, "tab_id": 3, "tab_seq": 3, "tab_label": "Activity Log", "tab_cols": 1,
+         "tab_disable_add": "Y", "tab_disable_edit": "N"},
+        # The nested form's own (single) tab — its fields live here.
+        {"frm_id": 8, "tab_id": 1, "tab_seq": 1, "tab_label": "JD Edwards", "tab_cols": 1,
+         "tab_disable_add": "N", "tab_disable_edit": "N"},
+    ]
+    col_rows = [
+        # Parent tab 1 — a plain field grid.
+        {"frm_id": 1, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_target": "APPS_ID",
+         "col_visible": "Y", "col_disabled": "Y", "col_required": "Y",
+         "col_component": "input", "col_component_id": None},
+        # Parent tab 2 — host for the nested FormsDialog (target frm 8).
+        {"frm_id": 1, "col_id": 14, "tab_id": 2, "col_seq": 1, "col_target": None,
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N",
+         "col_component": "FormsDialog", "col_component_id": 8},
+        # Parent tab 3 — host for the nested FormsTable (target tbl 84).
+        {"frm_id": 1, "col_id": 16, "tab_id": 3, "col_seq": 1, "col_target": None,
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N",
+         "col_component": "FormsTable", "col_component_id": 84},
+        # Nested form's own fields (frm 8).
+        {"frm_id": 8, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_target": "JDE_SY",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N",
+         "col_component": "input", "col_component_id": None},
+        {"frm_id": 8, "col_id": 2, "tab_id": 1, "col_seq": 2, "col_target": "JDE_DTA",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N",
+         "col_component": "input", "col_component_id": None},
+    ]
+    filter_rows = [
+        # Nested FormsDialog: bind parent.APPS_ID → nested .APPS_ID.
+        {"frm_id": 1, "col_id": 14, "flt_id": 1, "flt_type": "DD",
+         "flt_source": "APPS_ID", "flt_target": "APPS_ID", "flt_value": None},
+        # Nested FormsTable: bind parent.APPS_ID → ACL_APPS_ID on activity_log.
+        {"frm_id": 1, "col_id": 16, "flt_id": 1, "flt_type": "DD",
+         "flt_source": "APPS_ID", "flt_target": "ACL_APPS_ID", "flt_value": None},
+    ]
+    # Stand-in sql_rows so :func:`migrate_screens` resolves the CRUD query names:
+    #   - q31 → settings_applications_{get,put} (parent + writable)
+    #   - q97 → settings_jdedwards_{get,put,post} (nested form CRUD)
+    #   - q107 → settings_activity_log_get (read-only nested table)
+    sql_rows = [
+        {"query_id": 31, "query_crud": "GET", "query_label": "settings_applications", "query_pool": "nomasx1"},
+        {"query_id": 31, "query_crud": "PUT", "query_label": "settings_applications", "query_pool": "nomasx1"},
+        {"query_id": 97, "query_crud": "GET", "query_label": "settings_jdedwards", "query_pool": "nomasx1"},
+        {"query_id": 97, "query_crud": "PUT", "query_label": "settings_jdedwards", "query_pool": "nomasx1"},
+        {"query_id": 97, "query_crud": "POST", "query_label": "settings_jdedwards", "query_pool": "nomasx1"},
+        {"query_id": 107, "query_crud": "GET", "query_label": "settings_activity_log", "query_pool": "nomasx1"},
+    ]
+    out = migrate_screens(
+        table_rows, dialog_rows=[{"dlg_id": 1, "dlg_label": "Application"}],
+        frm_rows=frm_rows, tab_rows=tab_rows, tab_l_rows=[],
+        col_rows=col_rows, filter_rows=filter_rows, sql_rows=sql_rows, app_name="nomasx1",
+    )
+    s = out["screens"]["nomasx1"]["settings_applications"]
+    tabs = s["dialog"]["tabs"]
+    # Tab 0 — plain form tab; its single APPS_ID field rides on `fields`. `type` is implicit
+    # ("form") so the emit drops it — the discriminated union's default lands at parse time.
+    assert "type" not in tabs[0]  # implicit form
+    assert tabs[0]["fields"][0]["name"] == "APPS_ID"
+    # Tab 1 — nested form. read/update/insert resolved; binds carried; nested fields inline.
+    nf = tabs[1]
+    assert nf == {
+        "id": "jd_edwards", "label": "JD Edwards",
+        "type": "nested_form",
+        "read_query": "settings_jdedwards_get",
+        "update_query": "settings_jdedwards_put",
+        "insert_query": "settings_jdedwards_post",
+        "cols": 1,
+        "fields": [
+            {"name": "JDE_SY"},
+            {"name": "JDE_DTA"},
+        ],
+        "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
+    }
+    # Tab 2 — nested table. `screen` references settings_activity_log (the sibling row);
+    # the parent dlg_col's bind (APPS_ID → ACL_APPS_ID) carries through.
+    nt = tabs[2]
+    assert nt == {
+        "id": "activity_log", "label": "Activity Log",
+        "type": "nested_table",
+        "screen": "settings_activity_log",
+        "hide_on_add": True,
+        "param_binds": [{"param": "ACL_APPS_ID", "source": "APPS_ID"}],
+    }
+    # Round-trips through the schema (discriminated union resolves each variant).
+    parse_screens(out)
+
+
 def test_migrate_screens_cross_connector() -> None:
     """Screen's read query lives on a *different* pool than the app — `connector` is set."""
     sql = [
@@ -1388,7 +1507,7 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
     "CREATE TABLE ly_dlg_tab (frm_id INTEGER, tab_id INTEGER, tab_seq INTEGER, tab_label TEXT, tab_cols INTEGER, tab_disable_add TEXT, tab_disable_edit TEXT)",
     "CREATE TABLE ly_dlg_tab_l (frm_id INTEGER, tab_id INTEGER, lng_id TEXT, lng_label TEXT)",
-    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_colspan INTEGER, col_component TEXT, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_disabled TEXT, col_required TEXT, col_default TEXT, col_key TEXT, col_cdn_id INTEGER)",
+    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_colspan INTEGER, col_component TEXT, col_component_id INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_disabled TEXT, col_required TEXT, col_default TEXT, col_key TEXT, col_cdn_id INTEGER)",
     "CREATE TABLE ly_tbl_filters (tbl_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_dlg_filters (frm_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_cdn_params (cdn_id INTEGER, cdn_params_id INTEGER, cdn_seq INTEGER, cdn_dd_id TEXT, cdn_operator TEXT, cdn_value TEXT, cdn_logical TEXT, cdn_group INTEGER)",
@@ -1918,6 +2037,9 @@ def test_cli_screen(tmp_path) -> None:
     # The CLI also reports conditional field counts (slice 3) — the seeded USR_EXTRA field's
     # col_cdn_id pulled visible_when through.
     assert "1 conditional field(s)" in txt
+    # Nested tabs (FormsDialog / FormsTable inside a FormsDialog) — the seed has none, so both
+    # counters read zero. Asserts the new line is in the summary regardless.
+    assert "0 nested form tab(s), 0 nested table tab(s)" in txt
     # Slice 6b — the seed has no ly_ctxmenus / ly_ctx_val tables (an older v1 schema is allowed),
     # so the row-menu metric reads zero. Asserts the new line is in the summary regardless.
     assert "0 with row-menu" in txt

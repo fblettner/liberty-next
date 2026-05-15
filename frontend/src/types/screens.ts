@@ -39,16 +39,52 @@ export interface ScreenField {
   disabled_when?: FieldCondition[]
 }
 
-/** One tab in a dialog (CSS-grid of fields, `cols` wide). */
-export interface ScreenTab {
+/** Common to every tab kind — title + per-mode hide flags + translations. */
+interface TabCommon {
   id: string
   label?: string | null
   l?: Record<string, string>
-  cols?: number | null
   hide_on_add?: boolean
   hide_on_edit?: boolean
+}
+
+/** Plain field-grid tab — the original kind. `cols` wide CSS grid; `type` defaults to "form"
+ *  when omitted (matches the backend's discriminator default). */
+export interface FormTab extends TabCommon {
+  type?: 'form'
+  cols?: number | null
   fields: ScreenField[]
 }
+
+/** A child-record form embedded inline in this tab (v2's port of v1's "FormsDialog inside a
+ *  FormsDialog"). The parent's PK is bound into the nested `read_query` via `param_binds`;
+ *  the linked row (if any) populates the fields, and saving fires `update_query` (or
+ *  `insert_query` when the row didn't exist yet). All on `connector` (default: parent's). */
+export interface NestedFormTab extends TabCommon {
+  type: 'nested_form'
+  connector?: string | null
+  read_query: string
+  update_query?: string | null
+  insert_query?: string | null
+  cols?: number | null
+  fields: ScreenField[]
+  param_binds?: ParamBind[]
+}
+
+/** A related-rows TableView embedded inline in this tab (v1's "FormsTable inside a FormsDialog").
+ *  References a v2 screen by id; the nested TableView re-uses that screen's read query +
+ *  column hints + dialog + actions, with parent values bound into the read query via
+ *  `param_binds`. Used for activity logs, audit trails, sub-collections. */
+export interface NestedTableTab extends TabCommon {
+  type: 'nested_table'
+  screen: string
+  connector?: string | null
+  param_binds?: ParamBind[]
+}
+
+/** Discriminated union: a tab is one of the three kinds. The `type` field discriminates;
+ *  TypeScript's narrowing on `tab.type` gives compile-time exhaustiveness checks. */
+export type ScreenTab = FormTab | NestedFormTab | NestedTableTab
 
 /** One action attached to a dialog / screen / row. Discriminated union by `type` — every variant
  *  shares `id`, optional `label`, and `stop_on_error`. ParamBind-bearing variants resolve their

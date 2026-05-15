@@ -336,8 +336,12 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         assert "screens" in sch["screens"]["properties"]
         # The action discriminated union (slice 4) exposes every variant as its own $def so the
         # builder's ActionEditor can render the right per-type form when the operator picks one.
+        # Same for the tab union: ``ScreenTab`` is itself an ``oneOf + discriminator`` annotation
+        # (no class) — Pydantic emits one $def per branch (FormTab / NestedFormTab / NestedTableTab)
+        # instead of a single $def for the union.
         for nested in (
-            "Screen", "ScreenDialog", "ScreenTab", "ScreenField", "ParamBind",
+            "Screen", "ScreenDialog", "FormTab", "NestedFormTab", "NestedTableTab",
+            "ScreenField", "ParamBind",
             "RunQueryAction", "CallApiAction", "NavigateAction", "SetFieldAction",
             "ConfirmAction", "NotifyAction", "RefreshAction",
         ):

@@ -1793,9 +1793,185 @@ def migrate_screens(
     # current frm's dd→target map instead of the query's column map.
     cdn_values, cdn_order, cdn_bad = _cdn_to_field_groups(cdn_param_rows)
 
+    # Frm → its read query id (for nested ``FormsDialog`` resolution: a tab whose single dlg_col
+    # carries ``col_component='FormsDialog'`` with ``col_component_id`` = the nested ``frm_id``).
+    # Its CRUD companions are then looked up via ``crud_by_qid``.
+    frm_query_by_frm: dict[int, int] = {}
+    for r in frm_rows:
+        fid_raw = r.get("frm_id")
+        qid_raw = r.get("frm_query_id")
+        if fid_raw is None or qid_raw is None:
+            continue
+        try:
+            frm_query_by_frm[int(fid_raw)] = int(qid_raw)
+        except (TypeError, ValueError):
+            pass
+
+    # tbl_id → its v2 connector (for nested ``FormsTable`` resolution — the activity_log /
+    # audit_trail tabs of v1's SETTINGS_APPLICATIONS reference another ly_tables row by id;
+    # we emit a NestedTableTab pointing at that table's slug, plus the explicit connector
+    # when it differs from the parent screen's).
+    tbl_pool_by_tbl: dict[int, str] = {}
+    for tr in table_rows:
+        try:
+            ti = int(tr["tbl_id"])
+            tq = int(tr["tbl_query_id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        pool = pool_by_qid.get(tq)
+        if pool:
+            tbl_pool_by_tbl[ti] = pool
+
+    # Pre-bucket every form's columns regardless of tab — used for migrating the *nested*
+    # form's fields (where the nested frm_id's children land on whatever tab_id v1 used,
+    # which we don't care about for inline rendering).
+    cols_by_frm_all: dict[int, list[Mapping[str, Any]]] = {}
+    for r in col_rows:
+        fid = r.get("frm_id")
+        if fid is None:
+            continue
+        cols_by_frm_all.setdefault(int(fid), []).append(r)
+
+    def _migrate_field_row(c: Mapping[str, Any], owning_frm: int) -> dict[str, Any] | None:
+        """Build one field dict from a ly_dlg_col row. Returns None for placeholder rows
+        (no col_target — v1 used those for layout). Owning_frm threads the right frm-id
+        through the lookup_param_binds + visible_when resolvers (parent form ≠ nested form,
+        but the per-frm dd→target map is keyed by frm_id either way)."""
+        target = (c.get("col_target") or "").strip()
+        if not target:
+            return None
+        dd_id = (c.get("col_dd_id") or "").strip()
+        col_label = (c.get("col_label") or "").strip()
+        field: dict[str, Any] = {"name": target}
+        if dd_id and dd_id != target:
+            field["dd"] = dd_id
+        if col_label:
+            field["label"] = col_label
+        if str(c.get("col_visible") or "Y").upper() in _HIDDEN_FLAGS:
+            field["hidden"] = True
+        if str(c.get("col_disabled") or "").upper() in _YES_FLAGS:
+            field["disabled"] = True
+        if str(c.get("col_required") or "").upper() in _YES_FLAGS:
+            field["required"] = True
+        if c.get("col_colspan") not in (None, 0):
+            try:
+                field["colspan"] = int(c["col_colspan"])
+            except (TypeError, ValueError):
+                pass
+        default_v = (c.get("col_default") or "").strip()
+        if default_v:
+            field["default"] = default_v
+        # Field-level parameter bindings (v1 ly_dlg_filters).
+        binds: list[dict[str, Any]] = []
+        try:
+            cid_int = int(c["col_id"])
+        except (TypeError, ValueError, KeyError):
+            cid_int = None
+        if cid_int is not None:
+            for f in binds_by_col.get((owning_frm, cid_int), []):
+                target_p = (f.get("flt_target") or "").strip()
+                if not target_p:
+                    continue
+                ftype = (f.get("flt_type") or "").strip().upper()
+                if ftype == "VALUE":
+                    v = f.get("flt_value")
+                    if v is None or str(v).strip() == "":
+                        continue
+                    binds.append({"param": target_p, "value": str(v)})
+                elif ftype == "DD":
+                    src = (f.get("flt_source") or "").strip()
+                    if not src:
+                        continue
+                    binds.append({"param": target_p, "source": src})
+                # Other flt_type values (FIELD / etc.) — Phase 6 follow-up; skip for now.
+        if binds:
+            field["lookup_param_binds"] = binds
+        # Conditional visibility (v1 col_cdn_id → ly_cdn_params).
+        cid_raw = c.get("col_cdn_id")
+        if cid_raw is not None:
+            try:
+                cid = int(cid_raw)
+            except (TypeError, ValueError):
+                cid = None
+            if cid is not None:
+                resolved = _cdn_resolve(cid, cdn_values, cdn_order, cdn_bad, dd_to_target_by_frm.get(owning_frm, {}))
+                if resolved is None:
+                    _log.warning(
+                        "migration: screen field %s on frm %s uses a condition operator v2 can't model — left unconditionally visible",
+                        target, owning_frm,
+                    )
+                elif resolved:
+                    field["visible_when"] = resolved
+        return field
+
+    def _detect_nested(cols_for_tab: list[Mapping[str, Any]]) -> tuple[str | None, int | None, int | None]:
+        """If the tab is a v1 nested container — a single dlg_col row whose ``col_component``
+        names a child kind (``FormsDialog`` / ``FormsTable``) — return ``(kind, ref_id,
+        host_col_id)`` so the caller can read its ly_dlg_filters for the param binds. Returns
+        ``(None, None, None)`` for a regular field-list tab."""
+        host: Mapping[str, Any] | None = None
+        for c in cols_for_tab:
+            comp = (c.get("col_component") or "").strip()
+            if comp in ("FormsDialog", "FormsTable"):
+                # If more than one such row, give up — that's not a shape v2 currently models.
+                if host is not None:
+                    return None, None, None
+                host = c
+        if host is None:
+            return None, None, None
+        try:
+            ref = int(host["col_component_id"])
+            cid = int(host["col_id"])
+        except (TypeError, ValueError, KeyError):
+            return None, None, None
+        return (host.get("col_component") or "").strip(), ref, cid
+
+    def _binds_for_col(owning_frm: int, col_id: int) -> list[dict[str, Any]]:
+        """Resolve a parent dlg_col's ly_dlg_filters into v2 ParamBind dicts — same shape as
+        the field-level binds, but here the binds carry the parent → nested mapping for the
+        nested form/table's read query."""
+        binds: list[dict[str, Any]] = []
+        for f in binds_by_col.get((owning_frm, col_id), []):
+            target_p = (f.get("flt_target") or "").strip()
+            if not target_p:
+                continue
+            ftype = (f.get("flt_type") or "").strip().upper()
+            if ftype == "VALUE":
+                v = f.get("flt_value")
+                if v is None or str(v).strip() == "":
+                    continue
+                binds.append({"param": target_p, "value": str(v)})
+            elif ftype == "DD":
+                src = (f.get("flt_source") or "").strip()
+                if not src:
+                    continue
+                binds.append({"param": target_p, "source": src})
+        return binds
+
+    # ── pre-pass: assign final screen ids per ly_tables row ───────────────────
+    # Done first so a nested ``FormsTable`` tab (col_component='FormsTable', col_component_id =
+    # another tbl_id) can resolve to the *final* slug of its sibling — even when the sibling
+    # appears later in table_rows. Skip logic mirrors the main loop's so we don't reserve a slug
+    # we'd abandon (no resolvable read query → no screen).
+    sid_by_tbl_id: dict[int, str] = {}
+    taken: set[str] = set()
+    for r in table_rows:
+        try:
+            t_id = int(r["tbl_id"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        tq = r.get("tbl_query_id")
+        try:
+            tq_int = int(tq) if tq is not None else None
+        except (TypeError, ValueError):
+            tq_int = None
+        if tq_int is None or not (crud_by_qid.get(tq_int) or {}).get("GET"):
+            continue
+        seed = (r.get("tbl_db_name") or r.get("tbl_label") or "").strip()
+        sid_by_tbl_id[t_id] = _uniquify(slugify(seed, fallback=f"screen_{t_id}"), taken)
+
     # ── build one Screen per ly_tables row ────────────────────────────────────
     screens: dict[str, dict[str, Any]] = {}
-    taken: set[str] = set()
     for r in table_rows:
         try:
             tbl_id = int(r["tbl_id"])
@@ -1814,8 +1990,7 @@ def migrate_screens(
             # Without a resolvable read query the screen would be broken at runtime; skip.
             continue
 
-        seed = (r.get("tbl_db_name") or r.get("tbl_label") or "").strip()
-        sid = _uniquify(slugify(seed, fallback=f"screen_{tbl_id}"), taken)
+        sid = sid_by_tbl_id[tbl_id]   # set by the pre-pass with the same skip logic
 
         screen: dict[str, Any] = {
             "id": sid,
@@ -1864,83 +2039,81 @@ def migrate_screens(
                     if l:
                         tab_out["l"] = l
                     cols_for_tab = cols_by_tab.get((frm_id, tab_v1_id), [])
-                    if t.get("tab_cols") not in (None, 0):
-                        try:
-                            tab_out["cols"] = int(t["tab_cols"])
-                        except (TypeError, ValueError):
-                            pass
                     if str(t.get("tab_disable_add") or "").upper() in _YES_FLAGS:
                         tab_out["hide_on_add"] = True
                     if str(t.get("tab_disable_edit") or "").upper() in _YES_FLAGS:
                         tab_out["hide_on_edit"] = True
 
-                    fields: list[dict[str, Any]] = []
-                    for c in cols_for_tab:
-                        target = (c.get("col_target") or "").strip()
-                        if not target:                              # placeholder/layout-only rows
-                            continue
-                        dd_id = (c.get("col_dd_id") or "").strip()
-                        col_label = (c.get("col_label") or "").strip()
-                        field: dict[str, Any] = {"name": target}
-                        if dd_id and dd_id != target:
-                            field["dd"] = dd_id
-                        if col_label:
-                            field["label"] = col_label
-                        if str(c.get("col_visible") or "Y").upper() in _HIDDEN_FLAGS:
-                            field["hidden"] = True
-                        if str(c.get("col_disabled") or "").upper() in _YES_FLAGS:
-                            field["disabled"] = True
-                        if str(c.get("col_required") or "").upper() in _YES_FLAGS:
-                            field["required"] = True
-                        if c.get("col_colspan") not in (None, 0):
+                    # Nested-tab detection: a v1 tab whose single dlg_col carries a child-widget
+                    # component name (FormsDialog → inline editable form / FormsTable → inline
+                    # related-rows table) becomes a v2 NestedFormTab / NestedTableTab. The parent
+                    # dlg_col's ly_dlg_filters carry the param binds (parent column → nested
+                    # query param). Without this branch the tab would render empty in v2 — the
+                    # operator complaint that drove this slice.
+                    nested_kind, nested_ref, nested_host_col = _detect_nested(cols_for_tab)
+                    nested_handled = False
+                    if nested_kind == "FormsDialog" and nested_ref is not None:
+                        target_frm = nested_ref
+                        target_qid = frm_query_by_frm.get(target_frm)
+                        target_cruds = crud_by_qid.get(target_qid) if target_qid is not None else None
+                        if target_cruds and target_cruds.get("GET"):
+                            tab_out["type"] = "nested_form"
+                            tab_out["read_query"] = target_cruds["GET"]
+                            for crud_src, dst_key in (("PUT", "update_query"), ("POST", "insert_query")):
+                                if crud_src in target_cruds:
+                                    tab_out[dst_key] = target_cruds[crud_src]
+                            # `connector` only when it differs from the *parent screen's*
+                            # effective connector (the screen.connector field, else app_name) —
+                            # matches the menus.toml / row-menu convention.
+                            target_pool = pool_by_qid.get(target_qid) if target_qid is not None else None
+                            effective_parent_conn = screen.get("connector") or app_name
+                            if target_pool and target_pool != effective_parent_conn:
+                                tab_out["connector"] = target_pool
+                            if t.get("tab_cols") not in (None, 0):
+                                try:
+                                    tab_out["cols"] = int(t["tab_cols"])
+                                except (TypeError, ValueError):
+                                    pass
+                            # Nested fields: every col_row on the *target* frm regardless of tab —
+                            # v1 nested forms typically have just one tab and v2 renders them
+                            # inline so tab boundaries inside the nested form are irrelevant.
+                            nested_fields: list[dict[str, Any]] = []
+                            for c in cols_by_frm_all.get(target_frm, []):
+                                fr = _migrate_field_row(c, owning_frm=target_frm)
+                                if fr is not None:
+                                    nested_fields.append(fr)
+                            tab_out["fields"] = nested_fields
+                            pb = _binds_for_col(frm_id, nested_host_col) if nested_host_col is not None else []
+                            if pb:
+                                tab_out["param_binds"] = pb
+                            nested_handled = True
+                    elif nested_kind == "FormsTable" and nested_ref is not None:
+                        target_sid = sid_by_tbl_id.get(nested_ref)
+                        if target_sid:
+                            tab_out["type"] = "nested_table"
+                            tab_out["screen"] = target_sid
+                            target_pool = tbl_pool_by_tbl.get(nested_ref)
+                            effective_parent_conn = screen.get("connector") or app_name
+                            if target_pool and target_pool != effective_parent_conn:
+                                tab_out["connector"] = target_pool
+                            pb = _binds_for_col(frm_id, nested_host_col) if nested_host_col is not None else []
+                            if pb:
+                                tab_out["param_binds"] = pb
+                            nested_handled = True
+
+                    if not nested_handled:
+                        # Plain form tab (the default kind). cols + fields land here.
+                        if t.get("tab_cols") not in (None, 0):
                             try:
-                                field["colspan"] = int(c["col_colspan"])
+                                tab_out["cols"] = int(t["tab_cols"])
                             except (TypeError, ValueError):
                                 pass
-                        default_v = (c.get("col_default") or "").strip()
-                        if default_v:
-                            field["default"] = default_v
-                        # Field-level parameter bindings (v1 ly_dlg_filters).
-                        binds: list[dict[str, Any]] = []
-                        for f in binds_by_col.get((frm_id, int(c["col_id"])), []):
-                            target_p = (f.get("flt_target") or "").strip()
-                            if not target_p:
-                                continue
-                            ftype = (f.get("flt_type") or "").strip().upper()
-                            if ftype == "VALUE":
-                                v = f.get("flt_value")
-                                if v is None or str(v).strip() == "":
-                                    continue
-                                binds.append({"param": target_p, "value": str(v)})
-                            elif ftype == "DD":
-                                src = (f.get("flt_source") or "").strip()
-                                if not src:
-                                    continue
-                                binds.append({"param": target_p, "source": src})
-                            # Other flt_type values (FIELD / etc.) — Phase 6 follow-up; skip for now.
-                        if binds:
-                            field["lookup_param_binds"] = binds
-                        # Conditional visibility (v1 col_cdn_id → ly_cdn_params). The cdn graph is
-                        # shared with grid columns (migrate_column_visibility); for dialog fields
-                        # the dd→target resolver is the **per-frm** map built above so a predicate
-                        # referencing another field's col_dd_id resolves to that field's col_target.
-                        cid_raw = c.get("col_cdn_id")
-                        if cid_raw is not None:
-                            try:
-                                cid = int(cid_raw)
-                            except (TypeError, ValueError):
-                                cid = None
-                            if cid is not None:
-                                resolved = _cdn_resolve(cid, cdn_values, cdn_order, cdn_bad, dd_to_target_by_frm.get(frm_id, {}))
-                                if resolved is None:
-                                    _log.warning(
-                                        "migration: screen field %s on frm %s uses a condition operator v2 can't model — left unconditionally visible",
-                                        target, frm_id,
-                                    )
-                                elif resolved:
-                                    field["visible_when"] = resolved
-                        fields.append(field)
-                    tab_out["fields"] = fields
+                        fields: list[dict[str, Any]] = []
+                        for c in cols_for_tab:
+                            fr = _migrate_field_row(c, owning_frm=frm_id)
+                            if fr is not None:
+                                fields.append(fr)
+                        tab_out["fields"] = fields
                     tabs.append(tab_out)
                 if tabs:
                     screen["dialog"] = {"tabs": tabs}

@@ -17,27 +17,23 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Checkbox, Field, Input, ModalBody, ModalFooter, ModalHeader, Overlay, Row, ScreenDialogModal, SearchSelect, SpinnerRing } from '../../common'
+import { Banner, Button, Checkbox, Field, Input, ModalBody, ModalFooter, ModalHeader, Overlay, Row as FlexRow, ScreenDialogModal, SearchSelect, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
-import type { Action, FieldCondition, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { evalConditions, originalKeys, resolveBindList, type Row, withUpper } from './dialogHelpers'
+import { NestedFormView, NestedTableView } from './NestedTab'
 
-type Row = Record<string, unknown>
+/** Narrow a ScreenTab to FormTab — the original "grid of fields" kind. A tab without a
+ *  ``type`` discriminator is treated as a form (matches `parse_screens` backward compat).
+ *  Used to skip nested-tab kinds from the parent's seeding / submit loops — those tabs
+ *  manage their own read query + form state internally. */
+function isFormTab(tab: ScreenTab): tab is FormTab {
+  return tab.type === undefined || tab.type === 'form'
+}
+
 export type DialogMode = 'edit' | 'add'
-
-// Send both the as-is keys and UPPERCASE copies — same trick as the inline grid editor:
-// the migrated `_put`/`_post`/`_delete` queries use v1's uppercase column names, while
-// Postgres returns the read result's columns lowercased. `text()` only binds what its SQL
-// references, so the extras are harmless.
-function withUpper(o: Row): Row {
-  const out: Row = { ...o }
-  for (const [k, v] of Object.entries(o)) out[k.toUpperCase()] = v
-  return out
-}
-function originalKeys(row: Row): Row {
-  return Object.fromEntries(Object.entries(row).map(([k, v]) => [`${k}_ORIGINAL`, v]))
-}
 
 const TabStrip = styled.div`
   display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid ${colors.border};
@@ -66,48 +62,6 @@ const ReadOnlyBox = styled.div`
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
 function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
 function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
-
-// Evaluate a list of FieldCondition predicates against the dialog's current form state. The list
-// AND-s — every predicate must hold. An empty list returns `false` (= no condition asserted; the
-// caller falls back to the static flag). A predicate's `field` is matched case-insensitively to
-// match how the rest of the dialog reads form values (Postgres lowercases identifiers, v1's
-// migration emits uppercase). `value` is either a literal (string match) or a list (membership).
-function evalConditions(rules: FieldCondition[] | undefined, formValues: Row): boolean {
-  if (!rules || rules.length === 0) return false
-  for (const r of rules) {
-    const key = Object.keys(formValues).find((k) => k.toLowerCase() === r.field.toLowerCase())
-    const live = key != null ? formValues[key] : undefined
-    const liveStr = live == null ? '' : String(live)
-    if (Array.isArray(r.value)) {
-      if (!r.value.includes(liveStr)) return false
-    } else if (liveStr !== r.value) {
-      return false
-    }
-  }
-  return true
-}
-
-// Resolve a list of ParamBinds against the current form state. `value` binds are literals;
-// `source` binds read the live value of another field on the same form (column name,
-// case-insensitive). Empty / missing values are dropped — the caller decides whether that means
-// "no narrowing" (a lookup), or "this column keeps its current DB value" (a writable query).
-// Reserved built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) are skipped — wired in a future auth slice.
-function resolveBindList(
-  binds: ReadonlyArray<{ param: string; value?: string | null; source?: string | null }> | undefined,
-  formValues: Row,
-): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const b of binds ?? []) {
-    if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
-    if (b.source && !b.source.startsWith('#')) {
-      // case-insensitive on the source name (read columns are lowercased by Postgres)
-      const key = Object.keys(formValues).find((k) => k.toLowerCase() === b.source!.toLowerCase())
-      const v = key != null ? formValues[key] : undefined
-      if (v != null && String(v) !== '') out[b.param] = String(v)
-    }
-  }
-  return out
-}
 
 // Field-lookup shim — keeps the old call site stable while the shared helper grows uses.
 function resolveBinds(field: ScreenField, formValues: Row): Record<string, string> {
@@ -293,7 +247,9 @@ export function ScreenDialog({
     if (!open || !dlg) return
     const seeded: Row = {}
     const original: Row = {}
-    for (const tab of dlg.tabs) {
+    // Only seed the parent's own form tabs — nested-form / nested-table tabs manage their own
+    // read query + state inside the NestedFormView / NestedTableView components.
+    for (const tab of dlg.tabs.filter(isFormTab)) {
       for (const f of tab.fields ?? []) {
         const col = colByName.get(f.name.toLowerCase()) ?? null
         const v = valueFor(f.name, row)
@@ -380,7 +336,9 @@ export function ScreenDialog({
     // written). Password fields with empty values are also dropped so we don't overwrite the
     // stored hash / ENC: ciphertext with NULL or "".
     const sent: Row = {}
-    for (const tab of tabs) {
+    // The parent's save only collects its own form tabs' fields. Nested-form tabs write through
+    // their own update/insert queries (slice 2 — coordinated via a register-on-parent-save hook).
+    for (const tab of tabs.filter(isFormTab)) {
       for (const f of tab.fields ?? []) {
         if (!fieldStateOf(f).visible) continue
         if (!(f.name in formValues)) continue
@@ -461,10 +419,15 @@ export function ScreenDialog({
   if (!open || !dlg) return null
   const currentTab = tabs[Math.min(tabIdx, tabs.length - 1)] ?? null
   const title = dlg.title || screen.label || screen.id
-  const gridCols = Math.max(1, currentTab?.cols ?? 2)
+  // The parent's grid `cols` only applies when the current tab is a form-shaped tab; nested
+  // form tabs carry their own `cols`, nested tables ignore it. Default 2 columns.
+  const isForm = currentTab ? isFormTab(currentTab) : false
+  const gridCols = isForm && currentTab && (currentTab as FormTab).cols ? (currentTab as FormTab).cols! : 2
   // Drop fields that don't pass their visibility rule. Their values stay in form state so a
   // condition flipping back later restores them — but on submit, the same eval drops them again.
-  const visibleFields = (currentTab?.fields ?? []).filter((f) => fieldStateOf(f).visible)
+  const visibleFields = isForm && currentTab
+    ? ((currentTab as FormTab).fields ?? []).filter((f) => fieldStateOf(f).visible)
+    : []
 
   return (
     <Overlay onClick={onClose}>
@@ -486,7 +449,13 @@ export function ScreenDialog({
                   ))}
                 </TabStrip>
               )}
-              {currentTab && (
+              {currentTab && currentTab.type === 'nested_form' && (
+                <NestedFormView tab={currentTab} parentFormValues={formValues} parentConnector={connector} />
+              )}
+              {currentTab && currentTab.type === 'nested_table' && (
+                <NestedTableView tab={currentTab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
+              )}
+              {currentTab && isFormTab(currentTab) && (
                 <FieldGrid $cols={gridCols}>
                   {visibleFields.map((f) => {
                     const st = fieldStateOf(f)
@@ -514,14 +483,14 @@ export function ScreenDialog({
           {error && <Banner $tone="error">{error}</Banner>}
         </ModalBody>
         <ModalFooter>
-          <Row gap={8}>
+          <FlexRow gap={8}>
             <Button $size="sm" $variant="ghost" onClick={onClose} disabled={saving}>
               <X size={13} /> {t('common.cancel')}
             </Button>
             <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || tabs.length === 0}>
               {saving ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
             </Button>
-          </Row>
+          </FlexRow>
         </ModalFooter>
       </ScreenDialogModal>
     </Overlay>

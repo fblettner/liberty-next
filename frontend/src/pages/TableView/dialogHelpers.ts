@@ -1,0 +1,72 @@
+// Small helpers shared between ScreenDialog and the nested-tab components — pulling these out
+// of ScreenDialog so NestedFormTab / NestedTableTab can reuse the same param-bind resolution
+// and case-insensitive value lookup. The originals lived inline at the top of ScreenDialog
+// until the nested-tab slice; everything here stays type-light + side-effect-free.
+import type { FieldCondition, ParamBind } from '../../types/screens'
+
+export type Row = Record<string, unknown>
+
+/** Send both the as-is keys and UPPERCASE copies — same trick as the inline grid editor:
+ *  the migrated `_put`/`_post`/`_delete` queries use v1's uppercase column names, while
+ *  Postgres returns the read result's columns lowercased. `text()` only binds what its SQL
+ *  references, so the extras are harmless. */
+export function withUpper(o: Row): Row {
+  const out: Row = { ...o }
+  for (const [k, v] of Object.entries(o)) out[k.toUpperCase()] = v
+  return out
+}
+
+/** For the migrated `_put`'s WHERE rebind: each `:<NAME>` becomes `:<NAME>_ORIGINAL` so editing
+ *  a key column still updates the right row (the SET clause untouched — the new value). */
+export function originalKeys(row: Row): Row {
+  return Object.fromEntries(Object.entries(row).map(([k, v]) => [`${k}_ORIGINAL`, v]))
+}
+
+/** Case-insensitive lookup over a row's keys. The DB result rows have lowercase keys
+ *  (Postgres folds unquoted identifiers); a ScreenField.name from the migration is uppercase.
+ *  Match by lower-casing on both sides so we read the right cell. */
+export function valueFor(field: string, src: Row): unknown {
+  if (field in src) return src[field]
+  const lk = field.toLowerCase()
+  if (lk in src) return src[lk]
+  for (const k of Object.keys(src)) if (k.toLowerCase() === lk) return src[k]
+  return undefined
+}
+
+/** Evaluate a list of FieldCondition predicates against the dialog's current form state. The
+ *  list AND-s — every predicate must hold. An empty list returns `false` (= no condition
+ *  asserted; the caller falls back to the static flag). `value` is a literal (string match)
+ *  or a list (membership). Field names match case-insensitively (Postgres lowercases). */
+export function evalConditions(rules: FieldCondition[] | undefined, formValues: Row): boolean {
+  if (!rules || rules.length === 0) return false
+  for (const r of rules) {
+    const key = Object.keys(formValues).find((k) => k.toLowerCase() === r.field.toLowerCase())
+    const live = key != null ? formValues[key] : undefined
+    const liveStr = live == null ? '' : String(live)
+    if (Array.isArray(r.value)) {
+      if (!r.value.includes(liveStr)) return false
+    } else if (liveStr !== r.value) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Resolve a list of ParamBinds against the current form state. `value` binds are literals;
+ *  `source` binds read the live value of another field on the same form (column name,
+ *  case-insensitive). Empty / missing values are dropped — the caller decides whether that
+ *  means "no narrowing" (a lookup), "this column keeps its current DB value" (a writable
+ *  query), or "skip this fetch" (a nested form that needs its FK to resolve). Reserved
+ *  built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) are skipped — wired in a future auth slice. */
+export function resolveBindList(binds: ReadonlyArray<ParamBind> | undefined, formValues: Row): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const b of binds ?? []) {
+    if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
+    if (b.source && !b.source.startsWith('#')) {
+      const key = Object.keys(formValues).find((k) => k.toLowerCase() === b.source!.toLowerCase())
+      const v = key != null ? formValues[key] : undefined
+      if (v != null && String(v) !== '') out[b.param] = String(v)
+    }
+  }
+  return out
+}

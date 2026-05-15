@@ -158,21 +158,94 @@ class ScreenField(BaseModel):
     )
 
 
-class ScreenTab(BaseModel):
-    """One tab in a dialog. ``cols`` is v1's per-tab grid width (number of columns) — the
-    frontend lays the fields out in a CSS grid that wide. v1's tab_disable_add /
-    tab_disable_edit are captured as ``hide_on_add`` / ``hide_on_edit`` so the migration
-    keeps fidelity; the runtime checks them in slice 2."""
+class _ScreenTabBase(BaseModel):
+    """Fields every tab kind shares — title + per-mode hide flags + translations. The
+    discriminator ``type`` selects the variant: ``form`` (the default — a grid of fields),
+    ``nested_form`` (an editable child-record form embedded inline), ``nested_table`` (a
+    related-rows TableView embedded inline). v1's ``tab_disable_add`` / ``tab_disable_edit``
+    are captured as ``hide_on_add`` / ``hide_on_edit`` so the migration keeps fidelity."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(description="Stable id within the dialog (used as the tab's key in builders).")
     label: str | None = Field(default=None, description="Default-language tab title.")
     l: dict[str, str] = Field(default_factory=dict, description="Per-language overrides: {language_code: translated_label}.")
-    cols: int | None = Field(default=None, description="CSS grid column count for this tab's fields (v1's tab_cols).")
     hide_on_add: bool = Field(default=False, description="Hide this tab when *adding* a row (v1's tab_disable_add='Y').")
     hide_on_edit: bool = Field(default=False, description="Hide this tab when *editing* a row (v1's tab_disable_edit='Y').")
+
+
+class FormTab(_ScreenTabBase):
+    """A grid of editable fields — the original tab kind. ``cols`` is the CSS grid column count
+    (v1's tab_cols). Backward-compatible: a tab in screens.toml without an explicit ``type``
+    field is treated as ``"form"`` (see :func:`parse_screens`)."""
+
+    type: Literal["form"] = "form"
+    cols: int | None = Field(default=None, description="CSS grid column count for this tab's fields (v1's tab_cols).")
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown on this tab, in display order.")
+
+
+class NestedFormTab(_ScreenTabBase):
+    """A child-record form embedded inline in this tab — v2's port of v1's "FormsDialog inside
+    a FormsDialog". The parent's PK is bound into the nested ``read_query`` via ``param_binds``;
+    if a row comes back the nested form renders in edit mode (saving fires ``update_query``); if
+    not, the user is editing a new related record (saving fires ``insert_query``). All three
+    queries live on ``connector`` (default: the parent screen's effective connector).
+
+    Used for cases like SETTINGS_APPLICATIONS' "JD Edwards" / "LDAP" tabs in v1: same APPS_ID,
+    extra columns on related tables. The parent screen's ``update_query`` writes its own table;
+    each nested tab takes care of its own."""
+
+    type: Literal["nested_form"] = "nested_form"
+    connector: str | None = Field(
+        default=None,
+        description="Connector hosting the nested CRUD queries; blank → the parent screen's effective connector.",
+    )
+    read_query: str = Field(description="Reads the linked row (typically returning 0 or 1 rows after the bind narrows it).")
+    update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists.")
+    insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed.")
+    cols: int | None = Field(default=None, description="CSS grid column count for the nested fields (v1's tab_cols).")
+    fields: list[ScreenField] = Field(default_factory=list, description="Fields shown in the nested form, in display order.")
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description=(
+            "Bind parent values into the nested read/update/insert queries. Typically the parent's "
+            "PK column → the nested query's matching ``:param``. Resolved at call time against the "
+            "parent dialog's live form state (same shape as ``ScreenField.lookup_param_binds``)."
+        ),
+    )
+
+
+class NestedTableTab(_ScreenTabBase):
+    """A related-rows TableView embedded inline in this tab — v2's port of v1's "FormsTable
+    inside a FormsDialog". References another v2 screen by id (``screen``) — the nested
+    TableView re-uses that screen's read query + column hints + dialog + actions, so e.g.
+    a parent SETTINGS_APPLICATIONS' "Activity Log" tab points at ``settings_activity_log``
+    (already a standalone screen) and gets the full TableView pipeline for free.
+
+    The parent's PK (or any other column) is bound into the nested screen's read query via
+    ``param_binds`` — the activity-log rows narrow to the current application's APPS_ID."""
+
+    type: Literal["nested_table"] = "nested_table"
+    screen: str = Field(description="ID of the v2 screen to render as a TableView in this tab.")
+    connector: str | None = Field(
+        default=None,
+        description="Connector that hosts the referenced screen; blank → the parent screen's effective connector.",
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description=(
+            "Bind parent values into the nested screen's read query (e.g. parent's APPS_ID → "
+            "nested ``ACL_APPS_ID``). Resolved at render time against the parent dialog's form state."
+        ),
+    )
+
+
+# Discriminator union of tab kinds. Pydantic picks the right subclass on the ``type`` field;
+# a tab dict missing ``type`` is patched to ``"form"`` by :func:`parse_screens` so existing
+# screens.toml files keep validating. Ungrouped: deliberately re-emit through the public
+# alias ``ScreenTab`` so external code (the migration, tests, the OpenAPI exporter) still
+# imports one name.
+ScreenTab = Annotated[Union[FormTab, NestedFormTab, NestedTableTab], Field(discriminator="type")]
 
 
 class _ActionBase(BaseModel):
@@ -380,15 +453,31 @@ class ScreensFile(BaseModel):
 
 def parse_screens(data: dict[str, Any]) -> ScreensFile:
     """Validate a raw TOML dict into a :class:`ScreensFile`. Each inner screen's ``id`` is
-    auto-set from its key when missing (most TOML by-hand authors won't repeat it)."""
-    # Inject `id` from the dict key when an entry omits it — the validator above then
-    # enforces that an explicit `id` matches its key.
+    auto-set from its key when missing (most TOML by-hand authors won't repeat it). Each
+    dialog tab missing the ``type`` discriminator defaults to ``"form"`` so screens.toml
+    files written before the nested-tab variants were added keep validating."""
     apps = data.get("screens") or {}
     for app_name, screens in apps.items():
-        if isinstance(screens, dict):
-            for sid, screen in screens.items():
-                if isinstance(screen, dict) and not screen.get("id"):
-                    screen["id"] = sid
+        if not isinstance(screens, dict):
+            continue
+        for sid, screen in screens.items():
+            if not isinstance(screen, dict):
+                continue
+            # Inject `id` from the dict key when an entry omits it — the validator above then
+            # enforces that an explicit `id` matches its key.
+            if not screen.get("id"):
+                screen["id"] = sid
+            # Default tab kind = "form" for backward compat with the pre-nested-tab schema —
+            # everything before this commit was a flat field grid, and TOML by-hand authors
+            # routinely omit defaults. Pydantic's discriminated-union resolver needs the key
+            # to be present to pick a branch.
+            dialog = screen.get("dialog")
+            if isinstance(dialog, dict):
+                tabs = dialog.get("tabs")
+                if isinstance(tabs, list):
+                    for tab in tabs:
+                        if isinstance(tab, dict) and not tab.get("type"):
+                            tab["type"] = "form"
     return ScreensFile.model_validate(data)
 
 

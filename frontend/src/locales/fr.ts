@@ -207,6 +207,11 @@ const fr: Resources = {
     noVisibleFields: 'Aucun champ sur cet onglet.',
     passwordPlaceholder: 'laisser vide pour conserver la valeur actuelle',
     onSaveFailed: 'La ligne principale a été enregistrée, mais une action de suivi a échoué : {{message}}',
+    nested: {
+      pendingBinds: 'Enregistrez la ligne d’abord pour charger les données liées.',
+      noRecord: 'Pas encore de fiche liée.',
+      noRows: 'Aucune ligne liée.',
+    },
   },
   http: {
     ok: 'OK',

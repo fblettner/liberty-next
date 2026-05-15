@@ -205,6 +205,11 @@ const en = {
     noVisibleFields: 'No fields on this tab.',
     passwordPlaceholder: 'leave blank to keep the current value',
     onSaveFailed: 'The main row was saved, but a follow-up action failed: {{message}}',
+    nested: {
+      pendingBinds: 'Save the row first to load the linked data.',
+      noRecord: 'No linked record yet.',
+      noRows: 'No related rows.',
+    },
   },
   http: {
     ok: 'OK',

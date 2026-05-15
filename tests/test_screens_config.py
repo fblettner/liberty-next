@@ -9,6 +9,9 @@ import pytest
 
 from liberty.screens import (
     FieldCondition,
+    FormTab,
+    NestedFormTab,
+    NestedTableTab,
     NotifyAction,
     ParamBind,
     RefreshAction,
@@ -16,7 +19,6 @@ from liberty.screens import (
     Screen,
     ScreenDialog,
     ScreenField,
-    ScreenTab,
     ScreensFile,
     load_screens,
     parse_screens,
@@ -58,14 +60,40 @@ def test_screen_field_shape() -> None:
 def test_screen_dialog_and_tab() -> None:
     """A dialog owns its tabs, each tab owns its fields. Duplicate tab ids in the same
     dialog are caught at the Screen level (the dialog's parent)."""
-    tab = ScreenTab(id="general", label="General", cols=2, l={"fr": "Général"},
-                    fields=[ScreenField(name="USR_ID")])
+    tab = FormTab(id="general", label="General", cols=2, l={"fr": "Général"},
+                  fields=[ScreenField(name="USR_ID")])
     dlg = ScreenDialog(title="User", tabs=[tab])
     Screen(id="security_users", read_query="users_get", dialog=dlg)
     # duplicate tab ids — Screen's model_validator catches it.
-    bad_dlg = ScreenDialog(tabs=[ScreenTab(id="general"), ScreenTab(id="general")])
+    bad_dlg = ScreenDialog(tabs=[FormTab(id="general"), FormTab(id="general")])
     with pytest.raises(Exception):
         Screen(id="x", read_query="q", dialog=bad_dlg)
+
+
+def test_nested_tab_variants() -> None:
+    """The discriminated union covers three tab kinds: ``form`` (default field grid),
+    ``nested_form`` (an editable child-record form inline), ``nested_table`` (a related-rows
+    TableView inline). The discriminator routes a raw dict to the right variant."""
+    nf = NestedFormTab(
+        id="jdedwards", label="JD Edwards",
+        read_query="settings_jdedwards_get", update_query="settings_jdedwards_put",
+        insert_query="settings_jdedwards_post",
+        fields=[ScreenField(name="JDE_SY"), ScreenField(name="JDE_DTA")],
+        param_binds=[ParamBind(param="APPS_ID", source="APPS_ID")],
+    )
+    assert nf.type == "nested_form" and nf.read_query == "settings_jdedwards_get"
+    nt = NestedTableTab(
+        id="activity_log", screen="settings_activity_log",
+        param_binds=[ParamBind(param="ACL_APPS_ID", source="APPS_ID")],
+    )
+    assert nt.type == "nested_table" and nt.screen == "settings_activity_log"
+    # The union resolves via the ``type`` discriminator. A dialog of mixed tab kinds round-trips.
+    dlg = ScreenDialog(tabs=[
+        FormTab(id="general", fields=[ScreenField(name="APPS_ID")]),
+        nf, nt,
+    ])
+    s = Screen(id="settings_applications", read_query="settings_applications_get", dialog=dlg)
+    assert [t.type for t in s.dialog.tabs] == ["form", "nested_form", "nested_table"]
 
 
 def test_action_discriminated_union_round_trips() -> None:
@@ -185,9 +213,67 @@ def test_parse_screens_injects_id_from_key() -> None:
     assert s.id == "security_users"  # injected from the key
     assert s.read_query == "users_get" and s.audit is True
     assert s.dialog is not None and s.dialog.title == "User"
-    field = s.dialog.tabs[0].fields[1]
+    tab = s.dialog.tabs[0]
+    # The tab dict had no ``type`` → ``parse_screens`` defaulted it to "form" so the
+    # discriminated union resolves cleanly. Backward compat for every screens.toml file
+    # written before the nested-tab variants were added.
+    assert isinstance(tab, FormTab) and tab.type == "form"
+    field = tab.fields[1]
     assert field.dd == "ROL_ID"
     assert field.lookup_param_binds[0].source == "USR_APPS_ID"
+
+
+def test_parse_screens_with_nested_tab_kinds() -> None:
+    """A dialog with mixed tab kinds: a plain ``form`` tab, an inline ``nested_form`` tab
+    (an editable child record), and an inline ``nested_table`` tab (a related-rows TableView).
+    Each variant validates via its discriminator + parses its variant-specific fields."""
+    raw = tomllib.loads(
+        textwrap.dedent(
+            """
+            [screens.nomasx1.settings_applications]
+            label = "Applications"
+            read_query = "settings_applications_get"
+
+            [screens.nomasx1.settings_applications.dialog]
+
+            [[screens.nomasx1.settings_applications.dialog.tabs]]
+            id = "general"
+            label = "General"
+
+            [[screens.nomasx1.settings_applications.dialog.tabs.fields]]
+            name = "APPS_ID"
+
+            [[screens.nomasx1.settings_applications.dialog.tabs]]
+            type = "nested_form"
+            id = "jdedwards"
+            label = "JD Edwards"
+            read_query = "settings_jdedwards_get"
+            update_query = "settings_jdedwards_put"
+            insert_query = "settings_jdedwards_post"
+            hide_on_add = true
+            param_binds = [{ param = "APPS_ID", source = "APPS_ID" }]
+
+            [[screens.nomasx1.settings_applications.dialog.tabs.fields]]
+            name = "JDE_SY"
+
+            [[screens.nomasx1.settings_applications.dialog.tabs]]
+            type = "nested_table"
+            id = "activity_log"
+            label = "Activity Log"
+            screen = "settings_activity_log"
+            hide_on_add = true
+            param_binds = [{ param = "ACL_APPS_ID", source = "APPS_ID" }]
+            """
+        )
+    )
+    sf = parse_screens(raw)
+    tabs = sf.screens["nomasx1"]["settings_applications"].dialog.tabs
+    assert [t.type for t in tabs] == ["form", "nested_form", "nested_table"]
+    assert isinstance(tabs[1], NestedFormTab)
+    assert tabs[1].read_query == "settings_jdedwards_get"
+    assert tabs[1].param_binds[0].source == "APPS_ID"
+    assert isinstance(tabs[2], NestedTableTab)
+    assert tabs[2].screen == "settings_activity_log"
 
 
 def test_parse_screens_id_mismatch_rejected() -> None:
