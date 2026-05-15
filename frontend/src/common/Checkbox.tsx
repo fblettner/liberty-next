@@ -1,10 +1,11 @@
-// A themed checkbox — a native `<input type="checkbox">` hidden behind a styled
-// `<span>` box, so it picks up the rest of the form's liquid-glass look (rounded
-// corners, theme-aware border/fill, focus ring) instead of the OS chrome the
-// browser would otherwise paint. Used everywhere boolean values are toggled
-// (SchemaForm's boolean fields, ScreenDialog's BOOLEAN-ruled columns, the SQL
-// wizard's column picker). The `<input>` itself stays in the DOM and keeps full
-// keyboard semantics — space toggles, Tab focuses, the label is clickable.
+// A themed checkbox — a native `<input type="checkbox">` overlaid invisibly on top of a
+// styled box, so the box picks up the liquid-glass look (rounded corners, theme-aware
+// border/fill, focus ring) while the input itself receives the real clicks. The earlier
+// pattern hid the input off-screen and relied on `<label>`'s click-fires-input mechanism,
+// but that's brittle: `pointer-events: none` on the hidden input broke the forwarding in
+// some browsers (user reported clicks not toggling state). Putting the input ON TOP of the
+// box, sized 100%, opacity 0, is the bog-standard custom-checkbox pattern — clicks land on
+// a real form control, keyboard a11y stays free, no synthesised events.
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Check, Minus } from 'lucide-react'
@@ -16,16 +17,24 @@ const Wrap = styled.label<{ $disabled?: boolean }>`
   opacity: ${({ $disabled }) => ($disabled ? 0.55 : 1)};
   font-family: ${fonts.sans}; font-size: ${fontSize.base}; color: ${colors.text.secondary};
   user-select: none;
-  /* Hide the native input — we still keep it in the DOM so the keyboard / a11y
-     behaviour is unchanged, but the visible box is the styled span below it. */
-  & > input {
-    position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0;
-  }
+`
+
+// Positioning context for the box + the overlaid input — both must lay on top of each other.
+const BoxWrap = styled.span`
+  position: relative; display: inline-flex; flex-shrink: 0; width: 16px; height: 16px;
+`
+
+// The native input, sized 100% of BoxWrap with opacity 0 — invisible but click-receiving.
+// Keep margin: 0 so the input doesn't push the box layout around in some browsers.
+const HiddenInput = styled.input`
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; padding: 0; opacity: 0;
+  cursor: inherit;
 `
 
 const Box = styled.span<{ $checked: boolean; $indeterminate: boolean }>`
+  position: absolute; inset: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; flex-shrink: 0;
   border-radius: ${radius.sm};
   border: 1px solid ${({ $checked, $indeterminate }) =>
     $checked || $indeterminate ? colors.blue.main : colors.border};
@@ -33,9 +42,9 @@ const Box = styled.span<{ $checked: boolean; $indeterminate: boolean }>`
     $checked || $indeterminate ? colors.blue.main : colors.bg.input};
   color: white;
   transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
-  /* Focus ring lives on the box, driven by the visually-hidden input's :focus-visible
-     state — a label > input + box sibling-selector keeps the ring keyboard-only. */
-  ${Wrap}:has(input:focus-visible) & { box-shadow: ${shadow.focus}; }
+  pointer-events: none;  /* clicks pass through to the input that sits on top */
+  /* Focus ring on the box, driven by the input's :focus-visible — keeps the ring keyboard-only. */
+  ${HiddenInput}:focus-visible + & { box-shadow: ${shadow.focus}; }
   ${Wrap}:hover & { border-color: ${colors.blue.border}; }
 `
 
@@ -60,17 +69,19 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Che
   const isChecked = Boolean(checked)
   return (
     <Wrap $disabled={disabled} className={className} style={style}>
-      <input
-        ref={ref}
-        type="checkbox"
-        checked={isChecked}
-        disabled={disabled}
-        onChange={(e) => onChange?.(e.target.checked)}
-        {...rest}
-      />
-      <Box $checked={isChecked} $indeterminate={Boolean(indeterminate && !isChecked)}>
-        {indeterminate && !isChecked ? <Minus size={11} strokeWidth={3} /> : isChecked ? <Check size={11} strokeWidth={3} /> : null}
-      </Box>
+      <BoxWrap>
+        <HiddenInput
+          ref={ref}
+          type="checkbox"
+          checked={isChecked}
+          disabled={disabled}
+          onChange={(e) => onChange?.(e.target.checked)}
+          {...rest}
+        />
+        <Box $checked={isChecked} $indeterminate={Boolean(indeterminate && !isChecked)}>
+          {indeterminate && !isChecked ? <Minus size={11} strokeWidth={3} /> : isChecked ? <Check size={11} strokeWidth={3} /> : null}
+        </Box>
+      </BoxWrap>
       {label != null && <span>{label}</span>}
     </Wrap>
   )
