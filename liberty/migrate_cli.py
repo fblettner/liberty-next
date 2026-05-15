@@ -59,6 +59,7 @@ from liberty.migrations import (
     migrate_table_filters,
     migrate_table_meta,
     read_actions,
+    read_event_actions,
     read_api,
     read_applications,
     read_context_menus,
@@ -132,21 +133,34 @@ async def _build(args: argparse.Namespace) -> dict:
                 promotable_dialogs=promotable_dialogs,
                 app_name=args.connector,
             )
-            # Auto-attach v1 named actions (NOMAJDE's Create Role / Reset Password / etc.) to
-            # the matching v2 screens — match by query-base (an action's task running
-            # ``f0092_put`` belongs to the screen whose ``read_query`` is ``f0092_get``).
-            # libnsx1 has no rows in ly_actions, so this is a no-op there. The reference dump
-            # (full v1 shape including branches / loops / IF / multi-task chains) still requires
-            # ``liberty-migrate actions`` to be run separately.
+            # Attach v1 named actions to v2 screens via the event junction (ly_evt_cpt) — the
+            # *correct* attachment model. v1's NOMAJDE wires "Create Role" to the Role dialog's
+            # Save event (FormsDialog evt 1) and to the Role table's row-insert event
+            # (FormsTable evt 2). We map both to the screen's ``dialog.on_save`` (the typical
+            # flow is Add Row → dialog → Save fires the chain). The first task is skipped when
+            # it matches the screen's update/insert query — the dialog Save already runs that;
+            # the chain handles the additional related-table writes.
+            #
+            # The reference dump (full v1 shape: branches, loops, IF, multi-task chains) still
+            # requires ``liberty-migrate actions`` separately for hand-wiring complex flows.
+            # ``attach_actions_to_screens`` also scrubs prior heuristic-attached entries from
+            # the previous slice — re-running on an existing screens.toml cleans up the bad
+            # ``Screen.actions`` automatically.
             try:
                 act_rows = await read_actions(engine)
+                evt_rows = await read_event_actions(engine)
             except Exception:
                 act_rows = ([], [], [], [], [], [])
-            if act_rows[0]:
+                evt_rows = []
+            if act_rows[0] or evt_rows:
                 actions_data = migrate_actions(
                     *act_rows, sql_rows=sql_rows, app_name=args.connector,
                 )
-                attach_actions_to_screens(screens_data, actions_data, app_name=args.connector)
+                attach_actions_to_screens(
+                    screens_data, actions_data,
+                    event_rows=evt_rows, table_rows=tables_rows,
+                    app_name=args.connector,
+                )
             return screens_data
         parts: list[dict] = []
         if args.command in ("sql", "all"):
@@ -284,12 +298,12 @@ def _summary(data: dict, *, command: str) -> str:
         # Promoted row-click targets — screens whose v1 ctx menu had a "Display Properties"-style
         # FormsDialog item; the migrator promoted it to ``row_click_screen`` + dropped the menu entry.
         n_row_click = sum(1 for s in screens.values() if s.get("row_click_screen"))
-        # Auto-attached actions — v1 ly_actions wired to a v2 screen via query-base matching
-        # (NOMAJDE's "Create Role" → role_management). Each attached entry has an ``id`` that
+        # Auto-attached action chains — v1 ly_evt_cpt rows wired to v2 ``dialog.on_save`` (or
+        # falling back to ``Screen.actions`` when the screen has no dialog). Each entry's ``id``
         # starts with ``migrated_`` so the count is unambiguous.
         n_attached_actions = sum(
             1 for s in screens.values()
-            for a in (s.get("actions") or [])
+            for a in ((s.get("dialog") or {}).get("on_save") or []) + (s.get("actions") or [])
             if isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_")
         )
         return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "

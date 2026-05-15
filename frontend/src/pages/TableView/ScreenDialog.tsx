@@ -15,7 +15,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Save, X, Zap } from 'lucide-react'
+import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
@@ -217,34 +217,14 @@ export function ScreenDialog({
     return { ok: true, warnings, refresh }
   }, [connector])
 
-  // Screen-level actions surfaced inside the dialog footer too — v1's NOMAJDE pattern (e.g.
-  // role-management dialog carried "Import Security" / "Merge Roles" buttons inside its second
-  // tab). The same ``Screen.actions`` list as the TableView toolbar, but fired with the *live
-  // form state* as context: a ``source`` ParamBind reads the current values, so "Merge Roles"
-  // with ``source = ROL_ID`` picks up the role being edited. Reuses ``runOnSaveActions`` (a
-  // single-action chain works fine) — the runner already handles run_query / notify / refresh /
-  // navigate, stubs the rest.
-  const screenActions = useMemo<Action[]>(() => (screen.actions ?? []) as Action[], [screen])
-  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —
+  // the v1 model attaches actions either to *events* (ly_evt_cpt → wired to ``dialog.on_save``,
+  // fires automatically on Save) or as *per-tab InputAction buttons* (ly_dlg_col col_component
+  // 'InputAction' → next slice needs a new ``FormTab.actions`` schema field). Surfacing
+  // ``screen.actions`` in every dialog regardless of context made the same buttons appear on
+  // the wrong screens. The status banner for ``dialog.on_save`` failures stays — surfaced via
+  // the parent's ``error`` state below.
   const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
-  const fireScreenAction = useCallback(async (a: Action) => {
-    setActionBusy(a.id); setActionStatus(null)
-    // Form state takes precedence over the original row's values — the user may have edited a
-    // bind-source field before clicking the action. ``savedRow`` provides untouched columns
-    // (e.g. the PK on a not-yet-modified record).
-    const ctx: Row = { ...savedRow, ...formValues }
-    const result = await runOnSaveActions([a], ctx)
-    setActionBusy(null)
-    if (!result.ok) {
-      setActionStatus({ message: result.error || a.label || a.id, tone: 'error' })
-    } else {
-      // notify-type actions emit their own message via warnings; non-notify successes get a
-      // generic "<label> · OK" so the operator sees feedback.
-      const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : `${a.label || a.id} · ${t('http.ok')}`
-      setActionStatus({ message: msg, tone: 'ok' })
-    }
-    if (result.refresh) onSaved()
-  }, [formValues, savedRow, runOnSaveActions, onSaved, t])
 
   const submit = useCallback(async () => {
     const targetQuery = mode === 'edit' ? screen.update_query : screen.insert_query
@@ -464,25 +444,13 @@ export function ScreenDialog({
           )}
         </ModalBody>
         <ModalFooter>
-          {screenActions.length > 0 && (
-            <FlexRow gap={6} style={{ marginRight: 'auto', flexWrap: 'wrap' }}>
-              {/* v1's pattern of in-dialog action buttons — fires the screen's actions with the
-                  live form state as context. ParamBinds (``source``) read formValues so e.g.
-                  "Merge Roles" on the role-management dialog picks up the role being edited. */}
-              {screenActions.map((a) => (
-                <Button
-                  key={a.id}
-                  $size="sm"
-                  $variant="ghost"
-                  onClick={() => { void fireScreenAction(a) }}
-                  disabled={saving || actionBusy != null}
-                  title={a.id}
-                >
-                  {actionBusy === a.id ? <SpinnerRing size={13} thickness={2} /> : <Zap size={13} />} {a.label || a.id}
-                </Button>
-              ))}
-            </FlexRow>
-          )}
+          {/* Note: v1's "actions inside a form" model is two distinct things — event-driven
+              actions (ly_evt_cpt, e.g. "on dialog save → run Create Role chain") and per-tab
+              action buttons (ly_dlg_col col_component='InputAction'). Event actions wire to
+              ``dialog.on_save`` and fire automatically; the operator never sees a button.
+              Per-tab buttons need a new ``FormTab.actions`` schema field (next slice). The
+              previous ``screen.actions`` mirroring in the footer was *wrong* — it surfaced
+              the same buttons across every dialog regardless of context — so it's gone. */}
           <FlexRow gap={8}>
             <Button $size="sm" $variant="ghost" onClick={onClose} disabled={saving}>
               <X size={13} /> {t('common.cancel')}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from liberty.migrations.source import (
     make_engine,
     read_actions,
+    read_event_actions,
     read_api,
     read_applications,
     read_column_hints,
@@ -59,6 +60,7 @@ __all__ = [
     "migrate_table_filters",
     "migrate_table_meta",
     "read_actions",
+    "read_event_actions",
     "read_api",
     "read_applications",
     "read_context_menus",

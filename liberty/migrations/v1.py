@@ -1960,168 +1960,201 @@ def migrate_actions(
 def attach_actions_to_screens(
     screens_data: dict[str, Any],
     actions_data: dict[str, Any],
+    event_rows: Iterable[Mapping[str, Any]] = (),
+    table_rows: Iterable[Mapping[str, Any]] = (),
     *,
     app_name: str,
 ) -> dict[str, Any]:
-    """Auto-attach the migrated v1 actions to v2 screens by **query-base matching**: each task's
-    query (e.g. ``f0092_put``) shares a base name with a screen's read_query (``f0092_get`` →
-    base ``f0092``). The most common base across the action's tasks decides the target screen
-    (ties go to the first matching screen in iteration order). The attached entry is a single
-    ``run_query`` ``Screen.actions`` item using the action's **first task with a query** — v2's
-    Action union is flat, no built-in multi-step chain, so multi-task v1 actions only get their
-    primary step wired here; the full chain stays in ``migrated_actions.toml`` for the operator
-    to hand-wire via the builder (or to chain manually in ``Dialog.on_save``).
+    """Attach v1 actions to v2 screens via the **event junction** (``ly_evt_cpt``).
 
-    Modifies ``screens_data`` in place and returns it. Idempotent: re-running drops any prior
-    auto-attached entry (matched by the ``id`` we stamp — ``migrated_<v1_act_id>``) before
-    re-attaching, so multiple migration runs don't duplicate buttons.
+    v1's action attachment lives in ``ly_evt_cpt`` — each row says "event *N* on component
+    *C* (a FormsDialog frm or FormsTable tbl) fires action *A*". Two event kinds in libnjde:
+
+    * ``FormsDialog`` evt_id 1 = the dialog's Save → action's tasks become extra writes after
+      v2's main update/insert. Maps to ``Screen.dialog.on_save``.
+    * ``FormsTable`` evt_id 2 / 3 = a row was inserted / deleted via the table. Currently maps
+      to ``Screen.dialog.on_save`` too (the typical NOMAJDE flow is Add Row → dialog opens →
+      Save fires the chain). A separate ``Screen.on_insert`` / ``on_delete`` hook for inline
+      batch-edit would be a future slice.
+
+    For each event row we resolve the target screen (a v2 screen whose ``tbl_frm_id`` =
+    evt_cpt_id for FormsDialog, or whose ``tbl_id`` = evt_cpt_id for FormsTable), build a v2
+    Action chain from the action's tasks, and append it to ``dialog.on_save``. **The first
+    task is skipped when its query already matches the screen's update/insert query** —
+    avoids the duplicate INSERT that would otherwise happen (the dialog Save itself runs
+    that query as the main row write; the action chain handles the *additional* related-
+    table writes).
+
+    Modifies ``screens_data`` in place and returns it. Idempotent — re-running scrubs any
+    prior auto-attached entries (id starting ``migrated_``) before re-attaching, so multiple
+    migration runs don't duplicate the chain.
+
+    Previous slice's keyword/base heuristic on ``Screen.actions`` is **gone** — it placed
+    buttons on the wrong screens (NOMAJDE's "Create Role" landed on f0092's toolbar instead
+    of firing automatically on Save). The cleanup of those prior heuristic entries happens
+    here too: any ``Screen.actions`` element whose ``id`` starts with ``migrated_`` gets
+    dropped on this run so the screens.toml is clean.
     """
     screens = (screens_data.get("screens") or {}).get(app_name) or {}
     actions = (actions_data.get("migrated_actions") or {}).get(app_name) or {}
-    if not screens or not actions:
-        return screens_data
-    # Build a base → screen-id index (first match wins on ties). The base of a query is
-    # ``<base>_<crud>`` split on the last underscore — ``f0092_get`` → ``f0092``,
-    # ``security_users_get`` → ``security_users``.
-    sid_by_base: dict[str, str] = {}
-    for sid, scr in screens.items():
-        rq = scr.get("read_query")
-        if not rq or "_" not in rq:
-            continue
-        sid_by_base.setdefault(rq.rsplit("_", 1)[0], sid)
 
-    def _base_of(query: str | None) -> str | None:
-        if not query or "_" not in query:
-            return None
-        return query.rsplit("_", 1)[0]
-
-    # Fallback strategy: when query-base matching fails (the action's tasks touch tables that
-    # aren't the screen's read-query target — common when one v1 action writes across several
-    # related tables), match by **keyword overlap between the action label and each screen's
-    # id+label**. NOMAJDE's "Reset Password for User" doesn't reference user_management's read
-    # query directly, but the keyword "user" matches the screen's label "User Management".
-    # Stop-words + verbs are filtered; trivial singularisation strips a trailing "s".
-    _ACTION_STOP = {
-        "in", "all", "the", "for", "of", "to", "from", "by", "with", "on", "at",
-        "and", "or", "a", "an", "is", "be", "are", "tables", "table",
-    }
-    _ACTION_VERBS = {
-        "create", "delete", "update", "insert", "get", "set", "import", "export",
-        "merge", "reset", "change", "remove", "add", "drop",
-    }
-
-    def _tokens(text: str) -> set[str]:
-        out: set[str] = set()
-        for w in text.lower().replace("_", " ").replace("-", " ").split():
-            w = "".join(c for c in w if c.isalnum())
-            if not w or len(w) < 3 or w in _ACTION_STOP or w in _ACTION_VERBS:
-                continue
-            out.add(w)
-            if w.endswith("s") and len(w) > 3:
-                out.add(w[:-1])
-        return out
-
-    # Pre-compute each screen's id-tokens and label-tokens separately so we can score id
-    # matches higher than label matches (a screen whose *id* contains "user" is more strongly
-    # a user-management screen than one whose label merely mentions "user" — NOMAJDE's
-    # ``f0005`` is "User Defined Code" but the proper target for "Reset Password for User"
-    # is ``user_management``).
-    screen_tokens: list[tuple[str, set[str], set[str]]] = []
-    for sid, scr in screens.items():
-        screen_tokens.append((
-            sid,
-            _tokens(sid),
-            _tokens(str(scr.get("label") or "")),
-        ))
-
-    # First, scrub any previously auto-attached entries (id starts with ``migrated_<v1_act_id>``)
-    # so re-running the migration is idempotent.
+    # Cleanup pass — always run, even when no events / no actions: drops every prior
+    # heuristic-attached ``Screen.actions`` entry (id starts with ``migrated_``) from the
+    # earlier slice, plus prior ``dialog.on_save`` entries we own (same id prefix). Hand-wired
+    # entries (without the prefix) survive untouched.
     for scr in screens.values():
-        existing = scr.get("actions")
-        if isinstance(existing, list) and existing:
-            kept = [a for a in existing if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
+        if isinstance(scr.get("actions"), list):
+            kept = [a for a in scr["actions"] if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
             if kept:
                 scr["actions"] = kept
             else:
                 scr.pop("actions", None)
+        dlg = scr.get("dialog")
+        if isinstance(dlg, dict) and isinstance(dlg.get("on_save"), list):
+            kept = [a for a in dlg["on_save"] if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
+            if kept:
+                dlg["on_save"] = kept
+            else:
+                dlg.pop("on_save", None)
 
-    for slug, a in actions.items():
-        tasks = a.get("tasks") or []
-        # Pick the most-common base across this action's tasks (only ones that resolved to a v2
-        # query); that's the screen the action "belongs to".
-        bases: list[str] = []
-        for t in tasks:
-            b = _base_of(t.get("query"))
-            if b:
-                bases.append(b)
-        target_sid: str | None = None
-        target_base: str | None = None
-        if bases:
-            # Strategy A: most-common task-base; pick the screen sharing that base.
-            seen: dict[str, int] = {}
-            for b in bases:
-                seen[b] = seen.get(b, 0) + 1
-            target_base = max(seen, key=lambda b: (seen[b], -bases.index(b)))
-            target_sid = sid_by_base.get(target_base)
-        if not target_sid:
-            # Strategy B (fallback): label-keyword overlap. NOMAJDE's "Reset Password for User"
-            # has no task whose query base matches user_management's read_query, but the
-            # *labels* share "user" — close enough to wire so the operator sees a button.
-            keywords = _tokens(a.get("label") or slug)
-            best_sid: str | None = None
-            best_score = 0
-            for sid, id_toks, label_toks in screen_tokens:
-                # ID overlap is 2x more valuable than label overlap — a screen named
-                # ``user_management`` outranks one merely labelled "User Defined Code".
-                score = 2 * len(keywords & id_toks) + len(keywords & label_toks)
-                if score > best_score:
-                    best_score, best_sid = score, sid
-            if best_sid:
-                target_sid = best_sid
-        if not target_sid:
+    if not screens or not actions or not event_rows:
+        return screens_data
+
+    # Index: v1 frm_id → v2 screen id (via the v2 screen whose tbl_frm_id matches the frm).
+    # Also v1 tbl_id → v2 screen id. Both rely on the v1 ``ly_tables`` rows that ``migrate_screens``
+    # consumed.
+    sid_by_frm: dict[int, str] = {}
+    sid_by_tbl: dict[int, str] = {}
+    for r in table_rows:
+        try:
+            t_id = int(r["tbl_id"])
+        except (KeyError, TypeError, ValueError):
             continue
-        # Find the representative task: prefer one whose query base matches the screen we
-        # picked (Strategy A); fall back to the first task with any query (Strategy B — the
-        # keyword match doesn't constrain query choice, so the first task is as good as any).
-        primary = None
-        if target_base:
-            primary = next((t for t in tasks if _base_of(t.get("query")) == target_base), None)
-        if primary is None:
-            primary = next((t for t in tasks if t.get("query")), None)
+        # Locate the v2 screen for this v1 tbl_id by matching the read_query name. The
+        # migration's ``sid_by_tbl_id`` map is internal to ``migrate_screens``; we re-derive
+        # it here from the table rows (slugified tbl_db_name / tbl_label) and resolve to a
+        # screen that survived the migration (some tbl rows get dropped — e.g. no readable
+        # GET). ``migrate_screens`` always emits the same slug for a given (tbl_db_name, tbl_label)
+        # in iteration order, so we can re-derive by scanning the already-built screens dict.
+        seed = (r.get("tbl_db_name") or r.get("tbl_label") or "").strip().lower()
+        # Best-effort: pick the screen whose id starts with the slugified seed.
+        for sid in screens:
+            if seed and (sid == seed or sid.startswith(f"{seed}_")):
+                sid_by_tbl[t_id] = sid
+                break
+        try:
+            frm_id_raw = r.get("tbl_frm_id")
+            if frm_id_raw is not None and t_id in sid_by_tbl:
+                sid_by_frm[int(frm_id_raw)] = sid_by_tbl[t_id]
+        except (TypeError, ValueError):
+            pass
+
+    # ── action_id → list of v2 Action dicts ────────────────────────────────────────────────
+    # Each v1 task becomes a v2 ``run_query`` (when its target query resolves) or is dropped
+    # (API-only / IF / LOOP — those aren't representable in v2's flat Action union yet).
+    actions_by_v1_id: dict[int, dict[str, Any]] = {}
+    for slug, a in actions.items():
         v1_act_id = a.get("v1_act_id")
         if v1_act_id is None:
             continue
-        # Multi-task hint: when the v1 action has more than one query-task, surface the count
-        # in the button label so the operator notices the chain isn't fully wired.
-        query_count = sum(1 for t in tasks if t.get("query"))
-        label = a.get("label") or slug
-        if query_count > 1:
-            label = f"{label} (1/{query_count})"
-        attached: dict[str, Any]
-        if primary:
-            # Strategy A or B: at least one task has a v2 query — emit a run_query button.
-            attached = {
-                "id": f"migrated_{v1_act_id}",
+        try:
+            actions_by_v1_id[int(v1_act_id)] = a
+        except (TypeError, ValueError):
+            continue
+
+    def _action_chain(a: Mapping[str, Any], skip_query: str | None = None) -> list[dict[str, Any]]:
+        """Convert a migrated v1 action's tasks into a list of v2 ``Action`` dicts. ``skip_query``
+        drops the first task whose query matches (used to avoid re-running the screen's own
+        update/insert when the dialog's main save is already the action's first step)."""
+        v1_act_id = int(a["v1_act_id"])
+        slug = a.get("id") or f"action_{v1_act_id}"
+        out: list[dict[str, Any]] = []
+        skip_consumed = False
+        step = 0
+        for t in a.get("tasks") or []:
+            q = t.get("query")
+            if not q:
+                # API / IF / LOOP — not representable in v2's Action union yet. Surface a notify
+                # placeholder so the operator notices, then keep going.
+                if t.get("type") in {"API"}:
+                    out.append({
+                        "id": f"migrated_{v1_act_id}_{step}",
+                        "type": "notify",
+                        "label": t.get("label") or f"{slug} step {t.get('seq', step)}",
+                        "message": f"v1 task {t.get('label')!r} uses an API call — see migrated_actions.toml + wire via builder.",
+                        "tone": "warn",
+                    })
+                    step += 1
+                continue
+            if not skip_consumed and skip_query and q == skip_query:
+                skip_consumed = True   # the dialog's main save already runs this
+                continue
+            entry: dict[str, Any] = {
+                "id": f"migrated_{v1_act_id}_{step}",
                 "type": "run_query",
-                "label": label,
-                "query": primary["query"],
+                "query": q,
             }
-            pb = primary.get("param_binds")
+            lbl = t.get("label")
+            if lbl:
+                entry["label"] = lbl
+            pb = t.get("param_binds")
             if pb:
-                attached["param_binds"] = list(pb)
+                entry["param_binds"] = list(pb)
+            out.append(entry)
+            step += 1
+        return out
+
+    # ── walk the event junction; attach each action's chain to the right screen ────────────
+    # FormsDialog events go on the screen's dialog.on_save; FormsTable events also map there
+    # (the typical NOMAJDE flow is Add Row → dialog opens → Save fires the action). Each
+    # (screen, evt_id) bucket is filled once — dedup by v1 act_id so when both the FormsDialog
+    # and the matching FormsTable point at the same action, we only wire it once.
+    attached_per_screen: dict[str, set[int]] = {}
+    for r in event_rows:
+        comp = (r.get("evt_component") or "").strip()
+        try:
+            cpt_id = int(r["evt_cpt_id"])
+            act_id = int(r["evt_act_id"])
+            evt_kind = int(r.get("evt_id") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        # **Only FormsDialog save events (evt_id 1)** map to ``dialog.on_save`` right now.
+        # FormsTable events come in two flavours that v2's single ``on_save`` hook can't
+        # distinguish: evt_id 2 = row insert (usually a duplicate of the Dialog event since
+        # v1 fires the action on both paths), evt_id 3 = row delete (a fundamentally
+        # different moment — firing the Create chain on Save *and* the Delete chain on Save
+        # would be wrong). They both need ``Screen.on_insert`` / ``on_delete`` hooks in v2
+        # — a future slice. For now, the deletion chain stays in ``migrated_actions.toml``
+        # for the operator to wire manually as a row-menu action or via a future event hook.
+        if comp == "FormsDialog" and evt_kind == 1:
+            target_sid = sid_by_frm.get(cpt_id)
         else:
-            # API-only or fully unresolved (NOMAJDE's "Reset Password for User" uses ly_api
-            # tasks). Emit a notify placeholder so the button still appears with a clear
-            # "needs wiring" message — the operator opens migrated_actions.toml + wires
-            # the real call_api / chain via the builder. Better than silently dropping.
-            attached = {
-                "id": f"migrated_{v1_act_id}",
-                "type": "notify",
-                "label": f"{label} (needs wiring)",
-                "message": f"v1 action {slug!r} — see migrated_actions.toml and wire via the builder.",
-                "tone": "warn",
-            }
-        screens[target_sid].setdefault("actions", []).append(attached)
+            continue
+        if not target_sid or target_sid not in screens:
+            continue
+        if act_id in attached_per_screen.get(target_sid, set()):
+            continue   # already wired (e.g. the FormsTable counterpart of a FormsDialog event)
+        action = actions_by_v1_id.get(act_id)
+        if not action:
+            continue
+        scr = screens[target_sid]
+        # Skip the first task if it matches the screen's main save — avoids double-INSERTing
+        # the row. The screen's update/insert query is what the dialog's Save already runs.
+        skip = scr.get("update_query") or scr.get("insert_query")
+        chain = _action_chain(action, skip_query=skip)
+        if not chain:
+            continue
+        # Ensure the dialog exists — actions without a dialog have nothing to fire on. We
+        # don't *create* a dialog for an action; instead we attach to ``actions`` on the
+        # screen so the operator sees it via the toolbar (a fallback that mirrors the prior
+        # ``Screen.actions`` capability without the wrong-keyword bug).
+        dlg = scr.get("dialog")
+        if isinstance(dlg, dict):
+            on_save = dlg.setdefault("on_save", [])
+            on_save.extend(chain)
+        else:
+            scr.setdefault("actions", []).extend(chain)
+        attached_per_screen.setdefault(target_sid, set()).add(act_id)
     return screens_data
 
 

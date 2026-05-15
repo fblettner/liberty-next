@@ -1418,98 +1418,118 @@ def test_migrate_actions_dumps_v1_workflows() -> None:
     ]
 
 
-def test_attach_actions_to_screens_query_base_match() -> None:
-    """The auto-attach matches an action to a screen when one of its task queries shares a
-    base name with the screen's read_query (``f0092_put`` → screen with read_query
-    ``f0092_get``). The first task with that base is the representative — its query becomes
-    the run_query action's target, its param_binds carry verbatim."""
+def test_attach_actions_to_screens_event_driven() -> None:
+    """v1's ``ly_evt_cpt`` is the *correct* attachment for actions: each row says "event N on
+    component C fires action A". ``FormsDialog`` rows wire to the matching v2 screen's
+    ``dialog.on_save``; the action's tasks become a sequential ``run_query`` chain there. The
+    **first task is skipped when its query matches the screen's main update/insert** — avoids
+    duplicating the row write the dialog Save already performs."""
     screens_data = {"screens": {"nomajde": {
-        "f0092": {"id": "f0092", "label": "Role Description", "read_query": "f0092_get"},
-        "user_management": {"id": "user_management", "label": "User Management", "read_query": "user_management_get"},
+        "f0092": {
+            "id": "f0092", "label": "Role Description",
+            "read_query": "f0092_get", "update_query": "f0092_put",
+            "dialog": {"tabs": [{"id": "general", "type": "form", "fields": []}]},
+        },
     }}}
     actions_data = {"migrated_actions": {"nomajde": {
         "create_role": {
             "id": "create_role", "v1_act_id": 1, "label": "Create Role in all tables",
             "tasks": [
-                {"seq": 1, "v1_evt_id": 1, "type": "QUERY", "query": "f0092_put",
+                # First task matches the screen's update_query → skipped (dialog already writes it).
+                {"seq": 1, "v1_evt_id": 1, "type": "QUERY", "label": "Insert role",
+                 "query": "f0092_put",
                  "param_binds": [{"param": "ULUSER", "source": "AUUSER"}]},
-                {"seq": 2, "v1_evt_id": 2, "type": "QUERY", "query": "f00921_put"},
+                # Subsequent tasks become the on_save chain.
+                {"seq": 2, "v1_evt_id": 2, "type": "QUERY", "label": "Insert role/lang",
+                 "query": "f00921_put"},
+                {"seq": 3, "v1_evt_id": 3, "type": "QUERY", "label": "Insert role/env",
+                 "query": "f0093_put"},
             ],
         },
     }}}
-    out = attach_actions_to_screens(screens_data, actions_data, app_name="nomajde")
-    actions = out["screens"]["nomajde"]["f0092"]["actions"]
-    assert len(actions) == 1
-    assert actions[0] == {
-        "id": "migrated_1",
-        "type": "run_query",
-        "label": "Create Role in all tables (1/2)",   # 1/N hint flags the multi-task chain
-        "query": "f0092_put",
-        "param_binds": [{"param": "ULUSER", "source": "AUUSER"}],
-    }
-    # No action attached to user_management.
-    assert "actions" not in out["screens"]["nomajde"]["user_management"]
+    # The event row + the table row that links frm 2 → tbl_id 11 (with read query for f0092).
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 1}]
+    table_rows = [
+        {"tbl_id": 11, "tbl_db_name": "f0092", "tbl_label": "Role Description", "tbl_frm_id": 2},
+    ]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
+    # First task (f0092_put) skipped because it duplicates update_query. Two run_query
+    # entries remain, in seq order, each labelled from the v1 task.
+    assert [a["query"] for a in on_save] == ["f00921_put", "f0093_put"]
+    assert all(a["type"] == "run_query" for a in on_save)
+    assert all(a["id"].startswith("migrated_1_") for a in on_save)
+    # No ``Screen.actions`` block landed — events go on ``dialog.on_save``, not the toolbar.
+    assert "actions" not in out["screens"]["nomajde"]["f0092"]
 
 
-def test_attach_actions_to_screens_label_keyword_fallback() -> None:
-    """When no task query base matches a screen, fall back to label-keyword overlap. NOMAJDE's
-    "Reset Password for User" runs only API tasks (no query base to match) — keyword "user"
-    overlaps user_management's id, so it attaches there as a *notify* placeholder (no
-    runnable query → notify-on-click with a "wire manually" message)."""
-    screens_data = {"screens": {"nomajde": {
-        "f0005": {"id": "f0005", "label": "User Defined Code", "read_query": "f0005_get"},
-        "user_management": {"id": "user_management", "label": "User Management", "read_query": "user_management_get"},
-    }}}
-    actions_data = {"migrated_actions": {"nomajde": {
-        "reset_password": {
-            "id": "reset_password", "v1_act_id": 7, "label": "Reset Password for User",
-            "tasks": [
-                {"seq": 1, "v1_evt_id": 1, "type": "API", "v1_api_id": 1},
-                {"seq": 2, "v1_evt_id": 2, "type": "API", "v1_api_id": 2},
-            ],
-        },
-    }}}
-    out = attach_actions_to_screens(screens_data, actions_data, app_name="nomajde")
-    # Despite f0005 ("User Defined Code") also containing "user" in its label, the score
-    # weighting (2× for id-overlap vs 1× for label-overlap) sends the action to
-    # user_management (whose *id* contains "user").
-    assert "actions" not in out["screens"]["nomajde"].get("f0005", {})
-    user_actions = out["screens"]["nomajde"]["user_management"]["actions"]
-    assert len(user_actions) == 1
-    a = user_actions[0]
-    assert a["id"] == "migrated_7"
-    # API-only → notify placeholder with a clear "needs wiring" message.
-    assert a["type"] == "notify"
-    assert a["tone"] == "warn"
-    assert "needs wiring" in a["label"]
-
-
-def test_attach_actions_to_screens_idempotent() -> None:
-    """Re-running drops any prior auto-attached entries (matched by ``migrated_`` id prefix)
-    before re-attaching, so multiple migration runs don't duplicate buttons. Hand-wired
-    entries (without the ``migrated_`` prefix) survive."""
+def test_attach_actions_to_screens_dedupes_table_and_dialog_events() -> None:
+    """v1 frequently wires the same action to both a FormsDialog *and* its FormsTable (Save
+    + row insert fire the same workflow). The attach function dedupes by ``(target_screen,
+    v1_act_id)`` so the on_save chain doesn't double up."""
     screens_data = {"screens": {"nomajde": {
         "f0092": {
-            "id": "f0092", "label": "Role Description", "read_query": "f0092_get",
-            "actions": [
-                # Hand-wired entry — must survive re-attachment.
-                {"id": "hand_wired", "type": "notify", "message": "hi", "tone": "info"},
-                # Prior auto-attached entry — must be dropped + replaced.
-                {"id": "migrated_1", "type": "run_query", "query": "stale_query"},
-            ],
+            "id": "f0092", "read_query": "f0092_get", "update_query": "f0092_put",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
         },
     }}}
     actions_data = {"migrated_actions": {"nomajde": {
         "create_role": {
             "id": "create_role", "v1_act_id": 1, "label": "Create Role",
-            "tasks": [{"seq": 1, "v1_evt_id": 1, "type": "QUERY", "query": "f0092_put"}],
+            "tasks": [{"seq": 1, "v1_evt_id": 1, "type": "QUERY", "query": "f00921_put"}],
         },
     }}}
-    out = attach_actions_to_screens(screens_data, actions_data, app_name="nomajde")
-    actions = out["screens"]["nomajde"]["f0092"]["actions"]
-    assert [a["id"] for a in actions] == ["hand_wired", "migrated_1"]
-    # The replaced entry uses the fresh query name, not the stale one.
-    assert next(a for a in actions if a["id"] == "migrated_1")["query"] == "f0092_put"
+    event_rows = [
+        {"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 1},
+        {"evt_component": "FormsTable",  "evt_cpt_id": 11, "evt_id": 2, "evt_act_id": 1},
+    ]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f0092", "tbl_label": "Role Description", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
+    # Despite two events pointing at action 1, the chain lands once.
+    assert [a["query"] for a in on_save] == ["f00921_put"]
+
+
+def test_attach_actions_to_screens_scrubs_prior_heuristic_entries() -> None:
+    """The previous slice's keyword-based heuristic attached actions to ``Screen.actions``
+    with ids starting ``migrated_<n>``. Those were misplaced. Re-running with the new event-
+    driven model scrubs them — both from ``Screen.actions`` and from ``dialog.on_save``,
+    whichever they ended up in. Hand-wired entries (without the ``migrated_`` prefix) stay."""
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {
+            "id": "f0092", "read_query": "f0092_get", "update_query": "f0092_put",
+            # Hand-wired + prior-heuristic mix on Screen.actions.
+            "actions": [
+                {"id": "hand_wired", "type": "notify", "message": "hi", "tone": "info"},
+                {"id": "migrated_1", "type": "run_query", "query": "stale_query"},
+            ],
+            "dialog": {
+                "tabs": [{"id": "g", "type": "form", "fields": []}],
+                # And a hand-wired entry mixed with a prior auto-attached one on dialog.on_save.
+                "on_save": [
+                    {"id": "user_added_notify", "type": "notify", "message": "post-save", "tone": "ok"},
+                    {"id": "migrated_42_0", "type": "run_query", "query": "another_stale"},
+                ],
+            },
+        },
+    }}}
+    # No events / no actions — but the scrub still runs.
+    out = attach_actions_to_screens(
+        screens_data, {"migrated_actions": {"nomajde": {}}},
+        event_rows=[], table_rows=[],
+        app_name="nomajde",
+    )
+    scr = out["screens"]["nomajde"]["f0092"]
+    assert [a["id"] for a in scr["actions"]] == ["hand_wired"]
+    assert [a["id"] for a in scr["dialog"]["on_save"]] == ["user_added_notify"]
 
 
 def test_migrate_actions_unresolvable_query_keeps_warning() -> None:

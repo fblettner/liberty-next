@@ -191,11 +191,22 @@ _CTX_FILTERS = text("""
     FROM ly_ctx_filters ORDER BY ctx_id, val_id, flt_id
 """)
 
-# Named workflows (v1's "Actions" — toolbar buttons in libnjde for things like "Create User",
+# Named workflows (v1's "Actions" — buttons in libnjde for things like "Create User",
 # "Reset Password"). Branching with IF / LOOP / QUERY / API tasks, action-level input params,
 # per-task param bindings, and an optional branch graph. v2 doesn't model the branching shape
 # (its ``Action`` union is flat sequential), so the migrator dumps each action into a
 # documented ``[migrated_actions.<app>]`` block for the operator to hand-wire via the builder.
+#
+# Where actions are attached in v1:
+#   * ``ly_evt_cpt`` — event-driven. ``evt_component`` (FormsDialog / FormsTable) +
+#     ``evt_cpt_id`` (the frm_id / tbl_id) + ``evt_id`` (event type — 1=dialog save, 2=row
+#     insert, 3=row delete) + ``evt_act_id`` (the action that fires). No visible button —
+#     fires automatically on the event. v2's ``Dialog.on_save`` is the closest match.
+#   * ``ly_evt_dd`` — same idea but keyed by a column's dictionary entry (fires on field
+#     change). Empty in libnjde / libnsx1 — defer migration.
+#   * ``ly_dlg_col`` rows with ``col_component = 'InputAction'`` — manual buttons placed inside
+#     a specific tab of a form. Click to fire; some require params (a sub-dialog opens). v2
+#     needs a new ``FormTab.actions`` schema field to capture these — separate slice.
 _ACTIONS = text("SELECT act_id, act_label FROM ly_actions ORDER BY act_id")
 _ACT_TASKS = text("""
     SELECT act_id, evt_id, evt_seq, evt_type, evt_label, evt_query_id, evt_query_crud, evt_api_id,
@@ -216,6 +227,12 @@ _ACT_TASKS_PARAMS = text("""
 _ACT_PARAMS_FILTERS = text("""
     SELECT act_id, map_var, flt_id, flt_type, flt_source, flt_target, flt_value
     FROM ly_act_params_filters ORDER BY act_id, map_var, flt_id
+""")
+# ly_evt_cpt — the event ↔ action junction. v1's NOMAJDE uses it to fire workflows
+# automatically when a dialog saves or a table row gets inserted / deleted.
+_EVT_CPT = text("""
+    SELECT evt_component, evt_cpt_id, evt_id, evt_act_id
+    FROM ly_evt_cpt ORDER BY evt_component, evt_cpt_id, evt_id
 """)
 
 _API_CONNS = text("SELECT conn_id, conn_label, conn_url, conn_user, conn_password FROM ly_api_conn ORDER BY conn_id")
@@ -397,6 +414,14 @@ async def read_context_menus(
         await _rows_or_empty(engine, _CTX_VALS, what="ly_ctx_val (context-menu items)"),
         await _rows_or_empty(engine, _CTX_FILTERS, what="ly_ctx_filters (item param binds)"),
     )
+
+
+async def read_event_actions(engine: AsyncEngine) -> list[dict[str, Any]]:
+    """Return v1's ``ly_evt_cpt`` rows — the event ↔ action junction. Each row says "when
+    *event N* fires on *component (frm or tbl) C*, run action *A*". A v1 deployment with no
+    workflow attachments (libnsx1) just returns ``[]``. v2's :func:`migrate_action_events`
+    then attaches each row's action to the matching screen's ``dialog.on_save``."""
+    return await _rows_or_empty(engine, _EVT_CPT, what="ly_evt_cpt (event ↔ action junction)")
 
 
 async def read_actions(
