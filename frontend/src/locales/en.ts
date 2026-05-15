@@ -446,6 +446,36 @@ const en = {
         hint: 'Toolbar buttons shown above the TableView. Each action fires its task chain when clicked. ParamBinds resolve to literal `value`s by default (no row context); a `source` bind against an unset form silently drops. v1\'s NOMAJDE workflows ("Create Role" / "Reset Password" / "Import Security" / …) attach here — see the `liberty-migrate actions` dump for the raw v1 shape and hand-wire each step as a run_query / call_api / notify.',
         empty: 'No screen actions yet — the toolbar shows only the standard Add row / Edit / Import buttons.',
       },
+      onLoad: {
+        heading: 'On load (action chain)',
+        hint: 'Runs immediately after the dialog opens + the row data has been loaded (edit) or default values seeded (add). Useful for refreshing a lookup, prefetching related rows, or logging the open. ParamBinds resolve against the just-loaded form state.',
+        empty: 'No on-load actions yet — the dialog opens silently.',
+      },
+      onCancel: {
+        heading: 'On cancel (action chain)',
+        hint: 'Runs when the user closes the dialog without saving (Cancel / click-outside / Discard). Useful for cleanup — release a lock, drop a draft row, log abandoned edits. Fires *before* the dialog actually closes; an error blocks the close (so the user can retry).',
+        empty: 'No on-cancel actions yet — closing the dialog just discards changes.',
+      },
+      tabActions: {
+        heading: 'Tab actions',
+        hint: 'Buttons placed in this tab — v2\'s port of v1\'s ``col_component="InputAction"`` rows. Available on every tab kind (form / nested_form / nested_table); a "Roles" tab can carry Import Security + Merge Roles alongside its nested table. Each button\'s ParamBinds resolve against the dialog\'s live form state.',
+        empty: 'No buttons on this tab yet.',
+      },
+      onInsert: {
+        heading: 'On insert (row hook)',
+        hint: 'Runs after a row has been inserted — via dialog Save in add mode *or* the inline batch-edit grid\'s Save. v2\'s port of v1\'s FormsTable evt 2. ParamBinds resolve against the new row\'s values.',
+        empty: 'No on-insert actions yet — inserts just write the row.',
+      },
+      onUpdate: {
+        heading: 'On update (row hook)',
+        hint: 'Runs after a row has been updated — via dialog Save in edit mode *or* the inline grid\'s Save. v2 extension (v1 had no such event); use it to hook into the post-update moment without faking it into on_save.',
+        empty: 'No on-update actions yet — updates just write the row.',
+      },
+      onDelete: {
+        heading: 'On delete (row hook)',
+        hint: 'Runs after a row has been deleted — via the dialog\'s Delete button *or* the inline grid\'s delete-then-Save. v2\'s port of v1\'s FormsTable evt 3. ParamBinds resolve against the deleted row\'s values.',
+        empty: 'No on-delete actions yet — deletes just drop the row.',
+      },
     },
     dashboards: {
       add: 'Add dashboard',

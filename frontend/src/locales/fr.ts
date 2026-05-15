@@ -448,6 +448,36 @@ const fr: Resources = {
         hint: "Boutons de barre d’outils affichés au-dessus du TableView. Chaque action déclenche sa chaîne de tâches au clic. Les ParamBind se résolvent par défaut en valeurs littérales (pas de contexte de ligne) ; un bind `source` sur un formulaire vide est ignoré. Les workflows NOMAJDE v1 (« Créer rôle » / « Réinitialiser mot de passe » / « Importer sécurité » / …) se branchent ici — consultez la sortie de `liberty-migrate actions` pour la forme v1 brute, puis câblez chaque étape manuellement en run_query / call_api / notify.",
         empty: 'Aucune action d’écran — la barre d’outils n’affiche que les boutons standard Ajouter une ligne / Modifier / Importer.',
       },
+      onLoad: {
+        heading: 'À l’ouverture (chaîne d’actions)',
+        hint: "S’exécute juste après l’ouverture du dialogue et le chargement des données (mode édition) ou l’application des valeurs par défaut (mode ajout). Utile pour rafraîchir une lookup, précharger des données liées, ou journaliser l’ouverture. Les ParamBind se résolvent contre l’état du formulaire qui vient d’être chargé.",
+        empty: 'Aucune action à l’ouverture — le dialogue s’ouvre silencieusement.',
+      },
+      onCancel: {
+        heading: 'À l’annulation (chaîne d’actions)',
+        hint: "S’exécute quand l’utilisateur ferme le dialogue sans enregistrer (Annuler / clic à l’extérieur / Abandonner). Utile pour le nettoyage — libérer un verrou, supprimer un brouillon, journaliser les modifications abandonnées. Se déclenche *avant* la fermeture effective du dialogue ; une erreur bloque la fermeture (l’utilisateur peut alors réessayer).",
+        empty: 'Aucune action à l’annulation — fermer le dialogue abandonne simplement les modifications.',
+      },
+      tabActions: {
+        heading: 'Actions de l’onglet',
+        hint: "Boutons placés dans cet onglet — version v2 des lignes ``col_component=\"InputAction\"`` de v1. Disponible sur tous les types d’onglet (form / nested_form / nested_table) ; un onglet « Roles » peut porter Import Security + Merge Roles à côté de sa table imbriquée. Les ParamBind de chaque bouton se résolvent contre l’état vivant du formulaire du dialogue.",
+        empty: 'Aucun bouton sur cet onglet pour le moment.',
+      },
+      onInsert: {
+        heading: 'À l’insertion (hook de ligne)',
+        hint: "S’exécute après l’insertion d’une ligne — via Enregistrer du dialogue en mode ajout *ou* via Enregistrer du mode modification en lot. Version v2 de l’événement 2 FormsTable de v1. Les ParamBind se résolvent contre les valeurs de la nouvelle ligne.",
+        empty: 'Aucune action à l’insertion — les insertions écrivent simplement la ligne.',
+      },
+      onUpdate: {
+        heading: 'À la mise à jour (hook de ligne)',
+        hint: "S’exécute après la mise à jour d’une ligne — via Enregistrer du dialogue en mode édition *ou* via Enregistrer du mode modification en lot. Extension v2 (v1 n’exposait pas cet événement) ; utilisez-la pour vous greffer sur le moment post-update sans le simuler dans on_save.",
+        empty: 'Aucune action à la mise à jour — les mises à jour écrivent simplement la ligne.',
+      },
+      onDelete: {
+        heading: 'À la suppression (hook de ligne)',
+        hint: "S’exécute après la suppression d’une ligne — via le bouton Supprimer du dialogue *ou* via Enregistrer après une suppression en lot. Version v2 de l’événement 3 FormsTable de v1. Les ParamBind se résolvent contre les valeurs de la ligne supprimée.",
+        empty: 'Aucune action à la suppression — les suppressions retirent simplement la ligne.',
+      },
     },
     dashboards: {
       add: 'Ajouter un tableau de bord',

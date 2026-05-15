@@ -354,6 +354,7 @@ class _PromptableMixin(BaseModel):
 
     prompt_fields: list[PromptField] = Field(
         default_factory=list,
+        json_schema_extra={"x_group": "Prompt"},
         description=(
             "Inputs to collect from the operator before this action fires (v2's port of v1's "
             "``ly_act_params``). Empty = no prompt; the action fires immediately."
@@ -361,18 +362,22 @@ class _PromptableMixin(BaseModel):
     )
     prompt_title: str | None = Field(
         default=None,
+        json_schema_extra={"x_group": "Prompt"},
         description="Title of the prompt sub-dialog (falls back to the action's ``label``).",
     )
     prompt_l: dict[str, str] = Field(
         default_factory=dict,
+        json_schema_extra={"x_group": "Prompt"},
         description="Per-language overrides for ``prompt_title``: ``{language_code: translated}``.",
     )
     prompt_cols: int | None = Field(
         default=None,
+        json_schema_extra={"x_group": "Prompt"},
         description="CSS grid column count for the prompt dialog's fields (default: 2).",
     )
     prompt_submit_label: str | None = Field(
         default=None,
+        json_schema_extra={"x_group": "Prompt"},
         description="Caption on the prompt's primary button (default: the action's ``label`` or i18n ``common.confirm``).",
     )
 

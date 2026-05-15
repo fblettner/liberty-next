@@ -399,18 +399,65 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     )
   }
 
-  // Dialog `on_save` chain (slice 4) — fires sequentially after the main update/insert succeeds.
-  const onSave: Row[] = useMemo(
-    () => (Array.isArray((dialog as Row | null)?.on_save) ? ((dialog as Row).on_save as Row[]) : []),
-    [dialog],
-  )
-  const setOnSave = (next: Row[]) =>
-    setDialog({ ...(dialog ?? {}), on_save: next } as { title?: string; tabs?: Row[]; on_save?: Row[] })
+  // Dialog lifecycle hook accessors — same pattern for each. ``setDialog`` strips empty hook
+  // lists (we drop the key when the array empties) so the saved TOML stays terse.
+  const dialogList = (key: 'on_load' | 'on_save' | 'on_cancel'): Row[] =>
+    Array.isArray((dialog as Row | null)?.[key]) ? ((dialog as Row)[key] as Row[]) : []
+  const setDialogList = (key: 'on_load' | 'on_save' | 'on_cancel', next: Row[]) => {
+    const updated = { ...(dialog ?? {}) } as Row
+    if (next.length === 0) delete updated[key]
+    else updated[key] = next
+    setDialog(updated as { title?: string; tabs?: Row[] })
+  }
+  const onLoad = useMemo(() => dialogList('on_load'), [dialog])
+  const onSave = useMemo(() => dialogList('on_save'), [dialog])
+  const onCancel = useMemo(() => dialogList('on_cancel'), [dialog])
+  const renderOnLoad = (): ReactNode => renderActionList({
+    listKey: 'on_load', actions: onLoad, setActions: (n) => setDialogList('on_load', n),
+    heading: t('settings.screens.onLoad.heading'),
+    hint: t('settings.screens.onLoad.hint'),
+    emptyMessage: t('settings.screens.onLoad.empty'),
+  })
   const renderOnSave = (): ReactNode => renderActionList({
-    listKey: 'on_save', actions: onSave, setActions: setOnSave,
+    listKey: 'on_save', actions: onSave, setActions: (n) => setDialogList('on_save', n),
     heading: t('settings.screens.action.heading'),
     hint: t('settings.screens.action.hint'),
     emptyMessage: t('settings.screens.action.empty'),
+  })
+  const renderOnCancel = (): ReactNode => renderActionList({
+    listKey: 'on_cancel', actions: onCancel, setActions: (n) => setDialogList('on_cancel', n),
+    heading: t('settings.screens.onCancel.heading'),
+    hint: t('settings.screens.onCancel.hint'),
+    emptyMessage: t('settings.screens.onCancel.empty'),
+  })
+
+  // Per-tab actions — every tab kind (FormTab / NestedFormTab / NestedTableTab) carries an
+  // ``actions: list[Action]``, v2's port of v1's ``ly_dlg_col col_component='InputAction'`` rows.
+  // The editor lives inside the selected tab's body so the operator sees the buttons in context
+  // (e.g. NOMAJDE's "Roles" tab carrying Import Security + Merge Roles + a nested table).
+  const tabActions: Row[] = useMemo(
+    () => (Array.isArray(selTab?.actions) ? (selTab!.actions as Row[]) : []),
+    [selTab],
+  )
+  const setTabActions = (next: Row[]) => {
+    // Drop the key entirely when the list empties so the TOML stays terse — updateTab's spread
+    // would otherwise leave `actions: undefined`, which serialises to nothing but pollutes the
+    // in-memory shape. Rebuild the tab object explicitly here.
+    const updated = dialogTabs.slice()
+    const cur = { ...(updated[selTabIdx] ?? {}) }
+    if (next.length === 0) delete cur.actions
+    else cur.actions = next
+    updated[selTabIdx] = cur
+    setDialog({ ...(dialog ?? {}), tabs: updated })
+  }
+  const renderTabActions = (): ReactNode => renderActionList({
+    // Keyed by tab index so each tab keeps its own expansion state across re-renders.
+    listKey: `tab_actions_${selTabIdx}`,
+    actions: tabActions,
+    setActions: setTabActions,
+    heading: t('settings.screens.tabActions.heading'),
+    hint: t('settings.screens.tabActions.hint'),
+    emptyMessage: t('settings.screens.tabActions.empty'),
   })
 
   // Screen `actions` — toolbar buttons above the TableView. v1's named workflows (NOMAJDE's
@@ -432,6 +479,49 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     hint: t('settings.screens.actions.hint'),
     emptyMessage: t('settings.screens.actions.empty'),
   })
+
+  // Screen-level row lifecycle hooks — v2's port of v1's ``ly_evt_cpt`` FormsTable events
+  // (evt 2 = on_insert, evt 3 = on_delete; on_update is v2's own extension). Fire after a row
+  // is mutated whether via dialog Save in the matching mode *or* the batch-edit grid Save.
+  // ParamBinds resolve against the *new row's* values (insert/update) or the deleted row's
+  // values (delete). Edit them in the same "Actions" tab alongside the toolbar buttons —
+  // related concept, same Action shape.
+  const screenHookList = (key: 'on_insert' | 'on_update' | 'on_delete'): Row[] =>
+    Array.isArray((value as Row)[key]) ? ((value as Row)[key] as Row[]) : []
+  const setScreenHook = (key: 'on_insert' | 'on_update' | 'on_delete', next: Row[]) => {
+    const v = { ...value }
+    if (next.length === 0) delete v[key]
+    else v[key] = next
+    onChange(v)
+  }
+  const renderRowHooks = (): ReactNode => (
+    <>
+      {renderActionList({
+        listKey: 'on_insert',
+        actions: screenHookList('on_insert'),
+        setActions: (n) => setScreenHook('on_insert', n),
+        heading: t('settings.screens.onInsert.heading'),
+        hint: t('settings.screens.onInsert.hint'),
+        emptyMessage: t('settings.screens.onInsert.empty'),
+      })}
+      {renderActionList({
+        listKey: 'on_update',
+        actions: screenHookList('on_update'),
+        setActions: (n) => setScreenHook('on_update', n),
+        heading: t('settings.screens.onUpdate.heading'),
+        hint: t('settings.screens.onUpdate.hint'),
+        emptyMessage: t('settings.screens.onUpdate.empty'),
+      })}
+      {renderActionList({
+        listKey: 'on_delete',
+        actions: screenHookList('on_delete'),
+        setActions: (n) => setScreenHook('on_delete', n),
+        heading: t('settings.screens.onDelete.heading'),
+        hint: t('settings.screens.onDelete.hint'),
+        emptyMessage: t('settings.screens.onDelete.empty'),
+      })}
+    </>
+  )
 
   // Screen `row_menu` (slice 6) — actions shown when the user right-clicks a row in the TableView.
   // ParamBinds resolve against the clicked row's values (not the dialog form state) — the runtime
@@ -607,15 +697,26 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
                 <Button $variant="ghost" $size="sm" onClick={addField} style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}>
                   <Plus size={13} /> {t('settings.screens.field.add')}
                 </Button>
+                {/* Per-tab action buttons — v2's port of v1's ``col_component='InputAction'``
+                    rows. Available on every tab kind (FormTab / NestedFormTab / NestedTableTab)
+                    so a "Roles" tab can carry Import Security + Merge Roles alongside its
+                    nested table, just like NOMAJDE used to. Renders below the field list so the
+                    operator sees the buttons in context. */}
+                {renderTabActions()}
               </>
             ) : (
               <Empty>{t('settings.screens.tab.pickOne')}</Empty>
             )}
           </TabBody>
         </DialogSplit>
-        {/* On-save action chain — fires sequentially after the main update/insert succeeds.
-            v2's port of v1's ly_act_tasks for the form-save flow; multi-table writes land here. */}
+        {/* Lifecycle hook chains — all three render the same renderActionList editor:
+            - on_load:   after the dialog opens + row data is loaded (edit) or defaults seed (add)
+            - on_save:   sequentially after the dialog's main update/insert succeeds (v2's port of
+                         v1's ly_act_tasks for the form-save flow; multi-table writes land here)
+            - on_cancel: when the user closes without saving — *blocks* the close on failure */}
+        {renderOnLoad()}
         {renderOnSave()}
+        {renderOnCancel()}
       </Stack>
     )
   }
@@ -625,7 +726,12 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       case 'general': return renderGeneral()
       case 'queries': return renderQueries()
       case 'dialog':  return renderDialog()
-      case 'actions': return renderScreenActions()
+      case 'actions': return (
+        <>
+          {renderScreenActions()}
+          {renderRowHooks()}
+        </>
+      )
       case 'rowmenu': return renderRowMenu()
     }
   }
