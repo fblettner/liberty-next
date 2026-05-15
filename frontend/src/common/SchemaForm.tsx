@@ -35,6 +35,11 @@ export interface JsonSchema {
   properties?: Record<string, JsonSchema>
   required?: string[]
   anyOf?: JsonSchema[]
+  /** Pydantic discriminated unions emit `oneOf` + `discriminator` rather than `anyOf`. We honour
+   *  both: arrays of discriminated objects (e.g. dashboard widgets = ChartWidget | KpiWidget)
+   *  resolve to the concrete branch via `discriminator.propertyName` on the item value. */
+  oneOf?: JsonSchema[]
+  discriminator?: { propertyName: string; mapping?: Record<string, string> }
   additionalProperties?: JsonSchema | boolean
   items?: JsonSchema
   $ref?: string
@@ -142,6 +147,44 @@ function effective(s: JsonSchema, defs: Defs): JsonSchema {
 }
 const isObjectModel = (s: JsonSchema) => s.type === 'object' && !!s.properties
 const isStringMap = (s: JsonSchema) => s.type === 'object' && !!s.additionalProperties && typeof s.additionalProperties === 'object'
+
+/** True iff *s* is a Pydantic discriminated union of object models — `oneOf: [...]` with a
+ *  `discriminator: {propertyName: …}`. Used by the array-handling branch to take the object-list
+ *  path (drill-in / accordion) instead of the string-list fallback. */
+function isDiscriminatedUnion(s: JsonSchema): boolean {
+  if (!s.oneOf || !s.discriminator) return false
+  return s.oneOf.length > 0
+}
+
+/** Resolve a discriminated-union schema to the concrete branch matching *value*'s discriminator.
+ *  Returns the original schema when *s* isn't a union or the discriminator value isn't in the
+ *  mapping (we render the union's structural shape — empty form — so the operator can still pick
+ *  a type via the dropdown the next render produces). */
+function resolveUnionBranch(s: JsonSchema, value: Record<string, unknown> | undefined, defs: Defs): JsonSchema {
+  if (!isDiscriminatedUnion(s) || !s.discriminator) return s
+  const propName = s.discriminator.propertyName
+  const discr = value?.[propName]
+  if (typeof discr !== 'string') return s
+  // Two ways the spec maps a discriminator value → schema:
+  //   1. an explicit `discriminator.mapping` entry → a `$ref` string
+  //   2. each branch carries the matching `const`/`enum` on the discriminator field
+  // Pydantic emits (1); we honour (2) too for hand-authored schemas. Either way, deref the
+  // resolved branch + carry the parent's `$defs` so downstream lookups still work.
+  const mapping = s.discriminator.mapping
+  if (mapping && discr in mapping) {
+    const branch = deref({ $ref: mapping[discr] }, defs)
+    return { ...branch, $defs: branch.$defs ?? defs }
+  }
+  for (const raw of s.oneOf ?? []) {
+    const branch = deref(raw, defs)
+    const propSchema = branch.properties?.[propName]
+    const enumSet = propSchema?.enum
+    if (Array.isArray(enumSet) && enumSet.map(String).includes(discr)) {
+      return { ...branch, $defs: branch.$defs ?? defs }
+    }
+  }
+  return s
+}
 
 // ── small styled bits ───────────────────────────────────────────────────────
 const Hint = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 3px; line-height: 1.4;`
@@ -269,8 +312,29 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
 
 // the summary line for a nested-object item in a list (the breadcrumb / list-row label)
 function itemSummary(it: Record<string, unknown>, itemSchema: JsonSchema, defs: Defs): string {
+  // Pydantic discriminated unions don't have top-level `properties` — they live on each `oneOf`
+  // branch. Resolve the item's branch via its discriminator value first; without this the
+  // fallback below returns "(unnamed)" and (worse) the row may render as String(obj) when the
+  // outer array handler treats the union as a non-object items list.
+  const resolved = resolveUnionBranch(itemSchema, it, defs)
   if (typeof it.name === 'string' && it.name) return it.name
-  const firstStr = Object.entries(itemSchema.properties ?? {}).find(([, p]) => effective(p, defs).type === 'string')?.[0]
+  if (typeof it.label === 'string' && it.label) {
+    // Discriminated unions: prefer `<discriminator value> · <label>` (e.g. `chart · Users by app`)
+    // so the row reads as both the variant and the user-given title.
+    if (isDiscriminatedUnion(itemSchema) && resolved.discriminator) {
+      const dv = it[resolved.discriminator.propertyName ?? '']
+      if (typeof dv === 'string' && dv) return `${dv} · ${it.label}`
+    }
+    return it.label
+  }
+  // For a discriminated union, surface the discriminator value at least — "chart" / "kpi" reads
+  // better than "(unnamed)" when the operator hasn't yet given the widget a label.
+  if (isDiscriminatedUnion(itemSchema) && resolved !== itemSchema) {
+    const propName = resolved.discriminator?.propertyName ?? itemSchema.discriminator?.propertyName
+    const dv = propName ? it[propName] : undefined
+    if (typeof dv === 'string' && dv) return dv
+  }
+  const firstStr = Object.entries(resolved.properties ?? {}).find(([, p]) => effective(p, defs).type === 'string')?.[0]
   const v = firstStr ? it[firstStr] : undefined
   return typeof v === 'string' && v ? v : '(unnamed)'
 }
@@ -374,8 +438,42 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
   onNavigate?: (seg: NavSeg) => void
 }) {
   const allDefs = { ...(schema.$defs ?? {}), ...(defs ?? {}) }
-  const props = schema.properties ?? {}
-  const required = new Set(schema.required ?? [])
+  // A discriminated union (Pydantic `Widget = ChartWidget | KpiWidget` → `oneOf` + `discriminator`)
+  // has no top-level `properties`; the fields live on each branch. We do two things here so the
+  // form renders sensibly:
+  //   1. Resolve to the matching branch via the value's discriminator field. When unset (fresh
+  //      item), fall back to the first branch so the form isn't blank.
+  //   2. Replace the branch's `const`-typed discriminator field with an `enum` of all possible
+  //      values. Pydantic emits `{const: "chart", default: "chart", type: "string"}` per branch;
+  //      we substitute `{enum: ["chart", "kpi"], type: "string"}` so SchemaForm's existing
+  //      string-enum branch renders it as a SearchSelect — picking a different value changes the
+  //      `value.type`, the parent re-renders, and this resolver picks the new branch.
+  const resolvedSchema: JsonSchema = isDiscriminatedUnion(schema)
+    ? (() => {
+        const branch = resolveUnionBranch(schema, value, allDefs)
+        const actualBranch = branch !== schema ? branch : deref(schema.oneOf?.[0] ?? schema, allDefs)
+        const propName = schema.discriminator?.propertyName
+        if (!propName || !actualBranch.properties) return actualBranch
+        const discValues: string[] = []
+        for (const raw of schema.oneOf ?? []) {
+          const b = deref(raw, allDefs)
+          const c = b.properties?.[propName]?.enum?.[0] ?? b.properties?.[propName]?.default
+          if (typeof c === 'string' && !discValues.includes(c)) discValues.push(c)
+        }
+        const newProps = {
+          ...actualBranch.properties,
+          [propName]: {
+            ...actualBranch.properties[propName],
+            enum: discValues,
+            // Drop the `const` so SchemaForm's enum-handling branch wins (otherwise the form sees
+            // a frozen string and renders a plain Input). Default keeps the auto-fill behaviour.
+          } as JsonSchema,
+        }
+        return { ...actualBranch, properties: newProps }
+      })()
+    : schema
+  const props = resolvedSchema.properties ?? {}
+  const required = new Set(resolvedSchema.required ?? [])
   const set = (key: string, v: unknown) => {
     const next = { ...value }
     if (v === undefined) delete next[key]
@@ -394,7 +492,9 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
   const showTabs = groupNames.length > 1
   const [tab, setTab] = useState(groupNames[0])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reset to the first tab when the *model* changes
-  useEffect(() => { setTab(groupNames[0]) }, [schema.title])
+  // Tab resets when the *model* changes — for discriminated unions, "model" is the resolved
+  // branch's title (so switching widget type from chart→kpi snaps the tab strip back to General).
+  useEffect(() => { setTab(groupNames[0]) }, [resolvedSchema.title])
   const activeProps = groups.get(tab) ?? groups.get(groupNames[0]) ?? []
   const enums = useContext(FrameworkEnumsContext)
 
@@ -444,7 +544,11 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           const items = effective(sub.items ?? {}, allDefs)
           // `cur` may be a single object for the `T | list[T] | None` shape (a hand-written single rule)
           const arr = Array.isArray(cur) ? (cur as unknown[]) : cur && typeof cur === 'object' ? [cur] : []
-          if (isObjectModel(items)) {
+          // Discriminated unions of object models (Pydantic's `Widget = ChartWidget | KpiWidget`,
+          // emitted as `oneOf` + `discriminator`) take the object-list path too — itemSummary
+          // resolves each item's branch via its discriminator value (`it.type`) so the row labels
+          // read sensibly + the per-item drill-in renders the matching branch's fields.
+          if (isObjectModel(items) || isDiscriminatedUnion(items)) {
             const objs = arr as Record<string, unknown>[]
             const setArr = (v: Record<string, unknown>[]) => set(key, v.length ? v : undefined)
             const labelPlain = label.replace(' *', '')
