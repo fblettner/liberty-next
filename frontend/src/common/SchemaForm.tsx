@@ -474,7 +474,23 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
     : schema
   const props = resolvedSchema.properties ?? {}
   const required = new Set(resolvedSchema.required ?? [])
+  // For a discriminated union, switching the discriminator (e.g. widget `type` from chart → kpi)
+  // leaves the *previous* branch's keys on the value — `chart` / `spec` would still ride along
+  // after picking kpi. Pydantic's `extra="forbid"` then rejects the save. Strip orphans here:
+  // when the discriminator field changes, keep only keys the new branch declares (plus the
+  // discriminator itself). Shared fields (label / col_span / connector / query …) survive.
+  const unionDiscr = isDiscriminatedUnion(schema) ? schema.discriminator?.propertyName : undefined
   const set = (key: string, v: unknown) => {
+    if (unionDiscr && key === unionDiscr && typeof v === 'string' && v !== value[unionDiscr]) {
+      const newBranch = resolveUnionBranch(schema, { [unionDiscr]: v }, allDefs)
+      const newProps = newBranch.properties ?? {}
+      const next: Record<string, unknown> = { [unionDiscr]: v }
+      for (const [k, val] of Object.entries(value)) {
+        if (k !== unionDiscr && k in newProps) next[k] = val
+      }
+      onChange(next)
+      return
+    }
     const next = { ...value }
     if (v === undefined) delete next[key]
     else next[key] = v

@@ -75,6 +75,12 @@ class ChartWidget(WidgetBase):
     chart: str | None = Field(
         default=None,
         description="ID of a saved chart in ``charts.toml`` to render. Leave blank to inline the spec instead.",
+        # `x_enum_ref` makes the DashboardsBuilder render this as a SearchSelect populated from the
+        # current charts.toml (the builder fetches GET /admin/config/charts/parsed and materialises
+        # `CHART_IDS` on top of the bundled framework enums). The field is free-text on its own —
+        # an operator typing an id that doesn't (yet) exist still saves cleanly — the dropdown is
+        # a UI convenience, not a validation gate.
+        json_schema_extra={"x_enum_ref": "CHART_IDS"},
     )
     connector: str | None = Field(default=None, description="(inline mode) SQL connector for the query.")
     query: str | None = Field(default=None, description="(inline mode) read query whose result we chart.")

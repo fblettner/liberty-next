@@ -27,7 +27,7 @@ import {
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
-import type { ConfigSchemas, DashboardsDoc } from '../../types/config'
+import type { ChartsDoc, ConfigSchemas, DashboardsDoc } from '../../types/config'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Dashboards = Record<string, Record<string, unknown>>
@@ -61,6 +61,11 @@ export default function DashboardsBuilder() {
   // level when the user drills in.
   const [dashboardSchema, setDashboardSchema] = useState<JsonSchema | null>(null)
   const [enums, setEnums] = useState<FrameworkEnums | null>(null)
+  // Saved charts catalog — drives the ChartWidget.chart picker (x_enum_ref="CHART_IDS"). Fetched
+  // alongside the dashboards so picking a saved chart is a dropdown rather than free-text. An
+  // empty catalog produces an empty dropdown — operator must save a chart first (via the
+  // TableView's chart-toggle Save modal) before referencing it here.
+  const [charts, setCharts] = useState<Record<string, Record<string, unknown>>>({})
   const [path, setPath] = useState('')
   const [doc, setDoc] = useState<Dashboards | null>(null)
   const [original, setOriginal] = useState('')
@@ -74,20 +79,39 @@ export default function DashboardsBuilder() {
     Promise.all([
       api.get<ConfigSchemas>('/admin/config/schema'),
       api.get<DashboardsDoc>('/admin/config/dashboards/parsed'),
+      // Charts fetch is best-effort: an empty / missing charts.toml just yields an empty picker.
+      api.get<ChartsDoc>('/admin/config/charts/parsed').catch((): ChartsDoc => ({ path: '', charts: {} })),
     ])
-      .then(([s, d]) => {
+      .then(([s, d, c]) => {
         // Lift the Dashboard $def to the top + thread the whole $defs so SchemaNavigator
         // resolves ChartWidget / KpiWidget / DashboardFilter when the user drills in.
         const defs = (s.dashboards.$defs ?? {}) as Record<string, JsonSchema>
         const dashboard = (defs.Dashboard ?? {}) as JsonSchema
         setDashboardSchema({ ...dashboard, $defs: defs })
         setEnums(s.framework_enums)
+        setCharts(c.charts)
         setPath(d.path); setDoc(d.dashboards); setOriginal(JSON.stringify(d.dashboards))
         setSel((cur) => (cur && d.dashboards[cur] ? cur : Object.keys(d.dashboards)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
   useEffect(load, [t])
+
+  // Materialise CHART_IDS on top of the bundled framework enums — fed into SchemaForm via
+  // FrameworkEnumsContext so ChartWidget.chart renders as a SearchSelect of {id → label} from
+  // the saved charts. Same pattern DictionaryBuilder uses for ENUM_IDS / LOOKUP_IDS.
+  const augmentedEnums: FrameworkEnums = useMemo(() => {
+    const base: FrameworkEnums = { ...(enums ?? {}) }
+    const ids = Object.keys(charts ?? {}).sort()
+    base.CHART_IDS = {
+      label: 'Saved charts',
+      values: ids.map((id) => {
+        const c = charts[id] as { label?: string } | undefined
+        return { value: id, label: c?.label || id, mono: id }
+      }),
+    }
+    return base
+  }, [enums, charts])
 
   const dirty = useMemo(() => doc != null && JSON.stringify(doc) !== original, [doc, original])
 
@@ -139,7 +163,7 @@ export default function DashboardsBuilder() {
   const selValue = sel ? doc[sel] : null
 
   return (
-    <FrameworkEnumsContext.Provider value={enums}>
+    <FrameworkEnumsContext.Provider value={augmentedEnums}>
       <Stack gap={12}>
         <Mono>{path}</Mono>
         <Split>
