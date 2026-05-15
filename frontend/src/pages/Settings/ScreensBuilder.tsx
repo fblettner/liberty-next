@@ -8,8 +8,9 @@
 // trip cleanly), then reloads. No rename of the app key yet (delete + re-add) — the inspector
 // does let you rename a screen's `id` (the dict key follows).
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, FolderOpen, FileText } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Search, FolderOpen, FileText, Edit3, X, Zap, Filter, Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
@@ -18,11 +19,15 @@ import {
   Banner,
   Centered,
   Card,
+  ModalFooter,
+  ModalHeader,
+  Overlay,
   Row,
   Stack,
   SpinnerRing,
   Mono,
   FrameworkEnumsContext,
+  VisualBuilderModal,
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
@@ -87,6 +92,26 @@ const NavItem = styled.button<{ $active?: boolean }>`
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
+// Summary card shown in the right pane when a screen is selected — gives the operator a quick
+// read of the screen's shape (connector, queries, dialog/actions/hook counts) without opening
+// the designer. The big "Open Screen Designer" button raises the full editing modal.
+const SummaryDescription = styled.p`
+  margin: 0; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.55;
+`
+const SummaryGrid = styled.div`display: grid; grid-template-columns: 140px 1fr; gap: 8px 16px; align-items: baseline;`
+const SummaryLabel = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
+const SummaryValue = styled.span`color: ${colors.text.primary}; font-size: ${fontSize.md}; font-family: ${fonts.mono};`
+const StatChips = styled.div`display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;`
+// Renamed from ``Chip`` to avoid colliding with the app-picker Chip styled-button above —
+// they're different shapes (this one's a span, no hover/click).
+const StatChip = styled.span<{ $tone?: 'orange' | 'green' | 'muted' }>`
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid ${({ $tone }) => ($tone === 'orange' ? colors.orange.border : $tone === 'green' ? colors.green.border : colors.border)};
+  background: ${({ $tone }) => ($tone === 'orange' ? colors.orange.bg : $tone === 'green' ? colors.green.bg : 'transparent')};
+  color: ${({ $tone }) => ($tone === 'orange' ? colors.orange.main : $tone === 'green' ? colors.green.main : colors.text.muted)};
+  font-size: ${fontSize.micro}; font-family: ${fonts.sans};
+  & svg { flex-shrink: 0; }
+`
 const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
 export default function ScreensBuilder() {
@@ -112,6 +137,20 @@ export default function ScreensBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The screen designer is a near-fullscreen modal hosting the existing ScreenEditor. The right
+  // pane in Settings shows a summary card with a big "Open Screen Designer" button; click →
+  // raises this modal. Edits flow through the same ``updateScreen`` callback as before — the
+  // ScreensBuilder's Save bar at the bottom commits to disk. Escape closes the modal.
+  const [designerOpen, setDesignerOpen] = useState(false)
+  useEffect(() => {
+    if (!designerOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDesignerOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [designerOpen])
+  // Close the designer when the operator picks a different screen — would otherwise show the
+  // wrong screen's data until they reopen.
+  useEffect(() => { setDesignerOpen(false) }, [selApp, selId])
 
   const load = () => {
     setError(null); setStatus(null)
@@ -331,25 +370,72 @@ export default function ScreensBuilder() {
           )}
         </NavCol>
         <FormCol>
-          {selScreen && selId && selApp ? (
-            <Stack gap={12}>
-              <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
-                  [screens.{selApp}.{selId}]
-                </strong>
+          {selScreen && selId && selApp ? (() => {
+            // Read a few stats off the selected screen so the summary card gives a quick read.
+            // Cast through Record because Screen's TS type doesn't expose every optional field
+            // and we just want counts.
+            const sc = selScreen as unknown as Record<string, unknown>
+            const dlg = sc.dialog as { tabs?: unknown[]; on_load?: unknown[]; on_save?: unknown[]; on_cancel?: unknown[] } | undefined
+            const fieldCount = Array.isArray(dlg?.tabs)
+              ? (dlg!.tabs as { fields?: unknown[] }[]).reduce((acc, t) => acc + (Array.isArray(t.fields) ? t.fields.length : 0), 0)
+              : 0
+            const tabCount = Array.isArray(dlg?.tabs) ? dlg!.tabs.length : 0
+            const onLoadCount = Array.isArray(dlg?.on_load) ? dlg!.on_load.length : 0
+            const onSaveCount = Array.isArray(dlg?.on_save) ? dlg!.on_save.length : 0
+            const onCancelCount = Array.isArray(dlg?.on_cancel) ? dlg!.on_cancel.length : 0
+            const actionsCount = Array.isArray(sc.actions) ? (sc.actions as unknown[]).length : 0
+            const rowMenuCount = Array.isArray(sc.row_menu) ? (sc.row_menu as unknown[]).length : 0
+            const onInsertCount = Array.isArray(sc.on_insert) ? (sc.on_insert as unknown[]).length : 0
+            const onUpdateCount = Array.isArray(sc.on_update) ? (sc.on_update as unknown[]).length : 0
+            const onDeleteCount = Array.isArray(sc.on_delete) ? (sc.on_delete as unknown[]).length : 0
+            return (
+            <Stack gap={16}>
+              <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontFamily: fonts.sans, fontSize: fontSize.lg, fontWeight: 600, color: colors.text.primary }}>
+                    {(sc.label as string | undefined) || (sc.description as string | undefined) || selId}
+                  </div>
+                  <div style={{ fontFamily: fonts.mono, fontSize: fontSize.sm, color: colors.text.muted, marginTop: 2 }}>
+                    [screens.{selApp}.{selId}]
+                  </div>
+                </div>
                 <Button $variant="danger" $size="sm" onClick={() => removeScreen(selApp, selId)} disabled={busy}>
                   <Trash2 size={13} /> {t('settings.screens.delete')}
                 </Button>
               </Row>
-              <ScreenEditor
-                app={selApp}
-                id={selId}
-                value={selScreen as unknown as Record<string, unknown>}
-                schema={screenSchema}
-                onChange={(v) => updateScreen(selApp, selId, v)}
-              />
+              <SummaryDescription>
+                {(sc.description as string | undefined) || t('settings.screens.summary.noDescription')}
+              </SummaryDescription>
+              <SummaryGrid>
+                <SummaryLabel>{t('settings.screens.summary.connector')}</SummaryLabel>
+                <SummaryValue>{(sc.connector as string | undefined) || `${selApp} (${t('settings.screens.summary.implicit')})`}</SummaryValue>
+                <SummaryLabel>{t('settings.screens.summary.readQuery')}</SummaryLabel>
+                <SummaryValue>{(sc.read_query as string | undefined) || <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>{t('settings.screens.summary.notSet')}</span>}</SummaryValue>
+                <SummaryLabel>{t('settings.screens.summary.writeQueries')}</SummaryLabel>
+                <SummaryValue style={{ fontFamily: fonts.mono, fontSize: fontSize.sm, color: colors.text.secondary }}>
+                  {[
+                    sc.update_query && `update: ${sc.update_query}`,
+                    sc.insert_query && `insert: ${sc.insert_query}`,
+                    sc.delete_query && `delete: ${sc.delete_query}`,
+                  ].filter(Boolean).join(' · ') || <span style={{ fontFamily: fonts.sans, color: colors.text.muted }}>—</span>}
+                </SummaryValue>
+              </SummaryGrid>
+              <StatChips>
+                <StatChip><Layers size={11} /> {t('settings.screens.summary.tabs', { count: tabCount })}</StatChip>
+                <StatChip><FileText size={11} /> {t('settings.screens.summary.fields', { count: fieldCount })}</StatChip>
+                {actionsCount > 0 && <StatChip $tone="orange"><Zap size={11} /> {t('settings.screens.summary.actions', { count: actionsCount })}</StatChip>}
+                {rowMenuCount > 0 && <StatChip $tone="orange"><Filter size={11} /> {t('settings.screens.summary.rowMenu', { count: rowMenuCount })}</StatChip>}
+                {(onLoadCount + onSaveCount + onCancelCount) > 0 && <StatChip $tone="green"><Zap size={11} /> {t('settings.screens.summary.dialogHooks', { count: onLoadCount + onSaveCount + onCancelCount })}</StatChip>}
+                {(onInsertCount + onUpdateCount + onDeleteCount) > 0 && <StatChip $tone="green"><Zap size={11} /> {t('settings.screens.summary.rowHooks', { count: onInsertCount + onUpdateCount + onDeleteCount })}</StatChip>}
+              </StatChips>
+              <Row>
+                <Button $variant="primary" onClick={() => setDesignerOpen(true)}>
+                  <Edit3 size={14} /> {t('settings.screens.openDesigner')}
+                </Button>
+              </Row>
             </Stack>
-          ) : (
+            )
+          })() : (
             <Empty>
               {!selApp
                 ? (apps.length ? t('settings.screens.pickApp') : t('settings.screens.empty'))
@@ -371,6 +457,75 @@ export default function ScreensBuilder() {
       </Row>
       <Hint>{t('settings.screens.hint')}</Hint>
     </Stack>
+    {/* Screen Designer modal — near-fullscreen (VisualBuilderModal preset) hosting the existing
+        ScreenEditor with its 5 internal tabs (General / Queries / Dialog / Actions / Row menu).
+        Portaled to document.body because Settings panels use backdrop-filter (the liquid-glass
+        surface), which would otherwise clamp position:fixed to the panel bounds. The modal closes
+        on Overlay click, header X, and Escape (handler bound above). Edits flow through the same
+        updateScreen → setDoc chain as before; ScreensBuilder's Save bar at the bottom commits. */}
+    {designerOpen && selScreen && selApp && selId && createPortal(
+      <Overlay onClick={() => setDesignerOpen(false)}>
+        <VisualBuilderModal onClick={(e) => e.stopPropagation()}>
+          <ModalHeader>
+            <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>
+                {t('settings.screens.designerTitle')} ·{' '}
+                <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
+                  [screens.{selApp}.{selId}]
+                </span>
+              </span>
+              {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm, marginLeft: 'auto', marginRight: 12 }}>{t('settings.unsaved')}</span>}
+              <Button $variant="ghost" $size="sm" onClick={() => setDesignerOpen(false)}>
+                <X size={13} /> {t('common.close')}
+              </Button>
+            </Row>
+          </ModalHeader>
+          {/* Custom body styling — overflow:hidden so the ScreenEditor's per-tab scroll wrappers
+              own the scroll. Without this the modal body would scroll and the visual builder's
+              panels would lose their fixed-height layout. */}
+          <div style={{
+            flex: '1 1 auto',
+            minHeight: 0,
+            padding: 20,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            color: colors.text.secondary,
+            fontSize: fontSize.md,
+          }}>
+            <ScreenEditor
+              app={selApp}
+              id={selId}
+              value={selScreen as unknown as Record<string, unknown>}
+              schema={screenSchema}
+              onChange={(v) => updateScreen(selApp, selId, v)}
+            />
+          </div>
+          {/* Footer with Save button — calls the same save() that ScreensBuilder's main bar uses
+              + closes the modal on success. Without this, operators couldn't see the main Save
+              bar (hidden behind the modal); they'd have to close, then save, awkward two-step. */}
+          <ModalFooter>
+            <Row gap={8}>
+              <Button onClick={() => setDesignerOpen(false)} $variant="ghost" $size="sm" disabled={busy}>
+                <X size={13} /> {t('common.close')}
+              </Button>
+              <Button
+                $variant="primary"
+                $size="sm"
+                disabled={busy || !dirty}
+                onClick={async () => {
+                  await save()
+                  setDesignerOpen(false)
+                }}
+              >
+                {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+              </Button>
+            </Row>
+          </ModalFooter>
+        </VisualBuilderModal>
+      </Overlay>,
+      document.body,
+    )}
     </FrameworkEnumsContext.Provider>
   )
 }

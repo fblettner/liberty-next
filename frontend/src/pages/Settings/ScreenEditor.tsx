@@ -14,24 +14,24 @@
 // All mutations go through `onChange(nextScreen)` — the parent (ScreensBuilder) owns the dirty
 // flag and the save call. `screenSchema` carries the full `$defs` map so we can pick out
 // `ScreenDialog` / `ScreenTab` / `ScreenField` / `ParamBind` for the per-section sub-schemas.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Code2, Eye, FileText, Layers, Plus, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Plus, Trash2 } from 'lucide-react'
 import {
-  Button, ModalBody, ModalHeader, Overlay, Row, SchemaForm, Stack,
-  VisualBuilderModal, type JsonSchema,
+  Button, Field, Row, SchemaForm, SearchSelect, Stack, type JsonSchema, type SearchSelectOption,
 } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
 
 type Row = Record<string, unknown>
 
-// Which top-level Screen properties belong on which inner tab.
-const GENERAL_KEYS = ['label', 'description', 'connector', 'audit', 'auto_load', 'editable', 'uploadable'] as const
-const QUERY_KEYS = ['read_query', 'update_query', 'insert_query', 'delete_query'] as const
+// Which top-level Screen properties belong on which inner tab. ``connector`` + the four CRUD
+// query refs are rendered as custom SearchSelects (driven by the workspace's connector list
+// and the selected connector's queries) — the rest fall through to SchemaForm for free.
+const GENERAL_FORM_KEYS = ['label', 'description', 'audit', 'auto_load', 'editable', 'uploadable'] as const
 
 type TabKey = 'general' | 'queries' | 'dialog' | 'actions' | 'rowmenu'
 const TAB_ORDER: TabKey[] = ['general', 'queries', 'dialog', 'actions', 'rowmenu']
@@ -48,20 +48,6 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
-
-// Dialog tab: a vertical strip of dialog tabs on the left + the selected tab's body on the right.
-const DialogSplit = styled.div`display: flex; gap: 14px; align-items: flex-start; min-height: 320px;`
-const TabsCol = styled.div`flex: 0 0 180px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100dvh - 28rem); overflow-y: auto;`
-const TabRow = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
-  & .id { font-family: ${fonts.mono}; color: ${colors.text.muted}; margin-left: auto; font-size: ${fontSize.micro}; }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
-const TabBody = styled.div`flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px;`
 const FieldList = styled.div`display: flex; flex-direction: column; gap: 6px;`
 const FieldHeader = styled.button<{ $open?: boolean }>`
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; text-align: left;
@@ -71,36 +57,12 @@ const FieldHeader = styled.button<{ $open?: boolean }>`
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
   & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .dd { font-family: ${fonts.mono}; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
-  & .badges { display: inline-flex; gap: 4px; }
-  & svg { flex-shrink: 0; color: ${colors.text.muted}; }
   &:hover { border-color: ${colors.blue.border}; }
-`
-// Visual/Schema mode toggle for the Dialog tab — same shape ConnectorsBuilder uses, kept here
-// instead of refactoring out to a shared primitive since this is the only other consumer for now.
-const ModeBar = styled.div`display: inline-flex; gap: 4px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};`
-const ModeBtn = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
-  border: none; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  background: ${({ $active }) => ($active ? colors.bg.card : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
-  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
-  &:hover { color: ${colors.text.primary}; }
-`
-const Badge = styled.span<{ $tone?: 'orange' | 'red' | 'muted' }>`
-  display: inline-block; padding: 1px 6px; border-radius: ${radius.sm}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
-  border: 1px solid ${({ $tone }) => ($tone === 'orange' ? colors.orange.border : $tone === 'red' ? colors.red.border : colors.border)};
-  color: ${({ $tone }) => ($tone === 'orange' ? colors.orange.main : $tone === 'red' ? colors.red.main : colors.text.muted)};
-  background: ${({ $tone }) => ($tone === 'orange' ? colors.orange.bg : $tone === 'red' ? colors.red.bg : 'transparent')};
 `
 const FieldBody = styled.div`
   border: 1px solid ${colors.blue.border}; border-top: none; padding: 12px;
   border-radius: 0 0 ${radius.md} ${radius.md}; background: ${colors.bg.input};
 `
-// Sub-schemas used inside Dialog. Picked once per screenSchema change.
-const TAB_PROPS_KEYS = ['label', 'l', 'cols', 'hide_on_add', 'hide_on_edit'] as const
-const FIELD_PROPS_KEYS = ['dd', 'label', 'hidden', 'disabled', 'required', 'colspan', 'default'] as const
-const FIELD_BINDS_KEY = 'lookup_param_binds'
-const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
 
 // Action discriminated union — maps the v2 `type` literal to its $def name (capitalised + "Action"
 // suffix). Used by the on_save editor to pick the right per-type form when the user changes type.
@@ -128,12 +90,8 @@ function blankActionOfType(t: ActionType, id: string): Row {
   return base
 }
 
-function pickFromDefs(defs: Record<string, JsonSchema>, name: string): JsonSchema {
-  // Return the named $def as a self-contained schema (the parent's $defs ride along so nested
-  // refs — ParamBind under ScreenField — still resolve when SchemaForm walks them).
-  const base = defs[name] ?? { type: 'object' }
-  return { ...base, $defs: defs }
-}
+// (``pickFromDefs`` removed — it was used by the now-deleted schema-mode field/tab editor.
+// The visual builder picks its sub-schemas internally.)
 
 export interface ScreenEditorProps {
   /** Selected screen path — for the optional breadcrumb. */
@@ -150,51 +108,43 @@ export interface ScreenEditorProps {
 export default function ScreenEditor({ app, id, value, schema, onChange }: ScreenEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('general')
-  // The Dialog tab can render in two modes:
-  //   - 'visual'  — Figma-style canvas + palette + inspector (ScreenVisualBuilder; default)
-  //   - 'schema'  — the original tabs + field accordion + on_save lists (kept as the escape
-  //                 hatch for hooks the visual mode doesn't surface inline — e.g. on_save chains).
-  // Toggle persists per ScreenEditor instance; switching modes is non-destructive (same data
-  // model). Visual is the default since the user asked for it; switching to Schema is one click.
-  const [dialogMode, setDialogMode] = useState<'visual' | 'schema'>('visual')
-  // Visual builder is opened in a modal so it gets the screen real estate it needs (the
-  // inline-in-Settings layout was cramped — operator couldn't see the canvas + inspector at the
-  // same time without scrolling). The Dialog tab in Visual mode shows a big "Open visual
-  // designer" button + the on_load / on_save / on_cancel chains below; clicking the button
-  // raises this modal.
-  const [visualOpen, setVisualOpen] = useState(false)
-  // Escape closes the visual builder modal — operators expect this from every other modal in
-  // the app. Bound only when open so the listener doesn't sit on the document otherwise.
-  useEffect(() => {
-    if (!visualOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setVisualOpen(false) }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [visualOpen])
 
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
-  // Pre-pick the per-tab sub-schemas; the General/Queries tabs use a SchemaForm over these
-  // so the field-level enums + descriptions still drive each input.
-  const generalSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, GENERAL_KEYS as unknown as string[]), [schema])
-  const queriesSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, QUERY_KEYS as unknown as string[]), [schema])
-  const tabPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(pickFromDefs(defs, 'ScreenTab'), TAB_PROPS_KEYS as unknown as string[]), [defs])
-  const fieldPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(pickFromDefs(defs, 'ScreenField'), FIELD_PROPS_KEYS as unknown as string[]), [defs])
-  // Field's lookup_param_binds — pick that one property so SchemaForm inlines its list[ParamBind] editor.
-  const bindsSchema = useMemo<JsonSchema>(() => {
-    const sf = pickFromDefs(defs, 'ScreenField')
-    const out = pickSchemaProperties(sf, [FIELD_BINDS_KEY] as unknown as string[])
-    return { ...out, $defs: defs }
-  }, [defs])
-  // Field's per-field conditions (visible_when / required_when / disabled_when). Same trick as
-  // bindsSchema — the three list[FieldCondition] props render as inline editors with `$defs`
-  // resolving FieldCondition. Operators see all three side-by-side under the expanded field row.
-  const conditionsSchema = useMemo<JsonSchema>(() => {
-    const sf = pickFromDefs(defs, 'ScreenField')
-    const out = pickSchemaProperties(sf, FIELD_CONDITION_KEYS as unknown as string[])
-    return { ...out, $defs: defs }
-  }, [defs])
-
-  // --- mutation helpers (all rebuild the screen value and call onChange) -------
+  // Workspace connectors carry their query list; we render the connector + query pickers as
+  // SearchSelects driven off that list (instead of plain text fields). Fetched once at login;
+  // permission-pruned to what the caller can read.
+  const { connectors: wsConnectors } = useWorkspace()
+  // Workspace context streams the connector list after login; until then it's null. Guard
+  // both reads so the pickers show ``loading`` placeholders instead of crashing on first render.
+  const effectiveConnector = (typeof value.connector === 'string' && value.connector.trim() ? value.connector : app)
+  const connectorOptions = useMemo<SearchSelectOption[]>(
+    () => (wsConnectors ?? []).filter((c) => c.type === 'sql')
+      .map((c) => ({ value: c.name, label: c.name, mono: c.name })),
+    [wsConnectors],
+  )
+  const selectedConnectorMeta = useMemo(
+    () => (wsConnectors ?? []).find((c) => c.name === effectiveConnector),
+    [wsConnectors, effectiveConnector],
+  )
+  // Queries available on the effective connector — the four CRUD pickers (read / update /
+  // insert / delete) all read from this. SQL connectors only; an API connector has endpoints
+  // not queries, but a Screen pins to a SQL read query so the picker filters to SQL anyway.
+  const queryOptions = useMemo<SearchSelectOption[]>(() => {
+    if (!selectedConnectorMeta || selectedConnectorMeta.type !== 'sql') return []
+    return selectedConnectorMeta.queries.map((q) => ({
+      value: q.name,
+      label: q.description || q.label || q.name,
+      mono: q.name,
+    }))
+  }, [selectedConnectorMeta])
+  // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
+  // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
+  // its field-level enums + descriptions kick in.
+  const generalSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, GENERAL_FORM_KEYS as unknown as string[]), [schema])
+  // (Schema-mode sub-schemas + tab/field mutation helpers are gone — the visual builder owns
+  // the dialog-tab/field editing experience now. ``setProp`` / ``dialog`` / ``setDialog`` /
+  // ``createDialog`` remain since they're used by the Dialog tab's empty-state "Create dialog"
+  // affordance and by the lifecycle-hook accessors below.)
   const setProp = (k: string, v: unknown) => {
     const next = { ...value }
     if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) delete next[k]
@@ -210,100 +160,67 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       onChange({ ...value, dialog: next })
     }
   }
-  const dialogTabs = useMemo<Row[]>(() => (Array.isArray(dialog?.tabs) ? dialog!.tabs : []), [dialog])
-
-  const [selTabIdx, setSelTabIdx] = useState(0)
-  const [expandedField, setExpandedField] = useState<number | null>(null)
-  const updateTab = (idx: number, patch: Row) => {
-    const next = dialogTabs.slice()
-    next[idx] = { ...next[idx], ...patch }
-    setDialog({ ...(dialog ?? {}), tabs: next })
-  }
-  const renameTab = (idx: number) => {
-    const cur = String((dialogTabs[idx] ?? {}).id ?? '')
-    const v = window.prompt(t('settings.screens.tab.renamePrompt'), cur)?.trim()
-    if (!v || v === cur) return
-    if (dialogTabs.some((tab, i) => i !== idx && tab.id === v)) {
-      window.alert(t('settings.screens.tab.idExists', { id: v })); return
-    }
-    updateTab(idx, { id: v })
-  }
-  const addTab = () => {
-    const id = window.prompt(t('settings.screens.tab.namePrompt'))?.trim()
-    if (!id) return
-    if (dialogTabs.some((t) => t.id === id)) { window.alert(t('settings.screens.tab.idExists', { id })); return }
-    const next = [...dialogTabs, { id, fields: [] }]
-    setDialog({ ...(dialog ?? {}), tabs: next })
-    setSelTabIdx(next.length - 1)
-  }
-  const deleteTab = (idx: number) => {
-    if (!window.confirm(t('settings.screens.tab.confirmDelete', { id: dialogTabs[idx]?.id }))) return
-    const next = dialogTabs.slice(); next.splice(idx, 1)
-    setDialog({ ...(dialog ?? {}), tabs: next })
-    setSelTabIdx((cur) => Math.min(cur, Math.max(0, next.length - 1)))
-  }
   const createDialog = () => {
     setDialog({ tabs: [{ id: 'general', label: 'General', fields: [] }] })
-    setSelTabIdx(0)
-  }
-
-  // --- field-level mutations -------------------------------------------------
-  const selTab = dialogTabs[selTabIdx]
-  const fields: Row[] = useMemo(() => (Array.isArray(selTab?.fields) ? (selTab!.fields as Row[]) : []), [selTab])
-  const updateFields = (next: Row[]) => updateTab(selTabIdx, { fields: next })
-  const addField = () => {
-    const name = window.prompt(t('settings.screens.field.namePrompt'))?.trim()
-    if (!name) return
-    if (fields.some((f) => f.name === name)) { window.alert(t('settings.screens.field.nameExists', { name })); return }
-    updateFields([...fields, { name }])
-    setExpandedField(fields.length)
-  }
-  const deleteField = (idx: number) => {
-    if (!window.confirm(t('settings.screens.field.confirmDelete', { name: fields[idx]?.name }))) return
-    const next = fields.slice(); next.splice(idx, 1)
-    updateFields(next)
-    setExpandedField((cur) => (cur === idx ? null : cur != null && cur > idx ? cur - 1 : cur))
-  }
-  const updateField = (idx: number, patch: Row) => {
-    const next = fields.slice()
-    next[idx] = { ...next[idx], ...patch }
-    // Drop empty optional keys so the saved TOML stays terse.
-    for (const k of Object.keys(patch)) {
-      if (patch[k] === undefined || patch[k] === null || patch[k] === '' || patch[k] === false) delete (next[idx] as Row)[k]
-    }
-    updateFields(next)
   }
 
   // --- render ----------------------------------------------------------------
+  // Connector picker — SearchSelect over the workspace's accessible SQL connectors. Setting it
+  // back to the app's name implicit value is handled by passing an "(use app's connector)"
+  // anyLabel: picking it clears ``screen.connector`` so the runtime falls back to the app name.
   const renderGeneral = (): ReactNode => (
     <>
       <Sub>{t('settings.screens.editor.generalHint')}</Sub>
+      <Field label={t('settings.screens.editor.connectorLabel')}>
+        <SearchSelect
+          value={(value.connector as string | undefined) ?? ''}
+          options={connectorOptions}
+          onChange={(v) => setProp('connector', v && v !== app ? v : null)}
+          anyLabel={t('settings.screens.editor.connectorUseApp', { app })}
+          placeholder={app}
+        />
+      </Field>
       <SchemaForm
         schema={generalSchema}
         defs={defs}
         value={value}
         onChange={(v) => {
           // SchemaForm gives the full subset — convert to a patch so we don't clobber the keys
-          // we didn't include (dialog, actions, row_menu, id, read_query/…).
+          // we didn't include (dialog, actions, row_menu, id, read_query/…, connector).
           const patch: Row = {}
-          for (const k of GENERAL_KEYS) patch[k] = v[k]
+          for (const k of GENERAL_FORM_KEYS) patch[k] = v[k]
           for (const [k, val] of Object.entries(patch)) setProp(k, val)
         }}
       />
     </>
   )
 
+  // The four CRUD query pickers — each a SearchSelect over the effective connector's queries.
+  // read_query is required (validator on the backend); the others are optional and clearing
+  // them removes the key. Picker shows the v2 query name (mono) + the query's description /
+  // label so operators can find by friendly name.
+  const renderQueryField = (key: 'read_query' | 'update_query' | 'insert_query' | 'delete_query', required: boolean): ReactNode => (
+    <Field
+      key={key}
+      label={`${t(`settings.screens.editor.queries.${key}`)}${required ? ' *' : ''}`}
+    >
+      <SearchSelect
+        value={(value[key] as string | undefined) ?? ''}
+        options={queryOptions}
+        onChange={(v) => setProp(key, v || (required ? value[key] ?? '' : null))}
+        anyLabel={required ? undefined : t('common.none')}
+        placeholder={selectedConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+        loading={!selectedConnectorMeta}
+      />
+    </Field>
+  )
   const renderQueries = (): ReactNode => (
     <>
       <Sub>{t('settings.screens.editor.queriesHint')}</Sub>
-      <SchemaForm
-        schema={queriesSchema}
-        defs={defs}
-        value={value}
-        onChange={(v) => {
-          for (const k of QUERY_KEYS) setProp(k, v[k])
-        }}
-      />
+      {renderQueryField('read_query', true)}
+      {renderQueryField('update_query', false)}
+      {renderQueryField('insert_query', false)}
+      {renderQueryField('delete_query', false)}
     </>
   )
 
@@ -313,13 +230,82 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   // Per-type SchemaForm subset — common fields (id/label/stop_on_error) are *also* rendered by
   // SchemaForm from the variant's $def, so the action form is one block. We exclude `type` from
   // the form (it's the picker above) by removing the property from the resolved schema.
+  // Properties we render as custom SearchSelects (above the SchemaForm) — strip them out of
+  // the variant schema so SchemaForm doesn't double-render them as text inputs. v1 operators
+  // had to remember the exact query name; v2's dropdowns pick from the live workspace catalog.
+  const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
+    run_query: ['connector', 'query'],
+    call_api: ['connector', 'endpoint'],
+    navigate: ['connector', 'to'],
+    set_field: [],
+    confirm: [],
+    notify: [],
+    refresh: [],
+  }
   const actionVariantSchema = (a: Row): JsonSchema | null => {
     const defName = ACTION_DEF_NAME[(a.type as ActionType) || 'run_query']
     const v = defs[defName] as JsonSchema | undefined
     if (!v) return null
     const props: Record<string, JsonSchema> = { ...(v.properties ?? {}) }
     delete props.type
+    // Strip the override fields — they render as SearchSelects above the SchemaForm body.
+    for (const k of ACTION_OVERRIDE_KEYS[(a.type as ActionType) || 'run_query']) delete props[k]
     return { ...v, properties: props, $defs: defs }
+  }
+  // Connector + target dropdowns for the ParamBind-bearing action variants. Each picker reads
+  // from the workspace catalog; queries are scoped to the action's chosen connector (with the
+  // screen's effective connector as the fallback when the action's ``connector`` field is unset).
+  const renderActionOverrides = (a: Row, onPatch: (patch: Row) => void): ReactNode => {
+    const aType = (a.type as ActionType) || 'run_query'
+    if (aType !== 'run_query' && aType !== 'call_api' && aType !== 'navigate') return null
+    const isApi = aType === 'call_api'
+    const opts = isApi
+      ? (wsConnectors ?? []).filter((c) => c.type === 'api').map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+      : connectorOptions
+    const actionConn = (a.connector as string | undefined) || effectiveConnector
+    const targetConnMeta = (wsConnectors ?? []).find((c) => c.name === actionConn)
+    // Target list depends on action type — SQL queries vs API endpoints. mono = the wire name,
+    // label = the friendly description / label so operators find by human name.
+    let targetOpts: SearchSelectOption[] = []
+    if (targetConnMeta) {
+      if ((aType === 'run_query' || aType === 'navigate') && targetConnMeta.type === 'sql') {
+        targetOpts = targetConnMeta.queries.map((q) => ({
+          value: q.name,
+          label: q.description || q.label || q.name,
+          mono: q.name,
+        }))
+      } else if (aType === 'call_api' && targetConnMeta.type === 'api') {
+        targetOpts = targetConnMeta.endpoints.map((e) => ({
+          value: e.name,
+          label: e.label || e.name,
+          mono: e.name,
+        }))
+      }
+    }
+    const targetKey: 'query' | 'endpoint' | 'to' = aType === 'run_query' ? 'query' : aType === 'call_api' ? 'endpoint' : 'to'
+    const targetLabel = t(`settings.screens.action.target.${aType}`)
+    return (
+      <>
+        <Field label={t('settings.screens.action.connector')}>
+          <SearchSelect
+            value={(a.connector as string | undefined) ?? ''}
+            options={opts}
+            onChange={(v) => onPatch({ connector: v && v !== effectiveConnector ? v : null })}
+            anyLabel={t('settings.screens.editor.connectorUseApp', { app: effectiveConnector })}
+            placeholder={effectiveConnector}
+          />
+        </Field>
+        <Field label={targetLabel + ' *'}>
+          <SearchSelect
+            value={(a[targetKey] as string | undefined) ?? ''}
+            options={targetOpts}
+            onChange={(v) => onPatch({ [targetKey]: v || '' })}
+            placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+            loading={!targetConnMeta}
+          />
+        </Field>
+      </>
+    )
   }
 
   // The list is keyed by a label string so each editor (on_save / row_menu) keeps its own
@@ -407,6 +393,11 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
                           {ACTION_TYPES.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
                         </select>
                       </Row>
+                      {/* Connector + target (query / endpoint / to) dropdowns — only for the
+                          three ParamBind-bearing variants (run_query / call_api / navigate).
+                          The remaining variant properties (id, label, stop_on_error, param_binds,
+                          prompt_fields, …) flow through SchemaForm below. */}
+                      {renderActionOverrides(a, (patch) => update(i, patch))}
                       {schema ? (
                         <SchemaForm
                           schema={schema}
@@ -468,34 +459,9 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     emptyMessage: t('settings.screens.onCancel.empty'),
   })
 
-  // Per-tab actions — every tab kind (FormTab / NestedFormTab / NestedTableTab) carries an
-  // ``actions: list[Action]``, v2's port of v1's ``ly_dlg_col col_component='InputAction'`` rows.
-  // The editor lives inside the selected tab's body so the operator sees the buttons in context
-  // (e.g. NOMAJDE's "Roles" tab carrying Import Security + Merge Roles + a nested table).
-  const tabActions: Row[] = useMemo(
-    () => (Array.isArray(selTab?.actions) ? (selTab!.actions as Row[]) : []),
-    [selTab],
-  )
-  const setTabActions = (next: Row[]) => {
-    // Drop the key entirely when the list empties so the TOML stays terse — updateTab's spread
-    // would otherwise leave `actions: undefined`, which serialises to nothing but pollutes the
-    // in-memory shape. Rebuild the tab object explicitly here.
-    const updated = dialogTabs.slice()
-    const cur = { ...(updated[selTabIdx] ?? {}) }
-    if (next.length === 0) delete cur.actions
-    else cur.actions = next
-    updated[selTabIdx] = cur
-    setDialog({ ...(dialog ?? {}), tabs: updated })
-  }
-  const renderTabActions = (): ReactNode => renderActionList({
-    // Keyed by tab index so each tab keeps its own expansion state across re-renders.
-    listKey: `tab_actions_${selTabIdx}`,
-    actions: tabActions,
-    setActions: setTabActions,
-    heading: t('settings.screens.tabActions.heading'),
-    hint: t('settings.screens.tabActions.hint'),
-    emptyMessage: t('settings.screens.tabActions.empty'),
-  })
+  // (Per-tab ``actions`` editor moved to the visual builder — it owns the dialog-tab selection
+  // state, so the per-tab actions sit naturally on the selected tab's canvas. The renderActionList
+  // editor for them is wired inside ScreenVisualBuilder's tab body.)
 
   // Screen `actions` — toolbar buttons above the TableView. v1's named workflows (NOMAJDE's
   // "Create Role" / "Reset Password" / etc.) belong here. ParamBinds resolve against the
@@ -596,234 +562,14 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         </Stack>
       )
     }
-    // Visual mode renders the WYSIWYG canvas + palette + inspector — opened in a near-fullscreen
-    // modal so the 3-column layout has room (the inline-in-Settings layout was cramped). The
-    // on_load / on_save / on_cancel chain editors stay BELOW the open-button — those are screen-
-    // wide hooks the operator wires once, not per-field; keeping them visible all the time avoids
-    // burying them inside the modal. Same accessor + setter helpers are reused.
-    if (dialogMode === 'visual') {
-      return (
-        <Stack gap={14}>
-          <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-            <Sub style={{ margin: 0 }}>{t('settings.screens.editor.dialogVisualHint')}</Sub>
-            <ModeBar>
-              <ModeBtn type="button" $active={true}>
-                <Eye size={13} /> {t('settings.screens.visual.modeVisual')}
-              </ModeBtn>
-              <ModeBtn type="button" $active={false} onClick={() => setDialogMode('schema')}>
-                <Code2 size={13} /> {t('settings.screens.visual.modeSchema')}
-              </ModeBtn>
-            </ModeBar>
-          </Row>
-          <Button $variant="primary" onClick={() => setVisualOpen(true)} style={{ alignSelf: 'flex-start' }}>
-            <Eye size={14} /> {t('settings.screens.visual.openModal')}
-          </Button>
-          {renderOnLoad()}
-          {renderOnSave()}
-          {renderOnCancel()}
-          {/* Portal the modal to ``document.body`` — Settings → Screens lives inside a Card with
-              ``backdrop-filter: blur(...)`` (the liquid-glass look), and that property creates a
-              new containing block for fixed-positioned descendants per the CSS spec. Without the
-              portal the Overlay's ``position: fixed; inset: 0`` would clamp to the Card's bounds
-              and the modal would land in the bottom-right of the panel instead of the viewport. */}
-          {visualOpen && createPortal(
-            <Overlay onClick={() => setVisualOpen(false)}>
-              <VisualBuilderModal onClick={(e) => e.stopPropagation()}>
-                <ModalHeader>
-                  <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>
-                      {t('settings.screens.visual.modalTitle')} ·{' '}
-                      <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
-                        [screens.{app}.{id}]
-                      </span>
-                    </span>
-                    <Button $variant="ghost" $size="sm" onClick={() => setVisualOpen(false)}>
-                      <X size={13} /> {t('common.close')}
-                    </Button>
-                  </Row>
-                </ModalHeader>
-                <ModalBody>
-                  <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
-                </ModalBody>
-                {/* No footer — the header carries the only Close button so we don't show two
-                    redundant "Close"s. Edits are saved by the parent ScreensBuilder's main Save
-                    bar after closing this modal; nothing to commit here. */}
-              </VisualBuilderModal>
-            </Overlay>,
-            document.body,
-          )}
-        </Stack>
-      )
-    }
+    // The Dialog tab IS the visual builder — schema mode and the Visual/Schema toggle are gone.
+    // Lifecycle hooks (on_load / on_save / on_cancel) moved to the Actions tab where the rest
+    // of the action chains live, grouped by event kind. Per-panel scrolling (palette / canvas /
+    // inspector) is handled inside ScreenVisualBuilder; we just give it a flex-fill container.
     return (
-      <Stack gap={10}>
-        <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <Sub style={{ margin: 0 }}>{t('settings.screens.editor.dialogHint')}</Sub>
-          <ModeBar>
-            <ModeBtn type="button" $active={false} onClick={() => setDialogMode('visual')}>
-              <Eye size={13} /> {t('settings.screens.visual.modeVisual')}
-            </ModeBtn>
-            <ModeBtn type="button" $active={true}>
-              <Code2 size={13} /> {t('settings.screens.visual.modeSchema')}
-            </ModeBtn>
-          </ModeBar>
-        </Row>
-        {/* Top-level dialog props — currently just `title`; kept compact above the split. */}
-        <Row gap={10} style={{ alignItems: 'flex-end' }}>
-          <SchemaForm
-            schema={{ type: 'object', properties: { title: { type: 'string', title: 'Dialog title' } } }}
-            defs={defs}
-            value={{ title: dialog.title ?? '' }}
-            onChange={(v) => setDialog({ ...(dialog ?? {}), title: typeof v.title === 'string' ? v.title : undefined })}
-          />
-        </Row>
-        <DialogSplit>
-          <TabsCol>
-            {dialogTabs.length === 0 && <Empty>{t('settings.screens.tab.empty')}</Empty>}
-            {dialogTabs.map((tab, i) => {
-              const tabId = String(tab.id ?? `tab_${i}`)
-              const tabLabel = typeof tab.label === 'string' && tab.label ? tab.label : tabId
-              const fcount = Array.isArray(tab.fields) ? tab.fields.length : 0
-              return (
-                <TabRow key={tabId + i} $active={i === selTabIdx} onClick={() => { setSelTabIdx(i); setExpandedField(null) }}>
-                  <Layers size={13} />
-                  <span className="lbl">{tabLabel}</span>
-                  <span className="id">· {fcount}</span>
-                </TabRow>
-              )
-            })}
-            <Button $variant="ghost" $size="sm" onClick={addTab} style={{ justifyContent: 'flex-start', marginTop: 6 }}>
-              <Plus size={13} /> {t('settings.screens.tab.add')}
-            </Button>
-          </TabsCol>
-          <TabBody>
-            {selTab ? (
-              <>
-                <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
-                    <code>{String(selTab.id)}</code>
-                  </strong>
-                  <Row gap={6}>
-                    <Button $variant="ghost" $size="sm" onClick={() => renameTab(selTabIdx)}>
-                      {t('settings.screens.tab.rename')}
-                    </Button>
-                    <Button $variant="danger" $size="sm" onClick={() => deleteTab(selTabIdx)}>
-                      <Trash2 size={13} /> {t('settings.screens.tab.delete')}
-                    </Button>
-                  </Row>
-                </Row>
-                <SchemaForm
-                  schema={tabPropsSchema}
-                  defs={defs}
-                  value={selTab}
-                  onChange={(v) => {
-                    const patch: Row = {}
-                    for (const k of TAB_PROPS_KEYS) patch[k] = v[k]
-                    updateTab(selTabIdx, patch)
-                  }}
-                />
-                <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>
-                  {t('settings.screens.field.heading')}
-                </strong>
-                <FieldList>
-                  {fields.length === 0 && <Empty>{t('settings.screens.field.empty')}</Empty>}
-                  {fields.map((f, i) => {
-                    const open = expandedField === i
-                    const required = !!f.required
-                    const hidden = !!f.hidden
-                    const disabled = !!f.disabled
-                    return (
-                      <div key={i}>
-                        <FieldHeader $open={open} onClick={() => setExpandedField(open ? null : i)}>
-                          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                          <FileText size={13} />
-                          <span className="name">{String(f.name ?? '')}</span>
-                          {f.dd != null && f.dd !== '' && <span className="dd">dd:{String(f.dd)}</span>}
-                          <span className="badges">
-                            {required && <Badge $tone="orange">{t('settings.screens.field.required')}</Badge>}
-                            {hidden && <Badge $tone="muted">{t('settings.screens.field.hidden')}</Badge>}
-                            {disabled && <Badge $tone="muted">{t('settings.screens.field.disabled')}</Badge>}
-                            {Array.isArray(f.lookup_param_binds) && (f.lookup_param_binds as unknown[]).length > 0 && (
-                              <Badge>{t('settings.screens.field.binds', { count: (f.lookup_param_binds as unknown[]).length })}</Badge>
-                            )}
-                            {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
-                              || (Array.isArray(f.required_when) && (f.required_when as unknown[]).length > 0)
-                              || (Array.isArray(f.disabled_when) && (f.disabled_when as unknown[]).length > 0)
-                              ? <Badge $tone="orange">{t('settings.screens.field.conditional')}</Badge>
-                              : null}
-                          </span>
-                        </FieldHeader>
-                        {open && (
-                          <FieldBody>
-                            <Stack gap={12}>
-                              <SchemaForm
-                                schema={fieldPropsSchema}
-                                defs={defs}
-                                value={f}
-                                onChange={(v) => {
-                                  const patch: Row = {}
-                                  for (const k of FIELD_PROPS_KEYS) patch[k] = v[k]
-                                  updateField(i, patch)
-                                }}
-                              />
-                              <SchemaForm
-                                schema={bindsSchema}
-                                defs={defs}
-                                value={f}
-                                onChange={(v) => {
-                                  // SchemaForm wraps the picked subset back into an object; pull
-                                  // out just the binds key so we don't accidentally write `name`/etc.
-                                  updateField(i, { [FIELD_BINDS_KEY]: v[FIELD_BINDS_KEY] })
-                                }}
-                              />
-                              <SchemaForm
-                                schema={conditionsSchema}
-                                defs={defs}
-                                value={f}
-                                onChange={(v) => {
-                                  // Same trick as bindsSchema — pick only the three condition keys
-                                  // so static name/dd/etc. on the field aren't mass-overwritten.
-                                  const patch: Row = {}
-                                  for (const k of FIELD_CONDITION_KEYS) patch[k] = v[k]
-                                  updateField(i, patch)
-                                }}
-                              />
-                              <Row gap={8}>
-                                <Button $variant="danger" $size="sm" onClick={() => deleteField(i)}>
-                                  <Trash2 size={13} /> {t('settings.screens.field.delete')}
-                                </Button>
-                              </Row>
-                            </Stack>
-                          </FieldBody>
-                        )}
-                      </div>
-                    )
-                  })}
-                </FieldList>
-                <Button $variant="ghost" $size="sm" onClick={addField} style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}>
-                  <Plus size={13} /> {t('settings.screens.field.add')}
-                </Button>
-                {/* Per-tab action buttons — v2's port of v1's ``col_component='InputAction'``
-                    rows. Available on every tab kind (FormTab / NestedFormTab / NestedTableTab)
-                    so a "Roles" tab can carry Import Security + Merge Roles alongside its
-                    nested table, just like NOMAJDE used to. Renders below the field list so the
-                    operator sees the buttons in context. */}
-                {renderTabActions()}
-              </>
-            ) : (
-              <Empty>{t('settings.screens.tab.pickOne')}</Empty>
-            )}
-          </TabBody>
-        </DialogSplit>
-        {/* Lifecycle hook chains — all three render the same renderActionList editor:
-            - on_load:   after the dialog opens + row data is loaded (edit) or defaults seed (add)
-            - on_save:   sequentially after the dialog's main update/insert succeeds (v2's port of
-                         v1's ly_act_tasks for the form-save flow; multi-table writes land here)
-            - on_cancel: when the user closes without saving — *blocks* the close on failure */}
-        {renderOnLoad()}
-        {renderOnSave()}
-        {renderOnCancel()}
-      </Stack>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
+      </div>
     )
   }
 
@@ -833,20 +579,41 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       case 'queries': return renderQueries()
       case 'dialog':  return renderDialog()
       case 'actions': return (
-        <>
-          {renderScreenActions()}
-          {renderRowHooks()}
-        </>
+        // All action attachment points consolidated. Grouped visually by *when* they fire:
+        // - **Dialog hooks** (on_load / on_save / on_cancel) — fire while the dialog is open
+        // - **Toolbar** (Screen.actions) — the buttons above the table
+        // - **Row hooks** (on_insert / on_update / on_delete) — fire after a row mutation,
+        //   either via dialog Save or the inline grid's batch save
+        // Each section is rendered through the same ``renderActionList`` editor.
+        <Stack gap={20}>
+          <div>
+            <Sub style={{ margin: 0, marginBottom: 8 }}>{t('settings.screens.actionsTab.dialogHooksGroup')}</Sub>
+            {renderOnLoad()}
+            {renderOnSave()}
+            {renderOnCancel()}
+          </div>
+          <div>
+            <Sub style={{ margin: 0, marginBottom: 8 }}>{t('settings.screens.actionsTab.toolbarGroup')}</Sub>
+            {renderScreenActions()}
+          </div>
+          <div>
+            <Sub style={{ margin: 0, marginBottom: 8 }}>{t('settings.screens.actionsTab.rowHooksGroup')}</Sub>
+            {renderRowHooks()}
+          </div>
+        </Stack>
       )
       case 'rowmenu': return renderRowMenu()
     }
   }
 
+  // Active tab content lives inside a scroll-managing wrapper. Most tabs (General / Queries /
+  // Actions / Row menu) get an ``overflow-y: auto`` wrapper so long forms scroll inside the
+  // modal body without making the body itself scroll. The Dialog tab is special — the visual
+  // builder owns its own per-panel scrolling (palette / canvas / inspector all scroll on their
+  // own); wrapping it would create a redundant outer scrollbar. Detect via the active tab key.
+  const isDialogTab = tab === 'dialog'
   return (
-    <Stack gap={10}>
-      <div style={{ color: colors.text.muted, fontSize: fontSize.micro, fontFamily: fonts.mono }}>
-        [screens.{app}.{id}]
-      </div>
+    <Stack gap={10} style={{ flex: 1, minHeight: 0 }}>
       <TabsBar>
         {TAB_ORDER.map((k) => (
           <TabBtn key={k} type="button" $active={tab === k} onClick={() => setTab(k)}>
@@ -854,7 +621,16 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
           </TabBtn>
         ))}
       </TabsBar>
-      {renderTab()}
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: isDialogTab ? 'hidden' : 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        paddingRight: isDialogTab ? 0 : 4,
+      }}>
+        {renderTab()}
+      </div>
     </Stack>
   )
 }
