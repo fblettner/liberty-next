@@ -69,6 +69,26 @@ export const ScreenDialogModal = styled(Modal)`
   min-height: 0;
 `
 
+/** A Modal preset for a *nested* ScreenDialog opened from inside another dialog — e.g. a row
+ *  click on a NestedTableView ("Edit Activity Log rule" sitting on top of "Settings - Applications").
+ *  Smaller than the top-level preset (so the parent's frame remains visible behind it) and
+ *  *auto-height* with a `max-height` cap — the nested form is usually short (a few related-table
+ *  columns) and the parent already paid for a fixed envelope, no point repeating it. */
+export const NestedScreenDialogModal = styled(Modal)`
+  width: min(720px, 90vw);
+  max-height: 85vh;
+  /* Re-enable a small min-height so a single-field dialog still has a sensible footprint. */
+  min-width: 0;
+  min-height: 240px;
+`
+
+/** Overlay variant for a nested dialog — bumps z-index above the parent's Overlay so click-
+ *  outside-to-close binds to the nested first, and the visual stack is unambiguous even when
+ *  React's commit order isn't (e.g. when sub-mount races with a parent re-render). */
+export const NestedOverlay = styled(Overlay)`
+  z-index: 500;
+`
+
 export const ModalFooter = styled.div`
   display: flex;
   justify-content: flex-end;

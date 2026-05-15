@@ -13,6 +13,7 @@
 //    text as the value. Free-text combobox semantics — for fields where v1 emitted aliases we don't
 //    want to reject (`format`, `dialect`, …).
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, Check } from 'lucide-react'
@@ -44,8 +45,13 @@ const Trigger = styled.button<{ $open: boolean; $placeholder: boolean }>`
   &:hover:not(:disabled) { border-color: ${colors.blue.border}; }
   &:disabled { opacity: 0.5; cursor: default; }
 `
+// `position: fixed` + portaled to `document.body` so the dropdown escapes any `overflow: hidden`
+// ancestor — most notably the Modal frame, which would otherwise clip the panel when the user
+// opened a dropdown inside a nested ScreenDialog (the embedded "Activity Log" / "Audit Trail"
+// row-edit case). Coords are computed from the trigger's getBoundingClientRect on open + on
+// scroll / resize. z-index sits above every Modal Overlay (top-level: 400, nested: 500).
 const Panel = styled.div`
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 300; min-width: 240px;
+  position: fixed; z-index: 1000;
   background: ${colors.bg.dropdown}; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   box-shadow: ${shadow.lg}; overflow: hidden; display: flex; flex-direction: column;
 `
@@ -97,16 +103,43 @@ export function SearchSelect({
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  // The trigger's viewport coords — drive the portaled Panel's `position: fixed` offsets.
+  // Recomputed on open + on scroll/resize so the dropdown follows the trigger as the user
+  // scrolls inside a modal body. `null` = panel not positioned yet (first render frame).
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number } | null>(null)
 
   useEffect(() => {
-    if (!open) { setQ(''); return }
-    const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false) }
+    if (!open) { setQ(''); setPanelPos(null); return }
+    const compute = () => {
+      const el = triggerRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setPanelPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+    compute()
+    // Click outside (either the trigger or the portaled panel itself) closes the dropdown.
+    const onDoc = (e: MouseEvent) => {
+      const inWrap = wrapRef.current?.contains(e.target as Node)
+      const inPanel = panelRef.current?.contains(e.target as Node)
+      if (!inWrap && !inPanel) setOpen(false)
+    }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
+    // `capture: true` so we catch scroll on every ancestor (ModalBody, page) — bubbling scroll
+    // events skip non-Window scrollers without it.
+    window.addEventListener('resize', compute)
+    window.addEventListener('scroll', compute, true)
     queueMicrotask(() => searchRef.current?.focus())
-    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
   }, [open])
 
   const current = options.find((o) => o.value === value)
@@ -144,49 +177,55 @@ export function SearchSelect({
     return <span className="lbl">{placeholder ?? ''}</span>
   })()
 
+  // Build the portaled Panel only when open *and* its position has been computed (one frame
+  // after open). Rendering with `null` coords would flash the dropdown at top-left of the
+  // viewport for a frame — `position: fixed; visibility: hidden` until ready is also fine but
+  // a single useEffect compute is simpler here.
+  const panel = open && panelPos ? (
+    <Panel ref={panelRef} style={{ top: panelPos.top, left: panelPos.left, minWidth: Math.max(240, panelPos.width) }}>
+      <SearchRow>
+        <input
+          ref={searchRef}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={allowCustom ? t('common.searchOrType', 'Search or type a value…') : t('table.search')}
+          onKeyDown={(e) => { if (e.key === 'Enter' && allowCustom) { e.preventDefault(); commitCustom() } }}
+        />
+      </SearchRow>
+      <List>
+        {anyLabel !== undefined && (
+          <Item type="button" $active={value === ''} onClick={() => pick('')}>
+            <span className="t">{anyLabel}</span>
+            {value === '' && <Check size={12} />}
+          </Item>
+        )}
+        {filtered.length === 0 ? (
+          <Empty>{t('table.noMatches', 'No matches')}</Empty>
+        ) : (
+          filtered.map((o) => (
+            <Item key={o.value} type="button" $active={o.value === value} onClick={() => pick(o.value)}>
+              {o.mono && o.mono !== o.label && <span className="mono">{o.mono}</span>}
+              <span className="t">{o.label}</span>
+              {o.value === value && <Check size={12} />}
+            </Item>
+          ))
+        )}
+      </List>
+      {showCreateRow && (
+        <CreateRow type="button" onClick={commitCustom}>
+          {t('common.useCustom', 'Use')} <span className="mono">{q.trim()}</span>
+        </CreateRow>
+      )}
+    </Panel>
+  ) : null
+
   return (
     <Wrap ref={wrapRef}>
-      <Trigger type="button" $open={open} $placeholder={!current && !(allowCustom && !!value)} disabled={disabled} onClick={() => !disabled && setOpen((o) => !o)}>
+      <Trigger ref={triggerRef} type="button" $open={open} $placeholder={!current && !(allowCustom && !!value)} disabled={disabled} onClick={() => !disabled && setOpen((o) => !o)}>
         {triggerLabel}
         <ChevronDown size={14} />
       </Trigger>
-      {open && (
-        <Panel>
-          <SearchRow>
-            <input
-              ref={searchRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder={allowCustom ? t('common.searchOrType', 'Search or type a value…') : t('table.search')}
-              onKeyDown={(e) => { if (e.key === 'Enter' && allowCustom) { e.preventDefault(); commitCustom() } }}
-            />
-          </SearchRow>
-          <List>
-            {anyLabel !== undefined && (
-              <Item type="button" $active={value === ''} onClick={() => pick('')}>
-                <span className="t">{anyLabel}</span>
-                {value === '' && <Check size={12} />}
-              </Item>
-            )}
-            {filtered.length === 0 ? (
-              <Empty>{t('table.noMatches', 'No matches')}</Empty>
-            ) : (
-              filtered.map((o) => (
-                <Item key={o.value} type="button" $active={o.value === value} onClick={() => pick(o.value)}>
-                  {o.mono && o.mono !== o.label && <span className="mono">{o.mono}</span>}
-                  <span className="t">{o.label}</span>
-                  {o.value === value && <Check size={12} />}
-                </Item>
-              ))
-            )}
-          </List>
-          {showCreateRow && (
-            <CreateRow type="button" onClick={commitCustom}>
-              {t('common.useCustom', 'Use')} <span className="mono">{q.trim()}</span>
-            </CreateRow>
-          )}
-        </Panel>
-      )}
+      {panel && createPortal(panel, document.body)}
     </Wrap>
   )
 }

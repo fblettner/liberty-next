@@ -17,7 +17,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Save, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Checkbox, Field, Input, ModalBody, ModalFooter, ModalHeader, Overlay, Row as FlexRow, ScreenDialogModal, SearchSelect, SpinnerRing } from '../../common'
+import { Banner, Button, Checkbox, Field, Input, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SearchSelect, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { Action, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
@@ -186,7 +186,7 @@ function FieldRow({
 }
 
 export function ScreenDialog({
-  open, mode, screen, columns, row, connector, onClose, onSaved,
+  open, mode, screen, columns, row, connector, onClose, onSaved, nested = false,
 }: {
   open: boolean
   mode: DialogMode
@@ -201,6 +201,10 @@ export function ScreenDialog({
   onClose: () => void
   /** Called after a successful save; the TableView reruns its SELECT to refresh the grid. */
   onSaved: () => void
+  /** When opened from inside another ScreenDialog (e.g. NestedTableView's row click → edit a
+   *  related-rules row), use the smaller auto-height modal variant + bumped Overlay z-index so
+   *  the parent's frame remains visible behind it and the sub doesn't dominate the viewport. */
+  nested?: boolean
 }) {
   const { t } = useTranslation()
   const dlg = screen.dialog
@@ -429,9 +433,14 @@ export function ScreenDialog({
     ? ((currentTab as FormTab).fields ?? []).filter((f) => fieldStateOf(f).visible)
     : []
 
+  // Pick the modal frame: top-level dialogs get the fixed-height ScreenDialogModal (so the
+  // Save button doesn't move as tabs swap content); a nested sub-dialog gets the smaller
+  // auto-height variant on a bumped-z-index Overlay so the parent stays visible behind it.
+  const OverlayEl = nested ? NestedOverlay : Overlay
+  const ModalEl = nested ? NestedScreenDialogModal : ScreenDialogModal
   return (
-    <Overlay onClick={onClose}>
-      <ScreenDialogModal onClick={(e) => e.stopPropagation()}>
+    <OverlayEl onClick={onClose}>
+      <ModalEl onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           {mode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
         </ModalHeader>
@@ -492,7 +501,7 @@ export function ScreenDialog({
             </Button>
           </FlexRow>
         </ModalFooter>
-      </ScreenDialogModal>
-    </Overlay>
+      </ModalEl>
+    </OverlayEl>
   )
 }

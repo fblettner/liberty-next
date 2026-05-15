@@ -26,6 +26,7 @@ import { Plus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, SpinnerRing } from '../../common'
 import { DataTable } from '../../common/DataTable'
+import { enumMap, ruleCell } from '../../services/cells'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { NestedFormTab, NestedTableTab, ScreenDetail, ScreenField } from '../../types/screens'
 import { resolveBindList, type Row, valueFor } from './dialogHelpers'
@@ -146,10 +147,24 @@ function NestedFieldCell({ field, column, row, cols }: {
 }) {
   const label = field.label ?? column?.label ?? field.name
   const raw = valueFor(field.name, row)
-  // Password fields never display their stored value (it's a hash / ENC: ciphertext).
-  // Same rule as the parent ScreenDialog's edit mode.
+  // Apply the dictionary's display rule the same way the grid does: BOOLEAN → ✓/✗,
+  // ENUM → resolved label, password → mask (the format check, since password isn't a
+  // ``rule``). LOOKUP stays raw for now — fully resolving labels needs the same lookup
+  // batch the grid uses (useLookupBatch); slice 2 territory when nested forms become
+  // editable and the field-row pipeline takes over wholesale.
   const isPwd = (column?.format ?? '').toLowerCase() === 'password'
-  const display = isPwd ? '••••••••' : raw == null ? '—' : String(raw)
+  let display: string
+  if (raw == null) {
+    display = '—'
+  } else if (isPwd) {
+    display = '••••••••'
+  } else if (column) {
+    const enums = column.rule?.kind === 'enum' ? enumMap(column.rule) : undefined
+    const cell = ruleCell(raw, column, enums)
+    display = cell.text
+  } else {
+    display = String(raw)
+  }
   const span = Math.min(cols, Math.max(1, field.colspan ?? 1))
   return (
     <Cell style={{ gridColumn: `span ${span}` }}>
@@ -272,6 +287,7 @@ export function NestedTableView({
       {subDialog && nestedScreen && (
         <ScreenDialog
           open
+          nested
           mode={subDialog.mode}
           screen={nestedScreen}
           columns={result.columns}
