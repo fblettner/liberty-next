@@ -770,16 +770,77 @@ migrate cleanly.
   binds (the migrated ``_put``'s SET only binds ``:PASSWORD`` if the user typed a new one — the
   DB column keeps its current value when blank).
 
-**Multi-table writes from one dialog (v1's ``FormsDialog`` — deferred to slice 4).** v1's
-NOMASX1 ``settings_applications`` screen actually wrote to 3-4 tables on save (the apps row + its
-JDE settings + its LDAP settings, all on one PK), orchestrated by ``liberty-core``'s
-``FormsDialog``. v2's plan for this is to use **slice 4 actions**: a screen's dialog will gain an
-``on_save`` event that runs a list of ``run_query`` actions in order, each receiving the same
-form state via ``ParamBind`` (so each action picks the columns it needs and writes its own
-table). The read side already works in v2 today — the screen's ``read_query`` can JOIN the
-linked tables into one flat result, the dialog renders tabs (General / JDE / LDAP / …) backed
-by the joined columns, and ``on_save`` then fans out to the write queries. No special
-``compound_dialog`` shape — same ParamBind mechanism as lookups, actions, and row menus.
+**Multi-table writes from one dialog (v1's ``FormsDialog``).** v1's NOMASX1
+``settings_applications`` screen wrote to 3-4 tables on save (the apps row + its JDE settings
++ its LDAP settings, all on one PK), orchestrated by ``liberty-core``'s ``FormsDialog``. v2's
+solution is now in place — see slice 4 below for the ``Action`` union and slice 2b for
+``NestedFormTab`` / ``NestedTableTab``. Two equally idiomatic routes depending on the layout:
+either (a) the dialog's ``on_save`` runs a sequence of ``run_query`` actions, each binding
+the PK via ``ParamBind`` to write its own table; or (b) the dialog has nested-form tabs (one
+per related table), each with its own ``read_query`` + ``update_query`` + ``insert_query``,
+all bound by the parent's PK — the parent dialog's Save walks the saver registry sequentially.
+No special ``compound_dialog`` shape; same ParamBind mechanism as field lookups, actions,
+and row menus.
+
+**Phase 6 slice 2b (Nested tabs + dialog UX polish) — DONE.**
+- **Nested tab kinds** (`liberty/screens/config.py`): ``ScreenTab`` is now a discriminated union
+  over three variants — ``FormTab`` (the default, plain grid of fields — pre-existing), plus
+  ``NestedFormTab`` and ``NestedTableTab``. A nested-form tab embeds a child-record form inline
+  (v2's port of v1's "FormsDialog inside FormsDialog" — same APPS_ID, extra columns on related
+  tables; e.g. NOMASX1's ``settings_applications`` JDE / LDAP tabs). Its own ``read_query`` is
+  bound by ``param_binds`` against the parent's form state — a returned row → edit mode (saves
+  via the nested ``update_query``), no row → add mode (saves via ``insert_query``). A nested-table
+  tab embeds an entire related-rows TableView by *referencing another v2 screen by id* — that
+  screen's read query + columns + dialog + actions get re-used inside the parent dialog tab
+  (e.g. a parent's "Activity Log" tab points at ``settings_activity_log``, narrowed by APPS_ID).
+  ``parse_screens`` defaults a tab missing ``type`` to ``"form"`` so older screens.toml files
+  keep validating. Each tab kind shares the ``_ScreenTabBase`` core (``id`` / ``label`` / ``l`` /
+  ``hide_on_add`` / ``hide_on_edit`` / ``actions`` — the per-tab buttons; see slice 4).
+- **Frontend runtime** (`frontend/src/pages/TableView/NestedTab.tsx`): ``NestedFormView`` mounts
+  inside the parent ``ScreenDialog`` (one per nested_form tab), fetches the linked row on open
+  (binds resolve from the parent's live form state), renders editable ``FieldRow``s with the
+  shared widget switch, and **registers a saver** via ``NestedSaversContext`` — the parent's
+  Save walks the registry sequentially after its own update/insert succeeds (a throwing saver
+  surfaces on the parent's banner; the main row stays written so the operator retries the
+  nested save). ``NestedTableView`` mounts a fully-interactive ``DataTable`` (with sub-dialog
+  on row-click — opened as a ``ScreenDialog nested`` variant so the parent stays visible
+  behind a smaller, auto-height modal on a bumped-z-index ``NestedOverlay``). Password columns
+  are filtered out of nested grids too (no ENC: leak).
+- **Promoted row-click dialog** (the *row_click_screen* pattern in `Screen`): when a screen has
+  no own ``dialog`` but has a single FormsDialog ctx-menu entry (the conventional v1 "Display
+  Properties" / "Edit details" action), the migrator promotes that entry to a **row-click
+  target**. The frontend fetches the target screen's detail + binds the clicked row's columns
+  into the target's read_query, then opens *that* screen's dialog as a modal on click — same
+  affordance as having an inline dialog. Set via ``Screen.row_click_screen`` /
+  ``row_click_connector`` / ``row_click_binds``; the matching ctx-menu entry is dropped during
+  migration so the same affordance doesn't double up.
+- **Dialog UX polish** (`frontend/src/pages/TableView/ScreenDialog.tsx`):
+  - **Delete button** in the footer (edit mode + ``delete_query`` set). Single confirm modal,
+    fires ``handleDelete`` → POST to ``delete_query`` + runs ``screen.on_delete`` chain (slice 4)
+    with the deleted row's values. v1 didn't expose this on the dialog (delete lived on the
+    table) — v2 surfaces it where the operator already is.
+  - **Unsaved-changes guard** (Save / Discard / Stay). ``isDirty`` compares ``formValues`` vs the
+    seeded original; Cancel + click-outside both gate on this. Save reuses the main submit;
+    Discard runs ``on_cancel`` then closes; Stay dismisses the prompt.
+  - **Tab actions live in the footer** (left side, ``marginRight: auto``) — they used to sit at
+    the top of the body, which on a tab with a nested table required scrolling past the grid to
+    reach Import Security / Merge Roles. The footer keeps them always visible.
+  - **Password fields are never seeded** with the stored ciphertext — render as ``<input
+    type="password">`` with a "leave blank to keep" placeholder; submit drops blank password
+    fields *and* strips them from ``:<COL>_ORIGINAL`` binds. (The migrated ``_put``'s SET only
+    binds ``:PASSWORD`` if the user typed one.)
+  - **ModalBody is flex-fill** (`flex: 1 1 auto; min-height: 0`) and **DataTable's table stretches
+    to fit** when its content is narrower than the viewport (``style={{ minWidth:
+    table.getTotalSize() }}`` — was ``width``). Both make tall tab content scroll inside the
+    body while the footer stays pinned at the bottom of a fixed-height ``ScreenDialogModal``.
+  - **SearchSelect is portal-rendered** (`document.body` + position-fixed coords from
+    ``getBoundingClientRect()``) so a dropdown inside a tall dialog doesn't get clipped by the
+    modal's own ``overflow: auto`` body. **Checkbox** is rewritten as a native input overlaid on
+    a styled box (opacity 0) so label-click reliably toggles.
+- Real-data check: NOMASX1's ``settings_applications`` screen (the JDE+LDAP+activity tabs case)
+  round-trips through the nested_form + nested_table tab kinds; security_users right-clicks open
+  the promoted "Display Properties" dialog (no own ``dialog`` set; row_click_screen points at
+  the matching screen).
 
 **Phase 6 slice 3 (Per-field conditions) — DONE.**
 - `liberty/screens/config.py` — new ``FieldCondition`` shape (``{field, value: str | list[str]}``)
@@ -815,42 +876,140 @@ Real-data smoke: 0 conditional fields on nomasx1 (none of the migrated screens u
 visibility depends on SEC_TYPE / FSSETY pickers. Migrates cleanly; round-trips through the
 schema.
 
-**Phase 6 slice 4 (Actions & events — dialog `on_save`) — DONE.**
-- `liberty/screens/config.py` — new ``Action`` discriminated union with 7 variants:
+**Phase 6 slice 4 (Actions, events & lifecycle hooks) — DONE.**
+- **Action union** (`liberty/screens/config.py`) — discriminated by ``type`` over 7 variants:
   ``RunQueryAction`` / ``CallApiAction`` / ``NavigateAction`` / ``SetFieldAction`` /
   ``ConfirmAction`` / ``NotifyAction`` / ``RefreshAction``. Each carries the common
-  ``{id, label?, stop_on_error=true}`` plus type-specific fields; the ParamBind-bearing
-  variants (run_query / call_api / navigate) reuse the same :class:`ParamBind` shape used for
-  lookups + cascading filters. ``ScreenDialog.on_save: list[Action]`` is the attachment point;
-  ``Screen.actions`` and ``Screen.row_menu`` now use the same ``Action`` type (they were
-  ``ScreenAction`` placeholders before — now properly shaped).
-- Frontend runtime (`ScreenDialog.tsx`) — after the main ``update_query`` / ``insert_query``
-  succeeds, ``runOnSaveActions`` iterates ``dialog.on_save`` sequentially against a snapshot of
-  the form (``savedRow ∪ sent``, so ParamBind ``source`` can reach the PK + untouched columns).
-  Each action's ParamBinds resolve via the shared ``resolveBindList`` helper. Implemented now:
-  ``run_query`` (POST /api/sql/{c}/{q} with bound + uppercased params, falls back to the
-  screen's effective connector), ``notify`` (collected as warnings), ``refresh`` (implied by
-  the existing onSaved call). Stubbed: ``call_api`` / ``navigate`` / ``set_field`` / ``confirm``
-  log a console.warn and abort the chain if ``stop_on_error=true`` (the default) — so an operator
-  who wires a not-yet-implemented action sees a clear message instead of silent skip. A failing
-  action surfaces ``dialog.onSaveFailed`` with the message; the main row is still saved.
-- Builder (`ScreenEditor.tsx`) — new **On save** panel under the Dialog tab: a list of
-  expandable action rows, each with a ``type`` picker (SearchSelect over the 7 variants;
-  switching seeds a minimum-viable shape via ``blankActionOfType`` so required keys exist) and
-  the matching ``$def``-driven SchemaForm beneath. The Pydantic union's ``$defs`` for every
-  variant ride along on ``GET /admin/config/schema`` so the builder can resolve them; the
-  same ``ParamBind`` ``$def`` powers the per-action ``param_binds`` editor.
-- Multi-table writes (v1's NOMASX1 ``settings_applications`` writing to apps + apps_jde +
-  apps_ldap on one PK): now expressible as one ``update_query`` (the apps row) + two
-  ``run_query`` actions on ``dialog.on_save``, each binding the PK via ParamBind. No special
-  ``compound_dialog`` shape — same mechanism as field lookups and (slice 6) row menus.
-- Migration from v1's ``ly_actions`` / ``ly_act_tasks`` / ``ly_act_branch`` is **deferred**:
-  the libnsx1 dataset has none; libnjde carries 7 named actions (Create Role / Delete Role /
-  Import Security / Merge Roles / Create User / Delete User / Reset Password) wired to
-  toolbar buttons in v1's frontend code rather than to a screen via the schema (the
-  ``evt_component`` / ``evt_component_id`` join columns are all NULL). Slice 4b will add a
-  ``liberty-migrate actions --connector <app>`` subcommand that dumps them into a
-  ``[migrated_actions.<app>]`` block for the operator to wire by hand via the builder.
+  ``{id, label?, stop_on_error=true}``; the three ParamBind-bearing variants (run_query /
+  call_api / navigate) reuse the same :class:`ParamBind` shape used for lookups + cascading
+  filters + row menus. **One mechanism per attachment point**; the schema is the same
+  everywhere.
+- **Attachment points** — actions hang off a screen at several lifecycle moments, all built on
+  the same Action union:
+
+  | Attachment | When it fires | v1 source |
+  |---|---|---|
+  | ``ScreenDialog.on_load`` | After the dialog opens + row data is loaded (edit) or defaults seed (add) | — (v2 extension) |
+  | ``ScreenDialog.on_save`` | After the dialog's main update/insert succeeds | ``ly_evt_cpt`` FormsDialog evt 1 |
+  | ``ScreenDialog.on_cancel`` | When the user closes without saving (Cancel / click-outside / Discard) — *blocks* the close on failure | — (v2 extension) |
+  | ``FormTab.actions`` (every tab kind) | Per-tab toolbar buttons (in the footer) | ``ly_dlg_col col_component='InputAction'`` |
+  | ``Screen.actions`` | Toolbar buttons above the table | (none — used to be heuristic; now empty unless hand-wired) |
+  | ``Screen.row_menu`` | Right-click row context menu (slice 6) | ``ly_ctxmenus`` (via slice 6b) |
+  | ``Screen.on_insert`` | After a row is inserted (dialog Save in add mode *or* batch-edit grid Save) | ``ly_evt_cpt`` FormsTable evt 2 |
+  | ``Screen.on_update`` | After a row is updated (dialog Save in edit mode *or* batch-edit grid Save) | — (v2 extension) |
+  | ``Screen.on_delete`` | After a row is deleted (dialog Delete *or* batch-edit grid Save) | ``ly_evt_cpt`` FormsTable evt 3 |
+
+- **Migration: event-driven via ``ly_evt_cpt``** (`liberty/migrations/v1.py::attach_actions_to_screens`).
+  v1's ``ly_evt_cpt`` is *the* schema-level attachment table — each row says "event N on
+  component C fires action A". The migrator walks it:
+
+  * ``FormsDialog`` evt_id 1 (Save) → ``dialog.on_save``. The action's tasks become a sequential
+    ``run_query`` chain. **The first task is skipped when its query matches the screen's
+    update/insert** (the dialog Save already runs that — otherwise the row would be inserted
+    twice). Falls back to ``Screen.actions`` when the screen has no dialog.
+  * ``FormsTable`` evt_id 2 (row insert) → ``Screen.on_insert`` — fires after batch-edit grid
+    insert + after dialog Save in add mode.
+  * ``FormsTable`` evt_id 3 (row delete) → ``Screen.on_delete`` — fires after batch-edit grid
+    delete + after dialog Delete. **Distinct from on_save** so the previous "everything onto
+    on_save" model can't double-fire a Delete chain on Save.
+
+  Deduped by ``(target_screen, hook, v1_act_id)`` — when both a FormsDialog and its FormsTable
+  point at the same action, the chain is wired once per hook. Idempotent: re-running scrubs
+  prior auto-attached entries (``id`` starting with ``migrated_``) from every hook before
+  re-attaching, so hand-wired entries (without the prefix) survive untouched.
+
+- **Migration: ``ly_dlg_col col_component='InputAction'`` → ``FormTab.actions``**
+  (`migrate_screens::_input_action_to_button`). v1 placed manual workflow buttons *inside* a
+  dialog tab via dlg_col rows with that special component. The migrator emits one v2 Action
+  per such column on the matching tab's ``actions`` list — picking the underlying action's
+  first task with a resolved v2 query as the button's ``run_query``. Multi-task workflows get a
+  ``(1/N)`` hint in the label so the operator notices the full chain isn't wired (the rest
+  lives in ``migrated_actions.toml`` for hand-wiring). InputAction detection is
+  **cross-cutting**: works even when the same tab carries a nested ``FormsTable`` (NOMAJDE's
+  "Roles" tab had Import Security + Merge Roles + a roles-of-this-user table all together).
+
+- **Frontend runtime**:
+  * `ScreenDialog.tsx` — ``runOnSaveActions(actions, ctx)`` walks any of the hook lists
+    sequentially. Each action's ParamBinds resolve against the running ``ctx`` (the dialog
+    form's live state for dialog hooks, the row's values for grid-save hooks). Implemented now:
+    ``run_query`` (POST /api/sql with bound + uppercased params, falls back to the screen's
+    effective connector), ``notify`` (collected as warnings), ``refresh`` (signals the caller
+    via the returned flag). Stubbed: ``call_api`` / ``set_field`` / ``confirm`` log a
+    console.warn and abort the chain when ``stop_on_error = true`` (the default). The
+    ``navigate`` action is implemented in the ResultTable / row-menu / toolbar paths (URL
+    push with the bound ParamBinds as query string), so the dialog runner's stub is for the
+    rare on_save-side use.
+  * Per-tab actions (``FormTab.actions`` / ``NestedFormTab.actions`` / ``NestedTableTab.actions``)
+    fire via ``fireTabAction`` — same runner, single-action chain, surfaces the result on the
+    dialog's status banner.
+  * ``ResultTable.tsx`` runs ``Screen.on_insert`` / ``on_update`` / ``on_delete`` after batch-
+    save success (one chain per affected row, with that row's values as context).
+- **Builder** (`ScreenEditor.tsx`) — every hook attachment point has the same expandable
+  action-row editor: type picker (SearchSelect over the 7 variants; switching seeds a
+  minimum-viable shape via ``blankActionOfType``), then the matching ``$def``-driven SchemaForm
+  beneath. ``ParamBind`` editor renders inline. The Pydantic union's ``$defs`` for every
+  variant ride along on ``GET /admin/config/schema`` so the builder resolves them. (UI for
+  ``on_load`` / ``on_cancel`` / ``on_insert`` / ``on_update`` / ``on_delete`` / per-tab
+  ``actions``: the schema endpoint already ships every needed ``$def``; the matching editors
+  in ``ScreenEditor`` are a follow-up slice.)
+- **Multi-table writes** (NOMASX1 ``settings_applications`` → apps + apps_jde + apps_ldap on
+  one PK) now expressible as one ``update_query`` (the apps row) + two ``run_query`` actions
+  on ``dialog.on_save``, each binding the PK via ParamBind. Same mechanism as field lookups
+  and row menus.
+- **Action dump** for hand-wiring: ``liberty-migrate actions --connector <app>`` writes a
+  ``[migrated_actions.<app>]`` reference block — every v1 ``ly_actions`` workflow captured
+  faithfully (branches, params, per-task binds, IF/LOOP shape). The operator reads this to
+  understand a workflow before wiring its tasks via the builder. (Auto-attached actions ride
+  on top of this dump — same data, same names — so what lands on a screen via ``ly_evt_cpt``
+  is consistent with what the dump shows.)
+
+**Phase 6 slice 4b (Action input dialog — ``ly_act_params`` → ``prompt_fields``) — DONE.**
+v1's named actions could declare *input arguments* (``ly_act_params``) the operator fills in
+before the workflow fires (NOMAJDE "Create Role" asks for AUUSER / JOBN / MUSE / PID / UPMJ
+before chaining its F0092 + F00921 + F0093 inserts). v2's port: a sub-dialog ahead of the
+action fire, values merged into the chain's resolution context.
+
+- `liberty/screens/config.py` — new ``PromptField`` shape (mirrors ``ScreenField``: name / dd /
+  label / format / required / disabled / hidden / colspan / default / lookup_param_binds + the
+  three ``*_when`` conditional rules — but stands on its own, no backing column). A new
+  ``_PromptableMixin`` adds ``prompt_fields`` / ``prompt_title`` / ``prompt_l`` / ``prompt_cols``
+  / ``prompt_submit_label`` to the three ParamBind-bearing variants (``RunQueryAction`` /
+  ``CallApiAction`` / ``NavigateAction``). The other four variants (notify / refresh / confirm
+  / set_field) reject the mixin via ``extra='forbid'`` — keeps stub variants clean.
+- `liberty/web/screens.py` — ``GET /api/screens/{app}/{id}`` resolves each prompt field's
+  ``dd`` against the shared dictionary in the request language, attaching ``label`` / ``format``
+  / ``rule`` (BOOLEAN / ENUM / LOOKUP) onto the wire payload. Same shape ``Column.rule`` ships
+  — so the prompt sub-dialog renders the right widget (text / number / date / SearchSelect /
+  Checkbox / password) without any extra plumbing. Walks every attachment point: screen-level
+  ``actions`` / ``row_menu`` / ``on_insert`` / ``on_update`` / ``on_delete`` plus the dialog's
+  ``on_load`` / ``on_save`` / ``on_cancel`` and each tab's ``actions``.
+- Frontend (`frontend/src/pages/TableView/ActionPromptDialog.tsx`) — small modal opened *before*
+  a promptable action fires. Reuses ``FieldRow`` via a synthesized ``Column`` so the existing
+  widget switch covers everything; conditional rules (``visible_when`` / ``required_when`` /
+  ``disabled_when``) evaluate against the prompt's *own* local state (a JDE param shown only
+  when another JDE param is "AC" stays consistent inside the sub-dialog). Cancel resolves with
+  ``null`` → chain aborts soft (no error banner).
+- Chain runners (`ScreenDialog.tsx`'s ``runOnSaveActions`` + `ResultTable.tsx`'s ``runRowAction``
+  + ``runScreenAction``) check each action for ``prompt_fields`` before resolving its binds;
+  if non-empty, ``requestPrompt`` opens the sub-dialog and awaits the resolver. **The merged
+  values feed the running ctx** so this action's ParamBinds *and* every later action in the
+  same chain can refer to a prompt field via ``source: "<NAME>"``. The toolbar's ``navigate``
+  action also threads prompt values through to the destination's URL query string (so a
+  prompted-for ``USR_ID`` ends up on ``?USR_ID=<value>``).
+- Migration (`liberty/migrations/v1.py::_params_to_prompt_fields`): each v1 ``ly_act_params``
+  row → a v2 ``PromptField``. ``map_dir = 'OUT'`` skipped (SP returns, not inputs);
+  ``map_display = 'N'`` → ``hidden = true``; ``map_default`` → ``default``;
+  ``ly_act_params_filters`` → ``lookup_param_binds`` (a future LOOKUP-typed dd makes them
+  cascade-narrow correctly). ``map_rules`` / ``map_rules_values`` (the v1 inline rule decls)
+  are **not** auto-carried — v2 wires them through the shared dictionary via ``dd``, and
+  auto-creating dictionary entries is out of slice scope. ``_action_chain`` attaches the prompt
+  fields to the **first emitted task only**, so the prompt fires once per chain and the rest
+  read from the merged ctx. ``_input_action_to_button`` attaches them to the migrated
+  ``RunQueryAction`` for ``col_component='InputAction'`` rows.
+- Real-data check: NOMAJDE's 5-input "Create Role" workflow migrates cleanly — operator clicks
+  Add Row, the prompt dialog opens (with AUUSER prefilled to "ADMIN", JOBN/PID empty, MUSE
+  hidden, UPMJ skipped), confirms, and the F0092 + F00921 + F0093 inserts fire in sequence
+  with the prompt values bound into each.
 
 **Phase 6 slice 5 (AUD audit trail) — DONE.**
 - `liberty/connectors/config.py` — new ``QueryDef.audit: str | None``. When set on a writable
@@ -904,11 +1063,11 @@ schema.
   ``$def``, ``param_binds`` rendered inline. Each editor keeps its own expansion state.
 - `frontend/src/types/screens.ts` — ``ScreenDetail`` now carries ``actions`` and ``row_menu``
   (both ``Action[]``), so the runtime can read them off the catalog payload directly.
-- v1's `ly_actions` (named workflows) **don't** auto-attach to screens (the `evt_component` /
-  `evt_component_id` columns are NULL across libnsx1 + libnjde) — those still need slice 4b's
-  hand-wiring "dump" subcommand. v1's **row context menus**, on the other hand, have a real
-  schema-level attachment: ``ly_tables.tbl_ctx_id`` → ``ly_ctxmenus`` → ``ly_ctx_val`` (items) →
-  ``ly_ctx_filters`` (per-item ParamBinds). Slice 6b (see below) migrates those automatically.
+- v1 ``ly_actions`` *now* auto-attach via the ``ly_evt_cpt`` event junction *and* via
+  ``ly_dlg_col col_component='InputAction'`` (see slice 4 above) — the previous "wired in v1
+  frontend code, not migratable" assumption was wrong. v1's **row context menus** are the
+  *third* attachment route: ``ly_tables.tbl_ctx_id`` → ``ly_ctxmenus`` → ``ly_ctx_val`` (items)
+  → ``ly_ctx_filters`` (per-item ParamBinds). Slice 6b (see below) migrates those automatically.
 
 **Phase 6 slice 6b (Row context menus — v1 migration) — DONE.**
 - `liberty/migrations/source.py` — new reader ``read_context_menus(engine)`` returns
@@ -936,34 +1095,69 @@ schema.
   round-trips through the Pydantic ``NavigateAction`` shape; the runtime built in slice 6 picks
   them up directly (right-click any row → menu of "Display Roles" / "Display Rights" / …).
 
+**Phase 6 slice 7 (Oracle compatibility — read trim + write null coalesce) — DONE.**
+v1's NOMAJDE app reads + writes JDE's Oracle DB extensively; Oracle's quirks bit two real
+places. v2 wires them as **pool-level flags** that auto-enable on Oracle and stay off
+elsewhere, so a deployment doesn't have to know:
+
+- ``PoolConfig.trim_strings: bool | None`` — strip trailing whitespace from string cells on
+  SELECT. Auto-on when the pool's dialect is ``oracle``. Reason: Oracle CHAR / NCHAR columns
+  are space-padded to the column width; the v1 frontend used to ``rstrip()`` every cell. With
+  this on, ``SQLConnector.execute()`` does the same right after fetching rows — only ``str``
+  cells, only trailing whitespace, leaves everything else alone. (v1 parity: same behaviour
+  for the same dialect, no opt-in needed.)
+- ``PoolConfig.coalesce_nulls: bool | None`` — replace ``None`` bind values with type-
+  appropriate sentinels on INSERT / UPDATE / MERGE. Auto-on for Oracle. Reason: Oracle's
+  ``''`` ≡ ``NULL`` on VARCHAR2 but *not* on CHAR/NCHAR (a CHAR(N) NOT NULL with an empty
+  string fails); v1's NCHAR-heavy JDE tables needed ``''`` for char columns and ``0`` for
+  numeric columns. ``SQLConnector`` introspects the target table once via ``ALL_TAB_COLUMNS``
+  (cached by ``(pool, owner, table)`` — invalidated on hot-reload via ``aclose``'s
+  ``reset_oracle_column_cache()``), then ``_coalesce_oracle_nulls`` swaps each ``None`` bind
+  to ``''`` (CHAR / NCHAR / VARCHAR / VARCHAR2 / NVARCHAR2 / CLOB / NCLOB / LONG) or ``0``
+  (NUMBER / FLOAT / BINARY_FLOAT / BINARY_DOUBLE / INTEGER / INT). The regex
+  ``_ORACLE_TARGET_RE`` extracts ``owner.table`` from the INSERT / UPDATE / MERGE INTO /
+  DELETE FROM clause.
+- `liberty/connectors/db.py::PoolRegistry` — ``trim_strings(name)`` and ``coalesce_nulls(name)``
+  resolve the effective flag per pool (explicit setting wins; else auto-on for Oracle; else
+  off). Builder exposes both as boolean toggles in the Pool editor's General tab.
+- Real-data check: NOMAJDE's role/user screens against JDE (Oracle) no longer return cells
+  with trailing spaces (v1 parity restored); writes to F0092 / F00921 / F0093 succeed with
+  the NCHAR-quirk handled. Operators who explicitly want to *disable* the auto-trim (e.g. a
+  table where trailing whitespace is data) can set ``trim_strings = false`` on the pool.
+
 Phase 6 (Form/screen engine) is now feature-complete for the slices outlined in `docs/PLAN.md`.
 
-343 tests pass.
+414 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
-the form/screen engine (dialogs + conditions + actions/events + `call_api` from actions + table
-contextual menus — slice 1 (Screen + ParamBind + migration) **done**, slice 2 (dialog runtime —
-row click → modal form, lookup param-binds, save → update/insert) **done**, slice 3
-(per-field `visible_when`/`required_when`/`disabled_when`, migrated from v1's `ly_cdn_params`)
-**done**, slice 4 (actions & events — dialog `on_save` chain with the 7-variant `Action`
-union; run_query / notify / refresh implemented, others stubbed) **done**, slice 5 (AUD
-audit trail — `QueryDef.audit = "AUD_<table>"` + SQL-connector interceptor that mirrors the
-row + action + user + timestamp into the named table, in the same transaction; migrated from
-v1's `tbl_audit = 'Y'`) **done**, slice 6 (row context menus — right-click on a TableView row
-opens a `Screen.row_menu` overlay; same Action shape, ParamBinds against the row) **done** —
-v1's `ly_actions` migration deferred to slice 4b; the `visible_when`/`filter_from` work is
-its table-side first slice; design it against real migrated screens) → **Phase 7** the config
-builders (a *schema-driven*
-UI shell — `SchemaForm`
-over the Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]` builders
-(sql + api), `SchemaForm` + the `SchemaNavigator` (breadcrumb drill-down master-detail — no nested accordions),
-the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` + `GET/PUT /admin/config/connectors/parsed`
-endpoints, and the field docs moved to `Field(description=)`; next: a dictionary builder, a menus tree builder,
-a SQL editor + "test run" preview for queries, plus rename support; + git-backed config-file versioning +
-frontend tests/CI) → **Phase 8** charts & dashboards →
-**Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement (in-project
-Python/local-Spark jobs & scheduling).
+the form/screen engine — **all slices done**: slice 1 (Screen + ParamBind + migration), slice 2
+(dialog runtime — row click → modal form, lookup param-binds, save → update/insert), slice 2b
+(nested_form / nested_table tabs + dialog UX polish — Delete, unsaved guard, footer actions,
+ModalBody flex, DataTable stretch, row_click_screen "Display Properties" promotion), slice 3
+(per-field `visible_when`/`required_when`/`disabled_when`, migrated from `ly_cdn_params`),
+slice 4 (actions & events — the 7-variant Action union + every lifecycle hook attachment;
+**event-driven attachment via `ly_evt_cpt`**: FormsDialog evt 1 → `dialog.on_save`,
+FormsTable evt 2 → `Screen.on_insert`, FormsTable evt 3 → `Screen.on_delete`; plus
+`FormTab.actions` from `ly_dlg_col col_component='InputAction'`), slice 4b (Action input
+dialog — `ly_act_params` → `prompt_fields`; sub-dialog ahead of action fire, values merged
+into the chain's resolution context), slice 5 (AUD audit trail — `QueryDef.audit =
+"AUD_<table>"` + SQL-connector interceptor in the same transaction, migrated from v1's
+`tbl_audit = 'Y'`), slice 6 (row context menus — right-click on a TableView row opens
+`Screen.row_menu`), slice 6b (migrate v1 `ly_ctxmenus` to row_menu / row_click_screen), slice 7
+(Oracle compatibility — pool-level `trim_strings` + `coalesce_nulls`, auto-on for Oracle).
+→ **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm` over the
+Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]`
+builders (sql + api), `SchemaForm` + `SchemaNavigator` (breadcrumb drill-down master-detail —
+no nested accordions), the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` +
+`GET/PUT /admin/config/connectors/parsed` endpoints, dictionary builder, menus tree builder,
+screens builder (general + dialog tabs + fields + on_save + row_menu); **next**: builder
+editors for the slice-4 lifecycle hooks (`on_load` / `on_cancel` / `on_insert` / `on_update`
+/ `on_delete` / per-tab `actions`) and slice-4b `prompt_fields`; a SQL editor + "test run"
+preview for queries; top-level-key rename; + git-backed config-file versioning + frontend
+tests/CI) → **Phase 8** charts & dashboards → **Phase 9** notifications / reporting /
+backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs &
+scheduling).
 
 **Big-grid scaling (deferred, no phase yet — track when a screen actually needs it):** the
 TableView today loads up to `max_rows` rows into the browser (default 1000) and TanStack does
@@ -1045,7 +1239,11 @@ config/         app.toml (committed — framework config) · connectors.toml / d
 liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli.py, crypto_cli.py, license_cli.py
                 · connectors/{config,base,db,sql,api,registry,dictionary}.py
                 · licensing/{__init__.py (verify_license), public.pem}   (RS256 license-key verification — the embedded public key)
-                · menus/config.py · screens/config.py (ParamBind, ScreenField, ScreenTab, ScreenDialog, ScreenAction, Screen, ScreensFile)
+                · menus/config.py · screens/config.py (ParamBind, FieldCondition, ScreenField, PromptField,
+                  FormTab/NestedFormTab/NestedTableTab → ScreenTab, ScreenDialog with on_load/on_save/on_cancel,
+                  Action union {RunQueryAction, CallApiAction, NavigateAction, SetFieldAction, ConfirmAction,
+                  NotifyAction, RefreshAction}, Screen with on_insert/on_update/on_delete + row_click_screen,
+                  ScreensFile)
                 · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
                   (authstore = the TOML/DB backend abstraction + config/auth.toml schema; models/db/service = the DB backend's internals)
                 · ai/{tools,connector_tools,assistant,routes}.py
