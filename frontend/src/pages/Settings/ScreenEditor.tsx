@@ -80,11 +80,6 @@ const FieldBody = styled.div`
   border: 1px solid ${colors.blue.border}; border-top: none; padding: 12px;
   border-radius: 0 0 ${radius.md} ${radius.md}; background: ${colors.bg.input};
 `
-const PlaceholderCard = styled.div`
-  padding: 24px; border: 1px dashed ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-  color: ${colors.text.muted}; font-size: ${fontSize.sm}; text-align: center; line-height: 1.6;
-`
-
 // Sub-schemas used inside Dialog. Picked once per screenSchema change.
 const TAB_PROPS_KEYS = ['label', 'l', 'cols', 'hide_on_add', 'hide_on_edit'] as const
 const FIELD_PROPS_KEYS = ['dd', 'label', 'hidden', 'disabled', 'required', 'colspan', 'default'] as const
@@ -418,6 +413,26 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     emptyMessage: t('settings.screens.action.empty'),
   })
 
+  // Screen `actions` — toolbar buttons above the TableView. v1's named workflows (NOMAJDE's
+  // "Create Role" / "Reset Password" / etc.) belong here. ParamBinds resolve against the
+  // *selected row* (when one is selected) — same Action shape used everywhere.
+  const screenActions: Row[] = useMemo(
+    () => (Array.isArray((value as Row).actions) ? ((value as Row).actions as Row[]) : []),
+    [value],
+  )
+  const setScreenActions = (next: Row[]) => {
+    const v = { ...value }
+    if (next.length === 0) delete v.actions
+    else v.actions = next
+    onChange(v)
+  }
+  const renderScreenActions = (): ReactNode => renderActionList({
+    listKey: 'actions', actions: screenActions, setActions: setScreenActions,
+    heading: t('settings.screens.actions.heading'),
+    hint: t('settings.screens.actions.hint'),
+    emptyMessage: t('settings.screens.actions.empty'),
+  })
+
   // Screen `row_menu` (slice 6) — actions shown when the user right-clicks a row in the TableView.
   // ParamBinds resolve against the clicked row's values (not the dialog form state) — the runtime
   // uses the same Action shape; only the firing context differs.
@@ -605,21 +620,12 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     )
   }
 
-  const renderPlaceholder = (sliceName: string): ReactNode => (
-    <PlaceholderCard>
-      <strong style={{ display: 'block', marginBottom: 8, color: colors.text.primary }}>
-        {t('settings.screens.editor.comingSoon')}
-      </strong>
-      {t('settings.screens.editor.comingSoonHint', { slice: sliceName })}
-    </PlaceholderCard>
-  )
-
   const renderTab = (): ReactNode => {
     switch (tab) {
       case 'general': return renderGeneral()
       case 'queries': return renderQueries()
       case 'dialog':  return renderDialog()
-      case 'actions': return renderPlaceholder(t('settings.screens.editor.sliceActions'))
+      case 'actions': return renderScreenActions()
       case 'rowmenu': return renderRowMenu()
     }
   }

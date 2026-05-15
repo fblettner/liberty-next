@@ -414,6 +414,11 @@ const en = {
         hint: 'Actions shown when the user right-clicks a row in the TableView. Each action\'s ParamBinds resolve against the clicked row\'s values (the column names match the result set, so a `{param: "USR_ID", source: "usr_id"}` bind feeds the row\'s USR_ID into the target query). Same Action shape as the dialog\'s on_save chain — only the firing context differs.',
         empty: 'No row-menu actions yet — right-click on a row does nothing on this screen.',
       },
+      actions: {
+        heading: 'Screen actions',
+        hint: 'Toolbar buttons shown above the TableView. Each action fires its task chain when clicked. ParamBinds resolve to literal `value`s by default (no row context); a `source` bind against an unset form silently drops. v1\'s NOMAJDE workflows ("Create Role" / "Reset Password" / "Import Security" / …) attach here — see the `liberty-migrate actions` dump for the raw v1 shape and hand-wire each step as a run_query / call_api / notify.',
+        empty: 'No screen actions yet — the toolbar shows only the standard Add row / Edit / Import buttons.',
+      },
     },
     dashboards: {
       add: 'Add dashboard',

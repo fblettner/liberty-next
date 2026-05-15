@@ -416,6 +416,11 @@ const fr: Resources = {
         hint: "Actions affichées au clic droit sur une ligne du TableView. Les ParamBind de chaque action sont résolus contre les valeurs de la ligne cliquée. Même forme d'Action que la chaîne on_save du dialogue — seul le contexte de déclenchement diffère.",
         empty: 'Aucune action de menu contextuel — un clic droit ne fait rien sur cet écran.',
       },
+      actions: {
+        heading: 'Actions de l’écran',
+        hint: "Boutons de barre d’outils affichés au-dessus du TableView. Chaque action déclenche sa chaîne de tâches au clic. Les ParamBind se résolvent par défaut en valeurs littérales (pas de contexte de ligne) ; un bind `source` sur un formulaire vide est ignoré. Les workflows NOMAJDE v1 (« Créer rôle » / « Réinitialiser mot de passe » / « Importer sécurité » / …) se branchent ici — consultez la sortie de `liberty-migrate actions` pour la forme v1 brute, puis câblez chaque étape manuellement en run_query / call_api / notify.",
+        empty: 'Aucune action d’écran — la barre d’outils n’affiche que les boutons standard Ajouter une ligne / Modifier / Importer.',
+      },
     },
     dashboards: {
       add: 'Ajouter un tableau de bord',

@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3 } from 'lucide-react'
+import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ScreenDetail } from '../../types/screens'
 import { api, ApiError } from '../../api/client'
@@ -391,6 +391,62 @@ export function ResultTable({
       setMenuError(`${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`)
     }
   }, [connector, onSaved, closeMenu, navigate])
+  // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
+  // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
+  // ParamBinds resolve to literal `value`s only — a `source` bind against an unset form falls
+  // through to "no value". For more complex flows the operator wires a `confirm` or a future
+  // input-dialog action; the runner uses the same Action shape as on_save / row_menu.
+  const screenActions: Action[] = useMemo(() => (screen?.actions ?? []) as Action[], [screen])
+  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
+  const runScreenAction = useCallback(async (a: Action) => {
+    setActionBusy(a.id); setActionStatus(null)
+    try {
+      switch (a.type) {
+        case 'run_query': {
+          const target = a.connector || connector
+          // No row context — ParamBinds with `source` against an empty {} silently drop.
+          const bound = resolveRowBinds(a.param_binds, {})
+          await api.post(
+            `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
+            { params: withUpper(bound) },
+          )
+          setActionStatus({ message: a.label || a.id, tone: 'ok' })
+          break
+        }
+        case 'notify': {
+          setActionStatus({ message: a.message, tone: a.tone === 'error' ? 'error' : 'ok' })
+          break
+        }
+        case 'refresh': {
+          // The onSaved() below also triggers a refetch; explicit refresh is a no-op here.
+          break
+        }
+        case 'navigate': {
+          const targetConnector = a.connector || connector
+          const url = `/sql/${encodeURIComponent(targetConnector)}/${encodeURIComponent(a.to)}`
+          navigate(url)
+          return
+        }
+        case 'call_api':
+        case 'set_field':
+        case 'confirm': {
+          const msg = `screen action '${a.id}' (${a.type}) — runtime not implemented yet`
+          // eslint-disable-next-line no-console
+          console.warn(msg)
+          setActionStatus({ message: msg, tone: 'error' })
+          if (a.stop_on_error !== false) { setActionBusy(null); return }
+          break
+        }
+      }
+      setActionBusy(null)
+      onSaved?.()
+    } catch (e) {
+      setActionBusy(null)
+      setActionStatus({ message: `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`, tone: 'error' })
+    }
+  }, [connector, onSaved, navigate])
+
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
   // re-renders). Also drop password-typed columns globally — a stored hash / ENC: blob should
@@ -799,21 +855,36 @@ export function ResultTable({
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
         toolbar={
-          !canEdit ? undefined : !editMode ? (
+          !canEdit && screenActions.length === 0 ? undefined : !editMode ? (
             <>
-              {hasDialog && screen?.insert_query && (
+              {canEdit && hasDialog && screen?.insert_query && (
                 <TbBtn $tone="primary" onClick={openDialogForAdd} title={t('dialog.addTooltip')}>
                   <Plus size={13} /> {t('table.addRow')}
                 </TbBtn>
               )}
-              <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
-                <Edit3 size={13} /> {hasDialog ? t('table.bulkEdit') : t('table.edit')}
-              </TbBtn>
-              {insertQuery && (
+              {canEdit && (
+                <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
+                  <Edit3 size={13} /> {hasDialog ? t('table.bulkEdit') : t('table.edit')}
+                </TbBtn>
+              )}
+              {canEdit && insertQuery && (
                 <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
                   <Upload size={13} /> {t('table.import')}
                 </TbBtn>
               )}
+              {/* Screen-level action buttons (v1 NOMAJDE "Create Role" / "Reset Password" / etc.).
+                  Always rendered when present — even on read-only screens — since the user may
+                  want to fire side-effect workflows independent of the table edit flow. */}
+              {screenActions.map((a) => (
+                <TbBtn
+                  key={a.id}
+                  onClick={() => { void runScreenAction(a) }}
+                  disabled={actionBusy != null}
+                  title={a.id}
+                >
+                  <Zap size={13} /> {a.label || a.id}{actionBusy === a.id ? ' …' : ''}
+                </TbBtn>
+              ))}
             </>
           ) : (
             <>
@@ -845,6 +916,25 @@ export function ResultTable({
           )
         }
       />
+      {/* Screen-action feedback — a thin dismissible banner that surfaces the latest action's
+          outcome (success message for run_query / refresh; the explicit text for notify; the
+          error message on failure). Sits between the grid and the dialog mount so it's visible
+          without crowding the toolbar. */}
+      {actionStatus && (
+        <Banner $tone={actionStatus.tone}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ flex: 1 }}>{actionStatus.message}</span>
+            <button
+              type="button"
+              onClick={() => setActionStatus(null)}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, display: 'inline-flex' }}
+              aria-label={t('common.cancel')}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        </Banner>
+      )}
       {/* Mount the dialog only when needed — keeps lookups from firing on screens without a form. */}
       {hasDialog && screen && dlgOpen && (
         <ScreenDialog
