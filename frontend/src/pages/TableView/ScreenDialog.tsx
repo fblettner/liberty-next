@@ -15,9 +15,9 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Save, X, Zap } from 'lucide-react'
+import { Save, Trash2, X, Zap } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
+import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { Action, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
@@ -59,14 +59,6 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
   font-weight: ${({ $active }) => ($active ? 600 : 400)};
   &:hover { color: ${colors.text.primary}; }
-`
-// Per-tab action buttons (v2's port of v1 ``ly_dlg_col col_component='InputAction'``).
-// Sits below the tab content with a thin top border so it reads as a distinct strip — same
-// gap as the field grid so the rhythm holds. Wraps onto multiple lines for tabs with many
-// buttons (rare, but NOMAJDE's Role dialog could theoretically have several).
-const TabActionBar = styled.div`
-  display: flex; flex-wrap: wrap; gap: 6px;
-  margin-top: 14px; padding-top: 12px; border-top: 1px solid ${colors.border};
 `
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
@@ -273,27 +265,95 @@ export function ScreenDialog({
     })()
   }, [open, dlg, formValues, savedRow, runOnSaveActions, onSaved, t])
 
+  // Dirty tracking — true when any field's current value differs from the seeded original.
+  // Compared as strings so a number-typed input that the user typed identical to the saved
+  // value doesn't show as dirty. Used by ``handleClose`` to gate the close on an unsaved-
+  // changes confirm; cleared by a successful submit (formValues is replaced + savedRow
+  // updates implicitly via the seeding effect on the next open).
+  const isDirty = useMemo(() => {
+    const keys = new Set<string>([...Object.keys(formValues), ...Object.keys(savedRow)])
+    for (const k of keys) {
+      const cur = formValues[k]
+      const seed = savedRow[k]
+      const curStr = cur == null ? '' : String(cur)
+      const seedStr = seed == null ? '' : String(seed)
+      if (curStr !== seedStr) return true
+    }
+    return false
+  }, [formValues, savedRow])
+
   // ``dialog.on_cancel`` — fires before the dialog actually closes. A failing action *blocks*
   // the close (the operator sees the error and can retry or fix); when stop_on_error = false
   // on every step, the close goes through anyway. The Overlay's click-outside and the Cancel
-  // button both go through ``handleClose``; the close-X icon (which doesn't exist as a
-  // standalone button here) would too if added later.
+  // button both go through ``handleClose``; with unsaved changes the close is gated on a
+  // Save / Discard / Stay confirm modal so a misclick can't lose edits.
   const [closing, setClosing] = useState(false)
-  const handleClose = useCallback(async () => {
-    if (closing) return
+  const [confirmClose, setConfirmClose] = useState(false)
+  const runCancelChain = useCallback(async (): Promise<boolean> => {
     const actions = (dlg?.on_cancel ?? []) as Action[]
-    if (actions.length === 0) { onClose(); return }
-    setClosing(true)
-    setActionStatus(null)
+    if (actions.length === 0) return true
+    setClosing(true); setActionStatus(null)
     const ctx: Row = { ...savedRow, ...formValues }
     const result = await runOnSaveActions(actions, ctx)
     setClosing(false)
     if (!result.ok) {
       setActionStatus({ message: result.error || t('dialog.onCancelFailed', { defaultValue: 'on_cancel failed' }), tone: 'error' })
-      return   // block the close
+      return false   // block the close
     }
-    onClose()
-  }, [closing, dlg, savedRow, formValues, runOnSaveActions, onClose, t])
+    return true
+  }, [dlg, savedRow, formValues, runOnSaveActions, t])
+  const handleClose = useCallback(async () => {
+    if (closing) return
+    if (isDirty) { setConfirmClose(true); return }
+    const ok = await runCancelChain()
+    if (ok) onClose()
+  }, [closing, isDirty, runCancelChain, onClose])
+
+  // Delete (edit mode + screen.delete_query). v1 didn't have this; v2 adds it as a useful
+  // convenience — you're already editing a row, you decide to drop it. Confirms first. After
+  // the row is deleted, ``screen.on_delete`` fires with the row's original values; on success
+  // the dialog closes + the caller's onSaved() refreshes the grid.
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const handleDelete = useCallback(async () => {
+    if (!screen.delete_query) return
+    setDeleting(true); setError(null); setActionStatus(null)
+    try {
+      const targetConn = screen.connector || connector
+      const params = withUpper(savedRow)
+      await api.post(
+        `/api/sql/${encodeURIComponent(targetConn)}/${encodeURIComponent(screen.delete_query)}`,
+        { params },
+      )
+      // Row-level on_delete hook — fires once with the deleted row's values as context.
+      const onDelete = (screen.on_delete ?? []) as Action[]
+      if (onDelete.length > 0) {
+        const result = await runOnSaveActions(onDelete, savedRow)
+        if (!result.ok) {
+          // Row was deleted; the chain failed. Surface clearly and still refresh so the user
+          // sees the new state. Same convention as on_save failure.
+          setError(t('dialog.onSaveFailed', { message: result.error || '' }))
+          onSaved()
+          setDeleting(false)
+          return
+        }
+      }
+      setDeleting(false)
+      onSaved()
+      onClose()
+    } catch (e) {
+      setDeleting(false)
+      setError(e instanceof ApiError ? e.message : String(e))
+    }
+  }, [screen, savedRow, connector, runOnSaveActions, onSaved, onClose, t])
+
+  // The active tab's action buttons — shown in the footer (always visible, regardless of
+  // body scroll). Each tab kind (form / nested_form / nested_table) carries its own list via
+  // the shared ``_ScreenTabBase.actions`` field.
+  const currentTabActions: Action[] = useMemo(() => {
+    const tab = tabs[Math.min(tabIdx, tabs.length - 1)] ?? null
+    return ((tab?.actions ?? []) as Action[])
+  }, [tabs, tabIdx])
 
   const submit = useCallback(async () => {
     const targetQuery = mode === 'edit' ? screen.update_query : screen.insert_query
@@ -458,32 +518,10 @@ export function ScreenDialog({
                   shared `formValues` so it can render only the active tab safely. */}
               {tabs.map((tab, i) => {
                 const active = i === tabIdx
-                const tabActionsBar = (tab.actions && tab.actions.length > 0) ? (
-                  // Per-tab action buttons (v1 InputAction columns). Rendered below the tab's
-                  // content so they don't crowd the fields above. Click fires the action chain
-                  // against the live form state via ``fireTabAction``.
-                  <TabActionBar>
-                    {tab.actions.map((a) => (
-                      <Button
-                        key={a.id}
-                        $size="sm"
-                        $variant="ghost"
-                        onClick={() => { void fireTabAction(a) }}
-                        disabled={saving || actionBusy != null}
-                        title={a.id}
-                      >
-                        {actionBusy === a.id
-                          ? <SpinnerRing size={13} thickness={2} />
-                          : <Zap size={13} />} {a.label || a.id}
-                      </Button>
-                    ))}
-                  </TabActionBar>
-                ) : null
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
                       <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} />
-                      {tabActionsBar}
                     </div>
                   )
                 }
@@ -491,7 +529,6 @@ export function ScreenDialog({
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
                       <NestedTableView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
-                      {tabActionsBar}
                     </div>
                   )
                 }
@@ -500,30 +537,27 @@ export function ScreenDialog({
                 // through `fieldStateOf` (visible_when / required_when / disabled_when).
                 if (!active) return null
                 return (
-                  <div key={tab.id}>
-                    <FieldGrid $cols={gridCols}>
-                      {visibleFields.map((f) => {
-                        const st = fieldStateOf(f)
-                        return (
-                          <FieldRow
-                            key={f.name}
-                            field={f}
-                            column={colByName.get(f.name.toLowerCase()) ?? null}
-                            formValues={formValues}
-                            onChange={onFieldChange}
-                            disabled={st.disabled}
-                            required={st.required}
-                          />
-                        )
-                      })}
-                      {visibleFields.length === 0 && !tabActionsBar && (
-                        <CellWrap $span={gridCols}>
-                          <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
-                        </CellWrap>
-                      )}
-                    </FieldGrid>
-                    {tabActionsBar}
-                  </div>
+                  <FieldGrid key={tab.id} $cols={gridCols}>
+                    {visibleFields.map((f) => {
+                      const st = fieldStateOf(f)
+                      return (
+                        <FieldRow
+                          key={f.name}
+                          field={f}
+                          column={colByName.get(f.name.toLowerCase()) ?? null}
+                          formValues={formValues}
+                          onChange={onFieldChange}
+                          disabled={st.disabled}
+                          required={st.required}
+                        />
+                      )
+                    })}
+                    {visibleFields.length === 0 && (
+                      <CellWrap $span={gridCols}>
+                        <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
+                      </CellWrap>
+                    )}
+                  </FieldGrid>
                 )
               })}
             </>
@@ -546,24 +580,104 @@ export function ScreenDialog({
           )}
         </ModalBody>
         <ModalFooter>
-          {/* Note: v1's "actions inside a form" model is two distinct things — event-driven
-              actions (ly_evt_cpt, e.g. "on dialog save → run Create Role chain") and per-tab
-              action buttons (ly_dlg_col col_component='InputAction'). Event actions wire to
-              ``dialog.on_save`` and fire automatically; the operator never sees a button.
-              Per-tab buttons need a new ``FormTab.actions`` schema field (next slice). The
-              previous ``screen.actions`` mirroring in the footer was *wrong* — it surfaced
-              the same buttons across every dialog regardless of context — so it's gone. */}
+          {/* Tab actions live on the LEFT of the footer (always visible — they used to sit
+              inside the scrolling body, so on a tall tab content the user had to scroll past
+              the nested table to reach Import Security / Merge Roles). ``marginRight: auto`` on
+              the left group pushes Delete / Cancel / Save to the right. */}
+          {currentTabActions.length > 0 && (
+            <FlexRow gap={6} style={{ marginRight: 'auto', flexWrap: 'wrap' }}>
+              {currentTabActions.map((a) => (
+                <Button
+                  key={a.id}
+                  $size="sm"
+                  $variant="ghost"
+                  onClick={() => { void fireTabAction(a) }}
+                  disabled={saving || closing || actionBusy != null}
+                  title={a.id}
+                >
+                  {actionBusy === a.id
+                    ? <SpinnerRing size={13} thickness={2} />
+                    : <Zap size={13} />} {a.label || a.id}
+                </Button>
+              ))}
+            </FlexRow>
+          )}
           <FlexRow gap={8}>
-            <Button $size="sm" $variant="ghost" onClick={() => { void handleClose() }} disabled={saving || closing}>
+            {/* Delete (edit mode + delete_query). v1 didn't have this — delete lived on the
+                table — but it's a useful v2 extension: you may want to edit + decide to drop
+                the row without closing the dialog first. Confirms before firing. */}
+            {mode === 'edit' && screen.delete_query && (
+              <Button
+                $size="sm"
+                $variant="danger"
+                onClick={() => setConfirmDelete(true)}
+                disabled={saving || closing || deleting}
+                title={t('common.delete')}
+              >
+                {deleting ? <SpinnerRing size={13} thickness={2} /> : <Trash2 size={13} />} {t('common.delete')}
+              </Button>
+            )}
+            <Button $size="sm" $variant="ghost" onClick={() => { void handleClose() }} disabled={saving || closing || deleting}>
               {closing ? <SpinnerRing size={13} thickness={2} /> : <X size={13} />} {t('common.cancel')}
             </Button>
-            <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || closing || tabs.length === 0}>
+            <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || closing || deleting || tabs.length === 0}>
               {saving ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
             </Button>
           </FlexRow>
         </ModalFooter>
       </ModalEl>
     </OverlayEl>
+    {/* Unsaved-changes guard — Save / Discard / Stay. Shown only when the form is dirty AND
+        the user attempts to close. Stops a misclick on the overlay (or Cancel) from blowing
+        away edits. ``Save`` reuses the main submit flow so on_save / on_insert / on_update
+        all fire as if the user clicked Save in the footer; ``Discard`` runs on_cancel then
+        closes; ``Stay`` simply dismisses the prompt and leaves the dialog open. */}
+    {confirmClose && (
+      <Overlay onClick={(e) => { e.stopPropagation(); setConfirmClose(false) }} style={{ zIndex: 600 }}>
+        <Modal style={{ width: 'min(440px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+          <ModalHeader>{t('dialog.unsavedTitle', { defaultValue: 'Unsaved changes' })}</ModalHeader>
+          <ModalBody>{t('dialog.unsavedMessage', { defaultValue: 'You have unsaved changes. What would you like to do?' })}</ModalBody>
+          <ModalFooter>
+            <FlexRow gap={8}>
+              <Button $size="sm" $variant="ghost" onClick={() => setConfirmClose(false)} disabled={saving || closing}>
+                {t('dialog.unsavedStay', { defaultValue: 'Stay' })}
+              </Button>
+              <Button
+                $size="sm"
+                $variant="danger"
+                onClick={async () => {
+                  setConfirmClose(false)
+                  const ok = await runCancelChain()
+                  if (ok) onClose()
+                }}
+                disabled={saving || closing}
+              >
+                {closing ? <SpinnerRing size={13} thickness={2} /> : <X size={13} />} {t('dialog.unsavedDiscard', { defaultValue: 'Discard' })}
+              </Button>
+              <Button
+                $size="sm"
+                $variant="primary"
+                onClick={() => { setConfirmClose(false); void submit() }}
+                disabled={saving || closing}
+              >
+                {saving ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+              </Button>
+            </FlexRow>
+          </ModalFooter>
+        </Modal>
+      </Overlay>
+    )}
+    {/* Delete-row guard — single confirm, fires ``handleDelete`` on Yes. */}
+    {confirmDelete && (
+      <ConfirmModal
+        title={t('dialog.deleteTitle', { defaultValue: 'Delete this row?' })}
+        message={t('dialog.deleteMessage', { defaultValue: 'The row will be removed and any on_delete actions will fire. This cannot be undone.' })}
+        confirmLabel={t('common.delete')}
+        variant="danger"
+        onConfirm={() => { setConfirmDelete(false); void handleDelete() }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
     </NestedSaversContext.Provider>
   )
 }
