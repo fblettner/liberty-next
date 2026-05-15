@@ -77,6 +77,17 @@ export const ScreenDialogModal = styled(Modal)`
   min-height: 0;
 `
 
+/** A Modal preset for the screen visual designer — a nearly full-screen frame so the 3-column
+ *  layout (palette + canvas + inspector) has room to breathe. Without the explicit width/height
+ *  the body's grid would collapse to its natural content and overflow the viewport instead of
+ *  letting each column scroll on its own. Used by ScreenEditor's Dialog tab in Visual mode. */
+export const VisualBuilderModal = styled(Modal)`
+  width: min(1400px, 96vw);
+  height: min(900px, 92vh);
+  min-width: 0;
+  min-height: 0;
+`
+
 /** A Modal preset for a *nested* ScreenDialog opened from inside another dialog — e.g. a row
  *  click on a NestedTableView ("Edit Activity Log rule" sitting on top of "Settings - Applications").
  *  Smaller than the top-level preset (so the parent's frame remains visible behind it) and

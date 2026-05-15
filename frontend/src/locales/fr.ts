@@ -404,6 +404,8 @@ const fr: Resources = {
       visual: {
         modeVisual: 'Visuel',
         modeSchema: 'Schéma',
+        modalTitle: 'Designer visuel',
+        openModal: 'Ouvrir le designer visuel',
         palette: {
           title: 'Ajouter un champ',
           dict: 'Dictionnaire',
@@ -417,6 +419,7 @@ const fr: Resources = {
         inspector: {
           title: 'Inspecteur',
           empty: "Sélectionnez un champ sur le canevas pour modifier ses propriétés.",
+          advanced: 'Avancé — flags d\'affichage, liaisons de lookup, règles conditionnelles',
         },
         bindsTitle: 'Liaisons de lookup',
         dialog: {

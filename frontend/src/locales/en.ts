@@ -402,6 +402,8 @@ const en = {
       visual: {
         modeVisual: 'Visual',
         modeSchema: 'Schema',
+        modalTitle: 'Visual designer',
+        openModal: 'Open visual designer',
         palette: {
           title: 'Add a field',
           dict: 'Dictionary',
@@ -415,6 +417,7 @@ const en = {
         inspector: {
           title: 'Inspector',
           empty: 'Pick a field on the canvas to edit its properties.',
+          advanced: 'Advanced — display flags, lookup binds, conditional rules',
         },
         bindsTitle: 'Lookup bindings',
         dialog: {

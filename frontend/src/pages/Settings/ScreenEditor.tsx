@@ -14,11 +14,15 @@
 // All mutations go through `onChange(nextScreen)` — the parent (ScreensBuilder) owns the dirty
 // flag and the save call. `screenSchema` carries the full `$defs` map so we can pick out
 // `ScreenDialog` / `ScreenTab` / `ScreenField` / `ParamBind` for the per-section sub-schemas.
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Code2, Eye, FileText, Layers, Plus, Trash2 } from 'lucide-react'
-import { Button, Row, SchemaForm, Stack, type JsonSchema } from '../../common'
+import { ChevronDown, ChevronRight, Code2, Eye, FileText, Layers, Plus, Trash2, X } from 'lucide-react'
+import {
+  Button, ModalBody, ModalFooter, ModalHeader, Overlay, Row, SchemaForm, Stack,
+  VisualBuilderModal, type JsonSchema,
+} from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
@@ -153,6 +157,20 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   // Toggle persists per ScreenEditor instance; switching modes is non-destructive (same data
   // model). Visual is the default since the user asked for it; switching to Schema is one click.
   const [dialogMode, setDialogMode] = useState<'visual' | 'schema'>('visual')
+  // Visual builder is opened in a modal so it gets the screen real estate it needs (the
+  // inline-in-Settings layout was cramped — operator couldn't see the canvas + inspector at the
+  // same time without scrolling). The Dialog tab in Visual mode shows a big "Open visual
+  // designer" button + the on_load / on_save / on_cancel chains below; clicking the button
+  // raises this modal.
+  const [visualOpen, setVisualOpen] = useState(false)
+  // Escape closes the visual builder modal — operators expect this from every other modal in
+  // the app. Bound only when open so the listener doesn't sit on the document otherwise.
+  useEffect(() => {
+    if (!visualOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setVisualOpen(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [visualOpen])
 
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
   // Pre-pick the per-tab sub-schemas; the General/Queries tabs use a SchemaForm over these
@@ -578,10 +596,11 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         </Stack>
       )
     }
-    // Visual mode renders the WYSIWYG canvas + palette + inspector. The on_load / on_save /
-    // on_cancel chain editors stay BELOW the visual builder — those are screen-wide hooks the
-    // operator wires once, not per-field; keeping them in one place avoids hiding them when the
-    // visual mode shows. Same accessor + setter helpers are reused.
+    // Visual mode renders the WYSIWYG canvas + palette + inspector — opened in a near-fullscreen
+    // modal so the 3-column layout has room (the inline-in-Settings layout was cramped). The
+    // on_load / on_save / on_cancel chain editors stay BELOW the open-button — those are screen-
+    // wide hooks the operator wires once, not per-field; keeping them visible all the time avoids
+    // burying them inside the modal. Same accessor + setter helpers are reused.
     if (dialogMode === 'visual') {
       return (
         <Stack gap={14}>
@@ -596,10 +615,45 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
               </ModeBtn>
             </ModeBar>
           </Row>
-          <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
+          <Button $variant="primary" onClick={() => setVisualOpen(true)} style={{ alignSelf: 'flex-start' }}>
+            <Eye size={14} /> {t('settings.screens.visual.openModal')}
+          </Button>
           {renderOnLoad()}
           {renderOnSave()}
           {renderOnCancel()}
+          {/* Portal the modal to ``document.body`` — Settings → Screens lives inside a Card with
+              ``backdrop-filter: blur(...)`` (the liquid-glass look), and that property creates a
+              new containing block for fixed-positioned descendants per the CSS spec. Without the
+              portal the Overlay's ``position: fixed; inset: 0`` would clamp to the Card's bounds
+              and the modal would land in the bottom-right of the panel instead of the viewport. */}
+          {visualOpen && createPortal(
+            <Overlay onClick={() => setVisualOpen(false)}>
+              <VisualBuilderModal onClick={(e) => e.stopPropagation()}>
+                <ModalHeader>
+                  <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>
+                      {t('settings.screens.visual.modalTitle')} ·{' '}
+                      <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
+                        [screens.{app}.{id}]
+                      </span>
+                    </span>
+                    <Button $variant="ghost" $size="sm" onClick={() => setVisualOpen(false)}>
+                      <X size={13} /> {t('common.close')}
+                    </Button>
+                  </Row>
+                </ModalHeader>
+                <ModalBody>
+                  <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
+                </ModalBody>
+                <ModalFooter>
+                  <Button $variant="ghost" $size="sm" onClick={() => setVisualOpen(false)}>
+                    <X size={13} /> {t('common.close')}
+                  </Button>
+                </ModalFooter>
+              </VisualBuilderModal>
+            </Overlay>,
+            document.body,
+          )}
         </Stack>
       )
     }

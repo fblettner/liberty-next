@@ -25,8 +25,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  AlertTriangle, AlignLeft, Calendar, CheckSquare, Code2, Eye, EyeOff, FileText, Filter,
-  Hash, Key, Layers, List, Lock, Plus, Search, Trash2, Zap, type LucideIcon,
+  AlertTriangle, AlignLeft, Calendar, CheckSquare, ChevronRight as ChevronRightIcon, Code2,
+  Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, Plus, Search, Trash2, Zap,
+  type LucideIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Input, Row, SchemaForm, Stack, type JsonSchema } from '../../common'
@@ -38,21 +39,28 @@ import { pickSchemaProperties } from './connectorTables'
 type Row = Record<string, unknown>
 
 // Pydantic field bucket subsets — same keys the Schema-mode editor uses (so SchemaForm renders
-// identical-looking inputs in both modes). Kept here as constants so the Inspector reuses them
-// without coupling back to ScreenEditor.
-const FIELD_PROPS_KEYS = ['dd', 'label', 'hidden', 'disabled', 'required', 'colspan', 'default'] as const
+// identical-looking inputs in both modes). Split into Basic (always visible) + Advanced
+// (collapsed by default) so the inspector isn't a wall of every property; operators rarely set
+// colspan / default but need ``dd`` / ``label`` / ``required`` on every field.
+const FIELD_BASIC_KEYS = ['dd', 'label', 'required'] as const
+const FIELD_ADVANCED_KEYS = ['hidden', 'disabled', 'colspan', 'default'] as const
 const FIELD_BINDS_KEY = 'lookup_param_binds'
 const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
 
 // ─── styled bits ────────────────────────────────────────────────────────────────────────────
+// Shell + columns assume they're mounted inside a fixed-height container (a Modal body or a
+// constrained Stack). The `min-height: 0` on Col is the flex-child quirk that lets each
+// column's PaletteList / CanvasBody / inspector content scroll on its own — without it the
+// children's natural content height would force the whole row to grow and overflow the modal.
 const Shell = styled.div`
-  display: grid; grid-template-columns: 240px 1fr 320px; gap: 12px; align-items: stretch;
-  min-height: 480px;
+  display: grid; grid-template-columns: 240px 1fr 340px; gap: 12px;
+  flex: 1 1 auto; min-height: 0; height: 100%;
 `
 const Col = styled.div`
-  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0;
   border: 1px solid ${colors.border}; border-radius: ${radius.md};
   background: ${colors.bg.card}; padding: 12px;
+  overflow: hidden;
 `
 const ColTitle = styled.div`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; color: ${colors.text.muted};
@@ -142,8 +150,37 @@ const TabActionBadge = styled.div`
   & svg { color: ${colors.orange.main}; }
 `
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 20px 4px; text-align: center;`
+// Inspector wrapper that owns the scroll — gap-stacks the sections inside; ``min-height: 0`` is
+// the flex-child quirk that lets it shrink + scroll inside the modal's body row.
+const InspBody = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 12px;`
 const InspSection = styled.div`display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid ${colors.border}; &:first-of-type { border-top: 0; padding-top: 0; }`
 const InspTitle = styled.div`color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-weight: 600; display: flex; align-items: center; gap: 6px; & svg { color: ${colors.text.muted}; }`
+// "Dialog › <field>" breadcrumb at the top of the inspector — clicking "Dialog" deselects the
+// field and brings the dialog-level inspector back (title editor + events). The chevron tile
+// between segments looks like the URL-style breadcrumbs operators are used to.
+const Crumbs = styled.div`display: flex; align-items: center; gap: 5px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; padding-bottom: 6px; border-bottom: 1px solid ${colors.border};`
+const CrumbBtn = styled.button<{ $active?: boolean }>`
+  background: transparent; border: none; cursor: ${({ $active }) => ($active ? 'default' : 'pointer')};
+  padding: 0; color: ${({ $active }) => ($active ? colors.text.primary : colors.blue.main)};
+  font: inherit;
+  &:hover { text-decoration: ${({ $active }) => ($active ? 'none' : 'underline')}; }
+`
+// Collapsible "Advanced" group — uses a styled <details>/<summary> pair so the toggle works
+// without any JS state. Closed by default; the operator opens it when they need colspan /
+// default / per-field flags.
+const AdvDetails = styled.details`
+  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; padding: 6px 10px;
+  background: ${colors.bg.input};
+  & summary {
+    list-style: none; cursor: pointer; color: ${colors.text.secondary}; font-size: ${fontSize.sm};
+    font-family: ${fonts.sans}; font-weight: 600; padding: 2px 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+  & summary::-webkit-details-marker { display: none; }
+  & summary svg { color: ${colors.text.muted}; transition: transform 0.15s; }
+  &[open] summary svg { transform: rotate(90deg); }
+  & > div { padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+`
 const EventRow = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: ${radius.sm};
   background: ${colors.bg.input}; color: ${colors.text.secondary}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
@@ -357,10 +394,13 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   }
 
   // ── inspector sub-schemas ────────────────────────────────────────────────────────────────
-  // Pick subsets of ScreenField so each SchemaForm renders just the section it owns. Same
-  // approach the Schema-mode editor uses; pulled here so the Inspector is self-contained.
+  // Pick subsets of ScreenField so each SchemaForm renders just the section it owns. **Split
+  // Basic (always visible) from Advanced (collapsible)** so the inspector isn't a wall of every
+  // property — operators rarely set colspan / default / per-field flags but always set
+  // ``dd`` / ``label`` / ``required``.
   const fieldDef = useMemo<JsonSchema>(() => ({ ...((defs.ScreenField as JsonSchema | undefined) ?? { type: 'object' }), $defs: defs }), [defs])
-  const fieldPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_PROPS_KEYS as unknown as string[]), [fieldDef])
+  const basicPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_BASIC_KEYS as unknown as string[]), [fieldDef])
+  const advancedPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_ADVANCED_KEYS as unknown as string[]), [fieldDef])
   const bindsSchema = useMemo<JsonSchema>(() => {
     const out = pickSchemaProperties(fieldDef, [FIELD_BINDS_KEY] as unknown as string[])
     return { ...out, $defs: defs }
@@ -604,43 +644,80 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       {/* ─── INSPECTOR (right) ─── */}
       <Col>
         <ColTitle>{t('settings.screens.visual.inspector.title')}</ColTitle>
+        {/* Breadcrumb: "Dialog ▸ <field>" — clicking "Dialog" deselects so the dialog-level
+            view comes back (title editor + events). Always rendered; "Dialog" is muted when
+            already there. The breadcrumb sits ABOVE the scroll body so it doesn't disappear
+            when the operator scrolls a long inspector. */}
+        <Crumbs>
+          <CrumbBtn type="button" $active={!selField} onClick={() => setSelFieldIdx(null)}>
+            {t('settings.screens.visual.dialog.title')}
+          </CrumbBtn>
+          {selField && (
+            <>
+              <ChevronRightIcon size={11} />
+              <CrumbBtn type="button" $active>{String(selField.name ?? '')}</CrumbBtn>
+            </>
+          )}
+        </Crumbs>
+        <InspBody>
         {selField ? (
           <>
+            {/* Basic — always visible, the fields operators set on every field. */}
             <InspSection>
               <InspTitle><FileText size={13} /> {String(selField.name ?? '')}</InspTitle>
               <SchemaForm
-                schema={fieldPropsSchema}
+                schema={basicPropsSchema}
                 defs={defs}
                 value={selField}
                 onChange={(v) => {
                   const patch: Row = {}
-                  for (const k of FIELD_PROPS_KEYS) patch[k] = v[k]
+                  for (const k of FIELD_BASIC_KEYS) patch[k] = v[k]
                   updateField(selFieldIdx!, patch)
                 }}
               />
             </InspSection>
-            <InspSection>
-              <InspTitle><Search size={13} /> {t('settings.screens.visual.bindsTitle')}</InspTitle>
-              <SchemaForm
-                schema={bindsSchema}
-                defs={defs}
-                value={selField}
-                onChange={(v) => updateField(selFieldIdx!, { [FIELD_BINDS_KEY]: v[FIELD_BINDS_KEY] })}
-              />
-            </InspSection>
-            <InspSection>
-              <InspTitle><Filter size={13} /> {t('settings.screens.field.conditional')}</InspTitle>
-              <SchemaForm
-                schema={conditionsSchema}
-                defs={defs}
-                value={selField}
-                onChange={(v) => {
-                  const patch: Row = {}
-                  for (const k of FIELD_CONDITION_KEYS) patch[k] = v[k]
-                  updateField(selFieldIdx!, patch)
-                }}
-              />
-            </InspSection>
+            {/* Advanced — collapsible. Display flags + cascading lookup binds + per-field
+                conditional rules. Closed by default so the inspector isn't a wall of toggles. */}
+            <AdvDetails>
+              <summary>
+                <ChevronRightIcon size={12} />
+                {t('settings.screens.visual.inspector.advanced')}
+              </summary>
+              <div>
+                <SchemaForm
+                  schema={advancedPropsSchema}
+                  defs={defs}
+                  value={selField}
+                  onChange={(v) => {
+                    const patch: Row = {}
+                    for (const k of FIELD_ADVANCED_KEYS) patch[k] = v[k]
+                    updateField(selFieldIdx!, patch)
+                  }}
+                />
+                <InspSection>
+                  <InspTitle><Search size={13} /> {t('settings.screens.visual.bindsTitle')}</InspTitle>
+                  <SchemaForm
+                    schema={bindsSchema}
+                    defs={defs}
+                    value={selField}
+                    onChange={(v) => updateField(selFieldIdx!, { [FIELD_BINDS_KEY]: v[FIELD_BINDS_KEY] })}
+                  />
+                </InspSection>
+                <InspSection>
+                  <InspTitle><Filter size={13} /> {t('settings.screens.field.conditional')}</InspTitle>
+                  <SchemaForm
+                    schema={conditionsSchema}
+                    defs={defs}
+                    value={selField}
+                    onChange={(v) => {
+                      const patch: Row = {}
+                      for (const k of FIELD_CONDITION_KEYS) patch[k] = v[k]
+                      updateField(selFieldIdx!, patch)
+                    }}
+                  />
+                </InspSection>
+              </div>
+            </AdvDetails>
             <InspSection>
               <InspTitle><Zap size={13} /> {t('settings.screens.visual.events.title')}</InspTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -692,6 +769,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             </InspSection>
           </Stack>
         )}
+        </InspBody>
       </Col>
     </Shell>
   )
