@@ -128,34 +128,36 @@ async def _build(args: argparse.Namespace) -> dict:
                 tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
                 app_name=args.connector,
             )
+            # Migrate actions first so ``migrate_screens`` can resolve v1's ``InputAction``
+            # columns (``ly_dlg_col col_component='InputAction'``) to v2's ``FormTab.actions``
+            # entries during the per-tab field loop. A v1 deployment without the workflow
+            # tables (libnsx1) just returns an empty actions_data.
+            try:
+                act_rows = await read_actions(engine)
+            except Exception:
+                act_rows = ([], [], [], [], [], [])
+            actions_data: dict[str, Any] = migrate_actions(
+                *act_rows, sql_rows=sql_rows, app_name=args.connector,
+            )
             screens_data = migrate_screens(
                 *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
                 promotable_dialogs=promotable_dialogs,
+                actions_data=actions_data,
                 app_name=args.connector,
             )
-            # Attach v1 named actions to v2 screens via the event junction (ly_evt_cpt) — the
-            # *correct* attachment model. v1's NOMAJDE wires "Create Role" to the Role dialog's
-            # Save event (FormsDialog evt 1) and to the Role table's row-insert event
-            # (FormsTable evt 2). We map both to the screen's ``dialog.on_save`` (the typical
-            # flow is Add Row → dialog → Save fires the chain). The first task is skipped when
-            # it matches the screen's update/insert query — the dialog Save already runs that;
-            # the chain handles the additional related-table writes.
-            #
-            # The reference dump (full v1 shape: branches, loops, IF, multi-task chains) still
-            # requires ``liberty-migrate actions`` separately for hand-wiring complex flows.
-            # ``attach_actions_to_screens`` also scrubs prior heuristic-attached entries from
-            # the previous slice — re-running on an existing screens.toml cleans up the bad
-            # ``Screen.actions`` automatically.
+            # Event-driven action attachment via ``ly_evt_cpt`` — the *correct* model:
+            #   * FormsDialog evt 1 (dialog save) → ``dialog.on_save``
+            #   * FormsTable  evt 2 (row insert)  → ``Screen.on_insert``
+            #   * FormsTable  evt 3 (row delete)  → ``Screen.on_delete``
+            # The first task on FormsDialog events is skipped when it matches the screen's
+            # update/insert query — the dialog's main Save already runs that; the chain handles
+            # the additional related-table writes. v1 deployments without workflow tables
+            # (libnsx1) silently no-op here.
             try:
-                act_rows = await read_actions(engine)
                 evt_rows = await read_event_actions(engine)
             except Exception:
-                act_rows = ([], [], [], [], [], [])
                 evt_rows = []
             if act_rows[0] or evt_rows:
-                actions_data = migrate_actions(
-                    *act_rows, sql_rows=sql_rows, app_name=args.connector,
-                )
                 attach_actions_to_screens(
                     screens_data, actions_data,
                     event_rows=evt_rows, table_rows=tables_rows,

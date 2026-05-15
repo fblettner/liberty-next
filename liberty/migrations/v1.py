@@ -1998,24 +1998,28 @@ def attach_actions_to_screens(
     screens = (screens_data.get("screens") or {}).get(app_name) or {}
     actions = (actions_data.get("migrated_actions") or {}).get(app_name) or {}
 
-    # Cleanup pass — always run, even when no events / no actions: drops every prior
-    # heuristic-attached ``Screen.actions`` entry (id starts with ``migrated_``) from the
-    # earlier slice, plus prior ``dialog.on_save`` entries we own (same id prefix). Hand-wired
-    # entries (without the prefix) survive untouched.
+    # Cleanup pass — always run, even when no events / no actions: drop every prior auto-
+    # attached entry (id starts with ``migrated_``) from each lifecycle hook we own. Re-running
+    # the migration is idempotent. Hand-wired entries (without the prefix) survive untouched.
+    HOOK_PATHS = [
+        ("screen", "actions"),
+        ("screen", "on_insert"),
+        ("screen", "on_update"),
+        ("screen", "on_delete"),
+        ("dialog", "on_load"),
+        ("dialog", "on_save"),
+        ("dialog", "on_cancel"),
+    ]
     for scr in screens.values():
-        if isinstance(scr.get("actions"), list):
-            kept = [a for a in scr["actions"] if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
+        for owner, key in HOOK_PATHS:
+            target = scr if owner == "screen" else scr.get("dialog")
+            if not isinstance(target, dict) or not isinstance(target.get(key), list):
+                continue
+            kept = [a for a in target[key] if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
             if kept:
-                scr["actions"] = kept
+                target[key] = kept
             else:
-                scr.pop("actions", None)
-        dlg = scr.get("dialog")
-        if isinstance(dlg, dict) and isinstance(dlg.get("on_save"), list):
-            kept = [a for a in dlg["on_save"] if not (isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].startswith("migrated_"))]
-            if kept:
-                dlg["on_save"] = kept
-            else:
-                dlg.pop("on_save", None)
+                target.pop(key, None)
 
     if not screens or not actions or not event_rows:
         return screens_data
@@ -2107,9 +2111,21 @@ def attach_actions_to_screens(
     # ── walk the event junction; attach each action's chain to the right screen ────────────
     # FormsDialog events go on the screen's dialog.on_save; FormsTable events also map there
     # (the typical NOMAJDE flow is Add Row → dialog opens → Save fires the action). Each
-    # (screen, evt_id) bucket is filled once — dedup by v1 act_id so when both the FormsDialog
-    # and the matching FormsTable point at the same action, we only wire it once.
-    attached_per_screen: dict[str, set[int]] = {}
+    # (screen, hook, act_id) bucket is filled once — dedup so when both a FormsDialog and the
+    # matching FormsTable point at the same action, we don't wire the chain twice on the same
+    # hook. Different hooks (dialog.on_save vs Screen.on_insert) can carry the same action.
+    attached: dict[tuple[str, str], set[int]] = {}
+    # Per-event-kind hook mapping. v1's evt_id meanings:
+    #   FormsDialog evt 1 = dialog Save
+    #   FormsTable  evt 2 = row insert
+    #   FormsTable  evt 3 = row delete
+    # We map each to a distinct v2 hook so the right chain fires at the right moment — the
+    # previous "everything onto dialog.on_save" model double-fired Delete chains on Save.
+    HOOK_BY_EVENT: dict[tuple[str, int], tuple[str, str]] = {
+        ("FormsDialog", 1): ("dialog_on_save", "screen_actions"),  # primary, fallback
+        ("FormsTable", 2):  ("screen_on_insert", "screen_on_insert"),
+        ("FormsTable", 3):  ("screen_on_delete", "screen_on_delete"),
+    }
     for r in event_rows:
         comp = (r.get("evt_component") or "").strip()
         try:
@@ -2118,43 +2134,47 @@ def attach_actions_to_screens(
             evt_kind = int(r.get("evt_id") or 0)
         except (KeyError, TypeError, ValueError):
             continue
-        # **Only FormsDialog save events (evt_id 1)** map to ``dialog.on_save`` right now.
-        # FormsTable events come in two flavours that v2's single ``on_save`` hook can't
-        # distinguish: evt_id 2 = row insert (usually a duplicate of the Dialog event since
-        # v1 fires the action on both paths), evt_id 3 = row delete (a fundamentally
-        # different moment — firing the Create chain on Save *and* the Delete chain on Save
-        # would be wrong). They both need ``Screen.on_insert`` / ``on_delete`` hooks in v2
-        # — a future slice. For now, the deletion chain stays in ``migrated_actions.toml``
-        # for the operator to wire manually as a row-menu action or via a future event hook.
-        if comp == "FormsDialog" and evt_kind == 1:
+        hook_kinds = HOOK_BY_EVENT.get((comp, evt_kind))
+        if hook_kinds is None:
+            continue
+        if comp == "FormsDialog":
             target_sid = sid_by_frm.get(cpt_id)
         else:
-            continue
+            target_sid = sid_by_tbl.get(cpt_id)
         if not target_sid or target_sid not in screens:
             continue
-        if act_id in attached_per_screen.get(target_sid, set()):
-            continue   # already wired (e.g. the FormsTable counterpart of a FormsDialog event)
+        primary_hook, fallback_hook = hook_kinds
+        if act_id in attached.get((target_sid, primary_hook), set()):
+            continue   # already wired on this hook
         action = actions_by_v1_id.get(act_id)
         if not action:
             continue
         scr = screens[target_sid]
-        # Skip the first task if it matches the screen's main save — avoids double-INSERTing
-        # the row. The screen's update/insert query is what the dialog's Save already runs.
-        skip = scr.get("update_query") or scr.get("insert_query")
+        # For dialog save events, skip the first task if it duplicates the screen's main
+        # update/insert query (the dialog Save already runs that). Other hooks (on_insert /
+        # on_delete) fire AFTER the main row mutation, so the action's full chain runs.
+        skip = None
+        if primary_hook == "dialog_on_save":
+            skip = scr.get("update_query") or scr.get("insert_query")
         chain = _action_chain(action, skip_query=skip)
         if not chain:
             continue
-        # Ensure the dialog exists — actions without a dialog have nothing to fire on. We
-        # don't *create* a dialog for an action; instead we attach to ``actions`` on the
-        # screen so the operator sees it via the toolbar (a fallback that mirrors the prior
-        # ``Screen.actions`` capability without the wrong-keyword bug).
+        # Pick the destination by hook + whether a dialog exists. dialog.on_save only works
+        # if the screen has a dialog; otherwise fall back to Screen.actions so the operator
+        # sees a hand-wirable hook (mirrors how row_menu attaches when there's no dialog).
         dlg = scr.get("dialog")
-        if isinstance(dlg, dict):
-            on_save = dlg.setdefault("on_save", [])
-            on_save.extend(chain)
-        else:
+        chosen_hook = primary_hook
+        if primary_hook == "dialog_on_save" and not isinstance(dlg, dict):
+            chosen_hook = fallback_hook
+        if chosen_hook == "dialog_on_save" and isinstance(dlg, dict):
+            dlg.setdefault("on_save", []).extend(chain)
+        elif chosen_hook == "screen_on_insert":
+            scr.setdefault("on_insert", []).extend(chain)
+        elif chosen_hook == "screen_on_delete":
+            scr.setdefault("on_delete", []).extend(chain)
+        else:   # screen_actions fallback
             scr.setdefault("actions", []).extend(chain)
-        attached_per_screen.setdefault(target_sid, set()).add(act_id)
+        attached.setdefault((target_sid, chosen_hook), set()).add(act_id)
     return screens_data
 
 
@@ -2170,6 +2190,7 @@ def migrate_screens(
     cdn_param_rows: Iterable[Mapping[str, Any]] = (),
     row_menus: Mapping[int, list[dict[str, Any]]] | None = None,
     promotable_dialogs: Mapping[int, Mapping[str, Any]] | None = None,
+    actions_data: Mapping[str, Any] | None = None,
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -2414,6 +2435,85 @@ def migrate_screens(
             return None, None, None
         return (host.get("col_component") or "").strip(), ref, cid
 
+    # Pre-index migrated actions by their v1 act_id so the InputAction migration below can
+    # look the action up by ``col_component_id``. Empty when no actions are migrated.
+    actions_by_v1_id: dict[int, Mapping[str, Any]] = {}
+    if actions_data:
+        for a in ((actions_data.get("migrated_actions") or {}).get(app_name) or {}).values():
+            v1_id = a.get("v1_act_id")
+            if v1_id is None:
+                continue
+            try:
+                actions_by_v1_id[int(v1_id)] = a
+            except (TypeError, ValueError):
+                pass
+
+    def _input_action_to_button(c: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Convert a v1 ``ly_dlg_col`` row with ``col_component='InputAction'`` into a single
+        v2 Action suitable for a ``FormTab.actions`` button. The button's label = ``col_label``
+        (falls back to the action's label); the underlying Action picks the action's first
+        task with a v2 query as a ``run_query`` (with param_binds verbatim), or a ``notify``
+        placeholder when the action is API-only (NOMAJDE's Reset Password) — same fallback
+        the event-driven attach uses for unresolved cases."""
+        comp_id_raw = c.get("col_component_id")
+        if comp_id_raw is None:
+            return None
+        try:
+            v1_act_id = int(comp_id_raw)
+        except (TypeError, ValueError):
+            return None
+        a = actions_by_v1_id.get(v1_act_id)
+        # The column's own label wins (v1 lets the operator override the button label per-tab
+        # placement); fall back to the action's label / id when the column carries no label.
+        col_label = (c.get("col_label") or "").strip()
+        action_label = (a or {}).get("label") if a else None
+        button_label = col_label or action_label or f"action_{v1_act_id}"
+        # The button's id encodes the col_id so multiple InputActions on the same tab don't
+        # collide (the same action could in theory be placed twice with different labels).
+        try:
+            col_id = int(c.get("col_id") or 0)
+        except (TypeError, ValueError):
+            col_id = 0
+        btn_id = f"input_action_{v1_act_id}_{col_id}"
+        if a is None:
+            # Action wasn't migrated (e.g. v1 schema had col_component_id pointing nowhere) —
+            # emit a notify placeholder so the button still appears with a clear message.
+            return {
+                "id": btn_id,
+                "type": "notify",
+                "label": f"{button_label} (unresolved)",
+                "message": f"v1 InputAction references missing action {v1_act_id}.",
+                "tone": "warn",
+            }
+        # Find the first task that resolved to a v2 query; that's the button's primary step.
+        # Multi-task workflows surface a "(1/N)" hint in the label so the operator notices the
+        # full chain isn't wired (see ``migrated_actions.toml`` for the rest).
+        tasks = a.get("tasks") or []
+        primary = next((t for t in tasks if t.get("query")), None)
+        query_count = sum(1 for t in tasks if t.get("query"))
+        label = button_label
+        if query_count > 1:
+            label = f"{button_label} (1/{query_count})"
+        if primary:
+            entry: dict[str, Any] = {
+                "id": btn_id,
+                "type": "run_query",
+                "label": label,
+                "query": primary["query"],
+            }
+            pb = primary.get("param_binds")
+            if pb:
+                entry["param_binds"] = list(pb)
+            return entry
+        # API-only / fully unresolved — notify placeholder pointing the operator at the dump.
+        return {
+            "id": btn_id,
+            "type": "notify",
+            "label": f"{button_label} (needs wiring)",
+            "message": f"v1 action {a.get('id') or v1_act_id!r} uses API calls — see migrated_actions.toml + wire via the builder.",
+            "tone": "warn",
+        }
+
     def _binds_for_col(owning_frm: int, col_id: int) -> list[dict[str, Any]]:
         """Resolve a parent dlg_col's ly_dlg_filters into v2 ParamBind dicts — same shape as
         the field-level binds, but here the binds carry the parent → nested mapping for the
@@ -2532,6 +2632,19 @@ def migrate_screens(
                     if str(t.get("tab_disable_edit") or "").upper() in _YES_FLAGS:
                         tab_out["hide_on_edit"] = True
 
+                    # Per-tab InputAction buttons (v2's port of v1's ``col_component='InputAction'``)
+                    # are *cross-cutting*: they can coexist with a nested FormsTable on the same
+                    # tab (NOMAJDE Role dialog's "Roles" tab has Import Security + Merge Roles
+                    # buttons AND a nested roles-by-user table). Collected up-front so every tab
+                    # type — form / nested_form / nested_table — can carry them via the shared
+                    # ``_ScreenTabBase.actions`` field.
+                    tab_actions: list[dict[str, Any]] = []
+                    for c in cols_for_tab:
+                        if (c.get("col_component") or "").strip() == "InputAction":
+                            btn = _input_action_to_button(c)
+                            if btn is not None:
+                                tab_actions.append(btn)
+
                     # Nested-tab detection: a v1 tab whose single dlg_col carries a child-widget
                     # component name (FormsDialog → inline editable form / FormsTable → inline
                     # related-rows table) becomes a v2 NestedFormTab / NestedTableTab. The parent
@@ -2590,7 +2703,8 @@ def migrate_screens(
                             nested_handled = True
 
                     if not nested_handled:
-                        # Plain form tab (the default kind). cols + fields land here.
+                        # Plain form tab (the default kind). DD cols become fields; InputAction
+                        # cols are skipped here (already collected into ``tab_actions`` above).
                         if t.get("tab_cols") not in (None, 0):
                             try:
                                 tab_out["cols"] = int(t["tab_cols"])
@@ -2598,10 +2712,17 @@ def migrate_screens(
                                 pass
                         fields: list[dict[str, Any]] = []
                         for c in cols_for_tab:
+                            if (c.get("col_component") or "").strip() == "InputAction":
+                                continue   # already in tab_actions
                             fr = _migrate_field_row(c, owning_frm=frm_id)
                             if fr is not None:
                                 fields.append(fr)
                         tab_out["fields"] = fields
+                    # ``actions`` lives on every tab kind via _ScreenTabBase — emit it after the
+                    # type-specific branch so a nested_form / nested_table tab can carry buttons
+                    # too (v1's Role dialog "Roles" tab had a FormsTable + 2 InputActions in one).
+                    if tab_actions:
+                        tab_out["actions"] = tab_actions
                     tabs.append(tab_out)
                 if tabs:
                     screen["dialog"] = {"tabs": tabs}

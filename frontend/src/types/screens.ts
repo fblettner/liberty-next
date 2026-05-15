@@ -39,13 +39,18 @@ export interface ScreenField {
   disabled_when?: FieldCondition[]
 }
 
-/** Common to every tab kind — title + per-mode hide flags + translations. */
+/** Common to every tab kind — title + per-mode hide flags + translations + per-tab action
+ *  buttons. v2's port of v1's ``ly_dlg_col col_component='InputAction'`` rows — buttons placed
+ *  inside a tab (e.g. NOMAJDE Role dialog "Roles" tab carries Import Security + Merge Roles
+ *  alongside its nested table). Lives on every tab kind so a nested_form / nested_table can
+ *  also carry buttons. */
 interface TabCommon {
   id: string
   label?: string | null
   l?: Record<string, string>
   hide_on_add?: boolean
   hide_on_edit?: boolean
+  actions?: Action[]
 }
 
 /** Plain field-grid tab — the original kind. `cols` wide CSS grid; `type` defaults to "form"
@@ -133,11 +138,20 @@ interface ActionCommon {
   stop_on_error?: boolean
 }
 
-/** The form shown for add / edit — optional on a screen. */
+/** The form shown for add / edit — optional on a screen.
+ *
+ *  Lifecycle hooks (all optional):
+ *   - ``on_load``  — fires after the dialog opens + row data is loaded (edit) or default
+ *     values are seeded (add).
+ *   - ``on_save``  — fires after the main update/insert succeeds. v1 ``FormsDialog`` evt 1.
+ *   - ``on_cancel`` — fires when the user closes without saving (Cancel / click-outside).
+ */
 export interface ScreenDialog {
   title?: string | null
   tabs: ScreenTab[]
+  on_load?: Action[]
   on_save?: Action[]
+  on_cancel?: Action[]
 }
 
 /** List-view item — what `GET /api/screens` and `GET /api/screens/{app}` return. No dialog /
@@ -178,6 +192,12 @@ export interface ScreenDetail extends ScreenListItem {
   dialog?: ScreenDialog | null
   actions?: Action[]
   row_menu?: Action[]
+  /** Row-level lifecycle hooks. Fire after a row is mutated — by either path: dialog Save
+   *  in the matching mode, *or* the inline grid's Save button. v1 ``FormsTable`` evt 2/3
+   *  map to ``on_insert`` / ``on_delete``; ``on_update`` is new in v2 (no v1 source). */
+  on_insert?: Action[]
+  on_update?: Action[]
+  on_delete?: Action[]
 }
 
 /** `GET /api/screens` reply — apps → list view. */

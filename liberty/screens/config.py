@@ -159,11 +159,11 @@ class ScreenField(BaseModel):
 
 
 class _ScreenTabBase(BaseModel):
-    """Fields every tab kind shares — title + per-mode hide flags + translations. The
-    discriminator ``type`` selects the variant: ``form`` (the default — a grid of fields),
-    ``nested_form`` (an editable child-record form embedded inline), ``nested_table`` (a
-    related-rows TableView embedded inline). v1's ``tab_disable_add`` / ``tab_disable_edit``
-    are captured as ``hide_on_add`` / ``hide_on_edit`` so the migration keeps fidelity."""
+    """Fields every tab kind shares — title + per-mode hide flags + translations + the per-tab
+    action buttons. The discriminator ``type`` selects the variant: ``form`` (the default — a
+    grid of fields), ``nested_form`` (an editable child-record form embedded inline),
+    ``nested_table`` (a related-rows TableView embedded inline). v1's ``tab_disable_add`` /
+    ``tab_disable_edit`` are captured as ``hide_on_add`` / ``hide_on_edit``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -172,6 +172,18 @@ class _ScreenTabBase(BaseModel):
     l: dict[str, str] = Field(default_factory=dict, description="Per-language overrides: {language_code: translated_label}.")
     hide_on_add: bool = Field(default=False, description="Hide this tab when *adding* a row (v1's tab_disable_add='Y').")
     hide_on_edit: bool = Field(default=False, description="Hide this tab when *editing* a row (v1's tab_disable_edit='Y').")
+    # ``actions`` is on every tab kind (form / nested_form / nested_table) — v1 routinely placed
+    # InputAction buttons alongside a nested FormsTable in the same tab (e.g. NOMAJDE Role
+    # dialog's "Roles" tab: Import Security + Merge Roles buttons + a roles-of-this-user table).
+    # Each entry's ParamBinds resolve against the live form state when clicked.
+    actions: list["Action"] = Field(
+        default_factory=list,
+        description=(
+            "Per-tab action buttons. v2's port of v1's ``ly_dlg_col col_component='InputAction'`` "
+            "rows. Same Action union as ``Dialog.on_save`` / ``row_menu`` / ``Screen.actions`` — "
+            "run_query / call_api / notify / refresh / navigate / set_field / confirm."
+        ),
+    )
 
 
 class FormTab(_ScreenTabBase):
@@ -362,6 +374,13 @@ Action = Annotated[
     Field(discriminator="type"),
 ]
 
+# ``_ScreenTabBase`` declares ``actions: list["Action"]`` as a forward reference (Action is
+# defined here, after the tab classes). Rebuild every tab variant so Pydantic resolves the
+# union before any model_validate call.
+FormTab.model_rebuild()
+NestedFormTab.model_rebuild()
+NestedTableTab.model_rebuild()
+
 
 class ScreenDialog(BaseModel):
     """The form shown when the user adds / edits a row of this screen. Optional — a screen
@@ -371,13 +390,37 @@ class ScreenDialog(BaseModel):
 
     title: str | None = Field(default=None, description="Dialog title (falls back to the screen's label).")
     tabs: list[ScreenTab] = Field(default_factory=list, description="Tabs, in display order. At least one.")
+    # ── lifecycle hooks ────────────────────────────────────────────────────────────────────
+    # v1 only had on-save and on-delete events; v2 extends to a fuller dialog lifecycle so the
+    # operator can wire side-effects at the right moment without faking them into on_save.
+    # All four are optional + ordered lists of Action; the runner applies the same switch
+    # (run_query / call_api / notify / refresh / navigate / set_field / confirm) and stops on
+    # the first error unless an action sets ``stop_on_error = false``.
+    on_load: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs immediately after the dialog opens and the row's data has been loaded — for "
+            "edit mode, after the row is fetched; for add mode, after default values are seeded. "
+            "Useful for: refreshing a lookup, prefetching related rows, hitting a webhook to "
+            "log the open. ParamBinds resolve against the just-loaded form state."
+        ),
+    )
     on_save: list[Action] = Field(
         default_factory=list,
         description=(
-            "Actions to run sequentially *after* the dialog's main update_query / insert_query "
-            "succeeds. Each action's ParamBinds resolve against the form's live state. Stops on "
-            "the first failure unless an action sets ``stop_on_error = false``. v2's port of v1's "
-            "``ly_act_tasks`` for the form-save flow — multi-table writes (FormsDialog) land here."
+            "Runs sequentially *after* the dialog's main update_query / insert_query succeeds. "
+            "Each action's ParamBinds resolve against the form's live state. Stops on the first "
+            "failure unless an action sets ``stop_on_error = false``. v2's port of v1's "
+            "``ly_act_tasks`` for the FormsDialog save flow — multi-table writes land here."
+        ),
+    )
+    on_cancel: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs when the user closes the dialog *without* saving (Cancel button or click-outside). "
+            "Useful for cleanup — release a lock, drop a draft row, log abandoned edits. The "
+            "actions fire *before* the dialog actually closes; an error blocks the close (so the "
+            "user sees the failure and can retry)."
         ),
     )
 
@@ -414,6 +457,35 @@ class Screen(BaseModel):
     row_menu: list[Action] = Field(
         default_factory=list,
         description="Right-click menu entries on a row (slice 6) — uses the same action shape.",
+    )
+    # ── row-level lifecycle hooks ──────────────────────────────────────────────────────────
+    # Fire after a row is mutated — whether via dialog Save (insert/update mode) or via inline
+    # batch edit (the grid's Save button). v2's port of v1's ``ly_evt_cpt`` FormsTable events
+    # (evt 2 = row insert, evt 3 = row delete). The hooks are screen-level (not dialog-level)
+    # because the same mutation can happen from either path; this single hook fires for both.
+    # ParamBinds resolve against the *new row's* values for on_insert / on_update, or the
+    # *deleted row's* values for on_delete.
+    on_insert: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs after a row has been inserted (via dialog Save in add mode OR via the inline "
+            "grid's Save). v2's port of v1's FormsTable evt 2."
+        ),
+    )
+    on_update: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs after a row has been updated (via dialog Save in edit mode OR via the inline "
+            "grid's Save). v1 didn't expose this event; v2 adds it so operators can hook into "
+            "the post-update moment without faking it into ``dialog.on_save``."
+        ),
+    )
+    on_delete: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs after a row has been deleted (via the dialog's Delete button OR via the "
+            "inline grid's delete-then-Save). v2's port of v1's FormsTable evt 3."
+        ),
     )
     # Row-click → sibling-screen dialog. v2's port of v1's "FormsDialog inside a ly_ctxmenus"
     # pattern: a screen that itself has no ``tbl_frm_id`` but whose context menu carried a single

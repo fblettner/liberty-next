@@ -15,7 +15,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Save, X } from 'lucide-react'
+import { Save, X, Zap } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
@@ -59,6 +59,14 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
   font-weight: ${({ $active }) => ($active ? 600 : 400)};
   &:hover { color: ${colors.text.primary}; }
+`
+// Per-tab action buttons (v2's port of v1 ``ly_dlg_col col_component='InputAction'``).
+// Sits below the tab content with a thin top border so it reads as a distinct strip — same
+// gap as the field grid so the rhythm holds. Wraps onto multiple lines for tabs with many
+// buttons (rare, but NOMAJDE's Role dialog could theoretically have several).
+const TabActionBar = styled.div`
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid ${colors.border};
 `
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
@@ -218,13 +226,74 @@ export function ScreenDialog({
   }, [connector])
 
   // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —
-  // the v1 model attaches actions either to *events* (ly_evt_cpt → wired to ``dialog.on_save``,
-  // fires automatically on Save) or as *per-tab InputAction buttons* (ly_dlg_col col_component
-  // 'InputAction' → next slice needs a new ``FormTab.actions`` schema field). Surfacing
-  // ``screen.actions`` in every dialog regardless of context made the same buttons appear on
-  // the wrong screens. The status banner for ``dialog.on_save`` failures stays — surfaced via
-  // the parent's ``error`` state below.
+  // the v1 model attaches actions either to *events* (``ly_evt_cpt`` → ``dialog.on_save``,
+  // fires automatically on Save) or as *per-tab InputAction buttons* (``ly_dlg_col
+  // col_component='InputAction'`` → ``tab.actions``). ``actionStatus`` surfaces the outcome
+  // of a per-tab button click; ``actionBusy`` tracks the firing button to show a spinner.
   const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
+  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  // ``on_load`` fires once per open session — after seeding completes. The ref gates against
+  // refiring on every formValues change while the dialog stays open.
+  const onLoadFiredRef = useRef(false)
+  useEffect(() => { if (!open) onLoadFiredRef.current = false }, [open])
+  const fireTabAction = useCallback(async (a: Action) => {
+    setActionBusy(a.id); setActionStatus(null)
+    // Action ParamBinds resolve against the live form state — same context as on_save.
+    const ctx: Row = { ...savedRow, ...formValues }
+    const result = await runOnSaveActions([a], ctx)
+    setActionBusy(null)
+    if (!result.ok) {
+      setActionStatus({ message: result.error || a.label || a.id, tone: 'error' })
+    } else {
+      // For ``notify`` the action emits its own message via warnings; for run_query / refresh
+      // / navigate we surface a generic "<label> · OK" so the operator sees feedback.
+      const msg = result.warnings.length > 0
+        ? result.warnings.join(' · ')
+        : `${a.label || a.id} · ${t('http.ok')}`
+      setActionStatus({ message: msg, tone: 'ok' })
+    }
+    if (result.refresh) onSaved()
+  }, [formValues, savedRow, runOnSaveActions, onSaved, t])
+
+  // ``dialog.on_load`` — fires once after the dialog opens *and* the seeding effect has run
+  // (so formValues + savedRow reflect the loaded row). Useful for: refreshing a lookup,
+  // prefetching related data, logging the open. Failures surface on the action status banner
+  // but don't block the open — the user can still edit. The ``onLoadFiredRef`` gate above
+  // makes sure we only fire once per open session, not on every formValues tick.
+  useEffect(() => {
+    if (!open || !dlg || onLoadFiredRef.current) return
+    const actions = (dlg.on_load ?? []) as Action[]
+    onLoadFiredRef.current = true
+    if (actions.length === 0) return
+    void (async () => {
+      const ctx: Row = { ...savedRow, ...formValues }
+      const result = await runOnSaveActions(actions, ctx)
+      if (!result.ok) setActionStatus({ message: result.error || t('dialog.onLoadFailed', { defaultValue: 'on_load failed' }), tone: 'error' })
+      if (result.refresh) onSaved()
+    })()
+  }, [open, dlg, formValues, savedRow, runOnSaveActions, onSaved, t])
+
+  // ``dialog.on_cancel`` — fires before the dialog actually closes. A failing action *blocks*
+  // the close (the operator sees the error and can retry or fix); when stop_on_error = false
+  // on every step, the close goes through anyway. The Overlay's click-outside and the Cancel
+  // button both go through ``handleClose``; the close-X icon (which doesn't exist as a
+  // standalone button here) would too if added later.
+  const [closing, setClosing] = useState(false)
+  const handleClose = useCallback(async () => {
+    if (closing) return
+    const actions = (dlg?.on_cancel ?? []) as Action[]
+    if (actions.length === 0) { onClose(); return }
+    setClosing(true)
+    setActionStatus(null)
+    const ctx: Row = { ...savedRow, ...formValues }
+    const result = await runOnSaveActions(actions, ctx)
+    setClosing(false)
+    if (!result.ok) {
+      setActionStatus({ message: result.error || t('dialog.onCancelFailed', { defaultValue: 'on_cancel failed' }), tone: 'error' })
+      return   // block the close
+    }
+    onClose()
+  }, [closing, dlg, savedRow, formValues, runOnSaveActions, onClose, t])
 
   const submit = useCallback(async () => {
     const targetQuery = mode === 'edit' ? screen.update_query : screen.insert_query
@@ -291,8 +360,15 @@ export function ScreenDialog({
       }
       // Run on_save actions against a snapshot of the full form (sent values + savedRow merged so
       // ParamBind `source` can reach untouched columns too, e.g. the PK on the main row).
+      // Then run the matching row-level hook on the screen — on_insert (add) or on_update (edit).
+      // Both chains see the same context. on_insert / on_update are independent of dialog.on_save
+      // so an operator can wire e.g. v1 FormsTable evt 2 actions there without polluting on_save.
       const ctx: Row = { ...savedRow, ...sent }
-      const actions = (screen.dialog?.on_save ?? []) as Action[]
+      const dialogActions = (screen.dialog?.on_save ?? []) as Action[]
+      const screenRowActions = mode === 'add'
+        ? ((screen.on_insert ?? []) as Action[])
+        : ((screen.on_update ?? []) as Action[])
+      const actions = [...dialogActions, ...screenRowActions]
       const result = actions.length > 0
         ? await runOnSaveActions(actions, ctx)
         : { ok: true, warnings: [], refresh: false }
@@ -356,7 +432,7 @@ export function ScreenDialog({
   const ModalEl = nested ? NestedScreenDialogModal : ScreenDialogModal
   return (
     <NestedSaversContext.Provider value={nestedSaversCtx}>
-    <OverlayEl onClick={onClose}>
+    <OverlayEl onClick={() => { void handleClose() }}>
       <ModalEl onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           {mode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
@@ -382,10 +458,32 @@ export function ScreenDialog({
                   shared `formValues` so it can render only the active tab safely. */}
               {tabs.map((tab, i) => {
                 const active = i === tabIdx
+                const tabActionsBar = (tab.actions && tab.actions.length > 0) ? (
+                  // Per-tab action buttons (v1 InputAction columns). Rendered below the tab's
+                  // content so they don't crowd the fields above. Click fires the action chain
+                  // against the live form state via ``fireTabAction``.
+                  <TabActionBar>
+                    {tab.actions.map((a) => (
+                      <Button
+                        key={a.id}
+                        $size="sm"
+                        $variant="ghost"
+                        onClick={() => { void fireTabAction(a) }}
+                        disabled={saving || actionBusy != null}
+                        title={a.id}
+                      >
+                        {actionBusy === a.id
+                          ? <SpinnerRing size={13} thickness={2} />
+                          : <Zap size={13} />} {a.label || a.id}
+                      </Button>
+                    ))}
+                  </TabActionBar>
+                ) : null
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
                       <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} />
+                      {tabActionsBar}
                     </div>
                   )
                 }
@@ -393,6 +491,7 @@ export function ScreenDialog({
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
                       <NestedTableView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
+                      {tabActionsBar}
                     </div>
                   )
                 }
@@ -401,27 +500,30 @@ export function ScreenDialog({
                 // through `fieldStateOf` (visible_when / required_when / disabled_when).
                 if (!active) return null
                 return (
-                  <FieldGrid key={tab.id} $cols={gridCols}>
-                    {visibleFields.map((f) => {
-                      const st = fieldStateOf(f)
-                      return (
-                        <FieldRow
-                          key={f.name}
-                          field={f}
-                          column={colByName.get(f.name.toLowerCase()) ?? null}
-                          formValues={formValues}
-                          onChange={onFieldChange}
-                          disabled={st.disabled}
-                          required={st.required}
-                        />
-                      )
-                    })}
-                    {visibleFields.length === 0 && (
-                      <CellWrap $span={gridCols}>
-                        <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
-                      </CellWrap>
-                    )}
-                  </FieldGrid>
+                  <div key={tab.id}>
+                    <FieldGrid $cols={gridCols}>
+                      {visibleFields.map((f) => {
+                        const st = fieldStateOf(f)
+                        return (
+                          <FieldRow
+                            key={f.name}
+                            field={f}
+                            column={colByName.get(f.name.toLowerCase()) ?? null}
+                            formValues={formValues}
+                            onChange={onFieldChange}
+                            disabled={st.disabled}
+                            required={st.required}
+                          />
+                        )
+                      })}
+                      {visibleFields.length === 0 && !tabActionsBar && (
+                        <CellWrap $span={gridCols}>
+                          <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
+                        </CellWrap>
+                      )}
+                    </FieldGrid>
+                    {tabActionsBar}
+                  </div>
                 )
               })}
             </>
@@ -452,10 +554,10 @@ export function ScreenDialog({
               previous ``screen.actions`` mirroring in the footer was *wrong* — it surfaced
               the same buttons across every dialog regardless of context — so it's gone. */}
           <FlexRow gap={8}>
-            <Button $size="sm" $variant="ghost" onClick={onClose} disabled={saving}>
-              <X size={13} /> {t('common.cancel')}
+            <Button $size="sm" $variant="ghost" onClick={() => { void handleClose() }} disabled={saving || closing}>
+              {closing ? <SpinnerRing size={13} thickness={2} /> : <X size={13} />} {t('common.cancel')}
             </Button>
-            <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || tabs.length === 0}>
+            <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || closing || tabs.length === 0}>
               {saving ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
             </Button>
           </FlexRow>

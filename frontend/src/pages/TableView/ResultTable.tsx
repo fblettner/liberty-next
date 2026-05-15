@@ -627,11 +627,60 @@ export function ResultTable({
     const reqErrs = settled
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
       .map((r) => (r.reason instanceof ApiError ? r.reason.message : String(r.reason)))
-    setSaving(false)
     const errs = [...new Set([...localErrs, ...reqErrs])]
-    if (errs.length) setSaveErrors(errs)
+    if (errs.length) {
+      setSaving(false); setSaveErrors(errs); return
+    }
+
+    // Row-level lifecycle hooks (v2 extension of v1's ly_evt_cpt FormsTable events). For each
+    // affected row, fire the matching chain — once per row, with that row's values as context.
+    // Only ``run_query`` chain steps are supported here; ``notify`` is collected as a console
+    // log, other types skip with a warning. Failures append to ``saveErrors`` so the operator
+    // sees what went wrong; the row mutation itself already succeeded (the chains run *after*).
+    const fireChain = async (actions: Action[] | undefined, ctx: DataRow): Promise<string | null> => {
+      if (!actions?.length) return null
+      for (const a of actions) {
+        try {
+          if (a.type === 'run_query') {
+            const tgt = a.connector || connector
+            const bound = resolveRowBinds(a.param_binds, ctx)
+            await api.post(`/api/sql/${encodeURIComponent(tgt)}/${encodeURIComponent(a.query)}`, { params: withUpper(bound) })
+          } else if (a.type === 'notify') {
+            // eslint-disable-next-line no-console
+            console.info('row-hook notify:', a.message)
+          } else if (a.type === 'refresh') {
+            // implied by the onSaved() below
+          } else if (a.stop_on_error !== false) {
+            return `${a.label || a.id} (${a.type}) — runtime not implemented yet`
+          }
+        } catch (e) {
+          const msg = `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`
+          if (a.stop_on_error !== false) return msg
+        }
+      }
+      return null
+    }
+    const hookErrs: string[] = []
+    for (const row of dirtyRows) {
+      if (deleted.has(row)) continue
+      const ctx = { ...row, ...editsRef.current.get(row) }
+      const err = await fireChain(screen?.on_update, ctx as DataRow)
+      if (err) hookErrs.push(err)
+    }
+    for (const row of newRows) {
+      if (deleted.has(row)) continue
+      const err = await fireChain(screen?.on_insert, editsRef.current.get(row) ?? {})
+      if (err) hookErrs.push(err)
+    }
+    for (const row of deleted) {
+      if (newRows.includes(row)) continue
+      const err = await fireChain(screen?.on_delete, row)
+      if (err) hookErrs.push(err)
+    }
+    setSaving(false)
+    if (hookErrs.length) setSaveErrors([...new Set(hookErrs)])
     else { resetEdit(); onSaved?.() }
-  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t])
+  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen])
 
   // ── rule helpers (memoized per result) ──
   const enumMaps = useMemo(() => {
