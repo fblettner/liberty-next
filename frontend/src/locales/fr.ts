@@ -30,6 +30,7 @@ const fr: Resources = {
     working: '…',
     cancel: 'Annuler',
     confirm: 'Confirmer',
+    delete: 'Supprimer',
     edit: 'Modifier',
     undo: 'Annuler la suppression',
     back: 'retour',

@@ -44,7 +44,15 @@ export const ModalHeader = styled.div`
   flex-shrink: 0;
 `
 
+// Body fills the vertical space between Header and Footer. Without 'flex: 1 1 auto' +
+// 'min-height: 0' the body sits at its natural content height and the footer floats up
+// under it, leaving empty space below — and tall content overflows the modal frame
+// instead of scrolling inside the body (the user's complaint on the role-management
+// dialog). The 'min-height: 0' is the flex-child quirk that lets the body actually
+// shrink to enable its own scroll.
 export const ModalBody = styled.div`
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 20px;
   overflow-y: auto;
   display: flex;

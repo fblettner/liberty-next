@@ -28,6 +28,7 @@ const en = {
     working: '…',
     cancel: 'Cancel',
     confirm: 'Confirm',
+    delete: 'Delete',
     edit: 'Edit',
     undo: 'Undo',
     back: 'back',
