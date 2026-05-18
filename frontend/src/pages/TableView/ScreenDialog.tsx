@@ -352,17 +352,27 @@ export function ScreenDialog({
   // value doesn't show as dirty. Used by ``handleClose`` to gate the close on an unsaved-
   // changes confirm; cleared by a successful submit (formValues is replaced + savedRow
   // updates implicitly via the seeding effect on the next open).
+  //
+  // Password fields are skipped: their seeded value is the stored hash / ``ENC:`` blob and
+  // the form is *intentionally* empty (the dialog's "leave blank to keep" pattern). Without
+  // this skip every dialog with a password column shows the "Unsaved changes" modal on
+  // close even with no edits — settings_applications hit this on every open via the
+  // Connection / Audit Trail / Custom SQL tabs.
   const isDirty = useMemo(() => {
     const keys = new Set<string>([...Object.keys(formValues), ...Object.keys(savedRow)])
     for (const k of keys) {
       const cur = formValues[k]
-      const seed = savedRow[k]
       const curStr = cur == null ? '' : String(cur)
+      // A password field with the form left blank is *not* dirty even though savedRow holds
+      // the stored hash — that's the intentional seeding skip. Once the user types anything,
+      // the field becomes dirty (curStr ≠ "") and flows through to the regular comparison.
+      if (curStr === '' && isPassword(colByName.get(k.toLowerCase()) ?? null)) continue
+      const seed = savedRow[k]
       const seedStr = seed == null ? '' : String(seed)
       if (curStr !== seedStr) return true
     }
     return false
-  }, [formValues, savedRow])
+  }, [formValues, savedRow, colByName])
 
   // ``dialog.on_cancel`` — fires before the dialog actually closes. A failing action *blocks*
   // the close (the operator sees the error and can retry or fix); when stop_on_error = false
