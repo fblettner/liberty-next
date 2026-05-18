@@ -40,20 +40,13 @@ def test_querydef_dialect_map_requires_default() -> None:
         QueryDef(name="q", sql={"default": "  ", "oracle": "SELECT 1"})  # empty default
 
 
-def test_querydef_column_hints() -> None:
-    q = QueryDef(
-        name="q",
-        sql="SELECT a, b, c FROM t",
-        columns=[
-            {"name": "a", "label": "Alpha", "format": "number", "align": "right"},
-            {"name": "b", "hidden": True},
-            {"name": "c"},  # bare hint — just affects ordering
-        ],
-    )
-    assert [h.name for h in q.columns] == ["a", "b", "c"]
-    assert q.columns[0].label == "Alpha" and q.columns[0].format == "number" and q.columns[0].align == "right"
-    assert q.columns[1].hidden is True
-    assert q.columns[2].label is None and q.columns[2].hidden is False
+def test_column_hint_shape_and_dictionary_key() -> None:
+    """Phase 3 — column hints live on :class:`liberty.screens.config.Screen`, not on
+    :class:`QueryDef`. This test now verifies the :class:`ColumnHint` shape directly + its
+    ``dictionary_key`` helper; the load-time legacy ``columns`` key on a query is silently
+    dropped by ``extra="ignore"`` (operators re-migrate to repopulate ``Screen.columns``)."""
+    a = ColumnHint(name="a", label="Alpha", format="number", align="right")
+    assert a.label == "Alpha" and a.format == "number" and a.align == "right"
     # the dictionary key for an un-set label/format: `dd` if given, else `name`; `dd=""` opts out
     assert ColumnHint(name="a").dictionary_key == "a"
     assert ColumnHint(name="a", dd="ALPHA_DD").dictionary_key == "ALPHA_DD"
@@ -61,11 +54,13 @@ def test_querydef_column_hints() -> None:
     # extra keys on a hint are rejected
     with pytest.raises(Exception):
         ColumnHint(name="a", typo="x")  # type: ignore[call-arg]
-    # round-trips through the config loader
+    # Legacy ``columns=…`` on a query parses cleanly (extra="ignore") but is silently dropped.
     cfg = parse_connectors({"connectors": {"c1": {"type": "sql", "pool": "default",
         "queries": [{"name": "q", "sql": "SELECT a FROM t", "columns": [{"name": "a", "dd": "ALPHA"}]}]}}})
     assert isinstance(cfg.connectors["c1"], SqlConnectorConfig)
-    assert cfg.connectors["c1"].queries[0].columns[0].dd == "ALPHA"
+    q = cfg.connectors["c1"].queries[0]
+    assert q.name == "q" and q.sql == "SELECT a FROM t"
+    assert not hasattr(q, "columns")  # silently dropped
 
 
 def test_dictionary(tmp_path) -> None:

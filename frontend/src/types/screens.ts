@@ -244,7 +244,16 @@ export interface ScreenListItem {
   insert_query: string | null
   delete_query: string | null
   auto_load: boolean
+  /** Phase 3 — kept as a bool for back-compat with frontend code that checks "is this screen
+   *  audited"; derived server-side from ``audit_table`` presence. */
   audit: boolean
+  /** Phase 3 — the audit table name. Frontend doesn't usually need it (the SQL connector
+   *  does the mirror via the route layer), but surfaced for completeness. */
+  audit_table?: string | null
+  /** Phase 3 — per-screen SELECT row cap. */
+  max_rows?: number | null
+  /** Phase 3 — result columns that identify a row (used by Excel import match-by-key). */
+  key_columns?: string[]
   editable: boolean
   uploadable: boolean
   has_dialog: boolean

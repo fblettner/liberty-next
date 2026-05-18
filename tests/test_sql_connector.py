@@ -121,17 +121,15 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
         pools,
         QueryDef(
             name="all",
-            sql="SELECT id, name, status FROM item ORDER BY id",
-            columns=[
+            sql="SELECT id, name, status FROM item ORDER BY id"),
+    )
+    result = await conn.execute("all", column_hints=[
                 ColumnHint(name="name", label="Item Name", align="left",
                            filter_from=[FilterDep(source="status", column="ST")]),  # cascading dep
                 ColumnHint(name="status", hidden=True),
                 ColumnHint(name="id", visible_when=VisibleWhen(field="status", value=["on", "off"])),  # conditional
                 ColumnHint(name="zzz", label="ignored — not a result column"),
-            ],
-        ),
-    )
-    result = await conn.execute("all")
+            ])
     # hinted columns first (in hint order), then un-hinted ones in discovery order; the
     # stale `zzz` hint is dropped (a hint never fabricates a column)
     assert [c.name for c in result.columns] == ["name", "status", "id"]
@@ -150,12 +148,11 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
     assert "label" not in cols["id"] and "hidden" not in cols["id"] and "filter_from" not in cols["id"]
     # rows are unaffected — every column's data is still present
     assert result.rows[0] == {"id": 1, "name": "a", "status": "on"}
-    # describe() exposes the configured hints (defaults excluded)
+    # Phase 3 — column hints left ``QueryDef``; describe() no longer surfaces them. The hints
+    # ride through ``execute(column_hints=…)``, and the read-result wire payload above already
+    # verifies the resolved columns. The screens API ships ``Screen.columns`` on its own route.
     qd = next(q for q in conn.describe()["queries"] if q["name"] == "all")
-    assert {h["name"] for h in qd["columns"]} == {"name", "status", "id", "zzz"}
-    assert next(h for h in qd["columns"] if h["name"] == "status") == {"name": "status", "hidden": True}
-    assert next(h for h in qd["columns"] if h["name"] == "name")["filter_from"] == [{"source": "status", "column": "ST"}]
-    assert next(h for h in qd["columns"] if h["name"] == "id") == {"name": "id", "visible_when": [{"field": "status", "value": ["on", "off"]}]}
+    assert "columns" not in qd
 
 
 @pytest.mark.asyncio
@@ -170,23 +167,19 @@ async def test_column_hints_resolve_from_dictionary(pools: PoolRegistry) -> None
         "db": DictionarySection(entries={"name": DictionaryEntry(label="DB Item Name", format="text", l={"fr": "Article DB"})}),
     })
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(
-        name="all", sql="SELECT id, name, status FROM item ORDER BY id",
-        # bare hint → look up under the column name; `dd` ref; inline `label` overrides everything
-        columns=[ColumnHint(name="name"), ColumnHint(name="status", dd="status", hidden=True), ColumnHint(name="id", label="ID")],
-    )])
+        name="all", sql="SELECT id, name, status FROM item ORDER BY id")])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
-    cols = {c.name: c for c in (await conn.execute("all")).columns}  # default language
+    cols = {c.name: c for c in (await conn.execute("all", column_hints=[ColumnHint(name="name"), ColumnHint(name="status", dd="status", hidden=True), ColumnHint(name="id", label="ID")])).columns}  # default language
     assert cols["name"].label == "DB Item Name" and cols["name"].format == "text"  # the [connectors.db] entry
     assert cols["status"].label == "Status" and cols["status"].hidden is True and cols["status"].format == "boolean"  # shared
     assert cols["id"].label == "ID" and cols["id"].format is None  # inline label, no dict entry → no format
-    cols = {c.name: c for c in (await conn.execute("all", language="fr")).columns}
+    cols = {c.name: c for c in (await conn.execute("all", language="fr", column_hints=[ColumnHint(name="name"), ColumnHint(name="status", dd="status", hidden=True), ColumnHint(name="id", label="ID")])).columns}
     assert cols["name"].label == "Article DB"  # the [connectors.db] translation
     assert cols["status"].label == "Status"    # no fr translation → default label
-    # describe() resolves the *default* language; the `dd` ref shows through
-    by = {h["name"]: h for h in next(q for q in conn.describe()["queries"] if q["name"] == "all")["columns"]}
-    assert by["name"] == {"name": "name", "label": "DB Item Name", "format": "text"}
-    assert by["status"] == {"name": "status", "dd": "status", "label": "Status", "hidden": True, "format": "boolean"}
-    assert by["id"] == {"name": "id", "label": "ID"}
+    # Phase 3 — describe() no longer surfaces column hints (they live on Screen). The wire
+    # payload above already verifies resolution from the dictionary in both languages.
+    qd = next(q for q in conn.describe()["queries"] if q["name"] == "all")
+    assert "columns" not in qd
 
 
 @pytest.mark.asyncio
@@ -208,11 +201,9 @@ async def test_column_hints_attach_display_rule(pools: PoolRegistry) -> None:
         lookups={"users": LookupDef(query="users_get", value="USR_ID", label="USR_NAME")},
     )})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(
-        name="q", sql="SELECT id, status, status AS kind, status AS owner, status AS password FROM item ORDER BY id",
-        columns=[ColumnHint(name="status"), ColumnHint(name="kind"), ColumnHint(name="owner"), ColumnHint(name="password")],
-    )])
+        name="q", sql="SELECT id, status, status AS kind, status AS owner, status AS password FROM item ORDER BY id")])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
-    cols = {c.name: c for c in (await conn.execute("q", language="fr")).columns}
+    cols = {c.name: c for c in (await conn.execute("q", language="fr", column_hints=[ColumnHint(name="status"), ColumnHint(name="kind"), ColumnHint(name="owner"), ColumnHint(name="password")])).columns}
     assert cols["status"].rule == {"kind": "boolean", "true_value": "on"}
     assert cols["kind"].rule == {
         "kind": "enum",
@@ -223,7 +214,7 @@ async def test_column_hints_attach_display_rule(pools: PoolRegistry) -> None:
     }
     assert cols["password"].rule is None  # PASSWORD is a form-layer rule — not a display transform
     # the resolved rule rides along in to_dict() (so the frontend gets it via /api/sql/...)
-    cols_d = {c["name"]: c for c in (await conn.execute("q")).to_dict()["columns"]}
+    cols_d = {c["name"]: c for c in (await conn.execute("q", column_hints=[ColumnHint(name="status"), ColumnHint(name="kind"), ColumnHint(name="owner"), ColumnHint(name="password")])).to_dict()["columns"]}
     assert cols_d["status"]["rule"]["kind"] == "boolean"
     assert "rule" not in cols_d["password"]  # no rule → no key emitted
 
@@ -238,15 +229,13 @@ async def test_column_hints_match_case_insensitively(pools: PoolRegistry) -> Non
         pools,
         QueryDef(
             name="all",
-            sql='SELECT id AS "ID", name AS "Name", status AS "STATUS" FROM item ORDER BY id',
-            columns=[
+            sql='SELECT id AS "ID", name AS "Name", status AS "STATUS" FROM item ORDER BY id'),
+    )
+    result = await conn.execute("all", column_hints=[
                 ColumnHint(name="name", label="Item Name"),
                 ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
                 ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
-            ],
-        ),
-    )
-    result = await conn.execute("all")
+            ])
     assert [c.name for c in result.columns] == ["Name", "ID", "STATUS"]   # discovered case, hint order
     by = {c.name: c for c in result.columns}
     assert by["Name"].label == "Item Name"
@@ -262,8 +251,7 @@ async def test_named_params_and_missing_param_binds_null(pools: PoolRegistry) ->
         QueryDef(
             name="filtered",
             sql="SELECT id FROM item WHERE (:status IS NULL OR status = :status) ORDER BY id",
-            params=[ParamDef(name="status")],
-        ),
+            params=[ParamDef(name="status")]),
     )
     assert [r["id"] for r in (await conn.execute("filtered", {"status": "on"})).rows] == [1, 2]
     # No param supplied → :status bound to SQL NULL → filter is a no-op.
@@ -277,8 +265,7 @@ async def test_param_default_applied(pools: PoolRegistry) -> None:
         QueryDef(
             name="def",
             sql="SELECT id FROM item WHERE status = :status ORDER BY id",
-            params=[ParamDef(name="status", default="off")],
-        ),
+            params=[ParamDef(name="status", default="off")]),
     )
     assert [r["id"] for r in (await conn.execute("def")).rows] == [3]
 
@@ -286,7 +273,11 @@ async def test_param_default_applied(pools: PoolRegistry) -> None:
 @pytest.mark.asyncio
 async def test_max_rows_truncation(pools: PoolRegistry) -> None:
     conn = _connector(pools, QueryDef(name="all", sql="SELECT id FROM item ORDER BY id"), max_rows=2)
-    result = await conn.execute("all")
+    result = await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])
     assert len(result.rows) == 2
     assert result.truncated is True
 
@@ -296,16 +287,28 @@ async def test_row_cap_precedence(pools: PoolRegistry) -> None:
     # connector leaves max_rows unset → its effective default falls back to the pool's (passed here as 1)
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="all", sql="SELECT id FROM item ORDER BY id"),
-        QueryDef(name="cap2", sql="SELECT id FROM item ORDER BY id", max_rows=2),  # per-query override
+        QueryDef(name="cap2", sql="SELECT id FROM item ORDER BY id"),  # per-query override
     ])
     conn = SQLConnector("db", cfg, pools, pool_max_rows=1)
-    r = await conn.execute("all")
+    r = await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])
     assert len(r.rows) == 1 and r.truncated is True            # pool default (1)
-    r = await conn.execute("cap2")
+    r = await conn.execute("cap2", screen_max_rows=2)
     assert len(r.rows) == 2 and r.truncated is True            # query's max_rows (2)
-    r = await conn.execute("all", max_rows=3)
+    r = await conn.execute("all", max_rows=3, column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])
     assert len(r.rows) == 3 and r.truncated is False           # per-request override (3) — all rows
-    r = await conn.execute("all", max_rows=10_000_000)
+    r = await conn.execute("all", max_rows=10_000_000, column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])
     assert len(r.rows) == 3                                     # clamped to HARD_MAX_ROWS, but only 3 rows exist
 
 
@@ -348,20 +351,18 @@ async def test_audit_mirrors_writes_into_aud_table(pools: PoolRegistry) -> None:
 
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_item",
-                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
-        QueryDef(name="upd", writable=True, audit="aud_item",
-                 sql="UPDATE item SET name = :NAME WHERE id = :ID_ORIGINAL"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+        QueryDef(name="upd", writable=True, sql="UPDATE item SET name = :NAME WHERE id = :ID_ORIGINAL"),
         QueryDef(name="aud_all", sql="SELECT * FROM aud_item ORDER BY rowid"),
     )
 
     # INSERT — full row in params (uppercase, matching the migrated _post convention).
-    r = await conn.execute("ins", {"ID": 100, "NAME": "alpha", "STATUS": "on"}, user="bob")
+    r = await conn.execute("ins", {"ID": 100, "NAME": "alpha", "STATUS": "on"}, user="bob", audit_table="aud_item")
     assert r.statement_type == "INSERT" and r.rowcount == 1
 
     # UPDATE — new value for NAME, plus :ID_ORIGINAL to find the row (the v2 _put convention).
     # The audit row should record the *new* values (NAME) and skip the _ORIGINAL key.
-    r = await conn.execute("upd", {"NAME": "alpha-2", "ID_ORIGINAL": 100}, user="alice")
+    r = await conn.execute("upd", {"NAME": "alpha-2", "ID_ORIGINAL": 100}, user="alice", audit_table="aud_item")
     assert r.statement_type == "UPDATE" and r.rowcount == 1
 
     aud = await conn.execute("aud_all")
@@ -395,11 +396,10 @@ async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None
         await c.execute(text("DROP TABLE IF EXISTS aud_item_auto"))
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_item_auto",
-                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
     )
     # First write triggers the auto-create + the audit INSERT — must succeed end-to-end.
-    r = await conn.execute("ins", {"ID": 500, "NAME": "first", "STATUS": "on"}, user="bob")
+    r = await conn.execute("ins", {"ID": 500, "NAME": "first", "STATUS": "on"}, user="bob", audit_table="aud_item_auto")
     assert r.rowcount == 1
     # The audit table now exists with the source columns + the three AUD_ columns; the row
     # landed. The auto-create's ``CAST(NULL AS …) AS AUD_ACTION`` aliases keep their *uppercase*
@@ -415,7 +415,7 @@ async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None
     assert row["id"] == 500 and row["name"] == "first" and row["status"] == "on"
     assert row["aud_action"] == "INSERT" and row["aud_user"] == "bob" and row["aud_date"] is not None
     # Second write skips the probe (cache hit) — still lands cleanly.
-    await conn.execute("ins", {"ID": 501, "NAME": "second", "STATUS": "off"}, user="alice")
+    await conn.execute("ins", {"ID": 501, "NAME": "second", "STATUS": "off"}, user="alice", audit_table="aud_item_auto")
     async with pools.engine("test").connect() as c:
         rows = (await c.execute(text("SELECT id FROM aud_item_auto ORDER BY id"))).mappings().all()
     assert [r["id"] for r in rows] == [500, 501]
@@ -437,10 +437,9 @@ async def test_audit_date_is_naive_utc_for_tz_naive_columns(pools: PoolRegistry)
         await c.execute(text("DROP TABLE IF EXISTS aud_tz_test"))
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_tz_test",
-                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
     )
-    await conn.execute("ins", {"ID": 800, "NAME": "tz-check"}, user="x")
+    await conn.execute("ins", {"ID": 800, "NAME": "tz-check"}, user="x", audit_table="aud_tz_test")
     async with pools.engine("test").connect() as c:
         rows = (await c.execute(text("SELECT AUD_DATE AS aud_date FROM aud_tz_test"))).mappings().all()
     assert len(rows) == 1
@@ -477,15 +476,14 @@ async def test_audit_probe_uses_metadata_table_not_select_against_missing_table(
         await c.execute(text("DROP TABLE IF EXISTS aud_for_probe_test"))
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_for_probe_test",
-                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
     )
     # First write — probes the metadata, creates the audit table, runs main + audit INSERT.
     # On Postgres the SELECT-on-missing-table approach would have aborted the txn here, the
     # CREATE TABLE would fail with "current transaction is aborted", and the whole audit
     # path would roll back. Asserting the probe-then-create-then-insert succeeds end-to-end
     # locks in the metadata-table behaviour.
-    r = await conn.execute("ins", {"ID": 700, "NAME": "probe-test", "STATUS": "on"}, user="x")
+    r = await conn.execute("ins", {"ID": 700, "NAME": "probe-test", "STATUS": "on"}, user="x", audit_table="aud_for_probe_test")
     assert r.rowcount == 1
     async with pools.engine("test").connect() as c:
         rows = (await c.execute(text("SELECT id FROM aud_for_probe_test"))).mappings().all()
@@ -512,13 +510,12 @@ async def test_audit_failure_rolls_back_the_main_write(pools: PoolRegistry) -> N
         ))
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_wrong_shape",
-                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
         QueryDef(name="count", sql="SELECT COUNT(*) AS n FROM item"),
     )
     before = (await conn.execute("count")).rows[0]["n"]
     with pytest.raises(Exception):  # the audit INSERT references columns the audit table doesn't have
-        await conn.execute("ins", {"ID": 600, "NAME": "z", "STATUS": "on"}, user="x")
+        await conn.execute("ins", {"ID": 600, "NAME": "z", "STATUS": "on"}, user="x", audit_table="aud_wrong_shape")
     assert (await conn.execute("count")).rows[0]["n"] == before  # the main write rolled back too
 
 
@@ -530,12 +527,15 @@ async def test_audit_anonymous_when_no_user(pools: PoolRegistry) -> None:
         await c.execute(text("CREATE TABLE aud_item2 (id INTEGER, aud_action TEXT, aud_user TEXT, aud_date TIMESTAMP)"))
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_item2",
-                 sql="INSERT INTO item (id) VALUES (:ID)"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id) VALUES (:ID)"),
         QueryDef(name="all", sql="SELECT aud_user FROM aud_item2"),
     )
-    await conn.execute("ins", {"ID": 7})  # no user kwarg
-    assert (await conn.execute("all")).rows == [{"aud_user": "anonymous"}]
+    await conn.execute("ins", {"ID": 7}, audit_table="aud_item2")  # no user kwarg
+    assert (await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])).rows == [{"aud_user": "anonymous"}]
 
 
 @pytest.mark.asyncio
@@ -588,24 +588,22 @@ async def test_unknown_query(pools: PoolRegistry) -> None:
         await conn.execute("nope")
 
 
-def test_describe_resolves_companion_queries(pools: PoolRegistry) -> None:
+def test_describe_no_longer_surfaces_screen_fields(pools: PoolRegistry) -> None:
+    """Phase 3 — companion-query refs (update/insert/delete_query), columns, auto_load,
+    audit, key_columns, and max_rows all moved off ``QueryDef`` onto :class:`Screen`. The
+    connector's describe() output no longer carries them — the frontend reads them from
+    ``GET /api/screens/{app}/{id}`` instead."""
     conn = _connector(
         pools,
         QueryDef(name="item_get", sql="SELECT id, name FROM item ORDER BY id"),
         QueryDef(name="item_put", sql="UPDATE item SET name = :name WHERE id = :id", writable=True),
-        QueryDef(name="item_post", sql="INSERT INTO item (id, name) VALUES (:id, :name)", writable=True),
-        QueryDef(name="readonly_get", sql="SELECT id FROM item"),                                  # no companions
-        QueryDef(name="lonely_get", sql="SELECT 1 AS x", update_query="item_put", delete_query="item_post"),  # explicit
-        QueryDef(name="bad_get", sql="SELECT 1 AS x", update_query="item_get"),                    # points at a non-writable query → ignored
     )
-    by = {q["name"]: q for q in conn.describe()["queries"]}
-    assert (by["item_get"]["update_query"], by["item_get"]["insert_query"], by["item_get"]["delete_query"]) == (
-        "item_put", "item_post", None,                          # <base>_get → <base>_put / _post (no _delete defined)
-    )
-    assert (by["readonly_get"]["update_query"], by["readonly_get"]["insert_query"]) == (None, None)
-    assert (by["lonely_get"]["update_query"], by["lonely_get"]["delete_query"]) == ("item_put", "item_post")  # explicit
-    assert by["bad_get"]["update_query"] is None                # explicit target isn't writable
-    assert by["item_put"]["update_query"] is None               # not a _get query
+    q = next(q for q in conn.describe()["queries"] if q["name"] == "item_get")
+    for k in ("update_query", "insert_query", "delete_query", "columns",
+              "auto_load", "audit", "key_columns", "max_rows"):
+        assert k not in q, f"describe() should not surface {k!r} after Phase 3"
+    # The SQL-layer bits stay.
+    assert q.keys() >= {"name", "writable", "sql", "params", "bind_params", "statement_type", "dialects"}
 
 
 def test_describe_lists_metadata(pools: PoolRegistry) -> None:
@@ -641,7 +639,11 @@ async def test_trim_strings_strips_trailing_whitespace_when_enabled() -> None:
     conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="on", queries=[
         QueryDef(name="all", sql="SELECT id, name FROM lbl ORDER BY id"),
     ]), pools)
-    r = await conn.execute("all")
+    r = await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])
     assert [row["name"] for row in r.rows] == ["role", "demo"]   # trailing spaces stripped
     await engine.dispose()
 
@@ -659,7 +661,11 @@ async def test_trim_strings_off_keeps_whitespace() -> None:
     conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="off", queries=[
         QueryDef(name="all", sql="SELECT id, name FROM lbl"),
     ]), pools)
-    r = await conn.execute("all")
+    r = await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])
     assert r.rows[0]["name"] == "role   "   # untouched
     await engine.dispose()
 
@@ -802,8 +808,7 @@ async def test_write_coerces_number_string_to_int(pools: PoolRegistry) -> None:
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="ins", writable=True,
-                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)",
-                 columns=[ColumnHint(name="ID"), ColumnHint(name="NAME")]),
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     # Submit a string — would crash on a strict driver; sqlite happens to accept it but the
@@ -814,7 +819,7 @@ async def test_write_coerces_number_string_to_int(pools: PoolRegistry) -> None:
     )
     assert bound == {"ID": 42, "NAME": "alpha"}  # number coerced; text untouched
     # Round-trip the actual INSERT to prove SQLAlchemy + driver accept the coerced value.
-    r = await conn.execute("ins", {"ID": "999", "NAME": "z"})
+    r = await conn.execute("ins", {"ID": "999", "NAME": "z"}, column_hints=[ColumnHint(name="ID"), ColumnHint(name="NAME")])
     assert r.rowcount == 1
 
 
@@ -829,8 +834,7 @@ async def test_write_coerces_empty_string_to_null(pools: PoolRegistry) -> None:
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="ins", writable=True,
-                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)",
-                 columns=[ColumnHint(name="ID"), ColumnHint(name="NAME")]),
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     bound = conn._apply_form_rules(
@@ -851,8 +855,7 @@ async def test_form_rule_login_stamps_user_uppercase(pools: PoolRegistry) -> Non
         "USR": DictionaryEntry(rules="LOGIN"),
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
-        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :USR)",
-                 columns=[ColumnHint(name="USR")]),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :USR)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules({"USR": None}, cfg.queries[0], stmt_type="INSERT", user="alice")
@@ -882,13 +885,14 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="ins", writable=True,
-                 sql="INSERT INTO item (id, name, status) VALUES (:CREATED_AT, :CREATED_ON, :PLAIN)",
-                 columns=[ColumnHint(name="CREATED_AT"), ColumnHint(name="CREATED_ON"), ColumnHint(name="JDE_DATE"), ColumnHint(name="PLAIN")]),
+                 sql="INSERT INTO item (id, name, status) VALUES (:CREATED_AT, :CREATED_ON, :PLAIN)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules(
         {"CREATED_AT": None, "CREATED_ON": None, "JDE_DATE": None, "PLAIN": None},
         cfg.queries[0], stmt_type="INSERT", user="x",
+        column_hints=[ColumnHint(name="CREATED_AT"), ColumnHint(name="CREATED_ON"),
+                      ColumnHint(name="JDE_DATE"), ColumnHint(name="PLAIN")],
     )
     # datetime column → datetime, date column → date (no time), jdedate → CYYDDD int.
     assert isinstance(out["CREATED_AT"], dt) and not isinstance(out["CREATED_AT"], date.__class__)
@@ -1062,9 +1066,13 @@ async def test_sequence_resolved_via_dictionary_sequence_id(pools: PoolRegistry)
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     # Fixture has rows 1, 2, 3 → next id should be 4.
-    r = await conn.execute("ins", {"ID": None})
+    r = await conn.execute("ins", {"ID": None}, column_hints=[ColumnHint(name="CREATED_AT"), ColumnHint(name="CREATED_ON"), ColumnHint(name="JDE_DATE"), ColumnHint(name="PLAIN")])
     assert r.rowcount == 1
-    rows = (await conn.execute("all")).rows
+    rows = (await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])).rows
     assert rows[-1] == {"id": 4, "name": "seq"}
 
 
@@ -1112,8 +1120,7 @@ async def test_form_rule_sysdate_stamps_now(pools: PoolRegistry) -> None:
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="ins", writable=True,
-                 sql="INSERT INTO item (id, name, status) VALUES (1, :CREATED, :UPDATED)",
-                 columns=[ColumnHint(name="CREATED"), ColumnHint(name="UPDATED")]),
+                 sql="INSERT INTO item (id, name, status) VALUES (1, :CREATED, :UPDATED)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules({"CREATED": None, "UPDATED": ""}, cfg.queries[0], stmt_type="INSERT", user="x")
@@ -1133,8 +1140,7 @@ async def test_form_rule_password_hashes_value(pools: PoolRegistry) -> None:
         "PWD": DictionaryEntry(format="password", rules="PASSWORD"),
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
-        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :PWD)",
-                 columns=[ColumnHint(name="PWD")]),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :PWD)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules({"PWD": "hunter2"}, cfg.queries[0], stmt_type="INSERT", user="x")
@@ -1155,10 +1161,8 @@ async def test_form_rule_default_on_insert_only(pools: PoolRegistry) -> None:
         "STATUS": DictionaryEntry(default="active"),
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
-        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, status) VALUES (1, :STATUS)",
-                 columns=[ColumnHint(name="STATUS")]),
-        QueryDef(name="upd", writable=True, sql="UPDATE item SET status = :STATUS WHERE id = :ID_ORIGINAL",
-                 columns=[ColumnHint(name="STATUS")]),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, status) VALUES (1, :STATUS)"),
+        QueryDef(name="upd", writable=True, sql="UPDATE item SET status = :STATUS WHERE id = :ID_ORIGINAL"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     # INSERT + missing value → use default
@@ -1185,8 +1189,7 @@ async def test_form_rule_skips_original_suffix(pools: PoolRegistry) -> None:
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="upd", writable=True,
-                 sql="UPDATE item SET name = :USR WHERE id = :ID_ORIGINAL",
-                 columns=[ColumnHint(name="USR"), ColumnHint(name="ID")]),
+                 sql="UPDATE item SET name = :USR WHERE id = :ID_ORIGINAL"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules(
@@ -1214,25 +1217,36 @@ async def test_form_rule_sequence_resolves_in_same_transaction(pools: PoolRegist
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="item_next_id", sql="SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM item"),
         QueryDef(name="ins", writable=True,
-                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)",
-                 columns=[ColumnHint(name="ID"), ColumnHint(name="NAME")]),
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
         QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     # The fixture has rows 1, 2, 3 already → next id should be 4.
-    r = await conn.execute("ins", {"ID": None, "NAME": "from-seq"})
+    r = await conn.execute("ins", {"ID": None, "NAME": "from-seq"}, column_hints=[ColumnHint(name="ID"), ColumnHint(name="NAME")])
     assert r.rowcount == 1
-    rows = (await conn.execute("all")).rows
+    rows = (await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])).rows
     assert rows[-1] == {"id": 4, "name": "from-seq"}
     # A caller-supplied explicit value should NOT trigger the sequence — keeps the explicit value.
-    r = await conn.execute("ins", {"ID": 99, "NAME": "explicit"})
+    r = await conn.execute("ins", {"ID": 99, "NAME": "explicit"}, column_hints=[ColumnHint(name="ID"), ColumnHint(name="NAME")])
     assert r.rowcount == 1
-    rows = (await conn.execute("all")).rows
+    rows = (await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])).rows
     assert {"id": 99, "name": "explicit"} in rows
     # Two more INSERTs with NULL IDs — should land on 5 then 100 (max(99,4)+1, then +1).
-    await conn.execute("ins", {"ID": None, "NAME": "from-seq-2"})
-    await conn.execute("ins", {"ID": None, "NAME": "from-seq-3"})
-    final = (await conn.execute("all")).rows
+    await conn.execute("ins", {"ID": None, "NAME": "from-seq-2"}, column_hints=[ColumnHint(name="ID"), ColumnHint(name="NAME")])
+    await conn.execute("ins", {"ID": None, "NAME": "from-seq-3"}, column_hints=[ColumnHint(name="ID"), ColumnHint(name="NAME")])
+    final = (await conn.execute("all", column_hints=[
+                ColumnHint(name="name", label="Item Name"),
+                ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
+                ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
+            ])).rows
     ids = sorted(r["id"] for r in final if r["name"].startswith("from-seq"))
     assert ids == [4, 100, 101]  # each call ran ``MAX(id) + 1`` in its own transaction
 
@@ -1249,12 +1263,11 @@ async def test_form_rule_sequence_missing_query_logs_and_falls_through(pools: Po
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="ins", writable=True,
-                 sql="INSERT INTO item (id, name) VALUES (:ID, 'x')",
-                 columns=[ColumnHint(name="ID")]),
+                 sql="INSERT INTO item (id, name) VALUES (:ID, 'x')"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     with caplog.at_level(logging.WARNING, logger="liberty.connectors.sql"):
-        r = await conn.execute("ins", {"ID": None})
+        r = await conn.execute("ins", {"ID": None}, column_hints=[ColumnHint(name="ID")])
         assert r.rowcount == 1
     # The warning names whichever of {sequence, query} failed to resolve. Phase 8 looks the id
     # up in ``DictionaryFile.sequences`` first; a missing entry there → "unknown sequence".
@@ -1294,17 +1307,15 @@ async def test_filter_wrap_text_column_default_op_contains(pools: PoolRegistry) 
     (``LOWER(col) LIKE LOWER('%v%')``). The wrap fires only because the caller sent a
     value; without it the stored SELECT runs unwrapped."""
     q = QueryDef(
-        name="users", sql="SELECT id, name, status FROM item",
-        columns=[ColumnHint(name="name", filter=True)],
-    )
+        name="users", sql="SELECT id, name, status FROM item")
     conn = _connector(pools, q)
     # No filter param → unwrapped: returns all rows (3 in fixture).
-    assert len(((await conn.execute("users")).rows)) == 3
+    assert len(((await conn.execute("users", column_hints=[ColumnHint(name="name", filter=True)])).rows)) == 3
     # With a `name = "b"` filter → wraps with `contains` → matches just 'b'.
-    rs = (await conn.execute("users", {"name": "b"})).rows
+    rs = (await conn.execute("users", {"name": "b"}, column_hints=[ColumnHint(name="name", filter=True)])).rows
     assert [r["name"] for r in rs] == ["b"]
     # An operator hint: startsWith picks 'a' / 'b' / 'c' depending on input.
-    rs = (await conn.execute("users", {"name": "a", "name_op": "startsWith"})).rows
+    rs = (await conn.execute("users", {"name": "a", "name_op": "startsWith"}, column_hints=[ColumnHint(name="name", filter=True)])).rows
     assert [r["name"] for r in rs] == ["a"]
 
 
@@ -1321,16 +1332,14 @@ async def test_filter_wrap_non_text_column_typed_equals(pools: PoolRegistry) -> 
         "id": DictionaryEntry(format="integer"),
     })})
     q = QueryDef(
-        name="users", sql="SELECT id, name, status FROM item",
-        columns=[ColumnHint(name="id", filter=True)],
-    )
+        name="users", sql="SELECT id, name, status FROM item")
     conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
-    rs = (await conn.execute("users", {"id": 2})).rows
+    rs = (await conn.execute("users", {"id": 2}, column_hints=[ColumnHint(name="id", filter=True)])).rows
     assert [r["id"] for r in rs] == [2]
     # The string "2" works too — the wrap helper coerces it to int(2) Python-side
     # before binding. SQLite is permissive so this would even work without coercion;
     # the real test is the dict-level coercion check below.
-    rs = (await conn.execute("users", {"id": "2"})).rows
+    rs = (await conn.execute("users", {"id": "2"}, column_hints=[ColumnHint(name="id", filter=True)])).rows
     assert [r["id"] for r in rs] == [2]
     # Direct check on ``_apply_filter_wrap`` itself: the returned params carry the
     # coerced int, not the original string. This is what fixes the asyncpg
@@ -1338,6 +1347,7 @@ async def test_filter_wrap_non_text_column_typed_equals(pools: PoolRegistry) -> 
     qdef = conn.get_query("users")
     new_sql, new_params = conn._apply_filter_wrap(
         "SELECT id, name, status FROM item", qdef, {"id": "10"}, stmt_type="SELECT",
+        column_hints=[ColumnHint(name="id", filter=True)],
     )
     assert new_params == {"id": 10}    # str → int
     # And the SQL is wrapped with a plain ``col = :id`` (no CAST around the bind, so
@@ -1353,24 +1363,31 @@ async def test_filter_wrap_multiple_active_columns_anded(pools: PoolRegistry) ->
     operator only filters one column."""
     q = QueryDef(
         name="users",
-        sql="SELECT id, name, status FROM item ORDER BY id",
-        columns=[
-            ColumnHint(name="name", filter=True),
-            ColumnHint(name="status", filter=True),
-        ],
-    )
+        sql="SELECT id, name, status FROM item ORDER BY id")
     conn = _connector(pools, q)
     # Only `name` set → only one predicate fires
-    rs = (await conn.execute("users", {"name": "a"})).rows
+    rs = (await conn.execute("users", {"name": "a"}, column_hints=[
+            ColumnHint(name="name", filter=True),
+            ColumnHint(name="status", filter=True),
+        ])).rows
     assert [r["name"] for r in rs] == ["a"]
     # Both → AND-ed
-    rs = (await conn.execute("users", {"name": "a", "status": "on"})).rows
+    rs = (await conn.execute("users", {"name": "a", "status": "on"}, column_hints=[
+            ColumnHint(name="name", filter=True),
+            ColumnHint(name="status", filter=True),
+        ])).rows
     assert rs == [{"id": 1, "name": "a", "status": "on"}]
     # Empty string treated as no filter — picks up the other one only
-    rs = (await conn.execute("users", {"name": "", "status": "off"})).rows
+    rs = (await conn.execute("users", {"name": "", "status": "off"}, column_hints=[
+            ColumnHint(name="name", filter=True),
+            ColumnHint(name="status", filter=True),
+        ])).rows
     assert [r["name"] for r in rs] == ["c"]
     # ORDER BY preserved (the wrap re-attaches it)
-    rs = (await conn.execute("users", {"name": ""})).rows
+    rs = (await conn.execute("users", {"name": ""}, column_hints=[
+            ColumnHint(name="name", filter=True),
+            ColumnHint(name="status", filter=True),
+        ])).rows
     assert [r["id"] for r in rs] == [1, 2, 3]
 
 
@@ -1392,20 +1409,16 @@ async def test_filter_wrap_resolves_format_from_dictionary(pools: PoolRegistry) 
         "CSI_ID": DictionaryEntry(format="number"),
     })})
     q = QueryDef(
-        name="csi_list", sql="SELECT id, name, status FROM item",
-        # Hint maps the result column ``id`` to the ``CSI_ID`` dd entry — same shape
-        # the migration emits for nested-table bind targets.
-        columns=[ColumnHint(name="id", dd="CSI_ID", filter=True)],
-    )
+        name="csi_list", sql="SELECT id, name, status FROM item")
     conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
     # A "contains" op on a number column would have failed pre-fix (LOWER(integer)).
     # Post-fix the runtime emits a typed equals regardless of the op the caller sent —
     # non-text columns ignore the operator hint and run as equals (the FilterPanel
     # already restricts the operator picker for non-text columns; this is defence-in-
     # depth for a stray op value from another caller).
-    rs = (await conn.execute("csi_list", {"id": 2})).rows
+    rs = (await conn.execute("csi_list", {"id": 2}, column_hints=[ColumnHint(name="id", dd="CSI_ID", filter=True)])).rows
     assert [r["id"] for r in rs] == [2]
-    rs = (await conn.execute("csi_list", {"id": "2", "id_op": "contains"})).rows
+    rs = (await conn.execute("csi_list", {"id": "2", "id_op": "contains"}, column_hints=[ColumnHint(name="id", dd="CSI_ID", filter=True)])).rows
     assert [r["id"] for r in rs] == [2]
 
 
@@ -1416,13 +1429,11 @@ async def test_filter_wrap_strips_op_binds_from_sql(pools: PoolRegistry) -> None
     SQLAlchemy bind — confirms the migrated SQL no longer has ``:NAME_op`` cluttering it
     and the request-side ``_op`` doesn't trip the `text()` parser."""
     q = QueryDef(
-        name="users", sql="SELECT id, name FROM item",
-        columns=[ColumnHint(name="name", filter=True)],
-    )
+        name="users", sql="SELECT id, name FROM item")
     conn = _connector(pools, q)
     # _op should be consumed by the wrap and not emit a `:name_op` bind — verify there
     # are no spurious errors when sending an op alongside the value.
-    rs = (await conn.execute("users", {"name": "b", "name_op": "equals"})).rows
+    rs = (await conn.execute("users", {"name": "b", "name_op": "equals"}, column_hints=[ColumnHint(name="name", filter=True)])).rows
     assert [r["name"] for r in rs] == ["b"]
 
 
@@ -1467,10 +1478,9 @@ async def test_jdedate_columns_converted_to_iso_on_read(pools: PoolRegistry) -> 
     d = DictionaryFile(connectors={"db": DictionarySection(entries={
         "upmj": DictionaryEntry(format="jdedate"),
     })})
-    q = QueryDef(name="all", sql="SELECT id, upmj FROM jde ORDER BY id",
-                 columns=[ColumnHint(name="upmj")])
+    q = QueryDef(name="all", sql="SELECT id, upmj FROM jde ORDER BY id")
     conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
-    rs = (await conn.execute("all")).rows
+    rs = (await conn.execute("all", column_hints=[ColumnHint(name="upmj")])).rows
     assert rs[0] == {"id": 1, "upmj": "2026-05-18"}
     # JDE 0 = "no date" → pass-through as-is so it's visible
     assert rs[1] == {"id": 2, "upmj": 0}

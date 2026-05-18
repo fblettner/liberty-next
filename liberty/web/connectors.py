@@ -24,13 +24,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError, detect_statement_type
+from liberty.connectors.config import ColumnHint
 from liberty.connectors.introspect import introspect_pool
-from liberty.web.deps import get_connectors, public_connector, request_language, require_permission
+from liberty.screens import Screen, ScreensFile
+from liberty.web.deps import get_connectors, get_screens, public_connector, request_language, require_permission
 from liberty.web.errors import http_for_connector_error
 
 router = APIRouter(prefix="/api", tags=["connectors"])
 
 Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
+Screens = Annotated[ScreensFile, Depends(get_screens)]
 
 
 # --------------------------------------------------------------------------- #
@@ -79,15 +82,63 @@ def _as_int(v: Any) -> int | None:
         return None
 
 
+def _find_screen_for_query(
+    screens: ScreensFile, connector: str, query: str,
+) -> tuple[Screen | None, str | None]:
+    """Phase 3 — look up the screen whose ``read_query`` / ``update_query`` / ``insert_query`` /
+    ``delete_query`` matches *(connector, query)*. Returns ``(screen, slot)`` where ``slot`` is
+    one of ``"read"`` / ``"update"`` / ``"insert"`` / ``"delete"`` so callers can decide which
+    behaviour applies (column hints on read, audit table on writes, …). When several screens
+    reference the same query (a config bug, but possible — a shared read query across screens
+    for example), the first hit wins. ``(None, None)`` when nothing matches.
+
+    The effective connector is the screen's explicit ``connector`` field if set, else the app
+    name (the dict key) — matches the convention :func:`migrate_screens` uses."""
+    slots = (("read_query", "read"), ("update_query", "update"),
+             ("insert_query", "insert"), ("delete_query", "delete"))
+    for app, app_screens in screens.screens.items():
+        for s in app_screens.values():
+            eff = s.connector or app
+            if eff != connector:
+                continue
+            for attr, slot in slots:
+                if getattr(s, attr) == query:
+                    return s, slot
+    return None, None
+
+
+def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
+    """Phase 3 — the SQL connector's runtime helpers (filter wrap / write-time coercion /
+    SEQUENCE / result-column hint application) read column metadata from the matching
+    :class:`Screen.columns`. Returns ``None`` when no screen → connector behaves as a thin
+    SQL runner with no per-screen hints (back-compat for connector-only deployments)."""
+    if screen is None or not screen.columns:
+        return None
+    return list(screen.columns)
+
+
 async def _run_sql(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
+    screens: ScreensFile | None = None,
 ) -> dict[str, Any]:
+    """Run *query* on *connector* with *params*. Phase 3 — when a matching :class:`Screen` is
+    found, thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``) into
+    the SQL connector. A query with no screen runs unadorned (no audit, no filter wrap,
+    no result-column dictionary resolution from per-screen hints — but dictionary lookup by
+    bind name still applies for write-side rule coercion)."""
+    screen, _slot = _find_screen_for_query(screens, connector, query) if screens else (None, None)
+    column_hints = _column_hints_for(screen)
+    audit_table = screen.audit_table if screen else None
+    screen_max_rows = screen.max_rows if screen else None
     try:
         conn = connectors.sql(connector)  # UnknownConnectorError if missing / wrong type
-        # `user` is recorded on the audit row when the query is flagged `audit = "AUD_<table>"`;
-        # otherwise it's ignored. Pulled from the JWT principal — never the request body.
-        result = await conn.execute(query, params, language=language, max_rows=max_rows, user=user)
+        # `user` is recorded on the audit row when the screen carries `audit_table`; otherwise
+        # it's ignored. Pulled from the JWT principal — never the request body.
+        result = await conn.execute(
+            query, params, language=language, max_rows=max_rows, user=user,
+            column_hints=column_hints, audit_table=audit_table, screen_max_rows=screen_max_rows,
+        )
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
@@ -123,7 +174,8 @@ async def sql_pool_schema(
 
 @router.get("/sql/{connector}/{query}")
 async def sql_query_get(
-    connector: str, query: str, request: Request, principal: CurrentPrincipal, connectors: Connectors
+    connector: str, query: str, request: Request, principal: CurrentPrincipal,
+    connectors: Connectors, screens: Screens,
 ) -> dict[str, Any]:
     require_permission(principal, f"sql:{connector}:{query}")
     # GET must not mutate — only SELECTs are allowed here; everything else uses POST.
@@ -131,19 +183,21 @@ async def sql_query_get(
         qdef = connectors.sql(connector).get_query(query)
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
-    if detect_statement_type(qdef.sql) != "SELECT":
+    if detect_statement_type(qdef.default_sql) != "SELECT":
         raise HTTPException(status.HTTP_405_METHOD_NOT_ALLOWED, detail="Non-SELECT queries must be run with POST")
     qp = dict(request.query_params)
     limit = _as_int(qp.pop("_limit", None))  # ?_limit=N overrides the row cap; the rest are query params
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
+        screens=screens,
     )
 
 
 @router.post("/sql/{connector}/{query}")
 async def sql_query_post(
-    connector: str, query: str, request: Request, principal: CurrentPrincipal, connectors: Connectors,
+    connector: str, query: str, request: Request, principal: CurrentPrincipal,
+    connectors: Connectors, screens: Screens,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     require_permission(principal, f"sql:{connector}:{query}")
@@ -151,6 +205,7 @@ async def sql_query_post(
     return await _run_sql(
         connectors, connector, query, _params_from_body(body),
         language=request_language(request), max_rows=limit, user=principal.username,
+        screens=screens,
     )
 
 

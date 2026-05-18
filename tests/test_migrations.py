@@ -167,7 +167,11 @@ def test_migrate_sql_queries_put_where_rewrite() -> None:
     assert "WHERE USR_APPS_ID = :USR_APPS_ID_ORIGINAL AND USR_ID = :USR_ID_ORIGINAL" in put_sql
     # the read query is untouched
     assert by_name["users_get"]["sql"] == "SELECT USR_APPS_ID, USR_ID, USR_NAME FROM SECURITY_USERS"
-    assert by_name["users_get"]["key_columns"] == ["USR_APPS_ID", "USR_ID"]  # surfaced for the import match-by-key
+    # Phase 3 — ``key_columns`` moved off QueryDef onto Screen (``migrate_screens`` consumes
+    # the same ``migrate_key_columns`` output). ``migrate_sql_queries`` no longer emits it on
+    # the connector — but the underlying ``_put`` WHERE-rewrite still uses the key columns,
+    # which is what this test verifies (the rewrite already asserted above).
+    assert "key_columns" not in by_name["users_get"]
     assert "key_columns" not in by_name["users_put"]  # only the read query carries it
     from liberty.connectors.base import find_bind_params
     binds = set(find_bind_params(put_sql))
@@ -260,11 +264,10 @@ def test_migrate_sql_queries_no_longer_wraps_filter_columns() -> None:
     assert "VARCHAR(4000)" not in sql["default"] and "VARCHAR2(4000)" not in sql["oracle"]
     assert ":USR_ID_op" not in sql["default"]
     assert sql["default"].rstrip().endswith("ORDER BY usr_name")
-    # The filter hint is preserved so the runtime can build the wrap on demand.
-    cols = q["columns"]
-    by_col = {c["name"]: c for c in cols}
-    assert by_col["USR_ID"].get("filter") is True
-    assert by_col["USR_NAME"].get("filter") is None  # default false → omitted
+    # Phase 3 — column hints (including ``filter``) live on ``Screen.columns``, not on
+    # ``QueryDef.columns``. ``migrate_sql_queries`` no longer emits them on the connector;
+    # the runtime gets them from the matching Screen via the route layer.
+    assert "columns" not in q
     # a query with no filter columns is left alone (no wrapper)
     assert by_name["twins_select"]["sql"] == "SELECT 1 AS x"
     # write queries are never wrapped (this was always true; assert it's still true)
@@ -325,21 +328,16 @@ def test_migrate_table_filters() -> None:
 
 
 def test_migrate_sql_queries_filter_from() -> None:
+    """Phase 3 — ``columns`` (including ``filter_from``) moved off QueryDef onto Screen.
+    ``migrate_sql_queries`` no longer emits them; the data is consumed by ``migrate_screens``."""
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
         column_hints={1: [{"name": "USR_ID", "filter": True}, {"name": "USR_NAME", "filter": True}]},
         column_filters={1: {"USR_NAME": [{"source": "USR_ID", "column": "UN_REF"}]},
-                        2: {"USR_ID": [{"source": "X", "column": "Y"}]}},  # query 2 is a write → no columns → no-op
+                        2: {"USR_ID": [{"source": "X", "column": "Y"}]}},
     )
     by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
-    cols = {c["name"]: c for c in by_name["users_list_select"]["columns"]}
-    assert cols["USR_NAME"]["filter_from"] == [{"source": "USR_ID", "column": "UN_REF"}]
-    assert "filter_from" not in cols["USR_ID"]  # no entry for it
-    # round-trips through the v2 loader
-    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
-    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
-    un = next(c for c in q1.columns if c.name == "USR_NAME")
-    assert [{"source": d.source, "column": d.column} for d in un.filter_from] == [{"source": "USR_ID", "column": "UN_REF"}]
+    assert "columns" not in by_name["users_list_select"]
     assert "delete_user_delete" in by_name  # write query unaffected
 
 
@@ -372,47 +370,41 @@ def test_migrate_column_visibility() -> None:
 
 
 def test_migrate_sql_queries_visible_when() -> None:
+    """Phase 3 — column visibility (``visible_when``) lives on ``Screen.columns``, not on
+    ``QueryDef.columns``. ``migrate_sql_queries`` no longer emits it on the connector."""
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
         column_hints={1: [{"name": "USR_ID"}, {"name": "USR_NAME"}]},
         column_visibility={1: {"USR_NAME": [{"field": "USR_ID", "value": ["42"]}]},
-                           2: {"USR_ID": [{"field": "X", "value": ["y"]}]}},  # write query → no-op
+                           2: {"USR_ID": [{"field": "X", "value": ["y"]}]}},
     )
     by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
-    cols = {c["name"]: c for c in by_name["users_list_select"]["columns"]}
-    assert cols["USR_NAME"]["visible_when"] == [{"field": "USR_ID", "value": ["42"]}]
-    assert "visible_when" not in cols["USR_ID"]
-    reparsed = parse_connectors(tomllib.loads(render_toml(out)))
-    q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
-    un = next(c for c in q1.columns if c.name == "USR_NAME")
-    assert [r.as_dict() for r in un.visible_when_rules] == [{"field": "USR_ID", "value": ["42"]}]
+    assert "columns" not in by_name["users_list_select"]
 
 
 def test_migrate_sql_queries_with_table_meta() -> None:
+    """Phase 3 — ``auto_load`` and ``audit`` moved off QueryDef onto Screen. The query's
+    ``description`` is still emitted (friendly metadata stays on QueryDef)."""
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
         table_meta={
             1: {"description": "Users List Screen", "auto_load": True},
-            # description on a write-only query gets ignored; audit_table propagates to the write variants
             2: {"description": "Should be ignored — write query", "audit_table": "AUD_LY_USERS"},
         },
     )
     by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
     assert by_name["users_list_select"]["description"] == "Users List Screen"
-    assert by_name["users_list_select"]["auto_load"] is True
-    # a write query (DELETE) gets no description/auto_load even if a table_meta entry exists
+    # auto_load / audit are silently dropped on QueryDef — they belong on Screen now.
+    assert "auto_load" not in by_name["users_list_select"]
+    assert "audit" not in by_name["delete_user_delete"]
+    # a write query (DELETE) gets no description from table_meta (only the read companion does)
     assert "description" not in by_name["delete_user_delete"]
-    assert "auto_load" not in by_name["delete_user_delete"]
-    # Slice 5 — the write companion picks up `audit = "AUD_LY_USERS"` from table_meta; the
-    # read companion gets *no* audit (it never mutates anything to mirror).
-    assert by_name["delete_user_delete"]["audit"] == "AUD_LY_USERS"
-    assert "audit" not in by_name["users_list_select"]
-    # round-trips through the v2 loader
+    # round-trips through the v2 loader — only the SQL-layer description survives on the
+    # query; auto_load / audit have moved to Screen.
     reparsed = parse_connectors(tomllib.loads(render_toml(out)))
     q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
-    qd = next(q for q in reparsed.connectors["default"].queries if q.name == "delete_user_delete")
-    assert q1.description == "Users List Screen" and q1.auto_load is True
-    assert qd.audit == "AUD_LY_USERS" and q1.audit is None
+    assert q1.description == "Users List Screen"
+    assert not hasattr(q1, "auto_load") and not hasattr(q1, "audit")
 
 
 # --------------------------------------------------------------------------- #
@@ -672,11 +664,10 @@ def test_migrate_drill_filter_columns_end_to_end() -> None:
     q = out["connectors"]["nomasx1"]["queries"][0]
     # The stored SQL is the raw inner SELECT — the runtime wraps on demand.
     assert q["sql"] == "SELECT * FROM assignments"
-    # Filter flags are preserved on the columns hint so the runtime can bind both columns
-    # when the URL drill provides them.
-    by_col = {c["name"]: c for c in q["columns"]}
-    assert by_col["RLU_APPS_ID"]["filter"] is True
-    assert by_col["RLU_USER_ID"]["filter"] is True
+    # Phase 3 — ``columns`` (with their ``filter`` flags) lives on Screen, not QueryDef.
+    # ``migrate_sql_queries`` no longer emits them; ``migrate_screens`` does (the same
+    # ``migrate_column_hints`` output gets threaded to ``migrate_screens(column_hints=…)``).
+    assert "columns" not in q
 
 
 def test_migrate_nested_tab_filter_columns() -> None:
@@ -752,16 +743,15 @@ def test_migrate_nested_tab_filter_columns_end_to_end() -> None:
     out = migrate_sql_queries(queries, sql_rows, column_hints=hints)
     q = out["connectors"]["nomasx1"]["queries"][0]
     assert q["sql"] == "SELECT * FROM audit_trail"   # raw — runtime wraps on demand
-    by_col = {c["name"]: c for c in q["columns"]}
-    assert by_col["AUD_APPS_ID"]["filter"] is True
+    # Phase 3 — column hints (with filter flags) live on Screen now.
+    assert "columns" not in q
 
 
 def test_migrate_sql_queries_drops_filter_for_missing_columns() -> None:
-    """A `filter = true` hint that names a column the SQL doesn't expose generates a
-    ``lib_flt.<missing>`` WHERE clause that errors at run time (the bug behind the dashboard's
-    SOD widget 502s). The migrator now strips the flag with a logged warning so the wrapper
-    only binds real columns. The hint itself stays — only `filter` goes away — so the column
-    still gets its label/format/etc."""
+    """Phase 3 — the column-hint drop-bad-filter validation logic is still useful for the
+    ``migrate_screens`` consumer path (it gets the hints with ``filter`` removed on missing
+    columns). ``migrate_sql_queries`` itself no longer emits columns on QueryDef; this test
+    just verifies the SQL is the raw inner SELECT (no wrap baked in)."""
     queries = [{"query_id": 20, "query_label": "Foo"}]
     sql_rows = [{
         "query_id": 20, "query_crud": "GET", "query_pool": "nomasx1", "query_dbtype": "postgres",
@@ -770,23 +760,14 @@ def test_migrate_sql_queries_drops_filter_for_missing_columns() -> None:
         "query_orderby": None,
     }]
     column_hints = {20: [
-        # `filter = true` on a column not in the SELECT → should be dropped
         {"name": "LUSR_APPS_ID", "dd": "APPS_ID", "filter": True},
-        # `filter = true` on a real column → kept
         {"name": "JDEO_APPS_ID", "dd": "APPS_ID", "filter": True},
-        # No `filter` flag at all → untouched (case-insensitive match against the SELECT)
         {"name": "cpt_id"},
     ]}
     out = migrate_sql_queries(queries, sql_rows, column_hints=column_hints)
     q = out["connectors"]["nomasx1"]["queries"][0]
-    cols = {c["name"]: c for c in q["columns"]}
-    # The broken filter is gone; the other one remains; the third is unchanged.
-    assert "filter" not in cols["LUSR_APPS_ID"]
-    assert cols["JDEO_APPS_ID"].get("filter") is True
-    # Phase 8: the migrator no longer wraps. The runtime would still skip an
-    # unflagged column when building its WHERE — the validation here just keeps the
-    # stored config honest.
     assert q["sql"] == "SELECT JDEO_APPS_ID, CPT_ID, USERS_COUNT FROM some_table"
+    assert "columns" not in q
 
 
 def test_outermost_select_columns_handles_nested_selects() -> None:
@@ -1051,19 +1032,18 @@ def test_migrate_dictionary_lookup_param_names() -> None:
 
 
 def test_migrate_sql_queries_with_column_hints() -> None:
+    """Phase 3 — column hints are not emitted on QueryDef; ``migrate_screens`` consumes the
+    same hint map and emits ``Screen.columns`` instead."""
     out = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres",
                               column_hints={3: [{"name": "F0101", "label": "Address Book"}]})
     q3 = out["connectors"]["nomasx1"]["queries"][0]  # query 3 lives on the nomasx1 connector
-    assert q3["columns"] == [{"name": "F0101", "label": "Address Book"}]
-    # a DELETE query gets no hints even if passed — display hints only apply to result sets
-    out2 = migrate_sql_queries(_QUERIES, _SQL_ROWS, dbtype="postgres", column_hints={2: [{"name": "X"}]})
-    by_name = {q["name"]: q for q in out2["connectors"]["default"]["queries"]}
-    assert "columns" not in by_name["delete_user_delete"]
+    assert "columns" not in q3
     parse_connectors(tomllib.loads(render_toml(out)))  # round-trips through the v2 config loader
 
 
 def test_migrate_sql_queries_rest_crud_verbs() -> None:
-    # v1's query_crud is a REST verb: GET = read, POST/PUT/DELETE = write
+    """v1's query_crud is a REST verb: GET = read, POST/PUT/DELETE = write. Phase 3 — column
+    hints are not emitted on QueryDef regardless of the verb."""
     queries = [{"query_id": 1, "query_label": "Things", "query_type": "TABLE"}]
     sql_rows = [
         {"query_id": 1, "query_dbtype": "generic", "query_crud": "GET", "query_pool": "app",
@@ -1073,13 +1053,14 @@ def test_migrate_sql_queries_rest_crud_verbs() -> None:
     ]
     out = migrate_sql_queries(queries, sql_rows, column_hints={1: [{"name": "name", "label": "Name"}]})
     by_name = {q["name"]: q for q in out["connectors"]["app"]["queries"]}
-    # GET → read: ORDER BY appended, no `writable`, gets the column hints
+    # GET → read: ORDER BY appended, no `writable`
     assert by_name["things_get"]["sql"].endswith("ORDER BY id")
     assert "writable" not in by_name["things_get"]
-    assert by_name["things_get"]["columns"] == [{"name": "name", "label": "Name"}]
-    # POST → write: `writable = true`, no ORDER BY, no column hints
+    # POST → write: `writable = true`, no ORDER BY
     assert by_name["things_post"]["writable"] is True
     assert "ORDER BY" not in by_name["things_post"]["sql"]
+    # Phase 3 — neither emits columns on QueryDef.
+    assert "columns" not in by_name["things_get"]
     assert "columns" not in by_name["things_post"]
     parse_connectors(tomllib.loads(render_toml(out)))
 
@@ -1184,7 +1165,8 @@ def test_migrate_screens_no_dialog() -> None:
         "insert_query": "users_post",
         "delete_query": "users_delete",
         "auto_load": True,
-        "audit": True,
+        # Phase 3 — Screen.audit_table = "AUD_<TBL_DB_NAME>" (was a bool flag pre-Phase-3).
+        "audit_table": "AUD_SECURITY_USERS",
     }
     # Round-trips through the screens schema.
     parse_screens(out)
@@ -2552,7 +2534,7 @@ async def test_read_screens(v1_engine) -> None:
     assert s.read_query == "users_list_select"
     # tbl_query_id=1 has only a SELECT companion in ly_qry_sql → no update/insert/delete refs.
     assert s.update_query is None and s.insert_query is None and s.delete_query is None
-    assert s.audit is True and s.auto_load is True
+    assert s.auto_load is True   # Phase 3: audit_table replaces audit bool
     # Pool of query 1 is 'default' (not the app 'nomasx1') → `connector` is explicitly set.
     assert s.connector == "default"
     # Dialog walks ly_dlg_tab (+ _l) + ly_dlg_col + ly_dlg_filters.
@@ -2637,16 +2619,15 @@ def test_cli_sql_to_file(tmp_path) -> None:
     assert "postgresql+asyncpg://nomasx1@db.example:5432/nomasx1" in text_out
     assert 'password = "ENC:nx"' in text_out  # carried over from apps_password, kept out of the URL
     assert "${LIBERTY_DB_URL_DEFAULT}" in text_out  # the default pool kept its env-var stub
-    # ly_tbl_col → the migrated SELECT carries column display hints
+    # Phase 3 — column hints (label / dd / hidden / filter_from / visible_when) live on the
+    # Screen, not QueryDef. The query carries only sql/params/writable/description/label.
     sql_conn = cfg.connectors["default"]
     assert isinstance(sql_conn, SqlConnectorConfig)
     q1 = next(q for q in sql_conn.queries if q.name == "users_list_select")
-    assert [c.name for c in q1.columns] == ["USR_ID", "USR_NAME", "USR_PWD"]
-    assert q1.columns[2].hidden is True and q1.columns[1].label == "User Name"
-    # ly_tbl_filters → the USR_NAME column's filter dropdown cascades from USR_ID
-    assert [{"source": d.source, "column": d.column} for d in q1.columns[1].filter_from] == [{"source": "USR_ID", "column": "UN_REF"}]
-    # ly_tbl_col_cdn → USR_NAME shows unless the USR_ID filter is set to something other than '42'
-    assert [r.as_dict() for r in q1.columns[1].visible_when_rules] == [{"field": "USR_ID", "value": ["42"]}]
+    assert not hasattr(q1, "columns")
+    # The migrated SELECT is the raw inner SELECT; the runtime wraps on demand from the
+    # matching Screen's columns hints (built by ``liberty-migrate screen``).
+    assert "SELECT * FROM ly_users" in q1.default_sql
 
 
 def test_cli_all_to_stdout(tmp_path, capsys) -> None:
@@ -2655,7 +2636,9 @@ def test_cli_all_to_stdout(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     assert "fill in these placeholders" in out  # ${LIBERTY_DB_URL_DEFAULT} (the framework pool stub)
     assert "ENC:" in out  # the migrated pool's password (apps_password ENC: value, kept out of the URL)
-    assert "liberty-migrate dictionary" in out  # column hints reference the shared dictionary
+    # Phase 3 — column hints went to Screen, not QueryDef, so the dictionary-prompt is now
+    # conditional on whether any screens were migrated. ``all`` only emits connectors.toml,
+    # not screens.toml — so the prompt for ``liberty-migrate screen`` should appear too.
     cfg = parse_connectors(tomllib.loads(out))
     assert {"default", "acme"} <= set(cfg.connectors)
     assert "nomasx1" in cfg.pools
@@ -2721,7 +2704,7 @@ def test_cli_screen(tmp_path) -> None:
     screens = sf.screens["nomasx1"]
     s = screens["security_users"]
     assert s.read_query == "users_list_select"
-    assert s.connector == "default" and s.audit is True and s.auto_load is True
+    assert s.connector == "default" and s.auto_load is True   # Phase 3: audit_table replaces audit bool
     assert s.dialog is not None
     tab = s.dialog.tabs[0]
     assert tab.label == "General" and tab.l == {"fr": "Général"}

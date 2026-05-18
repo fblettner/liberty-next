@@ -202,12 +202,16 @@ async def _build(args: argparse.Namespace) -> dict:
             # ``col_rules_values`` to the v2 slug-based sequence id (parallel to what
             # ``migrate_dictionary`` does for top-level entries).
             seq_rows, _seq_param_rows = await read_sequences(engine)
+            # Phase 3 — Screen.key_columns (was QueryDef.key_columns). Built from the same
+            # ly_tbl_col / ly_dlg_col rows that feed column hints.
+            key_columns_by_qid = migrate_key_columns(tbl_cols, dlg_cols)
             screens_data = migrate_screens(
                 *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
                 promotable_dialogs=promotable_dialogs,
                 actions_data=actions_data,
                 sequence_rows=seq_rows,
                 column_hints=column_hints_by_qid,
+                key_columns=key_columns_by_qid,
                 app_name=args.connector,
             )
             # Event-driven action attachment via ``ly_evt_cpt`` — the *correct* model:
@@ -354,7 +358,8 @@ def _summary(data: dict, *, command: str) -> str:
         screens = apps.get(app) or {}
         n = len(screens)
         with_dlg = sum(1 for s in screens.values() if s.get("dialog"))
-        with_audit = sum(1 for s in screens.values() if s.get("audit"))
+        # Phase 3 — screens are audited when ``audit_table`` is set (string, not bool).
+        with_audit = sum(1 for s in screens.values() if s.get("audit_table"))
         cross = sum(1 for s in screens.values() if s.get("connector") and s["connector"] != app)
         n_fields = sum(len(t.get("fields") or []) for s in screens.values() for t in ((s.get("dialog") or {}).get("tabs") or []))
         # Phase 2 — ``lookup_param_binds`` now lives on ``Screen.columns[]`` (single source of

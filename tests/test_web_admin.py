@@ -419,7 +419,8 @@ def test_config_screens_parsed_get_and_put(env) -> None:
                     "label": "Users",
                     "read_query": "users_get",
                     "update_query": "users_put",
-                    "audit": True,
+                    # Phase 3 — ``audit_table`` (string) replaces the legacy ``audit`` bool.
+                    "audit_table": "AUD_SECURITY_USERS",
                     "columns": [
                         {
                             "name": "USR_ROLE_ID",
@@ -449,13 +450,13 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         assert r.status_code == 200 and r.json()["saved"] is True
         text = screens_toml.read_text()
         assert "[screens.nomasx1.security_users]" in text
-        assert 'read_query = "users_get"' in text and "audit = true" in text
+        assert 'read_query = "users_get"' in text and 'audit_table = "AUD_SECURITY_USERS"' in text
         # round-trip GET — id is injected from the dict key (default-valued keys dropped)
         after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
         assert set(after) == {"nomasx1"}
         assert set(after["nomasx1"]) == {"security_users"}
         s = after["nomasx1"]["security_users"]
-        assert s["read_query"] == "users_get" and s["audit"] is True
+        assert s["read_query"] == "users_get" and s["audit_table"] == "AUD_SECURITY_USERS"
         # The lookup_param_binds round-trip on Screen.columns (not the dialog field).
         assert s["columns"][0]["lookup_param_binds"][0] == {
             "param": "ROL_APPS_ID", "source": "USR_APPS_ID",

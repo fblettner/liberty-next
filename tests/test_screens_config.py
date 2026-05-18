@@ -295,7 +295,10 @@ def test_parse_screens_injects_id_from_key() -> None:
     sf = parse_screens(raw)
     s = sf.screens["nomasx1"]["security_users"]
     assert s.id == "security_users"  # injected from the key
-    assert s.read_query == "users_get" and s.audit is True
+    assert s.read_query == "users_get"
+    # Phase 3 — ``audit: bool`` is gone; ``audit_table: str | None`` replaces it. Old
+    # screens.toml files with ``audit = true`` parse cleanly (extra="ignore") but the bool
+    # is silently dropped; re-migration repopulates ``audit_table``.
     assert s.dialog is not None and s.dialog.title == "User"
     tab = s.dialog.tabs[0]
     # The tab dict had no ``type`` → ``parse_screens`` defaulted it to "form" so the

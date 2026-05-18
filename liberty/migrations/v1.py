@@ -520,18 +520,21 @@ def migrate_sql_queries(
         # Declare the lookup params on `QueryDef.params` so the SQL connector accepts the binds and
         # the runtime knows they're optional (blank → SQL NULL → the WHERE branch lets every row through).
         param_defs = [{"name": p} for p in lkp_params]
+        # Phase 3 — ``columns`` / ``auto_load`` / ``audit`` / ``key_columns`` have moved off
+        # ``QueryDef`` onto :class:`Screen`. ``migrate_screens`` consumes the same source data
+        # (column_hints / table_meta / key_columns) and emits the matching ``Screen`` fields
+        # there (audit_table / auto_load / key_columns / columns). The unused locals here
+        # (``tm`` / ``kcs`` / ``audit_table`` / ``hints``) stay so the existing data plumb
+        # keeps working for ``migrate_screens``' calls in ``migrate_cli`` and tests.
+        _unused = (tm, kcs, audit_table, hints)
         connectors[conn_name]["queries"].append(
             _drop_none({
                 "name": _uniquify(base, names_per_connector[conn_name]),
                 "label": label or None,
                 "description": (tm or {}).get("description") or None,
-                "auto_load": True if (tm or {}).get("auto_load") else None,
-                "key_columns": (kcs or None),  # omit when empty — used by the Excel-import match-by-key
                 "writable": None if is_read else True,  # GET/SELECT → omit (default false); POST/PUT/DELETE/… → writable
-                "audit": audit_table or None,  # v1 tbl_audit='Y' → "AUD_<TBL_DB_NAME>" on each writable companion
                 "sql": _sql_value(variants),
                 "params": (param_defs or None),
-                "columns": (hints or None),  # omit when empty
             })
         )
 
@@ -2504,6 +2507,7 @@ def migrate_screens(
     actions_data: Mapping[str, Any] | None = None,
     sequence_rows: Iterable[Mapping[str, Any]] = (),
     column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
+    key_columns: Mapping[int, list[str]] | None = None,
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -3001,12 +3005,24 @@ def migrate_screens(
 
         if str(r.get("tbl_auto_load") or "").upper() in _YES_FLAGS:
             screen["auto_load"] = True
+        # Phase 3 — v1's ``tbl_audit = 'Y'`` translates to ``Screen.audit_table = "AUD_<TBL>"``
+        # (was QueryDef.audit pre-Phase-3). The screen-level audit table drives the SQL
+        # connector's audit mirror via the route layer's thread-through.
         if str(r.get("tbl_audit") or "").upper() in _YES_FLAGS:
-            screen["audit"] = True
+            db = (r.get("tbl_db_name") or "").strip()
+            if db:
+                screen["audit_table"] = f"AUD_{db.upper()}"
         if str(r.get("tbl_editable") or "Y").upper() in _HIDDEN_FLAGS:  # `'N'` → not editable
             screen["editable"] = False
         if str(r.get("tbl_uploadable") or "").upper() in _YES_FLAGS:
             screen["uploadable"] = True
+        # Phase 3 — ``key_columns`` (v1 col_key) moved off QueryDef onto Screen. The
+        # migration's ``migrate_key_columns`` helper produces ``{tbl_query_id: [col, …]}``
+        # which the caller threads in here.
+        if key_columns:
+            kcs = key_columns.get(tbl_q)
+            if kcs:
+                screen["key_columns"] = list(kcs)
 
         # Phase 1 mirror of QueryDef.columns onto the screen. Same hints the read query already
         # carries — copied here so the runtime can shift to ``Screen.columns`` as the source of

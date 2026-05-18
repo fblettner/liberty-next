@@ -516,7 +516,12 @@ class ScreenDialog(BaseModel):
 class Screen(BaseModel):
     """A screen — list + dialog. Keyed by ``id`` within the app's screens map."""
 
-    model_config = ConfigDict(extra="forbid")
+    # ``extra = "ignore"`` (not "forbid") so a screens.toml written before Phase 3 still loads.
+    # Removed legacy keys (``audit: bool``, ``max_rows`` was never on Screen, etc. — and the
+    # whole legacy field shape from before Phase 2) are silently dropped on parse; operators
+    # re-migrate at their pace via ``liberty-migrate screen`` to repopulate ``audit_table``,
+    # ``max_rows``, ``key_columns``, and the per-screen column hints.
+    model_config = ConfigDict(extra="ignore")
 
     id: str = Field(description="Stable screen id within the app (e.g. ``security_users``, ``F0005``).")
     label: str | None = Field(default=None, description="Short label shown in the menu / list.")
@@ -545,7 +550,34 @@ class Screen(BaseModel):
         ),
     )
     auto_load: bool = Field(default=False, description="Run the read query on screen open (v1's tbl_auto_load).")
-    audit: bool = Field(default=False, description="Stamp AUD_<table> on every write (v1's tbl_audit). Wired in slice 5.")
+    audit_table: str | None = Field(
+        default=None,
+        description=(
+            "Audit table name to mirror writes into (Phase 3 — promoted from ``QueryDef.audit``; "
+            "v2's port of v1's ``tbl_audit = 'Y'`` + auto-derived ``AUD_<TABLE>``). When set on a "
+            "screen, every successful write through its ``update_query`` / ``insert_query`` / "
+            "``delete_query`` INSERTs into ``<audit_table>`` the bound params (uppercased) plus "
+            "three audit columns: ``AUD_ACTION`` (INSERT/UPDATE/DELETE), ``AUD_USER`` (the caller's "
+            "username), ``AUD_DATE`` (server timestamp). The route layer threads it into the SQL "
+            "connector at execute time. Blank → no auditing."
+        ),
+    )
+    max_rows: int | None = Field(
+        default=None,
+        description=(
+            "Per-screen SELECT row cap (Phase 3 — promoted from ``QueryDef.max_rows``). Overrides "
+            "the connector's, then the pool's, then 1000 fallback. A per-request ``?_limit`` query "
+            "string still wins. Blank → defer to the connector / pool default."
+        ),
+    )
+    key_columns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Result columns that identify a row (v1's ``col_key``) — the TableView's Excel import "
+            "matches imported rows against loaded ones on these to decide update-vs-insert. "
+            "Phase 3 — promoted from ``QueryDef.key_columns``."
+        ),
+    )
     editable: bool = Field(default=True, description="Allow inline grid editing (v1's tbl_editable).")
     uploadable: bool = Field(default=False, description="Show the Excel/CSV import button (v1's tbl_uploadable).")
     dialog: ScreenDialog | None = Field(default=None, description="Form for adding / editing a row — optional.")

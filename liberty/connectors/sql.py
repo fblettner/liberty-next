@@ -629,41 +629,17 @@ class SQLConnector:
                 f"Available: {self.query_names or '(none)'}."
             ) from None
 
-    def _companion(self, qdef: QueryDef, suffix: str, explicit: str | None) -> str | None:
-        """The name of the ``writable`` companion query for *qdef* — the *explicit* value if set,
-        else the ``<base>_get`` → ``<base><suffix>`` query (if it exists on this connector and is
-        writable, the migration's convention). ``None`` otherwise."""
-        if explicit is not None:
-            cand = self._queries.get(explicit)
-            return explicit if cand is not None and cand.writable else None
-        n = qdef.name
-        if n[-4:].lower() == "_get":
-            cand_name = n[:-4] + suffix
-            cand = self._queries.get(cand_name)
-            if cand is not None and cand.writable:
-                return cand_name
-        return None
-
-    def update_query_for(self, qdef: QueryDef) -> str | None:
-        """The ``writable`` query that updates one row of *qdef*'s result (``QueryDef.update_query``
-        or the ``_get`` → ``_put`` companion)."""
-        return self._companion(qdef, "_put", qdef.update_query)
-
-    def insert_query_for(self, qdef: QueryDef) -> str | None:
-        """The ``writable`` query that inserts a row into *qdef*'s table (``_post`` companion)."""
-        return self._companion(qdef, "_post", qdef.insert_query)
-
-    def delete_query_for(self, qdef: QueryDef) -> str | None:
-        """The ``writable`` query that deletes one row of *qdef*'s result (``_delete`` companion)."""
-        return self._companion(qdef, "_delete", qdef.delete_query)
-
     def describe(self) -> dict[str, Any]:
         """Metadata only — no credentials, no pool URL. Feeds the CLI / settings UI / AI tool.
         Statement-type / bind-param introspection uses the dialect-independent (``default``)
-        SQL variant; ``dialects`` lists which per-dialect variants the query carries; each
-        query's ``columns`` carry the *resolved* hints (label/format from the dictionary, in
-        its default language, with any inline overrides applied)."""
-        lang = self._dict.default_language
+        SQL variant; ``dialects`` lists which per-dialect variants the query carries.
+
+        **Phase 3** — per-screen behaviour (columns / auto_load / audit_table / max_rows /
+        key_columns / update_query / insert_query / delete_query) has moved off ``QueryDef``
+        onto :class:`liberty.screens.config.Screen`. This output now carries only the SQL-layer
+        bits: the statement, declared params, bind names, writable flag, dialects, and
+        friendly labels. The frontend reads per-screen behaviour from
+        ``GET /api/screens/{app}/{id}`` instead."""
         return {
             "name": self.name,
             "type": "sql",
@@ -673,19 +649,13 @@ class SQLConnector:
                     "name": q.name,
                     "label": q.label,
                     "description": q.description,
-                    "auto_load": q.auto_load,
-                    "key_columns": q.key_columns,
                     "writable": q.writable,
-                    "update_query": self.update_query_for(q),
-                    "insert_query": self.insert_query_for(q),
-                    "delete_query": self.delete_query_for(q),
                     "statement_type": detect_statement_type(q.default_sql),
                     "dialects": q.dialects,
                     "params": [
                         {"name": p.name, "label": p.label, "default": p.default}
                         for p in q.params
                     ],
-                    "columns": [_hint_to_dict(h, self._dict, lang, connector=self.name) for h in q.columns],
                     "bind_params": find_bind_params(q.default_sql),
                     "sql": q.sql,
                 }
@@ -709,13 +679,15 @@ class SQLConnector:
         return bound
 
     def _apply_filter_wrap(
-        self, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None, *, stmt_type: str,
+        self, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None, *,
+        stmt_type: str, column_hints: list[ColumnHint] | None = None,
     ) -> tuple[str, dict[str, Any] | None]:
         """v1-style **runtime** filter wrap. Inspects *params* for values bound to columns
-        the query marks ``filter = true`` (in ``QueryDef.columns``), and emits a wrap with
-        a predicate per *active* column only — type-aware: text columns get the full
-        operator family (contains / equals / notEquals / startsWith / endsWith), non-text
-        columns get a typed equals.
+        flagged ``filter = true`` on *column_hints* (the screen's :class:`ColumnHint` list,
+        threaded in by the route layer from the matching :class:`Screen` — Phase 3).
+        Emits a wrap with a predicate per *active* column only — type-aware: text columns
+        get the full operator family (contains / equals / notEquals / startsWith / endsWith),
+        non-text columns get a typed equals.
 
         Each column's effective format is resolved the same way ``_apply_column_hints``
         and ``_column_meta_map`` do it: the column hint's own ``format`` wins, else the
@@ -725,16 +697,10 @@ class SQLConnector:
         binds) would render as text and break on a numeric column —
         ``LOWER(integer)`` is undefined on Postgres.
 
-        Phase 8: replaces the migrator's static wrap that bundled every filter column's
-        full operator predicate into the stored SQL whether the caller used it or not.
-        Side effect: indexes can finally be used (no universal CAST AS VARCHAR(4000) on
-        the column side) and the stored SELECT is small enough to round-trip through a
-        wizard.
-
         Only fires on SELECT — writes don't have filter columns to wrap. Returns
         *sql_text* unchanged when:
-          - the query has no filter-flagged columns, OR
-          - the caller didn't bind a value for any of them, OR
+          - no column hints supplied (no screen, or screen has no columns), OR
+          - the caller didn't bind a value for any filter-flagged column, OR
           - it's not a SELECT.
 
         ORDER BY at the top level is preserved across the wrap (the inner SELECT's
@@ -746,10 +712,11 @@ class SQLConnector:
         strict-type check rejects a string against an INTEGER-typed bind, so the wrap
         helper is the place to convert ``"10"`` → ``int(10)`` before binding. Non-active
         params and any other binds pass through untouched."""
-        if stmt_type != "SELECT" or not qdef.columns:
+        if stmt_type != "SELECT" or not column_hints:
             return sql_text, params
+        _ = qdef  # kept for signature symmetry — no longer reads qdef.columns (Phase 3).
         active: list[tuple[str, str | None, str, Any]] = []
-        for col in qdef.columns:
+        for col in column_hints:
             if not col.filter:
                 continue
             v = (params or {}).get(col.name)
@@ -789,17 +756,18 @@ class SQLConnector:
             new_params[name] = coerced
         return out, new_params
 
-    def _column_meta_map(self, qdef: QueryDef) -> dict[str, dict[str, str | None]]:
+    def _column_meta_map(
+        self, qdef: QueryDef, *, column_hints: list[ColumnHint] | None = None,
+    ) -> dict[str, dict[str, str | None]]:
         """Build a column-name → ``{format, rule, rules_values, default}`` map for *qdef*.
 
-        Column hints (``qdef.columns``) — the per-screen layer that can override the
-        dictionary entry's ``format`` — are picked up first; for every other column name
-        used as a bind in the SQL we fall back to ``find_entry(name)`` so write queries
-        (``_post`` / ``_put`` / ``_delete``, which the migration emits *without* a
-        ``columns`` block — the layout lives on the matching ``_get``) still get rule
-        resolution + coercion. Keys are upper-cased: the migration's binds (``:USR_ID``)
-        and the v1 dictionary's dd_ids both use uppercase; the resolved key matches the
-        bind name regardless of how the surrounding SQL was cased.
+        Column hints (Phase 3: threaded in by the route layer from the matching screen)
+        are picked up first; for every other column name used as a bind in the SQL we fall
+        back to ``find_entry(name)`` so write queries (``_post`` / ``_put`` / ``_delete``,
+        which the migration emits *without* a ``columns`` block — the layout lives on the
+        matching ``_get``) still get rule resolution + coercion. Keys are upper-cased: the
+        migration's binds (``:USR_ID``) and the v1 dictionary's dd_ids both use uppercase;
+        the resolved key matches the bind name regardless of how the surrounding SQL was cased.
 
         Each hint's ``dd`` (or its ``name`` when ``dd`` is unset) is the dictionary lookup
         key; ``dd = ""`` opts out (the column carries no dictionary semantics — keep the
@@ -827,7 +795,7 @@ class SQLConnector:
                 "false_value": false_v,
             }
 
-        for col in qdef.columns:
+        for col in (column_hints or []):
             key = (col.dd if col.dd else col.name) if col.dd != "" else None
             entry = self._dict.find_entry(key, connector=self.name) if key else None
             out[col.name.upper()] = _entry_meta(entry, col.format)
@@ -850,6 +818,7 @@ class SQLConnector:
 
     def _apply_form_rules(
         self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, user: str | None,
+        column_hints: list[ColumnHint] | None = None,
     ) -> dict[str, Any]:
         """Resolve form-layer rules + coerce types on the bound params, **synchronously**.
 
@@ -879,7 +848,7 @@ class SQLConnector:
         """
         if stmt_type not in WRITE_STATEMENTS:
             return bound
-        meta = self._column_meta_map(qdef)
+        meta = self._column_meta_map(qdef, column_hints=column_hints)
         if not meta:
             return bound
         out = dict(bound)
@@ -955,6 +924,7 @@ class SQLConnector:
 
     async def _resolve_sequences(
         self, conn: Any, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, language: str,
+        column_hints: list[ColumnHint] | None = None,
     ) -> dict[str, Any]:
         """Run any ``SEQUENCE`` / ``NN`` rule queries in *conn* (the open write transaction)
         and substitute the result into the matching bind. Only fires on INSERT and only when
@@ -973,7 +943,7 @@ class SQLConnector:
         """
         if stmt_type != "INSERT":
             return bound
-        meta = self._column_meta_map(qdef)
+        meta = self._column_meta_map(qdef, column_hints=column_hints)
         if not meta:
             return bound
         out = dict(bound)
@@ -1040,32 +1010,44 @@ class SQLConnector:
                 )
         return out
 
-    def _row_cap(self, qdef: QueryDef, override: int | None) -> int:
-        """Effective row cap for one SELECT: a per-request *override* if given, else the query's
-        ``max_rows``, else this connector's (which already folds in the pool's) — clamped to
-        ``[1, HARD_MAX_ROWS]``."""
-        cap = override if override is not None else (qdef.max_rows if qdef.max_rows is not None else self.max_rows)
+    def _row_cap(self, qdef: QueryDef, override: int | None, screen_max_rows: int | None = None) -> int:
+        """Effective row cap for one SELECT: per-request *override* > per-screen *screen_max_rows*
+        > this connector's (which already folds in the pool's) > 1000 fallback — clamped to
+        ``[1, HARD_MAX_ROWS]``. Phase 3 — the per-query cap moved to ``Screen.max_rows``;
+        ``qdef`` is kept for signature symmetry."""
+        _ = qdef
+        cap = override if override is not None else (screen_max_rows if screen_max_rows is not None else self.max_rows)
         return max(1, min(int(cap), self.HARD_MAX_ROWS))
 
     async def execute(
         self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
         max_rows: int | None = None, user: str | None = None,
+        column_hints: list[ColumnHint] | None = None, audit_table: str | None = None,
+        screen_max_rows: int | None = None,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
+        Phase 3 — per-screen behaviour (column hints / audit table / row cap) is threaded in
+        by the route layer from the matching :class:`Screen` rather than read off ``QueryDef``:
+
+          * ``column_hints`` — the screen's ``ColumnHint`` list, drives result-column display
+            (label/format/rule/filter/etc.), the runtime filter wrap, and the rule machinery
+            for write-side coercion / SEQUENCE resolution.
+          * ``audit_table`` — when non-empty, mirror successful writes into the named audit
+            table in the same transaction (v1's AUD_<table> pattern).
+          * ``screen_max_rows`` — per-screen SELECT row cap; the *max_rows* kwarg (per-request
+            override) still wins.
+
         The SQL variant matching the pool's database is selected (``QueryDef.sql_for``).
-        Result-column display hints (``QueryDef.columns``) are resolved against the shared
-        dictionary in *language* (default: the dictionary's ``default_language``). *max_rows*
-        overrides the configured row cap for this call (query → connector → pool → 1000), clamped
-        to ``[1, HARD_MAX_ROWS]``. *user* is the caller's username — recorded on the audit row
-        when ``QueryDef.audit`` is set; defaults to ``"anonymous"`` for unauthenticated paths.
-        Raises :class:`QueryNotFoundError`, :class:`StatementNotAllowedError`,
-        :class:`WriteNotAllowedError`, or :class:`UnknownPoolError`; database errors propagate as the
-        underlying SQLAlchemy exception.
+        *language* drives dictionary resolution (default: the dictionary's ``default_language``).
+        *user* is the caller's username — recorded on the audit row when ``audit_table`` is set;
+        defaults to ``"anonymous"`` for unauthenticated paths. Raises :class:`QueryNotFoundError`,
+        :class:`StatementNotAllowedError`, :class:`WriteNotAllowedError`, or
+        :class:`UnknownPoolError`; database errors propagate as the underlying SQLAlchemy exception.
         """
         lang = language or self._dict.default_language
         qdef = self.get_query(query_name)
-        cap = self._row_cap(qdef, max_rows)
+        cap = self._row_cap(qdef, max_rows, screen_max_rows)
         sql_text = _apply_schema_placeholders(
             qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
             connector=self.name, query=query_name, pool=self.pool_name,
@@ -1092,14 +1074,18 @@ class SQLConnector:
         # the proper Python type (str → int / date / bool); ``_build_params`` runs
         # afterwards against the (possibly-wrapped) SQL so it picks up the new ``:NAME``
         # binds with their coerced values.
-        sql_text, params = self._apply_filter_wrap(sql_text, qdef, params, stmt_type=stmt_type)
+        sql_text, params = self._apply_filter_wrap(
+            sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
+        )
         bound = self._build_params(sql_text, qdef, params)
         # Resolve form-layer rules (LOGIN / SYSDATE / PASSWORD / DEFAULT) + coerce string
         # binds to the matching Python type for the column's resolved format. SEQUENCE / NN
         # is deferred to inside the write transaction (it needs the DB). On SELECT this is
         # a no-op for the filter binds (they're already typed via the runtime CAST in the
         # wrap, and SYSDATE/etc. only fire on writes anyway).
-        bound = self._apply_form_rules(bound, qdef, stmt_type=stmt_type, user=user)
+        bound = self._apply_form_rules(
+            bound, qdef, stmt_type=stmt_type, user=user, column_hints=column_hints,
+        )
         stmt = text(sql_text)
         is_select = stmt_type == "SELECT"
 
@@ -1107,7 +1093,9 @@ class SQLConnector:
         if is_select:
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
-                columns = _apply_column_hints(_columns_from_result(result), qdef.columns, self._dict, lang, connector=self.name)
+                columns = _apply_column_hints(
+                    _columns_from_result(result), column_hints or [], self._dict, lang, connector=self.name,
+                )
                 rows: list[dict[str, Any]] = []
                 truncated = False
                 for row in result.mappings():
@@ -1197,16 +1185,21 @@ class SQLConnector:
             # the INSERT so a concurrent insert can't grab the same value (the surrounding
             # ``engine.begin()`` block serialises). A missing/failing sequence logs and falls
             # through with NULL (the DB will then reject the row if the column is NOT NULL).
-            bound = await self._resolve_sequences(conn, bound, qdef, stmt_type=stmt_type, language=lang)
+            bound = await self._resolve_sequences(
+                conn, bound, qdef, stmt_type=stmt_type, language=lang, column_hints=column_hints,
+            )
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
-            # AUD audit (v1's tbl_audit = 'Y' → migrated as QueryDef.audit = "AUD_<table>"). The
-            # mirror INSERT runs in the *same* transaction so a successful write + failing audit
-            # rolls back together — a missing/misshapen AUD table is loud, not silently dropped.
-            # Pass the *coerced/resolved* bound params (post LOGIN/SYSDATE/PASSWORD/SEQUENCE) so
-            # the audit mirror matches what actually hit the DB.
-            if qdef.audit:
-                await self._write_audit(conn, qdef, stmt_type, bound, user, main_sql=sql_text)
+            # AUD audit (v1's tbl_audit = 'Y' → migrated as Screen.audit_table = "AUD_<table>",
+            # threaded in by the route layer). The mirror INSERT runs in the *same* transaction
+            # so a successful write + failing audit rolls back together — a missing/misshapen
+            # AUD table is loud, not silently dropped. Pass the *coerced/resolved* bound params
+            # (post LOGIN/SYSDATE/PASSWORD/SEQUENCE) so the audit mirror matches what actually
+            # hit the DB.
+            if audit_table:
+                await self._write_audit(
+                    conn, qdef, stmt_type, bound, user, audit_table=audit_table, main_sql=sql_text,
+                )
         duration_ms = (time.perf_counter() - started) * 1000.0
         return QueryResult(
             connector=self.name,
@@ -1424,10 +1417,12 @@ class SQLConnector:
 
     async def _write_audit(
         self, conn, qdef: QueryDef, stmt_type: str, params: dict[str, Any], user: str | None,
-        *, main_sql: str | None = None,
+        *, audit_table: str, main_sql: str | None = None,
     ) -> None:
-        """Mirror a writable execute into ``qdef.audit`` (v1's AUD_<table> pattern). Logs the
-        bound row's *uppercase* params (the v1 convention — the migrated _put/_post/_delete SQLs
+        """Mirror a writable execute into *audit_table* (v1's AUD_<table> pattern). Phase 3 —
+        the audit table name is threaded in by the route layer from the matching
+        :class:`Screen.audit_table` (was ``QueryDef.audit`` pre-Phase-3). Logs the bound
+        row's *uppercase* params (the v1 convention — the migrated _put/_post/_delete SQLs
         bind columns as ``:USR_ID`` etc.) and three audit columns:
 
         * ``AUD_ACTION`` — the statement type (``INSERT`` / ``UPDATE`` / ``DELETE``)
@@ -1438,8 +1433,7 @@ class SQLConnector:
         only WHERE rebinds for the main UPDATE). The AUD table is auto-created from the source
         table's schema on first write (v1 parity — operators never ran DDL to set up audit, the
         framework did it lazily) via :meth:`_ensure_audit_table`; *main_sql* identifies the
-        source table for that step. The migration emits ``audit = "AUD_<TBL_DB_NAME>"`` on
-        writable companions when v1's ``tbl_audit = 'Y'`` is set, so the names line up."""
+        source table for that step."""
         cols: dict[str, Any] = {}
         for k, v in (params or {}).items():
             if not k or not k.isupper() or k.endswith("_ORIGINAL"):
@@ -1449,13 +1443,13 @@ class SQLConnector:
             # nothing to audit — leave a footprint so an operator who expected audit knows why nothing landed
             _log.warning(
                 "audit: %s.%s — no uppercase params to log into %s; skipping the audit row",
-                self.name, qdef.name, qdef.audit,
+                self.name, qdef.name, audit_table,
             )
             return
         # v1 parity: lazily create AUD_<table> from the source table's schema if it doesn't
         # exist yet. Runs in the same write transaction as the main statement so a failure
         # rolls everything back together.
-        await self._ensure_audit_table(conn, qdef.audit or "", main_sql)
+        await self._ensure_audit_table(conn, audit_table, main_sql)
         # Build `INSERT INTO <audit> (col1, col2, …, AUD_ACTION, AUD_USER, AUD_DATE)
         #                    VALUES (:col1, :col2, …, :_AUD_ACTION, :_AUD_USER, :_AUD_DATE)`
         # Reserved bind names start with `_aud_` so they can't collide with the row's columns.
@@ -1475,10 +1469,7 @@ class SQLConnector:
         }
         col_sql = ", ".join([*col_list, "AUD_ACTION", "AUD_USER", "AUD_DATE"])
         val_sql = ", ".join([f":{c}" for c in col_list] + [":_aud_action", ":_aud_user", ":_aud_date"])
-        # qdef.audit is the table name; we don't validate it here — it's operator config, same as
-        # other table names embedded in SQL. The migration only ever emits ``AUD_<UPPER>`` so the
-        # surface is small in practice.
-        audit_sql = f"INSERT INTO {qdef.audit} ({col_sql}) VALUES ({val_sql})"
+        audit_sql = f"INSERT INTO {audit_table} ({col_sql}) VALUES ({val_sql})"
         await conn.execute(text(audit_sql), bind_params)
 
 

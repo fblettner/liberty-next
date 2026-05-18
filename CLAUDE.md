@@ -1157,11 +1157,31 @@ queries:
   `liberty-migrate screen`. The Visual Designer's field cards now read `dd` / `label` / format
   preview / lookup-bind count from the matching column hint instead of the field.
 
-* **Phase 3 (planned):** Strip `QueryDef` of `columns` / `auto_load` / `audit` / `max_rows` /
-  `key_columns` / `update_query` / `insert_query` / `delete_query` — these all live on
-  `Screen` now. This is schema-breaking; will require re-migration. Final state: Connector =
-  queries only (sql, params, writable, description?, label?); Screen = source of truth for
-  everything else.
+* **Phase 3 (done):** Stripped `QueryDef` of `columns` / `auto_load` / `audit` / `max_rows`
+  / `key_columns` / `update_query` / `insert_query` / `delete_query`. **Final state:**
+  Connector = queries only (`sql`, `params`, `writable`, `description?`, `label?`); Screen =
+  source of truth for everything else (`columns`, `auto_load`, `audit_table`, `max_rows`,
+  `key_columns`, `update_query`/`insert_query`/`delete_query`, `dialog`, `actions`,
+  `row_menu`, lifecycle hooks). `QueryDef` uses `extra="ignore"` so a `connectors.toml`
+  written before Phase 3 keeps loading (legacy keys silently dropped); `Screen` does the
+  same for `audit: bool` (replaced by `audit_table: str | None`). Operators re-migrate via
+  `liberty-migrate sql` + `liberty-migrate screen` to repopulate the matching `Screen`
+  fields.
+
+  **Runtime plumbing** — the SQL connector's `execute()` gained three new kwargs:
+  `column_hints` (the screen's `Screen.columns` list — drives the filter wrap, result-column
+  display hints, and write-side rule coercion / SEQUENCE resolution), `audit_table` (the
+  audit-mirror target, was `qdef.audit` pre-Phase-3), and `screen_max_rows` (the per-screen
+  SELECT cap). The web route layer (`liberty/web/connectors.py`) looks up the matching
+  `Screen` for `(connector, query)` — checking `read_query` / `update_query` / `insert_query`
+  / `delete_query` — and threads its `columns` / `audit_table` / `max_rows` into the
+  `execute()` call. A query with no matching screen runs unadorned (no audit, no
+  filter wrap, no per-screen hints) — back-compat for connector-only deployments. The
+  connector's `describe()` output drops `columns` / `auto_load` / `audit` / `key_columns` /
+  `update_query` / `insert_query` / `delete_query`; the frontend reads them from
+  `GET /api/screens/{app}/{id}` instead. The TableView now reads `update_query` /
+  `insert_query` / `delete_query` / `key_columns` / `auto_load` from `screen.*` first,
+  falling back to the (now mostly-empty) `meta.*`.
 
 457 tests pass.
 

@@ -62,7 +62,7 @@ def _screens_toml() -> str:
         description = "User accounts"
         read_query = "users_get"
         update_query = "users_get"
-        audit = true
+        audit_table = "AUD_USERS"
 
         [screens.app1.users.dialog]
         title = "User"

@@ -318,7 +318,14 @@ class ColumnHint(BaseModel):
 
 
 class QueryDef(BaseModel):
-    """A named SQL query with ``:name`` placeholders.
+    """A named SQL query with ``:name`` placeholders. **Phase 3 — pure SQL definition.**
+
+    Carries only what the SQL connector needs to *run* the query: the statement, declared
+    parameters, the writable gate, and friendly metadata. Per-screen display + behaviour
+    (``columns`` hints, ``auto_load``, ``audit_table``, ``key_columns``, ``max_rows``,
+    ``update_query`` / ``insert_query`` / ``delete_query`` companion refs) lives on the
+    matching :class:`liberty.screens.config.Screen` and is threaded into the SQL connector
+    by the route layer at execute time.
 
     ``sql`` is either a single statement (the common case) or a per-dialect map —
     e.g. ``sql = { default = "…", oracle = "…" }`` — keyed by SQLAlchemy backend
@@ -327,34 +334,19 @@ class QueryDef(BaseModel):
     SQL variants migrate to this shape.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # ``extra = "ignore"`` (not "forbid") so a connectors.toml written before Phase 3 keeps
+    # loading. Removed keys (``columns`` / ``auto_load`` / ``audit`` / ``max_rows`` /
+    # ``key_columns`` / ``update_query`` / ``insert_query`` / ``delete_query``) are silently
+    # dropped on parse — operators re-migrate at their pace via ``liberty-migrate sql`` to
+    # repopulate the matching ``Screen`` fields.
+    model_config = ConfigDict(extra="ignore")
 
     name: str = Field(description="Unique name within the connector; the permission string is sql:<connector>:<name>.")
     sql: str | dict[str, str] = Field(description="The SQL statement (`:name` placeholders). Either one string, or a per-dialect map { default = \"…\", oracle = \"…\" } keyed by SQLAlchemy backend name (the connector picks the variant matching its pool, falling back to `default`, which is then required).")
     writable: bool = Field(default=False, description="Allow non-SELECT statements (INSERT/UPDATE/DELETE/…). Required for any mutating query — plus the caller must hold the permission.")
     params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters — give a `:name` placeholder a form label and a default.")
-    columns: list[ColumnHint] = Field(default_factory=list, json_schema_extra={"x_group": "Columns"}, description="Display hints for the result columns (label/visibility/order/filter/…). The column *schema* is still discovered from the query at run time — these only augment it; order here = display order.")
     label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Friendly name for the query (shown in listings).")
-    description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Screen title in the TableView (falls back to `label`, then the menu label).")
-    auto_load: bool = Field(default=False, json_schema_extra={"x_group": "Advanced"}, description="Run this query immediately when the TableView opens — no \"Run\" click (v1's per-table auto-load). Safe even with params: an omitted `:name` becomes SQL NULL.")
-    max_rows: int | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Per-query SELECT row cap (else the connector's, then the pool's, then 1000). A per-request `?_limit` override beats this.")
-    key_columns: list[str] = Field(default_factory=list, json_schema_extra={"x_group": "Advanced"}, description="Result columns that identify a row (v1's col_key) — the TableView's Excel import matches imported rows against loaded ones on these to decide update-vs-insert.")
-    update_query: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="A `writable` query on this connector that UPDATEs a row of this result (the TableView's batch-edit). Blank → auto-derived from the `<base>_get` → `<base>_put` naming convention.")
-    insert_query: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="A `writable` query that INSERTs a new row. Blank → auto-derived (`<base>_post`).")
-    delete_query: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="A `writable` query that DELETEs a row. Blank → auto-derived (`<base>_delete`).")
-    audit: str | None = Field(
-        default=None,
-        json_schema_extra={"x_group": "Advanced"},
-        description=(
-            "Name of the audit table to mirror this writable query's row into (v2's port of v1's "
-            "`tbl_audit = 'Y'`). When set on a writable query, after the main write succeeds the SQL "
-            "connector INSERTs into ``<audit>`` the bound params (uppercased) plus three audit "
-            "columns: ``AUD_ACTION`` (INSERT/UPDATE/DELETE), ``AUD_USER`` (the caller's username), "
-            "``AUD_DATE`` (server timestamp). The audit table must exist with a matching schema — "
-            "the migration emits ``audit = \"AUD_<TBL_DB_NAME>\"`` on each writable companion of "
-            "screens flagged ``tbl_audit = 'Y'``."
-        ),
-    )
+    description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what the query returns.")
 
     @field_validator("sql")
     @classmethod

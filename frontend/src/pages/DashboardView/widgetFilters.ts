@@ -28,7 +28,11 @@ export function buildWidgetFilterParams(
   for (const f of filters) {
     const value = filterValues[f.id]
     if (!value) continue                                          // "All" / unset
-    const col = meta.columns.find((c) => c.dd === f.dictionary_key)
+    // Phase 3 — ``meta.columns`` is gone from the connector describe(); dashboard widgets
+    // would need to resolve via the matching Screen instead. For now this code path returns
+    // no filter binds (the widget shows unfiltered rows) — Phase 3 follow-up will rewire it
+    // to the screen layer the same way TableView does.
+    const col = (meta.columns ?? []).find((c) => c.dd === f.dictionary_key)
     if (!col) continue                                            // widget has no matching column → ignore
     out[col.name] = value
     out[`${col.name}_op`] = 'equals'                              // server-side wrapper expects an op

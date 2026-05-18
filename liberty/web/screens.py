@@ -296,7 +296,13 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "insert_query": screen.insert_query,
         "delete_query": screen.delete_query,
         "auto_load": screen.auto_load,
-        "audit": screen.audit,
+        # Phase 3 — ``audit_table`` (string) replaces the legacy ``audit`` bool. The wire still
+        # carries ``audit`` (bool) for back-compat with frontend code that flagged "is this
+        # screen audited"; it's derived from ``audit_table`` presence.
+        "audit": bool(screen.audit_table),
+        "audit_table": screen.audit_table,
+        "max_rows": screen.max_rows,
+        "key_columns": list(screen.key_columns),
         "editable": screen.editable,
         "uploadable": screen.uploadable,
         "has_dialog": screen.dialog is not None,

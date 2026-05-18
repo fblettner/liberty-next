@@ -105,6 +105,10 @@ export default function TableView({ connector, query }: { connector: string; que
         const filterInit: Record<string, ServerFilter> = {}
         for (const p of q.params) if (p.default != null) init[p.name] = p.default
         const declared = new Set([...q.params.map((p) => p.name), ...q.bind_params])
+        // Phase 3 — ``q.columns`` is gone from the connector describe(); the filter columns
+        // live on the matching Screen, fetched separately. The initial-seed-from-URL flow for
+        // FilterPanel pre-fill triggers later when the screen loads (see the second
+        // setFilters call below).
         const filterCols = new Set((q.columns ?? []).filter((c) => c.filter).map((c) => c.name))
         searchParams.forEach((v, k) => {
           if (declared.has(k)) init[k] = v
@@ -129,19 +133,32 @@ export default function TableView({ connector, query }: { connector: string; que
   // → inline editor; this is best-effort UX, not a security gate.
   useEffect(() => {
     const stub = findScreen(connector, query)
-    // Phase 1 — fetch the screen body whenever *any* renderable bit is present, including the
-    // new ``has_columns`` flag. A screen with no dialog / row_menu / actions but with its own
-    // ``columns`` list still needs the body so the grid picks the screen's hints instead of
-    // the query's.
-    if (!stub || (!stub.has_dialog && !stub.has_row_menu && !stub.has_actions && !stub.has_columns)) {
-      setScreen(null); return
-    }
+    // Phase 3 — every Screen drives per-query behaviour now (columns / auto_load / audit / max_rows
+    // / update_query / etc.), so always fetch the full body when a Screen exists for this
+    // (connector, query). Falls back to inline editor only when no screen is configured.
+    if (!stub) { setScreen(null); return }
     let cancelled = false
     api
       .get<ScreenDetail>(`/api/screens/${encodeURIComponent(stub.app)}/${encodeURIComponent(stub.id)}`)
-      .then((s) => { if (!cancelled) setScreen(s) })
+      .then((s) => {
+        if (cancelled) return
+        setScreen(s)
+        // Re-seed FilterPanel from URL search params now that we know which columns are
+        // filter-flagged on this screen — at initial mount we didn't have the screen yet.
+        const filterCols = new Set((s.columns ?? []).filter((c) => c.filter).map((c) => c.name))
+        if (filterCols.size === 0) return
+        const next: Record<string, ServerFilter> = {}
+        searchParams.forEach((v, k) => {
+          if (filterCols.has(k)) next[k] = { val: v, op: 'equals' }
+        })
+        if (Object.keys(next).length > 0) {
+          setFilters((cur) => ({ ...next, ...cur }))   // existing manual edits win
+        }
+      })
       .catch(() => { if (!cancelled) setScreen(null) })
     return () => { cancelled = true }
+    // searchParams intentionally NOT in deps — we capture it at mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findScreen, connector, query])
 
   // Server-filter fields: columns flagged `filter` in the *screen*'s ``columns`` if present,
@@ -207,15 +224,18 @@ export default function TableView({ connector, query }: { connector: string; que
     }
   }, [meta, params, filters, maxRows, connector, query, t])
 
-  // Auto-load: run a SELECT immediately when the screen opens, once, if the query asks for it.
+  // Auto-load: run a SELECT immediately when the screen opens, once, if the screen asks for it.
+  // Phase 3 — ``auto_load`` is a screen-level flag now; fall back to the (deprecated) meta-level
+  // bool for back-compat with connectors-only setups.
+  const autoLoad = screen?.auto_load ?? meta?.auto_load ?? false
   const autoRan = useRef(false)
   useEffect(() => { autoRan.current = false }, [connector, query])
   useEffect(() => {
-    if (meta?.auto_load && meta.statement_type === 'SELECT' && !autoRan.current && !result && !busy) {
+    if (autoLoad && meta?.statement_type === 'SELECT' && !autoRan.current && !result && !busy) {
       autoRan.current = true
       run()
     }
-  }, [meta, result, busy, run])
+  }, [autoLoad, meta, result, busy, run])
 
   // Phase 1 — overlay the screen's ``columns`` (when set) on top of the SQL result's discovered
   // columns. The screen ships the resolved label/format/hidden/filter/filter_from/visible_when/
@@ -305,7 +325,7 @@ export default function TableView({ connector, query }: { connector: string; que
             values={filters}
             onChange={(name, next) => setFilters((f) => ({ ...f, [name]: next }))}
             onClearAll={() => setFilters({})}
-            autoLoad={meta.auto_load}
+            autoLoad={autoLoad}
           />
         )}
 
@@ -373,10 +393,12 @@ export default function TableView({ connector, query }: { connector: string; que
                 result={effectiveResult}
                 connector={connector}
                 query={query}
-                updateQuery={meta.update_query}
-                insertQuery={meta.insert_query}
-                deleteQuery={meta.delete_query}
-                keyColumns={meta.key_columns}
+                /* Phase 3 — CRUD companions + key_columns live on Screen now; fall back to
+                 * the (deprecated) meta.* fields when no screen exists (back-compat). */
+                updateQuery={screen?.update_query ?? meta.update_query ?? null}
+                insertQuery={screen?.insert_query ?? meta.insert_query ?? null}
+                deleteQuery={screen?.delete_query ?? meta.delete_query ?? null}
+                keyColumns={screen?.key_columns ?? meta.key_columns}
                 onSaved={run}
                 runControl={runBtn}
                 maxRowsControl={maxRowsField}

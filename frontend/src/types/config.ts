@@ -184,7 +184,15 @@ export interface Screen {
   /** Phase 2 — single source of truth for per-screen display metadata (grid + dialog share). */
   columns?: ColumnHint[]
   auto_load?: boolean
-  audit?: boolean
+  /** Phase 3 — audit table name (string) replaces the legacy ``audit`` bool. When set,
+   *  every successful write through this screen's update/insert/delete query mirrors a row
+   *  into ``<audit_table>``. */
+  audit_table?: string | null
+  /** Phase 3 — per-screen SELECT row cap (was ``QueryDef.max_rows`` pre-Phase-3). */
+  max_rows?: number | null
+  /** Phase 3 — result columns that identify a row (was ``QueryDef.key_columns`` pre-Phase-3).
+   *  Used by the Excel-import update-vs-insert match. */
+  key_columns?: string[]
   editable?: boolean
   uploadable?: boolean
   dialog?: ScreenDialog | null
