@@ -103,10 +103,13 @@ class ConnectorRegistry:
                 await conn.aclose()
         await self.pools.dispose()
         # Drop the Oracle column-type introspection cache so a hot-reload that swaps pools or
-        # schemas gets fresh metadata on the next write. Imported lazily to keep ``sql`` an
-        # internal detail of the registry's clients, not a top-level dep here.
-        from liberty.connectors.sql import reset_oracle_column_cache
+        # schemas gets fresh metadata on the next write. Same for the audit-table existence
+        # cache — a swapped pool may target a fresh DB that needs the AUD_ tables created
+        # again. Imported lazily to keep ``sql`` an internal detail of the registry's
+        # clients, not a top-level dep here.
+        from liberty.connectors.sql import reset_audit_table_cache, reset_oracle_column_cache
         reset_oracle_column_cache()
+        reset_audit_table_cache()
 
 
 def load_connectors(

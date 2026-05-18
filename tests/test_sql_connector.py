@@ -377,19 +377,77 @@ async def test_audit_mirrors_writes_into_aud_table(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_audit_failure_rolls_back_the_main_write(pools: PoolRegistry) -> None:
-    """A misconfigured audit table (or any audit failure) rolls back the main write — the
-    audit INSERT runs in the same transaction. Loud rather than silently dropped, so an
-    operator notices their AUD table needs fixing."""
+async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None:
+    """v1 parity: an audit table that doesn't exist yet is **auto-created** from the source
+    table's schema on the first write. v1's ``tbl_audit = 'Y'`` flag never required the
+    operator to pre-create the AUD_<table>; the framework did it lazily. v2 keeps the same
+    contract — without this, every migrated screen with ``audit`` set would fail its first
+    INSERT until the operator manually ran DDL.
+
+    The auto-create copies the source columns via ``CREATE TABLE … AS SELECT * FROM <source>
+    WHERE 1=0`` and appends three audit columns (``AUD_ACTION`` / ``AUD_USER`` / ``AUD_DATE``).
+    Verified once per (pool, audit-table) per process — a process cache skips the probe on
+    subsequent writes."""
+    from liberty.connectors.sql import reset_audit_table_cache
+    reset_audit_table_cache()
+    async with pools.engine("test").begin() as c:
+        # Make sure the audit table really doesn't exist beforehand.
+        await c.execute(text("DROP TABLE IF EXISTS aud_item_auto"))
     conn = _connector(
         pools,
-        QueryDef(name="ins", writable=True, audit="aud_does_not_exist",
-                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+        QueryDef(name="ins", writable=True, audit="aud_item_auto",
+                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+    )
+    # First write triggers the auto-create + the audit INSERT — must succeed end-to-end.
+    r = await conn.execute("ins", {"ID": 500, "NAME": "first", "STATUS": "on"}, user="bob")
+    assert r.rowcount == 1
+    # The audit table now exists with the source columns + the three AUD_ columns; the row
+    # landed. The auto-create's ``CAST(NULL AS …) AS AUD_ACTION`` aliases keep their *uppercase*
+    # case on SQLite (Postgres would fold to lowercase). We assert via lowercase aliases in the
+    # SELECT to be dialect-portable.
+    async with pools.engine("test").connect() as c:
+        rows = (await c.execute(text(
+            "SELECT id, name, status, AUD_ACTION AS aud_action, AUD_USER AS aud_user, "
+            "AUD_DATE AS aud_date FROM aud_item_auto"
+        ))).mappings().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["id"] == 500 and row["name"] == "first" and row["status"] == "on"
+    assert row["aud_action"] == "INSERT" and row["aud_user"] == "bob" and row["aud_date"] is not None
+    # Second write skips the probe (cache hit) — still lands cleanly.
+    await conn.execute("ins", {"ID": 501, "NAME": "second", "STATUS": "off"}, user="alice")
+    async with pools.engine("test").connect() as c:
+        rows = (await c.execute(text("SELECT id FROM aud_item_auto ORDER BY id"))).mappings().all()
+    assert [r["id"] for r in rows] == [500, 501]
+
+
+@pytest.mark.asyncio
+async def test_audit_failure_rolls_back_the_main_write(pools: PoolRegistry) -> None:
+    """A misconfigured audit table — one that exists but has the wrong schema — rolls back
+    the main write. The audit INSERT runs in the same transaction. Loud rather than silently
+    dropped, so an operator notices their AUD table needs fixing.
+
+    (Note: a *missing* audit table no longer triggers this path — :meth:`_ensure_audit_table`
+    auto-creates it now. This test covers the post-auto-create failure modes: schema drift
+    where the source table grew a new column but the audit table didn't.)"""
+    from liberty.connectors.sql import reset_audit_table_cache
+    reset_audit_table_cache()
+    # Create an audit table whose columns *don't* match the source (missing the `status` column
+    # that the source table has + the migration would copy in). The audit INSERT will fail.
+    async with pools.engine("test").begin() as c:
+        await c.execute(text("DROP TABLE IF EXISTS aud_wrong_shape"))
+        await c.execute(text(
+            "CREATE TABLE aud_wrong_shape (id INTEGER, aud_action TEXT, aud_user TEXT, aud_date TIMESTAMP)"
+        ))
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", writable=True, audit="aud_wrong_shape",
+                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
         QueryDef(name="count", sql="SELECT COUNT(*) AS n FROM item"),
     )
     before = (await conn.execute("count")).rows[0]["n"]
-    with pytest.raises(Exception):  # underlying SQLAlchemy error — the AUD table is missing
-        await conn.execute("ins", {"ID": 200, "NAME": "z"}, user="x")
+    with pytest.raises(Exception):  # the audit INSERT references columns the audit table doesn't have
+        await conn.execute("ins", {"ID": 600, "NAME": "z", "STATUS": "on"}, user="x")
     assert (await conn.execute("count")).rows[0]["n"] == before  # the main write rolled back too
 
 

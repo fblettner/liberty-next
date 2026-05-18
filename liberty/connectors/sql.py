@@ -72,6 +72,18 @@ def reset_oracle_column_cache() -> None:
     _ORACLE_COL_TYPES_CACHE.clear()
 
 
+# Per-(pool, audit_table_name) set of audit tables we've verified exist (or just created)
+# this process. The check is one SELECT 1 / catch UndefinedTable per fresh deployment per
+# audit table; once verified we skip it for every subsequent write. Cleared by
+# ``reset_audit_table_cache`` on hot-reload (a swapped pool may target a different DB).
+_AUDIT_TABLES_VERIFIED: set[tuple[str, str]] = set()
+
+
+def reset_audit_table_cache() -> None:
+    """Drop the audit-table existence cache. Called by ``ConnectorRegistry.aclose``."""
+    _AUDIT_TABLES_VERIFIED.clear()
+
+
 _ORACLE_CHAR_TYPES = {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
 _ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT"}
 
@@ -937,7 +949,7 @@ class SQLConnector:
             # Pass the *coerced/resolved* bound params (post LOGIN/SYSDATE/PASSWORD/SEQUENCE) so
             # the audit mirror matches what actually hit the DB.
             if qdef.audit:
-                await self._write_audit(conn, qdef, stmt_type, bound, user)
+                await self._write_audit(conn, qdef, stmt_type, bound, user, main_sql=sql_text)
         duration_ms = (time.perf_counter() - started) * 1000.0
         return QueryResult(
             connector=self.name,
@@ -1021,8 +1033,103 @@ class SQLConnector:
             rowcount=rowcount, duration_ms=duration_ms,
         )
 
+    async def _ensure_audit_table(self, conn, audit_name: str, main_sql: str | None) -> None:
+        """v1 parity — create the AUD_<table> companion on the first write to it. v1's
+        ``tbl_audit = 'Y'`` flag never required the operator to pre-create the audit table;
+        the framework did it lazily. v2 keeps the same: a ``SELECT 1`` probe checks
+        existence; on ``UndefinedTable`` we ``CREATE TABLE AS SELECT * FROM <source>
+        WHERE 1=0`` with three extra audit columns (AUD_ACTION / AUD_USER / AUD_DATE).
+
+        The source table is parsed from *main_sql* (the write statement that triggered this
+        audit) — same parser that already powers Oracle's null-coalesce step. When we can't
+        identify a source (unusual DML shape), we log a warning and let the audit INSERT
+        fail loudly: the v2 contract is "audit + main write succeed together or both
+        roll back", and silently dropping the audit would break that.
+
+        Verified-tables cache is process-wide and pool-scoped — once we've confirmed
+        AUD_LICENSE_CSI exists on ``pools.nomasx1``, we don't probe again until a
+        ``ConnectorRegistry.aclose`` clears the cache (hot-reload).
+        """
+        cache_key = (self.pool_name, audit_name.upper())
+        if cache_key in _AUDIT_TABLES_VERIFIED:
+            return
+        # Quick existence probe. ``SELECT 1 FROM <name> WHERE 1=0`` returns no rows on
+        # success; raises one of asyncpg/oracledb's "table doesn't exist" errors otherwise.
+        try:
+            await conn.execute(text(f"SELECT 1 FROM {audit_name} WHERE 1=0"))
+            _AUDIT_TABLES_VERIFIED.add(cache_key)
+            return
+        except Exception as e:  # noqa: BLE001 — any failure here means "doesn't exist (or unreachable)"
+            # Detect "undefined table"-style errors across drivers. We can't import the driver
+            # exception classes (they live in dialect-specific packages) — substring matching
+            # on the str() is the dialect-portable approach SQLAlchemy itself uses internally.
+            msg = str(e).lower()
+            if not any(needle in msg for needle in (
+                "does not exist", "undefinedtable", "ora-00942", "table or view does not exist",
+                "no such table",
+            )):
+                # The probe failed for some other reason (permissions, wrong schema, …) — log
+                # and let the audit INSERT itself surface the real error.
+                _log.warning(
+                    "audit: probe for %s on pool %r returned an unexpected error: %s",
+                    audit_name, self.pool_name, e,
+                )
+                _AUDIT_TABLES_VERIFIED.add(cache_key)  # don't keep probing every write
+                return
+
+        source = _oracle_target_table(main_sql) if main_sql else None
+        if source is None:
+            _log.warning(
+                "audit: cannot auto-create %s — couldn't identify the source table from the "
+                "write statement on %s.%s. Create the audit table by hand (or simplify the SQL "
+                "to a single-target write).",
+                audit_name, self.name, "(qdef)",
+            )
+            return
+        source_owner, source_table = source
+        qualified_source = f"{source_owner}.{source_table}" if source_owner else source_table
+        # Dialect-specific DDL — the column list comes from the source table's schema; the
+        # three audit columns are appended via ``CAST(NULL AS ...) AS AUD_*``. Postgres uses
+        # ``VARCHAR``; Oracle uses ``VARCHAR2``. SQLite (dev) is permissive on types and
+        # accepts ``VARCHAR``. Other dialects (MySQL, MSSQL) — operator wires audit by hand.
+        dialect = self._resolve_dialect()
+        if dialect == "oracle":
+            varchar = "VARCHAR2"
+        elif dialect in ("postgresql", "sqlite"):
+            varchar = "VARCHAR"
+        else:
+            _log.warning(
+                "audit: auto-create for %s on dialect %r isn't supported — create the AUD_ "
+                "table by hand or use ``dialog.on_save`` actions for custom audit.",
+                audit_name, dialect,
+            )
+            return
+        # ``CAST(NULL AS …)`` makes the audit columns nullable on both engines without a
+        # follow-up ALTER. Aliases ensure the column names land regardless of the dialect's
+        # rules around column derivation from constant expressions.
+        ddl = (
+            f"CREATE TABLE {audit_name} AS SELECT t.*, "
+            f"CAST(NULL AS {varchar}(20)) AS AUD_ACTION, "
+            f"CAST(NULL AS {varchar}(100)) AS AUD_USER, "
+            f"CAST(NULL AS TIMESTAMP) AS AUD_DATE "
+            f"FROM {qualified_source} t WHERE 1=0"
+        )
+        try:
+            await conn.execute(text(ddl))
+            _log.info(
+                "audit: auto-created %s on pool %r (from %s) — v1 tbl_audit='Y' parity",
+                audit_name, self.pool_name, qualified_source,
+            )
+            _AUDIT_TABLES_VERIFIED.add(cache_key)
+        except Exception as exc:  # noqa: BLE001 — let the caller see the audit INSERT failure
+            _log.warning(
+                "audit: auto-create of %s from %s on pool %r failed: %s — the audit INSERT "
+                "will surface the underlying error", audit_name, qualified_source, self.pool_name, exc,
+            )
+
     async def _write_audit(
         self, conn, qdef: QueryDef, stmt_type: str, params: dict[str, Any], user: str | None,
+        *, main_sql: str | None = None,
     ) -> None:
         """Mirror a writable execute into ``qdef.audit`` (v1's AUD_<table> pattern). Logs the
         bound row's *uppercase* params (the v1 convention — the migrated _put/_post/_delete SQLs
@@ -1033,10 +1140,11 @@ class SQLConnector:
         * ``AUD_DATE`` — UTC timestamp captured server-side
 
         Columns are taken from ``params`` (uppercase keys, not ending in ``_ORIGINAL`` — those are
-        only WHERE rebinds for the main UPDATE). The AUD table must already exist with a matching
-        schema; the migration emits ``audit = "AUD_<TBL_DB_NAME>"`` on writable companions when v1's
-        ``tbl_audit = 'Y'`` is set, so the names line up. Operators using mixed-case quoted columns
-        will need a custom audit query on ``dialog.on_save`` instead — slice 4 covers that path."""
+        only WHERE rebinds for the main UPDATE). The AUD table is auto-created from the source
+        table's schema on first write (v1 parity — operators never ran DDL to set up audit, the
+        framework did it lazily) via :meth:`_ensure_audit_table`; *main_sql* identifies the
+        source table for that step. The migration emits ``audit = "AUD_<TBL_DB_NAME>"`` on
+        writable companions when v1's ``tbl_audit = 'Y'`` is set, so the names line up."""
         cols: dict[str, Any] = {}
         for k, v in (params or {}).items():
             if not k or not k.isupper() or k.endswith("_ORIGINAL"):
@@ -1049,6 +1157,10 @@ class SQLConnector:
                 self.name, qdef.name, qdef.audit,
             )
             return
+        # v1 parity: lazily create AUD_<table> from the source table's schema if it doesn't
+        # exist yet. Runs in the same write transaction as the main statement so a failure
+        # rolls everything back together.
+        await self._ensure_audit_table(conn, qdef.audit or "", main_sql)
         # Build `INSERT INTO <audit> (col1, col2, …, AUD_ACTION, AUD_USER, AUD_DATE)
         #                    VALUES (:col1, :col2, …, :_AUD_ACTION, :_AUD_USER, :_AUD_DATE)`
         # Reserved bind names start with `_aud_` so they can't collide with the row's columns.
