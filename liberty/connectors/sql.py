@@ -696,7 +696,13 @@ class SQLConnector:
 
             # Type coercion (every kind of bind, including _ORIGINAL). Runs after the rule
             # substitution so a SYSDATE result also lands as the right shape for the column.
-            out[k] = _coerce_value(out[k], fmt)
+            # BOOLEAN-ruled columns skip coercion: the rule's ``true_value`` / ``false_value``
+            # *are* the strings the DB column stores (varchar/char, not Postgres bool), so
+            # coercing "Y" → Python ``True`` would break the column type (asyncpg's
+            # ``expected str, got bool`` on a string column). The pure ``format = "boolean"``
+            # case without a rule still coerces (a real PG bool column needs a Python bool).
+            if rule != "BOOLEAN":
+                out[k] = _coerce_value(out[k], fmt)
         return out
 
     async def _resolve_sequences(

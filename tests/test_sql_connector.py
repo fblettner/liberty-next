@@ -839,6 +839,44 @@ def test_resolve_rule_boolean_surfaces_false_value() -> None:
 
 
 @pytest.mark.asyncio
+async def test_boolean_rule_value_not_coerced_to_python_bool(pools: PoolRegistry) -> None:
+    """Regression — a column with ``format = "boolean"`` *and* ``rules = "BOOLEAN"`` stores
+    its true / false value as a **string** in the DB (``"Y"`` / ``"N"`` on NOMASX1's
+    CSI_STATUS, ``"01"`` / null on user status). v2 must not coerce that bind to a Python
+    ``bool``: asyncpg rejects ``True`` on a varchar column with ``expected str, got bool``
+    (the user's actual error on LICENSE_CSI's UPDATE).
+
+    The check lives in :meth:`SQLConnector._apply_form_rules` — when ``rule == "BOOLEAN"``,
+    the type-coercion pass is skipped because the rule already tells us the column is
+    string-typed. Pure ``format = "boolean"`` columns *without* a rule still coerce
+    (a real PG ``bool`` column needs Python ``bool``)."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "CSI_STATUS": DictionaryEntry(format="boolean", rules="BOOLEAN", rules_values="Y", false_value="N"),
+        # A pure-format column (no rule) still coerces — that path serves real PG bool columns.
+        "ACTIVE": DictionaryEntry(format="boolean"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="upd", writable=True,
+                 sql="UPDATE item SET status = :CSI_STATUS, name = :ACTIVE WHERE id = :ID_ORIGINAL"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # Frontend sends the rule's true_value ("Y") on check, "N" on uncheck — both must stay as
+    # strings on the bind so the driver hands a string to the varchar column.
+    out = conn._apply_form_rules(
+        {"CSI_STATUS": "Y", "ACTIVE": "true", "ID_ORIGINAL": "123"},
+        cfg.queries[0], stmt_type="UPDATE", user="admin",
+    )
+    assert out["CSI_STATUS"] == "Y"      # not Python True — would break the varchar column
+    assert out["ACTIVE"] is True          # no rule → coerced normally (real bool column path)
+    # The :CSI_STATUS_ORIGINAL bind (if it existed) would also stay as a string — same code path.
+    out = conn._apply_form_rules(
+        {"CSI_STATUS": "N", "CSI_STATUS_ORIGINAL": "Y"}, cfg.queries[0], stmt_type="UPDATE", user="admin",
+    )
+    assert out["CSI_STATUS"] == "N" and out["CSI_STATUS_ORIGINAL"] == "Y"
+
+
+@pytest.mark.asyncio
 async def test_form_rule_boolean_substitutes_false_value(pools: PoolRegistry) -> None:
     """Backend safety net: a BOOLEAN-ruled column receiving NULL gets the rule's ``false_value``
     substituted before binding. Handles the NOMASX1 CSI_STATUS case (DB needs 'Y' / 'N', dialog
