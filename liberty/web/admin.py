@@ -325,38 +325,39 @@ class DictionaryBody(BaseModel):
 
 @router.put("/config/dictionary/parsed")
 async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Superuser) -> dict[str, object]:
-    """Validate the submitted dict against :class:`DictionaryFile`, then rewrite ``dictionary.toml``
-    via ``tomlkit`` (replacing each top-level section wholesale — ``default_language`` / ``entries`` /
-    ``enums`` / ``lookups`` / ``connectors``); comments outside those sections are preserved. Re-parses
-    the resulting file before writing. Does not reload — call ``POST /admin/reload`` afterwards."""
+    """Validate the submitted dict against :class:`DictionaryFile`, then rewrite
+    ``dictionary.toml`` from scratch via ``tomli-w``.
+
+    **Why not tomlkit here.** ``tomlkit.parse`` is O(n²)-ish on big nested-table files and
+    takes ~2 minutes on a 5 k-line / 153 kB ``dictionary.toml`` (525 entries × 3 connectors +
+    sequences + enums + lookups + per-language translations). The builder POSTs the *full*
+    dictionary on every Save and waits on the response — at 2 minutes per call the UI looks
+    like an infinite loop, the browser tab gives up, and the operator can't recover.
+    ``tomli-w`` rewrites the same file in ~6 ms.
+
+    Cost: comments / formatting outside the migrated sections are not preserved. The
+    dictionary is **generated** content (``liberty-migrate dictionary``) and round-trips
+    through this builder — there's no operator hand-edit comments to protect. The other
+    PUT endpoints (pools / connectors / menus / screens) keep ``tomlkit`` because those
+    files *do* often carry operator comments and are smaller (parse stays sub-second).
+
+    Re-parses the resulting text via :func:`parse_dictionary` before writing as a
+    belt-and-braces guard. Does not reload — call ``POST /admin/reload`` afterwards.
+    """
     try:
         validated = DictionaryFile.model_validate(body.dictionary)
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dictionary: {exc}") from exc
     normalized = validated.model_dump(exclude_defaults=True)
 
-    path = _dictionary_path(request.app.state.settings)
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
-    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
-
-    # default_language (top-level scalar) — set or remove based on the payload
-    if "default_language" in normalized:
-        doc["default_language"] = normalized["default_language"]
-    elif "default_language" in doc:
-        del doc["default_language"]
-
-    # entries / enums / lookups / connectors — replace each section wholesale (tomlkit re-renders).
-    for section in ("entries", "enums", "lookups", "framework_enums", "connectors"):
-        if section in normalized and normalized[section]:
-            doc[section] = normalized[section]
-        elif section in doc:
-            del doc[section]
-
-    new_text = tomlkit.dumps(doc)
+    import tomli_w
+    new_text = tomli_w.dumps(normalized)
     try:
         parse_dictionary(tomllib.loads(new_text))   # belt-and-braces re-validation
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting dictionary is invalid: {exc}") from exc
+
+    path = _dictionary_path(request.app.state.settings)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}

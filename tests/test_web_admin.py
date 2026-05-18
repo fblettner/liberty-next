@@ -231,7 +231,7 @@ def test_config_dictionary_parsed_get_and_put(env) -> None:
         # schema serves the DictionaryFile shape (with its $defs)
         sch = client.get("/admin/config/schema", headers=h).json()
         assert "entries" in sch["dictionary"]["properties"]
-        for nested in ("DictionaryEntry", "EnumDef", "LookupDef", "EnumValue", "DictionarySection"):
+        for nested in ("DictionaryEntry", "EnumDef", "LookupDef", "SequenceDef", "EnumValue", "DictionarySection"):
             assert nested in sch["dictionary"]["$defs"]
         # a fresh checkout has no dictionary.toml → GET returns an empty dict (path still reported)
         body = client.get("/admin/config/dictionary/parsed", headers=h).json()
@@ -284,6 +284,60 @@ def test_config_dictionary_parsed_get_and_put(env) -> None:
         assert sch2["framework_enums"]["DATASOURCE_TYPE"]["values"] == [{"value": "duckdb", "label": "DuckDB"}]
         # other ids still come from the bundled set (untouched)
         assert sch2["framework_enums"]["HTTP_METHOD"]["values"] == sch["framework_enums"]["HTTP_METHOD"]["values"]
+
+
+def test_dictionary_put_is_fast_on_large_payload(env) -> None:
+    """Regression — the v1 migration produces a 500+ entry dictionary (per-language translations
+    on every row). The PUT used to go through ``tomlkit`` whose parser is O(n²)-ish on big
+    nested-table files; on a real-world libnsx1 dictionary (153 kB, ~5 k lines) Save took
+    ~2 minutes, which the browser interprets as an indefinite hang. The switch to ``tomli-w``
+    rewrites the file from scratch in single-digit ms.
+
+    This test builds a payload roughly the size that triggered the bug (500 entries × a few
+    translations + a connector overlay with another 200 entries) and asserts the round-trip
+    PUT completes well under a second. If a future change introduces tomlkit re-parsing on
+    the dictionary again, this test catches it.
+    """
+    import time
+    app, conn_toml, _ = env
+    dict_toml = conn_toml.with_name("dictionary.toml")
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # 500 shared entries, each with two translations and a rule — close to libnsx1's shape.
+        entries: dict[str, dict[str, object]] = {}
+        for i in range(500):
+            entries[f"COL_{i:03d}"] = {
+                "label": f"Col {i}", "format": "text",
+                "l": {"fr": f"Colonne {i}", "es": f"Columna {i}"},
+            }
+        # 200 connector-scoped overlays + a few enums/lookups so the file isn't trivial.
+        overlay_entries = {f"NSX_{i:03d}": {"label": f"NS {i}"} for i in range(200)}
+        payload = {
+            "default_language": "en",
+            "entries": entries,
+            "enums": {f"E{i}": {"values": [{"value": "A"}, {"value": "B"}]} for i in range(10)},
+            "connectors": {"nomasx1": {"entries": overlay_entries}},
+        }
+        # Round-trip once to write the file out (first PUT — no prior tomlkit parse cost).
+        start = time.perf_counter()
+        r = client.put("/admin/config/dictionary/parsed", json={"dictionary": payload}, headers=h)
+        first_ms = (time.perf_counter() - start) * 1000
+        assert r.json()["saved"] is True
+        # Second PUT — *this* is the one that used to hit the tomlkit-parse bottleneck because
+        # the file now exists and was re-parsed on every save. Must stay sub-second on a
+        # comfortable threshold so an overloaded CI box doesn't flake. tomli-w typically does
+        # this in ~10 ms; the prior tomlkit path took 60-120 *seconds* on this payload size.
+        start = time.perf_counter()
+        r = client.put("/admin/config/dictionary/parsed", json={"dictionary": payload}, headers=h)
+        second_ms = (time.perf_counter() - start) * 1000
+        assert r.json()["saved"] is True
+        assert second_ms < 1500, (
+            f"dictionary PUT took {second_ms:.0f}ms (first call: {first_ms:.0f}ms); "
+            "the tomlkit-parse regression is back — see commit history for the tomli_w switch."
+        )
+        # File still has the data.
+        text = dict_toml.read_text()
+        assert "[entries.COL_000]" in text and "[connectors.nomasx1.entries.NSX_000]" in text
 
 
 def test_config_menus_parsed_get_and_put(env) -> None:
