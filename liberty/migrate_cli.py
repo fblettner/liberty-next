@@ -52,6 +52,7 @@ from liberty.migrations import (
     migrate_drill_filter_columns,
     migrate_key_columns,
     migrate_menus,
+    migrate_nested_tab_filter_columns,
     migrate_screens,
     migrate_pools,
     migrate_sql_queries,
@@ -181,6 +182,9 @@ async def _build(args: argparse.Namespace) -> dict:
             _, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
             screen_rows = await read_screens(engine)
             ctx_tables_rows, ctx_dlg_frm_rows = screen_rows[0], screen_rows[2]
+            # The raw ly_dlg_col / ly_dlg_filters rows (no col_target filter — the widget rows
+            # we need have NULL col_target and are excluded by `read_column_hints`'s _DLG_COLS).
+            raw_dlg_cols, raw_dlg_filters = screen_rows[5], screen_rows[6]
             # Threads tbl_col/dlg_col rows in too — used to resolve `flt_target` when it names a
             # dictionary key (col_dd_id) rather than a column (col_target). Without this, queries
             # whose drill-target column has dd_id ≠ col_target (e.g. CFD_APPS_ID with dd APPS_ID)
@@ -190,9 +194,26 @@ async def _build(args: argparse.Namespace) -> dict:
                 tables_rows=ctx_tables_rows, dlg_frm_rows=ctx_dlg_frm_rows,
                 tbl_col_rows=tbl_cols, dlg_col_rows=dlg_cols,
             )
+            # Same trick for v1's nested-tab param-bindings (a FormsTable / FormsDialog widget
+            # inside a dialog form) — every bind target on the nested query becomes ``filter =
+            # true`` so :func:`_wrap_with_filters` adds the ``:NAME`` + ``:NAME_op`` binds the
+            # frontend sends at run time. Without this the binds are silently dropped and the
+            # nested table returns every row.
+            nested_cols = migrate_nested_tab_filter_columns(
+                raw_dlg_cols, raw_dlg_filters,
+                table_rows=ctx_tables_rows, dlg_frm_rows=ctx_dlg_frm_rows,
+                tbl_col_rows=tbl_cols,
+            )
+            merged_filter_cols: dict[int, list[str]] = {}
+            for src in (drill_cols, nested_cols):
+                for qid, cols in src.items():
+                    bucket = merged_filter_cols.setdefault(qid, [])
+                    for col in cols:
+                        if col not in bucket:
+                            bucket.append(col)
             parts.append(migrate_sql_queries(
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
-                column_hints=migrate_column_hints(tbl_cols, dlg_cols, extra_filter_cols=drill_cols),
+                column_hints=migrate_column_hints(tbl_cols, dlg_cols, extra_filter_cols=merged_filter_cols),
                 column_filters=migrate_table_filters(tbl_flt, dlg_flt),
                 column_visibility=migrate_column_visibility(tbl_cols, dlg_cols, cdn_params),
                 table_meta=migrate_table_meta(tbl_meta, frm_meta),

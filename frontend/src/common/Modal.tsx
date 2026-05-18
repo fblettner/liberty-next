@@ -67,10 +67,16 @@ export const ModalBody = styled.div`
  *  flow). Locks the frame's dimensions so switching tabs scrolls the body instead of jolting
  *  the dialog up/down — the user complained about chasing a moving Save button when tabs had
  *  different field counts. Uses a fixed height (not min-height) for that reason: tab A with
- *  3 fields and tab B with 15 fields render in the same envelope, ModalBody scrolls when needed. */
-export const ScreenDialogModal = styled(Modal)`
-  width: min(900px, 95vw);
-  height: min(700px, 90vh);
+ *  3 fields and tab B with 15 fields render in the same envelope, ModalBody scrolls when needed.
+ *
+ *  ``$fullscreen`` swaps to a near-100vw/vh frame for operators editing a row with many fields
+ *  on a small screen — the header gives them a maximize button, this toggles the prop. */
+export const ScreenDialogModal = styled(Modal)<{ $fullscreen?: boolean }>`
+  width: ${({ $fullscreen }) => ($fullscreen ? '100vw' : 'min(900px, 95vw)')};
+  height: ${({ $fullscreen }) => ($fullscreen ? '100vh' : 'min(700px, 90vh)')};
+  max-width: ${({ $fullscreen }) => ($fullscreen ? '100vw' : '95vw')};
+  max-height: ${({ $fullscreen }) => ($fullscreen ? '100vh' : '90vh')};
+  border-radius: ${({ $fullscreen }) => ($fullscreen ? '0' : radius.lg)};
   /* Override Modal's flexible min-* so the locked size wins on small content (an "Add row" with
      only required fields filled-in keeps the same footprint as a full Edit). */
   min-width: 0;
@@ -80,10 +86,16 @@ export const ScreenDialogModal = styled(Modal)`
 /** A Modal preset for the screen visual designer — a nearly full-screen frame so the 3-column
  *  layout (palette + canvas + inspector) has room to breathe. Without the explicit width/height
  *  the body's grid would collapse to its natural content and overflow the viewport instead of
- *  letting each column scroll on its own. Used by ScreenEditor's Dialog tab in Visual mode. */
-export const VisualBuilderModal = styled(Modal)`
-  width: min(1400px, 96vw);
-  height: min(900px, 92vh);
+ *  letting each column scroll on its own. Used by ScreenEditor's Dialog tab in Visual mode.
+ *
+ *  ``$fullscreen`` swaps to a 100vw/vh frame for designing complex screens on a laptop where
+ *  the default 1400×900 still leaves the palette / inspector cramped. */
+export const VisualBuilderModal = styled(Modal)<{ $fullscreen?: boolean }>`
+  width: ${({ $fullscreen }) => ($fullscreen ? '100vw' : 'min(1400px, 96vw)')};
+  height: ${({ $fullscreen }) => ($fullscreen ? '100vh' : 'min(900px, 92vh)')};
+  max-width: ${({ $fullscreen }) => ($fullscreen ? '100vw' : '96vw')};
+  max-height: ${({ $fullscreen }) => ($fullscreen ? '100vh' : '92vh')};
+  border-radius: ${({ $fullscreen }) => ($fullscreen ? '0' : radius.lg)};
   min-width: 0;
   min-height: 0;
 `
@@ -92,8 +104,12 @@ export const VisualBuilderModal = styled(Modal)`
  *  click on a NestedTableView ("Edit Activity Log rule" sitting on top of "Settings - Applications").
  *  Smaller than the top-level preset (so the parent's frame remains visible behind it) and
  *  *auto-height* with a `max-height` cap — the nested form is usually short (a few related-table
- *  columns) and the parent already paid for a fixed envelope, no point repeating it. */
-export const NestedScreenDialogModal = styled(Modal)`
+ *  columns) and the parent already paid for a fixed envelope, no point repeating it.
+ *
+ *  Accepts ``$fullscreen`` for shape-compatibility with ``ScreenDialogModal`` (the caller picks
+ *  one of the two based on a ``nested`` flag) but ignores it — a nested dialog going fullscreen
+ *  would hide the parent context that justified showing the nested one in the first place. */
+export const NestedScreenDialogModal = styled(Modal)<{ $fullscreen?: boolean }>`
   width: min(720px, 90vw);
   max-height: 85vh;
   /* Re-enable a small min-height so a single-field dialog still has a sensible footprint. */

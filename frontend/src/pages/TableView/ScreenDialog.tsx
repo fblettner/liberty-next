@@ -15,7 +15,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Save, Trash2, X, Zap } from 'lucide-react'
+import { Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import type { Column } from '../../types/connectors'
@@ -114,6 +114,13 @@ export function ScreenDialog({
   const [savedRow, setSavedRow] = useState<Row>({})  // the *original* values keyed by field name (for `:<FIELD>_ORIGINAL`)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Fullscreen / restore toggle for the top-level dialog — the default 900×700 envelope can be
+  // tight on a many-tab / many-field screen (NOMASX1 settings_applications has 31 fields on the
+  // Default tab alone). Operator clicks the maximize icon in the header, the modal grows to
+  // 100vw / 100vh. Doesn't apply when ``nested`` (those are intentionally smaller so the parent
+  // remains visible behind). Resets to windowed on each open.
+  const [fullscreen, setFullscreen] = useState(false)
+  useEffect(() => { if (!open) setFullscreen(false) }, [open])
 
   // Nested-form save coordination — NestedFormView components mount inside the dialog body
   // (one per ``nested_form`` tab) and register their own save function here. Stored in a ref
@@ -556,9 +563,28 @@ export function ScreenDialog({
   return (
     <NestedSaversContext.Provider value={nestedSaversCtx}>
     <OverlayEl onClick={() => { void handleClose() }}>
-      <ModalEl onClick={(e) => e.stopPropagation()}>
+      <ModalEl $fullscreen={!nested && fullscreen} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
-          {mode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
+          <FlexRow gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ flex: 1 }}>
+              {mode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
+            </span>
+            {/* Fullscreen / restore — only meaningful for the top-level dialog (nested ones are
+                deliberately smaller so the parent's frame stays visible). Same affordance the
+                Screen Designer modal uses; ``aria-pressed`` exposes the on/off state without
+                two icons in the DOM. */}
+            {!nested && (
+              <Button
+                $variant="ghost"
+                $size="sm"
+                onClick={() => setFullscreen((v) => !v)}
+                title={fullscreen ? t('common.restore') : t('common.maximize')}
+                aria-pressed={fullscreen}
+              >
+                {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </Button>
+            )}
+          </FlexRow>
         </ModalHeader>
         <ModalBody>
           {tabs.length === 0 ? (

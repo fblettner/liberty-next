@@ -404,6 +404,57 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         assert client.post("/admin/reload", headers=h).json()["screen_apps"] == ["nomasx1"]
 
 
+def test_config_screens_parsed_preserves_tab_type_discriminator(env) -> None:
+    """Regression: ``model_dump(exclude_defaults=True)`` strips the Literal ``type`` discriminator
+    on nested tabs (its only-allowed value equals its default). The visual builder needs the
+    discriminator to render the right Tab Settings panel — and a PUT round-trip would otherwise
+    re-validate every nested tab as FormTab and 422 on the extra keys (read_query / screen /
+    update_query / param_binds). The endpoint post-injects ``type`` for every tab + action so
+    the wire payload survives the trip."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Save a screen with one of each tab kind.
+        payload = {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "apps_get",
+                    "dialog": {
+                        "tabs": [
+                            {"id": "general", "type": "form", "fields": [{"name": "APPS_ID"}]},
+                            {
+                                "id": "jd_edwards", "type": "nested_form",
+                                "read_query": "settings_jdedwards_get",
+                                "update_query": "settings_jdedwards_put",
+                                "fields": [{"name": "JDE_SY"}],
+                                "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
+                            },
+                            {
+                                "id": "activity_log", "type": "nested_table",
+                                "screen": "settings_activity_log",
+                                "param_binds": [{"param": "ACL_APPS_ID", "source": "APPS_ID"}],
+                            },
+                        ],
+                    },
+                    "actions": [
+                        {"id": "rebuild", "type": "run_query", "query": "apps_rebuild"},
+                    ],
+                },
+            },
+        }
+        r = client.put("/admin/config/screens/parsed", json={"screens": payload}, headers=h)
+        assert r.status_code == 200, r.text
+        # GET — every tab + action has its ``type`` discriminator present in the JSON.
+        body = client.get("/admin/config/screens/parsed", headers=h).json()
+        tabs = body["screens"]["nomasx1"]["settings_applications"]["dialog"]["tabs"]
+        assert [t["type"] for t in tabs] == ["form", "nested_form", "nested_table"]
+        actions = body["screens"]["nomasx1"]["settings_applications"]["actions"]
+        assert actions[0]["type"] == "run_query"
+        # PUT round-trip — saving the GET'd body back doesn't 422 (the discriminator survives).
+        r2 = client.put("/admin/config/screens/parsed", json={"screens": body["screens"]}, headers=h)
+        assert r2.status_code == 200, r2.text
+
+
 def test_oidc_callback_fragment_redirect() -> None:
     from liberty.config import OIDCSettings
 

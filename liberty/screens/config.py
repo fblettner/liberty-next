@@ -679,14 +679,25 @@ def parse_screens(data: dict[str, Any]) -> ScreensFile:
             # Default tab kind = "form" for backward compat with the pre-nested-tab schema —
             # everything before this commit was a flat field grid, and TOML by-hand authors
             # routinely omit defaults. Pydantic's discriminated-union resolver needs the key
-            # to be present to pick a branch.
+            # to be present to pick a branch. **Variant-specific keys also infer the kind**:
+            # a tab carrying ``screen`` resolves to nested_table, one carrying ``read_query``
+            # (without ``screen``) resolves to nested_form. This is the safety net for the PUT
+            # round-trip via /admin/config/screens/parsed — the GET strips the Literal
+            # discriminator (it matches its default and exclude_defaults drops it), so without
+            # this inference a saved nested tab would re-validate as FormTab and reject its
+            # extra keys (read_query / update_query / screen / param_binds).
             dialog = screen.get("dialog")
             if isinstance(dialog, dict):
                 tabs = dialog.get("tabs")
                 if isinstance(tabs, list):
                     for tab in tabs:
                         if isinstance(tab, dict) and not tab.get("type"):
-                            tab["type"] = "form"
+                            if isinstance(tab.get("screen"), str):
+                                tab["type"] = "nested_table"
+                            elif isinstance(tab.get("read_query"), str):
+                                tab["type"] = "nested_form"
+                            else:
+                                tab["type"] = "form"
     return ScreensFile.model_validate(data)
 
 

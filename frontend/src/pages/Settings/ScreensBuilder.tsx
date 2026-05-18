@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, FolderOpen, FileText, Edit3, X, Zap, Filter, Layers } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Search, FolderOpen, FileText, Edit3, X, Zap, Filter, Layers, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
@@ -144,6 +144,10 @@ export default function ScreensBuilder() {
   // raises this modal. Edits flow through the same ``updateScreen`` callback as before — the
   // ScreensBuilder's Save bar at the bottom commits to disk. Escape closes the modal.
   const [designerOpen, setDesignerOpen] = useState(false)
+  // Fullscreen toggle for the designer modal — the default 1400×900 envelope can still feel
+  // tight on a complex screen (palette + many fields + inspector). Operator clicks the maximize
+  // icon in the header, the modal grows to 100vw / 100vh + drops its border-radius.
+  const [designerFullscreen, setDesignerFullscreen] = useState(false)
   useEffect(() => {
     if (!designerOpen) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDesignerOpen(false) }
@@ -151,8 +155,8 @@ export default function ScreensBuilder() {
     return () => document.removeEventListener('keydown', onKey)
   }, [designerOpen])
   // Close the designer when the operator picks a different screen — would otherwise show the
-  // wrong screen's data until they reopen.
-  useEffect(() => { setDesignerOpen(false) }, [selApp, selId])
+  // wrong screen's data until they reopen. Reset fullscreen too so each open starts windowed.
+  useEffect(() => { setDesignerOpen(false); setDesignerFullscreen(false) }, [selApp, selId])
 
   const load = () => {
     setError(null); setStatus(null)
@@ -475,8 +479,12 @@ export default function ScreensBuilder() {
         updateScreen → setDoc chain as before; ScreensBuilder's Save bar at the bottom commits. */}
     {designerOpen && selScreen && selApp && selId && createPortal(
       <Overlay onClick={() => setDesignerOpen(false)}>
-        <VisualBuilderModal onClick={(e) => e.stopPropagation()}>
+        <VisualBuilderModal $fullscreen={designerFullscreen} onClick={(e) => e.stopPropagation()}>
           <ModalHeader>
+            {/* The header is two flex regions — title on the left, actions clustered on the
+                right. Wrapping the actions in their own Row prevents ``justify-content:
+                space-between`` from distributing each child (title / dirty / maximize / close)
+                evenly across the bar, which pushed the maximize button into the middle. */}
             <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <span>
                 {t('settings.screens.designerTitle')} ·{' '}
@@ -484,10 +492,23 @@ export default function ScreensBuilder() {
                   [screens.{selApp}.{selId}]
                 </span>
               </span>
-              {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm, marginLeft: 'auto', marginRight: 12 }}>{t('settings.unsaved')}</span>}
-              <Button $variant="ghost" $size="sm" onClick={() => setDesignerOpen(false)}>
-                <X size={13} /> {t('common.close')}
-              </Button>
+              <Row gap={8} style={{ alignItems: 'center' }}>
+                {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+                {/* Fullscreen / restore — same affordance browsers + IDEs use. ``aria-pressed``
+                    exposes the on/off state to screen readers without needing two icons in DOM. */}
+                <Button
+                  $variant="ghost"
+                  $size="sm"
+                  onClick={() => setDesignerFullscreen((v) => !v)}
+                  title={designerFullscreen ? t('common.restore') : t('common.maximize')}
+                  aria-pressed={designerFullscreen}
+                >
+                  {designerFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => setDesignerOpen(false)}>
+                  <X size={13} /> {t('common.close')}
+                </Button>
+              </Row>
             </Row>
           </ModalHeader>
           {/* Custom body styling — overflow:hidden so the ScreenEditor's per-tab scroll wrappers

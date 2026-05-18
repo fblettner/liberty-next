@@ -354,6 +354,53 @@ def test_parse_screens_with_nested_tab_kinds() -> None:
     assert tabs[2].screen == "settings_activity_log"
 
 
+def test_parse_screens_infers_nested_tab_type_from_keys() -> None:
+    """Round-trip safety: when the ``type`` discriminator is missing on a tab dict (the
+    ``/admin/config/screens/parsed`` GET strips it because ``exclude_defaults=True`` finds the
+    Literal value matches its default), variant-specific keys tell ``parse_screens`` what kind
+    the tab really is. A tab carrying ``screen`` is a nested_table; one carrying ``read_query``
+    (without ``screen``) is a nested_form; otherwise plain form. Without this inference the
+    next PUT would re-validate every nested tab as FormTab and reject its extra keys (422)."""
+    raw = {
+        "screens": {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "settings_applications_get",
+                    "dialog": {
+                        "tabs": [
+                            # No type, no nested-specific keys → form
+                            {"id": "general", "fields": [{"name": "APPS_ID"}]},
+                            # No type but read_query → nested_form
+                            {
+                                "id": "jd_edwards",
+                                "read_query": "settings_jdedwards_get",
+                                "update_query": "settings_jdedwards_put",
+                                "fields": [{"name": "JDE_SY"}],
+                                "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
+                            },
+                            # No type but screen → nested_table
+                            {
+                                "id": "activity_log",
+                                "screen": "settings_activity_log",
+                                "param_binds": [{"param": "ACL_APPS_ID", "source": "APPS_ID"}],
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    }
+    sf = parse_screens(raw)
+    tabs = sf.screens["nomasx1"]["settings_applications"].dialog.tabs  # type: ignore[union-attr]
+    assert isinstance(tabs[0], FormTab) and tabs[0].id == "general"
+    assert isinstance(tabs[1], NestedFormTab)
+    assert tabs[1].read_query == "settings_jdedwards_get"
+    assert tabs[1].update_query == "settings_jdedwards_put"
+    assert tabs[1].param_binds[0].source == "APPS_ID"
+    assert isinstance(tabs[2], NestedTableTab)
+    assert tabs[2].screen == "settings_activity_log"
+
+
 def test_parse_screens_id_mismatch_rejected() -> None:
     """An explicit ``id`` field that doesn't match its dict key is a config bug — fail loudly."""
     with pytest.raises(Exception):

@@ -51,7 +51,7 @@ from liberty.framework_enums import FRAMEWORK_ENUMS
 from liberty.licensing import verify_license
 from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
-from liberty.screens import load_screens
+from liberty.screens import Screen, load_screens
 from liberty.screens.config import ScreensFile, parse_screens
 from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
@@ -410,16 +410,42 @@ async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> d
 @router.get("/config/screens/parsed")
 async def get_screens_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``screens.toml`` parsed and normalised — ``{path, screens: {<app>: {<screen_id>:
-    Screen dict}}}``. A missing file → an empty screen set. Default-valued keys are dropped."""
+    Screen dict}}}``. A missing file → an empty screen set. Default-valued keys are dropped (terser
+    JSON), **except** the ``type`` discriminator on each tab / action variant which is re-injected
+    after the dump — Pydantic's ``exclude_defaults=True`` would otherwise strip it (the Literal
+    discriminator's only-allowed value equals its default), leaving the frontend unable to tell
+    nested_form / nested_table tabs from plain form ones AND the PUT round-trip unable to validate
+    (extra fields on FormTab → 422)."""
     path = Path(request.app.state.settings.screens.config_path)
     cfg = load_screens(path)
     return {
         "path": str(path),
         "screens": {
-            app: {sid: s.model_dump(exclude_defaults=True) for sid, s in screens.items()}
+            app: {sid: _dump_screen(s) for sid, s in screens.items()}
             for app, screens in cfg.screens.items()
         },
     }
+
+
+def _dump_screen(s: Screen) -> dict[str, Any]:
+    """Default-stripped model dump + re-injected discriminators for every tab / action."""
+    d = s.model_dump(exclude_defaults=True)
+    # Tabs — discriminator on each ScreenTab variant.
+    if s.dialog is not None:
+        for tab_dict, tab_model in zip(d.get("dialog", {}).get("tabs", []), s.dialog.tabs):
+            tab_dict["type"] = tab_model.type
+            # Per-tab actions — same fix needed for the action union's discriminator.
+            for a_dict, a_model in zip(tab_dict.get("actions", []), tab_model.actions):
+                a_dict["type"] = a_model.type
+        # Dialog-level hook chains.
+        for hook in ("on_load", "on_save", "on_cancel"):
+            for a_dict, a_model in zip(d.get("dialog", {}).get(hook, []), getattr(s.dialog, hook, [])):
+                a_dict["type"] = a_model.type
+    # Screen-level action lists.
+    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
+        for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, [])):
+            a_dict["type"] = a_model.type
+    return d
 
 
 class ScreensBody(BaseModel):

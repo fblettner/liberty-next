@@ -804,6 +804,135 @@ def migrate_drill_filter_columns(
     return out
 
 
+def migrate_nested_tab_filter_columns(
+    dlg_col_rows: Iterable[Mapping[str, Any]],
+    dlg_filter_rows: Iterable[Mapping[str, Any]] = (),
+    table_rows: Iterable[Mapping[str, Any]] = (),
+    dlg_frm_rows: Iterable[Mapping[str, Any]] = (),
+    tbl_col_rows: Iterable[Mapping[str, Any]] = (),
+) -> dict[int, list[str]]:
+    """``{query_id: [col_target, …]}`` — for every nested-tab param-bind whose target column lives
+    on a different query (a v1 ``FormsTable`` or ``FormsDialog`` inside a dialog form), the
+    columns on that nested query that the bind references.
+
+    **Why this exists.** v1's nested tabs (FormsTable / FormsDialog inside a dialog form) carried
+    their param bindings in ``ly_dlg_filters`` — same shape as the field-level lookup binds — but
+    the target of each bind is a column on the *nested* query, not the parent's. v2's runtime
+    sends the bind as a URL param to the nested ``read_query``, and SQLAlchemy's ``text()`` only
+    binds what the SQL actually references. So unless the nested query's column is filter-flagged
+    (which causes :func:`migrate_sql_queries`'s ``_wrap_with_filters`` to add the ``:NAME`` +
+    ``:NAME_op`` binds), the param value is silently dropped at runtime and the nested table /
+    form returns *every row*, not narrowed by the parent's PK.
+
+    Mirrors :func:`migrate_drill_filter_columns` for row-menu drills, but reads from
+    ``ly_dlg_filters`` (the field-binds table) keyed by the *dlg_col* carrying the FormsTable /
+    FormsDialog widget. The target query_id is resolved via the widget's ``col_component_id``:
+    ``FormsTable`` → ``ly_tables.tbl_id → tbl_query_id``; ``FormsDialog`` → ``ly_dlg_frm.frm_id
+    → frm_query_id``.
+
+    Dictionary-key resolution is the same: ``ly_dlg_filters.flt_target`` is the dictionary key
+    (``dd_id``) on the destination, *not* always the SQL column. We translate at migration time
+    when the target's ``col_dd_id`` matches but its ``col_target`` differs (without this, queries
+    like ``settings_audit_get`` with column ``AUD_APPS_ID`` and dd ``APPS_ID`` would be wrapped
+    with a bogus ``lib_flt.APPS_ID`` filter that points at a non-existent column).
+
+    Args:
+        dlg_col_rows: rows from ``ly_dlg_col`` — every field row, including those with
+            ``col_component`` set to FormsTable / FormsDialog (the nested-tab widgets).
+        dlg_filter_rows: rows from ``ly_dlg_filters`` — the param-bind rules per (frm_id, col_id).
+        table_rows: rows from ``ly_tables`` — for ``FormsTable`` widgets: ``tbl_id → tbl_query_id``.
+        dlg_frm_rows: rows from ``ly_dlg_frm`` — for ``FormsDialog`` widgets: ``frm_id →
+            frm_query_id``.
+        tbl_col_rows: rows from ``ly_tbl_col`` — column hints for resolving a ``flt_target`` that
+            names a dictionary key (col_dd_id) rather than an SQL column (col_target) on the
+            *target* query. Only the destination's column rows matter; ``dlg_col_rows`` is already
+            in scope for FormsDialog targets.
+    """
+    # Resolve the target query_id for each (FormsTable | FormsDialog) widget.
+    tbl_qid: dict[int, int] = {}
+    for r in table_rows:
+        try:
+            tid = int(r["tbl_id"]); qid = r.get("tbl_query_id")
+            if qid is not None:
+                tbl_qid[tid] = int(qid)
+        except (KeyError, TypeError, ValueError):
+            continue
+    frm_qid: dict[int, int] = {}
+    for r in dlg_frm_rows:
+        try:
+            fid = int(r["frm_id"]); qid = r.get("frm_query_id")
+            if qid is not None:
+                frm_qid[fid] = int(qid)
+        except (KeyError, TypeError, ValueError):
+            continue
+    # (frm_id, col_id) → target_qid, for every nested-widget col.
+    target_qid_by_widget: dict[tuple[int, int], int] = {}
+    for c in dlg_col_rows:
+        comp = (c.get("col_component") or "").strip()
+        if comp not in ("FormsTable", "FormsDialog"):
+            continue
+        try:
+            frm = int(c["frm_id"]); col = int(c["col_id"])
+            ref = c.get("col_component_id")
+            if ref is None:
+                continue
+            ref_id = int(ref)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if comp == "FormsTable":
+            qid = tbl_qid.get(ref_id)
+        else:
+            qid = frm_qid.get(ref_id)
+        if qid is not None:
+            target_qid_by_widget[(frm, col)] = qid
+
+    # Build a dd_id → col_target map per target query (using BOTH ly_tbl_col + ly_dlg_col so we
+    # resolve targets regardless of whether the destination is a FormsTable or FormsDialog).
+    col_by_dd: dict[int, dict[str, str]] = {}            # query_id → {dd_id: col_target}
+    cols_by_query: dict[int, set[str]] = {}              # query_id → {col_target.lower(), …}
+    for r in (*tbl_col_rows, *dlg_col_rows):
+        try:
+            qid = int(r["query_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        target = (r.get("col_target") or "").strip()
+        if target:
+            cols_by_query.setdefault(qid, set()).add(target.lower())
+        dd = (r.get("col_dd_id") or "").strip()
+        if dd and target:
+            col_by_dd.setdefault(qid, {}).setdefault(dd, target)
+
+    def _resolve(target_qid: int, raw: str) -> str:
+        # If raw names a real column on the target, use it as-is (case-insensitive); else if
+        # raw is a dd_id we know maps to a different col_target on this query, substitute.
+        if raw.lower() in cols_by_query.get(target_qid, set()):
+            return raw
+        return col_by_dd.get(target_qid, {}).get(raw, raw)
+
+    # Walk every dlg_filter row whose (frm_id, col_id) belongs to a nested widget.
+    out: dict[int, list[str]] = {}
+    seen: dict[int, set[str]] = {}
+    for f in dlg_filter_rows:
+        frm_raw, col_raw = f.get("frm_id"), f.get("col_id")
+        raw_target = str(f.get("flt_target") or "").strip()
+        if frm_raw is None or col_raw is None or not raw_target:
+            continue
+        try:
+            key = (int(frm_raw), int(col_raw))
+        except (TypeError, ValueError):
+            continue
+        target_qid = target_qid_by_widget.get(key)
+        if target_qid is None:
+            continue
+        target = _resolve(target_qid, raw_target)
+        s = seen.setdefault(target_qid, set())
+        if target.lower() in s:
+            continue
+        s.add(target.lower())
+        out.setdefault(target_qid, []).append(target)
+    return out
+
+
 def migrate_key_columns(
     tbl_col_rows: Iterable[Mapping[str, Any]],
     dlg_col_rows: Iterable[Mapping[str, Any]] = (),
@@ -2791,6 +2920,28 @@ def migrate_screens(
                     # too (v1's Role dialog "Roles" tab had a FormsTable + 2 InputActions in one).
                     if tab_actions:
                         tab_out["actions"] = tab_actions
+                    # Normalize tab cols ≥ max(field.colspan). v1 effectively inferred the grid
+                    # width from the widest colspan and ignored tab_cols when they disagreed (a
+                    # tab with tab_cols=1 + a 3-span field rendered as 3 columns). v2 uses
+                    # ``cols`` literally as the CSS grid column count, so a colspan exceeding it
+                    # forces messy implicit-grid columns at render time. Bump cols up here so
+                    # the explicit grid covers every field's span without surprise.
+                    tab_fields = tab_out.get("fields") or []
+                    if isinstance(tab_fields, list) and tab_fields:
+                        max_cs = 1
+                        for fr in tab_fields:
+                            try:
+                                cs = int(fr.get("colspan") or 1)
+                            except (TypeError, ValueError):
+                                cs = 1
+                            if cs > max_cs:
+                                max_cs = cs
+                        try:
+                            cur_cols = int(tab_out.get("cols") or 1)
+                        except (TypeError, ValueError):
+                            cur_cols = 1
+                        if max_cs > cur_cols:
+                            tab_out["cols"] = max_cs
                     tabs.append(tab_out)
                 if tabs:
                     screen["dialog"] = {"tabs": tabs}

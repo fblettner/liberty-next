@@ -20,6 +20,7 @@ from liberty.migrations import (
     migrate_dictionary,
     migrate_drill_filter_columns,
     migrate_menus,
+    migrate_nested_tab_filter_columns,
     migrate_pools,
     migrate_context_menus,
     migrate_screens,
@@ -652,6 +653,80 @@ def test_migrate_drill_filter_columns_end_to_end() -> None:
     out = migrate_sql_queries(queries, sql_rows, column_hints=hints)
     sql = out["connectors"]["nomasx1"]["queries"][0]["sql"]
     assert ":RLU_APPS_ID" in sql and ":RLU_USER_ID" in sql  # _wrap_with_filters bound both
+
+
+def test_migrate_nested_tab_filter_columns() -> None:
+    """Same flavour as :func:`migrate_drill_filter_columns`, but for v1's nested-tab widgets
+    (``ly_dlg_col`` rows whose ``col_component`` is ``FormsTable`` or ``FormsDialog``). Each
+    widget's ``col_component_id`` resolves through ``ly_tables.tbl_id`` (FormsTable) or
+    ``ly_dlg_frm.frm_id`` (FormsDialog) to a destination ``query_id``; the matching
+    ``ly_dlg_filters`` rows' ``flt_target``s become filter columns on that destination so the
+    runtime's ``:NAME`` param actually narrows the nested read."""
+    # The parent dialog has two nested widgets:
+    #   col 50: a FormsTable pointing at ly_tables.tbl_id = 100 → tbl_query_id = 20 (audit_trail_get)
+    #   col 51: a FormsDialog pointing at ly_dlg_frm.frm_id = 7 → frm_query_id = 21 (settings_jdedwards_get)
+    dlg_col_rows = [
+        # The widget rows themselves (col_target is NULL — these are placeholders, not fields).
+        {"frm_id": 1, "col_id": 50, "col_component": "FormsTable", "col_component_id": 100, "col_target": None},
+        {"frm_id": 1, "col_id": 51, "col_component": "FormsDialog", "col_component_id": 7, "col_target": None},
+        # A regular field row on the parent — ignored (not a nested widget).
+        {"frm_id": 1, "col_id": 1, "col_component": None, "col_component_id": None, "col_target": "APPS_ID"},
+        # The destination form's own field rows — provide a dd_id → col_target map for resolution.
+        {"frm_id": 7, "col_id": 1, "query_id": 21, "col_target": "JDE_HOST", "col_dd_id": "HOST"},
+    ]
+    # ly_dlg_filters: binds attached to each widget col.
+    dlg_filter_rows = [
+        # col 50 → audit_trail_get: two binds (AUD_APPS_ID + AUD_USER_ID — real columns on the dest)
+        {"frm_id": 1, "col_id": 50, "flt_type": "DD", "flt_target": "AUD_APPS_ID", "flt_source": "APPS_ID"},
+        {"frm_id": 1, "col_id": 50, "flt_type": "VALUE", "flt_target": "AUD_USER_ID", "flt_value": "x"},
+        # Dup on col 50 — deduped case-insensitively
+        {"frm_id": 1, "col_id": 50, "flt_type": "DD", "flt_target": "aud_apps_id", "flt_source": "APPS_ID"},
+        # col 51 → settings_jdedwards_get: a bind that names a dd_id (HOST) instead of the column
+        # (JDE_HOST). Should be translated via the dd_id → col_target map.
+        {"frm_id": 1, "col_id": 51, "flt_type": "DD", "flt_target": "HOST", "flt_source": "APPS_HOST"},
+        # Empty flt_target → dropped
+        {"frm_id": 1, "col_id": 51, "flt_type": "DD", "flt_target": None, "flt_source": "X"},
+        # An unmapped widget col → dropped (no target)
+        {"frm_id": 1, "col_id": 999, "flt_type": "DD", "flt_target": "FOO", "flt_source": "BAR"},
+    ]
+    table_rows = [{"tbl_id": 100, "tbl_query_id": 20}]
+    dlg_frm_rows = [{"frm_id": 7, "frm_query_id": 21}]
+    # tbl_col_rows feeds dd_id resolution on the destination too (here: empty on purpose — the
+    # FormsDialog dest's resolution comes from the dlg_col_rows entry above).
+    out = migrate_nested_tab_filter_columns(
+        dlg_col_rows, dlg_filter_rows,
+        table_rows=table_rows, dlg_frm_rows=dlg_frm_rows, tbl_col_rows=(),
+    )
+    # audit_trail_get gets both binds (deduped); settings_jdedwards_get gets HOST → JDE_HOST.
+    assert out == {20: ["AUD_APPS_ID", "AUD_USER_ID"], 21: ["JDE_HOST"]}
+
+
+def test_migrate_nested_tab_filter_columns_end_to_end() -> None:
+    """End-to-end: ``migrate_nested_tab_filter_columns`` → ``migrate_column_hints`` →
+    ``migrate_sql_queries`` actually wraps the nested SQL with the ``:NAME`` binds the runtime
+    sends. Mirrors the drill-filter end-to-end test; without this the param is silently dropped."""
+    dlg_col_rows = [
+        {"frm_id": 1, "col_id": 50, "col_component": "FormsTable", "col_component_id": 100, "col_target": None},
+    ]
+    dlg_filter_rows = [
+        {"frm_id": 1, "col_id": 50, "flt_type": "DD", "flt_target": "AUD_APPS_ID", "flt_source": "APPS_ID"},
+    ]
+    table_rows = [{"tbl_id": 100, "tbl_query_id": 20}]
+    nested = migrate_nested_tab_filter_columns(dlg_col_rows, dlg_filter_rows, table_rows=table_rows)
+    assert nested == {20: ["AUD_APPS_ID"]}
+    # The destination had no v1 column hints at all — the nested-filter pass still emits hints
+    # so the SQL gets wrapped. (Real-world libnsx1 case for ``audit_trail_get`` inside
+    # ``settings_applications``'s Audit tab.)
+    hints = migrate_column_hints((), (), extra_filter_cols=nested)
+    assert hints[20] == [{"name": "AUD_APPS_ID", "filter": True}]
+    queries = [{"query_id": 20, "query_label": "Audit"}]
+    sql_rows = [{
+        "query_id": 20, "query_crud": "GET", "query_pool": "nomasx1", "query_dbtype": "postgres",
+        "query_sqlquery": "SELECT * FROM audit_trail", "query_orderby": None,
+    }]
+    out = migrate_sql_queries(queries, sql_rows, column_hints=hints)
+    sql = out["connectors"]["nomasx1"]["queries"][0]["sql"]
+    assert ":AUD_APPS_ID" in sql and ":AUD_APPS_ID_op" in sql
     assert "lib_flt" in sql  # wrapped, not raw
 
 
@@ -1072,6 +1147,46 @@ def test_migrate_screens_with_dialog() -> None:
         "hidden": True, "disabled": True, "default": "ADMIN",
         "lookup_param_binds": [{"param": "ROL_APPS_ID", "source": "USR_APPS_ID"}],
     }
+    parse_screens(out)
+
+
+def test_migrate_screens_normalizes_tab_cols_to_max_colspan() -> None:
+    """v1 effectively inferred dialog grid width from the widest field colspan and ignored
+    ``ly_dlg_tab.tab_cols`` when the two disagreed (a tab with tab_cols=1 + a colspan=3 field
+    rendered as 3 columns). v2 uses ``cols`` literally as the CSS grid column count, so the
+    migrator now bumps it up to ``max(tab_cols, max(field.colspan))`` to keep the v2 layout
+    matching what v1 displayed. NOMASX1's settings_applications.jd_edwards tab is the canonical
+    case: tab_cols = 1 but JDE_F00950 spans 3 — without normalization the grid renders messy."""
+    table_rows = [
+        {"tbl_id": 7, "tbl_db_name": "settings_applications", "tbl_query_id": 10,
+         "tbl_label": "Applications", "tbl_frm_id": 5},
+    ]
+    frm_rows = [{"frm_id": 5, "dlg_id": 1, "frm_query_id": 10, "frm_label": "App"}]
+    tab_rows = [
+        # tab_cols intentionally = 1
+        {"frm_id": 5, "tab_id": 1, "tab_seq": 1, "tab_label": "JD Edwards", "tab_cols": 1,
+         "tab_disable_add": "N", "tab_disable_edit": "N"},
+    ]
+    col_rows = [
+        # Two narrow fields…
+        {"frm_id": 5, "col_id": 1, "tab_id": 1, "col_seq": 1, "col_colspan": 1,
+         "col_dd_id": "JDE_SY", "col_label": None, "col_target": "JDE_SY",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N", "col_default": None},
+        {"frm_id": 5, "col_id": 2, "tab_id": 1, "col_seq": 2, "col_colspan": 1,
+         "col_dd_id": "JDE_DTA", "col_label": None, "col_target": "JDE_DTA",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N", "col_default": None},
+        # …and one that explicitly wants 3 columns
+        {"frm_id": 5, "col_id": 3, "tab_id": 1, "col_seq": 3, "col_colspan": 3,
+         "col_dd_id": "JDE_F00950", "col_label": None, "col_target": "JDE_F00950",
+         "col_visible": "Y", "col_disabled": "N", "col_required": "N", "col_default": None},
+    ]
+    out = migrate_screens(
+        table_rows, frm_rows=frm_rows, tab_rows=tab_rows, col_rows=col_rows,
+        sql_rows=_SCR_SQL, app_name="nomasx1",
+    )
+    tab = out["screens"]["nomasx1"]["settings_applications"]["dialog"]["tabs"][0]
+    # Bumped from 1 → 3 so the colspan=3 field actually has 3 explicit columns to span.
+    assert tab["cols"] == 3
     parse_screens(out)
 
 
