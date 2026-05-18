@@ -3,6 +3,8 @@
 // the unbridled JSON-schema shape used by `SchemaForm`, this one mirrors the resolved /
 // permission-pruned runtime view served by `_list_view` / `_full_view`).
 
+import type { Column } from './connectors'
+
 /** One ParamBind — same shape used by dialog field lookups, actions (slice 4), and row menus
  *  (slice 6). Exactly one of `value` / `source` is set in practice. */
 export interface ParamBind {
@@ -248,6 +250,10 @@ export interface ScreenListItem {
   has_dialog: boolean
   has_row_menu: boolean
   has_actions: boolean
+  /** Phase 1 — true when ``Screen.columns`` is non-empty. The TableView fetches the screen detail
+   *  whenever any ``has_*`` flag is true; this one lets it pull the body purely for the column
+   *  hints on screens that have no dialog / row_menu / actions. */
+  has_columns?: boolean
   /** Promoted-from-ctx-menu row-click target. When this screen has no own ``dialog`` and the
    *  user clicks a row, the frontend opens *the named screen's* dialog as a modal — the
    *  ``row_click_binds`` map this row's columns to the target read_query's params, the
@@ -272,6 +278,12 @@ export interface ScreenDetail extends ScreenListItem {
   on_insert?: Action[]
   on_update?: Action[]
   on_delete?: Action[]
+  /** Phase 1 — per-screen resolved column hints (label / format / hidden / filter / filter_from /
+   *  visible_when / rule / width / align / dd). Same shape :class:`Column` carries on the SQL
+   *  endpoint's ``result.columns``, so the TableView can swap this list in transparently. Only
+   *  set when ``Screen.columns`` is non-empty; when absent the TableView falls back to the SQL
+   *  endpoint's resolved columns from the query level. */
+  columns?: Column[]
 }
 
 /** `GET /api/screens` reply — apps → list view. */

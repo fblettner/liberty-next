@@ -55,6 +55,8 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from liberty.connectors.config import ColumnHint
+
 
 class ParamBind(BaseModel):
     """Bind one ``:placeholder`` parameter of a target query — for a lookup combo on a dialog
@@ -591,6 +593,21 @@ class Screen(BaseModel):
     update_query: str | None = Field(default=None, description="Writable query for edits — usually ``<base>_put``.")
     insert_query: str | None = Field(default=None, description="Writable query for inserts — usually ``<base>_post``.")
     delete_query: str | None = Field(default=None, description="Writable query for deletes — usually ``<base>_delete``.")
+    columns: list[ColumnHint] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Columns"},
+        description=(
+            "Per-screen display hints (label / hidden / filter / width / align / format / "
+            "filter_from / visible_when) — same :class:`ColumnHint` shape used on "
+            "``QueryDef.columns``. When non-empty, **this list overrides the read query's** "
+            "``columns`` for *this screen* — so two screens can show the same query with "
+            "different column orderings / labels / filters / hidden sets without forking the "
+            "SQL. Empty → the query's ``columns`` hints still drive the grid (Phase 1 "
+            "back-compat). Order is display order; hints for columns the query doesn't return "
+            "are ignored. Dictionary resolution and inline filter wrap follow the same rules "
+            "as ``QueryDef.columns``."
+        ),
+    )
     auto_load: bool = Field(default=False, description="Run the read query on screen open (v1's tbl_auto_load).")
     audit: bool = Field(default=False, description="Stamp AUD_<table> on every write (v1's tbl_audit). Wired in slice 5.")
     editable: bool = Field(default=True, description="Allow inline grid editing (v1's tbl_editable).")

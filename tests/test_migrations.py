@@ -1483,6 +1483,42 @@ def test_migrate_screens_crud_normalization() -> None:
     assert s["delete_query"] == "items_remove"   # REMOVE row landed in the DELETE slot
 
 
+def test_migrate_screens_emits_columns_mirror() -> None:
+    """Phase 1: when ``column_hints`` is passed in, each screen's ``columns`` field carries the
+    same per-column hint list the read query already has on ``QueryDef.columns`` — keyed by the
+    read query's v1 ``tbl_query_id``. The mirror is empty when no hints are passed (back-compat).
+    Hints from a read query the screen doesn't reference are ignored."""
+    table_rows = [
+        {"tbl_id": 1, "tbl_db_name": "security_users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": "N", "tbl_auto_load": "N", "tbl_frm_id": None},
+    ]
+    hints = {
+        10: [
+            {"name": "USR_ID", "dd": "USR_ID", "filter": True},
+            {"name": "USR_NAME", "label": "Name"},
+        ],
+        # An unrelated query — should be ignored (no screen references it).
+        99: [{"name": "OTHER_COL"}],
+    }
+    out = migrate_screens(
+        table_rows, sql_rows=_SCR_SQL, column_hints=hints, app_name="nomasx1",
+    )
+    s = out["screens"]["nomasx1"]["security_users"]
+    assert s["columns"] == [
+        {"name": "USR_ID", "dd": "USR_ID", "filter": True},
+        {"name": "USR_NAME", "label": "Name"},
+    ]
+    # Round-trips through the screens schema.
+    parsed = parse_screens(out)
+    screen = parsed.screens["nomasx1"]["security_users"]
+    assert [c.name for c in screen.columns] == ["USR_ID", "USR_NAME"]
+    assert screen.columns[0].filter is True
+    assert screen.columns[1].label == "Name"
+    # Without column_hints the field is absent (back-compat).
+    out2 = migrate_screens(table_rows, sql_rows=_SCR_SQL, app_name="nomasx1")
+    assert "columns" not in out2["screens"]["nomasx1"]["security_users"]
+
+
 def test_migrate_screens_skips_unreadable() -> None:
     """A table whose query has no GET/SELECT companion → skipped (would be broken at runtime)."""
     sql = [

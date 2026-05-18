@@ -129,7 +129,11 @@ export default function TableView({ connector, query }: { connector: string; que
   // → inline editor; this is best-effort UX, not a security gate.
   useEffect(() => {
     const stub = findScreen(connector, query)
-    if (!stub || (!stub.has_dialog && !stub.has_row_menu && !stub.has_actions)) {
+    // Phase 1 — fetch the screen body whenever *any* renderable bit is present, including the
+    // new ``has_columns`` flag. A screen with no dialog / row_menu / actions but with its own
+    // ``columns`` list still needs the body so the grid picks the screen's hints instead of
+    // the query's.
+    if (!stub || (!stub.has_dialog && !stub.has_row_menu && !stub.has_actions && !stub.has_columns)) {
       setScreen(null); return
     }
     let cancelled = false
@@ -140,10 +144,15 @@ export default function TableView({ connector, query }: { connector: string; que
     return () => { cancelled = true }
   }, [findScreen, connector, query])
 
-  // Server-filter fields: result columns flagged `filter` in the query's `columns` config (v1's
-  // col_filter). The migrated SQL is wrapped in `SELECT * FROM (…) _flt WHERE …` with a `:<col>` +
-  // optional `:<col>_op` bind per such column, so the value here actually pre-filters server-side.
-  const filterCols = useMemo(() => (meta?.columns ?? []).filter((c) => c.filter), [meta])
+  // Server-filter fields: columns flagged `filter` in the *screen*'s ``columns`` if present,
+  // else the query's `columns` config (v1's col_filter). The migrated SQL is wrapped in
+  // `SELECT * FROM (…) _flt WHERE …` with a `:<col>` + optional `:<col>_op` bind per such
+  // column, so the value here actually pre-filters server-side. (Phase 1 prefers the screen
+  // when set; Phase 2 will make this the only source.)
+  const filterCols = useMemo(
+    () => (screen?.columns?.length ? screen.columns : (meta?.columns ?? [])).filter((c) => c.filter),
+    [screen, meta],
+  )
   const filterBindNames = useMemo(() => {
     const s = new Set<string>()
     for (const c of filterCols) { s.add(c.name); s.add(`${c.name}_op`) }
@@ -207,6 +216,31 @@ export default function TableView({ connector, query }: { connector: string; que
       run()
     }
   }, [meta, result, busy, run])
+
+  // Phase 1 — overlay the screen's ``columns`` (when set) on top of the SQL result's discovered
+  // columns. The screen ships the resolved label/format/hidden/filter/filter_from/visible_when/
+  // rule/width/align/dd from its own ColumnHint list; the SQL result carries the discovered
+  // ``type`` (best-effort, from cursor.description). The merge: each screen column wins for
+  // display; ``type`` comes from the matching result column (case-insensitive); result columns
+  // the screen doesn't hint at follow at the end (keep discovery order, unhinted). Empty
+  // screen.columns → pass the result through untouched (back-compat).
+  const effectiveResult = useMemo<QueryResult | null>(() => {
+    if (!result) return null
+    if (!screen?.columns?.length) return result
+    const byLower = new Map(result.columns.map((c) => [c.name.toLowerCase(), c]))
+    const used = new Set<string>()
+    const merged: typeof result.columns = []
+    for (const sc of screen.columns) {
+      const rc = byLower.get(sc.name.toLowerCase())
+      if (!rc) continue   // stale screen hint — column the query doesn't return
+      used.add(rc.name)
+      merged.push({ ...sc, name: rc.name, type: rc.type ?? sc.type ?? null })
+    }
+    for (const rc of result.columns) {
+      if (!used.has(rc.name)) merged.push(rc)
+    }
+    return { ...result, columns: merged }
+  }, [result, screen])
 
   // Title = the screen's description (v1 ly_tables.tbl_label) — the menu label is already shown
   // on the tab; fall back to the menu label, then the technical name.
@@ -299,7 +333,7 @@ export default function TableView({ connector, query }: { connector: string; que
 
         {runErr && <Banner $tone="error">{runErr}</Banner>}
 
-        {result && result.statement_type === 'SELECT' && (
+        {effectiveResult && effectiveResult.statement_type === 'SELECT' && (
           // The inner Stack is the one that wraps ResultMeta + ResultTable. It must also
           // `flex: 1; minHeight: 0` so the chain reaches all the way down to DataTable —
           // without this the inner Stack grows to its content's natural height (table rows ×
@@ -308,13 +342,13 @@ export default function TableView({ connector, query }: { connector: string; que
           <Stack gap={10} style={{ flex: 1, minHeight: 0 }}>
             <Row align="center" style={{ justifyContent: 'space-between' }}>
               <Meta style={{ flex: 1 }}>
-                {t(result.row_count === 1 ? 'table.rows_one' : 'table.rows_other', { count: result.row_count })} ·{' '}
-                {result.duration_ms.toFixed(1)} {t('common.ms')}
-                {result.truncated && (
-                  <span style={{ color: colors.red.main }}> · {t('table.truncatedTo', { n: result.rows.length })}</span>
+                {t(effectiveResult.row_count === 1 ? 'table.rows_one' : 'table.rows_other', { count: effectiveResult.row_count })} ·{' '}
+                {effectiveResult.duration_ms.toFixed(1)} {t('common.ms')}
+                {effectiveResult.truncated && (
+                  <span style={{ color: colors.red.main }}> · {t('table.truncatedTo', { n: effectiveResult.rows.length })}</span>
                 )}
               </Meta>
-              {result.columns.length > 0 && (
+              {effectiveResult.columns.length > 0 && (
                 <ViewToggle role="group" aria-label={t('table.viewToggle')}>
                   <button type="button" aria-pressed={view === 'table'} onClick={() => setView('table')} title={t('table.viewTable')}>
                     <TableIcon size={12} /> {t('table.viewTable')}
@@ -325,18 +359,18 @@ export default function TableView({ connector, query }: { connector: string; que
                 </ViewToggle>
               )}
             </Row>
-            {result.columns.length === 0 ? (
+            {effectiveResult.columns.length === 0 ? (
               <Meta>{t('table.noColumns')}</Meta>
             ) : view === 'chart' ? (
               // Suspense + lazy: the Recharts chunk only fetches when the operator first
               // toggles to Chart mode. The fallback shows the existing centred spinner.
               <Suspense fallback={<Centered />}>
-                <ChartView result={result} connector={connector} query={query} />
+                <ChartView result={effectiveResult} connector={connector} query={query} />
               </Suspense>
             ) : (
               <ResultTable
-                key={result.columns.map((c) => c.name).join('|')}
-                result={result}
+                key={effectiveResult.columns.map((c) => c.name).join('|')}
+                result={effectiveResult}
                 connector={connector}
                 query={query}
                 updateQuery={meta.update_query}

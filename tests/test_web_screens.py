@@ -307,6 +307,89 @@ def test_get_screen_resolves_prompt_field_rules(app_with_prompts) -> None:
         assert client.get("/api/screens/app1/users").status_code == 401
 
 
+def _screens_with_columns() -> str:
+    """Phase 1 mirror — a screen carrying its own ``columns`` list. Same ColumnHint shape
+    used on ``QueryDef.columns``; the screens API resolves each hint against the dictionary
+    (label / format / rule) and ships it as ``ScreenDetail.columns`` so the TableView can
+    swap it in for the SQL endpoint's result columns."""
+    return textwrap.dedent(
+        """
+        [screens.app1.users]
+        label = "Users"
+        read_query = "users_get"
+
+        [[screens.app1.users.columns]]
+        name = "USR_ID"
+        dd = "USR_ID"
+        filter = true
+        width = 120
+
+        [[screens.app1.users.columns]]
+        name = "ROLE"
+        dd = "ROLE_ID"
+        label = "Override Label"
+        align = "right"
+        """
+    )
+
+
+@pytest.fixture
+def app_with_screen_columns(tmp_path):
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_with_lookup_query(db_url))
+    (tmp_path / "screens.toml").write_text(_screens_with_columns())
+    (tmp_path / "dictionary.toml").write_text(_dictionary_toml())
+    _seed(db_url)
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(
+            config_path=Path(tmp_path / "connectors.toml"),
+            dictionary_path=Path(tmp_path / "dictionary.toml"),
+        ),
+        screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    return create_app(settings)
+
+
+def test_screen_columns_resolved_on_wire(app_with_screen_columns) -> None:
+    """Phase 1 — ``Screen.columns`` rides through the screens API resolved against the shared
+    dictionary in the request's language, with the same shape ``Column.to_dict()`` emits for
+    read-result columns. The list-view also flags ``has_columns = true`` so the TableView
+    eagerly fetches the body even on screens with no dialog / row_menu / actions."""
+    with TestClient(app_with_screen_columns) as client:
+        # List view — the has_* flag tells the frontend to fetch the detail.
+        listing = client.get("/api/screens", headers=_h(client, "admin")).json()
+        users_item = next(s for s in listing["screens"]["app1"] if s["id"] == "users")
+        assert users_item["has_columns"] is True
+        # Detail view — columns are resolved (label/format/rule from the dictionary, the
+        # hint's own filter/width/align/dd surfaced as-is).
+        body = client.get("/api/screens/app1/users", headers=_h(client, "admin")).json()
+        cols = body["columns"]
+        assert len(cols) == 2
+        usr, role = cols
+        # USR_ID resolves its label from the dictionary entry, keeps the hint's filter+width.
+        assert usr["name"] == "USR_ID" and usr["label"] == "User id" and usr["format"] == "text"
+        assert usr["filter"] is True and usr["width"] == 120 and usr["dd"] == "USR_ID"
+        # ROLE keeps its explicit label override; the dictionary supplies the LOOKUP rule.
+        assert role["name"] == "ROLE" and role["label"] == "Override Label" and role["align"] == "right"
+        assert role["rule"]["kind"] == "lookup"
+        assert role["rule"]["connector"] == "app1" and role["rule"]["query"] == "roles_lookup"
+        assert role["dd"] == "ROLE_ID"
+
+
+def test_screen_columns_absent_when_empty(app) -> None:
+    """A screen without its own ``columns`` doesn't ship the field on the wire and the
+    list view's ``has_columns`` is false — back-compat with screens.toml from before Phase 1."""
+    with TestClient(app) as client:
+        listing = client.get("/api/screens", headers=_h(client, "admin")).json()
+        for s in listing["screens"]["app1"]:
+            assert s["has_columns"] is False
+        body = client.get("/api/screens/app1/users", headers=_h(client, "admin")).json()
+        assert "columns" not in body
+
+
 def test_info_reports_screen_apps(app) -> None:
     with TestClient(app) as client:
         info = client.get("/info").json()

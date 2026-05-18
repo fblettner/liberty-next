@@ -125,6 +125,57 @@ async def _build(args: argparse.Namespace) -> dict:
             screen_rows = await read_screens(engine)
             cdn_params = await read_column_conditions(engine)
             ctx_rows, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
+            # Phase 1 mirror: column hints onto the screen too. Same plumb the ``sql``/``all``
+            # subcommands use for ``migrate_sql_queries(column_hints=…)``. Pulled here so a
+            # ``liberty-migrate screen`` run produces a screens.toml whose Screen.columns already
+            # carries the v1 ly_tbl_col / ly_dlg_col hints — no need to re-run ``sql`` to populate
+            # the read query's columns as well. Drill / nested-tab filter columns flow in too so
+            # the screen sees the same ``filter = true`` set the wrapped read query does.
+            tbl_cols, dlg_cols = await read_column_hints(engine)
+            tbl_flt, dlg_flt = await read_table_filters(engine)
+            _, ctx_val_rows_for_filters, ctx_filter_rows_for_filters = await read_context_menus(engine)
+            tables_rows_for_hints = screen_rows[0]
+            dlg_frm_rows_for_hints = screen_rows[2]
+            raw_dlg_cols_for_hints = screen_rows[5]
+            raw_dlg_filters_for_hints = screen_rows[6]
+            drill_cols_for_hints = migrate_drill_filter_columns(
+                ctx_val_rows_for_filters, ctx_filter_rows_for_filters,
+                tables_rows=tables_rows_for_hints, dlg_frm_rows=dlg_frm_rows_for_hints,
+                tbl_col_rows=tbl_cols, dlg_col_rows=dlg_cols,
+            )
+            nested_cols_for_hints = migrate_nested_tab_filter_columns(
+                raw_dlg_cols_for_hints, raw_dlg_filters_for_hints,
+                table_rows=tables_rows_for_hints, dlg_frm_rows=dlg_frm_rows_for_hints,
+                tbl_col_rows=tbl_cols,
+            )
+            merged_filter_cols_for_hints: dict[int, list[str]] = {}
+            for src in (drill_cols_for_hints, nested_cols_for_hints):
+                for qid, cols in src.items():
+                    bucket = merged_filter_cols_for_hints.setdefault(qid, [])
+                    for col in cols:
+                        if col not in bucket:
+                            bucket.append(col)
+            column_hints_by_qid = migrate_column_hints(
+                tbl_cols, dlg_cols, extra_filter_cols=merged_filter_cols_for_hints,
+            )
+            # Merge cascading filter deps + conditional column visibility onto the same hints
+            # (parity with ``migrate_sql_queries``' shape — see :func:`migrate_sql_queries` for
+            # the merging logic). For Phase 1 we do it inline since :func:`migrate_screens`
+            # consumes the resolved per-query list directly.
+            _table_filters_by_qid = migrate_table_filters(tbl_flt, dlg_flt)
+            _column_vis_by_qid = migrate_column_visibility(tbl_cols, dlg_cols, cdn_params)
+            for qid, hint_list in column_hints_by_qid.items():
+                per_col_filters = _table_filters_by_qid.get(qid) or {}
+                per_col_vis = _column_vis_by_qid.get(qid) or {}
+                for h in hint_list:
+                    col_name = h.get("name")
+                    if not col_name:
+                        continue
+                    if col_name in per_col_filters and "filter_from" not in h:
+                        h["filter_from"] = [dict(d) for d in per_col_filters[col_name]]
+                    if col_name in per_col_vis and "visible_when" not in h:
+                        rules = per_col_vis[col_name]
+                        h["visible_when"] = rules[0] if len(rules) == 1 else list(rules)
             # The context-menu migrator needs ly_tables / ly_dlg_frm / ly_qry_sql — these are
             # already in the screen_rows tuple at positions 0, 2, and 7 respectively (see the
             # read_screens docstring for the layout).
@@ -156,6 +207,7 @@ async def _build(args: argparse.Namespace) -> dict:
                 promotable_dialogs=promotable_dialogs,
                 actions_data=actions_data,
                 sequence_rows=seq_rows,
+                column_hints=column_hints_by_qid,
                 app_name=args.connector,
             )
             # Event-driven action attachment via ``ly_evt_cpt`` — the *correct* model:

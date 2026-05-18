@@ -28,6 +28,7 @@ from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.dictionary import DictionaryFile
+from liberty.connectors.sql import _hint_to_dict
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language
 
@@ -267,6 +268,11 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "has_dialog": screen.dialog is not None,
         "has_row_menu": bool(screen.row_menu),
         "has_actions": bool(screen.actions),
+        # Phase 1 — non-empty Screen.columns means the screen carries its own resolved column
+        # hints (overrides the query's). The TableView fetches the full screen body when any of
+        # the ``has_*`` flags is true; flagging this lets it pull the body even on screens with
+        # no dialog / row_menu / actions, purely to pick up the screen-level column hints.
+        "has_columns": bool(screen.columns),
         # Row-click → sibling-screen dialog (the v1 "Display Properties" promotion). Carried on
         # the list view too so the frontend's TableView can wire row clicks without fetching the
         # full screen body (the property is only set on screens that need it; absent for most).
@@ -289,6 +295,20 @@ def _full_view(
     drives the dictionary lookup (matches how :class:`SQLConnector` resolves read-result hints)."""
     body = screen.model_dump(mode="json", exclude_none=True)
     connector = _screen_connector(screen, app=app)
+    # Phase 1 — when the screen carries its own ``columns`` list, ship it *resolved* against the
+    # shared dictionary in the request's language so the frontend can render the grid straight
+    # from this payload instead of from the SQL endpoint's ``result.columns``. The shape mirrors
+    # what :class:`liberty.connectors.sql.Column.to_dict` emits for read-result columns (same
+    # ``label`` / ``format`` / ``rule`` / ``hidden`` / ``filter`` / ``filter_from`` / ``visible_when``
+    # / ``align`` / ``width`` / ``dd`` keys), so the frontend can substitute it transparently.
+    # Empty list → drop the key entirely (Pydantic's ``exclude_none`` keeps the empty default; we
+    # drop it here so the frontend falls back to the SQL result's columns).
+    if screen.columns:
+        body["columns"] = [
+            _hint_to_dict(h, dictionary, language, connector=connector) for h in screen.columns
+        ]
+    else:
+        body.pop("columns", None)
     # Resolve prompts on every attachment point that can carry actions: screen-level actions /
     # row_menu / on_insert / on_update / on_delete, and the dialog's hooks + per-tab buttons.
     for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):

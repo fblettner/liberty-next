@@ -2503,6 +2503,7 @@ def migrate_screens(
     promotable_dialogs: Mapping[int, Mapping[str, Any]] | None = None,
     actions_data: Mapping[str, Any] | None = None,
     sequence_rows: Iterable[Mapping[str, Any]] = (),
+    column_hints: Mapping[int, list[dict[str, Any]]] | None = None,
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -2992,6 +2993,17 @@ def migrate_screens(
             screen["editable"] = False
         if str(r.get("tbl_uploadable") or "").upper() in _YES_FLAGS:
             screen["uploadable"] = True
+
+        # Phase 1 mirror of QueryDef.columns onto the screen. Same hints the read query already
+        # carries — copied here so the runtime can shift to ``Screen.columns`` as the source of
+        # truth in Phase 2 without re-migrating, and so two screens sharing one read query can
+        # diverge their column ordering / labels / hidden sets without forking the SQL. Hints
+        # are emitted as plain dicts (the same shape :func:`migrate_column_hints` produces) and
+        # round-trip through Pydantic's ``ColumnHint`` validation on load.
+        if column_hints:
+            hints = column_hints.get(tbl_q)
+            if hints:
+                screen["columns"] = [dict(h) for h in hints]
 
         # Dialog: only when the table widget is wired to a dialog form.
         frm_id_raw = r.get("tbl_frm_id")
