@@ -259,6 +259,7 @@ const en = {
     menus: {
       saved: 'Saved & reloaded.',
       hint: 'Save validates the whole MenusFile (unique ids, parents exist, no cycles, folder-vs-leaf shape), rewrites menus.toml — the [menus] table is replaced wholesale, then reloads.',
+      scopeLabel: 'App:',
       app: {
         add: 'Add app',
         delete: 'Delete app',
@@ -376,6 +377,7 @@ const en = {
       delete: 'Delete screen',
       openDesigner: 'Open Screen Designer',
       designerTitle: 'Screen Designer',
+      scopeLabel: 'App:',
       summary: {
         label: 'Label',
         description: 'Description',

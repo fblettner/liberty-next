@@ -15,7 +15,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { groupQueriesByTable } from './connectorTables'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -23,20 +23,9 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 type AppsMap = Record<string, AppMenu>
 
 // ── styled bits ──────────────────────────────────────────────────────────────
-const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-const NavCol = styled.div`flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
-const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
-const NavItem = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
-  & svg { flex-shrink: 0; color: ${colors.text.muted}; }
-  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
-const FormCol = styled(Card)`flex: 1; min-width: 0;`
+// (Split / NavCol / NavList / NavItem / FormCol removed — the outer two-column layout collapsed
+// when app selection moved to the scope-chip strip. The TreeSplit below is now the top-level
+// layout for the selected app's content: tree on the left, inspector on the right.)
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
 const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
@@ -102,6 +91,19 @@ const NavSearch = styled.div`
 `
 const AppHeader = styled(Row)`align-items: center; justify-content: space-between; gap: 10px;`
 const AppLabel = styled.strong`font-family: ${fonts.mono}; color: ${colors.text.primary};`
+// Scope row — matches DictionaryBuilder + ScreensBuilder pattern: horizontal chip strip above
+// the split, sans-serif label, 26px-high pill chips. Replaces the old left-column app list so
+// every builder shares the same "config path → scope chips → [list | detail]" layout.
+const ScopeBar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
+const ScopeChip = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
+  &:hover { color: ${colors.text.primary}; }
+`
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const isFolder = (it: MenuItem) => !it.type
@@ -484,36 +486,38 @@ export default function MenusBuilder() {
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
     <Stack gap={12}>
       <Mono>{path}</Mono>
-      <Split>
-        <NavCol>
-          {appNames.length > 6 && (
-            <NavSearch>
-              <Search size={13} />
-              <input value={appQ} onChange={(e) => setAppQ(e.target.value)} placeholder={`filter ${appNames.length}…`} />
-            </NavSearch>
-          )}
-          <NavList>
-            {shownApps.map((n) => (
-              <NavItem key={n} $active={n === selApp} onClick={() => { setSelApp(n); setStatus(null) }}>
-                <FolderTree size={13} /> <span className="name">{n}</span>
-              </NavItem>
-            ))}
-            {shownApps.length === 0 && <Empty>{appNames.length ? t('common.noMatches') : t('settings.menus.app.empty')}</Empty>}
-          </NavList>
-          <Button $variant="ghost" $size="sm" onClick={addApp} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
-            <Plus size={13} /> {t('settings.menus.app.add')}
-          </Button>
-        </NavCol>
-        <FormCol>
-          {selApp && currentApp ? (
-            <Stack gap={12}>
-              <AppHeader>
-                <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
-                <Button $variant="danger" $size="sm" onClick={() => removeApp(selApp)} disabled={busy}>
-                  <Trash2 size={13} /> {t('settings.menus.app.delete')}
-                </Button>
-              </AppHeader>
-              <TreeSplit>
+      {/* Scope row — apps are the menu-file's scope, equivalent to DictionaryBuilder's scope
+          chips and ScreensBuilder's app chips. Pulled out of the left column so every builder
+          follows the same "config path → scope chips → [list | detail]" layout. The optional
+          search box appears next to the chips when there are more than ~6 apps. */}
+      <ScopeBar>
+        <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.menus.scopeLabel')}</span>
+        {appNames.length > 6 && (
+          <NavSearch style={{ marginBottom: 0, height: 26 }}>
+            <Search size={12} />
+            <input value={appQ} onChange={(e) => setAppQ(e.target.value)} placeholder={`filter ${appNames.length}…`} />
+          </NavSearch>
+        )}
+        {shownApps.map((n) => (
+          <ScopeChip key={n} $active={n === selApp} type="button" onClick={() => { setSelApp(n); setStatus(null) }}>
+            <FolderTree size={12} /> {n}
+          </ScopeChip>
+        ))}
+        <ScopeChip type="button" onClick={addApp}>
+          <Plus size={12} /> {t('settings.menus.app.add')}
+        </ScopeChip>
+        {selApp && (
+          <ScopeChip type="button" onClick={() => removeApp(selApp)} title={t('settings.menus.app.delete')} style={{ marginLeft: 'auto', color: colors.red.main, borderColor: colors.red.border }}>
+            <Trash2 size={12} /> {t('settings.menus.app.delete')}
+          </ScopeChip>
+        )}
+      </ScopeBar>
+      {selApp && currentApp ? (
+        <Stack gap={12}>
+          <AppHeader>
+            <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
+          </AppHeader>
+          <TreeSplit>
                 <TreeCol>
                   <NavSearch>
                     <Search size={13} />
@@ -559,12 +563,10 @@ export default function MenusBuilder() {
                   </InspectorInner>
                 </InspectorCol>
               </TreeSplit>
-            </Stack>
-          ) : (
-            <Empty>{appNames.length ? t('settings.menus.app.pickOne') : t('settings.menus.app.empty')}</Empty>
-          )}
-        </FormCol>
-      </Split>
+        </Stack>
+      ) : (
+        <Empty>{appNames.length ? t('settings.menus.app.pickOne') : t('settings.menus.app.empty')}</Empty>
+      )}
       <Row>
         <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
           {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}

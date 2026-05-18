@@ -57,15 +57,17 @@ const NavSearch = styled.div`
   }
   &:focus-within { border-color: ${colors.blue.border}; }
 `
-const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 4px;`
+// Scope row — matches DictionaryBuilder's scope-chip pattern so every builder has a consistent
+// "scope: <chips>" header. Sans-serif label + 26px-high pill chips with subtle borders.
+const ScopeBar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
 const Chip = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
-  & svg { color: ${colors.text.muted}; }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
+  &:hover { color: ${colors.text.primary}; }
 `
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 // The screen row stacks id (mono) and label (sans) vertically — long labels were colliding with
@@ -313,19 +315,27 @@ export default function ScreensBuilder() {
     <FrameworkEnumsContext.Provider value={enums}>
     <Stack gap={12}>
       <Mono>{path}</Mono>
+      {/* Scope row — apps are the screen-file's scope, equivalent to DictionaryBuilder's
+          Shared / per-connector chips. Sits above the split so every builder follows the same
+          "config path → scope chips → [list | detail]" layout pattern. */}
+      <ScopeBar>
+        <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.screens.scopeLabel')}</span>
+        {apps.map((a) => (
+          <Chip key={a} $active={a === selApp} type="button" onClick={() => { setSelApp(a); setStatus(null) }}>
+            <FolderOpen size={12} /> {a}
+          </Chip>
+        ))}
+        <Chip type="button" onClick={addApp} title={t('settings.screens.addApp')}>
+          <Plus size={12} /> {t('settings.screens.addApp')}
+        </Chip>
+        {selApp && (
+          <Chip type="button" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteApp')} style={{ marginLeft: 'auto', color: colors.red.main, borderColor: colors.red.border }}>
+            <Trash2 size={12} /> {t('settings.screens.deleteApp')}
+          </Chip>
+        )}
+      </ScopeBar>
       <Split>
         <NavCol>
-          {/* App chips — same affordance as the DictionaryBuilder's scope chips. */}
-          <Chips>
-            {apps.map((a) => (
-              <Chip key={a} $active={a === selApp} onClick={() => { setSelApp(a); setStatus(null) }}>
-                <FolderOpen size={12} /> {a}
-              </Chip>
-            ))}
-            <Chip onClick={addApp} title={t('settings.screens.addApp')}>
-              <Plus size={12} /> {t('settings.screens.addApp')}
-            </Chip>
-          </Chips>
           {selApp && (
             <>
               {ids.length > 6 && (
@@ -358,14 +368,11 @@ export default function ScreensBuilder() {
                   </div>
                 )}
               </NavList>
-              <Row gap={4} style={{ marginTop: 6 }}>
-                <Button $variant="ghost" $size="sm" onClick={() => selApp && addScreen(selApp)} style={{ flex: 1, justifyContent: 'flex-start' }}>
-                  <Plus size={13} /> {t('settings.screens.add')}
-                </Button>
-                <Button $variant="ghost" $size="sm" onClick={() => selApp && removeApp(selApp)} title={t('settings.screens.deleteApp')}>
-                  <Trash2 size={13} />
-                </Button>
-              </Row>
+              {/* Add-screen button only — "Delete app" moved to the scope bar above so the
+                  list footer stays focused on actions for the screen list itself. */}
+              <Button $variant="ghost" $size="sm" onClick={() => selApp && addScreen(selApp)} style={{ justifyContent: 'flex-start', marginTop: 6 }}>
+                <Plus size={13} /> {t('settings.screens.add')}
+              </Button>
             </>
           )}
         </NavCol>

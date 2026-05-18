@@ -261,6 +261,7 @@ const fr: Resources = {
     menus: {
       saved: 'Enregistré et rechargé.',
       hint: "Enregistrer valide tout le fichier (ids uniques, parents existants, sans cycle, dossier vs feuille), réécrit menus.toml — la table [menus] est remplacée en bloc, puis recharge.",
+      scopeLabel: 'Application :',
       app: {
         add: 'Ajouter une application',
         delete: "Supprimer l'application",
@@ -378,6 +379,7 @@ const fr: Resources = {
       delete: 'Supprimer l\'écran',
       openDesigner: 'Ouvrir le Designer d\'Écran',
       designerTitle: 'Designer d\'Écran',
+      scopeLabel: 'Application :',
       summary: {
         label: 'Libellé',
         description: 'Description',
