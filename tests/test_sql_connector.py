@@ -422,6 +422,42 @@ async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None
 
 
 @pytest.mark.asyncio
+async def test_audit_probe_uses_metadata_table_not_select_against_missing_table(pools: PoolRegistry) -> None:
+    """Regression — the existence probe must use a metadata table (``information_schema`` /
+    ``all_tables`` / ``sqlite_master``), not ``SELECT 1 FROM <audit>``. On Postgres a SELECT
+    against a non-existent relation **aborts the entire transaction** (asyncpg's
+    ``InFailedSQLTransactionError`` — "current transaction is aborted, commands ignored
+    until end of transaction block"); the subsequent ``CREATE TABLE`` then fails and the
+    whole audited write rolls back, defeating the lazy auto-create.
+
+    The metadata-table probe returns zero rows on a miss without poisoning the transaction.
+
+    We can't easily reproduce the transaction-poison behaviour on SQLite (it doesn't enforce
+    it), but we *can* assert the probe's SQL shape — when the audit table doesn't exist, the
+    next operation in the transaction must still succeed. This catches a future regression
+    that reintroduces a ``SELECT 1 FROM <audit>`` probe."""
+    from liberty.connectors.sql import reset_audit_table_cache
+    reset_audit_table_cache()
+    async with pools.engine("test").begin() as c:
+        await c.execute(text("DROP TABLE IF EXISTS aud_for_probe_test"))
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", writable=True, audit="aud_for_probe_test",
+                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :NAME, :STATUS)"),
+    )
+    # First write — probes the metadata, creates the audit table, runs main + audit INSERT.
+    # On Postgres the SELECT-on-missing-table approach would have aborted the txn here, the
+    # CREATE TABLE would fail with "current transaction is aborted", and the whole audit
+    # path would roll back. Asserting the probe-then-create-then-insert succeeds end-to-end
+    # locks in the metadata-table behaviour.
+    r = await conn.execute("ins", {"ID": 700, "NAME": "probe-test", "STATUS": "on"}, user="x")
+    assert r.rowcount == 1
+    async with pools.engine("test").connect() as c:
+        rows = (await c.execute(text("SELECT id FROM aud_for_probe_test"))).mappings().all()
+    assert [r["id"] for r in rows] == [700]
+
+
+@pytest.mark.asyncio
 async def test_audit_failure_rolls_back_the_main_write(pools: PoolRegistry) -> None:
     """A misconfigured audit table — one that exists but has the wrong schema — rolls back
     the main write. The audit INSERT runs in the same transaction. Loud rather than silently

@@ -1036,9 +1036,17 @@ class SQLConnector:
     async def _ensure_audit_table(self, conn, audit_name: str, main_sql: str | None) -> None:
         """v1 parity — create the AUD_<table> companion on the first write to it. v1's
         ``tbl_audit = 'Y'`` flag never required the operator to pre-create the audit table;
-        the framework did it lazily. v2 keeps the same: a ``SELECT 1`` probe checks
-        existence; on ``UndefinedTable`` we ``CREATE TABLE AS SELECT * FROM <source>
-        WHERE 1=0`` with three extra audit columns (AUD_ACTION / AUD_USER / AUD_DATE).
+        the framework did it lazily. v2 keeps the same: a metadata-table probe checks
+        existence; on miss we ``CREATE TABLE AS SELECT * FROM <source> WHERE 1=0`` with
+        three extra audit columns (AUD_ACTION / AUD_USER / AUD_DATE).
+
+        **The probe MUST be a metadata-table query, not a ``SELECT 1 FROM <audit>``.**
+        Postgres aborts the entire transaction the instant a statement references a
+        non-existent relation (``current transaction is aborted, commands ignored until
+        end of transaction block``); the subsequent ``CREATE TABLE`` is then rejected and
+        the whole audited write rolls back. ``information_schema.tables`` /
+        ``all_tables`` / ``sqlite_master`` return zero rows on a miss without poisoning
+        the transaction.
 
         The source table is parsed from *main_sql* (the write statement that triggered this
         audit) — same parser that already powers Oracle's null-coalesce step. When we can't
@@ -1053,29 +1061,59 @@ class SQLConnector:
         cache_key = (self.pool_name, audit_name.upper())
         if cache_key in _AUDIT_TABLES_VERIFIED:
             return
-        # Quick existence probe. ``SELECT 1 FROM <name> WHERE 1=0`` returns no rows on
-        # success; raises one of asyncpg/oracledb's "table doesn't exist" errors otherwise.
-        try:
-            await conn.execute(text(f"SELECT 1 FROM {audit_name} WHERE 1=0"))
+        dialect = self._resolve_dialect()
+        # Split off an optional ``schema.audit_name`` prefix. The migration only ever emits
+        # ``AUD_<TBL_DB_NAME>`` (no schema), but a hand-edited config might qualify it.
+        if "." in audit_name:
+            schema_part, table_part = audit_name.split(".", 1)
+        else:
+            schema_part, table_part = None, audit_name
+        # Identifier-case normalisation per dialect — Postgres folds unquoted to lowercase,
+        # Oracle to uppercase, SQLite is case-preserving but case-insensitive on lookup.
+        # The metadata tables are case-sensitive on the *value*, so we match the dialect's
+        # convention. (A quoted mixed-case identifier wouldn't survive ``audit_name`` being
+        # a plain Python string anyway — operators using mixed case wire audit by hand.)
+        if dialect == "postgresql":
+            probe_sql = (
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_name = :t" + (" AND table_schema = :s" if schema_part else "") + " LIMIT 1"
+            )
+            params: dict[str, Any] = {"t": table_part.lower()}
+            if schema_part:
+                params["s"] = schema_part.lower()
+        elif dialect == "oracle":
+            probe_sql = (
+                "SELECT 1 FROM all_tables "
+                "WHERE table_name = :t" + (" AND owner = :s" if schema_part else "") + " AND ROWNUM = 1"
+            )
+            params = {"t": table_part.upper()}
+            if schema_part:
+                params["s"] = schema_part.upper()
+        elif dialect == "sqlite":
+            probe_sql = "SELECT 1 FROM sqlite_master WHERE type='table' AND name = :t LIMIT 1"
+            params = {"t": table_part}
+        else:
+            # Unknown dialect — let the audit INSERT itself raise if the table is missing.
+            _log.warning(
+                "audit: existence probe for %s isn't supported on dialect %r — assuming the "
+                "table exists; the audit INSERT will surface a missing-table error if it doesn't",
+                audit_name, dialect,
+            )
             _AUDIT_TABLES_VERIFIED.add(cache_key)
             return
-        except Exception as e:  # noqa: BLE001 — any failure here means "doesn't exist (or unreachable)"
-            # Detect "undefined table"-style errors across drivers. We can't import the driver
-            # exception classes (they live in dialect-specific packages) — substring matching
-            # on the str() is the dialect-portable approach SQLAlchemy itself uses internally.
-            msg = str(e).lower()
-            if not any(needle in msg for needle in (
-                "does not exist", "undefinedtable", "ora-00942", "table or view does not exist",
-                "no such table",
-            )):
-                # The probe failed for some other reason (permissions, wrong schema, …) — log
-                # and let the audit INSERT itself surface the real error.
-                _log.warning(
-                    "audit: probe for %s on pool %r returned an unexpected error: %s",
-                    audit_name, self.pool_name, e,
-                )
-                _AUDIT_TABLES_VERIFIED.add(cache_key)  # don't keep probing every write
+        try:
+            r = await conn.execute(text(probe_sql), params)
+            if r.first() is not None:
+                _AUDIT_TABLES_VERIFIED.add(cache_key)
                 return
+        except Exception as e:  # noqa: BLE001 — permissions / no metadata access / weird driver
+            _log.warning(
+                "audit: probe for %s on pool %r returned an unexpected error: %s — the audit "
+                "INSERT will surface the real error if it fails",
+                audit_name, self.pool_name, e,
+            )
+            _AUDIT_TABLES_VERIFIED.add(cache_key)  # don't keep probing every write
+            return
 
         source = _oracle_target_table(main_sql) if main_sql else None
         if source is None:
