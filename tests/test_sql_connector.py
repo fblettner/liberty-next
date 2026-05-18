@@ -422,6 +422,41 @@ async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None
 
 
 @pytest.mark.asyncio
+async def test_audit_date_is_naive_utc_for_tz_naive_columns(pools: PoolRegistry) -> None:
+    """Regression — the ``AUD_DATE`` bind must be a **naive** UTC datetime. The auto-create
+    DDL emits ``CAST(NULL AS TIMESTAMP) AS AUD_DATE`` (TIMESTAMP without time zone on
+    Postgres); a tz-aware ``datetime.now(UTC)`` against that column trips asyncpg with
+    ``can't subtract offset-naive and offset-aware datetimes`` and rolls the *entire*
+    audited write back — main statement + auto-create + audit INSERT all gone, leaving the
+    operator with no audit table created and the same error on retry. Matches the same
+    naive-UTC convention SYSDATE uses in ``_apply_form_rules``."""
+    from datetime import datetime as dt
+    from liberty.connectors.sql import reset_audit_table_cache
+    reset_audit_table_cache()
+    async with pools.engine("test").begin() as c:
+        await c.execute(text("DROP TABLE IF EXISTS aud_tz_test"))
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", writable=True, audit="aud_tz_test",
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+    )
+    await conn.execute("ins", {"ID": 800, "NAME": "tz-check"}, user="x")
+    async with pools.engine("test").connect() as c:
+        rows = (await c.execute(text("SELECT AUD_DATE AS aud_date FROM aud_tz_test"))).mappings().all()
+    assert len(rows) == 1
+    audit_date = rows[0]["aud_date"]
+    # SQLite stores datetimes as ISO strings — convert + assert naivety. On Postgres /
+    # Oracle the driver returns a Python datetime directly.
+    if isinstance(audit_date, str):
+        audit_date = dt.fromisoformat(audit_date)
+    assert isinstance(audit_date, dt)
+    assert audit_date.tzinfo is None, (
+        f"AUD_DATE bind must be tz-naive (matches TIMESTAMP column); got tzinfo={audit_date.tzinfo!r} — "
+        "asyncpg will reject this against a TIMESTAMP WITHOUT TIME ZONE column"
+    )
+
+
+@pytest.mark.asyncio
 async def test_audit_probe_uses_metadata_table_not_select_against_missing_table(pools: PoolRegistry) -> None:
     """Regression — the existence probe must use a metadata table (``information_schema`` /
     ``all_tables`` / ``sqlite_master``), not ``SELECT 1 FROM <audit>``. On Postgres a SELECT

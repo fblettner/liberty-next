@@ -1203,7 +1203,19 @@ class SQLConnector:
         #                    VALUES (:col1, :col2, …, :_AUD_ACTION, :_AUD_USER, :_AUD_DATE)`
         # Reserved bind names start with `_aud_` so they can't collide with the row's columns.
         col_list = list(cols)
-        bind_params = {**cols, "_aud_action": stmt_type, "_aud_user": user or "anonymous", "_aud_date": datetime.now(timezone.utc)}
+        # ``_aud_date`` is naive UTC: the audit column is ``TIMESTAMP`` (without time zone)
+        # — matches the auto-create DDL above and what v1's AUD_<table>s used. Binding a
+        # tz-aware ``datetime.now(UTC)`` against a tz-naive column trips asyncpg with
+        # "can't subtract offset-naive and offset-aware datetimes" and rolls the whole
+        # audited write back (auto-create + main + audit are one transaction). The same
+        # naive-UTC convention runs for SYSDATE in ``_apply_form_rules``, so the two
+        # paths stay consistent.
+        bind_params = {
+            **cols,
+            "_aud_action": stmt_type,
+            "_aud_user": user or "anonymous",
+            "_aud_date": datetime.now(timezone.utc).replace(tzinfo=None),
+        }
         col_sql = ", ".join([*col_list, "AUD_ACTION", "AUD_USER", "AUD_DATE"])
         val_sql = ", ".join([f":{c}" for c in col_list] + [":_aud_action", ":_aud_user", ":_aud_date"])
         # qdef.audit is the table name; we don't validate it here — it's operator config, same as
