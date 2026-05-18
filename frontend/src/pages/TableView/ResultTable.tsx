@@ -49,7 +49,7 @@ function actionPrompt(a: Action): { fields: PromptField[]; title: string | null;
 
 type DataRow = Record<string, unknown>
 type Align = CSSProperties['textAlign']
-type EditCtrl = 'enum' | 'date' | 'number' | 'text'
+type EditCtrl = 'enum' | 'lookup' | 'boolean' | 'date' | 'number' | 'text'
 
 function colHeader(c: Column): string { return c.label ?? c.name }
 // Column alignment: an explicit `align` hint wins; otherwise the natural default — booleans
@@ -71,11 +71,16 @@ function filterKindOf(c: Column): FilterKind {
   return 'text'
 }
 function editCtrlOf(c: Column): EditCtrl {
+  // Rule-driven widgets first — match the dialog's FieldRow conventions so inline-edit
+  // and dialog-edit feel identical (v1 parity: every form-control surface used dropdowns
+  // for ENUM / LOOKUP and a checkbox for BOOLEAN, never a plain text input).
   if (c.rule?.kind === 'enum') return 'enum'
+  if (c.rule?.kind === 'lookup') return 'lookup'
+  if (c.rule?.kind === 'boolean') return 'boolean'
   const fmt = (c.format ?? '').toLowerCase(), typ = (c.type ?? '').toLowerCase()
   if (isDateish(fmt, typ)) return 'date'
   if (isNumericish(fmt, typ)) return 'number'
-  return 'text'  // boolean codes & everything else → raw text
+  return 'text'
 }
 const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
   kind === 'boolean' || kind === 'enum'
@@ -191,14 +196,53 @@ const RowMenuErr = styled.div`
   font-size: ${fontSize.micro}; font-family: ${fonts.sans}; max-width: 320px; word-break: break-word;
 `
 
-function EditCell({ ctrl, column, defaultText, onChange }: {
+function EditCell({ ctrl, column, defaultText, onChange, lookupOptions }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
+  /** ``{value: label}`` map for LOOKUP columns — already resolved by the surrounding
+   *  ``lookupMaps`` (one fetch per unique spec; v2 mirrors v1's "fetch the lookup once,
+   *  populate every cell from the same set"). Undefined → not yet loaded → render
+   *  a disabled placeholder so the user knows the dropdown is coming. */
+  lookupOptions?: Map<string, string>
 }) {
   if (ctrl === 'enum' && column.rule?.kind === 'enum') {
     return (
       <EditSelect defaultValue={defaultText} onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}>
         <option value="">—</option>
         {column.rule.values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+      </EditSelect>
+    )
+  }
+  if (ctrl === 'lookup' && column.rule?.kind === 'lookup') {
+    // v1 parity: lookup columns render as a dropdown in edit mode (the user picks an
+    // existing value's label instead of typing a raw code). Options come pre-fetched via
+    // useLookupBatch upstream. If the lookup hasn't loaded yet (slow query, network
+    // latency), fall back to a disabled placeholder rather than blanking out the cell —
+    // the operator can wait a beat and re-click.
+    if (!lookupOptions) {
+      return <EditSelect disabled defaultValue=""><option value="">…</option></EditSelect>
+    }
+    const opts = [...lookupOptions.entries()].sort(([, a], [, b]) => a.localeCompare(b))
+    return (
+      <EditSelect defaultValue={defaultText} onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}>
+        <option value="">—</option>
+        {opts.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </EditSelect>
+    )
+  }
+  if (ctrl === 'boolean' && column.rule?.kind === 'boolean') {
+    // v1 parity: boolean columns render as a checkbox in edit mode. The rule's
+    // ``true_value`` / ``false_value`` (explicit or inferred via DictionaryFile) drive
+    // what we actually send: NOMASX1's CSI_STATUS goes "Y" / "N"; user status goes
+    // "01" / null. Mirrors the dialog's FieldRow boolean branch.
+    const trueV = column.rule.true_value
+    const falseV = column.rule.false_value ?? null
+    const checked = defaultText === trueV
+    return (
+      <EditSelect defaultValue={checked ? trueV : (falseV ?? '')}
+                  onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}>
+        <option value="">—</option>
+        <option value={trueV}>{trueV}</option>
+        {falseV !== null && <option value={falseV}>{falseV}</option>}
       </EditSelect>
     )
   }
@@ -809,7 +853,16 @@ export function ResultTable({
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
       const v = cur(row, c.name)
-      return <EditCell ctrl={editCtrlOf(c)} column={c} defaultText={v === null || v === undefined ? '' : String(v)} onChange={(nv) => editChange(row, c.name, nv)} />
+      // For LOOKUP columns, pull the already-fetched ``{value: label}`` map from
+      // ``lookupMaps`` so the dropdown populates without an extra request. Other widget
+      // kinds (enum / boolean / text / …) don't need it.
+      const lookupOpts = c.rule?.kind === 'lookup'
+        ? lookupMaps.get(lookupKey({
+            connector: c.rule.connector, query: c.rule.query,
+            value: c.rule.value, label: c.rule.label, params: c.rule.params,
+          }))
+        : undefined
+      return <EditCell ctrl={editCtrlOf(c)} column={c} defaultText={v === null || v === undefined ? '' : String(v)} onChange={(nv) => editChange(row, c.name, nv)} lookupOptions={lookupOpts} />
     }
     const out: ColumnDef<DataRow, unknown>[] = []
     for (const c of shownColumns) {
