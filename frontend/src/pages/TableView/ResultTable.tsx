@@ -21,7 +21,7 @@ import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap } from 'lucide
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError } from '../../api/client'
-import { Banner } from '../../common'
+import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
@@ -134,14 +134,6 @@ const EditInput = styled.input`
   padding: 2px 6px; outline: none;
   &:focus { border-color: ${colors.blue.border}; box-shadow: 0 0 0 2px ${colors.blue.bg}; }
 `
-const EditSelect = styled.select`
-  width: 100%; box-sizing: border-box; background: ${colors.bg.input};
-  border: 1px solid ${colors.border}; border-radius: ${radius.sm};
-  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  padding: 2px 4px; cursor: pointer;
-  &:focus { border-color: ${colors.blue.border}; }
-  option { background: ${colors.bg.dropdown}; color: ${colors.text.secondary}; }
-`
 const CheckBox = styled.span<{ $on: boolean }>`
   width: 14px; height: 14px; flex-shrink: 0; border-radius: 3px;
   border: 1.5px solid ${({ $on }) => ($on ? colors.blue.main : colors.border)};
@@ -200,33 +192,46 @@ function EditCell({ ctrl, column, defaultText, onChange, lookupOptions }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
   /** ``{value: label}`` map for LOOKUP columns — already resolved by the surrounding
    *  ``lookupMaps`` (one fetch per unique spec; v2 mirrors v1's "fetch the lookup once,
-   *  populate every cell from the same set"). Undefined → not yet loaded → render
-   *  a disabled placeholder so the user knows the dropdown is coming. */
+   *  populate every cell from the same set"). Undefined → not yet loaded → render a
+   *  loading state so the user sees the dropdown is coming. */
   lookupOptions?: Map<string, string>
 }) {
+  // ENUM and LOOKUP use the same searchable dropdown as the dialog's FieldRow —
+  // ``SearchSelect`` from common. v1's lookups for UDC / role-id-style tables had
+  // hundreds of entries; a native ``<select>`` is unusable at that size (no search,
+  // no keyboard filter beyond first-char jump). SearchSelect portals out of the
+  // grid cell so the panel isn't clipped by the table's overflow. Both branches are
+  // *controlled* — ``value={defaultText}`` reads the current edits-aware value on
+  // every TanStack re-render, so a programmatic edit (paste, copy, fill-down) flows
+  // through. ``mono`` shows the raw code beside the label so codes stay scannable.
   if (ctrl === 'enum' && column.rule?.kind === 'enum') {
+    const opts = column.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
     return (
-      <EditSelect defaultValue={defaultText} onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}>
-        <option value="">—</option>
-        {column.rule.values.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
-      </EditSelect>
+      <SearchSelect
+        value={defaultText}
+        onChange={(v) => onChange(v === '' ? null : v)}
+        options={opts}
+        anyLabel="—"
+        placeholder=""
+      />
     )
   }
   if (ctrl === 'lookup' && column.rule?.kind === 'lookup') {
-    // v1 parity: lookup columns render as a dropdown in edit mode (the user picks an
-    // existing value's label instead of typing a raw code). Options come pre-fetched via
-    // useLookupBatch upstream. If the lookup hasn't loaded yet (slow query, network
-    // latency), fall back to a disabled placeholder rather than blanking out the cell —
-    // the operator can wait a beat and re-click.
-    if (!lookupOptions) {
-      return <EditSelect disabled defaultValue=""><option value="">…</option></EditSelect>
-    }
-    const opts = [...lookupOptions.entries()].sort(([, a], [, b]) => a.localeCompare(b))
+    const ready = !!lookupOptions
+    const opts = ready
+      ? [...lookupOptions!.entries()]
+          .sort(([, a], [, b]) => a.localeCompare(b))
+          .map(([value, label]) => ({ value, label, mono: value }))
+      : []
     return (
-      <EditSelect defaultValue={defaultText} onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}>
-        <option value="">—</option>
-        {opts.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </EditSelect>
+      <SearchSelect
+        value={defaultText}
+        onChange={(v) => onChange(v === '' ? null : v)}
+        options={opts}
+        anyLabel="—"
+        loading={!ready}
+        placeholder=""
+      />
     )
   }
   if (ctrl === 'boolean' && column.rule?.kind === 'boolean') {
@@ -238,12 +243,11 @@ function EditCell({ ctrl, column, defaultText, onChange, lookupOptions }: {
     const falseV = column.rule.false_value ?? null
     const checked = defaultText === trueV
     return (
-      <EditSelect defaultValue={checked ? trueV : (falseV ?? '')}
-                  onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}>
-        <option value="">—</option>
-        <option value={trueV}>{trueV}</option>
-        {falseV !== null && <option value={falseV}>{falseV}</option>}
-      </EditSelect>
+      <Checkbox
+        checked={checked}
+        onChange={(v) => onChange(v ? trueV : falseV)}
+        label={checked ? trueV : (falseV ?? '—')}
+      />
     )
   }
   const type = ctrl === 'date' ? 'date' : ctrl === 'number' ? 'number' : 'text'
