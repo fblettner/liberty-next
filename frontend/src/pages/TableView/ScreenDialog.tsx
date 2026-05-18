@@ -196,6 +196,37 @@ export function ScreenDialog({
     setFormValues((p) => ({ ...p, [name]: v }))
   }, [])
 
+  // dd_id → field_name map across every FormTab. Drives the lookup-return-params write-back:
+  // when a LOOKUP pick exposes extra columns (v1's ly_lkp_params lkp_dir='OUT'), the parent
+  // looks up each return_param's dd here and writes the value to the matching sibling field.
+  // Case-insensitive (Postgres folds unquoted to lowercase). When several fields claim the
+  // same dd, the first wins — v1's convention; the operator can pin a different one via the
+  // explicit field.dd.
+  const ddToFieldName = useMemo(() => {
+    const m = new Map<string, string>()
+    if (!dlg) return m
+    for (const tab of dlg.tabs.filter(isFormTab)) {
+      for (const f of tab.fields ?? []) {
+        const dd = (f.dd || f.name).toLowerCase()
+        if (!m.has(dd)) m.set(dd, f.name)
+      }
+    }
+    return m
+  }, [dlg])
+  const onLookupReturnValues = useCallback((returnValues: Record<string, unknown>) => {
+    setFormValues((p) => {
+      const next = { ...p }
+      let touched = false
+      for (const [dd, v] of Object.entries(returnValues)) {
+        const fieldName = ddToFieldName.get(dd.toLowerCase())
+        if (!fieldName) continue
+        next[fieldName] = v
+        touched = true
+      }
+      return touched ? next : p
+    })
+  }, [ddToFieldName])
+
   // Imperative-from-async prompt plumbing. The chain runner pauses on actions with
   // ``prompt_fields`` and awaits ``requestPrompt`` — which sets ``pendingPrompt`` state +
   // stows a resolver in the ref. The mounted ActionPromptDialog reads the state; its onSubmit
@@ -661,6 +692,7 @@ export function ScreenDialog({
                           disabled={st.disabled}
                           required={st.required}
                           suppressLookup={mode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
+                          onLookupPick={onLookupReturnValues}
                         />
                       )
                     })}

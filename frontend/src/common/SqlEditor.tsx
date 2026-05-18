@@ -142,6 +142,11 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
           // wrapper too — the inner real table is what matches the schema). Undefined → the
           // wizard falls back to its first table.
           initialTable={findFirstReferencedTable(value, schema)}
+          // The full existing SQL — the wizard tries to parse it (columns / WHERE / ORDER BY
+          // for the simple single-table SELECT shape the migrator emits) so opening the wizard
+          // on an existing query pre-fills its widgets instead of starting fresh + replacing
+          // a non-trivial query with ``SELECT * FROM <table>``.
+          initialSql={value}
           onInsert={(sql) => { onChange(sql); setWizardOpen(false) }}
           onCancel={() => setWizardOpen(false)} />
       )}

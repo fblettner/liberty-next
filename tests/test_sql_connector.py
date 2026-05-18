@@ -1262,3 +1262,217 @@ async def test_form_rule_sequence_missing_query_logs_and_falls_through(pools: Po
         "references unknown sequence" in rec.message or "references unknown query" in rec.message
         for rec in caplog.records
     )
+
+
+# --------------------------------------------------------------------------- #
+# Phase 8: runtime filter wrap. The migrator stores the inner SELECT clean; the
+# SQL connector wraps dynamically based on caller-supplied filter params. Type-aware:
+# text columns get operator support, non-text get a typed equals.
+# --------------------------------------------------------------------------- #
+
+
+def test_split_order_by_top_level() -> None:
+    """``_split_order_by`` splits at the last top-level ORDER BY (depth 0 in parens). A
+    subquery's ORDER BY isn't taken (depth > 0). When the SQL has no top-level ORDER BY,
+    returns ``(sql, "")`` so the caller can compose unconditionally."""
+    from liberty.connectors.sql import _split_order_by
+    body, ob = _split_order_by("SELECT id, name FROM t ORDER BY name")
+    assert body == "SELECT id, name FROM t" and ob == "name"
+    # Subquery's ORDER BY left alone — last top-level is the outer one.
+    body, ob = _split_order_by(
+        "SELECT * FROM (SELECT id FROM t ORDER BY id) sub ORDER BY id DESC"
+    )
+    assert body.endswith(") sub") and ob == "id DESC"
+    # No top-level ORDER BY → empty clause
+    body, ob = _split_order_by("SELECT id FROM t")
+    assert body == "SELECT id FROM t" and ob == ""
+
+
+@pytest.mark.asyncio
+async def test_filter_wrap_text_column_default_op_contains(pools: PoolRegistry) -> None:
+    """A ``filter = true`` text column with no operator hint → ``contains`` predicate
+    (``LOWER(col) LIKE LOWER('%v%')``). The wrap fires only because the caller sent a
+    value; without it the stored SELECT runs unwrapped."""
+    q = QueryDef(
+        name="users", sql="SELECT id, name, status FROM item",
+        columns=[ColumnHint(name="name", filter=True)],
+    )
+    conn = _connector(pools, q)
+    # No filter param → unwrapped: returns all rows (3 in fixture).
+    assert len(((await conn.execute("users")).rows)) == 3
+    # With a `name = "b"` filter → wraps with `contains` → matches just 'b'.
+    rs = (await conn.execute("users", {"name": "b"})).rows
+    assert [r["name"] for r in rs] == ["b"]
+    # An operator hint: startsWith picks 'a' / 'b' / 'c' depending on input.
+    rs = (await conn.execute("users", {"name": "a", "name_op": "startsWith"})).rows
+    assert [r["name"] for r in rs] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_filter_wrap_non_text_column_typed_equals(pools: PoolRegistry) -> None:
+    """A ``filter = true`` non-text column (here ``integer``) — the wrap emits a plain
+    ``col = :bind`` and **coerces the bind to a Python int** before binding. asyncpg's
+    strict type check rejects a string against an integer-typed param (the user's bug:
+    ``invalid input for query argument $1: '10' ('str' object cannot be interpreted as
+    an integer)``), so the Python-side coercion is what makes the comparison work on
+    Postgres natively. The column index applies because there's no SQL CAST."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "id": DictionaryEntry(format="integer"),
+    })})
+    q = QueryDef(
+        name="users", sql="SELECT id, name, status FROM item",
+        columns=[ColumnHint(name="id", filter=True)],
+    )
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
+    rs = (await conn.execute("users", {"id": 2})).rows
+    assert [r["id"] for r in rs] == [2]
+    # The string "2" works too — the wrap helper coerces it to int(2) Python-side
+    # before binding. SQLite is permissive so this would even work without coercion;
+    # the real test is the dict-level coercion check below.
+    rs = (await conn.execute("users", {"id": "2"})).rows
+    assert [r["id"] for r in rs] == [2]
+    # Direct check on ``_apply_filter_wrap`` itself: the returned params carry the
+    # coerced int, not the original string. This is what fixes the asyncpg
+    # ``'str' object cannot be interpreted as an integer`` error on Postgres.
+    qdef = conn.get_query("users")
+    new_sql, new_params = conn._apply_filter_wrap(
+        "SELECT id, name, status FROM item", qdef, {"id": "10"}, stmt_type="SELECT",
+    )
+    assert new_params == {"id": 10}    # str → int
+    # And the SQL is wrapped with a plain ``col = :id`` (no CAST around the bind, so
+    # asyncpg sends the int with its native type code and the index applies).
+    assert "lib_flt.id = :id" in new_sql
+    assert "CAST(:id" not in new_sql
+
+
+@pytest.mark.asyncio
+async def test_filter_wrap_multiple_active_columns_anded(pools: PoolRegistry) -> None:
+    """Multiple active filter columns → ``AND``-ed predicates. Empty / null filter binds
+    are dropped (no predicate for them) so the stored SELECT stays unencumbered when the
+    operator only filters one column."""
+    q = QueryDef(
+        name="users",
+        sql="SELECT id, name, status FROM item ORDER BY id",
+        columns=[
+            ColumnHint(name="name", filter=True),
+            ColumnHint(name="status", filter=True),
+        ],
+    )
+    conn = _connector(pools, q)
+    # Only `name` set → only one predicate fires
+    rs = (await conn.execute("users", {"name": "a"})).rows
+    assert [r["name"] for r in rs] == ["a"]
+    # Both → AND-ed
+    rs = (await conn.execute("users", {"name": "a", "status": "on"})).rows
+    assert rs == [{"id": 1, "name": "a", "status": "on"}]
+    # Empty string treated as no filter — picks up the other one only
+    rs = (await conn.execute("users", {"name": "", "status": "off"})).rows
+    assert [r["name"] for r in rs] == ["c"]
+    # ORDER BY preserved (the wrap re-attaches it)
+    rs = (await conn.execute("users", {"name": ""})).rows
+    assert [r["id"] for r in rs] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_filter_wrap_resolves_format_from_dictionary(pools: PoolRegistry) -> None:
+    """Regression: a filter-flagged column without an inline ``format`` on the hint must
+    pick up the format from its dictionary entry (via ``col.dd``, or ``col.name`` when
+    unset). Otherwise a numeric column gets the *text* operator path
+    (``LOWER(integer)``) and Postgres rejects it — the exact error the user hit on the
+    LICENSE_CSI nested table where ``LCA_CSI_ID`` was hinted as
+    ``{ name = "LCA_CSI_ID", dd = "CSI_ID", filter = true }`` (format on the CSI_ID
+    dictionary entry, not the hint).
+
+    The dictionary's CSI_ID entry has ``format = "number"`` → typed equals path, no
+    LOWER, and the column-side stays as its native int type so a btree index applies."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        # Dictionary says CSI_ID is a number — the column hint inherits this via `dd`.
+        "CSI_ID": DictionaryEntry(format="number"),
+    })})
+    q = QueryDef(
+        name="csi_list", sql="SELECT id, name, status FROM item",
+        # Hint maps the result column ``id`` to the ``CSI_ID`` dd entry — same shape
+        # the migration emits for nested-table bind targets.
+        columns=[ColumnHint(name="id", dd="CSI_ID", filter=True)],
+    )
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
+    # A "contains" op on a number column would have failed pre-fix (LOWER(integer)).
+    # Post-fix the runtime emits a typed equals regardless of the op the caller sent —
+    # non-text columns ignore the operator hint and run as equals (the FilterPanel
+    # already restricts the operator picker for non-text columns; this is defence-in-
+    # depth for a stray op value from another caller).
+    rs = (await conn.execute("csi_list", {"id": 2})).rows
+    assert [r["id"] for r in rs] == [2]
+    rs = (await conn.execute("csi_list", {"id": "2", "id_op": "contains"})).rows
+    assert [r["id"] for r in rs] == [2]
+
+
+@pytest.mark.asyncio
+async def test_filter_wrap_strips_op_binds_from_sql(pools: PoolRegistry) -> None:
+    """The ``:NAME_op`` value comes from the caller as a *signal* (which operator to use),
+    not a bind that ends up in the SQL. The wrap reads it but doesn't emit it as a
+    SQLAlchemy bind — confirms the migrated SQL no longer has ``:NAME_op`` cluttering it
+    and the request-side ``_op`` doesn't trip the `text()` parser."""
+    q = QueryDef(
+        name="users", sql="SELECT id, name FROM item",
+        columns=[ColumnHint(name="name", filter=True)],
+    )
+    conn = _connector(pools, q)
+    # _op should be consumed by the wrap and not emit a `:name_op` bind — verify there
+    # are no spurious errors when sending an op alongside the value.
+    rs = (await conn.execute("users", {"name": "b", "name_op": "equals"})).rows
+    assert [r["name"] for r in rs] == ["b"]
+
+
+# --------------------------------------------------------------------------- #
+# JDE Julian date conversion on read (mirror of write-side `_coerce_value`).
+# --------------------------------------------------------------------------- #
+
+
+def test_from_jde_julian_helper() -> None:
+    """``_from_jde_julian`` mirrors ``_to_jde_julian``: CYYDDD int → ``"YYYY-MM-DD"``
+    ISO string. Pass-through on null / non-julian / out-of-range values so bad data
+    surfaces instead of silently corrupting."""
+    from liberty.connectors.sql import _from_jde_julian
+    # 2026-05-18: (2026 - 1900) * 1000 + 138 = 126138
+    assert _from_jde_julian(126138) == "2026-05-18"
+    # 2024-12-31 (leap year, day 366)
+    assert _from_jde_julian(124366) == "2024-12-31"
+    # First day of the 21st century: 2000-01-01 → C=1, YY=00, DDD=001 = 100001
+    assert _from_jde_julian(100001) == "2000-01-01"
+    # String of digits — same conversion.
+    assert _from_jde_julian("126138") == "2026-05-18"
+    # 0 → "no date" in JDE; pass-through so the operator sees the raw 0
+    assert _from_jde_julian(0) == 0
+    # None → None
+    assert _from_jde_julian(None) is None
+    # Non-numeric → pass-through (returns raw)
+    assert _from_jde_julian("not-a-date") == "not-a-date"
+    # Out-of-range day → pass-through
+    assert _from_jde_julian(126999) == 126999
+
+
+@pytest.mark.asyncio
+async def test_jdedate_columns_converted_to_iso_on_read(pools: PoolRegistry) -> None:
+    """Columns whose resolved ``format`` is ``"jdedate"`` get their CYYDDD integers
+    converted to ISO date strings on read — the grid shows ``"2026-05-18"`` instead of
+    ``126138``. Round-trip with the write-side coercion: the dialog sends the ISO string
+    back, ``_coerce_value`` re-encodes the CYYDDD integer on bind."""
+    async with pools.engine("test").begin() as c:
+        await c.execute(text("CREATE TABLE jde (id INTEGER, upmj INTEGER)"))
+        await c.execute(text("INSERT INTO jde (id, upmj) VALUES (1, 126138), (2, 0), (3, NULL)"))
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "upmj": DictionaryEntry(format="jdedate"),
+    })})
+    q = QueryDef(name="all", sql="SELECT id, upmj FROM jde ORDER BY id",
+                 columns=[ColumnHint(name="upmj")])
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
+    rs = (await conn.execute("all")).rows
+    assert rs[0] == {"id": 1, "upmj": "2026-05-18"}
+    # JDE 0 = "no date" → pass-through as-is so it's visible
+    assert rs[1] == {"id": 2, "upmj": 0}
+    # NULL stays NULL
+    assert rs[2] == {"id": 3, "upmj": None}

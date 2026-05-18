@@ -40,7 +40,7 @@ function resolveBinds(field: ScreenField, formValues: Row): Record<string, strin
 }
 
 export function FieldRow({
-  field, column, formValues, onChange, disabled, required, suppressLookup = false,
+  field, column, formValues, onChange, disabled, required, suppressLookup = false, onLookupPick,
 }: {
   field: ScreenField
   column: Column | null
@@ -53,25 +53,35 @@ export function FieldRow({
    *  user must *create* the value rather than pick from existing rows (v2 auto-derivation
    *  of v1's per-field ``col_rules = "DISABLED"`` convention for PKs). */
   suppressLookup?: boolean
+  /** Lookup return-params hook (v1 ly_lkp_params lkp_dir='OUT'). When the user picks a row
+   *  from a LOOKUP whose rule has ``return_params``, this fires with a ``{dd_id: value}``
+   *  map carrying the picked row's *additional* columns (beyond the headline value). The
+   *  parent (ScreenDialog) looks up sibling fields by dd and writes them. */
+  onLookupPick?: (returnValues: Record<string, unknown>) => void
 }) {
   const { t } = useTranslation()
   const value = formValues[field.name]
   const textValue = value === null || value === undefined ? '' : String(value)
   const label = field.label ?? column?.label ?? field.name
+  // Effective rule — screen-field-level override (v1 col_rules → ScreenField.rule, resolved by
+  // the backend on GET /api/screens) wins over the read column's rule (the dictionary's
+  // default). This is what fixes FSOBNM on F00950: the column has no rule but the field
+  // does (LOOKUP #9), so we pick that.
+  const effectiveRule = field.rule ?? column?.rule ?? null
 
   // For a LOOKUP field we need a live lookup spec — the *static* params from the rule plus the
   // dynamic ones from the field's lookup_param_binds (resolved against the current form values).
   const lookupSpec: LookupSpec | null = useMemo(() => {
-    if (!column?.rule || column.rule.kind !== 'lookup') return null
+    if (!effectiveRule || effectiveRule.kind !== 'lookup') return null
     const dyn = resolveBinds(field, formValues)
     return {
-      connector: column.rule.connector,
-      query: column.rule.query,
-      value: column.rule.value,
-      label: column.rule.label,
-      params: { ...(column.rule.params ?? {}), ...dyn },
+      connector: effectiveRule.connector,
+      query: effectiveRule.query,
+      value: effectiveRule.value,
+      label: effectiveRule.label,
+      params: { ...(effectiveRule.params ?? {}), ...dyn },
     }
-  }, [column, field, formValues])
+  }, [effectiveRule, field, formValues])
   // Mount a single-spec hook unconditionally (React requires stable hook order). The spec list is
   // either [lookupSpec] (lookup field) or [] (everything else); the lookup service caches per spec
   // key so re-renders that don't change the key don't refetch.
@@ -83,12 +93,12 @@ export function FieldRow({
     // Read-only echo — keep the value visible (and copyable). Boolean shows its raw code, same as
     // every other type; no special widget here so the user sees exactly what's in the column.
     widget = <ReadOnlyBox aria-readonly>{textValue || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
-  } else if (column?.rule?.kind === 'boolean') {
-    const trueV = column.rule.true_value
+  } else if (effectiveRule?.kind === 'boolean') {
+    const trueV = effectiveRule.true_value
     // false_value is the value to send on uncheck — explicit per ``DictionaryEntry.false_value``,
     // or inferred by the backend (Y→N, 1→0, true→false). Omitted → uncheck sends null (the v1
     // default; the DB column must accept NULL for that to work — see CSI_STATUS where it doesn't).
-    const falseV = column.rule.false_value ?? null
+    const falseV = effectiveRule.false_value ?? null
     const checked = textValue === trueV
     widget = (
       <Checkbox
@@ -97,8 +107,8 @@ export function FieldRow({
         label={checked ? trueV : (falseV ?? t('common.no'))}
       />
     )
-  } else if (column?.rule?.kind === 'enum') {
-    const options = column.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
+  } else if (effectiveRule?.kind === 'enum') {
+    const options = effectiveRule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
     widget = (
       <SearchSelect
         value={textValue}
@@ -108,12 +118,36 @@ export function FieldRow({
         placeholder={t('common.pick')}
       />
     )
-  } else if (column?.rule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
+  } else if (effectiveRule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
     const opts = lookupData ? lookupOptions(lookupData).map((o) => ({ value: o.value, label: o.label, mono: o.value })) : []
+    // Lookup pick handler — writes the picked value as usual, plus the rule's ``return_params``
+    // (v1's ly_lkp_params lkp_dir='OUT'): for each return_param dd_id, find the picked row's
+    // matching column (case-insensitive) and fire ``onLookupPick`` with the {dd_id: value} map.
+    // The parent (ScreenDialog) maps each dd to a sibling field name and writes them via
+    // ``setFormValues``. Example: pick FSOBNM, fires {SY: <picked row's SY column>}, parent
+    // writes that to FSSY (the field with dd="SY"). No-op when lookupData isn't loaded yet.
+    const handlePick = (picked: string) => {
+      onChange(field.name, picked === '' ? null : picked)
+      const returnParams = effectiveRule.return_params ?? []
+      if (!picked || returnParams.length === 0 || !lookupData || !onLookupPick) return
+      const valueCol = effectiveRule.value
+      const row = lookupData.rows.find((r) => {
+        const rv = r[valueCol] ?? r[valueCol.toLowerCase()] ?? r[valueCol.toUpperCase()]
+        return rv != null && String(rv) === picked
+      })
+      if (!row) return
+      const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
+      const aux: Record<string, unknown> = {}
+      for (const dd of returnParams) {
+        const v = lcRow.get(dd.toLowerCase())
+        if (v !== undefined) aux[dd] = v
+      }
+      if (Object.keys(aux).length > 0) onLookupPick(aux)
+    }
     widget = (
       <SearchSelect
         value={textValue}
-        onChange={(v) => onChange(field.name, v === '' ? null : v)}
+        onChange={handlePick}
         options={opts}
         anyLabel={required ? undefined : t('common.none')}
         loading={!lookupData}

@@ -112,7 +112,7 @@ _DICTIONARY_FILTERS = text("""
 # These tell the builder which `:placeholder` names the lookup's query expects, so an entry
 # that picks this lookup can auto-surface the bindable fields.
 _LOOKUP_PARAMS = text("""
-    SELECT lkp_id, dd_id
+    SELECT lkp_id, dd_id, lkp_dir
     FROM ly_lkp_params
     ORDER BY lkp_id, dd_id
 """)
@@ -181,7 +181,8 @@ _SCREENS_DLG_TAB_L = text("""
 _SCREENS_DLG_COL = text("""
     SELECT frm_id, col_id, tab_id, col_seq, col_colspan, col_dd_id, col_label, col_target,
            col_default, col_visible, col_disabled, col_required, col_cdn_id,
-           col_component, col_component_id
+           col_component, col_component_id,
+           col_rules, col_rules_values, col_type
     FROM ly_dlg_col ORDER BY frm_id, COALESCE(col_seq, col_id)
 """)
 _SCREENS_DLG_FILTERS = text("""

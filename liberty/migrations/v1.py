@@ -479,7 +479,6 @@ def migrate_sql_queries(
         # and the v1 SQL itself, plus any flt_target the drill-filter resolver couldn't translate.
         if hints:
             _drop_filter_for_missing_cols(hints, groups[key], connector=conn_name, query=base)
-        filter_cols = [h["name"] for h in hints if h.get("filter")] if hints else []
         # Lookup-target params (v1 ly_lkp_params) — declarative names the lookup callers bind. We
         # wrap the read SQL with `(:P IS NULL OR <col> = :P)` so they actually narrow server-side
         # (v1's SQL didn't have its own WHERE — the framework filtered in code). Only applies to
@@ -494,9 +493,21 @@ def migrate_sql_queries(
         # ORDER BY is appended (to the outer query, when the read was wrapped).
         ob = orderbys.get(key, "")
         def _variant(raw: str, dia: str) -> str:
-            if filter_cols:
-                s = _wrap_with_filters(raw, filter_cols, dialect=dia)
-            elif is_update:
+            # v2 (Phase 8): the runtime applies the filter wrap dynamically — see
+            # :meth:`SQLConnector._apply_filter_wrap`. The migrator no longer bakes the
+            # ``SELECT * FROM (…) lib_flt WHERE 1=1 AND <preds>`` envelope into the stored
+            # SQL: it kept *every* filter column's predicate in the stored TOML even when
+            # the caller wasn't actually filtering, CAST every value to VARCHAR(4000)
+            # (killing indexes), and made the query unusable in a wizard. The runtime now
+            # consults ``QueryDef.columns`` to find which columns are ``filter = true``,
+            # reads the caller's bind values to discover which are *actually set*, and
+            # builds a type-aware predicate per active column only (text → operator-aware;
+            # number/date/boolean/jdedate → typed equals, index-friendly).
+            #
+            # We still emit the *lookup-param* wrap (separate concern: a query is a lookup
+            # target whose params narrow it at fetch time; the wrap is fixed per query,
+            # not per caller) and the upsert simplifications.
+            if is_update:
                 s = _rewrite_put_where(_upsert_to_update(raw))
             elif is_read:
                 s = raw
@@ -1427,16 +1438,20 @@ def migrate_dictionary(
         c = str(r.get("query_crud") or "").upper()
         if c in _READ_CRUD and qid not in read_crud:
             read_crud[qid] = c
-    # Per-lookup parameter names — v1's ly_lkp_params (one row per (lkp_id, dd_id)). Declarative
-    # info: tells the dictionary builder which `:placeholder` names the lookup's query expects,
-    # so an entry that picks this lookup auto-surfaces the bindable fields. Preserve the v1 order.
+    # Per-lookup parameter names — v1's ly_lkp_params (one row per (lkp_id, dd_id)). Split by
+    # ``lkp_dir``: ``IN`` (or null — v1 default) → ``params`` (the :placeholder names the lookup's
+    # query expects). ``OUT`` → ``return_params`` (extra dd_ids the picked row writes back to
+    # the form, beyond the headline value/label — v2 LookupDef.return_params). Preserve v1 order.
     lkp_param_names: dict[str, list[str]] = {}
+    lkp_return_names: dict[str, list[str]] = {}
     for r in lookup_params_rows:
         lid = str(r.get("lkp_id") or "").strip()
         name = str(r.get("dd_id") or "").strip()
         if not lid or not name:
             continue
-        lst = lkp_param_names.setdefault(lid, [])
+        direction = str(r.get("lkp_dir") or "").strip().upper()
+        target = lkp_return_names if direction == "OUT" else lkp_param_names
+        lst = target.setdefault(lid, [])
         if name not in lst:
             lst.append(name)
 
@@ -1469,6 +1484,8 @@ def migrate_dictionary(
         })
         if lid in lkp_param_names:
             out_lkp["params"] = lkp_param_names[lid]
+        if lid in lkp_return_names:
+            out_lkp["return_params"] = lkp_return_names[lid]
         lookups[lid] = out_lkp
 
     # output  --------------------------------------------------------------- #
@@ -2485,6 +2502,7 @@ def migrate_screens(
     row_menus: Mapping[int, list[dict[str, Any]]] | None = None,
     promotable_dialogs: Mapping[int, Mapping[str, Any]] | None = None,
     actions_data: Mapping[str, Any] | None = None,
+    sequence_rows: Iterable[Mapping[str, Any]] = (),
     *,
     app_name: str,
 ) -> dict[str, Any]:
@@ -2635,6 +2653,57 @@ def migrate_screens(
             continue
         cols_by_frm_all.setdefault(int(fid), []).append(r)
 
+    # v1 numeric ``seq_id`` → v2 sequence id (slug of ``seq_label``) — same mapping
+    # ``migrate_dictionary`` builds for top-level entries. Used when a screen field has
+    # ``col_rules = 'SEQUENCE'`` / ``'NN'`` so the runtime can resolve the rule through
+    # ``DictionaryFile.find_sequence`` at INSERT time. Lookups + enums need no translation
+    # (v2 keeps their numeric v1 IDs verbatim as string keys), only SEQUENCE does.
+    _seq_id_to_v2_for_screens: dict[int, str] = {}
+    _q_label_by_qid: dict[int, str] = {}
+    _q_read_crud_by_qid: dict[int, str] = {}
+    for r in sql_rows:
+        qid_raw = r.get("query_id")
+        if qid_raw is None:
+            continue
+        qid_int = int(qid_raw)
+        _q_label_by_qid.setdefault(qid_int, str(r.get("query_label") or ""))
+        crud = str(r.get("query_crud") or "").upper()
+        if crud in _READ_CRUD and qid_int not in _q_read_crud_by_qid:
+            _q_read_crud_by_qid[qid_int] = crud
+    _seq_taken_for_screens: set[str] = set()
+    for s in sequence_rows:
+        try:
+            sid = int(s["seq_id"])
+            sqid_raw = s.get("seq_query_id")
+            if sqid_raw is None:
+                continue
+            sqid = int(sqid_raw)
+        except (KeyError, TypeError, ValueError):
+            continue
+        label = str(s.get("seq_label") or "").strip()
+        v2_seq_id = slugify(label, fallback=f"seq_{sid}")
+        if v2_seq_id in _seq_taken_for_screens:
+            v2_seq_id = _uniquify(v2_seq_id, _seq_taken_for_screens)
+        _seq_taken_for_screens.add(v2_seq_id)
+        _seq_id_to_v2_for_screens[sid] = v2_seq_id
+
+    def _resolve_screen_rule(col_rules: str | None, raw_rv: str | None) -> tuple[str | None, str | None]:
+        """Translate a v1 ``col_rules`` / ``col_rules_values`` pair into v2 form. LOOKUP / ENUM /
+        BOOLEAN keep their rules_values verbatim (v2 keeps v1's numeric IDs as string keys);
+        SEQUENCE / NN need the seq_id → v2 sequence id translation. Returns ``(rules, rules_values)``
+        with either side ``None`` when v1 left it blank."""
+        rules = (col_rules or "").strip().upper() or None
+        rv = (raw_rv or "").strip() or None
+        if rules in ("SEQUENCE", "NN") and rv:
+            try:
+                sid = int(rv)
+            except (TypeError, ValueError):
+                pass
+            else:
+                if sid in _seq_id_to_v2_for_screens:
+                    rv = _seq_id_to_v2_for_screens[sid]
+        return rules, rv
+
     def _migrate_field_row(c: Mapping[str, Any], owning_frm: int) -> dict[str, Any] | None:
         """Build one field dict from a ly_dlg_col row. Returns None for placeholder rows
         (no col_target — v1 used those for layout). Owning_frm threads the right frm-id
@@ -2664,6 +2733,26 @@ def migrate_screens(
         default_v = (c.get("col_default") or "").strip()
         if default_v:
             field["default"] = default_v
+        # v1 ``col_type`` — per-field format override (e.g. force a column to render as a date
+        # even when its dictionary entry has no format). Mapped to ScreenField.format. v2 keeps
+        # the same alias normalisation v1 used (numeric → number, etc. — :func:`_column_format`).
+        col_type_v = _column_format(c.get("col_type"))
+        if col_type_v:
+            field["format"] = col_type_v
+        # v1 ``col_rules`` / ``col_rules_values`` — per-field rule override. The dictionary's
+        # entry rule is the default; a non-empty col_rules here wins on this screen only.
+        # SEQUENCE / NN need seq_id → v2 sequence id translation (LOOKUP / ENUM / BOOLEAN keep
+        # the numeric ID verbatim — v2's lookups/enums use v1's IDs as string keys). Common case
+        # the user reported: FSOBNM on F00950 has col_rules='LOOKUP' / col_rules_values='9'
+        # because OBNM's dictionary entry has no rule — without this the field renders as a
+        # plain text input instead of a searchable dropdown.
+        rules_v, rules_values_v = _resolve_screen_rule(
+            c.get("col_rules"), c.get("col_rules_values"),
+        )
+        if rules_v:
+            field["rules"] = rules_v
+        if rules_values_v:
+            field["rules_values"] = rules_values_v
         # Field-level parameter bindings (v1 ly_dlg_filters).
         binds: list[dict[str, Any]] = []
         try:

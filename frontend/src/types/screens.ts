@@ -24,7 +24,7 @@ export interface FieldCondition {
  *  read-result `Column.rule` carries. Used on a PromptField so the prompt sub-dialog can pick
  *  the right widget without round-tripping the dictionary lookup. */
 export type DisplayRule =
-  | { kind: 'boolean'; true_value: string }
+  | { kind: 'boolean'; true_value: string; false_value?: string }
   | { kind: 'enum'; values: { value: string; label: string }[] }
   | {
       kind: 'lookup'
@@ -33,6 +33,9 @@ export type DisplayRule =
       value: string
       label: string
       params?: Record<string, string>
+      /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
+       *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
+      return_params?: string[]
     }
 
 /** One input field on the *prompt sub-dialog* shown before an action with `prompt_fields` fires.
@@ -70,11 +73,23 @@ export interface ScreenField {
   name: string
   dd?: string | null
   label?: string | null
+  /** Format override (v1's `col_type`) — e.g. force a column to render as a date even when the
+   *  dictionary's entry has no format. Wins over the read-column's format on this dialog. */
+  format?: string | null
   hidden?: boolean
   disabled?: boolean
   required?: boolean
   colspan?: number | null
   default?: string | null
+  /** Per-field rule override (v1's `col_rules`). When set, replaces the dictionary entry's rule
+   *  for this field on this dialog. Same kinds as DictionaryEntry.rules. */
+  rules?: string | null
+  /** The rule's argument (v1's `col_rules_values`) — enum/lookup/sequence id, etc. */
+  rules_values?: string | null
+  /** Server-resolved display rule from `rules` + `rules_values` (BOOLEAN / ENUM / LOOKUP), or
+   *  the dictionary entry's rule when no per-field override is set. Frontend prefers this over
+   *  the read-column's `rule` so a screen-level LOOKUP override actually renders as a dropdown. */
+  rule?: DisplayRule | null
   lookup_param_binds?: ParamBind[]
   /** Conditional visibility (v2's port of v1's col_cdn_id) — evaluated against the form. */
   visible_when?: FieldCondition[]

@@ -71,12 +71,42 @@ export function findTable(schema: PoolSchema, name: string): PoolTable | undefin
  *  undefined when nothing matches (the wizard then falls back to the first table). */
 export function findFirstReferencedTable(sql: string, schema: PoolSchema): string | undefined {
   if (!sql) return undefined
+  // Walk char-by-char tracking paren-depth + string literals so the regex doesn't pick up
+  // tables inside subqueries (e.g. ``(SELECT MAX(x) FROM AUX) AS A``) before the outer
+  // FROM. Real-world case: ``security_users_get`` has a subselect ``(SELECT MAX(LOUT_USAGE)
+  // FROM LICENSE_JDE_OUT …)`` that appears earlier in the source than the outer
+  // ``FROM SECURITY_USERS`` — the prior regex returned ``license_jde_out`` and the wizard
+  // opened on the wrong table. Only consider FROM / JOIN / INTO / UPDATE that sit at
+  // paren-depth 0.
   const re = /\b(?:FROM|JOIN|INTO|UPDATE)\s+([A-Za-z_][\w.]*)/gi
   let m: RegExpExecArray | null
+  // Pre-compute paren depth at each position once, so the per-match check is O(1).
+  const depths = parenDepths(sql)
   while ((m = re.exec(sql)) !== null) {
+    if ((depths[m.index] ?? 0) !== 0) continue   // inside a subquery — skip
     const ident = (m[1] ?? '').split('.').pop() ?? m[1]
     const t = findTable(schema, ident)
     if (t) return t.name
   }
   return undefined
+}
+
+/** Per-character paren-depth array (1-based after each `(`, decreased after each `)`),
+ *  string-literal-aware so we don't count parens inside ``'foo (bar)'``. */
+function parenDepths(sql: string): number[] {
+  const out = new Array(sql.length).fill(0)
+  let depth = 0
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < sql.length; i++) {
+    out[i] = depth
+    const c = sql[i]
+    if (inSingle) { if (c === "'" && sql[i - 1] !== '\\') inSingle = false; continue }
+    if (inDouble) { if (c === '"' && sql[i - 1] !== '\\') inDouble = false; continue }
+    if (c === "'") inSingle = true
+    else if (c === '"') inDouble = true
+    else if (c === '(') depth++
+    else if (c === ')') depth--
+  }
+  return out
 }

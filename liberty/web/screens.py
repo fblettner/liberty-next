@@ -70,6 +70,99 @@ def _resolve_prompt_field(
     return out
 
 
+def _resolve_screen_field(
+    raw: dict[str, Any], *, connector: str, language: str | None, dictionary: DictionaryFile,
+) -> dict[str, Any]:
+    """Resolve a :class:`ScreenField`'s effective rule + format. The screen-field-level
+    ``rules`` / ``rules_values`` override the dictionary entry's (v1's ``col_rules`` /
+    ``col_rules_values`` — used when a specific screen needs a different widget than the
+    global dictionary, e.g. FSOBNM on F00950 wants LOOKUP #9 even though the OBNM
+    dictionary entry has no rule). The screen-field's ``format`` (v1's ``col_type``) wins
+    over the entry's ``format``.
+
+    Synthesises a transient ``DictionaryEntry`` carrying the override(s), then calls
+    :meth:`DictionaryFile.resolve_rule` so the wire payload's ``rule`` matches the shape
+    the SQL connector emits for read-result columns — the frontend's FieldRow renders the
+    same way regardless of whether the rule came from the dictionary or the screen.
+
+    No-op for fields without overrides (the dictionary's rule already wins) and for
+    fields whose dd resolves to no entry. Returns a fresh dict — never mutates the input."""
+    from liberty.connectors.dictionary import DictionaryEntry
+    out = dict(raw)
+    name = (out.get("name") or "").strip()
+    if not name:
+        return out
+    field_rules = (out.get("rules") or "").strip().upper() or None
+    field_rules_values = (out.get("rules_values") or "").strip() or None
+    key = (out.get("dd") or name).strip()
+    entry = dictionary.find_entry(key, connector=connector) if key else None
+    # Effective format — field-level wins; ``label`` already comes from the screen field's
+    # own ``label`` or, if empty, the read column's label (the frontend handles fallback).
+    if not out.get("format"):
+        fmt = entry.format if entry else None
+        if fmt:
+            out["format"] = fmt
+    # Decide which rule applies. Field-level override → build a transient entry from the
+    # override(s). Otherwise → use the dictionary entry's rule as-is (the SQL connector's
+    # read-column path already resolves that; the frontend can fall back to ``column.rule``
+    # if we don't ship a field-level one here).
+    if field_rules:
+        synth = DictionaryEntry(
+            label=(entry.label if entry else None),
+            format=out.get("format") or (entry.format if entry else None),
+            rules=field_rules,
+            rules_values=field_rules_values,
+            # Carry the entry's ``lookup_params`` (the static IN-direction binds — UDC SY/RT etc.)
+            # so a screen-level LOOKUP override still narrows the lookup correctly. The field's
+            # own ``lookup_param_binds`` add the dynamic source-driven binds on top at runtime.
+            lookup_params=(entry.lookup_params if entry else {}),
+            false_value=(entry.false_value if entry else None),
+            default=(out.get("default") or (entry.default if entry else None)),
+        )
+        rule = dictionary.resolve_rule(synth, connector=connector, language=language)
+        if rule is not None:
+            out["rule"] = rule
+    elif entry is not None:
+        rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+        if rule is not None:
+            out["rule"] = rule
+    return out
+
+
+def _resolve_screen_fields_in_dialog(
+    dialog: dict[str, Any] | None,
+    *,
+    connector: str,
+    language: str | None,
+    dictionary: DictionaryFile,
+) -> dict[str, Any] | None:
+    """Walk a dumped ``ScreenDialog`` and enrich every form tab's fields with their resolved
+    ``rule`` / ``format``. Only ``FormTab``s carry fields — nested tabs reference another
+    screen entirely (resolved when the frontend loads that screen). The dialog's hooks +
+    per-tab actions are handled by :func:`_resolve_dialog_prompts` separately."""
+    if not dialog:
+        return dialog
+    out = dict(dialog)
+    tabs = out.get("tabs")
+    if not isinstance(tabs, list):
+        return out
+    new_tabs = []
+    for tab in tabs:
+        if isinstance(tab, dict) and isinstance(tab.get("fields"), list):
+            tab = {
+                **tab,
+                "fields": [
+                    _resolve_screen_field(
+                        f, connector=connector, language=language, dictionary=dictionary,
+                    ) if isinstance(f, dict) else f
+                    for f in tab["fields"]
+                ],
+            }
+        new_tabs.append(tab)
+    out["tabs"] = new_tabs
+    return out
+
+
 def _resolve_prompts_in_actions(
     actions: list[dict[str, Any]] | None,
     *,
@@ -204,6 +297,13 @@ def _full_view(
                 body.get(hook), connector=connector, language=language, dictionary=dictionary,
             )
     if "dialog" in body:
+        # Two passes — orthogonal concerns: ``_resolve_screen_fields_in_dialog`` enriches every
+        # form tab's ``fields`` with the resolved ``rule`` / ``format`` (so v1's per-field
+        # ``col_rules`` override actually drives the widget choice); ``_resolve_dialog_prompts``
+        # resolves action ``prompt_fields`` on the dialog's hooks + per-tab buttons.
+        body["dialog"] = _resolve_screen_fields_in_dialog(
+            body.get("dialog"), connector=connector, language=language, dictionary=dictionary,
+        )
         body["dialog"] = _resolve_dialog_prompts(
             body.get("dialog"), connector=connector, language=language, dictionary=dictionary,
         )

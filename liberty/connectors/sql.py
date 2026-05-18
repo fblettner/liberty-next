@@ -233,6 +233,161 @@ _RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missi
 _RULES_DISABLED = {"DISABLED"}
 
 
+# ── Runtime filter wrap (v1-style: wrap only what the caller filtered, type-aware) ────────────
+# v2 (Phase 8): the migrator no longer bakes filter predicates into the stored SQL. Instead
+# :meth:`SQLConnector._apply_filter_wrap` reads ``QueryDef.columns`` to find columns marked
+# ``filter = true``, reads the caller's params to find which were *actually* sent, and
+# generates one predicate per active column. Text columns get the operator-aware
+# LOWER/LIKE wrap; number/date/boolean/jdedate get a typed equals (index-friendly).
+# The migrator stored the alternative — every filter column's full operator wrap *always*
+# present — but that killed indexes (universal CAST AS VARCHAR(4000)) and made every
+# stored SELECT unreadable in a wizard.
+_FILTER_OPS_TEXT = ("contains", "equals", "notEquals", "startsWith", "endsWith")
+_TEXT_FORMATS = {"text", "textarea", "email", "url", "color", "password"}
+
+
+def _from_jde_julian(v: Any) -> str | int | None:
+    """Inverse of :func:`_to_jde_julian` — JDE Julian ``CYYDDD`` integer → ISO date string
+    ``"YYYY-MM-DD"``. The frontend renders the date string; the dialog's edit path parses
+    it back to a Python ``date`` and ``_coerce_value(..., "jdedate")`` re-encodes the CYYDDD
+    integer for the round-trip. Pass-through on ``None``; integers ≤ 0 / out-of-range
+    return the original raw value (so an operator can spot bad data instead of seeing a
+    silently-corrupted display).
+
+    Numeric values arriving as strings or floats are normalised first (some DB drivers
+    return DECIMAL columns as Decimal, others as int). The CYYDDD encoding is:
+    ``year = 1900 + jde_int // 1000`` and ``day_of_year = jde_int % 1000``.
+    """
+    from datetime import date as _date, timedelta
+    if v is None:
+        return None
+    try:
+        if isinstance(v, bool):
+            return v  # pass through — booleans aren't JDE dates
+        if isinstance(v, (int,)):
+            n = v
+        elif isinstance(v, float):
+            n = int(v)
+        elif isinstance(v, str):
+            s = v.strip()
+            if not s.isdigit():
+                return v
+            n = int(s)
+        else:
+            n = int(str(v))
+    except (TypeError, ValueError):
+        return v
+    if n <= 0:
+        return v   # 0 is "no date" in JDE; surface the raw value to make it visible
+    century_year, day = divmod(n, 1000)
+    year = 1900 + century_year
+    if day < 1 or day > 366:
+        return v
+    try:
+        return (_date(year, 1, 1) + timedelta(days=day - 1)).isoformat()
+    except ValueError:
+        return v
+
+
+def _split_order_by(sql_text: str) -> tuple[str, str]:
+    """Split *sql_text* at the **last top-level** ``ORDER BY`` (depth 0 in parens). Returns
+    ``(body, order_clause)`` — the clause does *not* include the ``ORDER BY`` keyword.
+
+    Used by :meth:`SQLConnector._apply_filter_wrap` so the dynamic wrap can re-attach the
+    operator-supplied ordering after the wrap: the inner SELECT's ORDER BY would otherwise
+    be lost (derived tables have unordered semantics in standard SQL).
+
+    Best-effort and idempotent: when no top-level ORDER BY is found, returns
+    ``(sql_text, "")`` so the caller can compose ``body + order_clause`` unconditionally.
+    Skips ORDER BYs inside subqueries / function calls / window clauses by tracking paren depth.
+    """
+    s = sql_text.rstrip().rstrip(";").rstrip()
+    depth = 0
+    last_idx = -1
+    sl_upper = s.upper()
+    # Walk forward, recording the *last* top-level ORDER BY. We can't naively walk
+    # backwards because that would misinterpret "ORDER BY" appearing inside a string
+    # literal — but we don't need string-literal tracking for v1-migrated SQL (no
+    # operator writes "ORDER BY" inside a string).
+    i = 0
+    n = len(s)
+    while i < n - 7:
+        c = s[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif depth == 0 and sl_upper[i:i + 8] == "ORDER BY" and (i == 0 or not s[i - 1].isalnum()) and (i + 8 == n or not s[i + 8].isalnum()):
+            last_idx = i
+        i += 1
+    if last_idx < 0:
+        return s, ""
+    return s[:last_idx].rstrip(), s[last_idx + len("ORDER BY"):].strip()
+
+
+def _filter_sql_type(fmt: str | None, dialect: str) -> str:
+    """SQL type to cast a filter bind into for a non-text column — picked so the comparison
+    can use a btree index on the column. Falls back to a wide VARCHAR when the format is
+    unknown (matches the historic v1 behaviour but only for one bind, not every column)."""
+    f = (fmt or "").strip().lower()
+    if f in ("integer", "number", "jdedate"):
+        return "NUMBER" if dialect == "oracle" else "INTEGER"
+    if f in ("decimal", "currency"):
+        return "NUMBER" if dialect == "oracle" else "NUMERIC"
+    if f in ("date",):
+        return "DATE"
+    if f in ("datetime", "timestamp"):
+        return "TIMESTAMP"
+    if f == "boolean":
+        # Oracle has no native BOOLEAN type for SQL expressions outside PL/SQL; use a
+        # short VARCHAR cast so the comparison works for the rule's true/false values.
+        return "VARCHAR2(20)" if dialect == "oracle" else "BOOLEAN"
+    return "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
+
+
+def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -> str:
+    """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``.
+
+    Text columns get the operator-aware ``LOWER(col) LIKE LOWER(...)`` family for
+    contains/startsWith/endsWith plus ``=`` / ``<>`` for equals/notEquals. Crucially, we
+    **don't CAST the column side** — Postgres can use a functional index on ``LOWER(col)``
+    if defined, and the planner has the option to choose between seq-scan and index-scan;
+    the previous universal CAST AS VARCHAR(4000) on every column kept it from ever using
+    an index.
+
+    Non-text columns (number / date / boolean / jdedate) only use ``equals``. The wrap
+    helper coerces the bind to the right *Python* type before passing it down (so a
+    string ``"10"`` becomes ``int(10)``) — asyncpg then sends the proper type code and
+    the column's btree index applies natively. No SQL CAST on either side: pre-Phase-8
+    we had ``col = CAST(:name AS INTEGER)`` which forced asyncpg's strict-type check to
+    reject the string ``"10"`` even though Postgres would have accepted it.
+    """
+    text_format = (fmt or "").lower() in _TEXT_FORMATS or fmt is None or fmt == ""
+    col_ref = f"lib_flt.{name}"
+    if text_format:
+        # The bind side still casts to a wide VARCHAR — asyncpg can't infer the type of a
+        # bind otherwise (Postgres needs the cast to know whether to compare as text vs
+        # bytea vs jsonb on an untyped TEXT column when the param type isn't pinned). The
+        # column side stays as-is so the planner is free to use an index.
+        pv = f"CAST(:{name} AS {_filter_sql_type(None, dialect)})"
+        if op == "equals":
+            return f"{col_ref} = {pv}"
+        if op == "notEquals":
+            return f"{col_ref} <> {pv}"
+        if op == "startsWith":
+            return f"LOWER({col_ref}) LIKE LOWER({pv} || '%')"
+        if op == "endsWith":
+            return f"LOWER({col_ref}) LIKE LOWER('%' || {pv})"
+        # default → "contains"
+        return f"LOWER({col_ref}) LIKE LOWER('%' || {pv} || '%')"
+    # Non-text: equals-only. The bind is *Python-coerced* upstream (see
+    # ``SQLConnector._apply_filter_wrap``) so asyncpg gets an actual int / float / date /
+    # bool. No SQL CAST — letting the driver send the proper type code is what makes the
+    # column's native btree index apply, *and* avoids asyncpg's strict-type rejection of
+    # a string value against an INTEGER-typed param.
+    return f"{col_ref} = :{name}"
+
+
 
 def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> dict[str, Any]:
     """Replace ``None`` values in *bound* with type-appropriate sentinels based on *col_types*.
@@ -553,6 +708,87 @@ class SQLConnector:
             bound.setdefault(p.name, merged.get(p.name))
         return bound
 
+    def _apply_filter_wrap(
+        self, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None, *, stmt_type: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        """v1-style **runtime** filter wrap. Inspects *params* for values bound to columns
+        the query marks ``filter = true`` (in ``QueryDef.columns``), and emits a wrap with
+        a predicate per *active* column only — type-aware: text columns get the full
+        operator family (contains / equals / notEquals / startsWith / endsWith), non-text
+        columns get a typed equals.
+
+        Each column's effective format is resolved the same way ``_apply_column_hints``
+        and ``_column_meta_map`` do it: the column hint's own ``format`` wins, else the
+        dictionary entry's (``col.dd`` or, when unset, ``col.name``). Without this, a
+        column whose only source of format is the dictionary (the common case for
+        ``extra_filter_cols`` hints that the migration emits from drill / nested-tab
+        binds) would render as text and break on a numeric column —
+        ``LOWER(integer)`` is undefined on Postgres.
+
+        Phase 8: replaces the migrator's static wrap that bundled every filter column's
+        full operator predicate into the stored SQL whether the caller used it or not.
+        Side effect: indexes can finally be used (no universal CAST AS VARCHAR(4000) on
+        the column side) and the stored SELECT is small enough to round-trip through a
+        wizard.
+
+        Only fires on SELECT — writes don't have filter columns to wrap. Returns
+        *sql_text* unchanged when:
+          - the query has no filter-flagged columns, OR
+          - the caller didn't bind a value for any of them, OR
+          - it's not a SELECT.
+
+        ORDER BY at the top level is preserved across the wrap (the inner SELECT's
+        ORDER BY would otherwise be lost — derived tables are unordered in standard SQL).
+
+        **Returns** ``(wrapped_sql, params)``. The returned params are a *new* dict (the
+        caller's input is never mutated) carrying the original keys plus any active-filter
+        bind values coerced to the right Python type for the column's format — asyncpg's
+        strict-type check rejects a string against an INTEGER-typed bind, so the wrap
+        helper is the place to convert ``"10"`` → ``int(10)`` before binding. Non-active
+        params and any other binds pass through untouched."""
+        if stmt_type != "SELECT" or not qdef.columns:
+            return sql_text, params
+        active: list[tuple[str, str | None, str, Any]] = []
+        for col in qdef.columns:
+            if not col.filter:
+                continue
+            v = (params or {}).get(col.name)
+            if v is None or v == "":
+                continue
+            op = str((params or {}).get(f"{col.name}_op", "") or "").strip() or "contains"
+            if op not in _FILTER_OPS_TEXT:
+                op = "contains"
+            # Effective format — hint's own wins, else the dictionary entry's. ``dd = ""``
+            # opts out of dictionary lookup (parallels the SELECT-side hint resolver).
+            fmt = col.format
+            if fmt is None and col.dd != "":
+                key = (col.dd or col.name)
+                entry = self._dict.find_entry(key, connector=self.name)
+                if entry is not None and entry.format:
+                    fmt = entry.format
+            # Python-coerce the value for non-text columns. Text-y formats are left as
+            # strings (the wrap's LOWER/LIKE want a string; ``_coerce_value(..., "text")``
+            # is a no-op anyway). For number / date / boolean / jdedate the value flows
+            # to asyncpg as a real Python int / date / bool — the SQL has no CAST so
+            # asyncpg gets to send the column's native type code and the index applies.
+            coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
+            active.append((col.name, fmt, op, coerced))
+        if not active:
+            return sql_text, params
+        dialect = self._resolve_dialect()
+        preds = [_build_filter_predicate(name, fmt, op, dialect) for name, fmt, op, _ in active]
+        body, order_clause = _split_order_by(sql_text)
+        where_clause = " AND ".join(f"({p})" for p in preds)
+        out = f"SELECT * FROM (\n{body}\n) lib_flt\nWHERE 1=1 AND {where_clause}"
+        if order_clause:
+            out += f"\nORDER BY {order_clause}"
+        # Merge the coerced active-filter values into a fresh params dict so the
+        # downstream ``_build_params`` picks them up (it reads the dict by bind name).
+        new_params: dict[str, Any] = dict(params or {})
+        for name, _fmt, _op, coerced in active:
+            new_params[name] = coerced
+        return out, new_params
+
     def _column_meta_map(self, qdef: QueryDef) -> dict[str, dict[str, str | None]]:
         """Build a column-name → ``{format, rule, rules_values, default}`` map for *qdef*.
 
@@ -848,12 +1084,21 @@ class SQLConnector:
             )
 
         engine: AsyncEngine = self._pools.engine(self.pool_name)
+        # Phase 8: dynamic filter wrap. On SELECT, if any ``filter = true`` column has a
+        # caller-supplied value, wrap the inner SELECT with a per-column predicate (text →
+        # operator-aware, non-text → equals with a Python-coerced bind). Skipped if no
+        # filters are active so the stored SELECT runs unwrapped most of the time. The
+        # wrap helper returns a params dict whose active-filter values are coerced to
+        # the proper Python type (str → int / date / bool); ``_build_params`` runs
+        # afterwards against the (possibly-wrapped) SQL so it picks up the new ``:NAME``
+        # binds with their coerced values.
+        sql_text, params = self._apply_filter_wrap(sql_text, qdef, params, stmt_type=stmt_type)
         bound = self._build_params(sql_text, qdef, params)
         # Resolve form-layer rules (LOGIN / SYSDATE / PASSWORD / DEFAULT) + coerce string
         # binds to the matching Python type for the column's resolved format. SEQUENCE / NN
         # is deferred to inside the write transaction (it needs the DB). On SELECT this is
-        # a no-op (filter binds stay as strings — the migrated SQL CASTs them to VARCHAR
-        # explicitly so type matching doesn't bite).
+        # a no-op for the filter binds (they're already typed via the runtime CAST in the
+        # wrap, and SYSDATE/etc. only fire on writes anyway).
         bound = self._apply_form_rules(bound, qdef, stmt_type=stmt_type, user=user)
         stmt = text(sql_text)
         is_select = stmt_type == "SELECT"
@@ -880,6 +1125,18 @@ class SQLConnector:
                     for k, v in row.items():
                         if isinstance(v, str):
                             row[k] = v.rstrip()
+            # JDE Julian dates → ISO ``"YYYY-MM-DD"`` strings on read. v1's `DynamicResultMapper`
+            # parity (deferred until now). Symmetric with ``_coerce_value(value, "jdedate")``
+            # on writes: the form sends an ISO date, we re-encode to CYYDDD on bind. Without
+            # this every JDE date in NOMAJDE showed as a raw integer in the grid (UPMJ etc.).
+            # Match columns case-insensitively — the resolved Column carries the discovered
+            # case (Postgres → lowercase) while the row dict uses the same.
+            _jdedate_cols = [c.name for c in columns if (c.format or "").lower() == "jdedate"]
+            if _jdedate_cols:
+                for row in rows:
+                    for cn in _jdedate_cols:
+                        if cn in row:
+                            row[cn] = _from_jde_julian(row[cn])
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name,

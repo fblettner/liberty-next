@@ -146,10 +146,16 @@ async def _build(args: argparse.Namespace) -> dict:
             actions_data: dict[str, Any] = migrate_actions(
                 *act_rows, sql_rows=sql_rows, app_name=args.connector,
             )
+            # Pull v1's sequences too — when a ly_dlg_col row has ``col_rules = 'SEQUENCE'`` /
+            # ``'NN'``, the migrator needs to translate the numeric ``seq_id`` in
+            # ``col_rules_values`` to the v2 slug-based sequence id (parallel to what
+            # ``migrate_dictionary`` does for top-level entries).
+            seq_rows, _seq_param_rows = await read_sequences(engine)
             screens_data = migrate_screens(
                 *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
                 promotable_dialogs=promotable_dialogs,
                 actions_data=actions_data,
+                sequence_rows=seq_rows,
                 app_name=args.connector,
             )
             # Event-driven action attachment via ``ly_evt_cpt`` — the *correct* model:

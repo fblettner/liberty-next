@@ -75,6 +75,9 @@ export type DisplayRule =
        *  Required for queries that take `:placeholder` params to even run — without these a UDC
        *  query returns nothing because SY/RT are NULL. The fetcher passes them as ?p=v on /api/sql. */
       params?: Record<string, string>
+      /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
+       *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
+      return_params?: string[]
     }
 
 export interface Column {

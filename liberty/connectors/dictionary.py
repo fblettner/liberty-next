@@ -186,10 +186,26 @@ class LookupDef(BaseModel):
         default_factory=list,
         title="Params",
         description=(
-            "The `:placeholder` parameter names the lookup's query expects (v1's ly_lkp_params). "
-            "Informational on the LookupDef itself — the entries that reference this lookup bind "
-            "values to these names via `DictionaryEntry.lookup_params` (the dictionary-builder's "
-            "Rule tab auto-surfaces one input per name when the entry's rule is LOOKUP)."
+            "The `:placeholder` parameter names the lookup's query expects (v1's ly_lkp_params "
+            "with ``lkp_dir = 'IN'``). Informational on the LookupDef itself — the entries that "
+            "reference this lookup bind values to these names via `DictionaryEntry.lookup_params` "
+            "(the dictionary-builder's Rule tab auto-surfaces one input per name when the entry's "
+            "rule is LOOKUP)."
+        ),
+        json_schema_extra={"x_group": "Target"},
+    )
+    return_params: list[str] = Field(
+        default_factory=list,
+        title="Return params",
+        description=(
+            "Additional dd_ids the lookup writes back to the form / row when the user picks a "
+            "value (v1's ``ly_lkp_params`` with ``lkp_dir = 'OUT'``). Beyond the rule's headline "
+            "``value`` / ``label`` columns, the picked row's matching columns are written to "
+            "every other form field / grid cell whose ``dd`` matches a name here. Example: lkp 9 "
+            "on F00950's FSOBNM picks an object; ``return_params = [\"SY\"]`` writes the picked "
+            "row's SY column to FSSY (the field with ``dd = \"SY\"``) so the form auto-populates "
+            "the system code alongside the object name. Each entry is a dd_id; the runtime "
+            "case-folds when looking up the result column."
         ),
         json_schema_extra={"x_group": "Target"},
     )
@@ -347,6 +363,11 @@ class DictionaryFile(BaseModel):
             # which UDC table to read).
             if entry.lookup_params:
                 wire["params"] = dict(entry.lookup_params)
+            # ``return_params`` (v1's ly_lkp_params with ``lkp_dir = 'OUT'``) — extra dd_ids to
+            # write back from the picked row to other form fields / grid cells. Surfaced on the
+            # wire so the frontend's lookup-pick handler can populate sibling fields.
+            if lk.return_params:
+                wire["return_params"] = list(lk.return_params)
             return wire
         return None  # the form-layer rules (SEQUENCE/SYSDATE/LOGIN/PASSWORD/…) — not a display transform
 

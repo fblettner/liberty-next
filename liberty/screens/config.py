@@ -122,11 +122,52 @@ class ScreenField(BaseModel):
         description="Dictionary entry override (blank → looked up under ``name``).",
     )
     label: str | None = Field(default=None, description="Display label (overrides the dictionary).")
+    format: str | None = Field(
+        default=None,
+        description=(
+            "Display format override (v1's ``col_type``) — e.g. 'date' / 'number' / 'boolean'. "
+            "Wins over the dictionary entry's ``format``. Free-text — values come from the "
+            "``DICTIONARY_TYPE`` framework enum but custom values are accepted."
+        ),
+        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
+    )
     hidden: bool = Field(default=False, description="Hide this field from the dialog by default.")
     disabled: bool = Field(default=False, description="Render the field read-only (v1's col_disabled).")
     required: bool = Field(default=False, description="Field is required for save (v1's col_required).")
     colspan: int | None = Field(default=None, description="How many columns of the tab's grid this field spans (v1's col_colspan).")
     default: str | None = Field(default=None, description="Pre-fill value on a new row (v1's col_default).")
+    rules: str | None = Field(
+        default=None,
+        description=(
+            "Per-field rule override (v1's ``col_rules``). When set, replaces the dictionary "
+            "entry's ``rules`` for this field — used when a specific screen needs a different "
+            "widget than the global dictionary says (e.g. FSOBNM on F00950 wants LOOKUP #9 even "
+            "though OBNM's dictionary entry has no rule). Same rule kinds as ``DictionaryEntry.rules``: "
+            "BOOLEAN / ENUM / LOOKUP / SEQUENCE / NN / LOGIN / SYSDATE / CURRENT_DATE / PASSWORD / "
+            "DEFAULT / DISABLED."
+        ),
+        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
+    )
+    rules_values: str | None = Field(
+        default=None,
+        description=(
+            "The rule's argument (v1's ``col_rules_values``) — same shape as ``DictionaryEntry.rules_values``: "
+            "true value for BOOLEAN, enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN."
+        ),
+        json_schema_extra={
+            "x_group": "Rule",
+            "x_enum_ref_when": {
+                "field": "rules",
+                "map": {
+                    "BOOLEAN": "BOOLEAN_TRUE_VALUES",
+                    "ENUM": "ENUM_IDS",
+                    "LOOKUP": "LOOKUP_IDS",
+                    "SEQUENCE": "SEQUENCE_IDS",
+                    "NN": "SEQUENCE_IDS",
+                },
+            },
+        },
+    )
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
         description=(

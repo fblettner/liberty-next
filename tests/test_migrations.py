@@ -233,31 +233,47 @@ def test_migrate_sql_queries_upsert_put_to_update() -> None:
     assert all(q.writable for q in parse_connectors(tomllib.loads(render_toml(out))).connectors["default"].queries)
 
 
-def test_migrate_sql_queries_filter_wrap() -> None:
-    # a read query with a filter-flagged column gets wrapped: SELECT * FROM (<orig>) lib_flt WHERE …
+def test_migrate_sql_queries_no_longer_wraps_filter_columns() -> None:
+    """Phase 8: the migrator no longer bakes the ``SELECT * FROM (…) lib_flt WHERE 1=1 …``
+    envelope into the stored SQL — that's now applied dynamically at runtime by the SQL
+    connector (only for filters the caller actually sent, with type-aware predicates).
+    The migrator keeps the ``filter = true`` column hints so the runtime knows which
+    columns are filterable; the inner SELECT stays clean.
+
+    The user's complaint: the old wrap stored ~1.5 KB of CAST-AS-VARCHAR predicates per
+    filter column whether the caller used them or not, killed indexes, and made the SQL
+    impossible to edit in a wizard.
+    """
     out = migrate_sql_queries(
         _QUERIES, _SQL_ROWS,
         column_hints={1: [{"name": "USR_ID", "filter": True}, {"name": "USR_NAME"}]},
     )
     by_name = {q["name"]: q for q in out["connectors"]["default"]["queries"]}
-    sql = by_name["users_list_select"]["sql"]
-    assert isinstance(sql, dict)  # query 1 has two dialect variants → still a map
+    q = by_name["users_list_select"]
+    sql = q["sql"]
+    # Dialect map (two variants) — but the inner SELECT is the original verbatim plus the
+    # operator-supplied ORDER BY. No lib_flt envelope, no CAST AS VARCHAR, no :USR_ID_op bind.
+    assert isinstance(sql, dict)
     inner = "SELECT usr_id, usr_name FROM ly_users WHERE usr_status = :status"
-    assert sql["default"].startswith("SELECT * FROM (\n" + inner)
-    assert "WHERE 1=1" in sql["default"]
-    assert ") lib_flt\n" in sql["default"] and "_flt" not in sql["default"].replace("lib_flt", "")  # alias must start with a letter (Oracle)
-    assert "CAST(:USR_ID AS VARCHAR(4000)) IS NULL" in sql["default"] and ":USR_ID_op" in sql["default"]
-    assert "CAST(:USR_ID AS VARCHAR2(4000))" in sql["oracle"]  # the oracle variant uses VARCHAR2
-    assert sql["default"].rstrip().endswith("ORDER BY usr_name")  # ORDER BY moved onto the outer query
+    assert sql["default"].startswith(inner)
+    assert "lib_flt" not in sql["default"] and "lib_flt" not in sql["oracle"]
+    assert "VARCHAR(4000)" not in sql["default"] and "VARCHAR2(4000)" not in sql["oracle"]
+    assert ":USR_ID_op" not in sql["default"]
+    assert sql["default"].rstrip().endswith("ORDER BY usr_name")
+    # The filter hint is preserved so the runtime can build the wrap on demand.
+    cols = q["columns"]
+    by_col = {c["name"]: c for c in cols}
+    assert by_col["USR_ID"].get("filter") is True
+    assert by_col["USR_NAME"].get("filter") is None  # default false → omitted
     # a query with no filter columns is left alone (no wrapper)
     assert by_name["twins_select"]["sql"] == "SELECT 1 AS x"
-    # write queries are never wrapped
+    # write queries are never wrapped (this was always true; assert it's still true)
     assert by_name["delete_user_delete"]["sql"] == "DELETE FROM ly_users WHERE usr_id = :id"
-    # round-trips through the v2 loader
+    # round-trips through the v2 loader; only the inner SELECT's binds remain
     reparsed = parse_connectors(tomllib.loads(render_toml(out)))
     q1 = next(q for q in reparsed.connectors["default"].queries if q.name == "users_list_select")
     from liberty.connectors.base import find_bind_params
-    assert {"status", "USR_ID", "USR_ID_op"} <= set(find_bind_params(q1.default_sql))
+    assert set(find_bind_params(q1.default_sql)) == {"status"}
 
 
 def test_migrate_table_meta() -> None:
@@ -623,8 +639,10 @@ def test_migrate_drill_filter_columns_dd_resolution_first_occurrence_wins() -> N
 
 def test_migrate_drill_filter_columns_end_to_end() -> None:
     """End-to-end check: ``migrate_drill_filter_columns`` → ``migrate_column_hints`` →
-    ``migrate_sql_queries`` wraps the destination SQL with ``:RLU_APPS_ID``/``:RLU_USER_ID``
-    binds, so the URL drill emitted by ``migrate_context_menus`` actually filters server-side."""
+    ``migrate_sql_queries``. Phase 8: the migrator no longer wraps the destination SQL —
+    the runtime does it dynamically. What we assert here is that the *column hints* mark
+    the drill target columns as ``filter = true`` so the runtime knows to bind them when
+    the URL drill arrives."""
     val_rows = [
         {"ctx_id": 1, "val_id": 1, "val_label": "Display Roles",
          "val_component": "FormsTable", "val_component_id": 100},
@@ -638,8 +656,8 @@ def test_migrate_drill_filter_columns_end_to_end() -> None:
     ]
     drill = migrate_drill_filter_columns(val_rows, filter_rows, tables_rows=tables_rows)
     assert drill == {20: ["RLU_APPS_ID", "RLU_USER_ID"]}
-    # The destination had no v1 column hints at all — the drill-filter pass still emits hints so
-    # the SQL gets wrapped. (Real-world libnsx1 case for `security_assignments_get`.)
+    # The destination had no v1 column hints at all — the drill-filter pass still emits hints
+    # so the runtime can bind. (Real-world libnsx1 case for `security_assignments_get`.)
     hints = migrate_column_hints((), (), extra_filter_cols=drill)
     assert hints[20] == [
         {"name": "RLU_APPS_ID", "filter": True},
@@ -651,8 +669,14 @@ def test_migrate_drill_filter_columns_end_to_end() -> None:
         "query_sqlquery": "SELECT * FROM assignments", "query_orderby": None,
     }]
     out = migrate_sql_queries(queries, sql_rows, column_hints=hints)
-    sql = out["connectors"]["nomasx1"]["queries"][0]["sql"]
-    assert ":RLU_APPS_ID" in sql and ":RLU_USER_ID" in sql  # _wrap_with_filters bound both
+    q = out["connectors"]["nomasx1"]["queries"][0]
+    # The stored SQL is the raw inner SELECT — the runtime wraps on demand.
+    assert q["sql"] == "SELECT * FROM assignments"
+    # Filter flags are preserved on the columns hint so the runtime can bind both columns
+    # when the URL drill provides them.
+    by_col = {c["name"]: c for c in q["columns"]}
+    assert by_col["RLU_APPS_ID"]["filter"] is True
+    assert by_col["RLU_USER_ID"]["filter"] is True
 
 
 def test_migrate_nested_tab_filter_columns() -> None:
@@ -703,8 +727,9 @@ def test_migrate_nested_tab_filter_columns() -> None:
 
 def test_migrate_nested_tab_filter_columns_end_to_end() -> None:
     """End-to-end: ``migrate_nested_tab_filter_columns`` → ``migrate_column_hints`` →
-    ``migrate_sql_queries`` actually wraps the nested SQL with the ``:NAME`` binds the runtime
-    sends. Mirrors the drill-filter end-to-end test; without this the param is silently dropped."""
+    ``migrate_sql_queries``. Phase 8: the migrator stores the inner SELECT verbatim; the
+    nested-tab bind's column gets ``filter = true`` on the column hint so the runtime
+    knows to bind it when the parent's PK arrives."""
     dlg_col_rows = [
         {"frm_id": 1, "col_id": 50, "col_component": "FormsTable", "col_component_id": 100, "col_target": None},
     ]
@@ -715,7 +740,7 @@ def test_migrate_nested_tab_filter_columns_end_to_end() -> None:
     nested = migrate_nested_tab_filter_columns(dlg_col_rows, dlg_filter_rows, table_rows=table_rows)
     assert nested == {20: ["AUD_APPS_ID"]}
     # The destination had no v1 column hints at all — the nested-filter pass still emits hints
-    # so the SQL gets wrapped. (Real-world libnsx1 case for ``audit_trail_get`` inside
+    # so the runtime can bind. (Real-world libnsx1 case for ``audit_trail_get`` inside
     # ``settings_applications``'s Audit tab.)
     hints = migrate_column_hints((), (), extra_filter_cols=nested)
     assert hints[20] == [{"name": "AUD_APPS_ID", "filter": True}]
@@ -725,9 +750,10 @@ def test_migrate_nested_tab_filter_columns_end_to_end() -> None:
         "query_sqlquery": "SELECT * FROM audit_trail", "query_orderby": None,
     }]
     out = migrate_sql_queries(queries, sql_rows, column_hints=hints)
-    sql = out["connectors"]["nomasx1"]["queries"][0]["sql"]
-    assert ":AUD_APPS_ID" in sql and ":AUD_APPS_ID_op" in sql
-    assert "lib_flt" in sql  # wrapped, not raw
+    q = out["connectors"]["nomasx1"]["queries"][0]
+    assert q["sql"] == "SELECT * FROM audit_trail"   # raw — runtime wraps on demand
+    by_col = {c["name"]: c for c in q["columns"]}
+    assert by_col["AUD_APPS_ID"]["filter"] is True
 
 
 def test_migrate_sql_queries_drops_filter_for_missing_columns() -> None:
@@ -757,10 +783,10 @@ def test_migrate_sql_queries_drops_filter_for_missing_columns() -> None:
     # The broken filter is gone; the other one remains; the third is unchanged.
     assert "filter" not in cols["LUSR_APPS_ID"]
     assert cols["JDEO_APPS_ID"].get("filter") is True
-    # The wrapped SQL only references the real column in its WHERE.
-    sql = q["sql"]
-    assert ":JDEO_APPS_ID" in sql and ":LUSR_APPS_ID" not in sql
-    assert "lib_flt.JDEO_APPS_ID" in sql and "lib_flt.LUSR_APPS_ID" not in sql
+    # Phase 8: the migrator no longer wraps. The runtime would still skip an
+    # unflagged column when building its WHERE — the validation here just keeps the
+    # stored config honest.
+    assert q["sql"] == "SELECT JDEO_APPS_ID, CPT_ID, USERS_COUNT FROM some_table"
 
 
 def test_outermost_select_columns_handles_nested_selects() -> None:
@@ -2110,7 +2136,7 @@ _V1_SCHEMA = [
     "CREATE TABLE ly_dlg_frm (frm_id INTEGER PRIMARY KEY, dlg_id INTEGER, frm_query_id INTEGER, frm_label TEXT)",
     "CREATE TABLE ly_dlg_tab (frm_id INTEGER, tab_id INTEGER, tab_seq INTEGER, tab_label TEXT, tab_cols INTEGER, tab_disable_add TEXT, tab_disable_edit TEXT)",
     "CREATE TABLE ly_dlg_tab_l (frm_id INTEGER, tab_id INTEGER, lng_id TEXT, lng_label TEXT)",
-    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_colspan INTEGER, col_component TEXT, col_component_id INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_disabled TEXT, col_required TEXT, col_default TEXT, col_key TEXT, col_cdn_id INTEGER)",
+    "CREATE TABLE ly_dlg_col (frm_id INTEGER, col_id INTEGER, tab_id INTEGER, col_seq INTEGER, col_colspan INTEGER, col_component TEXT, col_component_id INTEGER, col_dd_id TEXT, col_label TEXT, col_target TEXT, col_type TEXT, col_visible TEXT, col_disabled TEXT, col_required TEXT, col_default TEXT, col_key TEXT, col_cdn_id INTEGER, col_rules TEXT, col_rules_values TEXT)",
     "CREATE TABLE ly_tbl_filters (tbl_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_dlg_filters (frm_id INTEGER, col_id INTEGER, flt_id INTEGER, flt_type TEXT, flt_source TEXT, flt_target TEXT, flt_value TEXT)",
     "CREATE TABLE ly_cdn_params (cdn_id INTEGER, cdn_params_id INTEGER, cdn_seq INTEGER, cdn_dd_id TEXT, cdn_operator TEXT, cdn_value TEXT, cdn_logical TEXT, cdn_group INTEGER)",

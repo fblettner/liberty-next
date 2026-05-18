@@ -63,7 +63,10 @@ const SearchRow = styled.div`
     &::placeholder { color: ${colors.text.muted}; }
   }
 `
-const List = styled.div`max-height: 264px; overflow-y: auto; padding: 4px 0;`
+// The List grows up to the Panel's available space (the Panel caps its own max-height
+// against the viewport). ``min-height: 0`` is the flex-shrink unlock — without it the
+// List would keep its content's full height and overflow the panel.
+const List = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0;`
 const Item = styled.button<{ $active?: boolean }>`
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px ${PAD_X};
   border: none; cursor: pointer; text-align: left;
@@ -109,7 +112,14 @@ export function SearchSelect({
   // The trigger's viewport coords — drive the portaled Panel's `position: fixed` offsets.
   // Recomputed on open + on scroll/resize so the dropdown follows the trigger as the user
   // scrolls inside a modal body. `null` = panel not positioned yet (first render frame).
-  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  //
+  // ``placement`` records whether the panel opens BELOW (default) or ABOVE the trigger
+  // — when below would overflow the viewport, flip up. The panel's max-height is also
+  // capped to the available space so the list never overflows the viewport edge (the
+  // user's complaint: in a modal-edge SearchSelect the dropdown would render off-screen).
+  const [panelPos, setPanelPos] = useState<
+    { top: number; left: number; width: number; maxHeight: number; placement: 'below' | 'above' } | null
+  >(null)
 
   useEffect(() => {
     if (!open) { setQ(''); setPanelPos(null); return }
@@ -117,7 +127,19 @@ export function SearchSelect({
       const el = triggerRef.current
       if (!el) return
       const r = el.getBoundingClientRect()
-      setPanelPos({ top: r.bottom + 4, left: r.left, width: r.width })
+      const vh = window.innerHeight
+      const GAP = 4
+      const MIN_PANEL = 160         // never flip up if at least this much fits below
+      const MAX_PANEL = 320         // matches List's max-height 264 + header/footer rows
+      const spaceBelow = vh - r.bottom - GAP
+      const spaceAbove = r.top - GAP
+      // Prefer below. Flip up only when below has *less* room AND above has more — keeps
+      // the natural "open downward" feel for most cases, only flipping on a near-the-edge
+      // trigger.
+      const flipUp = spaceBelow < MIN_PANEL && spaceAbove > spaceBelow
+      const maxHeight = Math.min(MAX_PANEL, Math.max(MIN_PANEL, flipUp ? spaceAbove : spaceBelow))
+      const top = flipUp ? Math.max(GAP, r.top - maxHeight - GAP) : r.bottom + GAP
+      setPanelPos({ top, left: r.left, width: r.width, maxHeight, placement: flipUp ? 'above' : 'below' })
     }
     compute()
     // Click outside (either the trigger or the portaled panel itself) closes the dropdown.
@@ -182,7 +204,15 @@ export function SearchSelect({
   // viewport for a frame — `position: fixed; visibility: hidden` until ready is also fine but
   // a single useEffect compute is simpler here.
   const panel = open && panelPos ? (
-    <Panel ref={panelRef} style={{ top: panelPos.top, left: panelPos.left, minWidth: Math.max(240, panelPos.width) }}>
+    <Panel
+      ref={panelRef}
+      style={{
+        top: panelPos.top,
+        left: panelPos.left,
+        minWidth: Math.max(240, panelPos.width),
+        maxHeight: panelPos.maxHeight,
+      }}
+    >
       <SearchRow>
         <input
           ref={searchRef}
