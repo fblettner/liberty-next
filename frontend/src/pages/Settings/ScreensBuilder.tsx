@@ -298,9 +298,12 @@ export default function ScreensBuilder() {
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
   if (!doc || !screenSchema) return <Centered />
 
-  const apps = Object.keys(doc)
+  // Alphabetical sort — both the app scope-chip strip and the per-app screen list. v1's
+  // ``tbl_seq`` / ``apps_seq`` ordering doesn't carry over to v2 (each `[screens.<app>.<id>]`
+  // is just a dict), so a stable name-sorted order matches operator expectations.
+  const apps = Object.keys(doc).sort((a, b) => a.localeCompare(b))
   const screens = (selApp && doc[selApp]) || {}
-  const ids = Object.keys(screens)
+  const ids = Object.keys(screens).sort((a, b) => a.localeCompare(b))
   const needle = q.trim().toLowerCase()
   const shownIds = needle
     ? ids.filter((id) => {

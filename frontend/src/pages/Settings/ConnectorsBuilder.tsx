@@ -241,7 +241,9 @@ export default function ConnectorsBuilder() {
 
   if (error && !conns) return <Banner $tone="error">{error}</Banner>
   if (!conns || !schemas) return <Centered />
-  const names = Object.keys(conns)
+  // Alphabetical sort — operators expect a stable name-sorted list (the v1 ``apps_seq``
+  // ordering is gone). ``localeCompare`` handles mixed case naturally.
+  const names = Object.keys(conns).sort((a, b) => a.localeCompare(b))
   const needle = q.trim().toLowerCase()
   const shownNames = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
   const selConn = sel && conns[sel] ? conns[sel] : null

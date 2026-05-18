@@ -103,7 +103,9 @@ export default function PoolsBuilder() {
 
   if (error && !pools) return <Banner $tone="error">{error}</Banner>
   if (!pools || !schema) return <Centered />
-  const names = Object.keys(pools)
+  // Alphabetical sort — v1's per-row ``apps_seq`` ordering doesn't carry over, so we surface
+  // pools in a stable name-sorted order. ``localeCompare`` handles mixed case naturally.
+  const names = Object.keys(pools).sort((a, b) => a.localeCompare(b))
 
   return (
     <FrameworkEnumsContext.Provider value={enums}>

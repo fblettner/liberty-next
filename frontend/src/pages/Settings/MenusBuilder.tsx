@@ -340,7 +340,11 @@ export default function MenusBuilder() {
   const menusSchema = schemas.menus
   const defs = (menusSchema?.$defs ?? {}) as Record<string, JsonSchema>
   const menuItemSchema: JsonSchema | null = defs.MenuItem ?? null
-  const appNames = Object.keys(apps)
+  // Alphabetical sort for the scope-chip strip — operators expect a stable, predictable order.
+  // **Tree items WITHIN an app are NOT sorted** — operators set the menu order explicitly via
+  // the up / down / indent / outdent buttons on each row (the byParent groups + renderRow walks
+  // keep their authored position).
+  const appNames = Object.keys(apps).sort((a, b) => a.localeCompare(b))
   const appNeedle = appQ.trim().toLowerCase()
   const shownApps = appNeedle ? appNames.filter((n) => n.toLowerCase().includes(appNeedle)) : appNames
 

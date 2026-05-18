@@ -301,7 +301,10 @@ export default function DictionaryBuilder() {
   if (scope) scopeKeys.add(scope)
   const scopes: string[] = [SCOPE_SHARED, ...[...scopeKeys].filter((s) => s !== SCOPE_SHARED).sort()]
   const section = getSection(dict, scope, kind)
-  const keys = Object.keys(section)
+  // Alphabetical sort — v1's per-row `*_seq` columns aren't carried over, so we surface
+  // dictionary entries / enums / lookups in a stable name-sorted order. ``localeCompare``
+  // handles the mix of underscore-snake and PascalCase ids you see in NOMASX1 / NOMAJDE.
+  const keys = Object.keys(section).sort((a, b) => a.localeCompare(b))
   const needle = q.trim().toLowerCase()
   const shown = needle ? keys.filter((k) => k.toLowerCase().includes(needle)) : keys
 
