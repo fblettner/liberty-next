@@ -45,19 +45,25 @@ def test_param_bind_either_mode() -> None:
 
 
 def test_screen_field_shape() -> None:
-    """A field with the optional knobs the migration carries over."""
-    f = ScreenField(
-        name="USR_ROLE_ID", dd="ROL_ID", label="Role", hidden=False, disabled=True,
-        required=True, colspan=2, default="ADMIN",
-        lookup_param_binds=[ParamBind(param="ROL_APPS_ID", source="USR_APPS_ID")],
-    )
-    assert f.dd == "ROL_ID" and f.required is True and f.colspan == 2
-    assert f.lookup_param_binds[0].source == "USR_APPS_ID"
-    # `name` is mandatory; extra keys rejected
+    """Phase 2: ScreenField is **layout-only** — just ``name`` + ``hidden`` / ``disabled`` /
+    ``required`` / ``colspan`` + the three conditional rule lists. Display metadata (``dd`` /
+    ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` / ``lookup_param_binds``)
+    lives on the matching :class:`~liberty.connectors.config.ColumnHint` in
+    ``Screen.columns`` (single source of truth for both grid + dialog)."""
+    f = ScreenField(name="USR_ROLE_ID", hidden=False, disabled=True, required=True, colspan=2)
+    assert f.name == "USR_ROLE_ID" and f.required is True and f.colspan == 2 and f.disabled is True
+    # `name` is mandatory
     with pytest.raises(Exception):
         ScreenField()  # type: ignore[call-arg]
-    with pytest.raises(Exception):
-        ScreenField(name="X", bogus=1)  # type: ignore[call-arg]
+    # Legacy field-level metadata is *silently dropped* on parse (extra='ignore' — back-compat
+    # so a screens.toml from before Phase 2 keeps loading). Operators re-migrate at their pace.
+    legacy = ScreenField.model_validate({
+        "name": "USR_ROLE_ID", "dd": "ROL_ID", "label": "Role", "rules": "LOOKUP",
+        "rules_values": "5", "default": "ADMIN", "format": "text",
+        "lookup_param_binds": [{"param": "X", "source": "Y"}],
+    })
+    # The legacy fields are dropped — only the layout-only ones survive.
+    assert legacy.model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
 
 
 def test_screen_dialog_and_tab() -> None:
@@ -296,9 +302,12 @@ def test_parse_screens_injects_id_from_key() -> None:
     # discriminated union resolves cleanly. Backward compat for every screens.toml file
     # written before the nested-tab variants were added.
     assert isinstance(tab, FormTab) and tab.type == "form"
+    # Phase 2: legacy per-field metadata (``dd`` / ``lookup_param_binds``) is silently dropped
+    # by ``extra="ignore"`` — the ScreenField is layout-only now. A re-migrated screens.toml
+    # would have these moved onto the matching ColumnHint in ``Screen.columns``.
     field = tab.fields[1]
-    assert field.dd == "ROL_ID"
-    assert field.lookup_param_binds[0].source == "USR_APPS_ID"
+    assert field.name == "USR_ROLE_ID"
+    assert not hasattr(field, "dd")  # dropped from the schema
 
 
 def test_parse_screens_with_nested_tab_kinds() -> None:

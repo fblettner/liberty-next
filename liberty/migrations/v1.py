@@ -2705,21 +2705,25 @@ def migrate_screens(
                     rv = _seq_id_to_v2_for_screens[sid]
         return rules, rv
 
-    def _migrate_field_row(c: Mapping[str, Any], owning_frm: int) -> dict[str, Any] | None:
-        """Build one field dict from a ly_dlg_col row. Returns None for placeholder rows
-        (no col_target — v1 used those for layout). Owning_frm threads the right frm-id
-        through the lookup_param_binds + visible_when resolvers (parent form ≠ nested form,
-        but the per-frm dd→target map is keyed by frm_id either way)."""
+    def _migrate_field_row(
+        c: Mapping[str, Any], owning_frm: int,
+        *, column_overrides: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Build one **layout-only** field dict from a ly_dlg_col row (Phase 2). Display metadata
+        (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` /
+        ``lookup_param_binds``) is captured into *column_overrides* under the column's name so
+        the caller can merge it onto ``Screen.columns`` — single source of truth, no more
+        duplication between dialog form and grid editor.
+
+        Returns ``None`` for placeholder rows (no ``col_target`` — v1 used those for layout).
+        ``owning_frm`` threads the right frm-id through the lookup_param_binds + visible_when
+        resolvers (parent form ≠ nested form, but the per-frm dd→target map is keyed by frm_id
+        either way)."""
         target = (c.get("col_target") or "").strip()
         if not target:
             return None
-        dd_id = (c.get("col_dd_id") or "").strip()
-        col_label = (c.get("col_label") or "").strip()
         field: dict[str, Any] = {"name": target}
-        if dd_id and dd_id != target:
-            field["dd"] = dd_id
-        if col_label:
-            field["label"] = col_label
+        # ── layout-only field bits ─────────────────────────────────────────────────────────
         if str(c.get("col_visible") or "Y").upper() in _HIDDEN_FLAGS:
             field["hidden"] = True
         if str(c.get("col_disabled") or "").upper() in _YES_FLAGS:
@@ -2731,55 +2735,8 @@ def migrate_screens(
                 field["colspan"] = int(c["col_colspan"])
             except (TypeError, ValueError):
                 pass
-        default_v = (c.get("col_default") or "").strip()
-        if default_v:
-            field["default"] = default_v
-        # v1 ``col_type`` — per-field format override (e.g. force a column to render as a date
-        # even when its dictionary entry has no format). Mapped to ScreenField.format. v2 keeps
-        # the same alias normalisation v1 used (numeric → number, etc. — :func:`_column_format`).
-        col_type_v = _column_format(c.get("col_type"))
-        if col_type_v:
-            field["format"] = col_type_v
-        # v1 ``col_rules`` / ``col_rules_values`` — per-field rule override. The dictionary's
-        # entry rule is the default; a non-empty col_rules here wins on this screen only.
-        # SEQUENCE / NN need seq_id → v2 sequence id translation (LOOKUP / ENUM / BOOLEAN keep
-        # the numeric ID verbatim — v2's lookups/enums use v1's IDs as string keys). Common case
-        # the user reported: FSOBNM on F00950 has col_rules='LOOKUP' / col_rules_values='9'
-        # because OBNM's dictionary entry has no rule — without this the field renders as a
-        # plain text input instead of a searchable dropdown.
-        rules_v, rules_values_v = _resolve_screen_rule(
-            c.get("col_rules"), c.get("col_rules_values"),
-        )
-        if rules_v:
-            field["rules"] = rules_v
-        if rules_values_v:
-            field["rules_values"] = rules_values_v
-        # Field-level parameter bindings (v1 ly_dlg_filters).
-        binds: list[dict[str, Any]] = []
-        try:
-            cid_int = int(c["col_id"])
-        except (TypeError, ValueError, KeyError):
-            cid_int = None
-        if cid_int is not None:
-            for f in binds_by_col.get((owning_frm, cid_int), []):
-                target_p = (f.get("flt_target") or "").strip()
-                if not target_p:
-                    continue
-                ftype = (f.get("flt_type") or "").strip().upper()
-                if ftype == "VALUE":
-                    v = f.get("flt_value")
-                    if v is None or str(v).strip() == "":
-                        continue
-                    binds.append({"param": target_p, "value": str(v)})
-                elif ftype == "DD":
-                    src = (f.get("flt_source") or "").strip()
-                    if not src:
-                        continue
-                    binds.append({"param": target_p, "source": src})
-                # Other flt_type values (FIELD / etc.) — Phase 6 follow-up; skip for now.
-        if binds:
-            field["lookup_param_binds"] = binds
-        # Conditional visibility (v1 col_cdn_id → ly_cdn_params).
+        # Conditional visibility (v1 col_cdn_id → ly_cdn_params) is per-record (form-state),
+        # not per-table — stays on the field.
         cid_raw = c.get("col_cdn_id")
         if cid_raw is not None:
             try:
@@ -2795,6 +2752,57 @@ def migrate_screens(
                     )
                 elif resolved:
                     field["visible_when"] = resolved
+        # ── per-column display metadata (lands on Screen.columns, not on the field) ───────
+        if column_overrides is not None:
+            ov: dict[str, Any] = {}
+            dd_id = (c.get("col_dd_id") or "").strip()
+            if dd_id and dd_id != target:
+                ov["dd"] = dd_id
+            col_label = (c.get("col_label") or "").strip()
+            if col_label:
+                ov["label"] = col_label
+            default_v = (c.get("col_default") or "").strip()
+            if default_v:
+                ov["default"] = default_v
+            col_type_v = _column_format(c.get("col_type"))
+            if col_type_v:
+                ov["format"] = col_type_v
+            rules_v, rules_values_v = _resolve_screen_rule(
+                c.get("col_rules"), c.get("col_rules_values"),
+            )
+            if rules_v:
+                ov["rules"] = rules_v
+            if rules_values_v:
+                ov["rules_values"] = rules_values_v
+            # Field-level lookup parameter bindings (v1 ly_dlg_filters). Same shape as field
+            # binds in v1 — same shape as ColumnHint.lookup_param_binds in v2.
+            binds: list[dict[str, Any]] = []
+            try:
+                cid_int = int(c["col_id"])
+            except (TypeError, ValueError, KeyError):
+                cid_int = None
+            if cid_int is not None:
+                for f in binds_by_col.get((owning_frm, cid_int), []):
+                    target_p = (f.get("flt_target") or "").strip()
+                    if not target_p:
+                        continue
+                    ftype = (f.get("flt_type") or "").strip().upper()
+                    if ftype == "VALUE":
+                        v = f.get("flt_value")
+                        if v is None or str(v).strip() == "":
+                            continue
+                        binds.append({"param": target_p, "value": str(v)})
+                    elif ftype == "DD":
+                        src = (f.get("flt_source") or "").strip()
+                        if not src:
+                            continue
+                        binds.append({"param": target_p, "source": src})
+            if binds:
+                ov["lookup_param_binds"] = binds
+            if ov:
+                # case-insensitive dedup against the column hints already on the screen — the
+                # caller merges this overlay in (dialog overrides win where they diverge).
+                column_overrides[target] = ov
         return field
 
     def _detect_nested(cols_for_tab: list[Mapping[str, Any]]) -> tuple[str | None, int | None, int | None]:
@@ -2951,6 +2959,12 @@ def migrate_screens(
 
     # ── build one Screen per ly_tables row ────────────────────────────────────
     screens: dict[str, dict[str, Any]] = {}
+    # Phase 2 — overrides collected from each nested-form tab's fields. Keyed by the *nested
+    # screen's* read-query qid (resolved against ``crud_by_qid``); merged in a post-pass below
+    # so the nested screen's ``columns`` picks up the dialog's per-field metadata (dd / label /
+    # format / rules / default / lookup_param_binds) even though the dlg_col rows live under
+    # the parent screen's frm.
+    _nested_overrides_by_qid: dict[int, dict[str, dict[str, Any]]] = {}
     for r in table_rows:
         try:
             tbl_id = int(r["tbl_id"])
@@ -3004,6 +3018,13 @@ def migrate_screens(
             hints = column_hints.get(tbl_q)
             if hints:
                 screen["columns"] = [dict(h) for h in hints]
+
+        # Phase 2 — per-column overrides extracted from each dialog ly_dlg_col row by
+        # ``_migrate_field_row``. Keyed by the column ``name`` (the ``col_target``); merged
+        # into the screen's ``columns`` list after the dialog loop so the dialog's per-field
+        # metadata (dd / label / format / rules / rules_values / default / lookup_param_binds)
+        # lives once, on ``Screen.columns``, instead of being duplicated onto every ScreenField.
+        column_overrides: dict[str, dict[str, Any]] = {}
 
         # Dialog: only when the table widget is wired to a dialog form.
         frm_id_raw = r.get("tbl_frm_id")
@@ -3081,11 +3102,22 @@ def migrate_screens(
                             # v1 nested forms typically have just one tab and v2 renders them
                             # inline so tab boundaries inside the nested form are irrelevant.
                             nested_fields: list[dict[str, Any]] = []
+                            # Nested-form columns belong to the *nested* screen, not the parent;
+                            # collect their overrides separately and stash them onto the nested
+                            # target screen below (so its ``Screen.columns`` carries them too).
+                            # When the nested target isn't a known screen, the overrides simply
+                            # don't land anywhere — which is fine, the nested form runs against
+                            # the nested screen's own columns at render time.
+                            nested_overrides: dict[str, dict[str, Any]] = {}
                             for c in cols_by_frm_all.get(target_frm, []):
-                                fr = _migrate_field_row(c, owning_frm=target_frm)
+                                fr = _migrate_field_row(c, owning_frm=target_frm, column_overrides=nested_overrides)
                                 if fr is not None:
                                     nested_fields.append(fr)
                             tab_out["fields"] = nested_fields
+                            # Stash for the post-loop merge — keyed by the nested target's tbl_id
+                            # (resolved below once all screen ids exist).
+                            if nested_overrides:
+                                _nested_overrides_by_qid.setdefault(target_qid, {}).update(nested_overrides) if target_qid is not None else None
                             pb = _binds_for_col(frm_id, nested_host_col) if nested_host_col is not None else []
                             if pb:
                                 tab_out["param_binds"] = pb
@@ -3116,7 +3148,7 @@ def migrate_screens(
                         for c in cols_for_tab:
                             if (c.get("col_component") or "").strip() == "InputAction":
                                 continue   # already in tab_actions
-                            fr = _migrate_field_row(c, owning_frm=frm_id)
+                            fr = _migrate_field_row(c, owning_frm=frm_id, column_overrides=column_overrides)
                             if fr is not None:
                                 fields.append(fr)
                         tab_out["fields"] = fields
@@ -3151,6 +3183,24 @@ def migrate_screens(
                 if tabs:
                     screen["dialog"] = {"tabs": tabs}
 
+        # Phase 2 — merge each dialog-field's display-metadata overlay onto the screen's
+        # ``columns`` list (Screen.columns is single source of truth for dd / label / format /
+        # rules / rules_values / default / lookup_param_binds; the ScreenField only carries
+        # layout). Order: keep the existing column-hints' order, append new columns at the end.
+        # A dialog field for a column the tbl_col list didn't hint at adds a fresh ColumnHint.
+        if column_overrides:
+            existing = screen.get("columns") or []
+            by_name = {h["name"]: h for h in existing if "name" in h}
+            for col_name, ov in column_overrides.items():
+                if col_name in by_name:
+                    # dlg-row metadata wins where it differs (closer to operator intent).
+                    by_name[col_name].update(ov)
+                else:
+                    new_hint = {"name": col_name, **ov}
+                    existing.append(new_hint)
+                    by_name[col_name] = new_hint
+            screen["columns"] = existing
+
         # Row context menu (slice 6 follow-up) — `tbl_ctx_id` points at a v1 ``ly_ctxmenus`` row
         # whose items :func:`migrate_context_menus` has already resolved to NavigateActions keyed
         # by ``tbl_id``. Inline the list onto the screen; an empty entry is left off so the
@@ -3178,6 +3228,37 @@ def migrate_screens(
                 screen["row_menu"] = items
 
         screens[sid] = screen
+
+    # ── post-pass: merge nested-form column overrides onto each nested target screen ─────────
+    # Phase 2 — a nested_form tab on screen A points at the nested screen B's read_query; the
+    # parent A's dlg_col rows for B's fields carry per-column display metadata that belongs on
+    # B's ``columns`` list (so editing the nested form sees the same dd/rule/default as opening
+    # screen B standalone). Resolve B's screen id via its read query's qid → tbl_id, then merge.
+    if _nested_overrides_by_qid:
+        sid_by_qid: dict[int, str] = {}
+        for r in table_rows:
+            try:
+                tq_int = int(r["tbl_query_id"]); ti_int = int(r["tbl_id"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            sid_for_qid = sid_by_tbl_id.get(ti_int)
+            if sid_for_qid:
+                sid_by_qid.setdefault(tq_int, sid_for_qid)
+        for qid, overrides in _nested_overrides_by_qid.items():
+            nested_sid = sid_by_qid.get(qid)
+            if not nested_sid or nested_sid not in screens:
+                continue
+            nested_screen = screens[nested_sid]
+            nested_cols = nested_screen.get("columns") or []
+            by_name = {h["name"]: h for h in nested_cols if "name" in h}
+            for col_name, ov in overrides.items():
+                if col_name in by_name:
+                    by_name[col_name].update(ov)
+                else:
+                    new_hint = {"name": col_name, **ov}
+                    nested_cols.append(new_hint)
+                    by_name[col_name] = new_hint
+            nested_screen["columns"] = nested_cols
 
     # ── post-pass: promote a "Display Properties"-style ctx menu item into a row-click target ──
     # When a screen has no own dialog and its v1 ctx menu carries *exactly one* FormsDialog item

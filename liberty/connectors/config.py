@@ -170,6 +170,33 @@ class VisibleWhen(BaseModel):
         return {"field": self.field, "value": self.value}
 
 
+class ParamBind(BaseModel):
+    """Bind one ``:placeholder`` parameter of a target query — same shape used everywhere a
+    parameter binding shows up in v2 (a lookup combo on a dialog field, an action's argument,
+    a row context-menu trigger, a nested-tab read filter). v2's port of v1's ``ly_dlg_filters``
+    (the table was reused for every kind of parameter passing — v2 keeps the unified mechanism).
+    Two modes (exactly one of ``value`` / ``source`` set in practice, but both may be blank
+    during edits)::
+
+        {param = "SY", value = "01"}                    # literal binding
+        {param = "ROL_APPS_ID", source = "USR_APPS_ID"} # dynamic — read at call time
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    param: str = Field(description="The target query's :placeholder name to bind.")
+    value: str | None = Field(default=None, description="Literal value to bind (mode A).")
+    source: str | None = Field(
+        default=None,
+        description=(
+            "Name of the column / form-field whose current value to bind (mode B). Resolved "
+            "against the row (table context), the form (dialog context), or the firing event's "
+            "context (action / row menu). Reserved built-ins start with ``#`` — e.g. ``#LOGIN_USER#``, "
+            "``#SYSDATE#``."
+        ),
+    )
+
+
 class ColumnHint(BaseModel):
     """Optional *display* metadata for one result column. The column **schema**
     (names + types) is still discovered from the query at run time — these hints only
@@ -210,6 +237,65 @@ class ColumnHint(BaseModel):
         default=None,
         description='UI-interpreted format hint — "date" / "datetime" / "number" / "boolean" / "currency" / … — overrides the dictionary\'s. Free-text — the frontend tolerates v1\'s various aliases.',
         json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
+    )
+    # ── per-screen-column field metadata (Phase 2 — promoted from ScreenField) ──────────
+    # These four were duplicated between ``ScreenField`` (for the dialog form) and the grid
+    # editor's per-column render path. v2's single-source-of-truth: live here on the screen's
+    # ``columns`` list so the same metadata drives both the grid cell renderer *and* the
+    # dialog form's input widget. ``ScreenField`` becomes layout-only (name + colspan +
+    # conditional rules); the dialog backend resolves these onto each field via the matching
+    # ``ColumnHint`` at ``/api/screens/{app}/{id}`` time.
+    rules: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
+        description=(
+            "Per-column rule override (v1's ``col_rules``). When set, replaces the dictionary "
+            "entry's ``rules`` for this column on this screen — used when one screen needs a "
+            "different widget than the global dictionary says (e.g. FSOBNM on F00950 wants "
+            "LOOKUP #9 even though OBNM's dictionary entry has no rule). Same kinds as "
+            "``DictionaryEntry.rules``: BOOLEAN / ENUM / LOOKUP / SEQUENCE / NN / LOGIN / "
+            "SYSDATE / CURRENT_DATE / PASSWORD / DEFAULT / DISABLED."
+        ),
+    )
+    rules_values: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "x_group": "Rule",
+            "x_enum_ref_when": {
+                "field": "rules",
+                "map": {
+                    "BOOLEAN": "BOOLEAN_TRUE_VALUES",
+                    "ENUM": "ENUM_IDS",
+                    "LOOKUP": "LOOKUP_IDS",
+                    "SEQUENCE": "SEQUENCE_IDS",
+                    "NN": "SEQUENCE_IDS",
+                },
+            },
+        },
+        description=(
+            "The rule's argument (v1's ``col_rules_values``) — same shape as "
+            "``DictionaryEntry.rules_values``: true value for BOOLEAN, enum id for ENUM, "
+            "lookup id for LOOKUP, sequence id for SEQUENCE / NN."
+        ),
+    )
+    default: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Pre-fill value on a new row (v1's ``col_default``). Used by the dialog form when "
+            "opening in *add* mode. (Form-rule defaults like SEQUENCE / SYSDATE / LOGIN are "
+            "resolved separately at INSERT time via the rule machinery.)"
+        ),
+    )
+    lookup_param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Parameter bindings for this column's *lookup* query (when the column's rule resolves "
+            "to a LOOKUP). Same :class:`ParamBind` shape used by actions/menus/cascading filters. "
+            "v2's port of v1's ``ly_dlg_filters`` for a field-level lookup narrowing (e.g. picking "
+            "a role narrows by the row's current app id)."
+        ),
     )
 
     @property

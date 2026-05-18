@@ -1253,16 +1253,21 @@ def test_migrate_screens_with_dialog() -> None:
     fields = g["fields"]
     # Placeholder row (col_target='') is dropped.
     assert [f["name"] for f in fields] == ["USR_ID", "USR_ROLE_ID"]
-    # First field: col_dd_id == col_target → `dd` key omitted; required=True; colspan=2.
-    assert fields[0] == {
-        "name": "USR_ID", "required": True, "colspan": 2,
-        "lookup_param_binds": [{"param": "STATUS", "value": "A"}],
-    }
-    # Second field: dd override, label, hidden, disabled, default; one DD bind, the malformed ones dropped.
-    assert fields[1] == {
-        "name": "USR_ROLE_ID", "dd": "ROL_ID", "label": "Role",
-        "hidden": True, "disabled": True, "default": "ADMIN",
-        "lookup_param_binds": [{"param": "ROL_APPS_ID", "source": "USR_APPS_ID"}],
+    # Phase 2: fields are layout-only — display metadata (``dd`` / ``label`` / ``default`` /
+    # ``lookup_param_binds`` / etc.) lives on the screen's ``columns`` list instead.
+    assert fields[0] == {"name": "USR_ID", "required": True, "colspan": 2}
+    assert fields[1] == {"name": "USR_ROLE_ID", "hidden": True, "disabled": True}
+    # … and the per-column metadata landed on ``Screen.columns`` — single source of truth.
+    cols = s["columns"]
+    assert {c["name"]: c for c in cols} == {
+        "USR_ID": {
+            "name": "USR_ID",
+            "lookup_param_binds": [{"param": "STATUS", "value": "A"}],
+        },
+        "USR_ROLE_ID": {
+            "name": "USR_ROLE_ID", "dd": "ROL_ID", "label": "Role", "default": "ADMIN",
+            "lookup_param_binds": [{"param": "ROL_APPS_ID", "source": "USR_APPS_ID"}],
+        },
     }
     parse_screens(out)
 
@@ -2556,14 +2561,17 @@ async def test_read_screens(v1_engine) -> None:
     tab = s.dialog.tabs[0]
     assert tab.label == "General" and tab.cols == 2 and tab.l == {"fr": "Général"}
     assert [f.name for f in tab.fields] == ["USR_ID", "USR_EXTRA"]
+    # Phase 2: fields are layout-only.
     field = tab.fields[0]
-    # col_label='Id' overrides the dictionary; col_dd_id == name → `dd` left unset (falls back to `name`).
-    assert field.label == "Id" and field.dd is None and field.required is True and field.colspan == 2
-    assert field.default == "0"
-    # field 1 has no col_cdn_id → no visible_when
+    assert field.required is True and field.colspan == 2
     assert field.visible_when == []
-    # Both ParamBind flavours preserved: VALUE → {param, value}, DD → {param, source}.
-    binds = [{"param": b.param, "value": b.value, "source": b.source} for b in field.lookup_param_binds]
+    # Display metadata + lookup_param_binds live on ``Screen.columns``.
+    cols_by_name = {c.name: c for c in s.columns}
+    usr = cols_by_name["USR_ID"]
+    # col_label='Id' overrides the dictionary; col_dd_id == col_target → ``dd`` left unset
+    # (the column reads the dictionary entry under its own name as the fallback).
+    assert usr.label == "Id" and usr.dd is None and usr.default == "0"
+    binds = [{"param": b.param, "value": b.value, "source": b.source} for b in usr.lookup_param_binds]
     assert binds == [
         {"param": "STATUS", "value": "A", "source": None},
         {"param": "ROL_APPS_ID", "value": None, "source": "USR_APPS_ID"},
@@ -2719,8 +2727,10 @@ def test_cli_screen(tmp_path) -> None:
     assert tab.label == "General" and tab.l == {"fr": "Général"}
     field = tab.fields[0]
     assert field.name == "USR_ID" and field.required is True
-    # Both ParamBind shapes round-trip.
-    assert [(b.param, b.value, b.source) for b in field.lookup_param_binds] == [
+    # Phase 2 — ``lookup_param_binds`` now lives on ``Screen.columns[]`` (single source of
+    # truth for both dialog form + grid edit). The migration emits them there.
+    cols = {c.name: c for c in s.columns}
+    assert [(b.param, b.value, b.source) for b in cols["USR_ID"].lookup_param_binds] == [
         ("STATUS", "A", None),
         ("ROL_APPS_ID", None, "USR_APPS_ID"),
     ]

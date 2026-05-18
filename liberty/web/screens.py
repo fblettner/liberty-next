@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry
+from liberty.connectors.config import ColumnHint
 from liberty.connectors.dictionary import DictionaryFile
 from liberty.connectors.sql import _hint_to_dict
 from liberty.screens import Screen, ScreensFile
@@ -72,47 +73,78 @@ def _resolve_prompt_field(
 
 
 def _resolve_screen_field(
-    raw: dict[str, Any], *, connector: str, language: str | None, dictionary: DictionaryFile,
+    raw: dict[str, Any],
+    *,
+    column_hints: dict[str, "ColumnHint"],
+    connector: str,
+    language: str | None,
+    dictionary: DictionaryFile,
 ) -> dict[str, Any]:
-    """Resolve a :class:`ScreenField`'s effective rule + format. The screen-field-level
-    ``rules`` / ``rules_values`` override the dictionary entry's (v1's ``col_rules`` /
-    ``col_rules_values`` — used when a specific screen needs a different widget than the
-    global dictionary, e.g. FSOBNM on F00950 wants LOOKUP #9 even though the OBNM
-    dictionary entry has no rule). The screen-field's ``format`` (v1's ``col_type``) wins
-    over the entry's ``format``.
+    """Phase 2 — merge the matching ``Screen.columns`` entry's display metadata onto the
+    layout-only :class:`ScreenField` wire payload. The frontend's dialog FieldRow keeps
+    reading ``field.label`` / ``field.format`` / ``field.rule`` / ``field.default`` /
+    ``field.lookup_param_binds`` / ``field.dd`` — those now ride here, sourced from the
+    screen's ``ColumnHint`` (single source of truth) and resolved against the dictionary
+    in the request's language.
 
-    Synthesises a transient ``DictionaryEntry`` carrying the override(s), then calls
-    :meth:`DictionaryFile.resolve_rule` so the wire payload's ``rule`` matches the shape
-    the SQL connector emits for read-result columns — the frontend's FieldRow renders the
-    same way regardless of whether the rule came from the dictionary or the screen.
+    Resolution order:
+      1. Find the matching :class:`ColumnHint` on the screen (case-insensitive match on
+         ``field.name``). When none exists, the field reads the dictionary entry under
+         its own ``name`` as the fallback (back-compat: a screen with no ``columns`` list
+         and no per-field metadata gets the dictionary defaults).
+      2. The hint's ``rules`` / ``rules_values`` override the dictionary entry's rule —
+         synthesise a transient :class:`DictionaryEntry` carrying the override(s) and
+         call :meth:`DictionaryFile.resolve_rule`. Otherwise use the dictionary entry's
+         rule directly.
+      3. Surface ``dd`` / ``label`` / ``format`` / ``default`` / ``lookup_param_binds``
+         from the hint onto the wire (the frontend doesn't read the screen's ``columns``
+         directly when rendering the dialog).
 
-    No-op for fields without overrides (the dictionary's rule already wins) and for
-    fields whose dd resolves to no entry. Returns a fresh dict — never mutates the input."""
+    Returns a fresh dict — never mutates the input."""
     from liberty.connectors.dictionary import DictionaryEntry
     out = dict(raw)
     name = (out.get("name") or "").strip()
     if not name:
         return out
-    field_rules = (out.get("rules") or "").strip().upper() or None
-    field_rules_values = (out.get("rules_values") or "").strip() or None
+    # Find the matching ColumnHint (case-insensitive on column name).
+    hint = column_hints.get(name.lower())
+    if hint is not None:
+        if hint.dd is not None and not out.get("dd"):
+            out["dd"] = hint.dd
+        if hint.label and not out.get("label"):
+            out["label"] = hint.label
+        if hint.format and not out.get("format"):
+            out["format"] = hint.format
+        if hint.default and not out.get("default"):
+            out["default"] = hint.default
+        if hint.lookup_param_binds and not out.get("lookup_param_binds"):
+            out["lookup_param_binds"] = [
+                b.model_dump(mode="json", exclude_none=True) for b in hint.lookup_param_binds
+            ]
     key = (out.get("dd") or name).strip()
     entry = dictionary.find_entry(key, connector=connector) if key else None
-    # Effective format — field-level wins; ``label`` already comes from the screen field's
-    # own ``label`` or, if empty, the read column's label (the frontend handles fallback).
+    # Effective format — hint-level wins; ``label`` already came from the hint or stays
+    # absent (the frontend falls back to the read column's label).
     if not out.get("format"):
         fmt = entry.format if entry else None
         if fmt:
             out["format"] = fmt
-    # Decide which rule applies. Field-level override → build a transient entry from the
+    if entry is not None and not out.get("label"):
+        lbl = entry.label_for(language)
+        if lbl:
+            out["label"] = lbl
+    # Decide which rule applies. Hint-level override → build a transient entry from the
     # override(s). Otherwise → use the dictionary entry's rule as-is (the SQL connector's
     # read-column path already resolves that; the frontend can fall back to ``column.rule``
     # if we don't ship a field-level one here).
-    if field_rules:
+    hint_rules = hint.rules.strip().upper() if (hint and hint.rules) else None
+    hint_rules_values = hint.rules_values.strip() if (hint and hint.rules_values) else None
+    if hint_rules:
         synth = DictionaryEntry(
             label=(entry.label if entry else None),
             format=out.get("format") or (entry.format if entry else None),
-            rules=field_rules,
-            rules_values=field_rules_values,
+            rules=hint_rules,
+            rules_values=hint_rules_values,
             # Carry the entry's ``lookup_params`` (the static IN-direction binds — UDC SY/RT etc.)
             # so a screen-level LOOKUP override still narrows the lookup correctly. The field's
             # own ``lookup_param_binds`` add the dynamic source-driven binds on top at runtime.
@@ -133,14 +165,15 @@ def _resolve_screen_field(
 def _resolve_screen_fields_in_dialog(
     dialog: dict[str, Any] | None,
     *,
+    column_hints: dict[str, ColumnHint],
     connector: str,
     language: str | None,
     dictionary: DictionaryFile,
 ) -> dict[str, Any] | None:
-    """Walk a dumped ``ScreenDialog`` and enrich every form tab's fields with their resolved
-    ``rule`` / ``format``. Only ``FormTab``s carry fields — nested tabs reference another
-    screen entirely (resolved when the frontend loads that screen). The dialog's hooks +
-    per-tab actions are handled by :func:`_resolve_dialog_prompts` separately."""
+    """Walk a dumped ``ScreenDialog`` and merge each form field's display metadata from the
+    matching :class:`ColumnHint` (Phase 2). Only ``FormTab`` s carry fields; nested tabs
+    reference another screen entirely (resolved when the frontend loads that screen). The
+    dialog's hooks + per-tab actions are handled by :func:`_resolve_dialog_prompts` separately."""
     if not dialog:
         return dialog
     out = dict(dialog)
@@ -154,7 +187,8 @@ def _resolve_screen_fields_in_dialog(
                 **tab,
                 "fields": [
                     _resolve_screen_field(
-                        f, connector=connector, language=language, dictionary=dictionary,
+                        f, column_hints=column_hints,
+                        connector=connector, language=language, dictionary=dictionary,
                     ) if isinstance(f, dict) else f
                     for f in tab["fields"]
                 ],
@@ -317,12 +351,19 @@ def _full_view(
                 body.get(hook), connector=connector, language=language, dictionary=dictionary,
             )
     if "dialog" in body:
+        # Phase 2 — build a case-insensitive lookup of the screen's column hints once; the
+        # dialog field resolver uses it to merge per-column display metadata onto each field
+        # (so the v1 ``col_rules`` override actually drives the widget choice). A screen with
+        # no ``columns`` list yields an empty map and the resolver falls back to dictionary
+        # defaults — back-compat.
+        ch: dict[str, ColumnHint] = {h.name.lower(): h for h in screen.columns}
         # Two passes — orthogonal concerns: ``_resolve_screen_fields_in_dialog`` enriches every
-        # form tab's ``fields`` with the resolved ``rule`` / ``format`` (so v1's per-field
-        # ``col_rules`` override actually drives the widget choice); ``_resolve_dialog_prompts``
-        # resolves action ``prompt_fields`` on the dialog's hooks + per-tab buttons.
+        # form tab's ``fields`` with the resolved ``rule`` / ``format`` / etc. from the matching
+        # ColumnHint; ``_resolve_dialog_prompts`` resolves action ``prompt_fields`` on the
+        # dialog's hooks + per-tab buttons.
         body["dialog"] = _resolve_screen_fields_in_dialog(
-            body.get("dialog"), connector=connector, language=language, dictionary=dictionary,
+            body.get("dialog"), column_hints=ch,
+            connector=connector, language=language, dictionary=dictionary,
         )
         body["dialog"] = _resolve_dialog_prompts(
             body.get("dialog"), connector=connector, language=language, dictionary=dictionary,

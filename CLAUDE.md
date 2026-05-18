@@ -1127,7 +1127,43 @@ elsewhere, so a deployment doesn't have to know:
 
 Phase 6 (Form/screen engine) is now feature-complete for the slices outlined in `docs/PLAN.md`.
 
-414 tests pass.
+**Phase 6 follow-up (Connector ↔ Screen ↔ ScreenField roles consolidation) — Phase 1 of 3 DONE,
+Phase 2 of 3 DONE.** The original design split display metadata across three places (the
+connector's `QueryDef.columns`, the screen, and each `ScreenField`), with the dialog form and
+the grid editor each reading from a different layer. Phased refactor (committable per phase) to
+make **Screen the single source of truth for display metadata** while Connector keeps only
+queries:
+
+* **Phase 1 (done):** Added `Screen.columns: list[ColumnHint]` as an additive mirror of
+  `QueryDef.columns`. The migration emits both; the screens API ships `Screen.columns` resolved
+  against the dictionary (label/format/rule/hidden/filter/filter_from/visible_when/align/width/dd
+  — same shape `Column.to_dict()` emits); the TableView merges these over the SQL result's
+  discovered columns (case-insensitive name match, keeps server-discovered type). When the screen
+  has no `columns` list, falls back to the query's columns (back-compat).
+
+* **Phase 2 (done):** `ScreenField` shrinks to **layout-only** — keeps `name` (reference) +
+  `hidden` / `disabled` / `required` / `colspan` + the three conditional rule lists. The per-field
+  metadata (`dd` / `label` / `format` / `rules` / `rules_values` / `default` / `lookup_param_binds`)
+  moves onto `ColumnHint` so it lives **once** on `Screen.columns` and drives both the grid
+  editor and the dialog form. The unified `ParamBind` moves to `liberty/connectors/config.py`
+  (no upstream deps) and is re-exported from `liberty/screens.config`. The migration emits
+  display metadata onto `Screen.columns`, including a post-pass that propagates nested-form
+  field metadata onto each nested target screen's columns. The backend resolver
+  (`_resolve_screen_field`) merges the matching `ColumnHint` onto each dialog field's wire
+  payload so the frontend's `FieldRow` keeps reading `field.label` / `field.rule` /
+  `field.lookup_param_binds` / `field.default` transparently — the wire shape is unchanged,
+  the metadata moved one level up. `ScreenField` has `extra="ignore"` (not `"forbid"`) so an
+  old screens.toml keeps loading — operators re-migrate at their own pace via
+  `liberty-migrate screen`. The Visual Designer's field cards now read `dd` / `label` / format
+  preview / lookup-bind count from the matching column hint instead of the field.
+
+* **Phase 3 (planned):** Strip `QueryDef` of `columns` / `auto_load` / `audit` / `max_rows` /
+  `key_columns` / `update_query` / `insert_query` / `delete_query` — these all live on
+  `Screen` now. This is schema-breaking; will require re-migration. Final state: Connector =
+  queries only (sql, params, writable, description?, label?); Screen = source of truth for
+  everything else.
+
+457 tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
 nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**

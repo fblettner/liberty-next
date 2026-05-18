@@ -357,11 +357,12 @@ def _summary(data: dict, *, command: str) -> str:
         with_audit = sum(1 for s in screens.values() if s.get("audit"))
         cross = sum(1 for s in screens.values() if s.get("connector") and s["connector"] != app)
         n_fields = sum(len(t.get("fields") or []) for s in screens.values() for t in ((s.get("dialog") or {}).get("tabs") or []))
+        # Phase 2 — ``lookup_param_binds`` now lives on ``Screen.columns[]`` (single source of
+        # truth for both dialog form + grid edit). Count from there.
         n_binds = sum(
-            len(f.get("lookup_param_binds") or [])
+            len(c.get("lookup_param_binds") or [])
             for s in screens.values()
-            for t in ((s.get("dialog") or {}).get("tabs") or [])
-            for f in (t.get("fields") or [])
+            for c in (s.get("columns") or [])
         )
         n_conds = sum(
             1 for s in screens.values()

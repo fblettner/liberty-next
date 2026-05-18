@@ -55,33 +55,11 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from liberty.connectors.config import ColumnHint
-
-
-class ParamBind(BaseModel):
-    """Bind one ``:placeholder`` parameter of a target query — for a lookup combo on a dialog
-    field, an action's argument, a row context-menu trigger, or any future query/API call.
-    v2's port of v1's ``ly_dlg_filters`` (the name was historical — the table was reused for
-    every kind of parameter passing). Two modes (exactly one of ``value`` / ``source`` set in
-    practice, but both may be blank during edits)::
-
-        {param = "SY", value = "01"}                  # literal binding
-        {param = "ROL_APPS_ID", source = "USR_APPS_ID"} # dynamic — read at call time
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    param: str = Field(description="The target query's :placeholder name to bind.")
-    value: str | None = Field(default=None, description="Literal value to bind (mode A).")
-    source: str | None = Field(
-        default=None,
-        description=(
-            "Name of the column / form-field whose current value to bind (mode B). Resolved "
-            "against the row (table context), the form (dialog context), or the firing event's "
-            "context (action / row menu). Reserved built-ins start with ``#`` — e.g. ``#LOGIN_USER#``, "
-            "``#SYSDATE#`` — will be wired in slice 4."
-        ),
-    )
+# ``ParamBind`` lives in connectors.config (no upstream deps) so v2 has one single mechanism for
+# every parameter binding — lookups, actions, row menus, nested-tab read filters, cascading
+# filters on ``ColumnHint.lookup_param_binds``. Re-exported here for back-compat: external code
+# that does ``from liberty.screens import ParamBind`` keeps working.
+from liberty.connectors.config import ColumnHint, ParamBind
 
 
 class FieldCondition(BaseModel):
@@ -102,81 +80,39 @@ class FieldCondition(BaseModel):
 
 
 class ScreenField(BaseModel):
-    """One field on a dialog tab. Maps to a column of the screen's read query (by ``name``) —
-    same convention as ``ColumnHint.name``. ``dd`` overrides the dictionary entry lookup
-    (defaults to ``name`` when unset).
+    """One field on a dialog tab — **layout-only** (Phase 2). References a column of the
+    screen's ``columns`` list by ``name``; the column carries all the display metadata
+    (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` /
+    ``lookup_param_binds``). The field only declares its placement on the tab grid
+    (``colspan``), its dialog-context state flags (``hidden`` / ``disabled`` / ``required``
+    — distinct from the *column's* grid-context flags), and the per-record conditional
+    rules that fire against the live form state.
 
-    **Conditional rules** (slice 3): ``visible_when`` / ``required_when`` / ``disabled_when``
-    each take a list of :class:`FieldCondition` predicates evaluated against the dialog's live
-    form state. When the list is non-empty *and* every predicate holds, the rule fires (the
-    field shows / is required / is read-only); the static ``hidden`` / ``required`` /
+    Same convention as ``ColumnHint.name`` — the case-insensitive match against the read
+    query's columns lets v1's uppercase ``col_target`` line up with a Postgres-folded
+    lowercase result column.
+
+    **Conditional rules**: ``visible_when`` / ``required_when`` / ``disabled_when`` each
+    take a list of :class:`FieldCondition` predicates evaluated against the dialog's live
+    form state. When the list is non-empty *and* every predicate holds, the rule fires
+    (the field shows / is required / is read-only); the static ``hidden`` / ``required`` /
     ``disabled`` flags act as the fallback when the corresponding ``*_when`` list is empty.
-    v1's ``col_cdn_id`` migrates into ``visible_when``; the ``required_when`` / ``disabled_when``
-    paths have no v1 source mass-migrated yet — operators set them via the builder.
-    (``default_when`` waits for the form-rule slice — v1's SEQUENCE / SYSDATE / LOGIN / CURRENT_DATE
-    derived defaults live in the same territory.)"""
+    v1's ``col_cdn_id`` migrates into ``visible_when``; the ``required_when`` /
+    ``disabled_when`` paths have no v1 source mass-migrated yet — operators set them via
+    the builder."""
 
-    model_config = ConfigDict(extra="forbid")
+    # ``extra = "ignore"`` (not "forbid") so a screens.toml from before Phase 2 keeps loading
+    # — operators re-migrate at their own pace via ``liberty-migrate screen``. The legacy
+    # per-field metadata (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` /
+    # ``default`` / ``lookup_param_binds``) is silently dropped on parse; runtime + builder
+    # paths read from the matching ``Screen.columns`` entry instead.
+    model_config = ConfigDict(extra="ignore")
 
-    name: str = Field(description="The result column this field reads from / writes to.")
-    dd: str | None = Field(
-        default=None,
-        description="Dictionary entry override (blank → looked up under ``name``).",
-    )
-    label: str | None = Field(default=None, description="Display label (overrides the dictionary).")
-    format: str | None = Field(
-        default=None,
-        description=(
-            "Display format override (v1's ``col_type``) — e.g. 'date' / 'number' / 'boolean'. "
-            "Wins over the dictionary entry's ``format``. Free-text — values come from the "
-            "``DICTIONARY_TYPE`` framework enum but custom values are accepted."
-        ),
-        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
-    )
+    name: str = Field(description="The screen column this field renders (matches ``Screen.columns[].name`` case-insensitively).")
     hidden: bool = Field(default=False, description="Hide this field from the dialog by default.")
-    disabled: bool = Field(default=False, description="Render the field read-only (v1's col_disabled).")
-    required: bool = Field(default=False, description="Field is required for save (v1's col_required).")
+    disabled: bool = Field(default=False, description="Render the field read-only on the dialog (v1's col_disabled).")
+    required: bool = Field(default=False, description="Field is required for save on the dialog (v1's col_required).")
     colspan: int | None = Field(default=None, description="How many columns of the tab's grid this field spans (v1's col_colspan).")
-    default: str | None = Field(default=None, description="Pre-fill value on a new row (v1's col_default).")
-    rules: str | None = Field(
-        default=None,
-        description=(
-            "Per-field rule override (v1's ``col_rules``). When set, replaces the dictionary "
-            "entry's ``rules`` for this field — used when a specific screen needs a different "
-            "widget than the global dictionary says (e.g. FSOBNM on F00950 wants LOOKUP #9 even "
-            "though OBNM's dictionary entry has no rule). Same rule kinds as ``DictionaryEntry.rules``: "
-            "BOOLEAN / ENUM / LOOKUP / SEQUENCE / NN / LOGIN / SYSDATE / CURRENT_DATE / PASSWORD / "
-            "DEFAULT / DISABLED."
-        ),
-        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
-    )
-    rules_values: str | None = Field(
-        default=None,
-        description=(
-            "The rule's argument (v1's ``col_rules_values``) — same shape as ``DictionaryEntry.rules_values``: "
-            "true value for BOOLEAN, enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN."
-        ),
-        json_schema_extra={
-            "x_group": "Rule",
-            "x_enum_ref_when": {
-                "field": "rules",
-                "map": {
-                    "BOOLEAN": "BOOLEAN_TRUE_VALUES",
-                    "ENUM": "ENUM_IDS",
-                    "LOOKUP": "LOOKUP_IDS",
-                    "SEQUENCE": "SEQUENCE_IDS",
-                    "NN": "SEQUENCE_IDS",
-                },
-            },
-        },
-    )
-    lookup_param_binds: list[ParamBind] = Field(
-        default_factory=list,
-        description=(
-            "Parameter bindings for this field's *lookup* query (when the field's dd resolves "
-            "to a LOOKUP rule). Same shape used by actions/menus. v1's ly_dlg_filters."
-        ),
-    )
     visible_when: list[FieldCondition] = Field(
         default_factory=list,
         description=(

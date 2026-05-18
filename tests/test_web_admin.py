@@ -410,7 +410,9 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         )
         bad = {"app1": {"users": {"id": "people", "read_query": "q"}}}
         assert client.put("/admin/config/screens/parsed", json={"screens": bad}, headers=h).status_code == 422
-        # valid: one screen with a dialog + a ParamBind binding for a field's lookup
+        # valid: one screen with a dialog + a ParamBind binding for a column's lookup.
+        # Phase 2 — ``dd`` / ``lookup_param_binds`` live on ``Screen.columns[]`` (single source
+        # of truth for both grid + dialog); the ScreenField is layout-only.
         payload = {
             "nomasx1": {
                 "security_users": {
@@ -418,6 +420,15 @@ def test_config_screens_parsed_get_and_put(env) -> None:
                     "read_query": "users_get",
                     "update_query": "users_put",
                     "audit": True,
+                    "columns": [
+                        {
+                            "name": "USR_ROLE_ID",
+                            "dd": "ROL_ID",
+                            "lookup_param_binds": [
+                                {"param": "ROL_APPS_ID", "source": "USR_APPS_ID"},
+                            ],
+                        },
+                    ],
                     "dialog": {
                         "title": "User",
                         "tabs": [
@@ -426,13 +437,7 @@ def test_config_screens_parsed_get_and_put(env) -> None:
                                 "label": "General",
                                 "fields": [
                                     {"name": "USR_ID"},
-                                    {
-                                        "name": "USR_ROLE_ID",
-                                        "dd": "ROL_ID",
-                                        "lookup_param_binds": [
-                                            {"param": "ROL_APPS_ID", "source": "USR_APPS_ID"},
-                                        ],
-                                    },
+                                    {"name": "USR_ROLE_ID"},
                                 ],
                             },
                         ],
@@ -451,9 +456,11 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         assert set(after["nomasx1"]) == {"security_users"}
         s = after["nomasx1"]["security_users"]
         assert s["read_query"] == "users_get" and s["audit"] is True
-        assert s["dialog"]["tabs"][0]["fields"][1]["lookup_param_binds"][0] == {
+        # The lookup_param_binds round-trip on Screen.columns (not the dialog field).
+        assert s["columns"][0]["lookup_param_binds"][0] == {
             "param": "ROL_APPS_ID", "source": "USR_APPS_ID",
         }
+        assert s["columns"][0]["dd"] == "ROL_ID"
         # Reload picks it up — the screen apps go from 0 → 1
         assert client.post("/admin/reload", headers=h).json()["screen_apps"] == ["nomasx1"]
 

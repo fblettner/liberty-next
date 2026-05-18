@@ -353,6 +353,81 @@ def app_with_screen_columns(tmp_path):
     return create_app(settings)
 
 
+def _screens_with_dialog_and_column_metadata() -> str:
+    """Phase 2 verification: per-column metadata (``dd`` / ``label`` / ``format`` / ``rules`` /
+    ``rules_values`` / ``default`` / ``lookup_param_binds``) lives on ``Screen.columns`` (single
+    source of truth). The dialog field carries only layout (``name`` / ``colspan`` / ``required``).
+    The backend resolver merges the column hint onto the field's wire payload so the dialog
+    FieldRow renders without knowing about the column / field split."""
+    return textwrap.dedent(
+        """
+        [screens.app1.users]
+        label = "Users"
+        read_query = "users_get"
+
+        [[screens.app1.users.columns]]
+        name = "ROLE"
+        dd = "ROLE_ID"
+        default = "ADMIN"
+
+        [[screens.app1.users.columns.lookup_param_binds]]
+        param = "ROL_APPS_ID"
+        source = "USR_APPS_ID"
+
+        [screens.app1.users.dialog]
+        title = "User"
+
+        [[screens.app1.users.dialog.tabs]]
+        id = "general"
+
+        [[screens.app1.users.dialog.tabs.fields]]
+        name = "ROLE"
+        required = true
+        colspan = 2
+        """
+    )
+
+
+@pytest.fixture
+def app_with_dialog_columns(tmp_path):
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_with_lookup_query(db_url))
+    (tmp_path / "screens.toml").write_text(_screens_with_dialog_and_column_metadata())
+    (tmp_path / "dictionary.toml").write_text(_dictionary_toml())
+    _seed(db_url)
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(
+            config_path=Path(tmp_path / "connectors.toml"),
+            dictionary_path=Path(tmp_path / "dictionary.toml"),
+        ),
+        screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    return create_app(settings)
+
+
+def test_dialog_field_inherits_metadata_from_screen_column(app_with_dialog_columns) -> None:
+    """Phase 2 — the dialog field wire payload picks up ``dd`` / ``label`` / ``default`` /
+    ``lookup_param_binds`` / ``rule`` from the matching ``Screen.columns`` entry (case-
+    insensitive name match). The frontend's FieldRow keeps reading ``field.label`` etc.
+    transparently; the metadata moved one level up, the wire shape is unchanged."""
+    with TestClient(app_with_dialog_columns) as client:
+        body = client.get("/api/screens/app1/users", headers=_h(client, "admin")).json()
+        field = body["dialog"]["tabs"][0]["fields"][0]
+        # Layout bits stay on the field.
+        assert field["name"] == "ROLE" and field["required"] is True and field["colspan"] == 2
+        # Display metadata merged from Screen.columns[name="ROLE"].
+        assert field["dd"] == "ROLE_ID"
+        assert field["label"] == "Role"          # resolved from the dictionary entry under ROLE_ID
+        assert field["default"] == "ADMIN"
+        assert field["lookup_param_binds"] == [{"param": "ROL_APPS_ID", "source": "USR_APPS_ID"}]
+        # Rule resolved against the dictionary (ROLE_ID has rules = "LOOKUP" → SearchSelect widget).
+        assert field["rule"]["kind"] == "lookup"
+        assert field["rule"]["query"] == "roles_lookup"
+
+
 def test_screen_columns_resolved_on_wire(app_with_screen_columns) -> None:
     """Phase 1 — ``Screen.columns`` rides through the screens API resolved against the shared
     dictionary in the request's language, with the same shape ``Column.to_dict()`` emits for

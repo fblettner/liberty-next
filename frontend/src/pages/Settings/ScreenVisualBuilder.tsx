@@ -250,18 +250,25 @@ const NoEvents = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.m
 interface DictEntry { id: string; label?: string; format?: string; rules?: string; rules_values?: string }
 interface FieldPreview { Icon: LucideIcon; sample: string; kindLabel: string }
 
-function previewFor(field: Row, ddEntry: DictEntry | null): FieldPreview {
+function previewFor(field: Row, ddEntry: DictEntry | null, column: Row | null): FieldPreview {
+  // Phase 2 — per-column rule override (v1's col_rules) lives on the screen's ColumnHint.
+  // The dictionary entry's rule is the fallback. Same precedence on format.
+  const colRule = (column?.rules as string | undefined) ?? ''
+  const colRulesValues = (column?.rules_values as string | undefined) ?? ''
+  const colFormat = (column?.format as string | undefined) ?? ''
   // Password format = masked input (icon hint only — never shows real value).
-  if ((field.format ?? ddEntry?.format ?? '').toString().toLowerCase() === 'password') {
+  if ((colFormat || ddEntry?.format || '').toString().toLowerCase() === 'password') {
     return { Icon: Lock, sample: '••••••••', kindLabel: 'password' }
   }
-  // Dictionary rules drive the widget — BOOLEAN → checkbox, ENUM → dropdown, LOOKUP → search.
-  const rule = (ddEntry?.rules ?? '').toUpperCase()
+  // Rules drive the widget — column override wins; else dictionary entry's rule.
+  const rule = (colRule || ddEntry?.rules || '').toUpperCase()
+  const ruleVals = colRulesValues || ddEntry?.rules_values
   if (rule === 'BOOLEAN') return { Icon: CheckSquare, sample: '☑ / ☐', kindLabel: 'boolean' }
-  if (rule === 'ENUM')    return { Icon: List, sample: ddEntry?.rules_values ? `enum: ${ddEntry.rules_values}` : 'choose…', kindLabel: 'enum' }
-  if (rule === 'LOOKUP')  return { Icon: Search, sample: ddEntry?.rules_values ? `lookup: ${ddEntry.rules_values}` : 'search…', kindLabel: 'lookup' }
+  if (rule === 'ENUM')    return { Icon: List, sample: ruleVals ? `enum: ${ruleVals}` : 'choose…', kindLabel: 'enum' }
+  if (rule === 'LOOKUP')  return { Icon: Search, sample: ruleVals ? `lookup: ${ruleVals}` : 'search…', kindLabel: 'lookup' }
   // Format-driven fallbacks. The migration emits `format` on entries that don't carry a `rules`.
-  const fmt = ((field.format ?? ddEntry?.format ?? '') as string).toLowerCase()
+  void field   // kept for signature stability — field-level format is gone in Phase 2.
+  const fmt = (colFormat || ddEntry?.format || '').toLowerCase()
   if (fmt === 'date' || fmt === 'datetime' || fmt === 'timestamp') return { Icon: Calendar, sample: 'YYYY-MM-DD', kindLabel: 'date' }
   if (fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float/.test(fmt)) {
     return { Icon: Hash, sample: '123', kindLabel: 'number' }
@@ -300,6 +307,25 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   const cols = Math.max(1, Number(selTab?.cols ?? 2))
   const [selFieldIdx, setSelFieldIdx] = useState<number | null>(null)
   useEffect(() => { setSelFieldIdx(null) }, [tabIdx])
+  // Phase 2 — display metadata (dd / label / format / lookup_param_binds / rules / default)
+  // lives on ``Screen.columns`` (single source of truth, shared between grid + dialog). Build
+  // a case-insensitive lookup once so each field card can resolve its matching ColumnHint.
+  const screenColumns: Row[] = useMemo(
+    () => (Array.isArray(value.columns) ? (value.columns as Row[]) : []),
+    [value.columns],
+  )
+  const columnByName = useMemo(() => {
+    const m = new Map<string, Row>()
+    for (const c of screenColumns) {
+      const n = String(c.name ?? '').toLowerCase()
+      if (n) m.set(n, c)
+    }
+    return m
+  }, [screenColumns])
+  const colFor = useCallback(
+    (fieldName: unknown): Row | null => columnByName.get(String(fieldName ?? '').toLowerCase()) ?? null,
+    [columnByName],
+  )
   // The selected tab's `type` discriminator — drives which Tab Settings fields render. A tab
   // missing ``type`` is treated as 'form' (matches the backend's `parse_screens` default).
   const tabType = (selTab && typeof selTab.type === 'string' ? selTab.type : 'form') as 'form' | 'nested_form' | 'nested_table'
@@ -1050,10 +1076,13 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             // moving it inside the array.
             const renderCard = ({ f, idx: i }: { f: Row; idx: number }) => {
               const name = String(f.name ?? '')
-              const ddId = (f.dd as string | undefined) || name
+              const column = colFor(name)
+              // Phase 2: dd / label live on the matching ColumnHint (Screen.columns) — the
+              // field is layout-only. Column override → dictionary fallback → name.
+              const ddId = (column?.dd as string | undefined) || name
               const dd = ddEntries?.get(ddId) ?? null
-              const preview = previewFor(f, dd)
-              const label = (f.label as string | undefined) ?? dd?.label ?? name
+              const preview = previewFor(f, dd, column)
+              const label = (column?.label as string | undefined) ?? dd?.label ?? name
               const span = Math.max(1, Number(f.colspan ?? 1))
               const Icon = preview.Icon
               return (
@@ -1079,7 +1108,8 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                   <div className="preview"><Icon size={11} /> {preview.sample}</div>
                   <div className="badges">
                     <span className="name">{name}</span>
-                    {f.dd != null && f.dd !== '' && f.dd !== name && <Badge>dd:{String(f.dd)}</Badge>}
+                    {/* Phase 2 — dd badge + lookup-bind count come from the matching column hint. */}
+                    {column?.dd != null && column.dd !== '' && column.dd !== name && <Badge>dd:{String(column.dd)}</Badge>}
                     {!!f.hidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
                     {!!f.disabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
                     {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
@@ -1087,8 +1117,8 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                       || (Array.isArray(f.disabled_when) && (f.disabled_when as unknown[]).length > 0)
                       ? <Badge $tone="orange"><Filter size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.conditional')}</Badge>
                       : null}
-                    {Array.isArray(f.lookup_param_binds) && (f.lookup_param_binds as unknown[]).length > 0 && (
-                      <Badge $tone="green">{t('settings.screens.field.binds', { count: (f.lookup_param_binds as unknown[]).length })}</Badge>
+                    {Array.isArray(column?.lookup_param_binds) && (column!.lookup_param_binds as unknown[]).length > 0 && (
+                      <Badge $tone="green">{t('settings.screens.field.binds', { count: (column!.lookup_param_binds as unknown[]).length })}</Badge>
                     )}
                   </div>
                 </Card>

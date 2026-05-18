@@ -7,11 +7,16 @@
 #
 # A screen collapses v1's table → dialog → tabs → fields → field-param-binds chain into one entity.
 # Each [screens.<app>.<screen_id>] carries: the screen's read query + the CRUD companions (update/insert/
-# delete_query), flags (auto_load / audit / editable / uploadable), and an optional inline `dialog` with
-# tabs and fields. `connector` is set only when the screen's queries live on a different connector than
-# the app; otherwise it inherits the app name. Lookup parameter bindings on dialog fields (the unified
-# `ParamBind` shape — same one used by actions and row menus in later slices) ride under
-# `dialog.tabs.fields.lookup_param_binds`.
+# delete_query), flags (auto_load / audit / editable / uploadable), an optional `columns` list (per-screen
+# display metadata — the single source of truth), and an optional inline `dialog` with tabs and fields.
+# `connector` is set only when the screen's queries live on a different connector than the app; otherwise
+# it inherits the app name.
+#
+# Phase 2 layout — `Screen.columns` is the single source of truth for per-column display metadata (dd /
+# label / format / rules / rules_values / default / lookup_param_binds / filter / width / align). The
+# `[[screens.<app>.<sid>.dialog.tabs.fields]]` rows are **layout-only** — they reference a column by `name`
+# and add placement (`colspan`) + dialog-context state (`hidden` / `disabled` / `required`) + conditional
+# rules (`visible_when` / `required_when` / `disabled_when`). The same metadata drives the grid editor too.
 #
 # Permission gate: a screen is shown / openable iff the caller holds `sql:<connector>:<read_query>`.
 
@@ -24,9 +29,29 @@
 # insert_query = "users_post"
 # delete_query = "users_delete"
 # auto_load = true
-# audit = true     # wire AUD_<table> writes (slice 5)
+# audit = true     # wire AUD_<table> writes
 # # connector = "otherconn"   # only when the queries live on a different connector
 #
+# # Per-screen column metadata — single source of truth for grid + dialog.
+# [[screens.myapp.security_users.columns]]
+# name = "USR_ID"
+# dd = "USR_ID"
+# filter = true
+# width = 120
+#
+# [[screens.myapp.security_users.columns]]
+# name = "USR_ROLE_ID"
+# dd = "ROL_ID"
+# label = "Role"
+# default = "ADMIN"
+#
+# # Bind the column's lookup query's `:ROL_APPS_ID` parameter to the form's USR_APPS_ID at call time.
+# # Same `ParamBind` shape used by actions and row menus.
+# [[screens.myapp.security_users.columns.lookup_param_binds]]
+# param = "ROL_APPS_ID"
+# source = "USR_APPS_ID"
+#
+# # ── dialog: layout-only fields reference the columns above by `name` ──────────────────
 # [screens.myapp.security_users.dialog]
 # title = "User"
 #
@@ -41,14 +66,4 @@
 #
 # [[screens.myapp.security_users.dialog.tabs.fields]]
 # name = "USR_ROLE_ID"
-# dd = "ROL_ID"               # dictionary override (defaults to `name` when unset)
-#
-# # Bind the field's lookup query's `:ROL_APPS_ID` parameter to the form's USR_APPS_ID at call time.
-# [[screens.myapp.security_users.dialog.tabs.fields.lookup_param_binds]]
-# param = "ROL_APPS_ID"
-# source = "USR_APPS_ID"
-#
-# # Same shape with a literal binding:
-# # [[screens.myapp.security_users.dialog.tabs.fields.lookup_param_binds]]
-# # param = "SY"
-# # value = "01"
+# colspan = 2

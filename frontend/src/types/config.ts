@@ -100,17 +100,16 @@ export interface FieldCondition {
   value: string | string[]
 }
 
-/** One field on a dialog tab (matches `liberty/screens/config.py::ScreenField`). */
+/** One field on a dialog tab — **Phase 2: layout-only**. Display metadata (``dd`` / ``label``
+ *  / ``format`` / ``rules`` / ``rules_values`` / ``default`` / ``lookup_param_binds``) lives
+ *  on the matching ``Screen.columns`` entry (``ColumnHint``) — single source of truth for
+ *  both the grid editor and the dialog form. Matches `liberty/screens/config.py::ScreenField`. */
 export interface ScreenField {
   name: string
-  dd?: string | null
-  label?: string | null
   hidden?: boolean
   disabled?: boolean
   required?: boolean
   colspan?: number | null
-  default?: string | null
-  lookup_param_binds?: ParamBind[]
   visible_when?: FieldCondition[]
   required_when?: FieldCondition[]
   disabled_when?: FieldCondition[]
@@ -146,6 +145,32 @@ export interface ScreenDialog {
   on_save?: Action[]
 }
 
+/** One ColumnHint — per-screen display metadata. Phase 2: single source of truth for grid +
+ *  dialog (so editing a column's label / dd / format / rules / default / lookup_param_binds
+ *  affects both surfaces, no duplication). Most fields are optional — empty hints just keep
+ *  the column at its discovered defaults. */
+export interface ColumnHint {
+  name: string
+  dd?: string | null
+  label?: string | null
+  hidden?: boolean
+  filter?: boolean
+  filter_from?: { source: string; column: string }[]
+  visible_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[] | null
+  width?: number | null
+  align?: 'left' | 'right' | 'center' | null
+  format?: string | null
+  /** Per-column rule override (v1's col_rules). When set, replaces the dictionary entry's rule
+   *  for this column on this screen. Same kinds as DictionaryEntry.rules. */
+  rules?: string | null
+  /** The rule's argument — enum/lookup/sequence id, BOOLEAN true value. */
+  rules_values?: string | null
+  /** Pre-fill value on a new row (v1's col_default), used by the dialog in add mode. */
+  default?: string | null
+  /** ParamBinds for the column's lookup query when its rule resolves to LOOKUP. */
+  lookup_param_binds?: ParamBind[]
+}
+
 /** One screen — collapses v1's table + dialog into a single entity. */
 export interface Screen {
   id?: string
@@ -156,6 +181,8 @@ export interface Screen {
   update_query?: string | null
   insert_query?: string | null
   delete_query?: string | null
+  /** Phase 2 — single source of truth for per-screen display metadata (grid + dialog share). */
+  columns?: ColumnHint[]
   auto_load?: boolean
   audit?: boolean
   editable?: boolean
