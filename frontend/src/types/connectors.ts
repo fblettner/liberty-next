@@ -55,7 +55,15 @@ export interface ApiConnectorMeta {
 export type ConnectorMeta = SqlConnectorMeta | ApiConnectorMeta
 
 export type DisplayRule =
-  | { kind: 'boolean'; true_value: string }
+  | {
+      kind: 'boolean'
+      /** Value to send on check (also "yes" / ✓ render). v1's ``dd_rules_values``. */
+      true_value: string
+      /** Value to send on uncheck. Set explicitly by ``DictionaryEntry.false_value`` or
+       *  inferred by the backend (Y→N, 1→0, true→false). Omitted → uncheck sends null
+       *  (the v1 default; the DB column must accept NULL). */
+      false_value?: string
+    }
   | { kind: 'enum'; values: { value: string; label: string }[] }
   | {
       kind: 'lookup'

@@ -66,7 +66,7 @@ class DictionaryEntry(BaseModel):
     )
     rules_values: str | None = Field(
         default=None,
-        description="The rule's argument — true-value for BOOLEAN (default 'Y'), enum id for ENUM, lookup id for LOOKUP. The builder swaps the dropdown to the right source based on `rules`.",
+        description="The rule's argument — true-value for BOOLEAN (default 'Y'), enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN (resolved at runtime through DictionaryFile.sequences). The builder swaps the dropdown to the right source based on `rules`.",
         json_schema_extra={
             "x_group": "Rule",
             "x_enum_ref_when": {
@@ -75,9 +75,16 @@ class DictionaryEntry(BaseModel):
                     "BOOLEAN": "BOOLEAN_TRUE_VALUES",
                     "ENUM": "ENUM_IDS",
                     "LOOKUP": "LOOKUP_IDS",
+                    "SEQUENCE": "SEQUENCE_IDS",
+                    "NN": "SEQUENCE_IDS",
                 },
             },
         },
+    )
+    false_value: str | None = Field(
+        default=None,
+        description="BOOLEAN-only — the false value to write to the DB when the checkbox is unchecked. v1 stored only the true value (``rules_values``); for tables like NOMASX1's CSI_STATUS the DB expects 'Y' or 'N', not 'Y' or NULL. When unset, inferred from `rules_values`: 'Y'→'N', '1'→'0', 'true'→'false'; everything else → null (the checkbox sends SQL NULL on uncheck). The frontend uses this on submit and the SQL connector substitutes any null BOOLEAN bind with this value as a safety net.",
+        json_schema_extra={"x_group": "Rule"},
     )
     default: str | None = Field(
         default=None,
@@ -188,14 +195,47 @@ class LookupDef(BaseModel):
     )
 
 
+class SequenceDef(BaseModel):
+    """A named "next number" source — v1's ``ly_sequence`` ported to v2 as a first-class
+    dictionary entity (parallel to ``LookupDef``). The query returns the next number for
+    this sequence (typically ``SELECT COALESCE(MAX(<col>), 0) + 1 FROM <table>`` narrowed by
+    APPS_ID); the SQL connector runs it inside the same transaction as the INSERT when a
+    dictionary entry with ``rules = "SEQUENCE"`` (or ``"NN"``) references this id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, description="Display name / description (informational).")
+    connector: str | None = Field(
+        default=None,
+        description="Connector the sequence query lives on. Blank → the asking connector (the one the SEQUENCE-ruled entry is referenced from).",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "CONNECTOR_NAMES"},
+    )
+    query: str = Field(
+        description="The sequence's read query (e.g. 'get_act_ukid_from_sod_activities_get'). The dropdown lists the resolved connector's tables.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
+    )
+    params: list[str] = Field(
+        default_factory=list,
+        title="Params",
+        description=(
+            "The `:placeholder` parameter names the sequence's query expects (v1's "
+            "``ly_seq_params``). Informational only at runtime — ``text()`` binds whatever the "
+            "SQL references against the in-flight INSERT row, so a sequence narrowing by APPS_ID "
+            "picks it up automatically without extra plumbing."
+        ),
+        json_schema_extra={"x_group": "Target"},
+    )
+
+
 class DictionarySection(BaseModel):
-    """A per-connector group of entries / enums / lookups (``[connectors.<name>.…]``)."""
+    """A per-connector group of entries / enums / lookups / sequences (``[connectors.<name>.…]``)."""
 
     model_config = ConfigDict(extra="forbid")
 
     entries: dict[str, DictionaryEntry] = Field(default_factory=dict)
     enums: dict[str, EnumDef] = Field(default_factory=dict)
     lookups: dict[str, LookupDef] = Field(default_factory=dict)
+    sequences: dict[str, SequenceDef] = Field(default_factory=dict)
 
 
 class DictionaryFile(BaseModel):
@@ -205,6 +245,7 @@ class DictionaryFile(BaseModel):
     entries: dict[str, DictionaryEntry] = Field(default_factory=dict)              # shared / common
     enums: dict[str, EnumDef] = Field(default_factory=dict)
     lookups: dict[str, LookupDef] = Field(default_factory=dict)
+    sequences: dict[str, SequenceDef] = Field(default_factory=dict)
     connectors: dict[str, DictionarySection] = Field(default_factory=dict)          # per-connector
     # Operator overrides for the bundled `liberty/framework_enums.py` registry that powers the
     # builder UI's dropdowns (DICTIONARY_TYPE / DATASOURCE_TYPE / HTTP_METHOD / …). An entry here
@@ -234,6 +275,16 @@ class DictionaryFile(BaseModel):
                 return lk
         return self.lookups.get(lid)
 
+    def find_sequence(self, sid: str, *, connector: str | None = None) -> SequenceDef | None:
+        """The :class:`SequenceDef` for *sid* — *connector*'s section first, then the shared pool.
+        Used by the SQL connector to resolve a ``rules = "SEQUENCE"`` entry's ``rules_values``
+        (the sequence id) to the actual next-number query at INSERT time."""
+        if connector and connector in self.connectors:
+            s = self.connectors[connector].sequences.get(sid)
+            if s is not None:
+                return s
+        return self.sequences.get(sid)
+
     def resolve(self, key: str, language: str | None, *, connector: str | None = None) -> tuple[str | None, str | None]:
         """``(label, format)`` for *key* in *language* — *connector*'s section first, then shared;
         ``(None, None)`` if neither has it."""
@@ -246,8 +297,11 @@ class DictionaryFile(BaseModel):
         """The *entry*'s display rule resolved into a wire-ready dict, or ``None`` if the rule
         isn't display-relevant (or the referenced enum/lookup is missing). Three shapes:
 
-        * ``{"kind": "boolean", "true_value": "Y"}`` — values equal to ``true_value`` display as
-          "yes"; else "no" (nulls stay null). ``true_value`` defaults to ``"Y"`` when unset.
+        * ``{"kind": "boolean", "true_value": "Y", "false_value": "N"}`` — values equal to
+          ``true_value`` display as "yes"; else "no" (nulls stay null). ``true_value`` defaults
+          to ``"Y"`` when unset; ``false_value`` is explicit (``DictionaryEntry.false_value``)
+          when set, else inferred via :func:`infer_false_value`, else omitted entirely (the
+          frontend then sends SQL NULL on uncheck, the v1 default).
         * ``{"kind": "enum", "values": [{"value": "JDE", "label": "JD Edwards"}, …]}`` — the enum's
           members, with each label resolved in *language*; the frontend renders the matching label.
         * ``{"kind": "lookup", "connector": "nomasx1", "query": "security_roles_get",
@@ -256,7 +310,19 @@ class DictionaryFile(BaseModel):
         """
         rule = (entry.rules or "").strip().upper()
         if rule == "BOOLEAN":
-            return {"kind": "boolean", "true_value": (entry.rules_values or "Y")}
+            true_value = entry.rules_values or "Y"
+            wire: dict[str, Any] = {"kind": "boolean", "true_value": true_value}
+            # Always surface the false value — explicit when the operator set it; inferred from
+            # the true value otherwise (Y→N, 1→0, true→false, "01"→null). The frontend reads
+            # this to know what to send on uncheck; the SQL connector substitutes any NULL
+            # bind on a BOOLEAN-ruled column with it as a safety net (the dialog might send
+            # null if it doesn't know the rule yet, e.g. a freshly-loaded screen).
+            fv = entry.false_value
+            if fv is None:
+                fv = infer_false_value(true_value)
+            if fv is not None:
+                wire["false_value"] = fv
+            return wire
         if rule == "ENUM":
             ed = self._find_enum(entry.rules_values or "", connector=connector)
             if ed is None:
@@ -283,6 +349,36 @@ class DictionaryFile(BaseModel):
                 wire["params"] = dict(entry.lookup_params)
             return wire
         return None  # the form-layer rules (SEQUENCE/SYSDATE/LOGIN/PASSWORD/…) — not a display transform
+
+
+def infer_false_value(true_value: str | None) -> str | None:
+    """Best-effort inference of a BOOLEAN rule's false value from its true value. Mirrors v1's
+    common pairs — operator overrides via ``DictionaryEntry.false_value``. Returns ``None`` when
+    no obvious counterpart exists (the field then writes SQL NULL on uncheck, the v1 default).
+
+    Inferred pairs:
+
+    * ``"Y"`` / ``"y"`` → ``"N"`` / ``"n"`` (case preserved)
+    * ``"1"`` → ``"0"`` (numeric flag)
+    * ``"true"`` / ``"True"`` / ``"TRUE"`` → ``"false"`` / ``"False"`` / ``"FALSE"`` (case preserved)
+    * everything else (``"01"``, ``"A"``, ``"YES"``, …) → ``None`` (no auto-counterpart; the
+      operator sets ``false_value`` explicitly if the DB needs one)
+    """
+    if not true_value:
+        return None
+    if true_value == "Y":
+        return "N"
+    if true_value == "y":
+        return "n"
+    if true_value == "1":
+        return "0"
+    if true_value == "true":
+        return "false"
+    if true_value == "True":
+        return "False"
+    if true_value == "TRUE":
+        return "FALSE"
+    return None
 
 
 def parse_dictionary(data: dict[str, Any]) -> DictionaryFile:

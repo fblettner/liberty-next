@@ -335,6 +335,16 @@ const en = {
         empty: 'No lookups in this scope yet.',
         pickOne: 'Pick a lookup on the left.',
       },
+      sequences: {
+        tab: 'Sequences',
+        add: 'Add sequence',
+        delete: 'Delete sequence',
+        namePrompt: 'New sequence id (e.g. next_csi_id):',
+        renamePrompt: 'Rename sequence “{{name}}” to:',
+        confirmDelete: 'Delete sequence “{{name}}”?',
+        empty: 'No sequences in this scope yet.',
+        pickOne: 'Pick a sequence on the left.',
+      },
       framework_enums: {
         tab: 'Framework',
         add: 'Override framework enum',

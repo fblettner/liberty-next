@@ -71,6 +71,7 @@ from liberty.migrations import (
     read_dictionary_rules,
     read_menus,
     read_screens,
+    read_sequences,
     read_sql_queries,
     read_table_filters,
     read_table_meta,
@@ -96,8 +97,13 @@ async def _build(args: argparse.Namespace) -> dict:
         if args.command == "dictionary":
             entries_rows = await read_dictionary(engine)
             rule_rows = await read_dictionary_rules(engine)
+            # ``ly_sequence`` rows back ``dd_rules = "SEQUENCE"`` / ``"NN"`` entries — resolved
+            # to the v2 query name so the SQL connector can run it at INSERT time. v1's
+            # ``ly_seq_params`` is read but currently informational only (text() binds what
+            # the SQL references, so the WHERE narrows on whatever the bound row carries).
+            seq_rows, _seq_param_rows = await read_sequences(engine)
             return migrate_dictionary(
-                *entries_rows, *rule_rows,
+                *entries_rows, *rule_rows, seq_rows,
                 default_language=args.default_language, connector_name=args.connector,
             )
         if args.command == "menu":
@@ -259,11 +265,13 @@ def _summary(data: dict, *, command: str) -> str:
         entries = section.get("entries") or {}
         enums = section.get("enums") or {}
         lookups = section.get("lookups") or {}
+        sequences = section.get("sequences") or {}
         n_l = sum(len(e.get("l") or {}) for e in entries.values())
         rules = sum(1 for e in entries.values() if e.get("rules"))
         return (f"# migrated: {len(entries)} {scope} dictionary field(s) ({rules} with display rules), "
-                f"{len(enums)} enum(s), {len(lookups)} lookup(s), default language "
-                f"'{data.get('default_language', 'en')}'" + (f", {n_l} translation(s)" if n_l else "")
+                f"{len(enums)} enum(s), {len(lookups)} lookup(s), {len(sequences)} sequence(s), "
+                f"default language '{data.get('default_language', 'en')}'"
+                + (f", {n_l} translation(s)" if n_l else "")
                 + " — put this at config/dictionary.toml")
     if command == "menu":
         apps = data.get("menus") or {}

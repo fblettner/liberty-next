@@ -80,7 +80,7 @@ const FieldGrid = styled.div<{ $cols: number }>`
 `
 
 export function ScreenDialog({
-  open, mode, screen, columns, row, connector, onClose, onSaved, nested = false,
+  open, mode, screen, columns, row, connector, keyColumns, onClose, onSaved, nested = false,
 }: {
   open: boolean
   mode: DialogMode
@@ -92,6 +92,12 @@ export function ScreenDialog({
   row: Row
   /** the screen's effective connector — same one the screen's read query lives on. */
   connector: string
+  /** Result columns that identify a row (v1's ``col_key`` / ``QueryDef.key_columns``). In
+   *  ``mode='add'`` the dialog auto-suppresses the LOOKUP widget on these fields — the user is
+   *  *creating* a new key value, not picking an existing one (v1 hand-set ``col_rules =
+   *  "DISABLED"`` on these columns; v2 derives it from the existing ``key_columns`` metadata
+   *  so no operator config is needed). On ``edit`` mode the LOOKUP renders as usual. */
+  keyColumns?: string[]
   onClose: () => void
   /** Called after a successful save; the TableView reruns its SELECT to refresh the grid. */
   onSaved: () => void
@@ -108,6 +114,12 @@ export function ScreenDialog({
     if (!dlg) return []
     return dlg.tabs.filter((tab) => (mode === 'add' ? !tab.hide_on_add : !tab.hide_on_edit))
   }, [dlg, mode])
+
+  // Lowercase set of key-column names — used on ``add`` to suppress the LOOKUP dropdown for
+  // a key column (the user is creating a new PK value, not picking an existing one — same
+  // intent as v1's ``col_rules = "DISABLED"`` for PKs, but auto-derived from ``key_columns``
+  // so no per-field operator config is needed). Recomputed when the metadata changes.
+  const keyColumnSet = useMemo(() => new Set((keyColumns ?? []).map((k) => k.toLowerCase())), [keyColumns])
 
   const [tabIdx, setTabIdx] = useState(0)
   const [formValues, setFormValues] = useState<Row>({})
@@ -638,6 +650,7 @@ export function ScreenDialog({
                           onChange={onFieldChange}
                           disabled={st.disabled}
                           required={st.required}
+                          suppressLookup={mode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
                         />
                       )
                     })}

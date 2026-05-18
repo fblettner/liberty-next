@@ -75,10 +75,11 @@ const KIND_TO_DEF: Record<DictionaryKind, string> = {
   entries: 'DictionaryEntry',
   enums: 'EnumDef',
   lookups: 'LookupDef',
+  sequences: 'SequenceDef',
   framework_enums: 'EnumDef',  // operator overrides reuse the EnumDef shape (label + values)
 }
 
-const KIND_ORDER: DictionaryKind[] = ['entries', 'enums', 'lookups', 'framework_enums']
+const KIND_ORDER: DictionaryKind[] = ['entries', 'enums', 'lookups', 'sequences', 'framework_enums']
 /** Framework enums are top-level only — there's no per-connector overlay. The scope chip strip is
  *  hidden when this kind is active, and the section getters refuse the connector path. */
 const SHARED_ONLY: ReadonlySet<DictionaryKind> = new Set(['framework_enums'])
@@ -87,6 +88,7 @@ const SHARED_ONLY: ReadonlySet<DictionaryKind> = new Set(['framework_enums'])
  *  leave them empty strings (the user fills them in; SchemaForm flags required fields with `*`). */
 function newRecord(kind: DictionaryKind): Record<string, unknown> {
   if (kind === 'lookups') return { query: '', value: '', label: '' }
+  if (kind === 'sequences') return { query: '' }  // SequenceDef requires `query`
   if (kind === 'framework_enums') return { values: [] }
   return {}
 }
@@ -117,7 +119,7 @@ function setSection(
   const connectors: Record<string, DictionarySection> = { ...(out.connectors ?? {}) }
   const cur: DictionarySection = { ...(connectors[scope] ?? {}) }
   if (Object.keys(next).length === 0) delete cur[k]; else cur[k] = next
-  if (!cur.entries && !cur.enums && !cur.lookups) delete connectors[scope]
+  if (!cur.entries && !cur.enums && !cur.lookups && !cur.sequences) delete connectors[scope]
   else connectors[scope] = cur
   if (Object.keys(connectors).length === 0) delete out.connectors
   else out.connectors = connectors
@@ -196,6 +198,10 @@ export default function DictionaryBuilder() {
     const overlay = scope && dict ? (dict.connectors ?? {})[scope] : undefined
     base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(['label'], dict?.enums, overlay?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups (current scope)', values: mkValues(['description'], dict?.lookups, overlay?.lookups) }
+    // SEQUENCE_IDS — the named sequences in scope (shared + per-connector overlay). Drives the
+    // DictionaryEntry.rules_values dropdown when `rules = "SEQUENCE"` / `"NN"` (the SQL connector
+    // resolves the id to the sequence's query at INSERT time via DictionaryFile.find_sequence).
+    base.SEQUENCE_IDS = { label: 'Sequences (current scope)', values: mkValues(['description'], dict?.sequences, overlay?.sequences) }
 
     // CONNECTOR_NAMES — every connector in connectors.toml. Drives LookupDef.connector (which in
     // turn picks which connector's queries / dd entries fill the next two dropdowns).
@@ -446,7 +452,8 @@ export default function DictionaryBuilder() {
               // the key (entries/enums → `label`; lookups → `description`). Falls back to nothing when
               // the record has no human-readable side-name yet (in that case only the key shows).
               const rec = section[k] as Record<string, unknown> | undefined
-              const sub = kind === 'lookups' ? rec?.description : rec?.label
+              // sub-label per kind: entries/enums → `label`; lookups/sequences → `description`.
+              const sub = (kind === 'lookups' || kind === 'sequences') ? rec?.description : rec?.label
               const subStr = typeof sub === 'string' && sub.trim() ? sub : null
               return (
                 <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>

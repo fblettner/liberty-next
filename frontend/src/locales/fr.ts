@@ -337,6 +337,16 @@ const fr: Resources = {
         empty: 'Aucun lookup pour cette portée.',
         pickOne: 'Choisissez un lookup à gauche.',
       },
+      sequences: {
+        tab: 'Séquences',
+        add: 'Ajouter une séquence',
+        delete: 'Supprimer la séquence',
+        namePrompt: 'Identifiant de la nouvelle séquence (ex. next_csi_id) :',
+        renamePrompt: 'Renommer la séquence « {{name}} » en :',
+        confirmDelete: 'Supprimer la séquence « {{name}} » ?',
+        empty: 'Aucune séquence pour cette portée.',
+        pickOne: 'Choisissez une séquence à gauche.',
+      },
       framework_enums: {
         tab: 'Framework',
         add: 'Surcharger un enum framework',

@@ -1079,6 +1079,7 @@ export function ResultTable({
           columns={result.columns}
           row={dlgRow}
           connector={connector}
+          keyColumns={keyColumns}
           onClose={() => setDlgOpen(false)}
           onSaved={() => { setDlgOpen(false); onSaved?.() }}
         />

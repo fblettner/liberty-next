@@ -1183,6 +1183,7 @@ def migrate_dictionary(
     sql_rows: Iterable[Mapping[str, Any]] = (),
     dictionary_filters_rows: Iterable[Mapping[str, Any]] = (),
     lookup_params_rows: Iterable[Mapping[str, Any]] = (),
+    sequence_rows: Iterable[Mapping[str, Any]] = (),
     *,
     default_language: str = "en",
     connector_name: str | None = None,
@@ -1213,6 +1214,11 @@ def migrate_dictionary(
             ``lkp_dd_id`` — the value column, ``lkp_dd_label`` — the display column, ``lkp_dd_group``).
         sql_rows: rows from ``ly_qry_sql`` joined with ``ly_query`` (``query_id``, ``query_label``,
             ``query_crud``) — resolves ``lkp_query_id`` to the v2 read query name.
+        sequence_rows: rows from ``ly_sequence`` (``seq_id``, ``seq_query_id``, ``seq_dd_id``).
+            When a dictionary entry's ``dd_rules`` is ``"SEQUENCE"`` / ``"NN"``, the
+            ``dd_rules_values`` is the matching ``seq_id``; we translate it to the v2 read
+            query name (resolved through *sql_rows* — same logic as lookups). The SQL
+            connector runs that named query at INSERT time to fetch the next number.
         default_language: the language of ``ly_dictionary.dd_label`` (v1's base labels) — ``"en"``.
         connector_name: nest the migrated sections under this connector (default: top-level).
     """
@@ -1240,6 +1246,92 @@ def migrate_dictionary(
             continue
         lookup_params.setdefault(dd, {})[target] = str(value)
 
+    # Pre-scan sql_rows once for the seq_id → v2 query name lookup (same name resolution as
+    # :func:`migrate_menus` / the lookup branch below). v1's ``ly_sequence`` rows become a v2
+    # ``[sequences.<id>]`` section — first-class entities in the dictionary registry — and
+    # dictionary entries with ``dd_rules = "SEQUENCE"`` / ``"NN"`` carry the sequence id (a
+    # slug of ``seq_label``) in ``rules_values``. The SQL connector resolves the id to the
+    # named query at INSERT time via :meth:`DictionaryFile.find_sequence`.
+    _seq_rows_by_id: dict[int, Mapping[str, Any]] = {}
+    for s in sequence_rows:
+        try:
+            sid = int(s["seq_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        _seq_rows_by_id[sid] = s
+    # Map v1 query_id → (label, read-crud, pool) — the migrated query name = slug(label_crud).
+    _q_label_for_seq: dict[int, str] = {}
+    _read_crud_for_seq: dict[int, str] = {}
+    _q_pool_for_seq: dict[int, str] = {}
+    for r in sql_rows:
+        qid_raw = r.get("query_id")
+        if qid_raw is None:
+            continue
+        qid_int = int(qid_raw)
+        _q_label_for_seq.setdefault(qid_int, str(r.get("query_label") or ""))
+        crud = str(r.get("query_crud") or "").upper()
+        if crud in _READ_CRUD and qid_int not in _read_crud_for_seq:
+            _read_crud_for_seq[qid_int] = crud
+        pool = str(r.get("query_pool") or "").strip()
+        if pool and qid_int not in _q_pool_for_seq:
+            _q_pool_for_seq[qid_int] = pool
+
+    def _resolve_q_name(qid_int: int) -> str | None:
+        crud = _read_crud_for_seq.get(qid_int, "GET")
+        label = _q_label_for_seq.get(qid_int)
+        if not label:
+            return None
+        return slugify(f"{label}_{crud}", fallback=f"q{qid_int}_{crud.lower()}")
+
+    # Build the migrated ``sequences`` dict. Sequence id is a slug of seq_label so the
+    # builder UI shows human-readable names; falls back to ``seq_<sid>`` when label is blank.
+    # An orphan sequence (no resolvable query) is dropped — the operator can re-add by hand if
+    # needed. ``connector`` is set when the sequence's query lives on a different pool than
+    # the migrated app (only meaningful in a multi-app dictionary.toml).
+    sequences: dict[str, dict[str, Any]] = {}
+    _seq_id_to_v2: dict[int, str] = {}
+    _seq_taken: set[str] = set()
+    for sid, s in _seq_rows_by_id.items():
+        qid_raw = s.get("seq_query_id")
+        if qid_raw is None:
+            continue
+        try:
+            qid_int = int(qid_raw)
+        except (TypeError, ValueError):
+            continue
+        q_name = _resolve_q_name(qid_int)
+        if q_name is None:
+            continue
+        # Slug for the v2 sequence id. v1 stored a label like "Get ACT_UKID from SOD_ACTIVITIES";
+        # slugify → "get_act_ukid_from_sod_activities". Dedup with a "_2" suffix if needed.
+        raw_label = str(s.get("seq_label") or "").strip()
+        v2_seq_id = slugify(raw_label, fallback=f"seq_{sid}")
+        if v2_seq_id in _seq_taken:
+            v2_seq_id = _uniquify(v2_seq_id, _seq_taken)
+        _seq_taken.add(v2_seq_id)
+        _seq_id_to_v2[sid] = v2_seq_id
+        out_seq: dict[str, Any] = {"query": q_name}
+        if raw_label:
+            out_seq["description"] = raw_label
+        # Only emit ``connector`` when it differs from the migrated app the dictionary belongs
+        # to (parallels :class:`LookupDef`'s connector field — same logic).
+        seq_pool = _q_pool_for_seq.get(qid_int)
+        if seq_pool and connector_name and slugify(seq_pool, fallback=seq_pool) != connector_name:
+            out_seq["connector"] = slugify(seq_pool, fallback=seq_pool)
+        sequences[v2_seq_id] = out_seq
+
+    def _resolve_seq_id(rules_values_raw: str | None) -> str | None:
+        """Translate a v1 ``dd_rules_values`` numeric seq_id into the v2 sequence id. Returns
+        ``None`` when the value isn't numeric or the sequence wasn't migrated (caller falls
+        back to keeping the raw value, same as the prior implementation)."""
+        if rules_values_raw is None or rules_values_raw == "":
+            return None
+        try:
+            sid = int(str(rules_values_raw).strip())
+        except (TypeError, ValueError):
+            return None
+        return _seq_id_to_v2.get(sid)
+
     entries: dict[str, dict[str, Any]] = {}
     for r in dictionary_rows:
         dd = str(r.get("dd_id") or "").strip()
@@ -1255,11 +1347,21 @@ def migrate_dictionary(
         # the existing masking path fire automatically — no per-field hand-edit needed.
         if rules == "PASSWORD" and not fmt:
             fmt = "password"
+        rules_values = str(r.get("dd_rules_values") or "").strip() or None
+        # v1's `dd_rules = "SEQUENCE"` / `"NN"` carries a numeric seq_id in dd_rules_values
+        # that points at ``ly_sequence.seq_id``; v2 ports ``ly_sequence`` to a first-class
+        # ``[sequences.<id>]`` section and the entry's rules_values becomes the v2 sequence id
+        # (a slug of seq_label). The SQL connector resolves it via DictionaryFile.find_sequence
+        # at INSERT time. Orphan seq_id → kept verbatim (operator notices the migration warning).
+        if rules in ("SEQUENCE", "NN") and rules_values:
+            resolved = _resolve_seq_id(rules_values)
+            if resolved is not None:
+                rules_values = resolved
         entry = _drop_none({
             "label": str(r.get("dd_label") or "").strip() or None,
             "format": fmt,
             "rules": rules,
-            "rules_values": str(r.get("dd_rules_values") or "").strip() or None,
+            "rules_values": rules_values,
             "default": str(r.get("dd_default") or "").strip() or None,
         })
         if dd in translations:
@@ -1375,6 +1477,8 @@ def migrate_dictionary(
         section["enums"] = enums
     if lookups:
         section["lookups"] = lookups
+    if sequences:
+        section["sequences"] = sequences
     if connector_name:
         return {"default_language": default_language, "connectors": {connector_name: section}}
     return {"default_language": default_language, **section}

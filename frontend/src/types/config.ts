@@ -34,6 +34,11 @@ export interface DictionarySection {
   entries?: Record<string, Record<string, unknown>>
   enums?: Record<string, Record<string, unknown>>
   lookups?: Record<string, Record<string, unknown>>
+  /** v1's `ly_sequence` → first-class registry section. Each entry: ``{description?, connector?,
+   *  query, params?}``. Dictionary entries with ``rules = "SEQUENCE"`` / ``"NN"`` carry the
+   *  sequence id (a key into this map) in ``rules_values``; the SQL connector resolves it at
+   *  INSERT time. */
+  sequences?: Record<string, Record<string, unknown>>
 }
 
 /** GET /admin/config/dictionary/parsed — the current `dictionary.toml`, default keys dropped.
@@ -49,8 +54,9 @@ export interface DictionaryDoc {
 }
 
 /** Which kind of dictionary record the builder is editing. `framework_enums` is the operator
- *  override for the bundled `liberty/framework_enums.py` registry — shared scope only. */
-export type DictionaryKind = 'entries' | 'enums' | 'lookups' | 'framework_enums'
+ *  override for the bundled `liberty/framework_enums.py` registry — shared scope only.
+ *  `sequences` is v2's port of v1's `ly_sequence` (a named "next number" source). */
+export type DictionaryKind = 'entries' | 'enums' | 'lookups' | 'sequences' | 'framework_enums'
 
 /** One flat menu item — matches `liberty/menus/config.py::MenuItem` on the wire. Folders have
  *  no `type`; leaves carry `type` + `target`. The tree builder reconstructs the hierarchy from

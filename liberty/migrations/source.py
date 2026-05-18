@@ -116,6 +116,21 @@ _LOOKUP_PARAMS = text("""
     FROM ly_lkp_params
     ORDER BY lkp_id, dd_id
 """)
+# Sequence definitions — v1's ly_sequence + ly_seq_params. A dictionary entry with
+# ``dd_rules = 'SEQUENCE'`` / ``'NN'`` carries the seq_id in ``dd_rules_values``; that
+# resolves through ``ly_sequence.seq_query_id`` to the v2 query name (a SELECT that returns
+# the next number, typically ``MAX(col)+1`` narrowed by APPS_ID). ``ly_seq_params`` declares
+# the per-sequence param names — at runtime v2 just passes the full bound row as params and
+# SQLAlchemy ``text()`` only binds what the SQL actually references, so a missing param
+# can't break anything (the WHERE narrows naturally on whatever the query needs).
+_SEQUENCES = text("""
+    SELECT seq_id, seq_label, seq_query_id, seq_dd_id
+    FROM ly_sequence ORDER BY seq_id
+""")
+_SEQ_PARAMS = text("""
+    SELECT seq_id, dd_id
+    FROM ly_seq_params ORDER BY seq_id, dd_id
+""")
 # App navigation: ly_menus (the tree, by menu_seq_ukid) + ly_menus_l (per-language labels) +
 # the lookup tables that resolve a node's menu_component/menu_component_id to a query
 # (ly_tables.tbl_id → tbl_query_id ; ly_dlg_frm.frm_id → frm_query_id ; ly_query → label).
@@ -349,6 +364,21 @@ async def read_dictionary_rules(
         await _rows_or_empty(engine, _SQL_QUERIES, what="ly_qry_sql (lookup target → query name)"),
         await _rows_or_empty(engine, _DICTIONARY_FILTERS, what="ly_dictionary_filters (lookup static params)"),
         await _rows_or_empty(engine, _LOOKUP_PARAMS, what="ly_lkp_params (lookup param-name declarations)"),
+    )
+
+
+async def read_sequences(
+    engine: AsyncEngine,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (``ly_sequence`` rows, ``ly_seq_params`` rows) — sequence definitions backing
+    ``dd_rules = 'SEQUENCE'`` / ``'NN'`` dictionary entries (``seq_id`` keyed to the entry's
+    ``dd_rules_values``, ``seq_query_id`` pointing at the v1 query that fetches the next
+    number, plus ``ly_seq_params`` declaring the per-sequence param names). Missing tables
+    → empty lists (the open framework / a v1 deployment that never used sequences just
+    skips this)."""
+    return (
+        await _rows_or_empty(engine, _SEQUENCES, what="ly_sequence"),
+        await _rows_or_empty(engine, _SEQ_PARAMS, what="ly_seq_params"),
     )
 
 

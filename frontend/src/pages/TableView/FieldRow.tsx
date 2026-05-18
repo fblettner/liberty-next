@@ -40,7 +40,7 @@ function resolveBinds(field: ScreenField, formValues: Row): Record<string, strin
 }
 
 export function FieldRow({
-  field, column, formValues, onChange, disabled, required,
+  field, column, formValues, onChange, disabled, required, suppressLookup = false,
 }: {
   field: ScreenField
   column: Column | null
@@ -48,6 +48,11 @@ export function FieldRow({
   onChange: (name: string, v: unknown) => void
   disabled: boolean
   required: boolean
+  /** When ``true``, render the field's plain widget (text/number/date) even if the column
+   *  resolves to a LOOKUP rule — used by ScreenDialog on ``add`` for key columns where the
+   *  user must *create* the value rather than pick from existing rows (v2 auto-derivation
+   *  of v1's per-field ``col_rules = "DISABLED"`` convention for PKs). */
+  suppressLookup?: boolean
 }) {
   const { t } = useTranslation()
   const value = formValues[field.name]
@@ -80,12 +85,16 @@ export function FieldRow({
     widget = <ReadOnlyBox aria-readonly>{textValue || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
   } else if (column?.rule?.kind === 'boolean') {
     const trueV = column.rule.true_value
+    // false_value is the value to send on uncheck — explicit per ``DictionaryEntry.false_value``,
+    // or inferred by the backend (Y→N, 1→0, true→false). Omitted → uncheck sends null (the v1
+    // default; the DB column must accept NULL for that to work — see CSI_STATUS where it doesn't).
+    const falseV = column.rule.false_value ?? null
     const checked = textValue === trueV
     widget = (
       <Checkbox
         checked={checked}
-        onChange={(v) => onChange(field.name, v ? trueV : null)}
-        label={checked ? trueV : t('common.no')}
+        onChange={(v) => onChange(field.name, v ? trueV : falseV)}
+        label={checked ? trueV : (falseV ?? t('common.no'))}
       />
     )
   } else if (column?.rule?.kind === 'enum') {
@@ -99,7 +108,7 @@ export function FieldRow({
         placeholder={t('common.pick')}
       />
     )
-  } else if (column?.rule?.kind === 'lookup' && lookupSpec) {
+  } else if (column?.rule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
     const opts = lookupData ? lookupOptions(lookupData).map((o) => ({ value: o.value, label: o.label, mono: o.value })) : []
     widget = (
       <SearchSelect

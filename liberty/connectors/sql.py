@@ -75,6 +75,152 @@ def reset_oracle_column_cache() -> None:
 _ORACLE_CHAR_TYPES = {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
 _ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT"}
 
+# ── write-time type coercion + form-rule resolution ────────────────────────────────────────
+# Frontend submits everything as strings (HTML form inputs); asyncpg / oracledb won't auto-coerce
+# a ``"123"`` bind into an INTEGER column. v2's SQL connector consults the column's resolved
+# format (dictionary entry's ``format`` + the column hint's override) and coerces the bind into
+# the right Python type — same path for the dialog Save, the batch-edit grid, the AI tool.
+
+# Dictionary `format` → coercion family. Free-text values not in this map pass through unchanged
+# (the DB will error with its own message — clearer than a guess gone wrong).
+_INTEGER_FORMATS = {"integer", "number"}
+_DECIMAL_FORMATS = {"decimal", "currency"}
+_DATE_FORMATS = {"date"}
+_DATETIME_FORMATS = {"datetime", "timestamp"}
+_BOOLEAN_FORMATS = {"boolean"}
+# JDE Julian dates — stored as integers ``CYYDDD`` in JD Edwards (C = century - 19, YY = year-in-
+# century, DDD = day-of-year). 2026-05-18 → 126138. The conversion is symmetric on read (Phase 5
+# `DynamicResultMapper` parity) and on write (this module): a Python date/datetime / ISO string
+# / already-Julian int all collapse to the integer CYYDDD form before binding.
+_JDEDATE_FORMATS = {"jdedate"}
+
+
+def _to_jde_julian(d: Any) -> int | None:
+    """``date | datetime | ISO string | int`` → JDE Julian ``CYYDDD`` integer; ``None`` when
+    the input can't be parsed. ``int`` passes through (already in Julian form); a string of
+    digits is treated as a pre-converted Julian integer (operator pasted one directly).
+    Out-of-range years (< 1900) return ``None`` — JDE dates earlier than the epoch can't
+    survive the encoding."""
+    from datetime import date as _date
+    if isinstance(d, int):
+        return d if d >= 0 else None
+    if isinstance(d, str):
+        s = d.strip()
+        if s.isdigit():
+            return int(s)
+        try:
+            d = _date.fromisoformat(s[:10])
+        except ValueError:
+            return None
+    if isinstance(d, datetime):
+        d = d.date()
+    if not isinstance(d, _date):
+        return None
+    if d.year < 1900:
+        return None
+    return (d.year - 1900) * 1000 + d.timetuple().tm_yday
+
+
+def _coerce_value(value: Any, fmt: str | None) -> Any:
+    """Coerce *value* to the Python type implied by *fmt*. Pass-through when *fmt* is unknown
+    or the value is already the right type. Empty string → ``None`` so a blank field in the
+    form lands as SQL NULL, not as ``''`` (Oracle treats them the same on VARCHAR2 but not
+    on NUMBER / DATE; Postgres errors loudly on ``''`` for numeric/date). Coercion failures
+    leave the original value — the DB will raise with a clear message naming the column,
+    which beats a generic "could not coerce" Python error.
+
+    Non-string inputs are also handled: a ``datetime`` flows through to a ``date`` for a
+    ``format = "date"`` column; ``date`` / ``datetime`` / ISO-string / pre-converted int
+    all collapse to the JDE Julian integer for ``format = "jdedate"``.
+    """
+    from datetime import date as _date
+    if value is None:
+        return None
+    if isinstance(value, str) and value == "":
+        return None
+    f = (fmt or "").strip().lower()
+    if not f:
+        return value
+    try:
+        if f in _JDEDATE_FORMATS:
+            # Always convert — JDE stores integers, never dates/strings. None on a parse
+            # failure surfaces as SQL NULL, matching the "empty string → None" convention.
+            return _to_jde_julian(value)
+        if f in _INTEGER_FORMATS:
+            if isinstance(value, bool):
+                return int(value)  # True/False → 1/0
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return value
+            v = str(value).strip()
+            # Allow "123.0" to parse as int (a number column may receive a float-looking
+            # string from the frontend); reject decimal parts that aren't zero.
+            if "." in v or "e" in v.lower():
+                fv = float(v)
+                if fv.is_integer():
+                    return int(fv)
+                # Non-integer value into an integer column — let the DB reject it loudly.
+                return fv
+            return int(v)
+        if f in _DECIMAL_FORMATS:
+            if isinstance(value, (int, float)):
+                return value
+            return float(str(value).strip())
+        if f in _DATETIME_FORMATS:
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, _date):
+                return datetime.combine(value, datetime.min.time())
+            # ISO 8601 with optional 'T' separator; reject anything else.
+            v = str(value).strip().replace("T", " ")
+            try:
+                return datetime.fromisoformat(v)
+            except ValueError:
+                return value
+        if f in _DATE_FORMATS:
+            if isinstance(value, datetime):
+                return value.date()  # drop the time
+            if isinstance(value, _date):
+                return value
+            v = str(value).strip()
+            # Accept either "YYYY-MM-DD" or a full datetime (drop the time).
+            try:
+                return _date.fromisoformat(v[:10])
+            except ValueError:
+                return value
+        if f in _BOOLEAN_FORMATS:
+            if isinstance(value, bool):
+                return value
+            # No rule attached (would have routed through ``rule.true_value`` on the frontend).
+            # Fall back to a permissive string-to-bool: "true"/"y"/"1" → True, "false"/"n"/"0" → False.
+            v = str(value).strip().lower()
+            if v in {"true", "t", "yes", "y", "1"}:
+                return True
+            if v in {"false", "f", "no", "n", "0"}:
+                return False
+            return value
+    except (ValueError, TypeError, ArithmeticError):
+        # Surface the raw value — the DB driver's error is more actionable than ours.
+        return value
+    return value
+
+
+# Dictionary-entry rules that trigger a server-side substitution at INSERT / UPDATE time.
+# Same set v1's FormsDialog/FormsTable evaluated on Save — re-implemented here so the dialog,
+# batch-edit grid, and any future API caller all get it consistently.
+_RULES_LOGIN = {"LOGIN"}
+_RULES_NOW = {"SYSDATE", "CURRENT_DATE"}
+_RULES_SEQUENCE = {"SEQUENCE", "NN"}
+_RULES_PASSWORD = {"PASSWORD"}
+_RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missing/empty
+# v1 parity: a column-hint-level ``rules = "DISABLED"`` opts out of an inherited dictionary
+# rule on this specific screen. Used to keep SEQUENCE from refiring on UPDATE (we already
+# scope SEQUENCE to INSERT, so this is mostly belt-and-braces — but the operator may want it
+# on PASSWORD / SYSDATE too, e.g. an import screen that bulk-loads pre-computed values).
+_RULES_DISABLED = {"DISABLED"}
+
+
 
 def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> dict[str, Any]:
     """Replace ``None`` values in *bound* with type-appropriate sentinels based on *col_types*.
@@ -395,6 +541,251 @@ class SQLConnector:
             bound.setdefault(p.name, merged.get(p.name))
         return bound
 
+    def _column_meta_map(self, qdef: QueryDef) -> dict[str, dict[str, str | None]]:
+        """Build a column-name → ``{format, rule, rules_values, default}`` map for *qdef*.
+
+        Column hints (``qdef.columns``) — the per-screen layer that can override the
+        dictionary entry's ``format`` — are picked up first; for every other column name
+        used as a bind in the SQL we fall back to ``find_entry(name)`` so write queries
+        (``_post`` / ``_put`` / ``_delete``, which the migration emits *without* a
+        ``columns`` block — the layout lives on the matching ``_get``) still get rule
+        resolution + coercion. Keys are upper-cased: the migration's binds (``:USR_ID``)
+        and the v1 dictionary's dd_ids both use uppercase; the resolved key matches the
+        bind name regardless of how the surrounding SQL was cased.
+
+        Each hint's ``dd`` (or its ``name`` when ``dd`` is unset) is the dictionary lookup
+        key; ``dd = ""`` opts out (the column carries no dictionary semantics — keep the
+        format override only). Dictionary fallback uses the bind name itself, since
+        :func:`migrate_sql_queries` binds columns by their result-column name.
+        """
+        from liberty.connectors.dictionary import infer_false_value
+        out: dict[str, dict[str, str | None]] = {}
+        seen: set[str] = set()
+
+        def _entry_meta(entry: Any, fmt_override: str | None) -> dict[str, str | None]:
+            """Pull (fmt, rule, rules_values, default, false_value) off a DictionaryEntry,
+            inferring the BOOLEAN false counterpart when the operator didn't set one."""
+            if entry is None:
+                return {"fmt": fmt_override, "rule": None, "rules_values": None, "default": None, "false_value": None}
+            rule_up = entry.rules.upper() if entry.rules else None
+            false_v: str | None = None
+            if rule_up == "BOOLEAN":
+                false_v = entry.false_value or infer_false_value(entry.rules_values or "Y")
+            return {
+                "fmt": fmt_override or entry.format,
+                "rule": rule_up,
+                "rules_values": entry.rules_values,
+                "default": entry.default,
+                "false_value": false_v,
+            }
+
+        for col in qdef.columns:
+            key = (col.dd if col.dd else col.name) if col.dd != "" else None
+            entry = self._dict.find_entry(key, connector=self.name) if key else None
+            out[col.name.upper()] = _entry_meta(entry, col.format)
+            seen.add(col.name.upper())
+        # Fallback: for write queries (no ``columns`` hint block), look up the dictionary
+        # directly by every bind name the SQL references. The migration's _post/_put/_delete
+        # use uppercase v1 dd_ids verbatim, so a direct ``find_entry(name)`` resolves cleanly.
+        sql_for = qdef.sql_for(self._resolve_dialect())
+        for name in find_bind_params(sql_for):
+            up = name.upper()
+            base = up[: -len("_ORIGINAL")] if up.endswith("_ORIGINAL") else up
+            if base in seen:
+                continue
+            entry = self._dict.find_entry(base, connector=self.name)
+            if entry is None:
+                continue
+            out[base] = _entry_meta(entry, None)
+            seen.add(base)
+        return out
+
+    def _apply_form_rules(
+        self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, user: str | None,
+    ) -> dict[str, Any]:
+        """Resolve form-layer rules + coerce types on the bound params, **synchronously**.
+
+        Steps, in order:
+
+        1. **LOGIN** → stamp the caller's username (``"anonymous"`` when unauthenticated).
+        2. **SYSDATE / CURRENT_DATE** → stamp ``datetime.now(UTC)`` (one value per call so
+           every audit column in the same write lands on the same instant).
+        3. **PASSWORD** → Argon2-hash a non-empty value; blank/missing pass through as NULL
+           (the dialog already strips blank password fields from the submit body for UPDATE
+           — keeping the existing hash; INSERT with an empty password lands as NULL).
+        4. **BOOLEAN** → bind ← ``false_value`` when null/empty (the dialog usually sends the
+           proper value on uncheck, but the migration / batch-edit grid may not yet — this is
+           the safety net for the Y/N case where the DB doesn't accept NULL). ``true_value``
+           passes through; only the empty/null side is substituted.
+        5. **DEFAULT** → on INSERT only, when the bind is missing/empty, use the entry's
+           ``default`` value.
+        6. **Type coercion** → strings to the matching Python type for ``format`` ∈
+           {integer/number/decimal/currency/date/datetime/timestamp/boolean/jdedate}.
+
+        ``SEQUENCE`` / ``NN`` is handled separately by :meth:`_resolve_sequences` because it
+        needs a DB connection (and must run inside the same write transaction).
+
+        ``_ORIGINAL``-suffixed binds (the migration's ``_put`` WHERE-clause re-bindings) **skip
+        the form-rule step** (the WHERE wants the row's pre-edit values, untouched) but **do
+        get type coercion** (Postgres still won't compare ``'10' = INTEGER 10``).
+        """
+        if stmt_type not in WRITE_STATEMENTS:
+            return bound
+        meta = self._column_meta_map(qdef)
+        if not meta:
+            return bound
+        out = dict(bound)
+        now: datetime | None = None
+        from liberty.auth.password import hash_password  # local import — avoids auth-on-startup wiring
+        for k, v in list(out.items()):
+            ku = k.upper()
+            is_original = ku.endswith("_ORIGINAL")
+            col_name = ku[: -len("_ORIGINAL")] if is_original else ku
+            m = meta.get(col_name)
+            if m is None:
+                continue
+            fmt = m["fmt"]
+            rule = m["rule"]
+            default = m["default"]
+
+            # Form-rule substitution only applies to SET-clause binds (not WHERE _ORIGINAL).
+            # DISABLED is the v1 per-screen opt-out — short-circuits *every* rule below so a
+            # specific column hint can defuse an inherited dictionary rule (e.g. a bulk-import
+            # screen that wants SYSDATE / SEQUENCE to *not* fire because the rows carry their
+            # own pre-computed audit/PK values). Coercion still applies below.
+            if not is_original and rule not in _RULES_DISABLED:
+                if rule in _RULES_LOGIN:
+                    # v1 stored audit usernames as uppercase ("ADMIN" not "admin"). Match
+                    # that — the audit tables + downstream reporting all rely on it.
+                    out[k] = (user or "anonymous").upper()
+                    continue
+                if rule in _RULES_NOW:
+                    # One ``now()`` per call, so every audit column in the same write lands on
+                    # the same instant. Coerce to the matching Python type for the column's
+                    # format (date / datetime / jdedate) so the driver picks the right SQL type.
+                    if now is None:
+                        now = datetime.now(timezone.utc).replace(tzinfo=None)
+                    out[k] = _coerce_value(now, fmt) if fmt else now
+                    continue
+                if rule in _RULES_PASSWORD:
+                    if v not in (None, ""):
+                        out[k] = hash_password(str(v))
+                    else:
+                        # Blank password: leave as NULL — the dialog drops blank passwords from
+                        # UPDATE's SET (migrated _put binds :PASSWORD only when the user typed one).
+                        out[k] = None
+                    continue
+                # BOOLEAN — substitute the inferred / explicit `false_value` when the dialog
+                # sends null on uncheck. The dialog's checkbox knows the rule.true_value (from
+                # the read query's Column.rule) and now also rule.false_value, so it usually
+                # sends the right value already; this safety net catches paths that don't (a
+                # screen whose read result hasn't loaded the rule yet, the batch-edit grid, an
+                # external API caller). ``true_value`` itself passes through untouched.
+                if rule == "BOOLEAN" and (v is None or v == ""):
+                    fv = m.get("false_value")
+                    if fv is not None:
+                        out[k] = fv
+                        continue  # don't also fall into DEFAULT — BOOLEAN's "false" *is* the default
+                # DEFAULT — only on INSERT, only when the user didn't supply a value.
+                if (
+                    stmt_type == "INSERT" and (v is None or v == "")
+                    and default is not None and rule not in _RULES_SEQUENCE
+                ):
+                    out[k] = default
+                    v = default
+
+            # Type coercion (every kind of bind, including _ORIGINAL). Runs after the rule
+            # substitution so a SYSDATE result also lands as the right shape for the column.
+            out[k] = _coerce_value(out[k], fmt)
+        return out
+
+    async def _resolve_sequences(
+        self, conn: Any, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, language: str,
+    ) -> dict[str, Any]:
+        """Run any ``SEQUENCE`` / ``NN`` rule queries in *conn* (the open write transaction)
+        and substitute the result into the matching bind. Only fires on INSERT and only when
+        the bind is missing/empty — an explicit value from the caller wins.
+
+        ``rules_values`` is the **sequence id** (a key into ``DictionaryFile.sequences`` —
+        v1's ``ly_sequence`` ported to a first-class registry entity). The SequenceDef's
+        ``query`` names a v2 read query expected to return one row with the next number as
+        the first column. For backwards-compat with pre-Phase-8 migrations that put the
+        query name directly in ``rules_values``, we fall back to looking up the value as a
+        query if no sequence with that id exists.
+
+        Doing this in the *same* connection as the INSERT keeps the read + write atomic — a
+        concurrent insert that picks up the same number would have to commit in between, which
+        the surrounding ``engine.begin()`` block serialises against.
+        """
+        if stmt_type != "INSERT":
+            return bound
+        meta = self._column_meta_map(qdef)
+        if not meta:
+            return bound
+        out = dict(bound)
+        for k, v in list(out.items()):
+            if k.upper().endswith("_ORIGINAL"):
+                continue
+            m = meta.get(k.upper())
+            if m is None:
+                continue
+            if m["rule"] not in _RULES_SEQUENCE:
+                continue
+            if v not in (None, ""):
+                continue  # caller supplied an explicit value
+            seq_ref = m["rules_values"]
+            if not seq_ref:
+                _log.warning(
+                    "%s.%s: SEQUENCE rule on column %s has no rules_values — bind left NULL",
+                    self.name, qdef.name, k,
+                )
+                continue
+            # Sequence id → SequenceDef → query name. Falls through to "treat the value as a
+            # query name" for legacy / hand-edited dictionaries that don't yet have the
+            # ``[sequences.*]`` block — keeps the prior Phase-8 wiring working.
+            seq_ref_str = str(seq_ref).strip()
+            seq_def = self._dict.find_sequence(seq_ref_str, connector=self.name)
+            seq_query_name = seq_def.query if seq_def is not None else seq_ref_str
+            seq_qdef = self._queries.get(seq_query_name)
+            if seq_qdef is None:
+                _log.warning(
+                    "%s.%s: SEQUENCE rule on column %s references unknown %s %r — bind left NULL",
+                    self.name, qdef.name, k,
+                    "sequence" if seq_def is None else "query",
+                    seq_ref_str,
+                )
+                continue
+            seq_sql = _apply_schema_placeholders(
+                seq_qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+                connector=self.name, query=seq_qdef.name, pool=self.pool_name,
+            )
+            # Bind whatever the sequence query references from the *current* row — ``text()`` only
+            # binds names it sees in the SQL, so a sequence that narrows by APPS_ID picks it up
+            # automatically without extra param plumbing. Missing names → SQL NULL.
+            seq_bound = {name: out.get(name) for name in find_bind_params(seq_sql)}
+            try:
+                r = await conn.execute(text(seq_sql), seq_bound)
+                row = r.first()
+                if row is None:
+                    _log.warning(
+                        "%s.%s: SEQUENCE query %r returned no rows — bind %s left NULL",
+                        self.name, qdef.name, seq_query_name, k,
+                    )
+                    continue
+                # Take the first column of the first row (sequence queries are MAX(col)+1 by
+                # convention — one row, one column). Coerce defensively in case the query
+                # returns a string somehow.
+                next_val = row[0]
+                if isinstance(next_val, str) and next_val.strip().isdigit():
+                    next_val = int(next_val)
+                out[k] = next_val
+            except Exception as exc:  # noqa: BLE001 — log + fall through, NULL is acceptable here
+                _log.warning(
+                    "%s.%s: SEQUENCE query %r failed for column %s: %s — bind left NULL",
+                    self.name, qdef.name, seq_query_name, k, exc,
+                )
+        return out
+
     def _row_cap(self, qdef: QueryDef, override: int | None) -> int:
         """Effective row cap for one SELECT: a per-request *override* if given, else the query's
         ``max_rows``, else this connector's (which already folds in the pool's) — clamped to
@@ -440,6 +831,12 @@ class SQLConnector:
 
         engine: AsyncEngine = self._pools.engine(self.pool_name)
         bound = self._build_params(sql_text, qdef, params)
+        # Resolve form-layer rules (LOGIN / SYSDATE / PASSWORD / DEFAULT) + coerce string
+        # binds to the matching Python type for the column's resolved format. SEQUENCE / NN
+        # is deferred to inside the write transaction (it needs the DB). On SELECT this is
+        # a no-op (filter binds stay as strings — the migrated SQL CASTs them to VARCHAR
+        # explicitly so type matching doesn't bite).
+        bound = self._apply_form_rules(bound, qdef, stmt_type=stmt_type, user=user)
         stmt = text(sql_text)
         is_select = stmt_type == "SELECT"
 
@@ -521,13 +918,20 @@ class SQLConnector:
                 bound = _coalesce_oracle_nulls(bound, col_types)
 
         async with engine.begin() as conn:
+            # SEQUENCE / NN — run the named "next number" query in the *same* transaction as
+            # the INSERT so a concurrent insert can't grab the same value (the surrounding
+            # ``engine.begin()`` block serialises). A missing/failing sequence logs and falls
+            # through with NULL (the DB will then reject the row if the column is NOT NULL).
+            bound = await self._resolve_sequences(conn, bound, qdef, stmt_type=stmt_type, language=lang)
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
             # AUD audit (v1's tbl_audit = 'Y' → migrated as QueryDef.audit = "AUD_<table>"). The
             # mirror INSERT runs in the *same* transaction so a successful write + failing audit
             # rolls back together — a missing/misshapen AUD table is loud, not silently dropped.
+            # Pass the *coerced/resolved* bound params (post LOGIN/SYSDATE/PASSWORD/SEQUENCE) so
+            # the audit mirror matches what actually hit the DB.
             if qdef.audit:
-                await self._write_audit(conn, qdef, stmt_type, params or {}, user)
+                await self._write_audit(conn, qdef, stmt_type, bound, user)
         duration_ms = (time.perf_counter() - started) * 1000.0
         return QueryResult(
             connector=self.name,

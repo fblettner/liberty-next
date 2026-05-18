@@ -585,3 +585,513 @@ def test_coalesce_nulls_auto_on_for_oracle_dialect() -> None:
     # to one doesn't accidentally diverge.
     assert pools.trim_strings("ora_auto") is True
     assert pools.trim_strings("pg_auto") is False
+
+
+# --------------------------------------------------------------------------- #
+# Write-time type coercion + form-layer rules (LOGIN / SYSDATE / PASSWORD /
+# DEFAULT / SEQUENCE). The frontend submits everything as strings; v2's SQL
+# connector consults the column's resolved format and rules to coerce + stamp
+# server-side values, so the same path covers dialog Save, batch-edit grid,
+# and any future API caller.
+# --------------------------------------------------------------------------- #
+
+
+def test_coerce_value_numbers_dates_booleans() -> None:
+    """Round-trip the module-level coercer for every format family. Empty strings
+    become None (NULL); unknown / blank format passes through; coercion failures
+    leave the original so the DB error is the actionable message."""
+    from datetime import date, datetime
+    from liberty.connectors.sql import _coerce_value
+    # integer family
+    assert _coerce_value("123", "number") == 123
+    assert _coerce_value("123", "integer") == 123
+    assert _coerce_value("123.0", "number") == 123       # zero-decimal allowed → int
+    assert _coerce_value("123.5", "integer") == 123.5    # non-integer → float (DB rejects loudly)
+    # decimal / currency
+    assert _coerce_value("12.34", "decimal") == 12.34
+    assert _coerce_value("9.99", "currency") == 9.99
+    # date / datetime / timestamp
+    assert _coerce_value("2026-05-18", "date") == date(2026, 5, 18)
+    assert _coerce_value("2026-05-18T12:34:56", "datetime") == datetime(2026, 5, 18, 12, 34, 56)
+    assert _coerce_value("2026-05-18 12:34:56", "timestamp") == datetime(2026, 5, 18, 12, 34, 56)
+    # boolean (no rule attached — permissive fallback)
+    assert _coerce_value("true", "boolean") is True
+    assert _coerce_value("N", "boolean") is False
+    # empty string → None
+    assert _coerce_value("", "number") is None
+    assert _coerce_value("", "text") is None
+    # None passes through
+    assert _coerce_value(None, "number") is None
+    # already-typed values pass through (a recursive sequence call may pre-coerce)
+    assert _coerce_value(42, "number") == 42
+    # unparseable → original (DB raises its own clearer error)
+    assert _coerce_value("not-a-date", "date") == "not-a-date"
+    # unknown / blank format → pass through
+    assert _coerce_value("anything", None) == "anything"
+    assert _coerce_value("anything", "") == "anything"
+
+
+@pytest.mark.asyncio
+async def test_write_query_without_columns_hint_still_gets_coercion(pools: PoolRegistry) -> None:
+    """The migration emits ``_post`` / ``_put`` / ``_delete`` queries **without** a ``columns``
+    block (the column layout lives on the matching ``_get``). The form-rule resolver must
+    still find each bind's metadata — by falling back to ``DictionaryFile.find_entry(name)``
+    keyed off the bind name — otherwise the user's reported asyncpg ``'str' object cannot
+    be interpreted as an integer`` slips right through to the driver. Exact user case:
+    LICENSE_CSI_APPS INSERT with LCA_CSI_ID (number) bound as ``"123456"``."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        # The actual dictionary entries the user has — note: no `LCA_AUDIT_*` here, that's
+        # the operator's data; we're only proving the bind-fallback works for the format ones.
+        "LCA_CSI_ID": DictionaryEntry(label="CSI Number", format="number"),
+        "LCA_APPS_ID": DictionaryEntry(label="Application ID", format="number"),
+    })})
+    # Mimic the migrated _post query exactly — no `columns` block.
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="lca_post", writable=True,
+                 sql="INSERT INTO item (id, name) VALUES (:LCA_CSI_ID, :LCA_APPS_ID)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # The bind-name fallback (no qdef.columns) resolves both binds via find_entry()
+    # and coerces both string numerics to int.
+    bound = conn._apply_form_rules(
+        {"LCA_CSI_ID": "123456", "LCA_APPS_ID": "10"}, cfg.queries[0],
+        stmt_type="INSERT", user="bob",
+    )
+    assert bound == {"LCA_CSI_ID": 123456, "LCA_APPS_ID": 10}
+
+
+@pytest.mark.asyncio
+async def test_write_coerces_number_string_to_int(pools: PoolRegistry) -> None:
+    """The frontend sends "123" but the column's dictionary format says number — the SQL
+    connector coerces before binding so asyncpg / oracledb get a real Python int (the user's
+    reported bug: ``'str' object cannot be interpreted as an integer``)."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(label="ID", format="number"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)",
+                 columns=[ColumnHint(name="ID"), ColumnHint(name="NAME")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # Submit a string — would crash on a strict driver; sqlite happens to accept it but the
+    # coercion still applies. The assertion is on the connector's bound dict, not the row.
+    bound = conn._apply_form_rules(
+        {"ID": "42", "NAME": "alpha"}, cfg.queries[0],
+        stmt_type="INSERT", user="bob",
+    )
+    assert bound == {"ID": 42, "NAME": "alpha"}  # number coerced; text untouched
+    # Round-trip the actual INSERT to prove SQLAlchemy + driver accept the coerced value.
+    r = await conn.execute("ins", {"ID": "999", "NAME": "z"})
+    assert r.rowcount == 1
+
+
+@pytest.mark.asyncio
+async def test_write_coerces_empty_string_to_null(pools: PoolRegistry) -> None:
+    """An empty string in a number/date field becomes SQL NULL (Postgres rejects ``''`` for
+    INTEGER / DATE; Oracle accepts it on VARCHAR2 but not on NUMBER / DATE)."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(label="ID", format="number"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)",
+                 columns=[ColumnHint(name="ID"), ColumnHint(name="NAME")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    bound = conn._apply_form_rules(
+        {"ID": "", "NAME": ""}, cfg.queries[0], stmt_type="INSERT", user=None,
+    )
+    assert bound == {"ID": None, "NAME": None}  # both empty strings → NULL
+
+
+@pytest.mark.asyncio
+async def test_form_rule_login_stamps_user_uppercase(pools: PoolRegistry) -> None:
+    """``rules = "LOGIN"`` substitutes the caller's username on INSERT and UPDATE — used by
+    the v1 audit columns (e.g. TV_AUDIT_USER, ACL_AUDIT_USER). The value is **uppercased**
+    to match v1's convention ("ADMIN" not "admin" — every audit table + downstream report
+    expects uppercase). Unauthenticated paths land as ``"ANONYMOUS"`` so the column is
+    never NULL."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "USR": DictionaryEntry(rules="LOGIN"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :USR)",
+                 columns=[ColumnHint(name="USR")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    out = conn._apply_form_rules({"USR": None}, cfg.queries[0], stmt_type="INSERT", user="alice")
+    assert out["USR"] == "ALICE"  # uppercased
+    # Even a caller-supplied value is overwritten — LOGIN is server-trusted, not user input.
+    out = conn._apply_form_rules({"USR": "evil-spoof"}, cfg.queries[0], stmt_type="INSERT", user="Bob")
+    assert out["USR"] == "BOB"
+    # Unauthenticated → "ANONYMOUS"
+    out = conn._apply_form_rules({"USR": None}, cfg.queries[0], stmt_type="INSERT", user=None)
+    assert out["USR"] == "ANONYMOUS"
+
+
+@pytest.mark.asyncio
+async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
+    """SYSDATE / CURRENT_DATE coerces the ``now()`` to match the column's format — a
+    ``format = "date"`` column gets a ``date``, ``datetime`` gets a ``datetime``, ``jdedate``
+    gets the JDE Julian integer. This keeps the driver from rejecting a datetime bind on a
+    DATE column (Postgres errors loudly; Oracle silently truncates the time) and matches
+    JDE's CYYDDD storage convention without extra wiring on the operator's side."""
+    from datetime import date, datetime as dt
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "CREATED_AT": DictionaryEntry(format="datetime", rules="SYSDATE"),
+        "CREATED_ON": DictionaryEntry(format="date", rules="SYSDATE"),
+        "JDE_DATE": DictionaryEntry(format="jdedate", rules="SYSDATE"),
+        "PLAIN": DictionaryEntry(rules="SYSDATE"),  # no format — fall through to bare datetime
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name, status) VALUES (:CREATED_AT, :CREATED_ON, :PLAIN)",
+                 columns=[ColumnHint(name="CREATED_AT"), ColumnHint(name="CREATED_ON"), ColumnHint(name="JDE_DATE"), ColumnHint(name="PLAIN")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    out = conn._apply_form_rules(
+        {"CREATED_AT": None, "CREATED_ON": None, "JDE_DATE": None, "PLAIN": None},
+        cfg.queries[0], stmt_type="INSERT", user="x",
+    )
+    # datetime column → datetime, date column → date (no time), jdedate → CYYDDD int.
+    assert isinstance(out["CREATED_AT"], dt) and not isinstance(out["CREATED_AT"], date.__class__)
+    assert isinstance(out["CREATED_ON"], date) and not isinstance(out["CREATED_ON"], dt)
+    assert isinstance(out["JDE_DATE"], int)
+    today = date.today()
+    assert out["JDE_DATE"] == (today.year - 1900) * 1000 + today.timetuple().tm_yday
+    # All three resolve to the same instant (the same ``now()`` per call).
+    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today
+    # No format → bare datetime (the pre-coercion fallback).
+    assert isinstance(out["PLAIN"], dt)
+
+
+def test_jdedate_coercion() -> None:
+    """``_coerce_value(x, "jdedate")`` accepts ``date`` / ``datetime`` / ISO string / int —
+    all collapse to CYYDDD. Out-of-range years (< 1900) return None (can't encode). The
+    same path runs on read in Phase 5's `DynamicResultMapper` parity (deferred), so this
+    is the symmetric write-time half — the migration's JDE-date columns roundtrip cleanly."""
+    from datetime import date, datetime as dt
+    from liberty.connectors.sql import _coerce_value, _to_jde_julian
+    # 2026-05-18 → CYYDDD = 126138 ((2026-1900)*1000 + 138)
+    assert _coerce_value(date(2026, 5, 18), "jdedate") == 126138
+    assert _coerce_value(dt(2026, 5, 18, 12, 0, 0), "jdedate") == 126138
+    assert _coerce_value("2026-05-18", "jdedate") == 126138
+    # Already-Julian int passes through.
+    assert _coerce_value(126138, "jdedate") == 126138
+    assert _coerce_value("126138", "jdedate") == 126138
+    # Empty / unparseable → None.
+    assert _coerce_value("", "jdedate") is None
+    assert _coerce_value(None, "jdedate") is None
+    assert _coerce_value("not-a-date", "jdedate") is None
+    # Year < 1900 can't survive the encoding.
+    assert _to_jde_julian(date(1899, 12, 31)) is None
+    # First and last days of a JDE year.
+    assert _to_jde_julian(date(2000, 1, 1)) == 100001    # century 1, year 0, day 1
+    assert _to_jde_julian(date(2024, 12, 31)) == 124366  # 2024 is a leap year
+
+
+def test_infer_false_value_pairs() -> None:
+    """The well-known v1 boolean pairs Y/N, 1/0, true/false (case-preserved). Everything else
+    returns None — the operator sets ``DictionaryEntry.false_value`` explicitly for non-standard
+    pairs like NOMASX1's 01/null user-status convention."""
+    from liberty.connectors.dictionary import infer_false_value
+    assert infer_false_value("Y") == "N"
+    assert infer_false_value("y") == "n"
+    assert infer_false_value("1") == "0"
+    assert infer_false_value("true") == "false"
+    assert infer_false_value("True") == "False"
+    assert infer_false_value("TRUE") == "FALSE"
+    # No inference — the operator must set false_value explicitly (or leave as null on uncheck).
+    assert infer_false_value("01") is None
+    assert infer_false_value("YES") is None
+    assert infer_false_value("A") is None
+    assert infer_false_value(None) is None
+    assert infer_false_value("") is None
+
+
+def test_resolve_rule_boolean_surfaces_false_value() -> None:
+    """``resolve_rule`` exposes the BOOLEAN's false counterpart so the frontend dialog's
+    checkbox knows what to send on uncheck. ``false_value`` is the operator's explicit
+    override; falls back to ``infer_false_value(true_value)`` (Y→N etc.); omitted entirely
+    when no obvious counterpart (the frontend then sends null — v1's default behaviour)."""
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile
+    d = DictionaryFile()
+    # Explicit false_value wins
+    e = DictionaryEntry(rules="BOOLEAN", rules_values="01", false_value="X")
+    assert d.resolve_rule(e) == {"kind": "boolean", "true_value": "01", "false_value": "X"}
+    # Standard Y → N inference (most common case)
+    e = DictionaryEntry(rules="BOOLEAN", rules_values="Y")
+    assert d.resolve_rule(e) == {"kind": "boolean", "true_value": "Y", "false_value": "N"}
+    # No counterpart: 01 → no false_value key — frontend sends null on uncheck
+    e = DictionaryEntry(rules="BOOLEAN", rules_values="01")
+    assert d.resolve_rule(e) == {"kind": "boolean", "true_value": "01"}
+    # Empty rules_values defaults true_value to "Y" → infers "N"
+    e = DictionaryEntry(rules="BOOLEAN")
+    assert d.resolve_rule(e) == {"kind": "boolean", "true_value": "Y", "false_value": "N"}
+
+
+@pytest.mark.asyncio
+async def test_form_rule_boolean_substitutes_false_value(pools: PoolRegistry) -> None:
+    """Backend safety net: a BOOLEAN-ruled column receiving NULL gets the rule's ``false_value``
+    substituted before binding. Handles the NOMASX1 CSI_STATUS case (DB needs 'Y' / 'N', dialog
+    might send null if the rule hasn't loaded yet, batch-edit grid sends raw text). Explicit
+    ``false_value`` wins; the standard Y → N inference covers the common case."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        # Y / N (inferred) — most common
+        "STATUS": DictionaryEntry(format="text", rules="BOOLEAN", rules_values="Y"),
+        # Explicit false_value (operator override)
+        "FLAG": DictionaryEntry(format="text", rules="BOOLEAN", rules_values="A", false_value="B"),
+        # 01 / null (no inference, no override) — null passes through, v1 default
+        "ACTIVE": DictionaryEntry(format="text", rules="BOOLEAN", rules_values="01"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name, status) VALUES (:STATUS, :FLAG, :ACTIVE)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # All three checked → true_value passes through.
+    out = conn._apply_form_rules(
+        {"STATUS": "Y", "FLAG": "A", "ACTIVE": "01"}, cfg.queries[0], stmt_type="INSERT", user="x",
+    )
+    assert out == {"STATUS": "Y", "FLAG": "A", "ACTIVE": "01"}
+    # All three unchecked → null on the wire. STATUS → "N" (inferred), FLAG → "B" (explicit),
+    # ACTIVE → still null (no false_value, no inference for "01").
+    out = conn._apply_form_rules(
+        {"STATUS": None, "FLAG": None, "ACTIVE": None}, cfg.queries[0], stmt_type="INSERT", user="x",
+    )
+    assert out == {"STATUS": "N", "FLAG": "B", "ACTIVE": None}
+
+
+@pytest.mark.asyncio
+async def test_sequence_resolved_via_dictionary_sequence_id(pools: PoolRegistry) -> None:
+    """The SQL connector resolves a SEQUENCE-ruled column's ``rules_values`` as a *sequence id*
+    (first-class entity in ``DictionaryFile.sequences``), not the raw query name. Mirrors the
+    v1 → v2 migration where ``ly_sequence`` lands as ``[sequences.<id>]`` and entries reference
+    them. The named query runs in the same write transaction as the INSERT."""
+    from liberty.connectors.dictionary import DictionarySection, SequenceDef
+    d = DictionaryFile(connectors={"db": DictionarySection(
+        sequences={
+            "item_next_id": SequenceDef(
+                description="Next item id", query="item_next_id_q",
+            ),
+        },
+        entries={
+            "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="item_next_id"),
+        },
+    )})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="item_next_id_q", sql="SELECT COALESCE(MAX(id), 0) + 1 FROM item"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (:ID, 'seq')"),
+        QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # Fixture has rows 1, 2, 3 → next id should be 4.
+    r = await conn.execute("ins", {"ID": None})
+    assert r.rowcount == 1
+    rows = (await conn.execute("all")).rows
+    assert rows[-1] == {"id": 4, "name": "seq"}
+
+
+@pytest.mark.asyncio
+async def test_form_rule_disabled_opts_out_of_inherited_rule(pools: PoolRegistry) -> None:
+    """``rules = "DISABLED"`` short-circuits every form-rule on this column — used to opt
+    out of an inherited dictionary rule for a specific screen (a bulk-import / archive /
+    backfill that wants to keep the row's pre-computed audit / PK values). Type coercion
+    still applies; only the rule substitution is disabled."""
+    from liberty.connectors.dictionary import DictionarySection
+    # The dictionary entry for AUDIT_USER says LOGIN — but the operator wants this
+    # screen's INSERT to keep whatever the row carries (a v1-style archive load).
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "AUDIT_USER": DictionaryEntry(rules="DISABLED"),  # per-screen override (operator-edited)
+        "AUDIT_DATE": DictionaryEntry(format="date", rules="DISABLED"),
+        "ID": DictionaryEntry(format="number", rules="DISABLED"),  # also defuses any DEFAULT
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name, status) VALUES (:ID, :AUDIT_USER, :AUDIT_DATE)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    out = conn._apply_form_rules(
+        {"ID": "42", "AUDIT_USER": "imported-as-is", "AUDIT_DATE": "2024-01-01"},
+        cfg.queries[0], stmt_type="INSERT", user="alice",
+    )
+    # AUDIT_USER kept as the caller supplied (would have been "ALICE" with LOGIN).
+    assert out["AUDIT_USER"] == "imported-as-is"
+    # ID still coerced (number format → int) — DISABLED suppresses *rules*, not types.
+    assert out["ID"] == 42
+    # AUDIT_DATE coerced to a Python date.
+    from datetime import date
+    assert out["AUDIT_DATE"] == date(2024, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_form_rule_sysdate_stamps_now(pools: PoolRegistry) -> None:
+    """``rules = "SYSDATE"`` / ``"CURRENT_DATE"`` stamps ``datetime.now(UTC)`` (one value per
+    call, so every audit column in the same write lands on the same instant)."""
+    from datetime import datetime
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "CREATED": DictionaryEntry(format="datetime", rules="SYSDATE"),
+        "UPDATED": DictionaryEntry(format="datetime", rules="CURRENT_DATE"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name, status) VALUES (1, :CREATED, :UPDATED)",
+                 columns=[ColumnHint(name="CREATED"), ColumnHint(name="UPDATED")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    out = conn._apply_form_rules({"CREATED": None, "UPDATED": ""}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert isinstance(out["CREATED"], datetime) and isinstance(out["UPDATED"], datetime)
+    # Both columns get the *same* timestamp (one ``datetime.now`` per call).
+    assert out["CREATED"] == out["UPDATED"]
+
+
+@pytest.mark.asyncio
+async def test_form_rule_password_hashes_value(pools: PoolRegistry) -> None:
+    """``rules = "PASSWORD"`` Argon2-hashes the value before binding. Blank password → NULL
+    (the dialog drops blank fields from the SET on UPDATE; INSERT with no password lands as
+    NULL, which the column should be nullable to allow). A hash starts with ``$argon2``."""
+    from liberty.auth.password import verify_password
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "PWD": DictionaryEntry(format="password", rules="PASSWORD"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :PWD)",
+                 columns=[ColumnHint(name="PWD")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    out = conn._apply_form_rules({"PWD": "hunter2"}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert isinstance(out["PWD"], str) and out["PWD"].startswith("$argon2")
+    assert verify_password(out["PWD"], "hunter2")    # round-trip via the existing hasher
+    # Blank password → None (dialog drops blanks; the bind matches the dialog's intent)
+    out = conn._apply_form_rules({"PWD": ""}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert out["PWD"] is None
+
+
+@pytest.mark.asyncio
+async def test_form_rule_default_on_insert_only(pools: PoolRegistry) -> None:
+    """The dictionary entry's ``default`` value seeds an empty INSERT bind — but never an
+    UPDATE (UPDATE keeps the column's current value when not supplied), and never overwrites
+    an explicit user value."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "STATUS": DictionaryEntry(default="active"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, status) VALUES (1, :STATUS)",
+                 columns=[ColumnHint(name="STATUS")]),
+        QueryDef(name="upd", writable=True, sql="UPDATE item SET status = :STATUS WHERE id = :ID_ORIGINAL",
+                 columns=[ColumnHint(name="STATUS")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # INSERT + missing value → use default
+    out = conn._apply_form_rules({"STATUS": None}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert out["STATUS"] == "active"
+    # INSERT + explicit value → keep it
+    out = conn._apply_form_rules({"STATUS": "draft"}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert out["STATUS"] == "draft"
+    # UPDATE + missing value → leave None (don't default — UPDATE preserves the current value)
+    out = conn._apply_form_rules({"STATUS": None, "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS"] is None
+
+
+@pytest.mark.asyncio
+async def test_form_rule_skips_original_suffix(pools: PoolRegistry) -> None:
+    """The migration's ``_put`` WHERE-clause re-bindings use ``:NAME_ORIGINAL`` — these hold
+    the row's *pre-edit* values and must not be overwritten by LOGIN / SYSDATE / DEFAULT
+    (which would corrupt the WHERE). Type coercion still applies — the WHERE compares to a
+    real column type."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number"),
+        "USR": DictionaryEntry(rules="LOGIN"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="upd", writable=True,
+                 sql="UPDATE item SET name = :USR WHERE id = :ID_ORIGINAL",
+                 columns=[ColumnHint(name="USR"), ColumnHint(name="ID")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    out = conn._apply_form_rules(
+        {"USR": None, "ID_ORIGINAL": "42"}, cfg.queries[0], stmt_type="UPDATE", user="alice",
+    )
+    # SET clause's LOGIN bind got stamped (uppercased per v1 convention); WHERE clause's
+    # _ORIGINAL got coerced (number) but *not* substituted by the rule (it's not the SET-clause column).
+    assert out["USR"] == "ALICE"
+    assert out["ID_ORIGINAL"] == 42
+
+
+@pytest.mark.asyncio
+async def test_form_rule_sequence_resolves_in_same_transaction(pools: PoolRegistry) -> None:
+    """``rules = "SEQUENCE"`` / ``"NN"`` runs the named v2 query inside the *same* transaction
+    as the INSERT — a separate ``MAX(col)+1`` query whose first column is the next number.
+    The bind picks it up automatically; a caller-supplied explicit value still wins."""
+    from liberty.connectors.dictionary import DictionarySection
+    # The sequence query: SELECT COALESCE(MAX(id), 0) + 1 FROM item. Lives on the same
+    # connector. ``rules_values`` names the v2 query (the migration resolved it from v1's
+    # seq_id → seq_query_id → migrated query name).
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="item_next_id"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="item_next_id", sql="SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM item"),
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)",
+                 columns=[ColumnHint(name="ID"), ColumnHint(name="NAME")]),
+        QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # The fixture has rows 1, 2, 3 already → next id should be 4.
+    r = await conn.execute("ins", {"ID": None, "NAME": "from-seq"})
+    assert r.rowcount == 1
+    rows = (await conn.execute("all")).rows
+    assert rows[-1] == {"id": 4, "name": "from-seq"}
+    # A caller-supplied explicit value should NOT trigger the sequence — keeps the explicit value.
+    r = await conn.execute("ins", {"ID": 99, "NAME": "explicit"})
+    assert r.rowcount == 1
+    rows = (await conn.execute("all")).rows
+    assert {"id": 99, "name": "explicit"} in rows
+    # Two more INSERTs with NULL IDs — should land on 5 then 100 (max(99,4)+1, then +1).
+    await conn.execute("ins", {"ID": None, "NAME": "from-seq-2"})
+    await conn.execute("ins", {"ID": None, "NAME": "from-seq-3"})
+    final = (await conn.execute("all")).rows
+    ids = sorted(r["id"] for r in final if r["name"].startswith("from-seq"))
+    assert ids == [4, 100, 101]  # each call ran ``MAX(id) + 1`` in its own transaction
+
+
+@pytest.mark.asyncio
+async def test_form_rule_sequence_missing_query_logs_and_falls_through(pools: PoolRegistry, caplog) -> None:
+    """A SEQUENCE rule pointing at a query that doesn't exist on this connector logs a
+    warning and leaves the bind as NULL — the DB will reject the row if the column is NOT NULL,
+    which surfaces the misconfiguration clearly without crashing on an unrelated request."""
+    import logging
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="nope_not_a_query"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name) VALUES (:ID, 'x')",
+                 columns=[ColumnHint(name="ID")]),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    with caplog.at_level(logging.WARNING, logger="liberty.connectors.sql"):
+        r = await conn.execute("ins", {"ID": None})
+        assert r.rowcount == 1
+    # The warning names whichever of {sequence, query} failed to resolve. Phase 8 looks the id
+    # up in ``DictionaryFile.sequences`` first; a missing entry there → "unknown sequence".
+    assert any(
+        "references unknown sequence" in rec.message or "references unknown query" in rec.message
+        for rec in caplog.records
+    )

@@ -818,6 +818,97 @@ def test_migrate_dictionary() -> None:
     assert d2.resolve("USR_NAME", "fr") == (None, None)  # nothing at the top level
 
 
+def test_migrate_dictionary_sequence_becomes_first_class_section() -> None:
+    """v1's ``ly_sequence`` rows port to v2 as a first-class ``[sequences.<id>]`` section
+    (parallel to ``[enums.*]`` / ``[lookups.*]``). Each sequence's id is a slug of
+    ``seq_label`` so the builder UI shows human-readable names; ``query`` resolves through
+    ``seq_query_id`` → ``ly_qry_sql`` to the v2 read query name. Dictionary entries with
+    ``rules = "SEQUENCE"`` / ``"NN"`` carry the sequence *id* (not the query name) in
+    ``rules_values`` — the SQL connector resolves it via
+    :meth:`DictionaryFile.find_sequence` at INSERT time."""
+    dictionary = [
+        # SEQUENCE entry — rules_values is a seq_id (numeric) that resolves to a v2 sequence id.
+        {"dd_id": "ACT_UKID", "dd_label": "UKID", "dd_type": "number",
+         "dd_rules": "SEQUENCE", "dd_rules_values": "2"},
+        # NN entry — same mechanism, different v1 rule name
+        {"dd_id": "RISK_UKID", "dd_label": "UKID", "dd_type": "number",
+         "dd_rules": "NN", "dd_rules_values": "3"},
+        # SEQUENCE with no matching ly_sequence row → rules_values preserved (operator notices)
+        {"dd_id": "UNKNOWN_UKID", "dd_label": "Unknown", "dd_rules": "SEQUENCE", "dd_rules_values": "999"},
+        # SEQUENCE with non-numeric rules_values → leave it (already migrated / hand-edited)
+        {"dd_id": "ALREADY_NAMED", "dd_label": "Already", "dd_rules": "SEQUENCE",
+         "dd_rules_values": "some_sequence_id"},
+        # Non-SEQUENCE rule → rules_values untouched
+        {"dd_id": "OTHER", "dd_label": "Lookup", "dd_rules": "LOOKUP", "dd_rules_values": "4"},
+    ]
+    sequences = [
+        # seq_id 2 → query 79 (SOD_ACTIVITIES — read variant becomes ``sod_activities_get``).
+        # Slugified label → sequence id ``get_act_ukid_from_sod_activities``.
+        {"seq_id": 2, "seq_label": "Get ACT_UKID from SOD_ACTIVITIES",
+         "seq_query_id": 79, "seq_dd_id": "ACT_UKID"},
+        # seq_id 3 → query 80 (SOD_RISKS → ``sod_risks_select`` — non-GET CRUD works too)
+        {"seq_id": 3, "seq_label": "Get RISK_UKID from SOD_RISKS",
+         "seq_query_id": 80, "seq_dd_id": "RISK_UKID"},
+    ]
+    sql_rows = [
+        {"query_id": 79, "query_label": "SOD_ACTIVITIES", "query_crud": "GET", "query_pool": "nomasx1"},
+        {"query_id": 80, "query_label": "SOD_RISKS", "query_crud": "SELECT", "query_pool": "nomasx1"},
+    ]
+    out = migrate_dictionary(dictionary, sql_rows=sql_rows, sequence_rows=sequences)
+    # Sequences emitted as a first-class section; ``query`` points at the migrated v2 name,
+    # ``description`` carries the original v1 label for the builder UI.
+    sequences_out = out["sequences"]
+    assert sequences_out["get_act_ukid_from_sod_activities"] == {
+        "query": "sod_activities_get",
+        "description": "Get ACT_UKID from SOD_ACTIVITIES",
+    }
+    assert sequences_out["get_risk_ukid_from_sod_risks"] == {
+        "query": "sod_risks_select",
+        "description": "Get RISK_UKID from SOD_RISKS",
+    }
+    # Entries now reference the sequence by id (not the query name).
+    e = out["entries"]
+    assert e["ACT_UKID"]["rules_values"] == "get_act_ukid_from_sod_activities"
+    assert e["RISK_UKID"]["rules_values"] == "get_risk_ukid_from_sod_risks"
+    # An orphan seq_id leaves the value untouched — operator decides what to do.
+    assert e["UNKNOWN_UKID"]["rules_values"] == "999"
+    # A non-numeric rules_values isn't resolved (already a v2 sequence id, or hand-edited).
+    assert e["ALREADY_NAMED"]["rules_values"] == "some_sequence_id"
+    # LOOKUP rule kept as-is — only SEQUENCE / NN get the translation.
+    assert e["OTHER"]["rules_values"] == "4"
+
+
+def test_migrate_dictionary_sequence_cross_connector() -> None:
+    """When the sequence's query lives on a *different* pool than the connector this dictionary
+    section belongs to, ``connector`` is emitted on the SequenceDef so the SQL connector knows
+    which pool to look it up on. Mirrors the same convention :class:`LookupDef` uses."""
+    dictionary = [
+        {"dd_id": "JDE_UKID", "dd_rules": "SEQUENCE", "dd_rules_values": "5"},
+    ]
+    sequences = [
+        {"seq_id": 5, "seq_label": "JDE Next Number", "seq_query_id": 81, "seq_dd_id": "JDE_UKID"},
+    ]
+    # The sequence's query lives on the ``jdedwards`` pool; the dictionary section is for ``nomajde``.
+    sql_rows = [
+        {"query_id": 81, "query_label": "JDE_SEQ", "query_crud": "GET", "query_pool": "jdedwards"},
+    ]
+    out = migrate_dictionary(dictionary, sql_rows=sql_rows, sequence_rows=sequences, connector_name="nomajde")
+    seq = out["connectors"]["nomajde"]["sequences"]["jde_next_number"]
+    assert seq == {
+        "query": "jde_seq_get",
+        "description": "JDE Next Number",
+        "connector": "jdedwards",
+    }
+
+
+def test_migrate_dictionary_no_sequences_when_unset() -> None:
+    """No ``ly_sequence`` rows → no ``[sequences.*]`` section in the output. Keeps the migrated
+    TOML lean when the v1 deployment never used sequences (the open framework case)."""
+    out = migrate_dictionary([{"dd_id": "FOO", "dd_label": "Foo"}])
+    assert "sequences" not in out
+    assert "sequences" not in out.get("connectors", {}).get("any", {})
+
+
 def test_migrate_dictionary_password_rule_sets_password_format() -> None:
     """v1's ``dd_rules = "PASSWORD"`` marks a credential column. v2's frontend keys the masked
     widget (PasswordInput, "leave blank to keep" placeholder) off the entry's
