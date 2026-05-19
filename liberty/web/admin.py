@@ -95,32 +95,12 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     }
 
 
-@router.get("/config/connectors")
-async def get_connectors_config(request: Request, _: Superuser) -> dict[str, str]:
-    path = Path(request.app.state.settings.connectors.config_path)
-    content = path.read_text(encoding="utf-8") if path.exists() else ""
-    return {"path": str(path), "content": content}
-
-
-class ConfigBody(BaseModel):
-    content: str
-
-
-@router.put("/config/connectors")
-async def put_connectors_config(body: ConfigBody, request: Request, _: Superuser) -> dict[str, object]:
-    # Validate before writing — a syntactically or schema-invalid file must not land on disk.
-    try:
-        parsed = tomllib.loads(body.content)
-    except tomllib.TOMLDecodeError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid TOML: {exc}") from exc
-    try:
-        parse_connectors(parsed)
-    except Exception as exc:  # pydantic ValidationError or similar
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid connector config: {exc}") from exc
-    path = Path(request.app.state.settings.connectors.config_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body.content, encoding="utf-8")
-    return {"saved": True, "path": str(path)}
+# The legacy ``GET / PUT /config/connectors`` raw-TOML endpoints powered the Settings →
+# Raw editor (Monaco over the file). Removed — every config section now has a structured
+# builder (Pools / Connectors / Dictionary / Menus / Screens / Dashboards) that validates
+# its input against the Pydantic schemas before writing, so the raw escape hatch was both
+# redundant and a foot-gun (any typo there bypassed every per-section guard). The
+# /config/<section>/parsed endpoints stay in place for the structured editors.
 
 
 # ── ad-hoc SQL test-run for the per-query editor ──────────────────────────────────────────

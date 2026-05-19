@@ -1,24 +1,27 @@
-// Structured editor for `[connectors.*]` (sql + api) — Phase-7 config builder. Left = the connector
-// list; right pane has two views for a SQL connector — **Tables** (the default: queries grouped by
-// `<base>_<get|put|post|delete>` suffix, each table opens a unified editor where General/Columns/
-// Read/Update/Insert/Delete share one form) and **Form** (the full connector config via
-// SchemaNavigator — General/Pool/Queries, the escape hatch for non-CRUD queries and connector-level
-// settings). API connectors only show Form. Save validates each connector against the discriminated
-// schema + rewrites only the [connectors.*] tables of connectors.toml (a changed connector's subtree
-// is re-rendered, so its inline `columns = [{…}]` may become `[[…]]` — review in git), then reloads.
-// No rename yet — delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
+// Structured editor for `[connectors.*]` (sql + api) — Phase-7 config builder. Left = the
+// connector list; right pane shows the **Tables** view for SQL connectors (queries grouped by
+// `<base>_<get|put|post|delete>` suffix, each table opens a unified editor where
+// General/Columns/Read/Update/Insert/Delete share one form). API connectors render straight
+// into the SchemaNavigator (no CRUD shape to group by). A "Settings…" button raises a modal
+// hosting the full SchemaNavigator over the connector (label / pool / max_rows + loose
+// queries) — the rare escape hatch for non-CRUD shapes. Save validates each connector against
+// the discriminated schema + rewrites only the [connectors.*] tables of connectors.toml (a
+// changed connector's subtree is re-rendered, so its inline `columns = [{…}]` may become
+// `[[…]]` — review in git), then reloads. No rename yet — delete + re-add. Renders the body
+// only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy, Edit3 } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, useModals, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
-import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, tableExists } from './connectorTables'
+import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
+import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 
 type Connectors = Record<string, Record<string, unknown>>
 
@@ -109,10 +112,31 @@ export default function ConnectorsBuilder() {
   const [path, setPath] = useState('')
   const [conns, setConns] = useState<Connectors | null>(null)
   const [original, setOriginal] = useState('')
+  // Dictionary edits — only the scaffold flow writes here (adding a sequence/lookup creates
+  // a matching entry under the connector's scope). Tracked separately so the dirty flag /
+  // save() picks them up alongside the connector edits.
+  const [dictOriginal, setDictOriginal] = useState('')
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const [mode, setMode] = useState<'tables' | 'form'>('tables')
+  // Tables / Sequences / Lookups view — the connector list is the same underneath, the mode
+  // just filters which queries you see and which editor they open. Tables = CRUD-grouped
+  // queries (the canonical case). Sequences = queries referenced by ``[sequences.*]`` in
+  // dictionary.toml. Lookups = queries referenced by ``[lookups.*]``. The "loose" queries
+  // (none of the three) stay accessible via the Settings… escape hatch.
+  const [mode, setMode] = useState<'tables' | 'sequences' | 'lookups'>('tables')
+  // ``settingsOpen`` raises a small connector-level form (label / pool / licensed / max_rows /
+  // description). Was the old "Form view" toggle — promoted to a modal so the operator only
+  // sees those rare fields when they ask for them.
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Scaffold modal — opened from the Sequences / Lookups mode's "Add" button. The modal
+  // pulls live pool introspection, the operator picks a table + column(s), and on save we
+  // append the generated query to the connector + the matching ``[sequences.<id>]`` /
+  // ``[lookups.<id>]`` entry to dictionary.toml (under the connector's scope when one exists,
+  // else shared). Both files are written together on the next Save click.
+  const [scaffoldKind, setScaffoldKind] = useState<ScaffoldKind | null>(null)
   const [selTable, setSelTable] = useState<string | null>(null)
+  // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
+  const [selQuery, setSelQuery] = useState<string | null>(null)
   const [tq, setTq] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -127,17 +151,23 @@ export default function ConnectorsBuilder() {
     ])
       .then(([s, d, dd]) => {
         setSchemas(s); setPath(d.path); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
-        setDictionary(dd.dictionary)
+        setDictionary(dd.dictionary); setDictOriginal(JSON.stringify(dd.dictionary))
         setSel((cur) => (cur && d.connectors[cur] ? cur : Object.keys(d.connectors)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
   useEffect(load, [t])
 
-  // reset table selection + search when changing connector or mode
-  useEffect(() => { setSelTable(null); setTq('') }, [sel, mode])
+  // reset table selection + search when switching connectors
+  useEffect(() => { setSelTable(null); setSelQuery(null); setTq(''); setSettingsOpen(false); setMode('tables') }, [sel])
+  // reset list selection + search when switching mode (different list, different selection)
+  useEffect(() => { setSelTable(null); setSelQuery(null); setTq('') }, [mode])
 
-  const dirty = useMemo(() => conns != null && JSON.stringify(conns) !== original, [conns, original])
+  const dirty = useMemo(() => {
+    const connsDirty = conns != null && JSON.stringify(conns) !== original
+    const dictDirty = dictionary != null && JSON.stringify(dictionary) !== dictOriginal
+    return connsDirty || dictDirty
+  }, [conns, original, dictionary, dictOriginal])
   const schemaFor = (c: Record<string, unknown>): JsonSchema | null => (!schemas ? null : c.type === 'api' ? schemas.api : schemas.sql)
 
   // Per-connector dynamic enum: `DD_ENTRIES` for the current connector — shared entries plus the
@@ -270,11 +300,44 @@ export default function ConnectorsBuilder() {
     setSelTable(newBase)
   }
 
+  // Handler for the scaffold modal save: append the new query to the connector + the new
+  // dictionary entry under the connector's per-connector scope (creating the scope if it
+  // doesn't exist yet — same convention DictionaryBuilder uses). The operator then hits the
+  // top-toolbar Save to commit both files; this just stages the edits in memory.
+  const onScaffoldSave = (kind: ScaffoldKind, result: { query: { name: string; sql: string; label?: string }; dictEntry: Record<string, unknown>; dictId: string }) => {
+    if (!sel || !conns || !dictionary) return
+    // 1) append the query to the selected connector's queries list
+    const conn = conns[sel] ?? {}
+    const existing = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
+    updateQueries(sel, [...existing, { ...result.query }])
+    // 2) write the dict entry under the connector's per-connector scope (creating it when
+    //    absent). The kind picks ``sequences`` vs ``lookups``; the dict key is ``result.dictId``.
+    const dictKey = kind === 'sequence' ? 'sequences' : 'lookups'
+    setDictionary((prev) => {
+      const cur = prev ?? { entries: {}, enums: {}, lookups: {}, sequences: {}, connectors: {} }
+      const connectors = { ...(cur.connectors ?? {}) }
+      const scope = { ...(connectors[sel] ?? {}) }
+      const section = { ...((scope as Record<string, Record<string, Record<string, unknown>>>)[dictKey] ?? {}) }
+      section[result.dictId] = result.dictEntry
+      ;(scope as Record<string, unknown>)[dictKey] = section
+      connectors[sel] = scope as typeof connectors[string]
+      return { ...cur, connectors }
+    })
+    setScaffoldKind(null)
+    setSelQuery(result.query.name)   // jump to the new query so the operator can tweak its SQL
+  }
+
   async function save() {
     if (!conns) return
     setBusy(true); setError(null); setStatus(null)
     try {
-      await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: conns })
+      const connsDirty = JSON.stringify(conns) !== original
+      const dictDirty = dictionary != null && JSON.stringify(dictionary) !== dictOriginal
+      if (connsDirty) await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: conns })
+      // Scaffold writes a sequence / lookup entry into dictionary.toml — PUT here so a single
+      // Save commits both files atomically (from the operator's view). The reload below then
+      // re-reads everything; ``load()`` resets both originals so the dirty flag clears.
+      if (dictDirty) await api.put<{ saved: boolean }>('/admin/config/dictionary/parsed', { dictionary })
       const r = await api.post<{ connectors: string[] }>('/admin/reload')
       setStatus(t('settings.connectors.saved', { connectors: r.connectors.join(', ') || `(${t('common.none')})` }))
       load()
@@ -282,6 +345,41 @@ export default function ConnectorsBuilder() {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally { setBusy(false) }
   }
+
+  // Names of queries referenced by a ``[sequences.*]`` / ``[lookups.*]`` entry pointing at
+  // *this* connector — drives the Sequences / Lookups filter modes. Each def can be defined
+  // at the shared scope (top-level ``[sequences.*]``) or scoped to a connector (under
+  // ``[connectors.<name>.sequences.*]``); the def's own ``connector`` field overrides the
+  // implicit scope, defaulting to the scope's own name. v1's per-app dictionaries map onto
+  // these so two migrated apps can carry separate ``[sequences.7]`` entries safely.
+  // *Hook MUST live above the early returns* — React's rules-of-hooks require a stable hook
+  // call order across every render, and the early returns below would otherwise skip it on
+  // the loading-fallback render and break the next render's hook count (the #310 error).
+  const queryNamesByMode = useMemo<{ sequences: Set<string>; lookups: Set<string> }>(() => {
+    const seqNames = new Set<string>()
+    const lkpNames = new Set<string>()
+    if (!dictionary || !sel) return { sequences: seqNames, lookups: lkpNames }
+    const ingest = (defs: Record<string, Record<string, unknown>> | undefined, target: Set<string>, defaultConn: string) => {
+      if (!defs) return
+      for (const [, def] of Object.entries(defs)) {
+        const conn = typeof def.connector === 'string' && def.connector ? def.connector : defaultConn
+        const query = typeof def.query === 'string' ? def.query : ''
+        if (conn === sel && query) target.add(query)
+      }
+    }
+    // Shared scope — operator must spell out ``connector = "<name>"`` on the def to point at
+    // *this* connector. (No implicit fallback — a shared def with no connector is "any" and
+    // we'd over-include it; surfacing only the explicit ones keeps the list tidy.)
+    ingest((dictionary.sequences ?? {}) as Record<string, Record<string, unknown>>, seqNames, '')
+    ingest((dictionary.lookups ?? {}) as Record<string, Record<string, unknown>>, lkpNames, '')
+    // Per-connector scope — the scope name is the default ``connector``.
+    const perConn = (dictionary.connectors ?? {}) as Record<string, { sequences?: Record<string, Record<string, unknown>>; lookups?: Record<string, Record<string, unknown>> }>
+    for (const [connName, secs] of Object.entries(perConn)) {
+      ingest(secs.sequences, seqNames, connName)
+      ingest(secs.lookups, lkpNames, connName)
+    }
+    return { sequences: seqNames, lookups: lkpNames }
+  }, [dictionary, sel])
 
   if (error && !conns) return <Banner $tone="error">{error}</Banner>
   if (!conns || !schemas) return <Centered />
@@ -293,7 +391,6 @@ export default function ConnectorsBuilder() {
   const selConn = sel && conns[sel] ? conns[sel] : null
   const selSchema = selConn ? schemaFor(selConn) : null
   const isSql = selConn?.type !== 'api'
-  const effectiveMode: 'tables' | 'form' = isSql ? mode : 'form'
 
   // --- table grouping (only when SQL + tables mode) --------------------------
   const queriesArr = (selConn && Array.isArray(selConn.queries) ? selConn.queries : []) as Record<string, unknown>[]
@@ -361,19 +458,62 @@ export default function ConnectorsBuilder() {
           {selConn && selSchema ? (
             <Stack gap={12}>
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
-                  [connectors.{sel}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {String(selConn.type)}</span>
-                </strong>
-                <Row gap={8}>
+                <Row gap={10} style={{ alignItems: 'center' }}>
+                  <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
+                    [connectors.{sel}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {String(selConn.type)}</span>
+                  </strong>
+                  {/* Mode switcher — Tables / Sequences / Lookups. Filters which queries are
+                      shown + which editor opens on click. SQL connectors only — API connectors
+                      have no CRUD / sequence / lookup grouping (queries aren't even a concept
+                      there). The 3-mode set comes from the user: tables (CRUD), sequences
+                      (queries referenced by ``[sequences.*]``), lookups (queries referenced by
+                      ``[lookups.*]``). Loose queries that don't fit any of the three stay in
+                      the Settings… modal. */}
                   {isSql && (
                     <ModeBar>
-                      <ModeBtn type="button" $active={effectiveMode === 'tables'} onClick={() => setMode('tables')}>
-                        <Layers size={13} /> {t('settings.tables.tablesView')}
+                      <ModeBtn type="button" $active={mode === 'tables'} onClick={() => setMode('tables')}>
+                        {t('settings.tables.tablesView')}
                       </ModeBtn>
-                      <ModeBtn type="button" $active={effectiveMode === 'form'} onClick={() => setMode('form')}>
-                        <FileCog size={13} /> {t('settings.tables.formView')}
+                      <ModeBtn type="button" $active={mode === 'sequences'} onClick={() => setMode('sequences')}>
+                        {t('settings.connectors.sequencesView', 'Sequences')}
+                      </ModeBtn>
+                      <ModeBtn type="button" $active={mode === 'lookups'} onClick={() => setMode('lookups')}>
+                        {t('settings.connectors.lookupsView', 'Lookups')}
                       </ModeBtn>
                     </ModeBar>
+                  )}
+                </Row>
+                <Row gap={8}>
+                  {/* Per-mode Add button — Tables / Sequences / Lookups each need their own
+                      creator. Tables: prompt-for-name + scaffold a ``<base>_get`` query stub
+                      (existing flow). Sequences / Lookups: open ScaffoldQueryModal which
+                      introspects the pool, lets the operator pick a table + column(s), and
+                      writes both the new query AND the matching dictionary entry. Hidden in
+                      the single-query editor (selQuery set) so it doesn't collide with the
+                      Back-to-list affordance. */}
+                  {isSql && mode === 'tables' && !selTable && (
+                    <Button $variant="ghost" $size="sm" onClick={() => sel && addTable(sel)} disabled={busy}>
+                      <Plus size={13} /> {t('settings.tables.addTable')}
+                    </Button>
+                  )}
+                  {isSql && mode === 'sequences' && !selQuery && (
+                    <Button $variant="ghost" $size="sm" onClick={() => setScaffoldKind('sequence')} disabled={busy}>
+                      <Plus size={13} /> {t('settings.connectors.addSequence', 'Add sequence')}
+                    </Button>
+                  )}
+                  {isSql && mode === 'lookups' && !selQuery && (
+                    <Button $variant="ghost" $size="sm" onClick={() => setScaffoldKind('lookup')} disabled={busy}>
+                      <Plus size={13} /> {t('settings.connectors.addLookup', 'Add lookup')}
+                    </Button>
+                  )}
+                  {/* Small connector-level "Settings…" — modal with type / pool / licensed /
+                      max_rows fields. The 3-mode body below handles the per-query editing;
+                      this button is just for the few connector-wide settings + the rare loose
+                      queries. */}
+                  {isSql && (
+                    <Button $variant="ghost" $size="sm" onClick={() => setSettingsOpen(true)} disabled={busy} title={t('settings.connectors.openSettings', 'Connector settings (pool / licensed / max rows)')}>
+                      <FileCog size={13} /> {t('settings.connectors.settings', 'Settings…')}
+                    </Button>
                   )}
                   <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
                     <Edit3 size={13} /> {t('settings.rename.button')}
@@ -383,16 +523,14 @@ export default function ConnectorsBuilder() {
                   </Button>
                 </Row>
               </Row>
-              {effectiveMode === 'form' && (
-                // For a SQL connector, thread its name into SqlConnectorContext so every
-                // SQL editor inside the navigator (queries → drill-in body → per-dialect maps)
-                // enables schema-aware autocomplete. API connectors don't have a pool to
-                // introspect — context stays undefined (the default).
-                <SqlConnectorContext.Provider value={isSql ? sel ?? undefined : undefined}>
+              {!isSql && (
+                // API connectors render straight into the SchemaNavigator — no Tables / CRUD
+                // shape to group by, no sequences / lookups either.
+                <SqlConnectorContext.Provider value={undefined}>
                   <SchemaNavigator root={{ label: sel!, schema: selSchema, value: selConn, onChange: (v) => update(sel!, v) }} />
                 </SqlConnectorContext.Provider>
               )}
-              {effectiveMode === 'tables' && (
+              {isSql && mode === 'tables' && (
                 selTable && queryDefSchema ? (() => {
                   // The corresponding Screen (if any) is keyed by (connector, get-slot name).
                   // The cross-link only shows when both are present + a screen with a dialog is
@@ -459,23 +597,179 @@ export default function ConnectorsBuilder() {
                         )
                       })}
                     </TableList>
-                    <Row gap={6}>
-                      <Button $variant="ghost" $size="sm" onClick={() => sel && addTable(sel)}>
-                        <Plus size={13} /> {t('settings.tables.addTable')}
-                      </Button>
-                    </Row>
+                    {/* "Add table" moved to the top toolbar (per-mode Add cluster) — keeps
+                        every per-mode creator in one place at the top of the page. */}
                     {grouped.loose.length > 0 && (
                       <LooseNote>{t('settings.tables.looseHint', { count: grouped.loose.length })}</LooseNote>
                     )}
                   </Stack>
                 )
               )}
+              {/* Sequences / Lookups views — flat list of queries from ``queriesArr`` whose
+                  name is referenced by any ``[sequences.*]`` / ``[lookups.*]`` entry in
+                  dictionary.toml (scoped to this connector — see ``queryNamesByMode`` above).
+                  Click a query → opens a single-query editor (the same per-query SchemaForm
+                  over the QueryDef schema that the Tables view uses inside the CRUD slots).
+                  The dictionary metadata (dd_id / value / label / params / …) stays editable
+                  in DictionaryBuilder — this view edits the SQL + params for the query
+                  itself, the dictionary def is a separate concern. */}
+              {isSql && (mode === 'sequences' || mode === 'lookups') && (() => {
+                const usedNames = mode === 'sequences' ? queryNamesByMode.sequences : queryNamesByMode.lookups
+                const matches = queriesArr.filter((q) => typeof q.name === 'string' && usedNames.has(q.name as string))
+                  .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+                const qNeedle = tq.trim().toLowerCase()
+                const shown = qNeedle ? matches.filter((q) => String(q.name).toLowerCase().includes(qNeedle)) : matches
+                const picked = selQuery ? queriesArr.find((q) => q.name === selQuery) : null
+                if (picked && queryDefSchema) {
+                  // Single-query editor — patches the picked query in place via
+                  // updateQueries. ``onBack`` clears the selection to return to the list.
+                  // Back button on the LEFT matches the Tables-mode ConnectorsTableEditor
+                  // header convention (operator's eye is already there from the click).
+                  return (
+                    <Stack gap={10}>
+                      <Row gap={8} style={{ alignItems: 'center' }}>
+                        <Button $variant="ghost" $size="sm" onClick={() => setSelQuery(null)}>
+                          ← {t('common.back')}
+                        </Button>
+                        <Mono style={{ fontSize: fontSize.sm }}>{String(picked.name)}</Mono>
+                      </Row>
+                      <SqlConnectorContext.Provider value={sel ?? undefined}>
+                        <SchemaForm
+                          schema={queryDefSchema}
+                          defs={allDefs}
+                          value={picked as Record<string, unknown>}
+                          onChange={(v: Record<string, unknown>) => {
+                            const next = queriesArr.map((q) => (q.name === picked.name ? v : q))
+                            updateQueries(sel!, next)
+                            // Track the (possibly renamed) query so the editor stays open on it.
+                            const vn = v.name
+                            if (typeof vn === 'string' && vn && vn !== picked.name) setSelQuery(vn)
+                          }}
+                        />
+                      </SqlConnectorContext.Provider>
+                    </Stack>
+                  )
+                }
+                return (
+                  <Stack gap={10}>
+                    {matches.length > 6 && (
+                      <NavSearch>
+                        <Search size={13} />
+                        <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`filter ${matches.length}…`} />
+                      </NavSearch>
+                    )}
+                    {matches.length === 0 ? (
+                      <Empty>
+                        {mode === 'sequences'
+                          ? t('settings.connectors.emptySequences', 'No sequences defined for this connector. Add one in Dictionary → Sequences and point its `query` at a query here.')
+                          : t('settings.connectors.emptyLookups', 'No lookups defined for this connector. Add one in Dictionary → Lookups and point its `query` at a query here.')}
+                      </Empty>
+                    ) : (
+                      <TableList>
+                        {shown.map((q) => {
+                          const name = String(q.name)
+                          const desc = typeof q.description === 'string' && q.description
+                            ? q.description
+                            : typeof q.label === 'string' && q.label
+                              ? q.label
+                              : null
+                          return (
+                            <TableRow key={name} type="button" onClick={() => setSelQuery(name)}>
+                              <span className="text">
+                                <span className="base">{name}</span>
+                                {desc && <span className="desc">{desc}</span>}
+                              </span>
+                            </TableRow>
+                          )
+                        })}
+                      </TableList>
+                    )}
+                  </Stack>
+                )
+              })()}
             </Stack>
           ) : (
             <Empty>{names.length ? t('settings.connectors.pickOne') : t('settings.connectors.empty')}</Empty>
           )}
         </FormCol>
       </Split>
+      {/* Settings modal — the "rare-case" escape hatch for SQL connectors: edits everything
+          the Tables view doesn't show (label / pool / max_rows / loose non-CRUD queries) via
+          the full SchemaNavigator. Click-outside / Escape / Close all dismiss; edits flow
+          through the same ``update`` callback as the inline editor, so the dirty flag /
+          Save / Reload at the top stay in sync. */}
+      {/* Settings modal — small connector-level form. Picks only the rare-edit fields
+          (``type``, ``pool``, ``licensed``, ``max_rows``) out of the full connector schema;
+          ``queries`` lives in the Tables / Sequences / Lookups views, not here. Click-outside
+          / Escape / Close all dismiss; edits flow through the same ``update`` callback so
+          the dirty flag at the top toolbar stays in sync. */}
+      {settingsOpen && selConn && selSchema && (() => {
+        const fieldKeys = isSql
+          ? ['type', 'pool', 'licensed', 'max_rows'] as const
+          : ['type', 'licensed'] as const
+        const settingsSchema = pickSchemaProperties(selSchema, fieldKeys as unknown as string[])
+        return (
+          <Overlay onClick={() => setSettingsOpen(false)}>
+            <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+              <ModalHeader>
+                <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <span>
+                    {t('settings.connectors.settings', 'Settings…')} ·{' '}
+                    <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
+                      [connectors.{sel}]
+                    </span>
+                  </span>
+                  <Button $variant="ghost" $size="sm" onClick={() => setSettingsOpen(false)}>
+                    <X size={13} /> {t('common.close')}
+                  </Button>
+                </Row>
+              </ModalHeader>
+              <ModalBody>
+                <SchemaForm
+                  schema={settingsSchema}
+                  defs={allDefs}
+                  value={selConn as Record<string, unknown>}
+                  onChange={(v: Record<string, unknown>) => {
+                    // Patch — keep keys we didn't pick (queries, endpoints, base_url, …) untouched.
+                    const patch: Record<string, unknown> = {}
+                    for (const k of fieldKeys) patch[k] = v[k]
+                    update(sel!, { ...selConn, ...patch })
+                  }}
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button $variant="ghost" $size="sm" onClick={() => setSettingsOpen(false)}>
+                  <X size={13} /> {t('common.close')}
+                </Button>
+              </ModalFooter>
+            </Modal>
+          </Overlay>
+        )
+      })()}
+      {/* Scaffold modal — Add sequence / Add lookup. Picks a table + column(s) from the
+          connector's live pool introspection, generates the SQL, and on save stages both a
+          new query (in this connector) and a matching dictionary entry (under the
+          connector's scope). The top-toolbar Save commits both files together. */}
+      {scaffoldKind && sel && (
+        <ScaffoldQueryModal
+          kind={scaffoldKind}
+          connector={sel}
+          existingDictIds={(() => {
+            // The "existing ids" set comes from the same dict scope the save handler writes
+            // to — per-connector ``[connectors.<sel>.<sequences|lookups>.*]``. Operator can't
+            // pick an id that already exists there.
+            const section = scaffoldKind === 'sequence' ? 'sequences' : 'lookups'
+            const perConn = (dictionary?.connectors ?? {}) as Record<string, Record<string, Record<string, Record<string, unknown>>>>
+            const ids = Object.keys(perConn[sel]?.[section] ?? {})
+            return new Set(ids)
+          })()}
+          existingQueryNames={new Set(queriesArr
+            .map((q) => typeof q.name === 'string' ? q.name : '')
+            .filter(Boolean))}
+          onSave={(result) => onScaffoldSave(scaffoldKind, result)}
+          onCancel={() => setScaffoldKind(null)}
+        />
+      )}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

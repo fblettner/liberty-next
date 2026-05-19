@@ -125,33 +125,12 @@ def test_reload_picks_up_new_connector(env) -> None:
         assert client.post("/auth/login", json={"username": "admin", "password": "adminpw"}).status_code == 200
 
 
-def test_config_get_requires_superuser(env) -> None:
-    app, conn_toml, _ = env
-    with TestClient(app) as client:
-        assert client.get("/admin/config/connectors").status_code == 401
-        assert client.get("/admin/config/connectors", headers=_h(client, "reader")).status_code == 403
-        r = client.get("/admin/config/connectors", headers=_h(client, "admin"))
-        assert r.status_code == 200
-        body = r.json()
-        assert body["path"] == str(conn_toml) and "[connectors.db]" in body["content"]
-
-
-def test_config_put_validates_then_writes(env) -> None:
-    app, conn_toml, db_url = env
-    with TestClient(app) as client:
-        h = _h(client, "admin")
-        assert client.put("/admin/config/connectors", json={"content": "x = ="}, headers=h).status_code == 422
-        assert client.put(
-            "/admin/config/connectors", json={"content": '[connectors.x]\ntype = "ftp"\n'}, headers=h
-        ).status_code == 422
-        # a non-superuser can't write
-        assert client.put("/admin/config/connectors", json={"content": "# ok"}, headers=_h(client, "reader")).status_code == 403
-        # valid content is written and reflected on the next GET, and Reload picks it up
-        new_content = _toml(db_url, extra_connector=True)
-        assert client.put("/admin/config/connectors", json={"content": new_content}, headers=h).json()["saved"] is True
-        assert conn_toml.read_text() == new_content
-        assert "[connectors.db2]" in client.get("/admin/config/connectors", headers=h).json()["content"]
-        assert set(client.post("/admin/reload", headers=h).json()["connectors"]) == {"db", "db2"}
+# ``GET / PUT /admin/config/connectors`` (raw TOML) was removed — the Settings UI dropped
+# its "raw editor" tab in favour of the per-section structured editors (Pools / Connectors /
+# Dictionary / Menus / Screens / Dashboards), each backed by ``/admin/config/<section>/parsed``
+# which validates against the matching Pydantic schema before writing. The structured editors
+# now cover every config concern, so the raw escape hatch is gone (and with it, the foot-gun
+# of writing invalid TOML that bypassed every per-section validation).
 
 
 def test_config_schema_and_pools_get(env) -> None:

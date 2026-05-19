@@ -35,3 +35,6 @@ config/dashboards.toml
 
 # local migration output (liberty-migrate -o …) — review/merge into config/, don't commit raw
 /migrated*.toml
+
+# Claude Code per-session runtime state — lock files, recall caches, etc.
+.claude/

@@ -1,8 +1,10 @@
-// Settings page = a tab switcher over the config editors: a structured builder per config section
-// (Pools, Connectors, Dictionary — Phase 7) and the raw `connectors.toml` Monaco editor as the
-// escape hatch. The active tab + the per-tab selection (app/screen) ride on the URL search
-// params so a deep link like `/settings?tab=screens&app=nomasx1&screen=security_users` opens
-// straight to the right place — used by the Connectors → Screens cross-link.
+// Settings page = a tab switcher over the config editors: one structured builder per config
+// section (Pools, Connectors, Dictionary, Menus, Screens, Dashboards). The raw TOML escape
+// hatch was removed — too easy to write invalid configs that don't validate against the
+// schema, and every section has a structured editor now. The active tab + the per-tab
+// selection (app/screen) ride on the URL search params so a deep link like
+// `/settings?tab=screens&app=nomasx1&screen=security_users` opens straight to the right
+// place — used by the Connectors → Screens cross-link.
 import { lazy, Suspense } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -17,9 +19,8 @@ const DictionaryBuilder = lazy(() => import('./DictionaryBuilder'))
 const MenusBuilder = lazy(() => import('./MenusBuilder'))
 const ScreensBuilder = lazy(() => import('./ScreensBuilder'))
 const DashboardsBuilder = lazy(() => import('./DashboardsBuilder'))
-const RawEditor = lazy(() => import('./RawEditor'))
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'dashboards', 'raw'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'dashboards'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -57,7 +58,6 @@ export default function Settings() {
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'dashboards'} onClick={() => setTab('dashboards')}>{t('settings.tabs.dashboards')}</TabBtn>
-        <TabBtn $active={tab === 'raw'} onClick={() => setTab('raw')}>{t('settings.tabs.raw')}</TabBtn>
       </Tabs>
       <Suspense fallback={<Centered />}>
         {tab === 'pools' ? <PoolsBuilder />
@@ -65,8 +65,7 @@ export default function Settings() {
           : tab === 'dictionary' ? <DictionaryBuilder />
           : tab === 'menus' ? <MenusBuilder />
           : tab === 'screens' ? <ScreensBuilder />
-          : tab === 'dashboards' ? <DashboardsBuilder />
-          : <RawEditor />}
+          : <DashboardsBuilder />}
       </Suspense>
     </PageLayout>
   )
