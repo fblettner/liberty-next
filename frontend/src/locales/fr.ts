@@ -427,8 +427,10 @@ const fr: Resources = {
       saved: 'Enregistré et rechargé. Applications avec écrans : {{apps}}',
       hint: "Enregistrer valide le fichier ScreensFile complet (id correspond à sa clé, dialog/tabs/fields/lookup_param_binds aller-retour cleanly), réécrit screens.toml — la table [screens] est remplacée en bloc, puis recharge.",
       editor: {
-        tabs: { general: 'Général', queries: 'Requêtes', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne' },
-        generalHint: "Affichage + indicateurs de comportement pour cet écran. `audit` câble les écritures AUD_<table> (slice 5) ; `connector` n'est défini que si l'écran tourne sur un connecteur différent de l'application.",
+        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne' },
+        generalHint: "Indicateurs de comportement pour cet écran — chargement auto, table d'audit, plafond de lignes, colonnes clés. Le connecteur n'est utile que si l'écran tourne sur un connecteur différent de l'application.",
+        columnsHint: "Configurez chaque colonne une seule fois — titre, format, valeur par défaut, filtrage, règles d'édition. La grille et le formulaire de dialogue utilisent les mêmes paramètres. Cliquez sur une colonne pour définir sa requête de lookup, ses filtres en cascade ou sa visibilité conditionnelle.",
+        columnsCrumb: 'Colonnes de {{id}}',
         connectorLabel: 'Connecteur',
         connectorUseApp: 'Utiliser le connecteur de l\'application — {{app}}',
         queriesHint: "Références aux requêtes CRUD — la requête de lecture est obligatoire ; les autres sont optionnelles et utilisées par le dialogue / l'éditeur en grille pour enregistrer/insérer/supprimer.",

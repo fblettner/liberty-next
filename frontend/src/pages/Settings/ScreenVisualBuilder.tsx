@@ -1063,10 +1063,19 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             // binds resolve to NULL on save, nulling out columns the operator never touched).
             // Hidden fields stay in the data model (no behaviour change), they just visually
             // group into a collapsible block at the bottom of the canvas.
+            // ``hidden`` / ``disabled`` / ``required`` are inherited from the column unless the
+            // field explicitly overrides (bool | null). Compute the effective value here so the
+            // canvas / badges reflect what the operator will see at runtime.
+            const effective = (f: Row, key: 'hidden' | 'disabled' | 'required'): boolean => {
+              const own = f[key]
+              if (own === true || own === false) return own
+              const col = colFor(f.name)
+              return col?.[key] === true
+            }
             const visibleFields: { f: Row; idx: number }[] = []
             const hiddenFields: { f: Row; idx: number }[] = []
             fields.forEach((f, idx) => {
-              if (f.hidden) hiddenFields.push({ f, idx })
+              if (effective(f, 'hidden')) hiddenFields.push({ f, idx })
               else visibleFields.push({ f, idx })
             })
             // Per-field card renderer — factored so the visible group + hidden group reuse the
@@ -1077,19 +1086,22 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             const renderCard = ({ f, idx: i }: { f: Row; idx: number }) => {
               const name = String(f.name ?? '')
               const column = colFor(name)
-              // Phase 2: dd / label live on the matching ColumnHint (Screen.columns) — the
-              // field is layout-only. Column override → dictionary fallback → name.
+              // Display metadata (dd / label / format / lookup binds) lives on the column.
               const ddId = (column?.dd as string | undefined) || name
               const dd = ddEntries?.get(ddId) ?? null
               const preview = previewFor(f, dd, column)
               const label = (column?.label as string | undefined) ?? dd?.label ?? name
               const span = Math.max(1, Number(f.colspan ?? 1))
+              // Effective flags: field's explicit override wins; otherwise inherit the column.
+              const isHidden = effective(f, 'hidden')
+              const isDisabled = effective(f, 'disabled')
+              const isRequired = effective(f, 'required')
               const Icon = preview.Icon
               return (
                 <Card
                   key={`${name}_${i}`}
                   $selected={selFieldIdx === i}
-                  $hidden={!!f.hidden}
+                  $hidden={isHidden}
                   $span={span}
                   $dragOver={dragOverIdx === i && dragIdx !== i}
                   draggable
@@ -1103,15 +1115,14 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                   <div className="lbl">
                     <Icon size={13} className="icon" />
                     <span>{label}</span>
-                    {(f.required as boolean) && <span style={{ color: colors.orange.main }}>*</span>}
+                    {isRequired && <span style={{ color: colors.orange.main }}>*</span>}
                   </div>
                   <div className="preview"><Icon size={11} /> {preview.sample}</div>
                   <div className="badges">
                     <span className="name">{name}</span>
-                    {/* Phase 2 — dd badge + lookup-bind count come from the matching column hint. */}
                     {column?.dd != null && column.dd !== '' && column.dd !== name && <Badge>dd:{String(column.dd)}</Badge>}
-                    {!!f.hidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
-                    {!!f.disabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
+                    {isHidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
+                    {isDisabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
                     {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
                       || (Array.isArray(f.required_when) && (f.required_when as unknown[]).length > 0)
                       || (Array.isArray(f.disabled_when) && (f.disabled_when as unknown[]).length > 0)

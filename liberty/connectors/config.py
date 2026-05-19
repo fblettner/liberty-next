@@ -69,10 +69,9 @@ class PoolConfig(BaseModel):
     password: str | None = Field(
         default=None,
         description=(
-            "DB password kept *out of the URL* — substituted in (escaped) when the engine is built. May be "
-            "an ENC: value (decrypted at runtime via the crypto master key, like v1's apps_password), plain "
-            "text, or a ${ENV} ref. Leave empty if it's already in the URL (an ENC: password in the URL is "
-            "still decrypted)."
+            "DB password kept out of the URL — substituted in (URL-escaped) when the engine connects. "
+            "May be an ENC: value (decrypted at runtime via the master key), plain text, or a ${ENV} "
+            "reference. Leave blank if the password is already in the URL."
         ),
         json_schema_extra={"format": "password"},
     )
@@ -85,10 +84,9 @@ class PoolConfig(BaseModel):
         json_schema_extra={"x_enum_ref": "DATASOURCE_TYPE"},
     )
     schemas: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Schemas"}, description=(
-        "Schema-name map for `#SCHEMA.<NAME>#` placeholders in this pool's queries → the real schema name "
-        "(v1's ly_db_schema). Values must be plain identifiers (SY920, db.schema). Lets the same query "
-        "target dev vs prod schemas — or several schemas under one DB user — without editing the SQL. "
-        "Name lookup is case-insensitive."
+        "Maps #SCHEMA.<NAME># placeholders in this pool's queries to the real schema name. Lets the "
+        "same query target dev vs prod schemas — or several schemas under one DB user — without "
+        "editing the SQL. Values must be plain identifiers (SY920, db.schema). Case-insensitive."
     ))
     pool_size: int = Field(default=5, description="Persistent connections kept in the pool.", json_schema_extra={"x_group": "Pool"})
     max_overflow: int = Field(default=10, description="Extra connections allowed beyond `pool_size` under load.", json_schema_extra={"x_group": "Pool"})
@@ -96,23 +94,17 @@ class PoolConfig(BaseModel):
     pool_recycle: int = Field(default=-1, description="Recycle a connection after this many seconds; -1 = never.", json_schema_extra={"x_group": "Pool"})
     echo: bool = Field(default=False, description="Log every SQL statement (debug only — very noisy).", json_schema_extra={"x_group": "Pool"})
     max_rows: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
-        "Default cap on rows a SELECT returns on this pool (v1's per-app apps_limit). Empty → no pool-level "
-        "cap. A connector's max_rows, a query's max_rows, or a per-request override each take precedence in "
-        "that order; the absolute fallback is 1000."
+        "Default cap on rows a SELECT returns on this pool. Each screen and each request can override; "
+        "the absolute fallback is 1000. Blank = no pool-level cap."
     ))
     trim_strings: bool | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
-        "Strip trailing whitespace from every string cell returned by SELECTs on this pool. v1 did this "
-        "automatically for Oracle so editing a label on a CHAR/NCHAR column (space-padded to its declared "
-        "width) didn't drag a long tail of trailing spaces into the dialog field. Default is auto: enabled "
-        "on Oracle dialect, disabled elsewhere. Set explicitly to ``true`` / ``false`` to override."
+        "Strip trailing whitespace from every string cell. Useful for Oracle CHAR/NCHAR columns "
+        "(space-padded to their declared width). Blank = auto (on for Oracle, off elsewhere)."
     ))
     coalesce_nulls: bool | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
-        "On Oracle, INSERT/UPDATE binds with ``None`` get type-appropriate sentinels before the bind "
-        "(``''`` for CHAR/NCHAR/VARCHAR2/NVARCHAR2, ``0`` for NUMBER). v1 did this so Oracle's NCHAR "
-        "(which can't store '' as distinct from NULL) accepted a 'no value' write as an empty/zero "
-        "instead of failing on a NOT NULL column. The connector introspects ``ALL_TAB_COLUMNS`` once per "
-        "(schema, table) and caches the result. Default is auto: enabled on Oracle dialect, disabled "
-        "elsewhere. Set explicitly to override."
+        "On INSERT/UPDATE, replace empty bind values with type-appropriate defaults (empty string for "
+        "CHAR/VARCHAR, 0 for NUMBER). Needed for Oracle NCHAR NOT-NULL columns that don't treat '' as "
+        "distinct from NULL. Blank = auto (on for Oracle, off elsewhere)."
     ))
 
 
@@ -132,129 +124,99 @@ class ParamDef(BaseModel):
 
 
 class FilterDep(BaseModel):
-    """One cascading-filter dependency for a column's TableView filter dropdown (v1's
-    ``ly_tbl_filters`` / ``ly_dlg_filters`` row). When the ``source`` filter (another
-    ``filter``-flagged column on the same query) has a value, this column's LOOKUP options
-    are narrowed to the rows whose ``column`` (a column of *that lookup query's* result)
-    equals the source's value — i.e. pick an App in one filter, the Role dropdown shows only
-    that App's roles. (v1's ``flt_source`` / ``flt_target``.) Purely a frontend behaviour:
-    the lookup query itself is unchanged. Ignored for non-LOOKUP columns."""
+    """A cascading filter — narrow this column's lookup options based on another filter's value.
+    Example: pick an Application in one filter, the Role dropdown then shows only that
+    application's roles. Only meaningful when this column's rule is LOOKUP."""
 
     model_config = ConfigDict(extra="forbid")
 
     source: str = Field(
-        description="Another filter-flagged column on the same query — its current value is the input.",
+        description="Another filter-flagged column on the same screen — its current value is the input.",
         json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
     )
     column: str = Field(
-        description="A result column of *this* column's lookup query to match the source's value against.",
+        description="Column of the lookup query's result to match the source's value against.",
         json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
     )
 
 
 class VisibleWhen(BaseModel):
-    """One conditional-visibility rule for a TableView grid column (v1's ``ly_tbl_col.cdn_*``).
-    A column may carry a single rule or a list of them (``ColumnHint.visible_when``) — *all* must
-    hold for the column to appear, and a rule holds when the named ``field`` server-filter is unset
-    or its value is ``value`` (or one of ``value`` when it's a list). So setting ``field`` to a value
-    outside the allowed set drops the *whole column* from the grid. (A table has no per-row "current
-    value", so this is the table form of v1's conditional rendering; forms/dialogs get the per-record
-    version in the form phase.) ``field`` should be a ``filter``-flagged column on the same query."""
+    """Show this column only when a server-filter has a given value. Useful when the same grid
+    serves several modes — e.g. show the "From / To date" column only when "Status" is filtered
+    to "Active". The column disappears from the grid entirely when the rule doesn't hold.
+    Set multiple rules to AND them. ``field`` must be another filter-flagged column on the
+    same screen."""
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(description="A filter-flagged column on the same query whose value gates this column's visibility.")
-    value: str | list[str] = Field(description="The allowed value (or list of values); the column hides when `field` is set to something else.")
+    field: str = Field(description="The filter column whose value gates this column's visibility.")
+    value: str | list[str] = Field(description="The allowed value, or list of allowed values.")
 
     def as_dict(self) -> dict[str, Any]:
         return {"field": self.field, "value": self.value}
 
 
 class ParamBind(BaseModel):
-    """Bind one ``:placeholder`` parameter of a target query — same shape used everywhere a
-    parameter binding shows up in v2 (a lookup combo on a dialog field, an action's argument,
-    a row context-menu trigger, a nested-tab read filter). v2's port of v1's ``ly_dlg_filters``
-    (the table was reused for every kind of parameter passing — v2 keeps the unified mechanism).
-    Two modes (exactly one of ``value`` / ``source`` set in practice, but both may be blank
-    during edits)::
-
-        {param = "SY", value = "01"}                    # literal binding
-        {param = "ROL_APPS_ID", source = "USR_APPS_ID"} # dynamic — read at call time
-    """
+    """Bind a parameter of a target query — for a lookup combo, an action argument, a row
+    context-menu trigger, or a nested-tab filter. Two modes: bind a literal value, or bind
+    another column's / field's current value (resolved at call time). Set exactly one of
+    ``value`` or ``source``. ``source = "#LOGIN_USER#"`` and ``#SYSDATE#`` are reserved
+    built-ins."""
 
     model_config = ConfigDict(extra="forbid")
 
-    param: str = Field(description="The target query's :placeholder name to bind.")
-    value: str | None = Field(default=None, description="Literal value to bind (mode A).")
+    param: str = Field(description="The :placeholder parameter to bind on the target query.")
+    value: str | None = Field(default=None, description="Literal value to bind.")
     source: str | None = Field(
         default=None,
-        description=(
-            "Name of the column / form-field whose current value to bind (mode B). Resolved "
-            "against the row (table context), the form (dialog context), or the firing event's "
-            "context (action / row menu). Reserved built-ins start with ``#`` — e.g. ``#LOGIN_USER#``, "
-            "``#SYSDATE#``."
-        ),
+        description="Column / field whose current value to bind. Read at call time from the firing context (row, dialog form, …).",
     )
 
 
 class ColumnHint(BaseModel):
-    """Optional *display* metadata for one result column. The column **schema**
-    (names + types) is still discovered from the query at run time — these hints only
-    augment it (a display title, visibility, column order, a width/alignment, a
-    free-text ``format`` the UI may interpret, a ``filter`` flag — v1's ``col_filter`` —
-    that surfaces the column in the TableView filter panel, ``filter_from`` — v1's ``ly_tbl_filters`` —
-    cascading-filter dependencies for that panel, and ``visible_when`` — v1's ``ly_tbl_col.cdn_*`` —
-    a condition that drops the whole column from the grid unless a server-filter has a given value).
-    ``label``/``format``
-    may be left out and pulled from the shared dictionary (``config/dictionary.toml``) instead:
-    the entry key is ``dd`` if set, else the column ``name``; an inline ``label``/``format`` here
-    still overrides the dictionary. v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows migrate to
-    this shape (``dd`` = v1's ``col_dd_id``). A hint for a column the query doesn't return
-    is ignored. The order of the ``columns`` list is the display order; columns with no
-    hint keep their discovery order and follow the hinted ones.
+    """Display + edit metadata for one column on a screen. Drives both the grid (the table view)
+    and the dialog form — set it once, both surfaces use it.
+
+    ``label`` and ``format`` fall back to the shared field dictionary when not set here. The
+    dictionary entry is looked up under ``dd`` if set, else the column ``name``; set ``dd = ""``
+    to opt out of dictionary lookup entirely.
+
+    The order of the ``columns`` list is the display order in the grid. Columns the read query
+    returns but that aren't hinted here keep their discovery order and follow the hinted ones.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="The result column this hint applies to (matched case-insensitively; a hint for a column the query doesn't return is ignored).")
+    name: str = Field(description="The result column this entry applies to (matched case-insensitively).")
     dd: str | None = Field(
         default=None,
-        description="Dictionary-entry key for the label/format/rule (config/dictionary.toml). Blank → looked up under `name`; set to \"\" to opt this column out of the dictionary.",
+        description="Dictionary entry to inherit label / format / rule from. Blank = use ``name`` as the key. Empty string = no dictionary lookup.",
         json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
     )
-    label: str | None = Field(default=None, description="Display title — overrides the dictionary's label.")
-    hidden: bool = Field(default=False, description="Hide this column in the grid by default (the user can still un-hide it via the Columns menu).")
-    filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Surface this column as a server-filter field in the TableView filter panel (v1's col_filter).")
-    filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading-filter dependencies (v1's ly_tbl_filters) — narrow this column's LOOKUP options when a source filter is set.")
-    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Conditional visibility (v1's cdn_*): a rule (or list of rules, all AND-ed) — the column drops from the grid unless a server-filter has the allowed value.")
-    width: int | None = Field(default=None, description="Fixed column width in pixels (blank → auto-size to content).")
+    label: str | None = Field(default=None, description="Display title in the grid header and the dialog field label.")
+    hidden: bool = Field(default=False, description="Hide this column in the grid (operator can still un-hide it via the Columns menu).")
+    filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Show this column in the grid's filter panel for pre-narrowing the query.")
+    filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading filters — narrow this column's lookup options when another filter is set.")
+    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Show this column only when another filter has a given value. Multiple rules are AND-ed.")
+    width: int | None = Field(default=None, description="Fixed grid column width in pixels. Blank = auto-size to content.")
     align: Literal["left", "right", "center"] | None = Field(
         default=None,
-        description='"left" / "right" / "center" — blank auto-aligns (numbers right, booleans centred).',
+        description="Grid cell alignment. Blank auto-aligns (numbers right, booleans centred, everything else left).",
         json_schema_extra={"x_enum_ref": "COLUMN_ALIGN"},
     )
     format: str | None = Field(
         default=None,
-        description='UI-interpreted format hint — "date" / "datetime" / "number" / "boolean" / "currency" / … — overrides the dictionary\'s. Free-text — the frontend tolerates v1\'s various aliases.',
+        description="How to render the value — date / datetime / number / boolean / currency / password / … Overrides the dictionary's format.",
         json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
     )
-    # ── per-screen-column field metadata (Phase 2 — promoted from ScreenField) ──────────
-    # These four were duplicated between ``ScreenField`` (for the dialog form) and the grid
-    # editor's per-column render path. v2's single-source-of-truth: live here on the screen's
-    # ``columns`` list so the same metadata drives both the grid cell renderer *and* the
-    # dialog form's input widget. ``ScreenField`` becomes layout-only (name + colspan +
-    # conditional rules); the dialog backend resolves these onto each field via the matching
-    # ``ColumnHint`` at ``/api/screens/{app}/{id}`` time.
+    # ── form-side metadata (drives both the grid cell renderer and the dialog form) ──────
     rules: str | None = Field(
         default=None,
         json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
         description=(
-            "Per-column rule override (v1's ``col_rules``). When set, replaces the dictionary "
-            "entry's ``rules`` for this column on this screen — used when one screen needs a "
-            "different widget than the global dictionary says (e.g. FSOBNM on F00950 wants "
-            "LOOKUP #9 even though OBNM's dictionary entry has no rule). Same kinds as "
-            "``DictionaryEntry.rules``: BOOLEAN / ENUM / LOOKUP / SEQUENCE / NN / LOGIN / "
-            "SYSDATE / CURRENT_DATE / PASSWORD / DEFAULT / DISABLED."
+            "How to render and validate the column's value. BOOLEAN renders a checkbox, ENUM a "
+            "dropdown, LOOKUP a searchable picker. Leave blank to inherit from the dictionary "
+            "entry. Set here when one screen needs a different widget than the global default."
         ),
     )
     rules_values: str | None = Field(
@@ -273,28 +235,38 @@ class ColumnHint(BaseModel):
             },
         },
         description=(
-            "The rule's argument (v1's ``col_rules_values``) — same shape as "
-            "``DictionaryEntry.rules_values``: true value for BOOLEAN, enum id for ENUM, "
-            "lookup id for LOOKUP, sequence id for SEQUENCE / NN."
+            "The rule's value: BOOLEAN → the true marker (Y / 1 / true); ENUM → the enum id; "
+            "LOOKUP → the lookup id; SEQUENCE / NN → the sequence id."
         ),
     )
     default: str | None = Field(
         default=None,
         json_schema_extra={"x_group": "Rule"},
+        description="Pre-fill value when adding a new row.",
+    )
+    required: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Rule"},
         description=(
-            "Pre-fill value on a new row (v1's ``col_default``). Used by the dialog form when "
-            "opening in *add* mode. (Form-rule defaults like SEQUENCE / SYSDATE / LOGIN are "
-            "resolved separately at INSERT time via the rule machinery.)"
+            "Operator must fill this column before saving. Dialog field can override "
+            "per-dialog if needed."
+        ),
+    )
+    disabled: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Read-only — the operator sees the value but can't change it. Dialog field can "
+            "override per-dialog if needed."
         ),
     )
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
         json_schema_extra={"x_group": "Rule"},
         description=(
-            "Parameter bindings for this column's *lookup* query (when the column's rule resolves "
-            "to a LOOKUP). Same :class:`ParamBind` shape used by actions/menus/cascading filters. "
-            "v2's port of v1's ``ly_dlg_filters`` for a field-level lookup narrowing (e.g. picking "
-            "a role narrows by the row's current app id)."
+            "Narrow this column's lookup query by binding extra parameters. Used when the "
+            "lookup depends on another field's value — e.g. picking a role narrows by the "
+            "row's current application id."
         ),
     )
 

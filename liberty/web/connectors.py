@@ -84,16 +84,14 @@ def _as_int(v: Any) -> int | None:
 
 def _find_screen_for_query(
     screens: ScreensFile, connector: str, query: str,
-) -> tuple[Screen | None, str | None]:
-    """Phase 3 — look up the screen whose ``read_query`` / ``update_query`` / ``insert_query`` /
-    ``delete_query`` matches *(connector, query)*. Returns ``(screen, slot)`` where ``slot`` is
-    one of ``"read"`` / ``"update"`` / ``"insert"`` / ``"delete"`` so callers can decide which
-    behaviour applies (column hints on read, audit table on writes, …). When several screens
-    reference the same query (a config bug, but possible — a shared read query across screens
-    for example), the first hit wins. ``(None, None)`` when nothing matches.
-
-    The effective connector is the screen's explicit ``connector`` field if set, else the app
-    name (the dict key) — matches the convention :func:`migrate_screens` uses."""
+) -> tuple[Screen | None, str | None, str | None]:
+    """Look up the screen whose ``read_query`` / ``update_query`` / ``insert_query`` /
+    ``delete_query`` matches *(connector, query)*. Returns ``(screen, slot, app)`` — the slot
+    name (``read`` / ``update`` / ``insert`` / ``delete``) for behaviour selection, plus the
+    *app* (the dict key in ``screens.toml``) so the route can use it as the dictionary scope
+    (operator metadata lives under one app's section even when the screen runs against a
+    different data pool). When several screens reference the same query, the first hit wins.
+    ``(None, None, None)`` when nothing matches."""
     slots = (("read_query", "read"), ("update_query", "update"),
              ("insert_query", "insert"), ("delete_query", "delete"))
     for app, app_screens in screens.screens.items():
@@ -103,8 +101,8 @@ def _find_screen_for_query(
                 continue
             for attr, slot in slots:
                 if getattr(s, attr) == query:
-                    return s, slot
-    return None, None
+                    return s, slot, app
+    return None, None, None
 
 
 def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
@@ -122,22 +120,30 @@ async def _run_sql(
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None,
 ) -> dict[str, Any]:
-    """Run *query* on *connector* with *params*. Phase 3 — when a matching :class:`Screen` is
-    found, thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``) into
-    the SQL connector. A query with no screen runs unadorned (no audit, no filter wrap,
-    no result-column dictionary resolution from per-screen hints — but dictionary lookup by
-    bind name still applies for write-side rule coercion)."""
-    screen, _slot = _find_screen_for_query(screens, connector, query) if screens else (None, None)
+    """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
+    thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
+    scope = the screen's app) into the SQL connector. A query with no screen runs unadorned
+    — no audit, no filter wrap, no per-screen rule resolution; dictionary lookup by bind name
+    still applies for write-side rule coercion using the connector's own name as scope."""
+    screen, _slot, screen_app = (
+        _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+    )
     column_hints = _column_hints_for(screen)
     audit_table = screen.audit_table if screen else None
     screen_max_rows = screen.max_rows if screen else None
+    # Dictionary scope follows the screen's app (where operator metadata lives), not the
+    # data-pool connector. Falls back to the connector's own name when there's no matching
+    # screen (a query opened by an AI tool / external caller / dashboard widget — those don't
+    # have a screen and the connector resolves rules against its own scope).
+    dict_scope = screen_app if screen is not None else None
     try:
-        conn = connectors.sql(connector)  # UnknownConnectorError if missing / wrong type
+        conn = connectors.sql(connector)
         # `user` is recorded on the audit row when the screen carries `audit_table`; otherwise
         # it's ignored. Pulled from the JWT principal — never the request body.
         result = await conn.execute(
             query, params, language=language, max_rows=max_rows, user=user,
             column_hints=column_hints, audit_table=audit_table, screen_max_rows=screen_max_rows,
+            dictionary_scope=dict_scope,
         )
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc

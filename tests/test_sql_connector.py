@@ -898,10 +898,13 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
     assert isinstance(out["CREATED_AT"], dt) and not isinstance(out["CREATED_AT"], date.__class__)
     assert isinstance(out["CREATED_ON"], date) and not isinstance(out["CREATED_ON"], dt)
     assert isinstance(out["JDE_DATE"], int)
-    today = date.today()
-    assert out["JDE_DATE"] == (today.year - 1900) * 1000 + today.timetuple().tm_yday
+    # The SYSDATE rule stamps ``datetime.now(UTC)`` — compare against the UTC date, not the
+    # local one, otherwise the test flakes across midnight UTC in non-UTC timezones.
+    from datetime import timezone
+    today_utc = dt.now(timezone.utc).date()
+    assert out["JDE_DATE"] == (today_utc.year - 1900) * 1000 + today_utc.timetuple().tm_yday
     # All three resolve to the same instant (the same ``now()`` per call).
-    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today
+    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today_utc
     # No format → bare datetime (the pre-coercion fallback).
     assert isinstance(out["PLAIN"], dt)
 

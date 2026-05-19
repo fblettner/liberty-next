@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, FileText, Plus, Trash2 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SearchSelect, Stack, type JsonSchema, type SearchSelectOption,
+  Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -31,10 +31,15 @@ type Row = Record<string, unknown>
 // Which top-level Screen properties belong on which inner tab. ``connector`` + the four CRUD
 // query refs are rendered as custom SearchSelects (driven by the workspace's connector list
 // and the selected connector's queries) — the rest fall through to SchemaForm for free.
-const GENERAL_FORM_KEYS = ['label', 'description', 'audit', 'auto_load', 'editable', 'uploadable'] as const
+// Phase 3 — ``audit_table`` (str) replaces ``audit`` (bool); ``max_rows`` + ``key_columns``
+// moved off QueryDef onto Screen and now live in the General form.
+const GENERAL_FORM_KEYS = ['label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable', 'key_columns'] as const
+// Phase 3 — Screen.columns drives both grid + dialog display (single source of truth). Edited
+// via SchemaNavigator on a dedicated tab.
+const COLUMNS_KEYS = ['columns'] as const
 
-type TabKey = 'general' | 'queries' | 'dialog' | 'actions' | 'rowmenu'
-const TAB_ORDER: TabKey[] = ['general', 'queries', 'dialog', 'actions', 'rowmenu']
+type TabKey = 'general' | 'queries' | 'columns' | 'dialog' | 'actions' | 'rowmenu'
+const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'dialog', 'actions', 'rowmenu']
 
 // ── styled bits ─────────────────────────────────────────────────────────────
 const TabsBar = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; margin-bottom: 14px;`
@@ -141,6 +146,13 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
   // its field-level enums + descriptions kick in.
   const generalSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, GENERAL_FORM_KEYS as unknown as string[]), [schema])
+  // Phase 3 — the Columns tab edits ``Screen.columns`` via SchemaNavigator. Same ColumnHint
+  // shape used elsewhere; carries the full ``$defs`` map so nested ``filter_from`` /
+  // ``visible_when`` / ``lookup_param_binds`` drill in via the breadcrumb navigator.
+  const columnsSchema = useMemo<JsonSchema>(
+    () => ({ ...pickSchemaProperties(schema, COLUMNS_KEYS as unknown as string[]), $defs: defs }),
+    [schema, defs],
+  )
   // (Schema-mode sub-schemas + tab/field mutation helpers are gone — the visual builder owns
   // the dialog-tab/field editing experience now. ``setProp`` / ``dialog`` / ``setDialog`` /
   // ``createDialog`` remain since they're used by the Dialog tab's empty-state "Create dialog"
@@ -223,6 +235,33 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       {renderQueryField('delete_query', false)}
     </>
   )
+
+  // Phase 3 — the Columns tab edits ``Screen.columns`` (single source of truth for per-screen
+  // display metadata: label / dd / format / hidden / filter / filter_from / visible_when / width
+  // / align / rules / rules_values / default / lookup_param_binds). Same shape drives both the
+  // grid editor and the dialog form. SchemaNavigator gives breadcrumb drill-down into each
+  // column hint and its nested rules.
+  const renderColumns = (): ReactNode => {
+    const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
+    return (
+      <>
+        <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
+        <SchemaNavigator
+          root={{
+            label: t('settings.screens.editor.columnsCrumb', { id }),
+            schema: columnsSchema,
+            value: { columns: currentColumns },
+            onChange: (v) => {
+              const next = Array.isArray(v.columns) && (v.columns as unknown[]).length
+                ? (v.columns as unknown[])
+                : null
+              setProp('columns', next)
+            },
+          }}
+        />
+      </>
+    )
+  }
 
   // ── shared action-list editor (slice 4: dialog `on_save`; slice 6: screen `row_menu`) ────
   // One editor for any `list[Action]` attachment point. Tracks its own expansion state so two
@@ -577,6 +616,7 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     switch (tab) {
       case 'general': return renderGeneral()
       case 'queries': return renderQueries()
+      case 'columns': return renderColumns()
       case 'dialog':  return renderDialog()
       case 'actions': return (
         // All action attachment points consolidated. Grouped visually by *when* they fire:

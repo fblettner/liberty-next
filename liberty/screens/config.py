@@ -63,15 +63,9 @@ from liberty.connectors.config import ColumnHint, ParamBind
 
 
 class FieldCondition(BaseModel):
-    """One per-field predicate evaluated against the dialog's current form state (v2's port of
-    v1's ``ly_cdn_params``). Mirrors :class:`liberty.connectors.config.VisibleWhen` in shape but
-    the evaluation context is the *form*, not server filters: ``field`` names another field on
-    the same dialog (its v2 name, matching ``ScreenField.name``), and the predicate holds when
-    that field's current form value equals ``value`` (or is in ``value`` when it's a list). A
-    list of these AND-s: every predicate must hold for the parent rule to fire. An empty list
-    on a ``ScreenField.visible_when`` / ``required_when`` / ``disabled_when`` is "no condition"
-    (= the static ``hidden`` / ``required`` / ``disabled`` flag decides). v1's other operators
-    (NOT_EQUAL, LIKE, …) aren't representable; the migrator skips them with a warning."""
+    """A condition based on another field's current value on the same dialog. Used by
+    ``visible_when`` / ``required_when`` / ``disabled_when`` to make the dialog react as the
+    operator types. Add multiple rules to AND them — all must hold for the parent to fire."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -80,39 +74,37 @@ class FieldCondition(BaseModel):
 
 
 class ScreenField(BaseModel):
-    """One field on a dialog tab — **layout-only** (Phase 2). References a column of the
-    screen's ``columns`` list by ``name``; the column carries all the display metadata
-    (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` /
-    ``lookup_param_binds``). The field only declares its placement on the tab grid
-    (``colspan``), its dialog-context state flags (``hidden`` / ``disabled`` / ``required``
-    — distinct from the *column's* grid-context flags), and the per-record conditional
-    rules that fire against the live form state.
+    """A field on a dialog tab — references a column from the screen's ``columns`` list by
+    ``name`` and adds placement (``colspan``) + per-dialog overrides.
 
-    Same convention as ``ColumnHint.name`` — the case-insensitive match against the read
-    query's columns lets v1's uppercase ``col_target`` line up with a Postgres-folded
-    lowercase result column.
+    Most fields don't need any overrides: the column already defines the label, format, rule,
+    default, lookup binds, required, and disabled. The field just says "show this column on
+    this tab, spanning N grid cells". Use the override flags only when a specific dialog needs
+    different behaviour — e.g. "this column is normally required but for this particular
+    dialog it's optional".
 
-    **Conditional rules**: ``visible_when`` / ``required_when`` / ``disabled_when`` each
-    take a list of :class:`FieldCondition` predicates evaluated against the dialog's live
-    form state. When the list is non-empty *and* every predicate holds, the rule fires
-    (the field shows / is required / is read-only); the static ``hidden`` / ``required`` /
-    ``disabled`` flags act as the fallback when the corresponding ``*_when`` list is empty.
-    v1's ``col_cdn_id`` migrates into ``visible_when``; the ``required_when`` /
-    ``disabled_when`` paths have no v1 source mass-migrated yet — operators set them via
-    the builder."""
+    Conditional rules (``visible_when`` / ``required_when`` / ``disabled_when``) fire against
+    the dialog's live form state — show / require / lock this field only when another field
+    has a given value."""
 
-    # ``extra = "ignore"`` (not "forbid") so a screens.toml from before Phase 2 keeps loading
-    # — operators re-migrate at their own pace via ``liberty-migrate screen``. The legacy
-    # per-field metadata (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` /
-    # ``default`` / ``lookup_param_binds``) is silently dropped on parse; runtime + builder
-    # paths read from the matching ``Screen.columns`` entry instead.
+    # ``extra = "ignore"`` so old screens.toml files keep loading. Operators re-migrate via
+    # ``liberty-migrate screen`` to move legacy per-field metadata onto Screen.columns.
     model_config = ConfigDict(extra="ignore")
 
-    name: str = Field(description="The screen column this field renders (matches ``Screen.columns[].name`` case-insensitively).")
-    hidden: bool = Field(default=False, description="Hide this field from the dialog by default.")
-    disabled: bool = Field(default=False, description="Render the field read-only on the dialog (v1's col_disabled).")
-    required: bool = Field(default=False, description="Field is required for save on the dialog (v1's col_required).")
-    colspan: int | None = Field(default=None, description="How many columns of the tab's grid this field spans (v1's col_colspan).")
+    name: str = Field(description="The screen column to render here (matches Screen.columns[].name).")
+    hidden: bool | None = Field(
+        default=None,
+        description="Hide this field on this dialog. Leave blank to inherit from the column.",
+    )
+    disabled: bool | None = Field(
+        default=None,
+        description="Make this field read-only on this dialog. Leave blank to inherit from the column.",
+    )
+    required: bool | None = Field(
+        default=None,
+        description="Require a value on this dialog. Leave blank to inherit from the column.",
+    )
+    colspan: int | None = Field(default=None, description="How many tab-grid columns this field spans.")
     visible_when: list[FieldCondition] = Field(
         default_factory=list,
         description=(
@@ -149,18 +141,13 @@ class _ScreenTabBase(BaseModel):
     id: str = Field(description="Stable id within the dialog (used as the tab's key in builders).")
     label: str | None = Field(default=None, description="Default-language tab title.")
     l: dict[str, str] = Field(default_factory=dict, description="Per-language overrides: {language_code: translated_label}.")
-    hide_on_add: bool = Field(default=False, description="Hide this tab when *adding* a row (v1's tab_disable_add='Y').")
-    hide_on_edit: bool = Field(default=False, description="Hide this tab when *editing* a row (v1's tab_disable_edit='Y').")
-    # ``actions`` is on every tab kind (form / nested_form / nested_table) — v1 routinely placed
-    # InputAction buttons alongside a nested FormsTable in the same tab (e.g. NOMAJDE Role
-    # dialog's "Roles" tab: Import Security + Merge Roles buttons + a roles-of-this-user table).
-    # Each entry's ParamBinds resolve against the live form state when clicked.
+    hide_on_add: bool = Field(default=False, description="Hide this tab when adding a new row.")
+    hide_on_edit: bool = Field(default=False, description="Hide this tab when editing an existing row.")
     actions: list["Action"] = Field(
         default_factory=list,
         description=(
-            "Per-tab action buttons. v2's port of v1's ``ly_dlg_col col_component='InputAction'`` "
-            "rows. Same Action union as ``Dialog.on_save`` / ``row_menu`` / ``Screen.actions`` — "
-            "run_query / call_api / notify / refresh / navigate / set_field / confirm."
+            "Action buttons that show on this tab — run a query, call an API endpoint, navigate "
+            "to another screen, show a notification, refresh the screen, etc."
         ),
     )
 
@@ -171,7 +158,7 @@ class FormTab(_ScreenTabBase):
     field is treated as ``"form"`` (see :func:`parse_screens`)."""
 
     type: Literal["form"] = "form"
-    cols: int | None = Field(default=None, description="CSS grid column count for this tab's fields (v1's tab_cols).")
+    cols: int | None = Field(default=None, description="How many columns the tab's grid spans.")
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown on this tab, in display order.")
 
 
@@ -194,7 +181,7 @@ class NestedFormTab(_ScreenTabBase):
     read_query: str = Field(description="Reads the linked row (typically returning 0 or 1 rows after the bind narrows it).")
     update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists.")
     insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed.")
-    cols: int | None = Field(default=None, description="CSS grid column count for the nested fields (v1's tab_cols).")
+    cols: int | None = Field(default=None, description="How many columns the nested form's grid spans.")
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown in the nested form, in display order.")
     param_binds: list[ParamBind] = Field(
         default_factory=list,
@@ -538,48 +525,34 @@ class Screen(BaseModel):
         default_factory=list,
         json_schema_extra={"x_group": "Columns"},
         description=(
-            "Per-screen display hints (label / hidden / filter / width / align / format / "
-            "filter_from / visible_when) — same :class:`ColumnHint` shape used on "
-            "``QueryDef.columns``. When non-empty, **this list overrides the read query's** "
-            "``columns`` for *this screen* — so two screens can show the same query with "
-            "different column orderings / labels / filters / hidden sets without forking the "
-            "SQL. Empty → the query's ``columns`` hints still drive the grid (Phase 1 "
-            "back-compat). Order is display order; hints for columns the query doesn't return "
-            "are ignored. Dictionary resolution and inline filter wrap follow the same rules "
-            "as ``QueryDef.columns``."
+            "The columns on this screen — display title, format, filtering, edit rules. Drives "
+            "both the grid view and the dialog form. Add one entry per column the read query "
+            "returns that needs explicit configuration; columns not listed here keep the query's "
+            "discovered name and the dictionary's defaults."
         ),
     )
-    auto_load: bool = Field(default=False, description="Run the read query on screen open (v1's tbl_auto_load).")
+    auto_load: bool = Field(default=False, description="Run the read query as soon as the screen opens, with no Run click.")
     audit_table: str | None = Field(
         default=None,
         description=(
-            "Audit table name to mirror writes into (Phase 3 — promoted from ``QueryDef.audit``; "
-            "v2's port of v1's ``tbl_audit = 'Y'`` + auto-derived ``AUD_<TABLE>``). When set on a "
-            "screen, every successful write through its ``update_query`` / ``insert_query`` / "
-            "``delete_query`` INSERTs into ``<audit_table>`` the bound params (uppercased) plus "
-            "three audit columns: ``AUD_ACTION`` (INSERT/UPDATE/DELETE), ``AUD_USER`` (the caller's "
-            "username), ``AUD_DATE`` (server timestamp). The route layer threads it into the SQL "
-            "connector at execute time. Blank → no auditing."
+            "Mirror every successful write on this screen into this audit table. Each row gets "
+            "three extra columns added: AUD_ACTION (INSERT / UPDATE / DELETE), AUD_USER (the "
+            "caller's username), AUD_DATE (server timestamp). Blank = no auditing."
         ),
     )
     max_rows: int | None = Field(
         default=None,
-        description=(
-            "Per-screen SELECT row cap (Phase 3 — promoted from ``QueryDef.max_rows``). Overrides "
-            "the connector's, then the pool's, then 1000 fallback. A per-request ``?_limit`` query "
-            "string still wins. Blank → defer to the connector / pool default."
-        ),
+        description="Cap how many rows this screen's read query returns. Blank = use the connector's / pool's default.",
     )
     key_columns: list[str] = Field(
         default_factory=list,
         description=(
-            "Result columns that identify a row (v1's ``col_key``) — the TableView's Excel import "
-            "matches imported rows against loaded ones on these to decide update-vs-insert. "
-            "Phase 3 — promoted from ``QueryDef.key_columns``."
+            "Result columns that uniquely identify a row. Used by the Excel import to decide "
+            "whether an imported row updates an existing one or inserts a new one."
         ),
     )
-    editable: bool = Field(default=True, description="Allow inline grid editing (v1's tbl_editable).")
-    uploadable: bool = Field(default=False, description="Show the Excel/CSV import button (v1's tbl_uploadable).")
+    editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
+    uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
     dialog: ScreenDialog | None = Field(default=None, description="Form for adding / editing a row — optional.")
     actions: list[Action] = Field(
         default_factory=list,

@@ -1,17 +1,22 @@
 // Unified per-table editor: presents a `<base>_<get|put|post|delete>` quartet (or whichever slots
 // exist) as ONE configurable object — a tab strip across the top:
-//   General · Columns · Read · Update · Insert · Delete
-// `General` (label/description/auto_load/max_rows/key_columns) and `Columns` (the display hints) are
-// table-level — `columns` is a result-schema annotation, it only lives on the read query, so both
-// tabs write to `<base>_get`. The four CRUD tabs edit only the body of their respective query
-// (sql / params / writable). Missing slot → a "+ Create" button that adds the empty query stub.
-// No rename yet (delete + re-add), matching the rest of the Phase-7 builders.
+//   General · Read · Update · Insert · Delete
+// **Phase 3** — per-screen behaviour (`columns` / `auto_load` / `audit_table` / `max_rows` /
+// `key_columns` / companion-query refs) has moved off `QueryDef` onto `Screen`. The connector's
+// per-table editor now only edits the SQL-level pieces of each query: General (label/description
+// on the read query — friendly metadata that still rides on `QueryDef`) and the four CRUD bodies
+// (sql / params / writable). Columns + per-table behaviour live in the Screen Designer's
+// "Columns" / "General" tabs — the "Open in Screens" link in this editor's header jumps to the
+// matching screen when one exists.
+//
+// Missing slot → a "+ Create" button that adds the empty query stub. No rename yet (delete +
+// re-add), matching the rest of the Phase-7 builders.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { Button, Row, SchemaForm, SchemaNavigator, SqlConnectorContext, Stack, type JsonSchema } from '../../common'
+import { Button, Row, SchemaForm, SqlConnectorContext, Stack, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
   CRUD_KINDS,
@@ -51,19 +56,19 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; margin-bottom: 10px;`
 
 // ── tabs ──────────────────────────────────────────────────────────────────────
-type TabKey = 'general' | 'columns' | CrudKind
+type TabKey = 'general' | CrudKind
 
-const TAB_ORDER: TabKey[] = ['general', 'columns', 'get', 'put', 'post', 'delete']
+const TAB_ORDER: TabKey[] = ['general', 'get', 'put', 'post', 'delete']
 const TAB_TO_CRUD: Partial<Record<TabKey, CrudKind>> = { get: 'get', put: 'put', post: 'post', delete: 'delete' }
 
-// table-level fields (sit on the _get query — only place where `columns` etc. make sense)
-const GENERAL_KEYS = ['label', 'description', 'auto_load', 'max_rows', 'key_columns']
-const COLUMNS_KEYS = ['columns']
+// Phase 3 — General edits only the friendly metadata still on QueryDef (label/description).
+// auto_load / audit / max_rows / key_columns / columns moved to Screen — edit them in the
+// Screen Designer's General + Columns tabs.
+const GENERAL_KEYS = ['label', 'description']
 // per-query body — `name` is left out (renames break grouping); writable hidden for read.
 const READ_BODY_KEYS = ['sql', 'params']
-// `audit` (slice 5) — names the AUD_<table> the SQL connector mirrors this writable query into;
-// only meaningful on write companions, so it's grouped alongside `writable` on the Update/Insert/Delete tabs.
-const WRITE_BODY_KEYS = ['sql', 'params', 'writable', 'audit']
+// Phase 3 — `audit` is gone from QueryDef; the audit-table name lives on `Screen.audit_table`.
+const WRITE_BODY_KEYS = ['sql', 'params', 'writable']
 
 export interface ConnectorsTableEditorProps {
   base: string
@@ -126,7 +131,6 @@ export default function ConnectorsTableEditor({
   const filledSlots = CRUD_KINDS.filter((c) => slots[c])
   // pre-pick the subset schemas — flatten x_group so the inner SchemaForm has no nested tabs.
   const generalSchema: JsonSchema = pickSchemaProperties(queryDefSchema, GENERAL_KEYS)
-  const columnsSchema: JsonSchema = { ...pickSchemaProperties(queryDefSchema, COLUMNS_KEYS), $defs: defs }
   const readBodySchema: JsonSchema = pickSchemaProperties(queryDefSchema, READ_BODY_KEYS)
   const writeBodySchema: JsonSchema = pickSchemaProperties(queryDefSchema, WRITE_BODY_KEYS)
 
@@ -193,31 +197,9 @@ export default function ConnectorsTableEditor({
         </>
       )
     }
-    if (tab === 'columns') {
-      if (!getSlot) return (
-        <Empty>
-          <Stack gap={10} style={{ alignItems: 'center' }}>
-            <div>{t('settings.tables.needRead', { name: `${base}_get` })}</div>
-            <Button $variant="ghost" $size="sm" onClick={() => createSlot('get')}>
-              <Plus size={13} /> {t('settings.tables.createSlot', { crud: 'GET' })}
-            </Button>
-          </Stack>
-        </Empty>
-      )
-      return (
-        <>
-          <Sub>{t('settings.tables.columnsHint')}</Sub>
-          <SchemaNavigator
-            root={{
-              label: t('settings.tables.columnsCrumb', { name: base }),
-              schema: columnsSchema,
-              value: { columns: (getSlot.query.columns as unknown[] | undefined) ?? [] },
-              onChange: (v) => editGet({ columns: Array.isArray(v.columns) && (v.columns as unknown[]).length ? v.columns : undefined }),
-            }}
-          />
-        </>
-      )
-    }
+    // Phase 3 — the Columns tab has moved to the Screen Designer (a single source of truth
+    // for column display metadata across the grid editor + the dialog form). The "Open in
+    // Screens" link in this editor's header jumps to the matching screen.
     const crud = TAB_TO_CRUD[tab]!
     return renderQueryBody(crud)
   }
@@ -255,7 +237,7 @@ export default function ConnectorsTableEditor({
       <TabsBar>
         {TAB_ORDER.map((k) => {
           const crud = TAB_TO_CRUD[k]
-          const missing = crud ? !slots[crud] : (!getSlot && (k === 'general' || k === 'columns'))
+          const missing = crud ? !slots[crud] : (!getSlot && k === 'general')
           return (
             <TabBtn key={k} type="button" $active={tab === k} $missing={missing} onClick={() => setTab(k)}>
               {t(`settings.tables.tab.${k}`)}{missing && <span className="badge">+</span>}

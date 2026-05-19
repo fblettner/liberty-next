@@ -425,8 +425,10 @@ const en = {
       saved: 'Saved & reloaded. Screen apps: {{apps}}',
       hint: 'Save validates the whole ScreensFile (id matches its key, dialog/tabs/fields/lookup_param_binds round-trip cleanly), rewrites screens.toml — the [screens] table is replaced wholesale, then reloads.',
       editor: {
-        tabs: { general: 'General', queries: 'Queries', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu' },
-        generalHint: 'Display + behaviour flags for this screen. `audit` wires AUD_<table> writes (slice 5); `connector` is set only when the screen runs against a different connector than the app.',
+        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu' },
+        generalHint: 'Behaviour flags for this screen — auto-load, audit table, row cap, key columns. The connector picker only matters when the screen runs against a different connector than the app.',
+        columnsHint: 'Configure each column once — display title, format, default value, filtering, edit rules. Both the grid view and the dialog form use these. Drill into a column to set its lookup query, cascading filters, or conditional visibility.',
+        columnsCrumb: 'Columns of {{id}}',
         connectorLabel: 'Connector',
         connectorUseApp: 'Use the app\'s connector — {{app}}',
         queriesHint: 'CRUD query refs — the read query is required; the rest are optional and used by the dialog / inline grid editor for save/insert/delete.',

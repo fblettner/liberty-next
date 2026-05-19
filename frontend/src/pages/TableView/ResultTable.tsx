@@ -83,7 +83,7 @@ function editCtrlOf(c: Column): EditCtrl {
   return 'text'
 }
 const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
-  kind === 'boolean' || kind === 'enum'
+  kind === 'boolean' || kind === 'enum' || kind === 'lookup'
     ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
     : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
 
@@ -997,12 +997,32 @@ export function ResultTable({
         const r = c.rule
         const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
         const map = data?.map
+        // Lookup-filter options for both the (ID) and the resolved-label columns: the ID
+        // column filters by code, the label column filters by label. Each picker shows
+        // "<code> — <label>" so the operator sees both. Empty until the lookup table loads.
+        // Use ``data.vKey`` / ``data.lKey`` (the *actual-case* row keys — Postgres folds
+        // identifiers to lowercase, so the dictionary's uppercase ``r.value`` / ``r.label``
+        // don't match row keys directly).
+        const lookupOptsByCode = data && data.rows
+          ? data.rows.map((row) => {
+              const code = row[data.vKey] == null ? '' : String(row[data.vKey])
+              const label = row[data.lKey] == null ? '' : String(row[data.lKey])
+              return { value: code, label: code && label && code !== label ? `${code} — ${label}` : (label || code) }
+            })
+          : undefined
+        const lookupOptsByLabel = data && data.rows
+          ? data.rows.map((row) => {
+              const code = row[data.vKey] == null ? '' : String(row[data.vKey])
+              const label = row[data.lKey] == null ? '' : String(row[data.lKey])
+              return { value: label || code, label: code && label && code !== label ? `${code} — ${label}` : (label || code) }
+            })
+          : undefined
         out.push({
           id: c.name,
           header: colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
-          ...filterPropsFor('text', undefined, align),
+          ...filterPropsFor('lookup', lookupOptsByCode, align),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             if (editMode && !isGroupRow(info)) return editCellFor(c, info)
@@ -1015,7 +1035,7 @@ export function ResultTable({
           id: `${c.name}__lookup`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (map?.get(String(v)) ?? String(v)) },
-          ...filterPropsFor('text'),
+          ...filterPropsFor('lookup', lookupOptsByLabel),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code

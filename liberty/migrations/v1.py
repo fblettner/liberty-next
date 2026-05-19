@@ -592,19 +592,25 @@ def migrate_column_hints(
     dlg_col_rows: Iterable[Mapping[str, Any]] = (),
     *,
     extra_filter_cols: Mapping[int, Iterable[str]] | None = None,
+    read_sql_by_qid: Mapping[int, str] | None = None,
 ) -> dict[int, list[dict[str, Any]]]:
     """Build ``{query_id: [column-hint dict]}`` from v1's ``ly_tbl_col`` / ``ly_dlg_col`` rows.
 
     Each row maps a query's result column (``col_target``) to a v2 hint
     (see :class:`~liberty.connectors.config.ColumnHint`): ``name`` = ``col_target``; ``dd`` =
-    ``col_dd_id`` *only when it differs from* ``name`` (when equal — the common case — it's omitted;
-    the connector looks the dictionary entry up under the column name); ``label`` only when an
-    explicit ``col_label`` overrides the dictionary; ``hidden`` when ``col_visible`` reads false;
-    ``filter`` when ``col_filter`` reads true (table widgets only — surfaces the column in the
-    TableView filter panel); ``format`` only when an explicit ``col_type`` overrides the dictionary.
-    Table-widget columns take precedence over form-field columns; the first occurrence of each
-    ``(query_id, col_target)`` wins, so the per-query list keeps ``col_seq`` order. (Labels themselves
-    live in the shared dictionary — see :func:`migrate_dictionary`.)
+    ``col_dd_id`` *only when it differs from* ``name``; ``label`` only when an explicit
+    ``col_label`` overrides the dictionary; ``hidden`` when ``col_visible`` reads false;
+    ``filter`` when ``col_filter`` reads true; ``format`` only when an explicit ``col_type``
+    overrides the dictionary. Table-widget columns take precedence over form-field columns;
+    the first occurrence of each ``(query_id, col_target)`` wins, so the per-query list keeps
+    ``col_seq`` order.
+
+    **Whitelist behaviour** (v1 parity): when *read_sql_by_qid* gives the SELECT for a query,
+    every result column NOT in v1's ``ly_tbl_col`` for that query gets a ``hidden = True``
+    hint appended. v1's TableView only showed columns listed in ``ly_tbl_col`` — unlisted
+    result columns were hidden. Without this, internal / audit columns the v1 SQL returns
+    but the operator never wanted in the grid (e.g. APPS_CTRY_ID, APPS_JDBC on
+    SETTINGS_APPLICATIONS) leak into v2.
 
     Args:
         tbl_col_rows / dlg_col_rows: rows from :func:`liberty.migrations.source.read_column_hints`
@@ -614,11 +620,23 @@ def migrate_column_hints(
             :func:`migrate_drill_filter_columns` — every named column is forced to
             ``filter = True`` on its destination's read query, regardless of v1's
             ``col_filter`` flag. A column with no existing hint gets a minimal one
-            (``{name, filter}``) so the migrator's ``_wrap_with_filters`` still binds it.
-            Matching is case-insensitive on ``col_target``.
+            (``{name, filter}``).
+        read_sql_by_qid: optional ``{query_id: read_sql}`` — when given, drives the
+            whitelist hide step above. Skipped for queries with no ly_tbl_col hints at
+            all (preserves "no whitelist → show every column" for connectors-only setups).
     """
     out: dict[int, list[dict[str, Any]]] = {}
     seen: set[tuple[int, str]] = set()
+    # Queries that had at least one ly_tbl_col row — these are "whitelisted" screens.
+    # Queries with no tbl_col rows AT ALL keep v1's "show every result column" behaviour.
+    tbl_qids: set[int] = set()
+    for r in tbl_col_rows:
+        qid_raw = r.get("query_id")
+        if qid_raw is not None:
+            try:
+                tbl_qids.add(int(qid_raw))
+            except (TypeError, ValueError):
+                pass
     for r in (*tbl_col_rows, *dlg_col_rows):
         qid_raw = r.get("query_id")
         target = str(r.get("col_target") or "").strip()
@@ -644,6 +662,24 @@ def migrate_column_hints(
         if fmt:
             hint["format"] = fmt  # explicit per-column override of the dictionary's format
         out.setdefault(qid, []).append(hint)
+
+    # v1 whitelist: hide result columns the operator never listed in ly_tbl_col. Skipped
+    # for queries with no tbl_col rows at all (no whitelist intent → show everything).
+    if read_sql_by_qid:
+        for qid in tbl_qids:
+            sql = read_sql_by_qid.get(qid)
+            if not sql:
+                continue
+            result_cols = _outermost_select_columns(sql)
+            if not result_cols:
+                continue
+            hints = out.setdefault(qid, [])
+            listed = {str(h["name"]).lower() for h in hints}
+            for col in result_cols:
+                if col.lower() in listed:
+                    continue
+                hints.append({"name": col, "hidden": True})
+                listed.add(col.lower())
 
     # Force `filter = True` on each drill-target column — these are the column names the
     # v1 context menu uses as `flt_target` (the param on the destination), so the URL drill
@@ -2727,13 +2763,34 @@ def migrate_screens(
         if not target:
             return None
         field: dict[str, Any] = {"name": target}
-        # ── layout-only field bits ─────────────────────────────────────────────────────────
-        if str(c.get("col_visible") or "Y").upper() in _HIDDEN_FLAGS:
-            field["hidden"] = True
-        if str(c.get("col_disabled") or "").upper() in _YES_FLAGS:
-            field["disabled"] = True
-        if str(c.get("col_required") or "").upper() in _YES_FLAGS:
-            field["required"] = True
+        # v1 keeps grid visibility (ly_tbl_col.col_visible) and dialog visibility
+        # (ly_dlg_col.col_visible) independent — same for col_disabled and col_required.
+        # We emit field overrides only when the dialog's flag DIFFERS from the column's
+        # default (which comes from ly_tbl_col via migrate_column_hints). When they match,
+        # the field inherits cleanly. When they differ (audit columns hidden in grid but
+        # visible in dialog; user/password hidden in grid but visible in dialog), the field
+        # explicitly overrides.
+        dlg_hidden = str(c.get("col_visible") or "Y").upper() in _HIDDEN_FLAGS
+        dlg_disabled = str(c.get("col_disabled") or "").upper() in _YES_FLAGS
+        dlg_required = str(c.get("col_required") or "").upper() in _YES_FLAGS
+        # Look up the matching column's current grid-side defaults from migrate_column_hints.
+        owning_qid = frm_query_by_frm.get(owning_frm)
+        col_hidden = False
+        col_disabled = False
+        col_required = False
+        if owning_qid is not None and column_hints:
+            for h in column_hints.get(owning_qid, []) or []:
+                if str(h.get("name") or "").upper() == target.upper():
+                    col_hidden = bool(h.get("hidden"))
+                    col_disabled = bool(h.get("disabled"))
+                    col_required = bool(h.get("required"))
+                    break
+        if dlg_hidden != col_hidden:
+            field["hidden"] = dlg_hidden
+        if dlg_disabled != col_disabled:
+            field["disabled"] = dlg_disabled
+        if dlg_required != col_required:
+            field["required"] = dlg_required
         if c.get("col_colspan") not in (None, 0):
             try:
                 field["colspan"] = int(c["col_colspan"])
@@ -2778,6 +2835,10 @@ def migrate_screens(
                 ov["rules"] = rules_v
             if rules_values_v:
                 ov["rules_values"] = rules_values_v
+            # ``hidden`` / ``disabled`` / ``required`` are emitted on the *field* above (per
+            # dlg_col). The column's grid-side defaults come from ``ly_tbl_col`` via
+            # ``migrate_column_hints``, kept independent so a column hidden in the grid can
+            # still appear in the dialog (audit timestamps are a common case).
             # Field-level lookup parameter bindings (v1 ly_dlg_filters). Same shape as field
             # binds in v1 — same shape as ColumnHint.lookup_param_binds in v2.
             binds: list[dict[str, Any]] = []
@@ -3428,6 +3489,14 @@ def migrate_pools(
     # ly_db_schema rows for a pool that has no ly_applications row → scaffold a stub carrying the schemas
     for name, sch in schemas_by_pool.items():
         pools.setdefault(name, {"url": "${LIBERTY_DB_URL_" + name.upper() + "}", "pool_pre_ping": True})["schemas"] = sch
+    # The framework pool — used by v2 for its own ly2_* tables when [auth] backend = "db", and
+    # as the fallback pool for any connector that doesn't name one. Always emitted so a fresh
+    # migration produces a runnable connectors.toml (operator points it at their framework DB
+    # via $LIBERTY_DB_URL).
+    pools.setdefault("default", {
+        "url": "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}",
+        "pool_pre_ping": True,
+    })
     return {"pools": pools}
 
 

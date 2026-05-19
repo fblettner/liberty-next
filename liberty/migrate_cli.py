@@ -91,23 +91,128 @@ def _placeholders(data: dict) -> list[str]:
     return out
 
 
+async def _build_dictionary(args: argparse.Namespace, engine) -> dict:
+    entries_rows = await read_dictionary(engine)
+    rule_rows = await read_dictionary_rules(engine)
+    seq_rows, _ = await read_sequences(engine)
+    return migrate_dictionary(
+        *entries_rows, *rule_rows, seq_rows,
+        default_language=args.default_language, connector_name=args.connector,
+    )
+
+
+async def _build_menu(args: argparse.Namespace, engine) -> dict:
+    return migrate_menus(*await read_menus(engine), app_name=args.connector)
+
+
+async def _build_screen(args: argparse.Namespace, engine) -> dict:
+    """Migrate v1 ly_tables + ly_dlg_* + ly_ctx_* + ly_evt_cpt into one app's screens.toml.
+    Returns the dict ready for ``render_toml``."""
+    screen_rows = await read_screens(engine)
+    cdn_params = await read_column_conditions(engine)
+    ctx_rows, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
+    tbl_cols, dlg_cols = await read_column_hints(engine)
+    tbl_flt, dlg_flt = await read_table_filters(engine)
+    tables_rows_for_hints = screen_rows[0]
+    dlg_frm_rows_for_hints = screen_rows[2]
+    raw_dlg_cols_for_hints = screen_rows[5]
+    raw_dlg_filters_for_hints = screen_rows[6]
+    drill_cols_for_hints = migrate_drill_filter_columns(
+        ctx_val_rows, ctx_filter_rows,
+        tables_rows=tables_rows_for_hints, dlg_frm_rows=dlg_frm_rows_for_hints,
+        tbl_col_rows=tbl_cols, dlg_col_rows=dlg_cols,
+    )
+    nested_cols_for_hints = migrate_nested_tab_filter_columns(
+        raw_dlg_cols_for_hints, raw_dlg_filters_for_hints,
+        table_rows=tables_rows_for_hints, dlg_frm_rows=dlg_frm_rows_for_hints,
+        tbl_col_rows=tbl_cols,
+    )
+    merged_filter_cols_for_hints: dict[int, list[str]] = {}
+    for src in (drill_cols_for_hints, nested_cols_for_hints):
+        for qid, cols in src.items():
+            bucket = merged_filter_cols_for_hints.setdefault(qid, [])
+            for col in cols:
+                if col not in bucket:
+                    bucket.append(col)
+    # Pull the read SQL per query_id so ``migrate_column_hints`` can apply v1's whitelist
+    # behaviour (hide result columns the operator never added to ly_tbl_col).
+    read_sql_by_qid: dict[int, str] = {}
+    for r in screen_rows[7]:   # ly_qry_sql ⋈ ly_query (sql rows)
+        qid = r.get("query_id")
+        crud = str(r.get("query_crud") or "").upper()
+        sql = str(r.get("query_sqlquery") or "")
+        if qid is None or crud not in ("GET", "SELECT") or not sql:
+            continue
+        try:
+            read_sql_by_qid.setdefault(int(qid), sql)
+        except (TypeError, ValueError):
+            pass
+    column_hints_by_qid = migrate_column_hints(
+        tbl_cols, dlg_cols, extra_filter_cols=merged_filter_cols_for_hints,
+        read_sql_by_qid=read_sql_by_qid,
+    )
+    # Merge cascading filter deps + conditional column visibility onto the same hints.
+    _table_filters_by_qid = migrate_table_filters(tbl_flt, dlg_flt)
+    _column_vis_by_qid = migrate_column_visibility(tbl_cols, dlg_cols, cdn_params)
+    for qid, hint_list in column_hints_by_qid.items():
+        per_col_filters = _table_filters_by_qid.get(qid) or {}
+        per_col_vis = _column_vis_by_qid.get(qid) or {}
+        for h in hint_list:
+            col_name = h.get("name")
+            if not col_name:
+                continue
+            if col_name in per_col_filters and "filter_from" not in h:
+                h["filter_from"] = [dict(d) for d in per_col_filters[col_name]]
+            if col_name in per_col_vis and "visible_when" not in h:
+                rules = per_col_vis[col_name]
+                h["visible_when"] = rules[0] if len(rules) == 1 else list(rules)
+    tables_rows, _, dlg_frm_rows = screen_rows[0], screen_rows[1], screen_rows[2]
+    sql_rows = screen_rows[7]
+    row_menus, promotable_dialogs = migrate_context_menus(
+        ctx_rows, ctx_val_rows, ctx_filter_rows,
+        tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
+        app_name=args.connector,
+    )
+    # Pull v1's named workflows so InputAction buttons + on_save chains resolve.
+    try:
+        act_rows = await read_actions(engine)
+    except Exception:
+        act_rows = ([], [], [], [], [], [])
+    actions_data: dict[str, Any] = migrate_actions(
+        *act_rows, sql_rows=sql_rows, app_name=args.connector,
+    )
+    seq_rows, _ = await read_sequences(engine)
+    key_columns_by_qid = migrate_key_columns(tbl_cols, dlg_cols)
+    screens_data = migrate_screens(
+        *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
+        promotable_dialogs=promotable_dialogs,
+        actions_data=actions_data,
+        sequence_rows=seq_rows,
+        column_hints=column_hints_by_qid,
+        key_columns=key_columns_by_qid,
+        app_name=args.connector,
+    )
+    # Auto-attach event-driven workflows (ly_evt_cpt → dialog.on_save / on_insert / on_delete).
+    try:
+        evt_rows = await read_event_actions(engine)
+    except Exception:
+        evt_rows = []
+    if act_rows[0] or evt_rows:
+        attach_actions_to_screens(
+            screens_data, actions_data,
+            event_rows=evt_rows, table_rows=tables_rows,
+            app_name=args.connector,
+        )
+    return screens_data
+
+
 async def _build(args: argparse.Namespace) -> dict:
     engine = make_engine(args.source_url)
     try:
         if args.command == "dictionary":
-            entries_rows = await read_dictionary(engine)
-            rule_rows = await read_dictionary_rules(engine)
-            # ``ly_sequence`` rows back ``dd_rules = "SEQUENCE"`` / ``"NN"`` entries — resolved
-            # to the v2 query name so the SQL connector can run it at INSERT time. v1's
-            # ``ly_seq_params`` is read but currently informational only (text() binds what
-            # the SQL references, so the WHERE narrows on whatever the bound row carries).
-            seq_rows, _seq_param_rows = await read_sequences(engine)
-            return migrate_dictionary(
-                *entries_rows, *rule_rows, seq_rows,
-                default_language=args.default_language, connector_name=args.connector,
-            )
+            return await _build_dictionary(args, engine)
         if args.command == "menu":
-            return migrate_menus(*await read_menus(engine), app_name=args.connector)
+            return await _build_menu(args, engine)
         if args.command == "actions":
             # Pull every v1 actions table + ly_qry_sql (so QUERY tasks resolve to v2 query names).
             action_rows, task_rows, branch_rows, param_rows, task_param_rows, param_filter_rows = (
@@ -119,120 +224,7 @@ async def _build(args: argparse.Namespace) -> dict:
                 sql_rows=sql_rows, app_name=args.connector,
             )
         if args.command == "screen":
-            # Pull ly_cdn_params for per-field `visible_when` conditions, plus the v1 context-menu
-            # tables (ly_ctxmenus / ly_ctx_val / ly_ctx_filters) so each screen with a
-            # ``tbl_ctx_id`` gets its row_menu populated with NavigateActions.
-            screen_rows = await read_screens(engine)
-            cdn_params = await read_column_conditions(engine)
-            ctx_rows, ctx_val_rows, ctx_filter_rows = await read_context_menus(engine)
-            # Phase 1 mirror: column hints onto the screen too. Same plumb the ``sql``/``all``
-            # subcommands use for ``migrate_sql_queries(column_hints=…)``. Pulled here so a
-            # ``liberty-migrate screen`` run produces a screens.toml whose Screen.columns already
-            # carries the v1 ly_tbl_col / ly_dlg_col hints — no need to re-run ``sql`` to populate
-            # the read query's columns as well. Drill / nested-tab filter columns flow in too so
-            # the screen sees the same ``filter = true`` set the wrapped read query does.
-            tbl_cols, dlg_cols = await read_column_hints(engine)
-            tbl_flt, dlg_flt = await read_table_filters(engine)
-            _, ctx_val_rows_for_filters, ctx_filter_rows_for_filters = await read_context_menus(engine)
-            tables_rows_for_hints = screen_rows[0]
-            dlg_frm_rows_for_hints = screen_rows[2]
-            raw_dlg_cols_for_hints = screen_rows[5]
-            raw_dlg_filters_for_hints = screen_rows[6]
-            drill_cols_for_hints = migrate_drill_filter_columns(
-                ctx_val_rows_for_filters, ctx_filter_rows_for_filters,
-                tables_rows=tables_rows_for_hints, dlg_frm_rows=dlg_frm_rows_for_hints,
-                tbl_col_rows=tbl_cols, dlg_col_rows=dlg_cols,
-            )
-            nested_cols_for_hints = migrate_nested_tab_filter_columns(
-                raw_dlg_cols_for_hints, raw_dlg_filters_for_hints,
-                table_rows=tables_rows_for_hints, dlg_frm_rows=dlg_frm_rows_for_hints,
-                tbl_col_rows=tbl_cols,
-            )
-            merged_filter_cols_for_hints: dict[int, list[str]] = {}
-            for src in (drill_cols_for_hints, nested_cols_for_hints):
-                for qid, cols in src.items():
-                    bucket = merged_filter_cols_for_hints.setdefault(qid, [])
-                    for col in cols:
-                        if col not in bucket:
-                            bucket.append(col)
-            column_hints_by_qid = migrate_column_hints(
-                tbl_cols, dlg_cols, extra_filter_cols=merged_filter_cols_for_hints,
-            )
-            # Merge cascading filter deps + conditional column visibility onto the same hints
-            # (parity with ``migrate_sql_queries``' shape — see :func:`migrate_sql_queries` for
-            # the merging logic). For Phase 1 we do it inline since :func:`migrate_screens`
-            # consumes the resolved per-query list directly.
-            _table_filters_by_qid = migrate_table_filters(tbl_flt, dlg_flt)
-            _column_vis_by_qid = migrate_column_visibility(tbl_cols, dlg_cols, cdn_params)
-            for qid, hint_list in column_hints_by_qid.items():
-                per_col_filters = _table_filters_by_qid.get(qid) or {}
-                per_col_vis = _column_vis_by_qid.get(qid) or {}
-                for h in hint_list:
-                    col_name = h.get("name")
-                    if not col_name:
-                        continue
-                    if col_name in per_col_filters and "filter_from" not in h:
-                        h["filter_from"] = [dict(d) for d in per_col_filters[col_name]]
-                    if col_name in per_col_vis and "visible_when" not in h:
-                        rules = per_col_vis[col_name]
-                        h["visible_when"] = rules[0] if len(rules) == 1 else list(rules)
-            # The context-menu migrator needs ly_tables / ly_dlg_frm / ly_qry_sql — these are
-            # already in the screen_rows tuple at positions 0, 2, and 7 respectively (see the
-            # read_screens docstring for the layout).
-            tables_rows, _, dlg_frm_rows = screen_rows[0], screen_rows[1], screen_rows[2]
-            sql_rows = screen_rows[7]
-            row_menus, promotable_dialogs = migrate_context_menus(
-                ctx_rows, ctx_val_rows, ctx_filter_rows,
-                tables_rows=tables_rows, dlg_frm_rows=dlg_frm_rows, sql_rows=sql_rows,
-                app_name=args.connector,
-            )
-            # Migrate actions first so ``migrate_screens`` can resolve v1's ``InputAction``
-            # columns (``ly_dlg_col col_component='InputAction'``) to v2's ``FormTab.actions``
-            # entries during the per-tab field loop. A v1 deployment without the workflow
-            # tables (libnsx1) just returns an empty actions_data.
-            try:
-                act_rows = await read_actions(engine)
-            except Exception:
-                act_rows = ([], [], [], [], [], [])
-            actions_data: dict[str, Any] = migrate_actions(
-                *act_rows, sql_rows=sql_rows, app_name=args.connector,
-            )
-            # Pull v1's sequences too — when a ly_dlg_col row has ``col_rules = 'SEQUENCE'`` /
-            # ``'NN'``, the migrator needs to translate the numeric ``seq_id`` in
-            # ``col_rules_values`` to the v2 slug-based sequence id (parallel to what
-            # ``migrate_dictionary`` does for top-level entries).
-            seq_rows, _seq_param_rows = await read_sequences(engine)
-            # Phase 3 — Screen.key_columns (was QueryDef.key_columns). Built from the same
-            # ly_tbl_col / ly_dlg_col rows that feed column hints.
-            key_columns_by_qid = migrate_key_columns(tbl_cols, dlg_cols)
-            screens_data = migrate_screens(
-                *screen_rows, cdn_param_rows=cdn_params, row_menus=row_menus,
-                promotable_dialogs=promotable_dialogs,
-                actions_data=actions_data,
-                sequence_rows=seq_rows,
-                column_hints=column_hints_by_qid,
-                key_columns=key_columns_by_qid,
-                app_name=args.connector,
-            )
-            # Event-driven action attachment via ``ly_evt_cpt`` — the *correct* model:
-            #   * FormsDialog evt 1 (dialog save) → ``dialog.on_save``
-            #   * FormsTable  evt 2 (row insert)  → ``Screen.on_insert``
-            #   * FormsTable  evt 3 (row delete)  → ``Screen.on_delete``
-            # The first task on FormsDialog events is skipped when it matches the screen's
-            # update/insert query — the dialog's main Save already runs that; the chain handles
-            # the additional related-table writes. v1 deployments without workflow tables
-            # (libnsx1) silently no-op here.
-            try:
-                evt_rows = await read_event_actions(engine)
-            except Exception:
-                evt_rows = []
-            if act_rows[0] or evt_rows:
-                attach_actions_to_screens(
-                    screens_data, actions_data,
-                    event_rows=evt_rows, table_rows=tables_rows,
-                    app_name=args.connector,
-                )
-            return screens_data
+            return await _build_screen(args, engine)
         parts: list[dict] = []
         if args.command in ("sql", "all"):
             queries, sql_rows = await read_sql_queries(engine)
@@ -411,20 +403,16 @@ def _summary(data: dict, *, command: str) -> str:
     pools = data.get("pools") or {}
     connectors = data.get("connectors") or {}
     queries = [q for c in connectors.values() if c.get("type") == "sql" for q in (c.get("queries") or [])]
-    n_q, n_e = len(queries), sum(len(c.get("endpoints") or []) for c in connectors.values() if c.get("type") == "api")
-    n_hinted = sum(1 for q in queries if q.get("columns"))
-    n_filtered = sum(1 for q in queries if any(c.get("filter") for c in (q.get("columns") or [])))
+    n_q = len(queries)
+    n_e = sum(len(c.get("endpoints") or []) for c in connectors.values() if c.get("type") == "api")
     blob = render_toml(data)
     lines = [
-        f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies)"
-        f"{f' ({n_hinted} with column hints' if n_hinted else ''}{f', {n_filtered} with server-filter columns' if n_filtered else ''}{')' if n_hinted else ''}, {n_e} endpoint(s)"
+        f"# migrated: {len(pools)} pool(s), {len(connectors)} connector(s), {n_q} quer(y/ies), "
+        f"{n_e} endpoint(s)"
     ]
     ph = _placeholders(data)
     if ph:
         lines.append("# fill in these placeholders before use: " + ", ".join(ph))
-    if n_hinted:
-        lines.append("# column hints reference the shared field dictionary — run `liberty-migrate dictionary")
-        lines.append("#   --source-url <same> -o config/dictionary.toml` for the labels/types")
     if any("MIGRATED_PW_" in f"{p.get('url', '')}{p.get('password', '')}" for p in pools.values()):
         lines.append("# some pool `password`s are ${MIGRATED_PW_<NAME>} stubs (v1's apps_password wasn't ENC:) —")
         lines.append("#   set the env var(s), or recover each from v1's ly_applications.apps_password")
@@ -438,9 +426,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="liberty-migrate", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     for name, help_ in [
-        ("sql", "migrate ly_query/ly_qry_sql + ly_applications pools + ly_tbl_col/ly_dlg_col hints"),
+        ("sql", "migrate ly_query/ly_qry_sql + ly_applications pools"),
         ("api", "migrate ly_api/ly_api_conn"),
-        ("all", "sql + api"),
+        ("all", "everything in one go: connectors + (with --connector) dictionary + menus + screens"),
         ("dictionary", "migrate ly_dictionary (+ ly_dictionary_l) → dictionary.toml"),
         ("menu", "migrate ly_menus (+ ly_menus_l) → menus.toml"),
         ("screen", "migrate ly_tables + ly_dlg_frm/_tab/_col/_filters → screens.toml"),
@@ -462,6 +450,13 @@ def build_parser() -> argparse.ArgumentParser:
         elif name == "actions":
             p.add_argument("--connector", required=True, help="the app/connector these actions belong to ([migrated_actions.<name>])")
             p.set_defaults(prefix="", dbtype=None, default_language="en")
+        elif name == "all":
+            p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
+            p.add_argument("--dbtype", default=None, help="only migrate ly_qry_sql rows of this query_dbtype")
+            p.add_argument("--connector", default=None,
+                           help="App name for the per-app files (dictionary / menus / screens). When set, ``all`` also writes those alongside connectors.toml.")
+            p.add_argument("--default-language", default="en",
+                           help="language of v1's ly_dictionary.dd_label labels (default: en)")
         else:
             p.add_argument("--prefix", default="", help="prepend to migrated connector/pool names (e.g. v1_)")
             if name == "api":
@@ -469,7 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
             else:
                 p.add_argument("--dbtype", default=None, help="only migrate ly_qry_sql rows of this query_dbtype")
             p.set_defaults(default_language="en", connector=None)
-        p.add_argument("-o", "--out", help="write the TOML here (default: stdout)")
+        p.add_argument("-o", "--out", help="write the TOML here (default: stdout). With `all --connector`, the directory is also used for dictionary.toml / menus.toml / screens.toml.")
     return parser
 
 
@@ -478,16 +473,16 @@ def _build_output(data: dict, path: str | None, command: str, summary: str) -> t
     output is a comment-preserving merge into an existing file (so other apps' sections survive),
     ``False`` means a fresh render.
 
-    Per-app commands (``dictionary`` / ``menu`` / ``screen`` / ``actions``) migrate one app at a
-    time and naturally need merging when the operator targets the same file for several apps:
+    Per-app commands (``dictionary`` / ``menu`` / ``screen`` / ``actions``, plus the synthetic
+    ``all_per_app`` used by ``_run_all`` when ``--connector`` is set) migrate one app at a time
+    and naturally need merging when the operator targets the same file for several apps:
     nomasx1 first, then nomajde, then a re-run of nomasx1 to pick up new fields, etc. Without
-    this, each run **silently replaces** the file — that's how the user lost their nomajde
-    screens when we re-ran the nomasx1 migration to test row_click promotion.
+    this, each run **silently replaces** the file.
 
-    Whole-file commands (``sql`` / ``api`` / ``all``) migrate everything in one go from a single
-    v1 DB, so merging doesn't apply — the previous behaviour of replacing the file is kept.
+    Whole-file commands (``sql`` / ``api`` / ``all`` without ``--connector``) migrate everything
+    in one go from a single v1 DB, so merging doesn't apply — the file is replaced.
     """
-    PER_APP = {"dictionary", "menu", "screen", "actions"}
+    PER_APP = {"dictionary", "menu", "screen", "actions", "all_per_app"}
     fresh = f"{summary}\n\n{render_toml(data)}"
     if not path or command not in PER_APP:
         return fresh, False
@@ -515,19 +510,83 @@ def _build_output(data: dict, path: str | None, command: str, summary: str) -> t
     return tomlkit.dumps(existing), True
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    data = asyncio.run(_build(args))
-    summary = _summary(data, command=args.command)
-    text, merged = _build_output(data, args.out, args.command, summary)
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as fh:
+def _write_or_print(data: dict, path: str | None, command: str) -> None:
+    """Render *data* as TOML and either write it to *path* (with merge if the file exists for
+    per-app commands) or print to stdout. Logs the summary to stderr."""
+    summary = _summary(data, command=command)
+    text, merged = _build_output(data, path, command, summary)
+    if path:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write(text)
         print(summary.replace("# ", ""), file=sys.stderr)
         action = "merged into" if merged else "wrote"
-        print(f"{action} {args.out}", file=sys.stderr)
+        print(f"{action} {path}", file=sys.stderr)
     else:
         sys.stdout.write(text)
+
+
+def _sibling_path(connectors_out: str | None, name: str) -> str | None:
+    """Pick a sensible path for a per-app file when ``all --connector`` is run:
+    the same directory as the operator's connectors.toml output, with the conventional
+    name. Returns ``None`` when the operator targeted stdout (no `-o`)."""
+    if not connectors_out:
+        return None
+    from pathlib import Path as _P
+    return str(_P(connectors_out).parent / name)
+
+
+async def _run_all(args: argparse.Namespace) -> int:
+    """``liberty-migrate all``: connectors.toml always; when ``--connector`` is set, also write
+    dictionary.toml + menus.toml + screens.toml into the same directory. Each per-app file
+    merges into an existing one so several apps share one config dir without overwriting."""
+    # 1. Connectors (sql + api + pools). When `--connector` is set we're in per-app mode and
+    # `all_per_app` triggers the comment-preserving merge so a second app's connectors don't
+    # wipe the first one's section. Without `--connector` we keep the whole-file replace.
+    connectors_data = await _build(args)
+    connectors_label = "all_per_app" if args.connector else "all"
+    _write_or_print(connectors_data, args.out, connectors_label)
+    if not args.connector:
+        # Connectors-only mode — print a hint about the per-app files for the operator who
+        # wanted everything in one shot.
+        print(
+            "hint: re-run with --connector <app-name> to also generate dictionary.toml + "
+            "menus.toml + screens.toml in the same directory.",
+            file=sys.stderr,
+        )
+        return 0
+
+    # 2. Per-app files. Each gets its own engine (clean transaction boundary; the builders
+    # close it themselves). Synthetic argparse namespace per command so the helpers see
+    # the args they need (connector / default_language / out).
+    import copy
+
+    def _ns(out_name: str) -> argparse.Namespace:
+        ns = copy.copy(args)
+        ns.out = _sibling_path(args.out, out_name)
+        return ns
+
+    for sub_cmd, file_name, builder in [
+        ("dictionary", "dictionary.toml", _build_dictionary),
+        ("menu", "menus.toml", _build_menu),
+        ("screen", "screens.toml", _build_screen),
+    ]:
+        engine = make_engine(args.source_url)
+        try:
+            sub_args = _ns(file_name)
+            sub_args.command = sub_cmd
+            data = await builder(sub_args, engine)
+        finally:
+            await engine.dispose()
+        _write_or_print(data, sub_args.out, sub_cmd)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command == "all":
+        return asyncio.run(_run_all(args))
+    data = asyncio.run(_build(args))
+    _write_or_print(data, args.out, args.command)
     return 0
 
 

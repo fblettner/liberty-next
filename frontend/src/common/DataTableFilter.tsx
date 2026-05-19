@@ -9,8 +9,9 @@ import { useTranslation } from 'react-i18next'
 import { Check } from 'lucide-react'
 import type { Column, FilterFn } from '@tanstack/react-table'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
+import { SearchSelect } from './SearchSelect'
 
-export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum'
+export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum' | 'lookup'
 
 /** Per-column extras carried in TanStack's `columnDef.meta`. */
 export interface FilterMeta {
@@ -111,12 +112,6 @@ genericFilterFn.autoRemove = (value) => {
 
 // ── controls ────────────────────────────────────────────────────────────────
 const Box = styled.div`display: flex; gap: 3px; align-items: center; min-width: 0;`
-const Sel = styled.select`
-  background: transparent; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
-  color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  padding: 2px 4px; cursor: pointer; flex-shrink: 0; max-width: 100%;
-  option { background: ${colors.bg.dropdown}; color: ${colors.text.secondary}; }
-`
 // The operator picker: a compact glyph button that opens a labelled menu (the native <select>
 // could only show the glyph or the name, not both, and styled badly next to the rest of the UI).
 const OpWrap = styled.div`position: relative; flex-shrink: 0;`
@@ -196,17 +191,24 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
   const meta = (column.columnDef.meta as FilterMeta | undefined)?.filter
   const kind: FilterKind = meta?.kind ?? 'text'
 
-  if (kind === 'boolean' || kind === 'enum') {
+  if (kind === 'boolean' || kind === 'enum' || kind === 'lookup') {
     const cur = (column.getFilterValue() as string | undefined) ?? ''
     const opts =
       kind === 'boolean'
         ? [{ value: 'true', label: t('common.true', 'true') }, { value: 'false', label: t('common.false', 'false') }]
         : meta?.options ?? []
+    // Themed SearchSelect (not a native <select>) so the dropdown portals out of the header
+    // and matches the rest of the app — operators dealing with hundreds of UDC values need
+    // type-ahead, which the native control can't do.
     return (
-      <Sel value={cur} onChange={(e) => column.setFilterValue(e.target.value || undefined)} onClick={(e) => e.stopPropagation()} style={{ width: '100%' }}>
-        <option value="">{t('table.filterAny', '(any)')}</option>
-        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </Sel>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: '100%' }}>
+        <SearchSelect
+          value={cur}
+          options={opts}
+          onChange={(v) => column.setFilterValue(v || undefined)}
+          anyLabel={t('table.filterAny', '(any)')}
+        />
+      </div>
     )
   }
 

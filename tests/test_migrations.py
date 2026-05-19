@@ -437,9 +437,11 @@ def test_migrate_pools() -> None:
         {"sch_pool": "jde_extra", "sch_name": "CTL", "sch_target": "JDECTL"},  # pool not in ly_applications → stub
     ]
     out = migrate_pools(_APPLICATIONS, db_schemas=db_schemas)["pools"]
-    # v1's `default` pool is skipped — v2 reserves [pools.default] for its own framework DB
-    assert "default" not in out
-    assert set(out) == {"nomasx1", "nomajde", "viajdbc", "incomplete", "jde_extra"}
+    # v1's `default` pool (its framework DB) is skipped, but v2 always emits its own
+    # `[pools.default]` framework pool with a ${LIBERTY_DB_URL:-sqlite…} fallback so a
+    # fresh checkout boots on SQLite without env vars.
+    assert out["default"]["url"] == "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
+    assert set(out) == {"default", "nomasx1", "nomajde", "viajdbc", "incomplete", "jde_extra"}
 
     nx = out["nomasx1"]
     # the password is a separate field (kept out of the URL); v1's `ENC:` value carried over verbatim
@@ -484,7 +486,9 @@ def test_migrate_pools_prefix_and_overrides_stubs() -> None:
     assert sql_part["pools"]["nomasx1"]["url"] == "${LIBERTY_DB_URL_NOMASX1}"
     merged = merge_connectors(sql_part, migrate_pools(_APPLICATIONS))
     assert merged["pools"]["nomasx1"]["url"].startswith("postgresql+asyncpg://")    # real one wins
-    assert merged["pools"]["default"]["url"] == "${LIBERTY_DB_URL_DEFAULT}"          # default-pool stub kept (skipped by migrate_pools)
+    # v2's framework pool — always emitted by migrate_pools — wins over the stub migrate_sql_queries
+    # left for [pools.default] (since migrate_pools is merged in last).
+    assert merged["pools"]["default"]["url"] == "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
     parse_connectors(tomllib.loads(render_toml(merged)))
 
 
@@ -1235,11 +1239,15 @@ def test_migrate_screens_with_dialog() -> None:
     fields = g["fields"]
     # Placeholder row (col_target='') is dropped.
     assert [f["name"] for f in fields] == ["USR_ID", "USR_ROLE_ID"]
-    # Phase 2: fields are layout-only — display metadata (``dd`` / ``label`` / ``default`` /
-    # ``lookup_param_binds`` / etc.) lives on the screen's ``columns`` list instead.
+    # Dialog-context flags (hidden/disabled/required) ride on the *field* — they come from
+    # ``ly_dlg_col`` and are independent of the grid's ``ly_tbl_col`` visibility. Field
+    # carries display metadata (dd / label / default / lookup_param_binds) only when the
+    # column overrides it; everything else lives on the column.
     assert fields[0] == {"name": "USR_ID", "required": True, "colspan": 2}
     assert fields[1] == {"name": "USR_ROLE_ID", "hidden": True, "disabled": True}
-    # … and the per-column metadata landed on ``Screen.columns`` — single source of truth.
+    # Per-column display metadata landed on ``Screen.columns`` (single source of truth for
+    # label / dd / format / default / lookup_param_binds / rules). Grid visibility (hidden)
+    # comes from ``ly_tbl_col`` via migrate_column_hints — not from dlg_col rows.
     cols = s["columns"]
     assert {c["name"]: c for c in cols} == {
         "USR_ID": {
@@ -2375,7 +2383,11 @@ async def test_read_applications(v1_engine) -> None:
     apps = await read_applications(v1_engine)
     assert {a["apps_pool"] for a in apps} == {"default", "nomasx1"}
     pools = migrate_pools(apps)["pools"]
-    assert "default" not in pools  # v2 reserves [pools.default]
+    # v1's "default" pool (its framework/definition DB) is skipped — but v2 always emits its own
+    # framework `[pools.default]` (used by the ly2_* tables + as the fallback pool). The URL
+    # uses the ``${LIBERTY_DB_URL:-...}`` default-fallback form so a fresh checkout boots on
+    # SQLite without env vars.
+    assert pools["default"]["url"] == "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
     assert pools["nomasx1"]["url"] == "postgresql+asyncpg://nomasx1@db.example:5432/nomasx1"
     assert pools["nomasx1"]["password"] == "ENC:nx"  # apps_password carried over verbatim
 
@@ -2543,16 +2555,17 @@ async def test_read_screens(v1_engine) -> None:
     tab = s.dialog.tabs[0]
     assert tab.label == "General" and tab.cols == 2 and tab.l == {"fr": "Général"}
     assert [f.name for f in tab.fields] == ["USR_ID", "USR_EXTRA"]
-    # Phase 2: fields are layout-only.
+    # Dialog-context flags (hidden/disabled/required) ride on the field — from ly_dlg_col.
     field = tab.fields[0]
-    assert field.required is True and field.colspan == 2
+    assert field.colspan == 2 and field.required is True
     assert field.visible_when == []
-    # Display metadata + lookup_param_binds live on ``Screen.columns``.
+    # Display metadata (label/format/default/lookup_param_binds) lives on ``Screen.columns``;
+    # grid hidden comes from ``ly_tbl_col`` (independent of dialog hidden).
     cols_by_name = {c.name: c for c in s.columns}
     usr = cols_by_name["USR_ID"]
-    # col_label='Id' overrides the dictionary; col_dd_id == col_target → ``dd`` left unset
-    # (the column reads the dictionary entry under its own name as the fallback).
     assert usr.label == "Id" and usr.dd is None and usr.default == "0"
+    # Column.required is NOT set from dlg_col (that's a dialog-context flag, on the field).
+    assert usr.required is False
     binds = [{"param": b.param, "value": b.value, "source": b.source} for b in usr.lookup_param_binds]
     assert binds == [
         {"param": "STATUS", "value": "A", "source": None},
@@ -2618,7 +2631,9 @@ def test_cli_sql_to_file(tmp_path) -> None:
     assert "nomasx1" in cfg.pools
     assert "postgresql+asyncpg://nomasx1@db.example:5432/nomasx1" in text_out
     assert 'password = "ENC:nx"' in text_out  # carried over from apps_password, kept out of the URL
-    assert "${LIBERTY_DB_URL_DEFAULT}" in text_out  # the default pool kept its env-var stub
+    # The framework `[pools.default]` falls back to SQLite if $LIBERTY_DB_URL isn't set, so a
+    # fresh checkout boots without env vars.
+    assert "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}" in text_out
     # Phase 3 — column hints (label / dd / hidden / filter_from / visible_when) live on the
     # Screen, not QueryDef. The query carries only sql/params/writable/description/label.
     sql_conn = cfg.connectors["default"]
@@ -2634,8 +2649,9 @@ def test_cli_all_to_stdout(tmp_path, capsys) -> None:
     url = _make_v1_db(tmp_path)
     assert migrate_main(["all", "--source-url", url]) == 0
     out = capsys.readouterr().out
-    assert "fill in these placeholders" in out  # ${LIBERTY_DB_URL_DEFAULT} (the framework pool stub)
     assert "ENC:" in out  # the migrated pool's password (apps_password ENC: value, kept out of the URL)
+    # The framework pool's URL uses the SQLite-fallback form so a fresh checkout boots without env vars.
+    assert "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}" in out
     # Phase 3 — column hints went to Screen, not QueryDef, so the dictionary-prompt is now
     # conditional on whether any screens were migrated. ``all`` only emits connectors.toml,
     # not screens.toml — so the prompt for ``liberty-migrate screen`` should appear too.
@@ -2709,10 +2725,11 @@ def test_cli_screen(tmp_path) -> None:
     tab = s.dialog.tabs[0]
     assert tab.label == "General" and tab.l == {"fr": "Général"}
     field = tab.fields[0]
+    # Field carries dialog-context required (from dlg_col); lookup_param_binds + label/format
+    # live on the column (single source of truth for display metadata).
     assert field.name == "USR_ID" and field.required is True
-    # Phase 2 — ``lookup_param_binds`` now lives on ``Screen.columns[]`` (single source of
-    # truth for both dialog form + grid edit). The migration emits them there.
     cols = {c.name: c for c in s.columns}
+    assert cols["USR_ID"].required is False  # dlg_col flags don't pollute the column's grid defaults
     assert [(b.param, b.value, b.source) for b in cols["USR_ID"].lookup_param_binds] == [
         ("STATUS", "A", None),
         ("ROL_APPS_ID", None, "USR_APPS_ID"),

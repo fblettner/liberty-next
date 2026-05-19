@@ -681,6 +681,7 @@ class SQLConnector:
     def _apply_filter_wrap(
         self, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None, *,
         stmt_type: str, column_hints: list[ColumnHint] | None = None,
+        dict_scope: str | None = None,
     ) -> tuple[str, dict[str, Any] | None]:
         """v1-style **runtime** filter wrap. Inspects *params* for values bound to columns
         flagged ``filter = true`` on *column_hints* (the screen's :class:`ColumnHint` list,
@@ -730,7 +731,7 @@ class SQLConnector:
             fmt = col.format
             if fmt is None and col.dd != "":
                 key = (col.dd or col.name)
-                entry = self._dict.find_entry(key, connector=self.name)
+                entry = self._dict.find_entry(key, connector=dict_scope or self.name)
                 if entry is not None and entry.format:
                     fmt = entry.format
             # Python-coerce the value for non-text columns. Text-y formats are left as
@@ -758,6 +759,7 @@ class SQLConnector:
 
     def _column_meta_map(
         self, qdef: QueryDef, *, column_hints: list[ColumnHint] | None = None,
+        dict_scope: str | None = None,
     ) -> dict[str, dict[str, str | None]]:
         """Build a column-name → ``{format, rule, rules_values, default}`` map for *qdef*.
 
@@ -795,9 +797,10 @@ class SQLConnector:
                 "false_value": false_v,
             }
 
+        scope = dict_scope or self.name
         for col in (column_hints or []):
             key = (col.dd if col.dd else col.name) if col.dd != "" else None
-            entry = self._dict.find_entry(key, connector=self.name) if key else None
+            entry = self._dict.find_entry(key, connector=scope) if key else None
             out[col.name.upper()] = _entry_meta(entry, col.format)
             seen.add(col.name.upper())
         # Fallback: for write queries (no ``columns`` hint block), look up the dictionary
@@ -809,7 +812,7 @@ class SQLConnector:
             base = up[: -len("_ORIGINAL")] if up.endswith("_ORIGINAL") else up
             if base in seen:
                 continue
-            entry = self._dict.find_entry(base, connector=self.name)
+            entry = self._dict.find_entry(base, connector=scope)
             if entry is None:
                 continue
             out[base] = _entry_meta(entry, None)
@@ -818,7 +821,7 @@ class SQLConnector:
 
     def _apply_form_rules(
         self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, user: str | None,
-        column_hints: list[ColumnHint] | None = None,
+        column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
     ) -> dict[str, Any]:
         """Resolve form-layer rules + coerce types on the bound params, **synchronously**.
 
@@ -848,7 +851,7 @@ class SQLConnector:
         """
         if stmt_type not in WRITE_STATEMENTS:
             return bound
-        meta = self._column_meta_map(qdef, column_hints=column_hints)
+        meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
         if not meta:
             return bound
         out = dict(bound)
@@ -924,7 +927,7 @@ class SQLConnector:
 
     async def _resolve_sequences(
         self, conn: Any, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, language: str,
-        column_hints: list[ColumnHint] | None = None,
+        column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
     ) -> dict[str, Any]:
         """Run any ``SEQUENCE`` / ``NN`` rule queries in *conn* (the open write transaction)
         and substitute the result into the matching bind. Only fires on INSERT and only when
@@ -943,7 +946,7 @@ class SQLConnector:
         """
         if stmt_type != "INSERT":
             return bound
-        meta = self._column_meta_map(qdef, column_hints=column_hints)
+        meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
         if not meta:
             return bound
         out = dict(bound)
@@ -968,7 +971,7 @@ class SQLConnector:
             # query name" for legacy / hand-edited dictionaries that don't yet have the
             # ``[sequences.*]`` block — keeps the prior Phase-8 wiring working.
             seq_ref_str = str(seq_ref).strip()
-            seq_def = self._dict.find_sequence(seq_ref_str, connector=self.name)
+            seq_def = self._dict.find_sequence(seq_ref_str, connector=dict_scope or self.name)
             seq_query_name = seq_def.query if seq_def is not None else seq_ref_str
             seq_qdef = self._queries.get(seq_query_name)
             if seq_qdef is None:
@@ -1023,7 +1026,7 @@ class SQLConnector:
         self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
         max_rows: int | None = None, user: str | None = None,
         column_hints: list[ColumnHint] | None = None, audit_table: str | None = None,
-        screen_max_rows: int | None = None,
+        screen_max_rows: int | None = None, dictionary_scope: str | None = None,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
@@ -1046,6 +1049,11 @@ class SQLConnector:
         :class:`UnknownPoolError`; database errors propagate as the underlying SQLAlchemy exception.
         """
         lang = language or self._dict.default_language
+        # For a cross-pool screen (its connector ≠ its app), the dictionary entries live under
+        # the *app's* scope in dictionary.toml — not this SQL connector's scope. The route
+        # layer threads it in via ``dictionary_scope`` when the query is run through a screen;
+        # otherwise we fall back to the connector's own name (its own dictionary section, if any).
+        dict_scope = dictionary_scope or self.name
         qdef = self.get_query(query_name)
         cap = self._row_cap(qdef, max_rows, screen_max_rows)
         sql_text = _apply_schema_placeholders(
@@ -1076,6 +1084,7 @@ class SQLConnector:
         # binds with their coerced values.
         sql_text, params = self._apply_filter_wrap(
             sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
+            dict_scope=dict_scope,
         )
         bound = self._build_params(sql_text, qdef, params)
         # Resolve form-layer rules (LOGIN / SYSDATE / PASSWORD / DEFAULT) + coerce string
@@ -1085,6 +1094,7 @@ class SQLConnector:
         # wrap, and SYSDATE/etc. only fire on writes anyway).
         bound = self._apply_form_rules(
             bound, qdef, stmt_type=stmt_type, user=user, column_hints=column_hints,
+            dict_scope=dict_scope,
         )
         stmt = text(sql_text)
         is_select = stmt_type == "SELECT"
@@ -1094,7 +1104,7 @@ class SQLConnector:
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
                 columns = _apply_column_hints(
-                    _columns_from_result(result), column_hints or [], self._dict, lang, connector=self.name,
+                    _columns_from_result(result), column_hints or [], self._dict, lang, connector=dict_scope,
                 )
                 rows: list[dict[str, Any]] = []
                 truncated = False
@@ -1187,6 +1197,7 @@ class SQLConnector:
             # through with NULL (the DB will then reject the row if the column is NOT NULL).
             bound = await self._resolve_sequences(
                 conn, bound, qdef, stmt_type=stmt_type, language=lang, column_hints=column_hints,
+                dict_scope=dict_scope,
             )
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
