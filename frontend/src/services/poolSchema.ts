@@ -47,10 +47,21 @@ export function getPoolSchema(connector: string): Promise<PoolSchema | null> {
 }
 
 /** Drop a connector's cached schema — call after a /admin/reload or when the operator wants
- *  to pick up a freshly-added table without reloading the page. */
+ *  to pick up a freshly-added table without reloading the page. Clears every cache touched
+ *  by the introspection helpers, so the next call to either ``getPoolSchema`` or the lazy
+ *  ``getPoolSchemaNames`` / ``getPoolSchemaTables`` re-fetches. */
 export function invalidatePoolSchema(connector?: string): void {
-  if (connector === undefined) cache.clear()
-  else cache.delete(connector)
+  if (connector === undefined) {
+    cache.clear()
+    schemasCache.clear()
+    schemaTablesCache.clear()
+  } else {
+    cache.delete(connector)
+    schemasCache.delete(connector)
+    for (const k of Array.from(schemaTablesCache.keys())) {
+      if (k.startsWith(`${connector}\0`)) schemaTablesCache.delete(k)
+    }
+  }
 }
 
 /** Helper: flatten the table list into a `name → PoolTable` map (case-insensitive lookup, since
@@ -109,4 +120,59 @@ function parenDepths(sql: string): number[] {
     else if (c === ')') depth--
   }
   return out
+}
+
+// ─── lazy two-step schema fetch (for the CRUD wizard) ─────────────────────────────────────
+// Oracle pools enumerate every accessible owner under ``ALL_TAB_COLUMNS`` — the unscoped
+// ``/_schema`` call walks every schema's tables + columns, which can take 10+ seconds on a
+// JDE-style catalog (6 schemas × hundreds of tables each). The wizard needs only the schema
+// LIST up front; tables are only worth fetching once the operator picks one schema. These two
+// helpers wrap the matching backend endpoints, both session-cached.
+
+/** Lightweight schema-name list — used by the wizard's first dropdown. ``null`` on 403 / 502 /
+ *  404 so the caller degrades gracefully (the picker shows "no schemas"). */
+const schemasCache = new Map<string, Promise<{ pool: string; dialect: string; schemas: string[] } | null>>()
+export function getPoolSchemaNames(
+  connector: string,
+): Promise<{ pool: string; dialect: string; schemas: string[] } | null> {
+  let p = schemasCache.get(connector)
+  if (!p) {
+    p = api
+      .get<{ pool: string; dialect: string; schemas: string[] }>(`/api/sql/${encodeURIComponent(connector)}/_schemas`)
+      .catch((e) => {
+        if (e instanceof ApiError) return null
+        throw e
+      })
+    schemasCache.set(connector, p)
+  }
+  return p
+}
+
+/** Tables-of-one-schema lookup — the second step of the wizard flow. ``schema = null`` falls
+ *  back to the full unscoped walk (autocomplete path, not the wizard). ``nameLike`` is a
+ *  SQL-LIKE-style filter (``F009%``) applied before the per-table column fetch — the big
+ *  speedup knob on Oracle. Cached per ``(connector, schema, nameLike)`` for the session —
+ *  :func:`invalidatePoolSchema` clears it. */
+const schemaTablesCache = new Map<string, Promise<PoolSchema | null>>()
+export function getPoolSchemaTables(
+  connector: string, schema: string | null, nameLike: string | null = null,
+): Promise<PoolSchema | null> {
+  const pat = (nameLike ?? '').trim()
+  const key = `${connector}\0${schema ?? ''}\0${pat}`
+  let p = schemaTablesCache.get(key)
+  if (!p) {
+    const qs = new URLSearchParams()
+    if (schema) qs.set('schema', schema)
+    if (pat) qs.set('name_like', pat)
+    const tail = qs.toString()
+    const url = `/api/sql/${encodeURIComponent(connector)}/_schema${tail ? `?${tail}` : ''}`
+    p = api
+      .get<PoolSchema>(url)
+      .catch((e) => {
+        if (e instanceof ApiError) return null
+        throw e
+      })
+    schemaTablesCache.set(key, p)
+  }
+  return p
 }

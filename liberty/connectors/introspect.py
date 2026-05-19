@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -98,12 +99,57 @@ def _format_type(t: Any) -> str | None:
     return s.strip() or None
 
 
-def _walk_sync(sync_conn, *, dialect: str, pool_schemas: dict[str, str], max_tables: int) -> tuple[list[TableInfo], bool]:
+def _name_like_predicate(pattern: str | None) -> Callable[[str], bool] | None:
+    """Compile a SQL-LIKE-style pattern (``F009%``) into a case-insensitive predicate.
+    Returns ``None`` for an empty / unset pattern — caller treats this as "match all".
+
+    Wildcards:
+      * ``%`` matches any number of characters (the SQL convention)
+      * ``_`` is treated **literally** here — operators routinely have underscores in v1's
+        column / table names (``USR_ID``, ``LY_USERS``), so a literal ``_`` is the safer
+        interpretation. If they want the SQL ``_`` (one-char) meaning they can use ``.``
+        once we expose a regex mode (out of scope today).
+
+    The match is case-insensitive so an Oracle uppercase schema (``F00921``) is found by a
+    lowercase pattern (``f009%``)."""
+    import re
+    pat = (pattern or "").strip()
+    if not pat:
+        return None
+    # Escape regex metachars first, then re-introduce ``%`` → ``.*``.
+    regex = re.escape(pat).replace(r"%", ".*")
+    rx = re.compile(f"^{regex}$", re.IGNORECASE)
+    return lambda name: rx.match(name) is not None
+
+
+def _walk_sync(
+    sync_conn, *, dialect: str, pool_schemas: dict[str, str], max_tables: int,
+    only_schema: str | None = None, name_like: str | None = None,
+) -> tuple[list[TableInfo], bool]:
     """Synchronous worker — runs inside ``connection.run_sync()`` so we can use the regular
     (sync) ``Inspector`` API. SQLAlchemy doesn't ship an async Inspector — this is the
-    documented pattern."""
+    documented pattern.
+
+    *only_schema* (optional) scopes the walk to a single schema. For Oracle, where
+    ``ALL_TAB_COLUMNS`` enumerates every accessible owner's tables, fetching all schemas
+    up front is slow (10+ seconds with hundreds of tables) — the CRUD wizard wants to fetch
+    just *one* schema at a time, after the operator picks it.
+
+    *name_like* (optional) SQL-LIKE-style pattern (``F009%``) — applied to **table / view
+    names** before ``get_columns`` is called per name, so the per-table column fetch only
+    runs for the names that matched. That's where the time goes on a schema with hundreds
+    of tables (SY920 has 2000+), so this is the big speedup knob. Empty / unset matches all.
+    """
     inspector = inspect(sync_conn)
     schemas = _scoped_schemas(inspector, dialect, pool_schemas)
+    if only_schema is not None:
+        # Case-insensitive match — Oracle's get_schema_names returns ``SY920`` but the operator
+        # may have typed ``sy920``. PostgreSQL keeps the case the dictionary stores.
+        wanted = only_schema.lower()
+        schemas = [s for s in schemas if (s or "").lower() == wanted]
+        if not schemas:
+            return [], False
+    name_match = _name_like_predicate(name_like)
     out: list[TableInfo] = []
     truncated = False
     for sch in schemas:
@@ -114,6 +160,10 @@ def _walk_sync(sync_conn, *, dialect: str, pool_schemas: dict[str, str], max_tab
             continue
         for kind, names in (("table", t_names), ("view", v_names)):
             for name in sorted(names):
+                # Drop names that don't match the LIKE pattern before paying for get_columns
+                # — that's where the wall-clock goes on a big schema.
+                if name_match is not None and not name_match(name):
+                    continue
                 if len(out) >= max_tables:
                     truncated = True
                     return out, truncated
@@ -123,9 +173,11 @@ def _walk_sync(sync_conn, *, dialect: str, pool_schemas: dict[str, str], max_tab
                     cols = []
                 table = TableInfo(
                     name=name,
-                    # Only emit `schema` when there's more than one — keeps the wire payload
-                    # terse for the common single-schema case (most pools).
-                    schema=sch if (sch and len(schemas) > 1) else None,
+                    # Always emit ``schema`` when the operator scoped the walk to one — they
+                    # asked for that specific schema, so the wire payload should be explicit.
+                    # Otherwise only emit it when the pool spans multiple schemas (the
+                    # original single-schema-pool terseness rule still applies).
+                    schema=sch if (sch and (only_schema is not None or len(schemas) > 1)) else None,
                     kind=kind,
                     columns=[
                         ColumnInfo(
@@ -140,8 +192,22 @@ def _walk_sync(sync_conn, *, dialect: str, pool_schemas: dict[str, str], max_tab
     return out, truncated
 
 
+def _list_schemas_sync(sync_conn, *, dialect: str, pool_schemas: dict[str, str]) -> list[str]:
+    """List the non-system schema names a pool exposes — no table walk, no column walk.
+    Fast even on Oracle (a single ``ALL_USERS`` query, no per-schema fan-out). Used by the
+    CRUD wizard to populate its schema picker before pulling tables for the chosen one."""
+    inspector = inspect(sync_conn)
+    schemas = _scoped_schemas(inspector, dialect, pool_schemas)
+    # ``_scoped_schemas`` may return ``[None]`` when the inspector can't enumerate (SQLite).
+    # Drop the None — the wire shape is ``list[str]`` and the SQLite case is already handled
+    # by the empty-schemas branch on the wizard side (no picker).
+    return [s for s in schemas if s]
+
+
 async def introspect_pool(
-    pools: PoolRegistry, pool_name: str, *, max_tables: int = DEFAULT_MAX_TABLES,
+    pools: PoolRegistry, pool_name: str, *,
+    max_tables: int = DEFAULT_MAX_TABLES,
+    only_schema: str | None = None, name_like: str | None = None,
 ) -> dict[str, Any]:
     """Return ``{pool, dialect, tables: [...], truncated: bool}`` for *pool_name*.
 
@@ -149,6 +215,15 @@ async def introspect_pool(
     in a thread under ``connection.run_sync()`` to dodge the missing async-inspector API,
     and returns plain dicts ready for ``JSONResponse``. Raises :class:`UnknownPoolError` /
     :class:`SQLAlchemyError` like any other pool operation; the route translates those.
+
+    *only_schema* scopes the walk to a single schema — Oracle's ``ALL_TAB_COLUMNS``
+    enumerates every accessible owner, so the unscoped call is slow when many schemas exist
+    (e.g. JDE's PS920 / SY920 / DTA920 / CTL920 / CRP920 / PRD920 each with hundreds of
+    tables). The CRUD wizard uses this to fetch tables one schema at a time.
+
+    *name_like* is a SQL-LIKE-style pattern (``F009%``) applied to table / view names —
+    the wizard sets it from a free-text input so an operator on a 2000-table SY920 doesn't
+    have to wait for every column on every table. Empty matches all (the default).
     """
     dialect = pools.dialect(pool_name)
     pool_schemas = pools.schemas(pool_name)
@@ -156,6 +231,7 @@ async def introspect_pool(
     async with engine.connect() as conn:
         tables, truncated = await conn.run_sync(
             _walk_sync, dialect=dialect, pool_schemas=pool_schemas, max_tables=max_tables,
+            only_schema=only_schema, name_like=name_like,
         )
     return {
         "pool": pool_name,
@@ -165,7 +241,25 @@ async def introspect_pool(
     }
 
 
-__all__ = ["ColumnInfo", "TableInfo", "introspect_pool", "DEFAULT_MAX_TABLES"]
+async def list_pool_schemas(pools: PoolRegistry, pool_name: str) -> dict[str, Any]:
+    """Return ``{pool, dialect, schemas: [...]}`` for *pool_name* — just the schema names,
+    no tables / columns. Fast lookup, even on Oracle (a single ``ALL_USERS`` query under the
+    hood, no per-schema fan-out). Driven by the CRUD wizard's schema picker so the operator
+    can pick a target schema *before* paying for the per-schema table walk.
+
+    For pools with a ``[pools.X.schemas]`` map, the listed schemas are the mapped *targets*
+    (not the placeholder keys) so what the wizard shows lines up with what the SQL connector
+    actually uses when expanding ``#SCHEMA.<NAME>#`` placeholders.
+    """
+    dialect = pools.dialect(pool_name)
+    pool_schemas = pools.schemas(pool_name)
+    engine: AsyncEngine = pools.engine(pool_name)
+    async with engine.connect() as conn:
+        names = await conn.run_sync(_list_schemas_sync, dialect=dialect, pool_schemas=pool_schemas)
+    return {"pool": pool_name, "dialect": dialect, "schemas": names}
+
+
+__all__ = ["ColumnInfo", "TableInfo", "introspect_pool", "list_pool_schemas", "DEFAULT_MAX_TABLES"]
 
 
 # `asyncio` is imported so the public docstring's ``await introspect_pool(...)`` example reads

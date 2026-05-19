@@ -239,3 +239,54 @@ def test_pool_schema_requires_superuser(app) -> None:
 def test_pool_schema_404_when_connector_missing(app) -> None:
     with TestClient(app) as client:
         assert client.get("/api/sql/ghost/_schema", headers=_h(client, "admin")).status_code == 404
+
+
+def test_pool_schemas_lists_schema_names_only(app) -> None:
+    """``GET /api/sql/{c}/_schemas`` — the lightweight schema list. On SQLite the test fixture
+    doesn't have multiple schemas, so the response carries an empty list; the dialect + pool
+    fields are populated either way. The CRUD wizard's schema picker uses this endpoint so
+    Oracle pools with many schemas don't pay the full-catalog walk before the operator's first
+    interaction. Same superuser gate as ``/_schema``."""
+    with TestClient(app) as client:
+        r = client.get("/api/sql/db/_schemas", headers=_h(client, "admin"))
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["pool"] == "default" and body["dialect"] == "sqlite"
+        assert isinstance(body["schemas"], list)
+        # Permission gate: same as /_schema.
+        assert client.get("/api/sql/db/_schemas", headers=_h(client, "dbuser")).status_code == 403
+        assert client.get("/api/sql/db/_schemas").status_code == 401
+        # Unknown connector → 404.
+        assert client.get("/api/sql/ghost/_schemas", headers=_h(client, "admin")).status_code == 404
+
+
+def test_pool_schema_with_schema_query_param_scopes_walk(app) -> None:
+    """``?schema=<sch>`` filter restricts the table walk to one schema. The seeded SQLite fixture
+    only has a default schema (None) so passing a nonexistent schema returns zero tables —
+    proves the filter is applied rather than ignored. Real-world Oracle case is covered by the
+    introspector's unit-level behaviour (``_walk_sync(only_schema=…)``)."""
+    with TestClient(app) as client:
+        r = client.get("/api/sql/db/_schema?schema=nosuch", headers=_h(client, "admin"))
+        assert r.status_code == 200, r.text
+        assert r.json()["tables"] == []
+
+
+def test_pool_schema_name_like_filter_narrows_table_list(app) -> None:
+    """``?name_like=<pat>`` filters table / view names with SQL-LIKE wildcards (``%``).
+    Names that don't match are dropped *before* the per-table column fetch — the wizard
+    uses this on Oracle so the operator doesn't pay for every column on every table when
+    they only need ``F009%``. Matching is case-insensitive."""
+    with TestClient(app) as client:
+        # The fixture seeds an ``item`` table (see tests/test_web_connectors.py::_seed).
+        # ``ite%`` should match; ``XYZ%`` shouldn't.
+        r = client.get("/api/sql/db/_schema?name_like=ite%25", headers=_h(client, "admin"))
+        assert r.status_code == 200, r.text
+        names = [t["name"] for t in r.json()["tables"]]
+        assert names == ["item"]
+        r = client.get("/api/sql/db/_schema?name_like=XYZ%25", headers=_h(client, "admin"))
+        assert r.status_code == 200, r.text
+        assert r.json()["tables"] == []
+        # Case-insensitive — uppercase pattern still matches lowercase ``item``.
+        r = client.get("/api/sql/db/_schema?name_like=ITEM", headers=_h(client, "admin"))
+        assert r.status_code == 200, r.text
+        assert [t["name"] for t in r.json()["tables"]] == ["item"]

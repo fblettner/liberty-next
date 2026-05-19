@@ -22,6 +22,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
 import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
+import { CrudWizardModal } from './CrudWizardModal'
 
 type Connectors = Record<string, Record<string, unknown>>
 
@@ -134,6 +135,9 @@ export default function ConnectorsBuilder() {
   // ``[lookups.<id>]`` entry to dictionary.toml (under the connector's scope when one exists,
   // else shared). Both files are written together on the next Save click.
   const [scaffoldKind, setScaffoldKind] = useState<ScaffoldKind | null>(null)
+  // CRUD wizard modal — opened from "+ Add table → Generate from DB". Reverse-engineers a table
+  // into all four CRUD queries via the live pool introspection.
+  const [crudWizardOpen, setCrudWizardOpen] = useState(false)
   const [selTable, setSelTable] = useState<string | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
@@ -254,6 +258,25 @@ export default function ConnectorsBuilder() {
     setStatus(t('settings.connectors.renamed', { from: oldName, to: next }))
   }
   const addTable = async (connectorName: string) => {
+    // Two flows for "+ Add table":
+    //   * **Generate from DB**: opens the CRUD wizard — pick a table, mark key columns, get
+    //     all four queries (_get / _put / _post / _delete) auto-generated against the live
+    //     pool. The recommended path for any table that exists in the DB.
+    //   * **Empty stub**: prompts for a name and creates a blank ``<base>_get`` (the old
+    //     behaviour). For when the table doesn't exist in the DB yet, or the operator wants
+    //     to hand-write each query.
+    const choice = await modals.choose({
+      title: t('settings.tables.addTable'),
+      message: t('settings.crudWizard.howAdd', 'How do you want to add this table?'),
+      options: [
+        { value: 'wizard', label: t('settings.crudWizard.generateFromDb', 'Generate from DB'), variant: 'primary', autoFocus: true },
+        { value: 'empty', label: t('settings.crudWizard.emptyStub', 'Empty stub'), variant: 'ghost' },
+      ],
+      cancelValue: 'cancel',
+    })
+    if (choice === 'cancel' || choice == null) return
+    if (choice === 'wizard') { setCrudWizardOpen(true); return }
+    // Empty stub path — original behaviour.
     const base = (await modals.prompt({
       title: t('settings.tables.addTable'),
       message: t('settings.tables.namePrompt'),
@@ -768,6 +791,30 @@ export default function ConnectorsBuilder() {
             .filter(Boolean))}
           onSave={(result) => onScaffoldSave(scaffoldKind, result)}
           onCancel={() => setScaffoldKind(null)}
+        />
+      )}
+      {/* CRUD wizard — opened from "+ Add table → Generate from DB". Saves the four queries
+          to the connector's ``queries`` list + auto-selects the new table in the list so the
+          operator can keep tweaking inside ConnectorsTableEditor. The top-toolbar Save commits
+          the result to disk. */}
+      {crudWizardOpen && sel && (
+        <CrudWizardModal
+          connector={sel}
+          existingQueryNames={new Set(queriesArr
+            .map((q) => typeof q.name === 'string' ? q.name : '')
+            .filter(Boolean))}
+          onSave={(result) => {
+            const cur = (conns ?? {})[sel] ?? {}
+            const existing = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
+            updateQueries(sel, [...existing, ...result.queries])
+            setCrudWizardOpen(false)
+            // The base name follows the v1 ``<base>_<crud>`` convention; jump straight to the
+            // new table in the Tables list so the operator can tweak the auto-generated SQL.
+            const firstName = result.queries[0]?.name ?? ''
+            const m = firstName.match(/^(.+)_(get|put|post|delete)$/i)
+            if (m) setSelTable(m[1])
+          }}
+          onCancel={() => setCrudWizardOpen(false)}
         />
       )}
     </Shell>

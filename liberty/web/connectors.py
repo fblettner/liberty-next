@@ -25,7 +25,7 @@ from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError, detect_statement_type
 from liberty.connectors.config import ColumnHint
-from liberty.connectors.introspect import introspect_pool
+from liberty.connectors.introspect import introspect_pool, list_pool_schemas
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, public_connector, request_language, require_permission
 from liberty.web.errors import http_for_connector_error
@@ -152,9 +152,34 @@ async def _run_sql(
     return result.to_dict()
 
 
+@router.get("/sql/{connector}/_schemas")
+async def sql_pool_schemas(
+    connector: str, principal: CurrentPrincipal, connectors: Connectors,
+) -> dict[str, Any]:
+    """List the non-system schema names on the connector's pool. **No tables, no columns** —
+    just the schema names. Used by the CRUD wizard's schema picker so an Oracle pool with
+    many schemas doesn't have to enumerate every table up front (the unscoped table walk on
+    JDE's PS920 + SY920 + DTA920 + CTL920 + CRP920 + PRD920 takes 10+ seconds; this returns
+    in milliseconds). Pairs with the ``?schema=<sch>`` filter on ``/_schema`` below.
+
+    **Superuser only** — same restriction as the table walk."""
+    if not principal.is_superuser:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Superuser only")
+    try:
+        conn = connectors.sql(connector)
+    except ConnectorError as exc:
+        raise http_for_connector_error(exc) from exc
+    try:
+        return await list_pool_schemas(connectors.pools, conn.pool_name)
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, detail=f"schema list failed: {type(exc).__name__}: {exc}",
+        ) from exc
+
+
 @router.get("/sql/{connector}/_schema")
 async def sql_pool_schema(
-    connector: str, principal: CurrentPrincipal, connectors: Connectors,
+    connector: str, request: Request, principal: CurrentPrincipal, connectors: Connectors,
 ) -> dict[str, Any]:
     """Introspect the connector's pool — list its tables/views + their columns. Powers the
     Phase-7 SQL editor's autocomplete (Monaco CompletionItemProvider) and the wizard's table
@@ -162,6 +187,16 @@ async def sql_pool_schema(
     for an operator using the config builder (the only consumer) but not for a regular caller
     who only knows about named queries. Returns 502 on connection failure so the frontend can
     degrade gracefully (autocomplete just doesn't show suggestions).
+
+    ``?schema=<sch>`` (optional) scopes the walk to a single schema — the CRUD wizard uses
+    this so an Oracle pool with many owners doesn't fan out across every one on every
+    introspection. The autocomplete path leaves it unset and gets the full catalog.
+
+    ``?name_like=<pattern>`` (optional) is a SQL-LIKE-style filter on table / view names
+    (``F009%`` matches every JDE F009-prefixed table). Names that don't match are dropped
+    *before* the per-table column fetch, which is the slow step — a 2000-table SY920
+    narrowed to ``F009%`` (≈10 tables) returns in well under a second instead of 5+s.
+    Empty matches all.
     """
     if not principal.is_superuser:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Superuser only")
@@ -169,8 +204,13 @@ async def sql_pool_schema(
         conn = connectors.sql(connector)  # UnknownConnectorError → 404; wrong-type → 404
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
+    only_schema = request.query_params.get("schema") or None
+    name_like = request.query_params.get("name_like") or None
     try:
-        return await introspect_pool(connectors.pools, conn.pool_name)
+        return await introspect_pool(
+            connectors.pools, conn.pool_name,
+            only_schema=only_schema, name_like=name_like,
+        )
     except SQLAlchemyError as exc:
         # Don't 500 — the editor calls this on focus and gracefully degrades without suggestions.
         raise HTTPException(
