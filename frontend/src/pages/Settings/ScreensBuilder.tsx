@@ -157,19 +157,85 @@ export default function ScreensBuilder() {
   // raises this modal. Edits flow through the same ``updateScreen`` callback as before — the
   // ScreensBuilder's Save bar at the bottom commits to disk. Escape closes the modal.
   const [designerOpen, setDesignerOpen] = useState(false)
+  // Snapshot of the screen at modal-open — Cancel reverts to this so edits made inside the
+  // designer (e.g. "Create dialog" + a few fields) don't stick when the operator changes their
+  // mind. Save clears the snapshot before closing. Stored as a JSON-serialised string so a deep
+  // copy is cheap; ``selScreen`` is re-derived from ``doc`` on every render.
+  const [designerSnapshot, setDesignerSnapshot] = useState<string | null>(null)
   // Fullscreen toggle for the designer modal — the default 1400×900 envelope can still feel
   // tight on a complex screen (palette + many fields + inspector). Operator clicks the maximize
   // icon in the header, the modal grows to 100vw / 100vh + drops its border-radius.
   const [designerFullscreen, setDesignerFullscreen] = useState(false)
+  // Open / close helpers — Cancel restores the snapshot, Save just discards it (the in-memory
+  // doc already reflects every edit, the parent's Save button commits to disk).
+  const openDesigner = () => {
+    if (selApp && selId) {
+      const snap = doc?.[selApp]?.[selId]
+      if (snap !== undefined) setDesignerSnapshot(JSON.stringify(snap))
+    }
+    setDesignerOpen(true)
+  }
+  const cancelDesigner = async () => {
+    // If the operator made changes since opening the designer, show a 3-way prompt:
+    // **Discard** reverts the snapshot + closes (the current cancel behaviour).
+    // **Save** commits to disk + closes — same as clicking the footer Save button.
+    // **Keep editing** dismisses the prompt without closing anything.
+    // When nothing changed inside the modal, just close (no prompt needed).
+    const hasModalEdits = (() => {
+      if (designerSnapshot == null || !selApp || !selId) return false
+      const cur = doc?.[selApp]?.[selId]
+      if (cur === undefined) return false
+      try { return JSON.stringify(cur) !== designerSnapshot } catch { return false }
+    })()
+    if (hasModalEdits) {
+      const choice = await modals.choose({
+        title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
+        message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes in this screen. Save them, discard them, or keep editing?'),
+        options: [
+          { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+          { value: 'save', label: t('common.save'), variant: 'primary' },
+          { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+        ],
+        cancelValue: 'keep',  // Escape / overlay click = keep editing
+      })
+      if (choice === 'keep' || choice == null) return  // dismiss the close
+      if (choice === 'save') {
+        await save()
+        setDesignerSnapshot(null)
+        setDesignerOpen(false)
+        return
+      }
+      // discard → fall through to the revert path below
+    }
+    // Revert every edit made in the modal session. When the snapshot is missing (the operator
+    // opened an outdated reference) we fall through and just close — better than throwing.
+    if (designerSnapshot != null && selApp && selId) {
+      try {
+        const snap = JSON.parse(designerSnapshot) as Screen
+        updateScreen(selApp, selId, snap as unknown as Record<string, unknown>)
+      } catch {
+        // ignore — snapshot was malformed, just close
+      }
+    }
+    setDesignerSnapshot(null)
+    setDesignerOpen(false)
+  }
+  const closeDesigner = () => {
+    // Save path — the snapshot is no longer needed; doc already has the saved edits.
+    setDesignerSnapshot(null)
+    setDesignerOpen(false)
+  }
   useEffect(() => {
     if (!designerOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDesignerOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelDesigner() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps  -- cancelDesigner reads stable state
   }, [designerOpen])
   // Close the designer when the operator picks a different screen — would otherwise show the
   // wrong screen's data until they reopen. Reset fullscreen too so each open starts windowed.
-  useEffect(() => { setDesignerOpen(false); setDesignerFullscreen(false) }, [selApp, selId])
+  // Don't revert here — the operator switched screens, they didn't ask to undo edits.
+  useEffect(() => { setDesignerOpen(false); setDesignerSnapshot(null); setDesignerFullscreen(false) }, [selApp, selId])
 
   const load = () => {
     setError(null); setStatus(null)
@@ -488,7 +554,7 @@ export default function ScreensBuilder() {
                 {(onInsertCount + onUpdateCount + onDeleteCount) > 0 && <StatChip $tone="green"><Zap size={11} /> {t('settings.screens.summary.rowHooks', { count: onInsertCount + onUpdateCount + onDeleteCount })}</StatChip>}
               </StatChips>
               <Row>
-                <Button $variant="primary" onClick={() => setDesignerOpen(true)}>
+                <Button $variant="primary" onClick={openDesigner}>
                   <Edit3 size={14} /> {t('settings.screens.openDesigner')}
                 </Button>
               </Row>
@@ -511,7 +577,9 @@ export default function ScreensBuilder() {
         on Overlay click, header X, and Escape (handler bound above). Edits flow through the same
         updateScreen → setDoc chain as before; ScreensBuilder's Save bar at the bottom commits. */}
     {designerOpen && selScreen && selApp && selId && createPortal(
-      <Overlay onClick={() => setDesignerOpen(false)}>
+      // Overlay click = Cancel (revert in-modal edits). Matches the dialog convention everywhere
+      // else in the app: clicking outside a modal cancels.
+      <Overlay onClick={cancelDesigner}>
         <VisualBuilderModal $fullscreen={designerFullscreen} onClick={(e) => e.stopPropagation()}>
           <ModalHeader>
             {/* The header is two flex regions — title on the left, actions clustered on the
@@ -538,8 +606,8 @@ export default function ScreensBuilder() {
                 >
                   {designerFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
                 </Button>
-                <Button $variant="ghost" $size="sm" onClick={() => setDesignerOpen(false)}>
-                  <X size={13} /> {t('common.close')}
+                <Button $variant="ghost" $size="sm" onClick={cancelDesigner}>
+                  <X size={13} /> {t('common.cancel')}
                 </Button>
               </Row>
             </Row>
@@ -570,8 +638,11 @@ export default function ScreensBuilder() {
               bar (hidden behind the modal); they'd have to close, then save, awkward two-step. */}
           <ModalFooter>
             <Row gap={8}>
-              <Button onClick={() => setDesignerOpen(false)} $variant="ghost" $size="sm" disabled={busy}>
-                <X size={13} /> {t('common.close')}
+              {/* Cancel reverts every edit made in this modal session to the snapshot taken
+                  when the designer opened — operator can experiment without leaving stale
+                  state behind if they change their mind. */}
+              <Button onClick={cancelDesigner} $variant="ghost" $size="sm" disabled={busy}>
+                <X size={13} /> {t('common.cancel')}
               </Button>
               <Button
                 $variant="primary"
@@ -579,7 +650,7 @@ export default function ScreensBuilder() {
                 disabled={busy || !dirty}
                 onClick={async () => {
                   await save()
-                  setDesignerOpen(false)
+                  closeDesigner()
                 }}
               >
                 {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}

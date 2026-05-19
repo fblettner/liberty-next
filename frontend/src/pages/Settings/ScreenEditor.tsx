@@ -201,11 +201,20 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         defs={defs}
         value={value}
         onChange={(v) => {
-          // SchemaForm gives the full subset — convert to a patch so we don't clobber the keys
-          // we didn't include (dialog, actions, row_menu, id, read_query/…, connector).
-          const patch: Row = {}
-          for (const k of GENERAL_FORM_KEYS) patch[k] = v[k]
-          for (const [k, val] of Object.entries(patch)) setProp(k, val)
+          // Apply every GENERAL_FORM_KEYS field in ONE onChange call — calling ``setProp``
+          // in a loop loses edits because each call reads ``value`` from the closure (stale
+          // within the synchronous event handler), so only the last one wins (and any field
+          // that wasn't the last key in the loop gets clobbered). Build the patched next
+          // value in one go, then call ``onChange`` once with the full result. Untouched
+          // keys outside GENERAL_FORM_KEYS (dialog, actions, row_menu, id, read_query, …)
+          // stay verbatim via the ``{...value}`` spread.
+          const next: Row = { ...value }
+          for (const k of GENERAL_FORM_KEYS) {
+            const val = v[k]
+            if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
+            else next[k] = val
+          }
+          onChange(next)
         }}
       />
     </>
@@ -603,6 +612,21 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     emptyMessage: t('settings.screens.rowmenu.empty'),
   })
 
+  // Deletes the entire dialog (every tab + field + lookup_param_bind). Confirmed via the
+  // shared ConfirmModal — the action is destructive and irreversible inside this designer
+  // session (the only way back is to Cancel the whole designer modal, which reverts to the
+  // snapshot, OR Reload from disk after committing).
+  const deleteDialog = async () => {
+    const ok = await modals.confirm({
+      title: t('settings.screens.editor.dialogDeleteTitle', 'Delete dialog?'),
+      message: t('settings.screens.editor.dialogDeleteMsg', 'Remove the screen\'s dialog (every tab + field + lookup_param_bind). The screen becomes read-only / grid-edit only.'),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
+    setDialog(null)
+  }
+
   const renderDialog = (): ReactNode => {
     if (!dialog) {
       return (
@@ -623,9 +647,18 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     // Lifecycle hooks (on_load / on_save / on_cancel) moved to the Actions tab where the rest
     // of the action chains live, grouped by event kind. Per-panel scrolling (palette / canvas /
     // inspector) is handled inside ScreenVisualBuilder; we just give it a flex-fill container.
+    // A "Delete dialog" button on the right header line lets the operator wipe it entirely —
+    // confirmed via shared modal so an accidental click doesn't nuke the work.
     return (
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <Row gap={8} style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
+          <Button $variant="danger" $size="sm" onClick={deleteDialog}>
+            <Trash2 size={13} /> {t('settings.screens.editor.dialogDelete', 'Delete dialog')}
+          </Button>
+        </Row>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <ScreenVisualBuilder app={app} id={id} value={value} schema={schema} onChange={onChange} />
+        </div>
       </div>
     )
   }

@@ -24,10 +24,20 @@ import {
   createContext, useCallback, useContext, useEffect, useRef, useState,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
+import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from './Modal'
 import { Button } from './Button'
 import { Input } from './Input'
+
+// Provider-level modals always paint on top of every other modal in the app — the Screen
+// Designer (portaled to document.body, z-index 400), the visual builder, dropdowns
+// (z-index 1000), etc. ``useModals().confirm`` is the "global manager" that interrupts
+// whatever's underneath, so its overlay raises above everything. Each modal is also
+// ``createPortal``-ed to ``document.body`` so it doesn't get trapped inside another
+// portal's stacking context.
+const TopOverlay = styled(Overlay)`z-index: 2000;`
 
 export interface ConfirmOptions {
   title: string
@@ -65,10 +75,38 @@ export interface AlertOptions {
   variant?: 'primary' | 'danger'
 }
 
+export interface ChooseOption<V extends string = string> {
+  /** Stable value returned to the caller when the operator picks this option. */
+  value: V
+  /** Display label on the button. */
+  label: string
+  /** Visual tone — ``primary`` for the recommended action, ``danger`` for destructive ones,
+   *  ``ghost`` for the dismiss / "keep editing" path. Defaults to ``ghost``. */
+  variant?: 'primary' | 'danger' | 'ghost'
+  /** When true, focuses the button on open — usually the safest non-destructive option so
+   *  Enter doesn't accidentally trigger a discard. */
+  autoFocus?: boolean
+}
+
+export interface ChooseOptions<V extends string = string> {
+  title: string
+  message: ReactNode
+  /** 2-5 button choices. Order = left-to-right in the footer. */
+  options: ReadonlyArray<ChooseOption<V>>
+  /** Value resolved when the operator dismisses the modal via overlay click or Escape.
+   *  When unset (``null``), Escape / overlay click resolves ``null`` — the caller treats it
+   *  as "keep editing" / no decision. */
+  cancelValue?: V | null
+}
+
 export interface ModalsContextValue {
   confirm: (opts: ConfirmOptions) => Promise<boolean>
   prompt: (opts: PromptOptions) => Promise<string | null>
   alert: (opts: AlertOptions) => Promise<void>
+  /** Multi-button choice — for "unsaved changes: Save / Discard / Keep editing" and similar
+   *  three-way dialogs that don't fit the binary ``confirm``. Returns the picked option's
+   *  ``value``, or ``cancelValue`` (default ``null``) on Escape / overlay click. */
+  choose: <V extends string>(opts: ChooseOptions<V>) => Promise<V | null>
 }
 
 const ModalsContext = createContext<ModalsContextValue | null>(null)
@@ -86,6 +124,7 @@ type Queued =
   | { kind: 'confirm'; opts: ConfirmOptions; resolve: (v: boolean) => void }
   | { kind: 'prompt'; opts: PromptOptions; resolve: (v: string | null) => void }
   | { kind: 'alert'; opts: AlertOptions; resolve: () => void }
+  | { kind: 'choose'; opts: ChooseOptions<string>; resolve: (v: string | null) => void }
 
 export function ModalsProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
@@ -102,6 +141,7 @@ export function ModalsProvider({ children }: { children: ReactNode }) {
     if (!cur) return
     if (cur.kind === 'confirm') cur.resolve(Boolean(value))
     else if (cur.kind === 'prompt') cur.resolve(value as string | null)
+    else if (cur.kind === 'choose') cur.resolve(value as string | null)
     else cur.resolve()
     setQueued(null)
   }, [])
@@ -113,6 +153,7 @@ export function ModalsProvider({ children }: { children: ReactNode }) {
     if (cur) {
       if (cur.kind === 'confirm') cur.resolve(false)
       else if (cur.kind === 'prompt') cur.resolve(null)
+      else if (cur.kind === 'choose') cur.resolve(null)
       else cur.resolve()
     }
     setQueued(next)
@@ -127,6 +168,18 @@ export function ModalsProvider({ children }: { children: ReactNode }) {
     }),
     alert: (opts) => new Promise<void>((resolve) => {
       open({ kind: 'alert', opts, resolve })
+    }),
+    choose: <V extends string>(opts: ChooseOptions<V>) => new Promise<V | null>((resolve) => {
+      // Internal Queued kind erases the value-type parameter; the cast back to ``V`` at the
+      // caller is safe because the only values that can land in ``close()`` are the ones the
+      // operator clicks (each ``ChooseOption.value`` is V) or the ``cancelValue`` we forward
+      // verbatim when Escape / overlay closes.
+      const erased: ChooseOptions<string> = opts as ChooseOptions<string>
+      open({
+        kind: 'choose',
+        opts: erased,
+        resolve: (v) => resolve(v as V | null),
+      })
     }),
   }
 
@@ -154,6 +207,13 @@ export function ModalsProvider({ children }: { children: ReactNode }) {
           onClose={() => close(undefined)}
         />
       )}
+      {queued?.kind === 'choose' && (
+        <ChooseModalContent
+          opts={queued.opts}
+          onPick={(v) => close(v)}
+          onCancel={() => close(queued.opts.cancelValue ?? null)}
+        />
+      )}
     </ModalsContext.Provider>
   )
 }
@@ -173,8 +233,8 @@ function ConfirmModalContent({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onConfirm, onCancel])
-  return (
-    <Overlay onClick={onCancel}>
+  return createPortal(
+    <TopOverlay onClick={onCancel}>
       <Modal style={{ width: 440 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>{opts.message}</ModalBody>
@@ -187,7 +247,8 @@ function ConfirmModalContent({
           </Button>
         </ModalFooter>
       </Modal>
-    </Overlay>
+    </TopOverlay>,
+    document.body,
   )
 }
 
@@ -227,8 +288,8 @@ function PromptModalContent({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onCancel])
-  return (
-    <Overlay onClick={onCancel}>
+  return createPortal(
+    <TopOverlay onClick={onCancel}>
       <Modal style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>
@@ -253,7 +314,8 @@ function PromptModalContent({
           </Button>
         </ModalFooter>
       </Modal>
-    </Overlay>
+    </TopOverlay>,
+    document.body,
   )
 }
 
@@ -270,8 +332,8 @@ function AlertModalContent({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
-  return (
-    <Overlay onClick={onClose}>
+  return createPortal(
+    <TopOverlay onClick={onClose}>
       <Modal style={{ width: 440 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>{opts.message}</ModalBody>
@@ -281,6 +343,47 @@ function AlertModalContent({
           </Button>
         </ModalFooter>
       </Modal>
-    </Overlay>
+    </TopOverlay>,
+    document.body,
+  )
+}
+
+function ChooseModalContent({
+  opts, onPick, onCancel,
+}: {
+  opts: ChooseOptions<string>
+  onPick: (value: string) => void
+  onCancel: () => void
+}) {
+  // Escape = cancel (resolves to ``cancelValue ?? null`` upstream — the "keep editing" path
+  // for an unsaved-changes prompt). Enter is intentionally NOT bound to any choice — the
+  // operator must explicitly click one of the buttons, which avoids accidentally discarding
+  // changes by hitting Enter when their focus is somewhere else.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  return createPortal(
+    <TopOverlay onClick={onCancel}>
+      <Modal style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
+        <ModalHeader>{opts.title}</ModalHeader>
+        <ModalBody>{opts.message}</ModalBody>
+        <ModalFooter>
+          {opts.options.map((opt) => (
+            <Button
+              key={opt.value}
+              $size="sm"
+              $variant={opt.variant ?? 'ghost'}
+              onClick={() => onPick(opt.value)}
+              autoFocus={opt.autoFocus}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </ModalFooter>
+      </Modal>
+    </TopOverlay>,
+    document.body,
   )
 }
