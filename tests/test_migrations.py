@@ -872,10 +872,12 @@ def test_migrate_dictionary_sequence_becomes_first_class_section() -> None:
     assert sequences_out["get_act_ukid_from_sod_activities"] == {
         "query": "sod_activities_get",
         "description": "Get ACT_UKID from SOD_ACTIVITIES",
+        "dd_id": "ACT_UKID",
     }
     assert sequences_out["get_risk_ukid_from_sod_risks"] == {
         "query": "sod_risks_select",
         "description": "Get RISK_UKID from SOD_RISKS",
+        "dd_id": "RISK_UKID",
     }
     # Entries now reference the sequence by id (not the query name).
     e = out["entries"]
@@ -908,6 +910,7 @@ def test_migrate_dictionary_sequence_cross_connector() -> None:
     assert seq == {
         "query": "jde_seq_get",
         "description": "JDE Next Number",
+        "dd_id": "JDE_UKID",
         "connector": "jdedwards",
     }
 

@@ -684,10 +684,17 @@ export function ResultTable({
   const [saving, setSaving] = useState(false)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const editsRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())  // row → edited fields (uncontrolled inputs write here)
+  // ``editTick`` increments on every edit (new rows + existing rows alike) so the dataCols
+  // memo recomputes — TanStack then re-renders cells, picking up the new ``cur(row, …)``
+  // values for the dropdown's displayed selection and the cascading ``narrowBy`` deps. Distinct
+  // from ``dirtyRows`` (which is the *existing*-row dirty set used by Save) so we don't
+  // conflate new-row edits with "needs UPDATE".
+  const [editTick, setEditTick] = useState(0)
 
   const resetEdit = useCallback(() => {
     setEditMode(false); setDirtyRows(new Set()); setNewRows([]); setDeleted(new Set()); setSelected(new Set()); setSaveErrors([])
     editsRef.current = new Map()
+    setEditTick(0)
   }, [])
   // a refetch (or a query change) ends any in-progress batch edit (the clipboard survives — it's just data)
   useEffect(() => { resetEdit() }, [result, resetEdit])
@@ -706,12 +713,12 @@ export function ResultTable({
     let ed = editsRef.current.get(row)
     if (!ed) { ed = {}; editsRef.current.set(row, ed) }
     ed[name] = v
-    // Always create a fresh Set so React sees a state change on every edit — drives the
-    // re-render needed by cascading LOOKUP cells whose dropdown options depend on a
-    // same-row sibling's value (v1's bulk-edit cascading via ly_tbl_filters). Without
-    // this, the dropdown's options would stay stale until something else triggered a
-    // render. The text/number inputs use ``defaultValue`` (uncontrolled) so they keep
-    // their typed text + focus across the re-render.
+    // Tick on every edit so the dataCols memo recomputes → TanStack re-renders cells →
+    // dropdowns reflect the new value and cascading LOOKUP options re-narrow. Text/number
+    // inputs use ``defaultValue`` (uncontrolled) so they keep their typed text + focus across
+    // the re-render. Separately, mark *existing* rows as dirty for the Save flow (newRows
+    // already track inserts; we don't conflate them here).
+    setEditTick((t) => t + 1)
     if (!newRowsRef.current.includes(row)) setDirtyRows((s) => new Set(s).add(row))
   }, [])
   // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values
@@ -928,9 +935,24 @@ export function ResultTable({
     [span],
   )
   const isGroupRow = useCallback((info: { row: { getIsGrouped?: () => boolean } }) => !!info.row.getIsGrouped?.(), [])
+  // Reads the cell's current value (original row overlaid with any pending edits).
+  // Case-insensitive lookup of *name* on both maps — v1's column hints / filter_from /
+  // ParamBinds carry uppercase column names, while a Postgres result lowercases its
+  // identifiers (Oracle preserves uppercase). Without the fold, a cascading
+  // ``filter_from = {source: "SEC_TYPE", column: "FS"}`` on a Postgres screen would
+  // read ``ed["SEC_TYPE"]`` while the edit was stored at ``ed["sec_type"]`` → narrowing
+  // stays disabled. Same lookup walks ed then row so a pending edit beats the original.
   const cur = useCallback((row: DataRow, name: string) => {
     const ed = editsRef.current.get(row)
-    return ed && name in ed ? ed[name] : row[name]
+    if (ed) {
+      if (name in ed) return ed[name]
+      const lk = name.toLowerCase()
+      for (const k of Object.keys(ed)) if (k.toLowerCase() === lk) return ed[k]
+    }
+    if (name in row) return row[name]
+    const lk = name.toLowerCase()
+    for (const k of Object.keys(row)) if (k.toLowerCase() === lk) return row[k]
+    return undefined
   }, [])
 
   const dataCols = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
@@ -1079,7 +1101,13 @@ export function ResultTable({
       })
     }
     return out
-  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span])
+    // ``editTick`` is intentionally in the dep list even though the cell functions read live
+    // values via ``cur`` / ``editsRef`` (stable refs). Without this, TanStack's
+    // ``useReactTable`` keeps the same column reference across edits and doesn't re-render
+    // the cells — so a LOOKUP dropdown pick wouldn't reflect, and a cascading column
+    // (filter_from) wouldn't re-narrow when its source cell changes. Each edit bumps the
+    // tick → dataCols rebuilds → TanStack re-evaluates cells.
+  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span, editTick])
 
   // the leftmost select + status columns — rebuild freely on edit-state changes; they hold no
   // <input>, only checkboxes/markers/buttons, so remounting them is harmless.

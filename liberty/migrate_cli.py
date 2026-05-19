@@ -271,6 +271,13 @@ async def _build(args: argparse.Namespace) -> dict:
                     for col in cols:
                         if col not in bucket:
                             bucket.append(col)
+            # Pull ly_sequence so v1's MAX-only sequence queries get rewritten to next-number.
+            try:
+                seq_rows, _ = await read_sequences(engine)
+            except Exception:
+                seq_rows = []
+            sequence_query_ids = [int(s["seq_query_id"]) for s in seq_rows
+                                   if s.get("seq_query_id") is not None]
             parts.append(migrate_sql_queries(
                 queries, sql_rows, dbtype=args.dbtype, connector_prefix=args.prefix,
                 column_hints=migrate_column_hints(tbl_cols, dlg_cols, extra_filter_cols=merged_filter_cols),
@@ -279,6 +286,7 @@ async def _build(args: argparse.Namespace) -> dict:
                 table_meta=migrate_table_meta(tbl_meta, frm_meta),
                 key_columns=migrate_key_columns(tbl_cols, dlg_cols),
                 lookup_params=migrate_lookup_param_names(lookup_rows, lookup_params_rows),
+                sequence_query_ids=sequence_query_ids,
             ))
         if args.command in ("api", "all"):
             conns, apis, headers, params = await read_api(engine)

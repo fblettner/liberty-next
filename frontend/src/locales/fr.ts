@@ -455,6 +455,16 @@ const fr: Resources = {
         modeSchema: 'Schéma',
         modalTitle: 'Designer visuel',
         openModal: 'Ouvrir le designer visuel',
+        override: {
+          inherit: 'Hériter',
+          fromColumn: 'depuis la colonne : {{val}}',
+          hidden: 'masqué',
+          shown: 'visible',
+          required: 'obligatoire',
+          optional: 'optionnel',
+          readOnly: 'lecture seule',
+          editable: 'modifiable',
+        },
         palette: {
           title: 'Ajouter un champ',
           dict: 'Dictionnaire',

@@ -453,6 +453,16 @@ const en = {
         modeSchema: 'Schema',
         modalTitle: 'Visual designer',
         openModal: 'Open visual designer',
+        override: {
+          inherit: 'Inherit',
+          fromColumn: 'from column: {{val}}',
+          hidden: 'hidden',
+          shown: 'shown',
+          required: 'required',
+          optional: 'optional',
+          readOnly: 'read-only',
+          editable: 'editable',
+        },
         palette: {
           title: 'Add a field',
           dict: 'Dictionary',

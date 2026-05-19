@@ -212,11 +212,15 @@ class LookupDef(BaseModel):
 
 
 class SequenceDef(BaseModel):
-    """A named "next number" source — v1's ``ly_sequence`` ported to v2 as a first-class
-    dictionary entity (parallel to ``LookupDef``). The query returns the next number for
-    this sequence (typically ``SELECT COALESCE(MAX(<col>), 0) + 1 FROM <table>`` narrowed by
-    APPS_ID); the SQL connector runs it inside the same transaction as the INSERT when a
-    dictionary entry with ``rules = "SEQUENCE"`` (or ``"NN"``) references this id."""
+    """A named "next number" source — the query that generates the next ID for a column.
+    The SQL connector fires the sequence inside the INSERT transaction when:
+      * a dictionary entry with ``rules = "SEQUENCE"`` / ``"NN"`` references this id, OR
+      * this sequence's ``dd_id`` matches a bound column on the INSERT (independent of the
+        column's own rule — so a column that's both a LOOKUP target *and* gets an auto-ID
+        still picks up the next number).
+
+    The query typically reads ``SELECT COALESCE(MAX(<col>), 0) + 1 FROM <table>`` narrowed
+    by any row context (the WHERE binds against the in-flight INSERT row)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -229,6 +233,17 @@ class SequenceDef(BaseModel):
     query: str = Field(
         description="The sequence's read query (e.g. 'get_act_ukid_from_sod_activities_get'). The dropdown lists the resolved connector's tables.",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
+    )
+    dd_id: str | None = Field(
+        default=None,
+        description=(
+            "The dictionary entry (column) this sequence generates values for. Lets the SQL "
+            "connector auto-fire the sequence at INSERT time for any column referencing this "
+            "dd — even when the dd's own rule is something else (e.g. APPS_ID is both a "
+            "LOOKUP target *and* gets an auto-ID from this sequence). Blank → only the "
+            "``rules = \"SEQUENCE\"``-via-rules_values path fires this sequence."
+        ),
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "DD_ENTRIES"},
     )
     params: list[str] = Field(
         default_factory=list,
@@ -300,6 +315,23 @@ class DictionaryFile(BaseModel):
             if s is not None:
                 return s
         return self.sequences.get(sid)
+
+    def find_sequence_by_dd_id(self, dd_id: str, *, connector: str | None = None) -> SequenceDef | None:
+        """Find any sequence whose ``dd_id`` matches *dd_id* — used at INSERT time to auto-fire
+        a sequence for a column regardless of its dictionary entry's own rule. Returns the first
+        match (v1's ``ly_sequence`` has at most one row per ``seq_dd_id`` per app). Searches the
+        per-connector scope first, then shared."""
+        key = dd_id.upper() if dd_id else ""
+        if not key:
+            return None
+        if connector and connector in self.connectors:
+            for s in self.connectors[connector].sequences.values():
+                if (s.dd_id or "").upper() == key:
+                    return s
+        for s in self.sequences.values():
+            if (s.dd_id or "").upper() == key:
+                return s
+        return None
 
     def resolve(self, key: str, language: str | None, *, connector: str | None = None) -> tuple[str | None, str | None]:
         """``(label, format)`` for *key* in *language* — *connector*'s section first, then shared;

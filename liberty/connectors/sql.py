@@ -425,7 +425,7 @@ from liberty.connectors.base import (
 )
 from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig
 from liberty.connectors.db import PoolRegistry
-from liberty.connectors.dictionary import DictionaryFile
+from liberty.connectors.dictionary import DictionaryFile, SequenceDef
 
 # Internal sentinel raised by `test_run(dry_run=True)` on a write — forces `engine.begin()`'s
 # context manager to roll back; caught outside the `async with`. Not part of the public surface.
@@ -947,39 +947,53 @@ class SQLConnector:
         if stmt_type != "INSERT":
             return bound
         meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
-        if not meta:
-            return bound
+        # ``dd_by_col``: column name (upper) → dd id (upper). Drives the dd_id-keyed sequence
+        # lookup — a column with a sequence registered under its dd auto-fires at INSERT time
+        # even when the dd's own rule is something else (e.g. APPS_ID is a LOOKUP target *and*
+        # gets an auto-ID from ``[sequences.get_apps_id_from_…]``).
+        dd_by_col: dict[str, str] = {}
+        for col in (column_hints or []):
+            ddk = (col.dd if col.dd else col.name) if col.dd != "" else ""
+            if ddk:
+                dd_by_col[col.name.upper()] = ddk.upper()
+        scope = dict_scope or self.name
         out = dict(bound)
         for k, v in list(out.items()):
             if k.upper().endswith("_ORIGINAL"):
                 continue
-            m = meta.get(k.upper())
-            if m is None:
-                continue
-            if m["rule"] not in _RULES_SEQUENCE:
-                continue
             if v not in (None, ""):
-                continue  # caller supplied an explicit value
-            seq_ref = m["rules_values"]
-            if not seq_ref:
-                _log.warning(
-                    "%s.%s: SEQUENCE rule on column %s has no rules_values — bind left NULL",
-                    self.name, qdef.name, k,
-                )
-                continue
-            # Sequence id → SequenceDef → query name. Falls through to "treat the value as a
-            # query name" for legacy / hand-edited dictionaries that don't yet have the
-            # ``[sequences.*]`` block — keeps the prior Phase-8 wiring working.
-            seq_ref_str = str(seq_ref).strip()
-            seq_def = self._dict.find_sequence(seq_ref_str, connector=dict_scope or self.name)
-            seq_query_name = seq_def.query if seq_def is not None else seq_ref_str
-            seq_qdef = self._queries.get(seq_query_name)
+                continue  # caller supplied an explicit value — never overwrite
+
+            # Two lookup paths to find a sequence for this bind:
+            #   1. via the dd_id (v1 ``ly_sequence.seq_dd_id`` — fires for any column whose dd
+            #      a sequence targets, regardless of the dd's own rule).
+            #   2. via the dictionary entry's ``rules = "SEQUENCE"`` / ``"NN"`` → ``rules_values``
+            #      (the sequence id, looked up via :meth:`find_sequence`).
+            seq_def: SequenceDef | None = None
+            dd = dd_by_col.get(k.upper(), k.upper())
+            seq_def = self._dict.find_sequence_by_dd_id(dd, connector=scope)
+            seq_query_name: str | None = seq_def.query if seq_def is not None else None
+            if seq_def is None:
+                m = meta.get(k.upper())
+                if m is None or m["rule"] not in _RULES_SEQUENCE:
+                    continue
+                seq_ref = m["rules_values"]
+                if not seq_ref:
+                    _log.warning(
+                        "%s.%s: SEQUENCE rule on column %s has no rules_values — bind left NULL",
+                        self.name, qdef.name, k,
+                    )
+                    continue
+                # Sequence id → SequenceDef → query name. Falls back to "treat rules_values as
+                # the query name" for legacy / hand-edited dictionaries.
+                seq_ref_str = str(seq_ref).strip()
+                seq_def = self._dict.find_sequence(seq_ref_str, connector=scope)
+                seq_query_name = seq_def.query if seq_def is not None else seq_ref_str
+            seq_qdef = self._queries.get(seq_query_name or "")
             if seq_qdef is None:
                 _log.warning(
-                    "%s.%s: SEQUENCE rule on column %s references unknown %s %r — bind left NULL",
-                    self.name, qdef.name, k,
-                    "sequence" if seq_def is None else "query",
-                    seq_ref_str,
+                    "%s.%s: SEQUENCE on column %s references unknown query %r — bind left NULL",
+                    self.name, qdef.name, k, seq_query_name,
                 )
                 continue
             seq_sql = _apply_schema_placeholders(
@@ -999,9 +1013,10 @@ class SQLConnector:
                         self.name, qdef.name, seq_query_name, k,
                     )
                     continue
-                # Take the first column of the first row (sequence queries are MAX(col)+1 by
-                # convention — one row, one column). Coerce defensively in case the query
-                # returns a string somehow.
+                # Take the first column of the first row — sequence queries return the
+                # *next* number directly (``SELECT COALESCE(MAX(col), 0) + 1 ...``). The
+                # migration rewrites v1's ``MAX(col)``-only pattern to include ``+ 1`` so
+                # operator-written and migrated queries follow one rule.
                 next_val = row[0]
                 if isinstance(next_val, str) and next_val.strip().isdigit():
                     next_val = int(next_val)

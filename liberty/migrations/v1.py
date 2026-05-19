@@ -277,6 +277,20 @@ def _wrap_with_lookup_params(base_sql: str, params: list[str], *, dialect: str =
     return f"SELECT * FROM (\n{base_sql}\n) lib_lkp\nWHERE 1=1\n{preds}"
 
 
+def _rewrite_sequence_max_to_next(sql: str) -> str:
+    """v1's sequence queries are stored as ``SELECT MAX(col) [AS alias] FROM table`` (v1's
+    framework added the ``+1`` at runtime). v2's SQL connector expects the query to return
+    the *next* number directly, so we rewrite ``MAX(col)`` → ``COALESCE(MAX(col), 0) + 1``.
+    Already-rewritten queries (containing ``COALESCE`` or ``+ 1``) pass through unchanged.
+
+    Only the *first* ``MAX(...)`` occurrence is touched (a sequence query's projection is
+    one column). Safe on Oracle / Postgres / SQLite — all support the COALESCE form.
+    """
+    if "COALESCE" in sql.upper() or "+ 1" in sql or "+1)" in sql:
+        return sql
+    return re.sub(r"\bMAX\s*\(\s*([^)]+?)\s*\)", r"COALESCE(MAX(\1), 0) + 1", sql, count=1, flags=re.IGNORECASE)
+
+
 def _simplify_upsert(sql: str) -> str:
     """v1's ``_post`` SQL for some tables is an *upsert* — PostgreSQL ``INSERT … ON CONFLICT … DO
     UPDATE …`` or Oracle ``MERGE INTO … WHEN NOT MATCHED THEN INSERT (…) VALUES (…)`` — so an Excel
@@ -375,6 +389,7 @@ def migrate_sql_queries(
     table_meta: Mapping[int, Mapping[str, Any]] | None = None,
     key_columns: Mapping[int, list[str]] | None = None,
     lookup_params: Mapping[int, list[str]] | None = None,
+    sequence_query_ids: Iterable[int] = (),
 ) -> dict[str, Any]:
     """Build the ``{pools, connectors}`` dict for the SQL side.
 
@@ -453,9 +468,15 @@ def migrate_sql_queries(
         if orderby and crud in _READ_CRUD:
             orderbys.setdefault(key, orderby)
 
+    # v1's ``ly_sequence`` queries are stored as ``SELECT MAX(<col>) FROM <table>`` and v1's
+    # framework added ``+1`` at runtime. v2's SQL connector expects the query to return the
+    # *next* number directly. Rewrite each migrated sequence query's MAX(...) projection to
+    # ``COALESCE(MAX(...), 0) + 1`` so the runtime gets the right value with no surprises.
+    seq_query_id_set = {int(q) for q in sequence_query_ids}
     for key in order:
         conn_name, qid, crud = key
         is_read = crud in _READ_CRUD
+        is_sequence = qid in seq_query_id_set
         label = labels.get(qid, "")
         base = slugify(f"{label}_{crud}" if label else f"q{qid}_{crud}", fallback=f"q{qid}_{crud.lower()}")
         hints = (column_hints or {}).get(qid) if is_read else None  # display hints only make sense for result sets
@@ -513,6 +534,8 @@ def migrate_sql_queries(
                 s = raw
             else:
                 s = _simplify_upsert(raw)
+            if is_sequence:
+                s = _rewrite_sequence_max_to_next(s)
             if lkp_params:
                 s = _wrap_with_lookup_params(s, lkp_params, dialect=dia)
             return f"{s}\nORDER BY {ob}" if ob else s
@@ -1363,6 +1386,12 @@ def migrate_dictionary(
         out_seq: dict[str, Any] = {"query": q_name}
         if raw_label:
             out_seq["description"] = raw_label
+        # ``seq_dd_id`` ties this sequence to a column: at INSERT time the SQL connector
+        # auto-fires the sequence for any bind whose dd matches this — independent of the
+        # dd's own rule (APPS_ID is a LOOKUP target *and* gets an auto-ID from this sequence).
+        seq_dd = str(s.get("seq_dd_id") or "").strip()
+        if seq_dd:
+            out_seq["dd_id"] = seq_dd
         # Only emit ``connector`` when it differs from the migrated app the dictionary belongs
         # to (parallels :class:`LookupDef`'s connector field — same logic).
         seq_pool = _q_pool_for_seq.get(qid_int)

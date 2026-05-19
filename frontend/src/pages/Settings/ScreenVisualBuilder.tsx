@@ -43,10 +43,66 @@ type Row = Record<string, unknown>
 // identical-looking inputs in both modes). Split into Basic (always visible) + Advanced
 // (collapsed by default) so the inspector isn't a wall of every property; operators rarely set
 // colspan / default but need ``dd`` / ``label`` / ``required`` on every field.
-const FIELD_BASIC_KEYS = ['dd', 'label', 'required'] as const
-const FIELD_ADVANCED_KEYS = ['hidden', 'disabled', 'colspan', 'default'] as const
+// ``hidden`` / ``disabled`` / ``required`` are *inheritable* overrides — rendered through
+// ``OverrideToggle`` (3-state: Inherit / Yes / No) below, not through SchemaForm. They live
+// on ScreenField as ``bool | None`` (null = inherit the column's value), and the canvas badges
+// + dialog runtime read the effective value (field value, else column default).
+const FIELD_BASIC_KEYS = ['dd', 'label'] as const
+const FIELD_ADVANCED_KEYS = ['colspan', 'default'] as const
 const FIELD_BINDS_KEY = 'lookup_param_binds'
 const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
+
+// Three-state override control for ``ScreenField`` flags that can inherit from their matching
+// ``ColumnHint``. Renders three pills: "Inherit (col: yes/no)" / "Yes" / "No" so the operator
+// can clearly see the current state, the column's default, and how to reset to inherit.
+// ``value`` semantics:
+//   * ``true``  → field explicitly overrides to *yes*
+//   * ``false`` → field explicitly overrides to *no*
+//   * ``null`` / ``undefined`` → field inherits the column's default
+const OverrideWrap = styled.div`display: flex; gap: 4px; flex-wrap: wrap; align-items: center;`
+const OverridePill = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; height: 24px;
+  border-radius: ${({ theme }) => (theme as { radius?: { sm: string } })?.radius?.sm ?? '6px'};
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-family: ${fonts.sans}; font-size: ${fontSize.micro}; cursor: pointer;
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
+`
+const InheritedHint = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.micro}; font-style: italic; margin-left: 4px;`
+function OverrideToggle(props: {
+  label: string
+  value: boolean | null | undefined
+  inherited: boolean
+  onChange: (next: boolean | null) => void
+  inheritedYesLabel?: string   // e.g. "hidden" / "required" / "read-only"
+  inheritedNoLabel?: string    // e.g. "shown"  / "optional" / "editable"
+}) {
+  const { t } = useTranslation()
+  const { label, value, inherited, onChange, inheritedYesLabel = 'yes', inheritedNoLabel = 'no' } = props
+  const isOverridden = value === true || value === false
+  const inheritedWord = inherited ? inheritedYesLabel : inheritedNoLabel
+  return (
+    <Field label={label}>
+      <OverrideWrap>
+        <OverridePill type="button" $active={!isOverridden} onClick={() => onChange(null)}>
+          {t('settings.screens.visual.override.inherit', 'Inherit')}
+        </OverridePill>
+        <OverridePill type="button" $active={value === true} onClick={() => onChange(true)}>
+          {t('common.yes', 'Yes')}
+        </OverridePill>
+        <OverridePill type="button" $active={value === false} onClick={() => onChange(false)}>
+          {t('common.no', 'No')}
+        </OverridePill>
+        {!isOverridden && (
+          <InheritedHint>
+            {t('settings.screens.visual.override.fromColumn', 'from column: {{val}}', { val: inheritedWord })}
+          </InheritedHint>
+        )}
+      </OverrideWrap>
+    </Field>
+  )
+}
 
 // ─── styled bits ────────────────────────────────────────────────────────────────────────────
 // Shell + columns assume they're mounted inside a fixed-height container (a Modal body or a
@@ -1233,6 +1289,16 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                   updateField(selFieldIdx!, patch)
                 }}
               />
+              {/* Override toggle: required on this dialog. Inherits the column's grid-level
+                  default unless the operator explicitly sets it. */}
+              <OverrideToggle
+                label={t('settings.screens.field.required', 'Required')}
+                value={selField.required as boolean | null | undefined}
+                inherited={Boolean(colFor(selField.name)?.required)}
+                onChange={(v) => updateField(selFieldIdx!, { required: v })}
+                inheritedYesLabel={t('settings.screens.visual.override.required', 'required')}
+                inheritedNoLabel={t('settings.screens.visual.override.optional', 'optional')}
+              />
             </InspSection>
             {/* Advanced — collapsible. Display flags + cascading lookup binds + per-field
                 conditional rules. Closed by default so the inspector isn't a wall of toggles. */}
@@ -1242,6 +1308,22 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 {t('settings.screens.visual.inspector.advanced')}
               </summary>
               <div>
+                <OverrideToggle
+                  label={t('settings.screens.field.hidden', 'Hidden')}
+                  value={selField.hidden as boolean | null | undefined}
+                  inherited={Boolean(colFor(selField.name)?.hidden)}
+                  onChange={(v) => updateField(selFieldIdx!, { hidden: v })}
+                  inheritedYesLabel={t('settings.screens.visual.override.hidden', 'hidden')}
+                  inheritedNoLabel={t('settings.screens.visual.override.shown', 'shown')}
+                />
+                <OverrideToggle
+                  label={t('settings.screens.field.disabled', 'Read-only')}
+                  value={selField.disabled as boolean | null | undefined}
+                  inherited={Boolean(colFor(selField.name)?.disabled)}
+                  onChange={(v) => updateField(selFieldIdx!, { disabled: v })}
+                  inheritedYesLabel={t('settings.screens.visual.override.readOnly', 'read-only')}
+                  inheritedNoLabel={t('settings.screens.visual.override.editable', 'editable')}
+                />
                 <SchemaForm
                   schema={advancedPropsSchema}
                   defs={defs}
