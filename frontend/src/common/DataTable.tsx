@@ -6,7 +6,7 @@
 // menu (columns aren't user-resizable — `table-layout: auto` lets the browser content-size them);
 // CSV / Excel export; page-size + page navigation; and localStorage persistence of column
 // visibility + order keyed by `tableId`. Theme-driven throughout.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
   useReactTable,
@@ -263,6 +263,20 @@ export function DataTable<T extends object>({
     if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder })
   }, [tableId, columnVisibility, columnOrder])
 
+  // Reset the grid's persisted visibility + order back to the screen's defaults — clears the
+  // localStorage entry *and* re-applies ``initialColumnVisibility`` (which encodes the screen's
+  // ``hidden`` flags). Needed when a screen has ``visible_when`` rules: an old saved-visibility
+  // entry can override a column the rule wants shown (or hidden) given the current filter,
+  // leaving the operator unable to see / hide a column without manually toggling it in the
+  // Columns menu. "Reset" gives them a single-click way back to the configured defaults.
+  const resetGrid = useCallback(() => {
+    if (tableId) {
+      try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ }
+    }
+    setColumnVisibility({ ...(initialColumnVisibility ?? {}) })
+    setColumnOrder([])
+  }, [tableId, initialColumnVisibility])
+
   useEffect(() => {
     if (!colOpen && !groupOpen && !exportOpen) return
     const h = (e: MouseEvent) => {
@@ -436,6 +450,14 @@ export function DataTable<T extends object>({
                   <Spacer />
                   <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll', 'All')}</MiniLink>
                   <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone', 'None')}</MiniLink>
+                  {/* "Reset" wipes the saved visibility + order from localStorage and re-applies
+                      the screen's defaults (the ``hidden`` hints on each column). Needed when a
+                      ``visible_when`` rule drops a column based on a server filter but an older
+                      saved entry still hides it — the operator would otherwise have to hunt
+                      through the column list to un-stick it. */}
+                  <MiniLink type="button" onClick={resetGrid} title={t('table.resetColumnsHint', 'Clear the saved column visibility / order for this table — handy when a visible_when rule conflicts with an older saved state.')}>
+                    {t('table.resetColumns', 'Reset')}
+                  </MiniLink>
                 </MenuHead>
                 {effectiveOrder.map((colId, idx) => {
                   const col = table.getColumn(colId)

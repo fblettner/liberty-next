@@ -156,6 +156,8 @@ const fr: Resources = {
     pasteRows: 'Coller',
     selectAll: 'Tout sélectionner',
     selectNone: 'Tout désélectionner',
+    resetColumns: 'Réinit.',
+    resetColumnsHint: "Efface la visibilité / l'ordre enregistré pour cette table — utile quand une règle visible_when entre en conflit avec un état sauvegardé plus ancien.",
     selectRow: 'Sélectionner la ligne',
     import: 'Importer',
     importNoMatch: 'Aucune colonne de {{file}} ne correspond à cette requête.',

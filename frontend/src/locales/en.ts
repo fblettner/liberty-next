@@ -154,6 +154,8 @@ const en = {
     pasteRows: 'Paste',
     selectAll: 'Select all',
     selectNone: 'Select none',
+    resetColumns: 'Reset',
+    resetColumnsHint: 'Clear the saved column visibility / order for this table — handy when a visible_when rule conflicts with an older saved state.',
     selectRow: 'Select row',
     import: 'Import',
     importNoMatch: 'No columns in {{file}} matched this query.',
