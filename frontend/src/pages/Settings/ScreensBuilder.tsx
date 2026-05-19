@@ -28,6 +28,7 @@ import {
   Mono,
   FrameworkEnumsContext,
   VisualBuilderModal,
+  useModals,
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
@@ -118,6 +119,7 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 
 export default function ScreensBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
@@ -251,19 +253,31 @@ export default function ScreensBuilder() {
       return next
     })
 
-  const addApp = () => {
-    const name = window.prompt(t('settings.screens.appNamePrompt'))?.trim()
+  const addApp = async () => {
+    const name = (await modals.prompt({
+      title: t('settings.screens.addApp'),
+      message: t('settings.screens.appNamePrompt'),
+    }))?.trim()
     if (!name) return
     setDoc((p) => ({ ...(p ?? {}), [name]: { ...((p ?? {})[name] ?? {}) } }))
     setSelApp(name); setStatus(null)
   }
-  const removeApp = (name: string) => {
-    if (!window.confirm(t('settings.screens.confirmAppDelete', { name }))) return
+  const removeApp = async (name: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.screens.deleteApp'),
+      message: t('settings.screens.confirmAppDelete', { name }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     setDoc((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSelApp((s) => (s === name ? null : s)); setStatus(null)
   }
-  const addScreen = (app: string) => {
-    const id = window.prompt(t('settings.screens.namePrompt'))?.trim()
+  const addScreen = async (app: string) => {
+    const id = (await modals.prompt({
+      title: t('settings.screens.add'),
+      message: t('settings.screens.namePrompt'),
+    }))?.trim()
     if (!id) return
     setDoc((p) => {
       const cur = p ?? {}
@@ -274,8 +288,14 @@ export default function ScreensBuilder() {
     })
     setSelId(id); setStatus(null)
   }
-  const removeScreen = (app: string, id: string) => {
-    if (!window.confirm(t('settings.screens.confirmDelete', { name: id }))) return
+  const removeScreen = async (app: string, id: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.screens.delete'),
+      message: t('settings.screens.confirmDelete', { name: id }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     setDoc((p) => {
       const cur = p ?? {}
       const appCur = { ...(cur[app] ?? {}) }
@@ -325,6 +345,12 @@ export default function ScreensBuilder() {
       {/* Scope row — apps are the screen-file's scope, equivalent to DictionaryBuilder's
           Shared / per-connector chips. Sits above the split so every builder follows the same
           "config path → scope chips → [list | detail]" layout pattern. */}
+      {/* Scope bar — apps on the left, scope-level actions clustered on the right (Add screen +
+          Delete <currentApp>). v1's "Delete the whole [screens.<app>] section" label was generic
+          and unhelpful when several builders share the same pattern; the new label interpolates
+          the selected app name (e.g. "Delete nomasx1") so a glance confirms what's about to go.
+          "Add screen" moves up from the bottom of the screen list — keeping every scope action
+          (add app · add screen · delete app) in one place at the top. */}
       <ScopeBar>
         <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.screens.scopeLabel')}</span>
         {apps.map((a) => (
@@ -336,9 +362,14 @@ export default function ScreensBuilder() {
           <Plus size={12} /> {t('settings.screens.addApp')}
         </Chip>
         {selApp && (
-          <Chip type="button" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteApp')} style={{ marginLeft: 'auto', color: colors.red.main, borderColor: colors.red.border }}>
-            <Trash2 size={12} /> {t('settings.screens.deleteApp')}
-          </Chip>
+          <>
+            <Chip type="button" onClick={() => addScreen(selApp)} title={t('settings.screens.add')} style={{ marginLeft: 'auto' }}>
+              <Plus size={12} /> {t('settings.screens.add')}
+            </Chip>
+            <Chip type="button" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteAppOne', { name: selApp })} style={{ color: colors.red.main, borderColor: colors.red.border }}>
+              <Trash2 size={12} /> {t('settings.screens.deleteAppOne', { name: selApp })}
+            </Chip>
+          </>
         )}
       </ScopeBar>
       <Split>
@@ -375,11 +406,9 @@ export default function ScreensBuilder() {
                   </div>
                 )}
               </NavList>
-              {/* Add-screen button only — "Delete app" moved to the scope bar above so the
-                  list footer stays focused on actions for the screen list itself. */}
-              <Button $variant="ghost" $size="sm" onClick={() => selApp && addScreen(selApp)} style={{ justifyContent: 'flex-start', marginTop: 6 }}>
-                <Plus size={13} /> {t('settings.screens.add')}
-              </Button>
+              {/* "Add screen" and "Delete <app>" both live in the scope bar at the top — no list
+                  footer needed here. Keeps every per-scope action visible without scrolling past
+                  a long screen list. */}
             </>
           )}
         </NavCol>

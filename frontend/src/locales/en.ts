@@ -61,6 +61,10 @@ const en = {
     remove: 'Remove',
     maximize: 'Maximize',
     restore: 'Restore',
+    ok: 'OK',
+    yes: 'Yes',
+    nameRequired: 'Name is required.',
+    nameExists: 'A "{{name}}" already exists.',
   },
   login: {
     title: 'Sign in',
@@ -265,6 +269,7 @@ const en = {
       app: {
         add: 'Add app',
         delete: 'Delete app',
+        deleteOne: 'Delete {{name}}',
         namePrompt: 'New app id (must match a connector name, e.g. "nomasx1"):',
         confirmDelete: 'Delete the whole menu tree for “{{name}}”?',
         empty: 'No app menus yet. Add one (typically matching a connector name).',
@@ -375,9 +380,11 @@ const en = {
     pools: {
       add: 'Add pool',
       delete: 'Delete pool',
+      deleteOne: 'Delete {{name}}',
       namePrompt: 'New pool name:',
+      namePlaceholder: 'e.g. nomasx1, jdedwards',
       renamePrompt: 'Rename pool “{{name}}” to:',
-      confirmDelete: 'Delete pool “{{name}}”?',
+      confirmDelete: 'Delete pool “{{name}}”? This removes its config — connections opened on it stay alive until the next reload.',
       empty: 'No pools yet. Add one — at minimum a database URL.',
       pickOne: 'Pick a pool on the left.',
       reloadFromDisk: 'Reload from disk',
@@ -414,6 +421,7 @@ const en = {
       },
       addApp: 'Add app',
       deleteApp: 'Delete the whole [screens.<app>] section',
+      deleteAppOne: 'Delete {{name}}',
       appNamePrompt: 'New app id (must match a connector name, e.g. "nomasx1"):',
       confirmAppDelete: 'Delete every screen under “{{name}}”?',
       namePrompt: 'New screen id (e.g. security_users, F0005):',
@@ -605,6 +613,7 @@ const en = {
     dashboards: {
       add: 'Add dashboard',
       delete: 'Delete',
+      deleteOne: 'Delete {{name}}',
       namePrompt: 'New dashboard id (slug-style, e.g. nomasx1_overview):',
       confirmDelete: 'Delete dashboard "{{name}}"?',
       empty: 'No dashboards yet. Add one to get started.',

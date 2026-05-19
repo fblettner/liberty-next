@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -128,6 +128,7 @@ function setSection(
 
 export default function DictionaryBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [path, setPath] = useState('')
   const [dict, setDict] = useState<DictionaryData | null>(null)
@@ -318,15 +319,24 @@ export default function DictionaryBuilder() {
     setDict(setSection(dict, scope, kind, { ...section, [key]: v }))
     setStatus(null)
   }
-  const addRecord = () => {
-    const key = window.prompt(t(`settings.dictionary.${kind}.namePrompt`))?.trim()
+  const addRecord = async () => {
+    const key = (await modals.prompt({
+      title: t(`settings.dictionary.${kind}.add`),
+      message: t(`settings.dictionary.${kind}.namePrompt`),
+    }))?.trim()
     if (!key) return
     if (key in section) { setSel(key); return }
     setDict(setSection(dict, scope, kind, { ...section, [key]: newRecord(kind) }))
     setSel(key); setStatus(null)
   }
-  const removeRecord = (key: string) => {
-    if (!window.confirm(t(`settings.dictionary.${kind}.confirmDelete`, { name: key }))) return
+  const removeRecord = async (key: string) => {
+    const ok = await modals.confirm({
+      title: t(`settings.dictionary.${kind}.delete`),
+      message: t(`settings.dictionary.${kind}.confirmDelete`, { name: key }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     const next = { ...section }; delete next[key]
     setDict(setSection(dict, scope, kind, next))
     setSel((s) => (s === key ? null : s)); setStatus(null)
@@ -337,17 +347,23 @@ export default function DictionaryBuilder() {
   // when an enum is renamed, etc.). Cross-scope and cross-file refs (``ScreenField.dd`` in
   // screens.toml, ``ColumnHint.dd`` in connectors.toml) are **not** auto-updated — the operator
   // sees a status banner reminding them. Framework-enum overrides have no cascade.
-  const renameRecord = (oldKey: string) => {
+  const renameRecord = async (oldKey: string) => {
     if (!dict) return
-    const next = window.prompt(
-      t(`settings.dictionary.${kind}.renamePrompt`, { name: oldKey }),
-      oldKey,
-    )?.trim()
-    if (!next) return
-    const err = validateRename(oldKey, next, Object.keys(section))
-    if (err === 'unchanged') return
-    if (err === 'empty') { window.alert(t('settings.rename.empty')); return }
-    if (err === 'exists') { window.alert(t('settings.rename.exists', { name: next })); return }
+    const existing = Object.keys(section)
+    const next = (await modals.prompt({
+      title: t('settings.rename.button'),
+      message: t(`settings.dictionary.${kind}.renamePrompt`, { name: oldKey }),
+      defaultValue: oldKey,
+      submitLabel: t('settings.rename.button'),
+      validate: (v) => {
+        const err = validateRename(oldKey, v, existing)
+        if (err === 'unchanged') return null
+        if (err === 'empty') return t('settings.rename.empty')
+        if (err === 'exists') return t('settings.rename.exists', { name: v })
+        return null
+      },
+    }))?.trim()
+    if (!next || next === oldKey) return
     let updated = setSection(dict, scope, kind, renameKey(section, oldKey, next))
     let cascaded = 0
     if (kind === 'enums' || kind === 'lookups') {
@@ -376,8 +392,11 @@ export default function DictionaryBuilder() {
         : t('settings.dictionary.renamed', { from: oldKey, to: next }),
     )
   }
-  const addScope = () => {
-    const name = window.prompt(t('settings.dictionary.scope.addPrompt'))?.trim()
+  const addScope = async () => {
+    const name = (await modals.prompt({
+      title: t('settings.dictionary.scope.add'),
+      message: t('settings.dictionary.scope.addPrompt'),
+    }))?.trim()
     if (!name) return
     if (scopes.includes(name)) { setScope(name); return }
     // We just switch — the scope materialises in `dict.connectors` as soon as a record is added
@@ -424,8 +443,19 @@ export default function DictionaryBuilder() {
         ))}
       </SubTabs>
       {SHARED_ONLY.has(kind) ? (
-        <Hint>{t('settings.dictionary.framework_enums.scopeNote')}</Hint>
+        // Framework enums live only in the shared scope; show a hint instead of the chip strip,
+        // but still surface "Add <kind>" on the right so every kind has a discoverable add action
+        // at the top (entries / enums / lookups / sequences / framework all follow the same UX).
+        <ScopeBar>
+          <Hint style={{ flex: 1, margin: 0 }}>{t('settings.dictionary.framework_enums.scopeNote')}</Hint>
+          <Chip type="button" onClick={addRecord} title={t(`settings.dictionary.${kind}.add`)}>
+            <Plus size={12} /> {t(`settings.dictionary.${kind}.add`)}
+          </Chip>
+        </ScopeBar>
       ) : (
+        // Scope chips on the left, scope-level actions on the right. "Add <kind>" was at the
+        // bottom of the record list before — promoting it here keeps every scope-level action
+        // (add scope · add record) visible without scrolling past a long list.
         <ScopeBar>
           <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.dictionary.scope.label')}</span>
           {scopes.map((s) => (
@@ -435,6 +465,9 @@ export default function DictionaryBuilder() {
           ))}
           <Chip type="button" onClick={addScope} title={t('settings.dictionary.scope.addPrompt')}>
             <Plus size={12} /> {t('settings.dictionary.scope.add')}
+          </Chip>
+          <Chip type="button" onClick={addRecord} title={t(`settings.dictionary.${kind}.add`)} style={{ marginLeft: 'auto' }}>
+            <Plus size={12} /> {t(`settings.dictionary.${kind}.add`)}
           </Chip>
         </ScopeBar>
       )}
@@ -468,9 +501,9 @@ export default function DictionaryBuilder() {
               </div>
             )}
           </NavList>
-          <Button $variant="ghost" $size="sm" onClick={addRecord} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
-            <Plus size={13} /> {t(`settings.dictionary.${kind}.add`)}
-          </Button>
+          {/* "Add <kind>" lives in the scope bar above — keeps every per-scope action in one
+              place at the top of the page. The list footer here would otherwise compete with it
+              for the operator's eye, and gets buried under a long list. */}
         </NavCol>
         <FormCol>
           {sel && section[sel] && recordSchema ? (

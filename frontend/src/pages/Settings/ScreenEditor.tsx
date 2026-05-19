@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, FileText, Plus, Trash2 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, type JsonSchema, type SearchSelectOption,
+  Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -112,6 +112,7 @@ export interface ScreenEditorProps {
 
 export default function ScreenEditor({ app, id, value, schema, onChange }: ScreenEditorProps) {
   const { t } = useTranslation()
+  const modals = useModals()
   const [tab, setTab] = useState<TabKey>('general')
 
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
@@ -370,15 +371,29 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       }
       setActions(next)
     }
-    const add = () => {
-      const id = window.prompt(t('settings.screens.action.namePrompt'))?.trim()
+    const add = async () => {
+      const existing = actions.map((a) => a.id)
+      const id = (await modals.prompt({
+        title: t('settings.screens.action.add'),
+        message: t('settings.screens.action.namePrompt'),
+        validate: (v) => {
+          if (!v) return null   // empty → close as if cancelled
+          if (existing.includes(v)) return t('settings.screens.action.idExists', { id: v })
+          return null
+        },
+      }))?.trim()
       if (!id) return
-      if (actions.some((a) => a.id === id)) { window.alert(t('settings.screens.action.idExists', { id })); return }
       setActions([...actions, blankActionOfType('run_query', id)])
       setExpanded(actions.length)
     }
-    const remove = (idx: number) => {
-      if (!window.confirm(t('settings.screens.action.confirmDelete', { id: actions[idx]?.id }))) return
+    const remove = async (idx: number) => {
+      const ok = await modals.confirm({
+        title: t('settings.screens.action.delete'),
+        message: t('settings.screens.action.confirmDelete', { id: actions[idx]?.id }),
+        variant: 'danger',
+        confirmLabel: t('common.delete'),
+      })
+      if (!ok) return
       const next = actions.slice(); next.splice(idx, 1)
       setActions(next)
       setExpanded(expanded === idx ? null : expanded != null && expanded > idx ? expanded - 1 : expanded)

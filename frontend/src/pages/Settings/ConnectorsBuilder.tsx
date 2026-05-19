@@ -12,7 +12,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, Layers, FileCog, Copy, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, useModals, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -87,6 +87,7 @@ const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.
 
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const { findScreen } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
@@ -161,15 +162,24 @@ export default function ConnectorsBuilder() {
     })
     setStatus(null)
   }
-  const addConnector = (type: 'sql' | 'api') => {
-    const name = window.prompt(t('settings.connectors.namePrompt'))?.trim()
+  const addConnector = async (type: 'sql' | 'api') => {
+    const name = (await modals.prompt({
+      title: type === 'api' ? t('settings.connectors.addApi') : t('settings.connectors.addSql'),
+      message: t('settings.connectors.namePrompt'),
+    }))?.trim()
     if (!name) return
     if (conns && name in conns) { setSel(name); return }
     setConns((p) => ({ ...(p ?? {}), [name]: type === 'api' ? { type: 'api', base_url: '' } : { type: 'sql', queries: [] } }))
     setSel(name); setStatus(null)
   }
-  const removeConnector = (name: string) => {
-    if (!window.confirm(t('settings.connectors.confirmDelete', { name }))) return
+  const removeConnector = async (name: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.connectors.delete'),
+      message: t('settings.connectors.confirmDelete', { name }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     setConns((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
   }
@@ -179,20 +189,32 @@ export default function ConnectorsBuilder() {
   // dictionary.toml) are **not** auto-updated — those live in separate files behind different
   // PUT endpoints. A persistent banner reminds the operator after the rename. (A future slice
   // can fetch + scan + cross-file batch update, with proper failure handling.)
-  const renameConnector = (oldName: string) => {
+  const renameConnector = async (oldName: string) => {
     if (!conns) return
-    const next = window.prompt(t('settings.connectors.renamePrompt', { name: oldName }), oldName)?.trim()
-    if (!next) return
-    const err = validateRename(oldName, next, Object.keys(conns))
-    if (err === 'unchanged') return
-    if (err === 'empty') { window.alert(t('settings.rename.empty')); return }
-    if (err === 'exists') { window.alert(t('settings.rename.exists', { name: next })); return }
+    const existing = Object.keys(conns)
+    const next = (await modals.prompt({
+      title: t('settings.rename.button'),
+      message: t('settings.connectors.renamePrompt', { name: oldName }),
+      defaultValue: oldName,
+      submitLabel: t('settings.rename.button'),
+      validate: (v) => {
+        const err = validateRename(oldName, v, existing)
+        if (err === 'unchanged') return null
+        if (err === 'empty') return t('settings.rename.empty')
+        if (err === 'exists') return t('settings.rename.exists', { name: v })
+        return null
+      },
+    }))?.trim()
+    if (!next || next === oldName) return
     setConns((p) => renameKey(p ?? {}, oldName, next))
     setSel(next)
     setStatus(t('settings.connectors.renamed', { from: oldName, to: next }))
   }
-  const addTable = (connectorName: string) => {
-    const base = window.prompt(t('settings.tables.namePrompt'))?.trim()
+  const addTable = async (connectorName: string) => {
+    const base = (await modals.prompt({
+      title: t('settings.tables.addTable'),
+      message: t('settings.tables.namePrompt'),
+    }))?.trim()
     if (!base) return
     const cur = (conns ?? {})[connectorName] ?? {}
     const queries = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
@@ -203,25 +225,34 @@ export default function ConnectorsBuilder() {
     updateQueries(connectorName, [...queries, newQueryStub(base, 'get')])
     setSelTable(base)
   }
-  const duplicateTable = (connectorName: string, oldBase: string) => {
+  const duplicateTable = async (connectorName: string, oldBase: string) => {
     const cur = (conns ?? {})[connectorName] ?? {}
     const queries = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
+    // Pre-check: nothing to duplicate from. Surface as an alert before prompting at all.
+    if (duplicateTableQueries(queries, oldBase, `${oldBase}_copy`) === queries) {
+      await modals.alert({
+        title: t('settings.tables.duplicate'),
+        message: t('settings.tables.duplicateNoSource', { name: oldBase }),
+        variant: 'danger',
+      })
+      return
+    }
     const suggested = `${oldBase}_copy`
-    const newBase = window.prompt(t('settings.tables.duplicatePrompt', { name: oldBase }), suggested)?.trim()
+    const newBase = (await modals.prompt({
+      title: t('settings.tables.duplicate'),
+      message: t('settings.tables.duplicatePrompt', { name: oldBase }),
+      defaultValue: suggested,
+      submitLabel: t('settings.tables.duplicate'),
+      validate: (v) => {
+        if (!v) return null   // empty → close as if cancelled
+        if (v.toLowerCase() === oldBase.toLowerCase()) return t('settings.tables.duplicateSameName')
+        if (tableExists(queries, v)) return t('settings.tables.duplicateExists', { name: v })
+        return null
+      },
+    }))?.trim()
     if (!newBase) return
-    if (newBase.toLowerCase() === oldBase.toLowerCase()) {
-      window.alert(t('settings.tables.duplicateSameName'))
-      return
-    }
-    if (tableExists(queries, newBase)) {
-      window.alert(t('settings.tables.duplicateExists', { name: newBase }))
-      return
-    }
     const next = duplicateTableQueries(queries, oldBase, newBase)
-    if (next === queries) {
-      window.alert(t('settings.tables.duplicateNoSource', { name: oldBase }))
-      return
-    }
+    if (next === queries) return
     updateQueries(connectorName, next)
     setSelTable(newBase)
   }

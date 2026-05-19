@@ -16,7 +16,7 @@ import styled from '@emotion/styled'
 import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { Button, Row, SchemaForm, SqlConnectorContext, Stack, type JsonSchema } from '../../common'
+import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
   CRUD_KINDS,
@@ -92,6 +92,7 @@ export default function ConnectorsTableEditor({
   base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, screenLink,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
+  const modals = useModals()
   const [tab, setTab] = useState<TabKey>(slots.get ? 'general' : 'get')
 
   const getSlot = slots.get
@@ -117,8 +118,14 @@ export default function ConnectorsTableEditor({
   const createSlot = (crud: CrudKind) => {
     onChangeQueries([...queries, newQueryStub(base, crud)])
   }
-  const removeWholeTable = () => {
-    if (!window.confirm(t('settings.tables.confirmDelete', { name: base }))) return
+  const removeWholeTable = async () => {
+    const ok = await modals.confirm({
+      title: t('settings.tables.deleteTable'),
+      message: t('settings.tables.confirmDelete', { name: base }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     let next = queries
     for (const crud of CRUD_KINDS) {
       const slot = slots[crud]

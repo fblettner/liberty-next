@@ -24,6 +24,7 @@ import {
   SchemaNavigator,
   SpinnerRing,
   Stack,
+  useModals,
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
@@ -56,6 +57,7 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 
 export default function DashboardsBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   // We navigate the `Dashboard` $def with the full $defs map alongside so SchemaNavigator can
   // resolve widget / filter refs into ChartWidget / KpiWidget / DashboardFilter at the right
   // level when the user drills in.
@@ -130,15 +132,24 @@ export default function DashboardsBuilder() {
       return next
     })
 
-  const addDashboard = () => {
-    const id = window.prompt(t('settings.dashboards.namePrompt'))?.trim()
+  const addDashboard = async () => {
+    const id = (await modals.prompt({
+      title: t('settings.dashboards.add'),
+      message: t('settings.dashboards.namePrompt'),
+    }))?.trim()
     if (!id) return
     if (doc && id in doc) { setSel(id); return }
     setDoc((p) => ({ ...(p ?? {}), [id]: { id, label: id, widgets: [] } }))
     setSel(id); setStatus(null)
   }
-  const removeDashboard = (id: string) => {
-    if (!window.confirm(t('settings.dashboards.confirmDelete', { name: id }))) return
+  const removeDashboard = async (id: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.dashboards.delete'),
+      message: t('settings.dashboards.confirmDelete', { name: id }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     setDoc((p) => { const next = { ...(p ?? {}) }; delete next[id]; return next })
     setSel((s) => (s === id ? null : s)); setStatus(null)
   }
@@ -165,7 +176,22 @@ export default function DashboardsBuilder() {
   return (
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
       <Stack gap={12}>
-        <Mono>{path}</Mono>
+        {/* Top toolbar — config path on the left, scope-level actions on the right. "Add
+            dashboard" was at the bottom of the list before; promoting it here keeps every
+            builder consistent (same place as Pools / Screens / Dictionary). */}
+        <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Mono>{path}</Mono>
+          <Row gap={6}>
+            <Button $variant="ghost" $size="sm" onClick={addDashboard} disabled={busy}>
+              <Plus size={13} /> {t('settings.dashboards.add')}
+            </Button>
+            {sel && selValue && (
+              <Button $variant="danger" $size="sm" onClick={() => removeDashboard(sel)} disabled={busy} title={t('settings.dashboards.deleteOne', { name: sel })}>
+                <Trash2 size={13} /> {t('settings.dashboards.deleteOne', { name: sel })}
+              </Button>
+            )}
+          </Row>
+        </Row>
         <Split>
           <NavCol>
             <NavList>
@@ -189,9 +215,6 @@ export default function DashboardsBuilder() {
                 </div>
               )}
             </NavList>
-            <Button $variant="ghost" $size="sm" onClick={addDashboard} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
-              <Plus size={13} /> {t('settings.dashboards.add')}
-            </Button>
           </NavCol>
           <FormCol>
             {sel && selValue ? (
@@ -200,9 +223,6 @@ export default function DashboardsBuilder() {
                   <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
                     [dashboards.{sel}]
                   </strong>
-                  <Button $variant="danger" $size="sm" onClick={() => removeDashboard(sel)} disabled={busy}>
-                    <Trash2 size={13} /> {t('settings.dashboards.delete')}
-                  </Button>
                 </Row>
                 <SchemaNavigator
                   root={{

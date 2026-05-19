@@ -15,7 +15,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { groupQueriesByTable } from './connectorTables'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -197,6 +197,7 @@ function freshId(items: MenuItem[], seed: string): string {
 // ── component ────────────────────────────────────────────────────────────────
 export default function MenusBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // Read-only — the inspector's CONNECTOR / TARGET dropdowns pull from here. Loaded alongside
   // the menus + schema so the framework-enum augmentation can offer real query / endpoint names.
@@ -360,21 +361,37 @@ export default function MenusBuilder() {
   const updateItems = (next: MenuItem[]) =>
     selApp && currentApp && updateApp(selApp, { ...currentApp, items: next })
 
-  const addApp = () => {
-    const name = window.prompt(t('settings.menus.app.namePrompt'))?.trim()
+  const addApp = async () => {
+    const name = (await modals.prompt({
+      title: t('settings.menus.app.add'),
+      message: t('settings.menus.app.namePrompt'),
+    }))?.trim()
     if (!name) return
     if (apps[name]) { setSelApp(name); return }
     setApps((p) => ({ ...(p ?? {}), [name]: { items: [] } }))
     setSelApp(name); setStatus(null)
   }
-  const removeApp = (name: string) => {
-    if (!window.confirm(t('settings.menus.app.confirmDelete', { name }))) return
+  const removeApp = async (name: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.menus.app.delete'),
+      message: t('settings.menus.app.confirmDelete', { name }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     setApps((p) => { const n = { ...(p ?? {}) }; delete n[name]; return n })
     setSelApp((s) => (s === name ? null : s)); setStatus(null)
   }
-  const renameItem = (oldId: string, newId: string) => {
+  const renameItem = async (oldId: string, newId: string) => {
     if (!newId || newId === oldId) return
-    if (items.some((it) => it.id === newId)) { window.alert(t('settings.menus.item.idExists', { id: newId })); return }
+    if (items.some((it) => it.id === newId)) {
+      await modals.alert({
+        title: t('settings.menus.app.add'),
+        message: t('settings.menus.item.idExists', { id: newId }),
+        variant: 'danger',
+      })
+      return
+    }
     updateItems(items.map((it) => {
       const next: MenuItem = { ...it }
       if (next.id === oldId) next.id = newId
@@ -403,11 +420,19 @@ export default function MenusBuilder() {
     if (parent) setExpanded((s) => new Set([...s, parent]))
     setSelItem(newId)
   }
-  const removeItem = (id: string) => {
+  const removeItem = async (id: string) => {
     const rec = items.find((it) => it.id === id)
     if (!rec) return
     const hasChildren = items.some((it) => it.parent === id)
-    if (hasChildren && !window.confirm(t('settings.menus.item.confirmDeleteSubtree', { name: rec.label || rec.id }))) return
+    if (hasChildren) {
+      const ok = await modals.confirm({
+        title: t('common.delete'),
+        message: t('settings.menus.item.confirmDeleteSubtree', { name: rec.label || rec.id }),
+        variant: 'danger',
+        confirmLabel: t('common.delete'),
+      })
+      if (!ok) return
+    }
     updateItems(removeSubtree(items, id))
     if (selItem === id) setSelItem(null)
   }
@@ -511,8 +536,8 @@ export default function MenusBuilder() {
           <Plus size={12} /> {t('settings.menus.app.add')}
         </ScopeChip>
         {selApp && (
-          <ScopeChip type="button" onClick={() => removeApp(selApp)} title={t('settings.menus.app.delete')} style={{ marginLeft: 'auto', color: colors.red.main, borderColor: colors.red.border }}>
-            <Trash2 size={12} /> {t('settings.menus.app.delete')}
+          <ScopeChip type="button" onClick={() => removeApp(selApp)} title={t('settings.menus.app.deleteOne', { name: selApp })} style={{ marginLeft: 'auto', color: colors.red.main, borderColor: colors.red.border }}>
+            <Trash2 size={12} /> {t('settings.menus.app.deleteOne', { name: selApp })}
           </ScopeChip>
         )}
       </ScopeBar>

@@ -30,7 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, type JsonSchema, type SearchSelectOption } from '../../common'
+import { Banner, Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import type { Column, QueryResult } from '../../types/connectors'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -344,6 +344,7 @@ export interface ScreenVisualBuilderProps {
 
 export default function ScreenVisualBuilder({ app, value, schema, onChange }: ScreenVisualBuilderProps) {
   const { t } = useTranslation()
+  const modals = useModals()
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
 
   // The selected screen's connector (explicit, else app). All palette fetches scope to this.
@@ -662,12 +663,18 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     }
     updateFields(next)
   }, [fields, updateFields])
-  const deleteField = useCallback((idx: number) => {
-    if (!window.confirm(t('settings.screens.field.confirmDelete', { name: fields[idx]?.name }))) return
+  const deleteField = useCallback(async (idx: number) => {
+    const ok = await modals.confirm({
+      title: t('settings.screens.field.delete'),
+      message: t('settings.screens.field.confirmDelete', { name: fields[idx]?.name }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     const next = fields.slice(); next.splice(idx, 1)
     updateFields(next)
     setSelFieldIdx((cur) => (cur === idx ? null : cur != null && cur > idx ? cur - 1 : cur))
-  }, [fields, updateFields, t])
+  }, [fields, updateFields, t, modals])
   // Drag-to-reorder within the same tab. HTML5 native DnD; the dragged index lives in state so
   // the drop target knows what to splice. Cross-tab drop = move the field to the target tab.
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -759,10 +766,18 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   }
 
   // ── tabs strip helpers ───────────────────────────────────────────────────────────────────
-  const addTab = () => {
-    const id = window.prompt(t('settings.screens.tab.namePrompt'))?.trim()
+  const addTab = async () => {
+    const existing = tabs.map((tt) => tt.id)
+    const id = (await modals.prompt({
+      title: t('settings.screens.tab.add'),
+      message: t('settings.screens.tab.namePrompt'),
+      validate: (v) => {
+        if (!v) return null   // empty → close as if cancelled
+        if (existing.includes(v)) return t('settings.screens.tab.idExists', { id: v })
+        return null
+      },
+    }))?.trim()
     if (!id) return
-    if (tabs.some((tt) => tt.id === id)) { window.alert(t('settings.screens.tab.idExists', { id })); return }
     const next = [...tabs, { id, fields: [] }]
     setDialog({ ...(dialog ?? {}), tabs: next })
     setTabIdx(next.length - 1)
@@ -1205,8 +1220,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 {tabType !== 'nested_table' && (
                   <FieldGrid $cols={cols}>
                     {visibleFields.map(renderCard)}
-                    <AddSlot onClick={() => {
-                      const name = window.prompt(t('settings.screens.field.namePrompt'))?.trim()
+                    <AddSlot onClick={async () => {
+                      const name = (await modals.prompt({
+                        title: t('settings.screens.field.add'),
+                        message: t('settings.screens.field.namePrompt'),
+                      }))?.trim()
                       if (name) addFieldFromName(name)
                     }}>
                       <Plus size={13} /> {t('settings.screens.field.add')}

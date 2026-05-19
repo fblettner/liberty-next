@@ -9,7 +9,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Table as TableIcon, Play, BarChart3 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
-import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing } from '../../common'
+import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing, useModals } from '../../common'
 import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
@@ -60,6 +60,7 @@ const ViewToggle = styled.div`
 
 export default function TableView({ connector, query }: { connector: string; query: string }) {
   const { t } = useTranslation()
+  const modals = useModals()
   const { menus, findScreen } = useWorkspace()
   // URL search params seed the param form / filter panel on initial load — that's how the
   // row-menu's NavigateAction drill-down works ("?USR_ID=42" → the destination's USR_ID param
@@ -197,7 +198,14 @@ export default function TableView({ connector, query }: { connector: string; que
 
   const run = useCallback(async () => {
     if (!meta) return
-    if (meta.writable && !window.confirm(t('table.runWritableConfirm', { q: `${connector}.${query}` }))) return
+    if (meta.writable) {
+      const ok = await modals.confirm({
+        title: t('table.run'),
+        message: t('table.runWritableConfirm', { q: `${connector}.${query}` }),
+        confirmLabel: t('table.run'),
+      })
+      if (!ok) return
+    }
     setBusy(true)
     setRunErr(null)
     const sent: Record<string, string> = {}
@@ -222,7 +230,7 @@ export default function TableView({ connector, query }: { connector: string; que
     } finally {
       setBusy(false)
     }
-  }, [meta, params, filters, maxRows, connector, query, t])
+  }, [meta, params, filters, maxRows, connector, query, t, modals])
 
   // Auto-load: run a SELECT immediately when the screen opens, once, if the screen asks for it.
   // Phase 3 — ``auto_load`` is a screen-level flag now; fall back to the (deprecated) meta-level

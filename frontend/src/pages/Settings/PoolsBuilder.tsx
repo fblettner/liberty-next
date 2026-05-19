@@ -8,7 +8,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -35,6 +35,7 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 
 export default function PoolsBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const [schema, setSchema] = useState<JsonSchema | null>(null)
   const [enums, setEnums] = useState<FrameworkEnums | null>(null)
   const [path, setPath] = useState('')
@@ -59,31 +60,51 @@ export default function PoolsBuilder() {
   const dirty = useMemo(() => pools != null && JSON.stringify(pools) !== original, [pools, original])
 
   const update = (name: string, v: Record<string, unknown>) => setPools((p) => ({ ...(p ?? {}), [name]: v }))
-  const addPool = () => {
-    const name = window.prompt(t('settings.pools.namePrompt'))?.trim()
+  const addPool = async () => {
+    const name = (await modals.prompt({
+      title: t('settings.pools.add'),
+      message: t('settings.pools.namePrompt'),
+      placeholder: t('settings.pools.namePlaceholder', 'e.g. nomasx1, jdedwards'),
+    }))?.trim()
     if (!name) return
     if (pools && name in pools) { setSel(name); return }
     setPools((p) => ({ ...(p ?? {}), [name]: { url: '' } }))
     setSel(name); setStatus(null)
   }
-  const removePool = (name: string) => {
-    if (!window.confirm(t('settings.pools.confirmDelete', { name }))) return
+  const removePool = async (name: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.pools.delete'),
+      message: t('settings.pools.confirmDelete', { name }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     setPools((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
   }
   // Rename the selected pool's dict key. Order-preserving (the renamed item stays in place in the
-  // left nav). Validation: non-empty, not colliding with another existing pool. Cross-file refs
-  // (`[connectors.<X>] pool = "<old>"` in connectors.toml) are **not** auto-updated — that's a
-  // separate file, owned by a different PUT endpoint; doing a multi-document write here would
-  // need partial-failure handling. A hint at the bottom of the builder reminds the operator.
-  const renamePool = (oldName: string) => {
+  // left nav). Validation: non-empty, not colliding with another existing pool — handled by the
+  // modal's ``validate`` callback so errors render under the input instead of as separate alerts.
+  // Cross-file refs (`[connectors.<X>] pool = "<old>"` in connectors.toml) are **not** auto-updated
+  // — that's a separate file, owned by a different PUT endpoint; doing a multi-document write
+  // here would need partial-failure handling. A hint at the bottom of the builder reminds.
+  const renamePool = async (oldName: string) => {
     if (!pools) return
-    const next = window.prompt(t('settings.pools.renamePrompt', { name: oldName }), oldName)?.trim()
-    if (!next) return
-    const err = validateRename(oldName, next, Object.keys(pools))
-    if (err === 'unchanged') return
-    if (err === 'empty') { window.alert(t('settings.rename.empty')); return }
-    if (err === 'exists') { window.alert(t('settings.rename.exists', { name: next })); return }
+    const existing = Object.keys(pools)
+    const next = (await modals.prompt({
+      title: t('settings.rename.button'),
+      message: t('settings.pools.renamePrompt', { name: oldName }),
+      defaultValue: oldName,
+      submitLabel: t('settings.rename.button'),
+      validate: (v) => {
+        const err = validateRename(oldName, v, existing)
+        if (err === 'unchanged') return null  // identity is a soft no-op (close as if cancelled)
+        if (err === 'empty') return t('settings.rename.empty')
+        if (err === 'exists') return t('settings.rename.exists', { name: v })
+        return null
+      },
+    }))?.trim()
+    if (!next || next === oldName) return
     setPools((p) => renameKey(p ?? {}, oldName, next))
     setSel(next); setStatus(null)
   }
@@ -110,7 +131,23 @@ export default function PoolsBuilder() {
   return (
     <FrameworkEnumsContext.Provider value={enums}>
     <Stack gap={12}>
-      <Mono>{path}</Mono>
+      {/* Top toolbar — config path on the left, scope-level actions on the right. The "Add pool"
+          button used to sit at the bottom of the left nav; promoting it here keeps every builder
+          consistent (Pools / Screens / Dictionary all expose "Add scope-item" + "Delete current"
+          in one place) and makes the action discoverable without scrolling past a long list. */}
+      <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <Mono>{path}</Mono>
+        <Row gap={6}>
+          <Button $variant="ghost" $size="sm" onClick={addPool} disabled={busy}>
+            <Plus size={13} /> {t('settings.pools.add')}
+          </Button>
+          {sel && pools[sel] && (
+            <Button $variant="danger" $size="sm" onClick={() => removePool(sel)} disabled={busy} title={t('settings.pools.deleteOne', { name: sel })}>
+              <Trash2 size={13} /> {t('settings.pools.deleteOne', { name: sel })}
+            </Button>
+          )}
+        </Row>
+      </Row>
       <Split>
         <NavCol>
           <NavList>
@@ -118,23 +155,15 @@ export default function PoolsBuilder() {
               <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}><Database size={13} /> {n}</NavItem>
             ))}
           </NavList>
-          <Button $variant="ghost" $size="sm" onClick={addPool} style={{ marginTop: 6, justifyContent: 'flex-start' }}>
-            <Plus size={13} /> {t('settings.pools.add')}
-          </Button>
         </NavCol>
         <FormCol>
           {sel && pools[sel] ? (
             <Stack gap={12}>
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>[pools.{sel}]</strong>
-                <Row gap={6}>
-                  <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
-                    <Edit3 size={13} /> {t('settings.rename.button')}
-                  </Button>
-                  <Button $variant="danger" $size="sm" onClick={() => removePool(sel)} disabled={busy}>
-                    <Trash2 size={13} /> {t('settings.pools.delete')}
-                  </Button>
-                </Row>
+                <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
+                  <Edit3 size={13} /> {t('settings.rename.button')}
+                </Button>
               </Row>
               <SchemaForm schema={schema} value={pools[sel]} onChange={(v) => update(sel, v)} />
             </Stack>

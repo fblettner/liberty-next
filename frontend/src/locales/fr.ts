@@ -63,6 +63,10 @@ const fr: Resources = {
     remove: 'Retirer',
     maximize: 'Agrandir',
     restore: 'Restaurer',
+    ok: 'OK',
+    yes: 'Oui',
+    nameRequired: 'Le nom est obligatoire.',
+    nameExists: 'Un « {{name}} » existe déjà.',
   },
   login: {
     title: 'Connexion',
@@ -267,6 +271,7 @@ const fr: Resources = {
       app: {
         add: 'Ajouter une application',
         delete: "Supprimer l'application",
+        deleteOne: 'Supprimer {{name}}',
         namePrompt: "Identifiant de la nouvelle application (doit correspondre à un connecteur, ex. « nomasx1 ») :",
         confirmDelete: "Supprimer tout l'arbre de menus de « {{name}} » ?",
         empty: "Aucun menu défini. Ajoutez une application (généralement le nom d'un connecteur).",
@@ -377,9 +382,11 @@ const fr: Resources = {
     pools: {
       add: 'Ajouter un pool',
       delete: 'Supprimer le pool',
+      deleteOne: 'Supprimer {{name}}',
       namePrompt: 'Nom du nouveau pool :',
+      namePlaceholder: 'ex. nomasx1, jdedwards',
       renamePrompt: 'Renommer le pool « {{name}} » en :',
-      confirmDelete: 'Supprimer le pool « {{name}} » ?',
+      confirmDelete: 'Supprimer le pool « {{name}} » ? Cela retire sa configuration — les connexions déjà ouvertes restent actives jusqu’au prochain rechargement.',
       empty: 'Aucun pool. Ajoutez-en un — au minimum une URL de base de données.',
       pickOne: 'Choisissez un pool à gauche.',
       reloadFromDisk: 'Recharger depuis le disque',
@@ -416,6 +423,7 @@ const fr: Resources = {
       },
       addApp: 'Ajouter une application',
       deleteApp: 'Supprimer toute la section [screens.<app>]',
+      deleteAppOne: 'Supprimer {{name}}',
       appNamePrompt: 'Nom de la nouvelle application (doit correspondre à un connecteur, ex. « nomasx1 ») :',
       confirmAppDelete: 'Supprimer tous les écrans sous « {{name}} » ?',
       namePrompt: 'Identifiant du nouvel écran (ex. security_users, F0005) :',
@@ -607,6 +615,7 @@ const fr: Resources = {
     dashboards: {
       add: 'Ajouter un tableau de bord',
       delete: 'Supprimer',
+      deleteOne: 'Supprimer {{name}}',
       namePrompt: "Identifiant du nouveau tableau de bord (slug, ex. nomasx1_overview) :",
       confirmDelete: 'Supprimer le tableau de bord « {{name}} » ?',
       empty: "Aucun tableau de bord pour le moment. Ajoutez-en un pour commencer.",
