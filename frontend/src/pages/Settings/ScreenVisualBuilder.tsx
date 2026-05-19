@@ -21,12 +21,12 @@
 // External data fetched on mount: dictionary.toml entries (for the connector scope) + the
 // read_query's column names (via /api/sql with _limit=0). Both cached in component state; the
 // dictionary feeds both the palette and the field-widget preview.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle, AlignLeft, Calendar, CheckSquare, ChevronRight as ChevronRightIcon, Code2,
-  Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, Plus, Search, Trash2, Zap,
+  Edit3, Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, Plus, Search, Trash2, Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
@@ -34,6 +34,7 @@ import { Banner, Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, use
 import type { ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import type { Column, QueryResult } from '../../types/connectors'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 
@@ -357,6 +358,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   const dialog = (value.dialog && typeof value.dialog === 'object' ? value.dialog : null) as { title?: string; tabs?: Row[] } | null
   const tabs: Row[] = useMemo(() => (Array.isArray(dialog?.tabs) ? dialog!.tabs : []), [dialog])
   const [tabIdx, setTabIdx] = useState(0)
+  // ``editQuery`` raises ``EditQueryModal`` from a nested-form tab's query SearchSelect's
+  // pencil button — same pattern the Screen Editor's Queries tab uses. Cleared when the
+  // modal closes.
+  const [editQuery, setEditQuery] = useState<{ connector: string; queryName: string } | null>(null)
   useEffect(() => { if (tabIdx >= tabs.length) setTabIdx(Math.max(0, tabs.length - 1)) }, [tabs, tabIdx])
   const selTab = tabs[tabIdx]
   const fields: Row[] = useMemo(() => (Array.isArray(selTab?.fields) ? (selTab!.fields as Row[]) : []), [selTab])
@@ -414,6 +419,40 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       mono: q.name,
     }))
   }, [tabConnectorMeta])
+  // Helper: nested-form query picker (read_query / update_query / insert_query) — SearchSelect
+  // over the tab's effective connector + an adjacent "Edit query" pencil that raises
+  // EditQueryModal so the operator can tweak the SQL without leaving the visual designer.
+  // Same shape the Screen Editor's Queries tab uses. ``patchTab`` is bound from the closure.
+  const renderTabQueryPicker = (
+    key: 'read_query' | 'update_query' | 'insert_query',
+    opts: { required: boolean; anyLabel: string | undefined },
+  ): ReactNode => {
+    const val = (selTab && typeof selTab[key] === 'string' ? (selTab[key] as string) : '') || ''
+    return (
+      <Row gap={6} style={{ alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SearchSelect
+            value={val}
+            options={tabQueryOptions}
+            onChange={(v) => patchTab({ [key]: v || (opts.required ? '' : null) })}
+            anyLabel={opts.anyLabel}
+            placeholder={tabConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+            loading={!tabConnectorMeta}
+          />
+        </div>
+        {val && tabEffectiveConnector && (
+          <Button
+            $variant="ghost"
+            $size="sm"
+            onClick={() => setEditQuery({ connector: tabEffectiveConnector, queryName: val })}
+            title={t('settings.editQuery.edit', 'Edit query')}
+          >
+            <Edit3 size={13} />
+          </Button>
+        )}
+      </Row>
+    )
+  }
   // Target-screen picker for nested_table — same-app screens, alpha sort. Cross-app references
   // aren't allowed at runtime (the nested TableView fetches against /api/screens/{app}/{id}).
   const sameAppScreenOptions = useMemo<SearchSelectOption[]>(() => {
@@ -892,39 +931,19 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label={`${t('settings.screens.editor.queries.read_query')} *`}>
-                    <SearchSelect
-                      value={(selTab.read_query as string | undefined) ?? ''}
-                      options={tabQueryOptions}
-                      onChange={(v) => patchTab({ read_query: v || '' })}
-                      placeholder={tabConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                      loading={!tabConnectorMeta}
-                    />
+                    {renderTabQueryPicker('read_query', { required: true, anyLabel: undefined })}
                   </Field>
                 </div>
               </Row>
               <Row gap={10}>
                 <div style={{ flex: 1 }}>
                   <Field label={t('settings.screens.editor.queries.update_query')}>
-                    <SearchSelect
-                      value={(selTab.update_query as string | undefined) ?? ''}
-                      options={tabQueryOptions}
-                      onChange={(v) => patchTab({ update_query: v || null })}
-                      anyLabel={t('common.none')}
-                      placeholder={tabConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                      loading={!tabConnectorMeta}
-                    />
+                    {renderTabQueryPicker('update_query', { required: false, anyLabel: t('common.none') })}
                   </Field>
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label={t('settings.screens.editor.queries.insert_query')}>
-                    <SearchSelect
-                      value={(selTab.insert_query as string | undefined) ?? ''}
-                      options={tabQueryOptions}
-                      onChange={(v) => patchTab({ insert_query: v || null })}
-                      anyLabel={t('common.none')}
-                      placeholder={tabConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                      loading={!tabConnectorMeta}
-                    />
+                    {renderTabQueryPicker('insert_query', { required: false, anyLabel: t('common.none') })}
                   </Field>
                 </div>
               </Row>
@@ -1433,6 +1452,16 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         )}
         </InspBody>
       </Col>
+      {/* Edit query — raised from a nested-form tab's pencil button. Self-contained: fetches
+          its own connectors copy + PUTs it back on Save (the visual builder doesn't track
+          query edits itself). */}
+      {editQuery && (
+        <EditQueryModal
+          connector={editQuery.connector}
+          queryName={editQuery.queryName}
+          onClose={() => setEditQuery(null)}
+        />
+      )}
     </Shell>
   )
 }

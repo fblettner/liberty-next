@@ -17,13 +17,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, FileText, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Edit3, FileText, Plus, Trash2 } from 'lucide-react'
 import {
   Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import { EditQueryModal } from './EditQueryModal'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
 
 type Row = Record<string, unknown>
@@ -117,6 +118,10 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   const { t } = useTranslation()
   const modals = useModals()
   const [tab, setTab] = useState<TabKey>('general')
+  // ``editQuery`` raises ``EditQueryModal`` to let the operator tweak a query's SQL / params
+  // / writable flag without leaving the Screen Designer — every query SearchSelect has an
+  // adjacent Edit (pencil) button that sets this. Cleared on Save / Cancel inside the modal.
+  const [editQuery, setEditQuery] = useState<{ connector: string; queryName: string } | null>(null)
 
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
   // Workspace connectors carry their query list; we render the connector + query pickers as
@@ -223,22 +228,40 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   // The four CRUD query pickers — each a SearchSelect over the effective connector's queries.
   // read_query is required (validator on the backend); the others are optional and clearing
   // them removes the key. Picker shows the v2 query name (mono) + the query's description /
-  // label so operators can find by friendly name.
-  const renderQueryField = (key: 'read_query' | 'update_query' | 'insert_query' | 'delete_query', required: boolean): ReactNode => (
-    <Field
-      key={key}
-      label={`${t(`settings.screens.editor.queries.${key}`)}${required ? ' *' : ''}`}
-    >
-      <SearchSelect
-        value={(value[key] as string | undefined) ?? ''}
-        options={queryOptions}
-        onChange={(v) => setProp(key, v || (required ? value[key] ?? '' : null))}
-        anyLabel={required ? undefined : t('common.none')}
-        placeholder={selectedConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-        loading={!selectedConnectorMeta}
-      />
-    </Field>
-  )
+  // label so operators can find by friendly name. An "Edit" button next to the picker raises
+  // ``EditQueryModal`` so the operator can tweak the SQL / params without leaving this screen.
+  const renderQueryField = (key: 'read_query' | 'update_query' | 'insert_query' | 'delete_query', required: boolean): ReactNode => {
+    const queryName = (value[key] as string | undefined) ?? ''
+    return (
+      <Field
+        key={key}
+        label={`${t(`settings.screens.editor.queries.${key}`)}${required ? ' *' : ''}`}
+      >
+        <Row gap={6} style={{ alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SearchSelect
+              value={queryName}
+              options={queryOptions}
+              onChange={(v) => setProp(key, v || (required ? value[key] ?? '' : null))}
+              anyLabel={required ? undefined : t('common.none')}
+              placeholder={selectedConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+              loading={!selectedConnectorMeta}
+            />
+          </div>
+          {queryName && effectiveConnector && (
+            <Button
+              $variant="ghost"
+              $size="sm"
+              onClick={() => setEditQuery({ connector: effectiveConnector, queryName })}
+              title={t('settings.editQuery.edit', 'Edit query')}
+            >
+              <Edit3 size={13} />
+            </Button>
+          )}
+        </Row>
+      </Field>
+    )
+  }
   const renderQueries = (): ReactNode => (
     <>
       <Sub>{t('settings.screens.editor.queriesHint')}</Sub>
@@ -348,13 +371,29 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
           />
         </Field>
         <Field label={targetLabel + ' *'}>
-          <SearchSelect
-            value={(a[targetKey] as string | undefined) ?? ''}
-            options={targetOpts}
-            onChange={(v) => onPatch({ [targetKey]: v || '' })}
-            placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-            loading={!targetConnMeta}
-          />
+          <Row gap={6} style={{ alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SearchSelect
+                value={(a[targetKey] as string | undefined) ?? ''}
+                options={targetOpts}
+                onChange={(v) => onPatch({ [targetKey]: v || '' })}
+                placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+                loading={!targetConnMeta}
+              />
+            </div>
+            {/* Edit query — only meaningful for SQL targets (run_query / navigate). The
+                ``call_api`` endpoint editor lives elsewhere and is out of scope here. */}
+            {(aType === 'run_query' || aType === 'navigate') && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
+              <Button
+                $variant="ghost"
+                $size="sm"
+                onClick={() => setEditQuery({ connector: actionConn, queryName: String(a[targetKey]) })}
+                title={t('settings.editQuery.edit', 'Edit query')}
+              >
+                <Edit3 size={13} />
+              </Button>
+            )}
+          </Row>
         </Field>
       </>
     )
@@ -443,22 +482,17 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
                 {open && (
                   <FieldBody>
                     <Stack gap={12}>
-                      <Row gap={8} style={{ alignItems: 'center' }}>
-                        <span style={{ color: colors.text.muted, fontSize: fontSize.sm, minWidth: 60 }}>
-                          {t('settings.screens.action.type')}
-                        </span>
-                        <select
+                      {/* Themed dropdown to switch the action's discriminator. v1's UI used a
+                          native ``<select>`` here — replaced with SearchSelect for consistency
+                          with the rest of the app (every dropdown across the builders shares one
+                          look + portal-out-of-modal behaviour). */}
+                      <Field label={t('settings.screens.action.type')}>
+                        <SearchSelect
                           value={aType}
-                          onChange={(e) => changeType(i, e.target.value as ActionType)}
-                          style={{
-                            height: 30, padding: '0 8px', borderRadius: 6,
-                            border: `1px solid ${colors.border}`, background: colors.bg.input,
-                            color: colors.text.primary, fontFamily: fonts.sans, fontSize: fontSize.sm,
-                          }}
-                        >
-                          {ACTION_TYPES.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
-                        </select>
-                      </Row>
+                          options={ACTION_TYPES.map((tt) => ({ value: tt, label: tt, mono: tt }))}
+                          onChange={(v) => changeType(i, v as ActionType)}
+                        />
+                      </Field>
                       {/* Connector + target (query / endpoint / to) dropdowns — only for the
                           three ParamBind-bearing variants (run_query / call_api / navigate).
                           The remaining variant properties (id, label, stop_on_error, param_binds,
@@ -722,6 +756,16 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
       }}>
         {renderTab()}
       </div>
+      {/* Per-query Edit modal — opened from any query SearchSelect's pencil button. The modal
+          fetches its own connectors copy + PUTs it back on Save (independent of the Screen
+          Designer's edit cycle, since query edits live in connectors.toml). */}
+      {editQuery && (
+        <EditQueryModal
+          connector={editQuery.connector}
+          queryName={editQuery.queryName}
+          onClose={() => setEditQuery(null)}
+        />
+      )}
     </Stack>
   )
 }
