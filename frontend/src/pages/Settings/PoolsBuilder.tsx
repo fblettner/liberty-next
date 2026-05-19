@@ -15,10 +15,25 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Pools = Record<string, Record<string, unknown>>
 
-const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-// Left nav scrolls on its own — pools rarely run into dozens, but the cap keeps the page wheel-
-// friendly when a deployment does. Add button stays pinned outside the scroller.
-const NavCol = styled.div`flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100dvh - 18rem);`
+// Layout: outer Stack flex-fills the page, the toolbar is fixed at top, the Split fills the
+// remaining vertical space, and only the inner panels scroll. No page-level scroll — the
+// operator sees Save / Reload / Add / Delete without chasing them past a long list.
+const Shell = styled.div`
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; height: 100%;
+`
+const Toolbar = styled.div`
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
+`
+const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
+const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const ToolbarDivider = styled.span`
+  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
+`
+const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
+// Left nav scrolls on its own — pools rarely run into dozens, but a long list mustn't push
+// the form panel off-screen. Add button moved to the top toolbar; this column is list-only.
+const NavCol = styled.div`flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavItem = styled.button<{ $active?: boolean }>`
   display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
@@ -29,9 +44,11 @@ const NavItem = styled.button<{ $active?: boolean }>`
   & svg { flex-shrink: 0; color: ${colors.text.muted}; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const FormCol = styled(Card)`flex: 1; min-width: 0;`
+// FormCol owns the vertical scroll for the selected record's form. Constrained to the Shell's
+// remaining height so a tall SchemaForm scrolls *inside* the card instead of pushing the page
+// down — the toolbar stays put, dirty / status / Save / Reload are always one click away.
+const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
-const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
 export default function PoolsBuilder() {
   const { t } = useTranslation()
@@ -130,14 +147,20 @@ export default function PoolsBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={enums}>
-    <Stack gap={12}>
-      {/* Top toolbar — config path on the left, scope-level actions on the right. The "Add pool"
-          button used to sit at the bottom of the left nav; promoting it here keeps every builder
-          consistent (Pools / Screens / Dictionary all expose "Add scope-item" + "Delete current"
-          in one place) and makes the action discoverable without scrolling past a long list. */}
-      <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <Mono>{path}</Mono>
-        <Row gap={6}>
+    <Shell>
+      {/* One consolidated top toolbar — config path + status on the left, every action
+          (Add / Delete / Save / Reload) on the right. Previously Save / Reload sat in a
+          separate row at the bottom of the page and the operator had to scroll past a long
+          pool list to find them. The Shell below flex-fills the page; only the inner panels
+          scroll, so the toolbar stays pinned at the top no matter how tall the form gets. */}
+      <Toolbar>
+        <ToolbarLeft>
+          <Mono>{path}</Mono>
+          {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+          {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+          {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+        </ToolbarLeft>
+        <ToolbarRight>
           <Button $variant="ghost" $size="sm" onClick={addPool} disabled={busy}>
             <Plus size={13} /> {t('settings.pools.add')}
           </Button>
@@ -146,8 +169,15 @@ export default function PoolsBuilder() {
               <Trash2 size={13} /> {t('settings.pools.deleteOne', { name: sel })}
             </Button>
           )}
-        </Row>
-      </Row>
+          <ToolbarDivider />
+          <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+          </Button>
+          <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+          </Button>
+        </ToolbarRight>
+      </Toolbar>
       <Split>
         <NavCol>
           <NavList>
@@ -172,19 +202,7 @@ export default function PoolsBuilder() {
           )}
         </FormCol>
       </Split>
-      <Row>
-        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
-        </Button>
-        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
-        </Button>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-      </Row>
-      <Hint>{t('settings.pools.hint')}</Hint>
-    </Stack>
+    </Shell>
     </FrameworkEnumsContext.Provider>
   )
 }

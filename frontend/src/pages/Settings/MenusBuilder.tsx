@@ -29,13 +29,22 @@ type AppsMap = Record<string, AppMenu>
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
 const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
-// The split is *fixed* height (height, not max-height) so expanding/collapsing folders never
+// Layout: outer Shell flex-fills the page, top toolbar is fixed, the per-app stack fills the
+// remaining vertical space, and only the inner panels scroll. Same pattern as PoolsBuilder.
+const Shell = styled.div`
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; height: 100%;
+`
+const ToolbarDivider = styled.span`
+  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
+`
+// The split flex-fills the remaining vertical space — expanding/collapsing folders never
 // resizes the column — TreeBox / InspectorInner scroll internally. `align-items: stretch` makes
 // both columns the same height (so the empty space below a short tree stays put instead of being
 // pushed up by the inspector's content).
 const TreeSplit = styled.div`
-  display: flex; gap: 14px; align-items: stretch; min-height: 360px;
-  height: calc(100dvh - 24rem);
+  display: flex; gap: 14px; align-items: stretch; min-height: 0;
+  flex: 1 1 auto;
 `
 const TreeCol = styled.div`
   flex: 0 0 400px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;
@@ -513,14 +522,18 @@ export default function MenusBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
-    <Stack gap={12}>
-      <Mono>{path}</Mono>
-      {/* Scope row — apps are the menu-file's scope, equivalent to DictionaryBuilder's scope
-          chips and ScreensBuilder's app chips. Pulled out of the left column so every builder
-          follows the same "config path → scope chips → [list | detail]" layout. The optional
-          search box appears next to the chips when there are more than ~6 apps. */}
+    <Shell>
+      {/* One consolidated top toolbar — config path + status on the left, scope chips (apps) and
+          every action (Add app · Delete app · Save · Reload) inline on the right. Replaces the
+          old "scope bar at top + bottom Save Row" split — the operator never has to scroll past a
+          long tree to reach Save / Reload. The optional search box appears next to the chips when
+          there are more than ~6 apps. */}
       <ScopeBar>
-        <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.menus.scopeLabel')}</span>
+        <Mono>{path}</Mono>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+        <span style={{ color: colors.text.muted, fontSize: fontSize.sm, marginLeft: 8 }}>{t('settings.menus.scopeLabel')}</span>
         {appNames.length > 6 && (
           <NavSearch style={{ marginBottom: 0, height: 26 }}>
             <Search size={12} />
@@ -540,10 +553,17 @@ export default function MenusBuilder() {
             <Trash2 size={12} /> {t('settings.menus.app.deleteOne', { name: selApp })}
           </ScopeChip>
         )}
+        <ToolbarDivider style={{ marginLeft: selApp ? 0 : 'auto' }} />
+        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+        </Button>
       </ScopeBar>
       {selApp && currentApp ? (
-        <Stack gap={12}>
-          <AppHeader>
+        <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
+          <AppHeader style={{ flexShrink: 0 }}>
             <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
           </AppHeader>
           <TreeSplit>
@@ -596,19 +616,7 @@ export default function MenusBuilder() {
       ) : (
         <Empty>{appNames.length ? t('settings.menus.app.pickOne') : t('settings.menus.app.empty')}</Empty>
       )}
-      <Row>
-        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
-        </Button>
-        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
-        </Button>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-      </Row>
-      <Hint>{t('settings.menus.hint')}</Hint>
-    </Stack>
+    </Shell>
     </FrameworkEnumsContext.Provider>
   )
 }

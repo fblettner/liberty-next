@@ -38,10 +38,23 @@ import ScreenEditor from './ScreenEditor'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
-const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-// Left = two stacked columns: the apps chip strip + the chosen app's screens list. Both scroll on
-// their own — a deployment with dozens of screens for one app shouldn't drag the whole page.
-const NavCol = styled.div`flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+// Layout: outer Shell flex-fills the page, top toolbar is fixed, the Split fills the remaining
+// vertical space, and only the inner panels scroll. No page-level scroll — the operator sees
+// Save / Reload / Add / Delete without chasing them past a long list.
+const Shell = styled.div`
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; height: 100%;
+`
+// ScreensBuilder reuses ScopeBar (defined below) as the toolbar — its scope chips + Save/Reload
+// cluster share one row. (Other builders that don't already have a ScopeBar use a dedicated
+// Toolbar styled-component — see PoolsBuilder for the canonical pattern.)
+const ToolbarDivider = styled.span`
+  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
+`
+const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
+// Left = the chosen app's screens list. Scrolls on its own — a deployment with dozens of screens
+// for one app shouldn't drag the whole page.
+const NavCol = styled.div`flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
 // Filter / search bar between the app-chip strip and the screen list. Pill-shaped (matches the
 // app chips above), 44px tall with a 16px icon and a larger placeholder — visually a peer of the
 // chunky app chips above and the two-line screen rows below (which now run ~50px). The other
@@ -93,7 +106,7 @@ const NavItem = styled.button<{ $active?: boolean }>`
   }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const FormCol = styled(Card)`flex: 1; min-width: 0;`
+const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
 // Summary card shown in the right pane when a screen is selected — gives the operator a quick
 // read of the screen's shape (connector, queries, dialog/actions/hook counts) without opening
@@ -115,8 +128,6 @@ const StatChip = styled.span<{ $tone?: 'orange' | 'green' | 'muted' }>`
   font-size: ${fontSize.micro}; font-family: ${fonts.sans};
   & svg { flex-shrink: 0; }
 `
-const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
-
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
@@ -340,19 +351,17 @@ export default function ScreensBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={enums}>
-    <Stack gap={12}>
-      <Mono>{path}</Mono>
-      {/* Scope row — apps are the screen-file's scope, equivalent to DictionaryBuilder's
-          Shared / per-connector chips. Sits above the split so every builder follows the same
-          "config path → scope chips → [list | detail]" layout pattern. */}
-      {/* Scope bar — apps on the left, scope-level actions clustered on the right (Add screen +
-          Delete <currentApp>). v1's "Delete the whole [screens.<app>] section" label was generic
-          and unhelpful when several builders share the same pattern; the new label interpolates
-          the selected app name (e.g. "Delete nomasx1") so a glance confirms what's about to go.
-          "Add screen" moves up from the bottom of the screen list — keeping every scope action
-          (add app · add screen · delete app) in one place at the top. */}
+    <Shell>
+      {/* One consolidated top toolbar — config path + status on the left, scope chips and every
+          action (Add app · Add screen · Delete app · Save · Reload) inline on the right. Replaces
+          the old "scope bar at top + bottom Save Row" split — the operator never has to scroll
+          past a long screen list to reach Save / Reload. */}
       <ScopeBar>
-        <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.screens.scopeLabel')}</span>
+        <Mono>{path}</Mono>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+        <span style={{ color: colors.text.muted, fontSize: fontSize.sm, marginLeft: 8 }}>{t('settings.screens.scopeLabel')}</span>
         {apps.map((a) => (
           <Chip key={a} $active={a === selApp} type="button" onClick={() => { setSelApp(a); setStatus(null) }}>
             <FolderOpen size={12} /> {a}
@@ -371,6 +380,13 @@ export default function ScreensBuilder() {
             </Chip>
           </>
         )}
+        <ToolbarDivider style={{ marginLeft: selApp ? 0 : 'auto' }} />
+        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+        </Button>
       </ScopeBar>
       <Split>
         <NavCol>
@@ -487,19 +503,7 @@ export default function ScreensBuilder() {
           )}
         </FormCol>
       </Split>
-      <Row>
-        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
-        </Button>
-        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
-        </Button>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-      </Row>
-      <Hint>{t('settings.screens.hint')}</Hint>
-    </Stack>
+    </Shell>
     {/* Screen Designer modal — near-fullscreen (VisualBuilderModal preset) hosting the existing
         ScreenEditor with its 5 internal tabs (General / Queries / Dialog / Actions / Row menu).
         Portaled to document.body because Settings panels use backdrop-filter (the liquid-glass

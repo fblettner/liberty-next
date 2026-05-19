@@ -22,11 +22,23 @@ import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTabl
 
 type Connectors = Record<string, Record<string, unknown>>
 
-const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
+// Layout: outer Shell flex-fills, top toolbar is fixed, the Split fills remaining height,
+// only the inner panels scroll. Same pattern as PoolsBuilder.
+const Shell = styled.div`
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; height: 100%;
+`
+const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
+const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
+const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const ToolbarDivider = styled.span`
+  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
+`
+const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // Left nav scrolls on its own (a connector list with dozens of entries shouldn't drag the page
 // along when wheeled). Search row + the two "+ Add" buttons stay pinned outside the scroller —
-// items live in NavList.
-const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+// items live in NavList. The flex chain (Shell → Split → NavCol → NavList) caps the list height.
+const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
@@ -43,9 +55,8 @@ const NavItem = styled.button<{ $active?: boolean }>`
   & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const FormCol = styled(Card)`flex: 1; min-width: 0;`
+const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
-const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 const ModeBar = styled.div`display: inline-flex; gap: 4px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};`
 const ModeBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
@@ -56,8 +67,10 @@ const ModeBtn = styled.button<{ $active?: boolean }>`
   &:hover { color: ${colors.text.primary}; }
 `
 // Same idea as NavList — a connector with dozens of tables (jdedwards has 52) needs its own
-// scroller so wheeling doesn't drag the whole Settings page along.
-const TableList = styled.div`display: flex; flex-direction: column; gap: 6px; max-height: calc(100dvh - 22rem); overflow-y: auto; padding-right: 4px;`
+// scroller so wheeling doesn't drag the whole Settings page along. With the FormCol now scrolling
+// internally (overflow-y: auto + min-height: 0), the table list rides that scroll naturally — but
+// we keep min-height: 0 here so the gap collapses cleanly when the Stack flexes.
+const TableList = styled.div`display: flex; flex-direction: column; gap: 6px; min-height: 0; padding-right: 4px;`
 const TableRow = styled.button`
   display: flex; align-items: center; gap: 10px; padding: 9px 11px; width: 100%; text-align: left;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
@@ -292,8 +305,39 @@ export default function ConnectorsBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
-    <Stack gap={12}>
-      <Mono>{path}</Mono>
+    <Shell>
+      {/* One consolidated top toolbar — config path + status on the left, Save + Reload on the
+          right. Replaces the old "config path at top + bottom Save Row" split — the operator
+          never has to scroll past a long connectors list to reach Save / Reload. Add (sql/api)
+          and Delete actions live on the connector list / detail panes since they're per-row. */}
+      <Toolbar>
+        <ToolbarLeft>
+          <Mono>{path}</Mono>
+          {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+          {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+          {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+        </ToolbarLeft>
+        <ToolbarRight>
+          <Button $variant="ghost" $size="sm" onClick={() => addConnector('sql')} disabled={busy}>
+            <Plus size={13} /> {t('settings.connectors.addSql')}
+          </Button>
+          <Button $variant="ghost" $size="sm" onClick={() => addConnector('api')} disabled={busy}>
+            <Plus size={13} /> {t('settings.connectors.addApi')}
+          </Button>
+          {sel && conns[sel] && (
+            <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy} title={t('settings.connectors.delete')}>
+              <Trash2 size={13} /> {t('settings.connectors.delete')}
+            </Button>
+          )}
+          <ToolbarDivider />
+          <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+          </Button>
+          <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+          </Button>
+        </ToolbarRight>
+      </Toolbar>
       <Split>
         <NavCol>
           {names.length > 6 && (
@@ -310,10 +354,8 @@ export default function ConnectorsBuilder() {
             ))}
             {shownNames.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '2px 4px' }}>no match</div>}
           </NavList>
-          <Row gap={4} style={{ marginTop: 6 }}>
-            <Button $variant="ghost" $size="sm" onClick={() => addConnector('sql')} style={{ flex: 1, justifyContent: 'flex-start' }}><Plus size={13} /> {t('settings.connectors.addSql')}</Button>
-          </Row>
-          <Button $variant="ghost" $size="sm" onClick={() => addConnector('api')} style={{ justifyContent: 'flex-start' }}><Plus size={13} /> {t('settings.connectors.addApi')}</Button>
+          {/* "Add SQL" / "Add API" / "Delete" moved to the top toolbar — keeps every connector-
+              level action in one place at the top, no scrolling past the list. */}
         </NavCol>
         <FormCol>
           {selConn && selSchema ? (
@@ -434,19 +476,7 @@ export default function ConnectorsBuilder() {
           )}
         </FormCol>
       </Split>
-      <Row>
-        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
-        </Button>
-        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
-        </Button>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-      </Row>
-      <Hint>{t('settings.connectors.hint')}</Hint>
-    </Stack>
+    </Shell>
     </FrameworkEnumsContext.Provider>
   )
 }

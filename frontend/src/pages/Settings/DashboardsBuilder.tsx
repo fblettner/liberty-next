@@ -33,8 +33,20 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Dashboards = Record<string, Record<string, unknown>>
 
-const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
-const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; max-height: calc(100dvh - 18rem);`
+// Layout: outer Shell flex-fills, top toolbar is fixed, the Split fills remaining height,
+// only the inner panels scroll. Same pattern as PoolsBuilder.
+const Shell = styled.div`
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; height: 100%;
+`
+const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
+const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
+const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const ToolbarDivider = styled.span`
+  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
+`
+const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
+const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavItem = styled.button<{ $active?: boolean }>`
   display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
@@ -51,9 +63,8 @@ const NavItem = styled.button<{ $active?: boolean }>`
   }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const FormCol = styled(Card)`flex: 1; min-width: 0;`
+const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
-const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
 export default function DashboardsBuilder() {
   const { t } = useTranslation()
@@ -175,13 +186,18 @@ export default function DashboardsBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
-      <Stack gap={12}>
-        {/* Top toolbar — config path on the left, scope-level actions on the right. "Add
-            dashboard" was at the bottom of the list before; promoting it here keeps every
-            builder consistent (same place as Pools / Screens / Dictionary). */}
-        <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <Mono>{path}</Mono>
-          <Row gap={6}>
+      <Shell>
+        {/* One consolidated top toolbar — config path + status on the left, Add / Delete + Save /
+            Reload on the right. Replaces the old "top action row + bottom Save Row" split — the
+            operator never has to scroll past a long dashboards list to reach Save / Reload. */}
+        <Toolbar>
+          <ToolbarLeft>
+            <Mono>{path}</Mono>
+            {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+            {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+            {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+          </ToolbarLeft>
+          <ToolbarRight>
             <Button $variant="ghost" $size="sm" onClick={addDashboard} disabled={busy}>
               <Plus size={13} /> {t('settings.dashboards.add')}
             </Button>
@@ -190,8 +206,15 @@ export default function DashboardsBuilder() {
                 <Trash2 size={13} /> {t('settings.dashboards.deleteOne', { name: sel })}
               </Button>
             )}
-          </Row>
-        </Row>
+            <ToolbarDivider />
+            <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+            </Button>
+            <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+              {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+            </Button>
+          </ToolbarRight>
+        </Toolbar>
         <Split>
           <NavCol>
             <NavList>
@@ -238,19 +261,7 @@ export default function DashboardsBuilder() {
             )}
           </FormCol>
         </Split>
-        <Row>
-          <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
-            {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
-          </Button>
-          <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-            {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
-          </Button>
-          {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-          {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-          {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        </Row>
-        <Hint>{t('settings.dashboards.hint')}</Hint>
-      </Stack>
+      </Shell>
     </FrameworkEnumsContext.Provider>
   )
 }

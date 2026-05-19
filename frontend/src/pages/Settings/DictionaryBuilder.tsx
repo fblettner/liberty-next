@@ -21,7 +21,15 @@ type DictionaryData = DictionaryDoc['dictionary']
 
 const SCOPE_SHARED = '' as const
 
-const Header = styled(Row)`align-items: center; justify-content: space-between; gap: 12px;`
+// Layout: outer Shell flex-fills, top toolbar is fixed, the Split fills remaining height,
+// only the inner panels scroll. Same pattern as PoolsBuilder.
+const Shell = styled.div`
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; height: 100%;
+`
+const ToolbarDivider = styled.span`
+  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
+`
 const LangBox = styled.label`
   display: inline-flex; align-items: center; gap: 6px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
   & input { width: 60px; }
@@ -44,12 +52,12 @@ const Chip = styled.button<{ $active?: boolean }>`
   & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
   &:hover { color: ${colors.text.primary}; }
 `
-const Split = styled.div`display: flex; gap: 14px; align-items: flex-start;`
+const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // The left nav has its own scroll container so a long list (think 347 dictionary entries) doesn't
 // drag the whole page along when you wheel through it. The search row and the "+ Add" button stay
-// pinned outside the scroller, the items live in NavList. Capped at the viewport minus the
-// Settings chrome above + the Save bar below; if the list is short the cap is a no-op.
-const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; max-height: calc(100dvh - 18rem);`
+// pinned outside the scroller, the items live in NavList. The flex chain (Shell → Split → NavCol →
+// NavList) caps the list height to the page; no max-height hack needed.
+const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
@@ -67,7 +75,7 @@ const NavItem = styled.button<{ $active?: boolean }>`
   & .sub  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.sans}; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const FormCol = styled(Card)`flex: 1; min-width: 0;`
+const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
 const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
@@ -429,14 +437,27 @@ export default function DictionaryBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
-    <Stack gap={12}>
-      <Header>
+    <Shell>
+      {/* One consolidated top toolbar — config path + status + language input on the left, Save +
+          Reload on the right. Replaces the old "header at top + bottom Save Row" split — the
+          operator never has to scroll past a long entries list to reach Save / Reload. */}
+      <ScopeBar style={{ flexShrink: 0 }}>
         <Mono>{path}</Mono>
-        <LangBox title={t('settings.dictionary.langHint')}>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+        <LangBox title={t('settings.dictionary.langHint')} style={{ marginLeft: 'auto' }}>
           {t('settings.dictionary.lang')}
           <Input type="text" value={dict.default_language ?? ''} placeholder="en" onChange={(e) => setLang(e.target.value)} />
         </LangBox>
-      </Header>
+        <ToolbarDivider />
+        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+        </Button>
+      </ScopeBar>
       <SubTabs>
         {KIND_ORDER.map((k) => (
           <SubTab key={k} $active={kind === k} type="button" onClick={() => { setKind(k); if (SHARED_ONLY.has(k)) setScope(SCOPE_SHARED) }}>{t(`settings.dictionary.${k}.tab`)}</SubTab>
@@ -535,19 +556,7 @@ export default function DictionaryBuilder() {
           )}
         </FormCol>
       </Split>
-      <Row>
-        <Button $variant="primary" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <Save size={14} />} {t('common.save')}
-        </Button>
-        <Button onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={14} thickness={2} /> : <RefreshCw size={14} />} {t('settings.pools.reloadFromDisk')}
-        </Button>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-      </Row>
-      <Hint>{t('settings.dictionary.hint')}</Hint>
-    </Stack>
+    </Shell>
     </FrameworkEnumsContext.Provider>
   )
 }
