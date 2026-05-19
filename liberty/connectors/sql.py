@@ -520,6 +520,7 @@ class Column:
     type: str | None = None
     label: str | None = None
     hidden: bool = False
+    key: bool = False
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
@@ -535,6 +536,8 @@ class Column:
             d["label"] = self.label
         if self.hidden:
             d["hidden"] = True
+        if self.key:
+            d["key"] = True
         if self.filter:
             d["filter"] = True
         if self.filter_from:
@@ -1532,7 +1535,7 @@ def _resolve_hint(
                 fmt = entry.format
             rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
-        name=name or h.name, type=type_, label=label, hidden=h.hidden, filter=h.filter,
+        name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         width=h.width, align=h.align, format=fmt, rule=rule,

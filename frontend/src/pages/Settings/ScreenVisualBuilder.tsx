@@ -1192,6 +1192,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                   <div className="badges">
                     <span className="name">{name}</span>
                     {column?.dd != null && column.dd !== '' && column.dd !== name && <Badge>dd:{String(column.dd)}</Badge>}
+                    {/* "key" badge — the column is part of the row's primary key (drives the
+                        Excel-import match + edit-mode lock). Surfaces here so the operator
+                        sees at-a-glance which columns are keys without opening each one. */}
+                    {Boolean(column?.key) && <Badge $tone="green">{t('settings.screens.field.key', 'key')}</Badge>}
                     {isHidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
                     {isDisabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
                     {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)

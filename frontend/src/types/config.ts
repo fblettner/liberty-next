@@ -154,6 +154,11 @@ export interface ColumnHint {
   dd?: string | null
   label?: string | null
   hidden?: boolean
+  /** Mark this column as part of the row's primary key. Drives the Excel-import update-vs-
+   *  insert match and locks the column in the dialog's edit mode. Operators tick this in the
+   *  Visual Designer's Columns tab — the backend's ``Screen.effective_key_columns()`` derives
+   *  the runtime list from these flags (the explicit ``Screen.key_columns`` is an override). */
+  key?: boolean
   filter?: boolean
   filter_from?: { source: string; column: string }[]
   visible_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[] | null

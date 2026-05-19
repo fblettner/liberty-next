@@ -3106,24 +3106,47 @@ def migrate_screens(
             screen["editable"] = False
         if str(r.get("tbl_uploadable") or "").upper() in _YES_FLAGS:
             screen["uploadable"] = True
-        # Phase 3 — ``key_columns`` (v1 col_key) moved off QueryDef onto Screen. The
-        # migration's ``migrate_key_columns`` helper produces ``{tbl_query_id: [col, …]}``
-        # which the caller threads in here.
-        if key_columns:
-            kcs = key_columns.get(tbl_q)
-            if kcs:
-                screen["key_columns"] = list(kcs)
+        # ``key_columns`` (v1 col_key) lands on each matching column hint as ``key = true``
+        # rather than as a flat list on ``Screen.key_columns`` — operators tick a "key"
+        # checkbox per column in the Visual Designer's Columns tab, which is closer to where
+        # they're editing the schema. ``Screen.effective_key_columns()`` derives the list at
+        # runtime from the columns' ``key`` flags; the explicit ``Screen.key_columns`` field
+        # stays as an override hatch for unusual cases.
+        key_set: set[str] = {
+            c.upper() for c in (key_columns.get(tbl_q, []) if key_columns else [])
+        }
 
         # Phase 1 mirror of QueryDef.columns onto the screen. Same hints the read query already
         # carries — copied here so the runtime can shift to ``Screen.columns`` as the source of
         # truth in Phase 2 without re-migrating, and so two screens sharing one read query can
         # diverge their column ordering / labels / hidden sets without forking the SQL. Hints
         # are emitted as plain dicts (the same shape :func:`migrate_column_hints` produces) and
-        # round-trip through Pydantic's ``ColumnHint`` validation on load.
+        # round-trip through Pydantic's ``ColumnHint`` validation on load. While we're here,
+        # flip ``key = true`` on each hint whose name appears in this screen's key_columns set
+        # (the Visual Designer's Columns tab surfaces the flag there).
         if column_hints:
             hints = column_hints.get(tbl_q)
             if hints:
-                screen["columns"] = [dict(h) for h in hints]
+                emitted: list[dict[str, Any]] = []
+                matched_keys: set[str] = set()
+                for h in hints:
+                    h2 = dict(h)
+                    nm_upper = str(h2.get("name", "")).upper()
+                    if key_set and nm_upper in key_set:
+                        h2["key"] = True
+                        matched_keys.add(nm_upper)
+                    emitted.append(h2)
+                screen["columns"] = emitted
+                # Any key column that didn't match a hint (rare — would mean v1's col_key was
+                # set on a column that isn't in ly_tbl_col) falls back onto the explicit list
+                # so the Excel-import match still works. Empty when every key column has a hint.
+                leftover = [k for k in (key_columns.get(tbl_q, []) if key_columns else []) if k.upper() not in matched_keys]
+                if leftover:
+                    screen["key_columns"] = leftover
+        elif key_columns and key_set:
+            # No column hints emitted for this query (rare — table widget with no v1
+            # ly_tbl_col rows) but key columns are known. Surface them as the explicit list.
+            screen["key_columns"] = list(key_columns.get(tbl_q, []))
 
         # Phase 2 — per-column overrides extracted from each dialog ly_dlg_col row by
         # ``_migrate_field_row``. Keyed by the column ``name`` (the ``col_target``); merged

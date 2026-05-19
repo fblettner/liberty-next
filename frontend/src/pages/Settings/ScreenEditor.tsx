@@ -31,9 +31,12 @@ type Row = Record<string, unknown>
 // Which top-level Screen properties belong on which inner tab. ``connector`` + the four CRUD
 // query refs are rendered as custom SearchSelects (driven by the workspace's connector list
 // and the selected connector's queries) — the rest fall through to SchemaForm for free.
-// Phase 3 — ``audit_table`` (str) replaces ``audit`` (bool); ``max_rows`` + ``key_columns``
-// moved off QueryDef onto Screen and now live in the General form.
-const GENERAL_FORM_KEYS = ['label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable', 'key_columns'] as const
+// Phase 3 — ``audit_table`` (str) replaces ``audit`` (bool); ``max_rows`` lives in General.
+// ``key_columns`` was here too, but the row's identifying columns are now ticked per-column
+// via the Columns tab (``ColumnHint.key``) — the runtime's ``Screen.effective_key_columns()``
+// derives the list from those flags. The explicit ``key_columns`` field stays on the schema
+// for hand-edited overrides, but it doesn't render here (less duplication, one place to set).
+const GENERAL_FORM_KEYS = ['label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable'] as const
 // Phase 3 — Screen.columns drives both grid + dialog display (single source of truth). Edited
 // via SchemaNavigator on a dedicated tab.
 const COLUMNS_KEYS = ['columns'] as const

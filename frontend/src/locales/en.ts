@@ -542,6 +542,7 @@ const en = {
         required: 'required',
         hidden: 'hidden',
         disabled: 'read-only',
+        key: 'key',
         conditional: 'conditional',
         binds_one: '{{count}} bind',
         binds_other: '{{count}} binds',

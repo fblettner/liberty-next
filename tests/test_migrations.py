@@ -1151,6 +1151,63 @@ _SCR_SQL = [
 ]
 
 
+def test_migrate_screens_marks_key_columns_on_column_hints() -> None:
+    """``migrate_key_columns`` output is now folded into each matching column hint as
+    ``key: True`` (the Visual Designer's Columns tab surfaces the flag there). The screen's
+    own ``key_columns`` is left unset when every key has a matching hint —
+    :meth:`Screen.effective_key_columns` derives it at runtime. Operators can still set
+    ``screen.key_columns`` explicitly as an override."""
+    from liberty.screens.config import Screen, parse_screens
+
+    table_rows = [
+        {"tbl_id": 1, "tbl_db_name": "security_users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": None, "tbl_auto_load": "N", "tbl_frm_id": None},
+    ]
+    out = migrate_screens(
+        table_rows, sql_rows=_SCR_SQL, app_name="nomasx1",
+        # Two key columns + one non-key; the non-key column has no ``key`` flag.
+        column_hints={10: [
+            {"name": "USR_APPS_ID"},
+            {"name": "USR_ID"},
+            {"name": "USR_NAME"},
+        ]},
+        key_columns={10: ["USR_APPS_ID", "USR_ID"]},
+    )
+    s = out["screens"]["nomasx1"]["security_users"]
+    # ``key: true`` lands on the key columns; the non-key column stays unflagged.
+    assert s["columns"] == [
+        {"name": "USR_APPS_ID", "key": True},
+        {"name": "USR_ID", "key": True},
+        {"name": "USR_NAME"},
+    ]
+    # The explicit ``key_columns`` list is *not* emitted — every key has a matching hint.
+    assert "key_columns" not in s
+    # The Pydantic model derives the runtime list from the columns' ``key`` flags.
+    sf = parse_screens(out)
+    screen: Screen = sf.screens["nomasx1"]["security_users"]
+    assert screen.effective_key_columns() == ["USR_APPS_ID", "USR_ID"]
+
+
+def test_migrate_screens_leftover_keys_fall_back_to_key_columns() -> None:
+    """When a key column has no matching column hint (rare — v1's ``col_key`` set on a
+    column outside ``ly_tbl_col``), the migration falls back to the explicit
+    ``screen.key_columns`` list so the Excel-import match still works."""
+    table_rows = [
+        {"tbl_id": 1, "tbl_db_name": "users", "tbl_query_id": 10, "tbl_label": "Users",
+         "tbl_editable": "Y", "tbl_uploadable": "N", "tbl_audit": None, "tbl_auto_load": "N", "tbl_frm_id": None},
+    ]
+    out = migrate_screens(
+        table_rows, sql_rows=_SCR_SQL, app_name="nomasx1",
+        column_hints={10: [{"name": "USR_APPS_ID"}]},   # only one hint
+        key_columns={10: ["USR_APPS_ID", "USR_ID"]},     # but two key columns
+    )
+    s = out["screens"]["nomasx1"]["users"]
+    # Matched key gets the flag on its hint.
+    assert s["columns"] == [{"name": "USR_APPS_ID", "key": True}]
+    # Unmatched key column falls back onto the explicit list.
+    assert s["key_columns"] == ["USR_ID"]
+
+
 def test_migrate_screens_no_dialog() -> None:
     """A ly_tables row with no tbl_frm_id → screen carries the read/update/insert/delete refs
     but no ``dialog`` (read-only / grid-edit only) and the flag wiring round-trips."""

@@ -198,6 +198,15 @@ class ColumnHint(BaseModel):
     )
     label: str | None = Field(default=None, description="Display title in the grid header and the dialog field label.")
     hidden: bool = Field(default=False, description="Hide this column in the grid (operator can still un-hide it via the Columns menu).")
+    key: bool = Field(
+        default=False,
+        description=(
+            "Mark this column as part of the row's primary key — drives the Excel import's "
+            "update-vs-insert match (a row whose key columns match a loaded row updates that row; "
+            "otherwise inserts) and locks the column on edit-mode dialogs so the operator can't "
+            "type over an identifying value. v1's ``col_key = 'Y'``."
+        ),
+    )
     filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Show this column in the grid's filter panel for pre-narrowing the query.")
     filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading filters — narrow this column's lookup options when another filter is set.")
     visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Show this column only when another filter has a given value. Multiple rules are AND-ed.")

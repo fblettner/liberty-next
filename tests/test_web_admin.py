@@ -517,6 +517,67 @@ def test_config_screens_parsed_preserves_tab_type_discriminator(env) -> None:
         assert r2.status_code == 200, r2.text
 
 
+def test_config_screens_parsed_folds_legacy_key_columns_onto_column_hints(env) -> None:
+    """The screen designer's Columns tab reads ``column.key`` per column. An older
+    ``screens.toml`` (pre-key-on-hint) sets keys via the flat ``screen.key_columns`` list —
+    the GET payload folds those names onto matching column hints as ``key: true`` so the
+    UI lights up without a re-migration, and PUTs back the cleaner shape (no redundant
+    ``key_columns`` line when every key has a hint)."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Pre-fold: an operator hand-wrote screens.toml with the flat list.
+        payload = {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "apps_get",
+                    "columns": [
+                        {"name": "APPS_ID"},
+                        {"name": "APPS_NAME"},
+                    ],
+                    "key_columns": ["APPS_ID"],
+                },
+            },
+        }
+        assert client.put("/admin/config/screens/parsed", json={"screens": payload}, headers=h).status_code == 200
+        body = client.get("/admin/config/screens/parsed", headers=h).json()
+        s = body["screens"]["nomasx1"]["settings_applications"]
+        # The matching column got ``key: True``; the legacy list dropped (every key found a hint).
+        assert s["columns"] == [{"name": "APPS_ID", "key": True}, {"name": "APPS_NAME"}]
+        assert "key_columns" not in s
+        # PUT the GET'd shape back — server keeps the column.key flag (no 422).
+        r = client.put("/admin/config/screens/parsed", json={"screens": body["screens"]}, headers=h)
+        assert r.status_code == 200, r.text
+        # Round-trip GET — column.key survives, no spurious key_columns reintroduced.
+        after = client.get("/admin/config/screens/parsed", headers=h).json()
+        s2 = after["screens"]["nomasx1"]["settings_applications"]
+        assert s2["columns"] == [{"name": "APPS_ID", "key": True}, {"name": "APPS_NAME"}]
+        assert "key_columns" not in s2
+
+
+def test_config_screens_parsed_preserves_leftover_key_columns(env) -> None:
+    """Defensive: a key column with no matching column hint (rare — a hand-edited
+    ``key_columns`` referring to a column that isn't in the ``columns`` list) keeps the
+    explicit list as a fallback so the Excel-import match still works."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        payload = {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "apps_get",
+                    "columns": [{"name": "APPS_ID"}],
+                    "key_columns": ["APPS_ID", "TENANT_ID"],   # TENANT_ID has no hint
+                },
+            },
+        }
+        assert client.put("/admin/config/screens/parsed", json={"screens": payload}, headers=h).status_code == 200
+        body = client.get("/admin/config/screens/parsed", headers=h).json()
+        s = body["screens"]["nomasx1"]["settings_applications"]
+        assert s["columns"] == [{"name": "APPS_ID", "key": True}]
+        assert s["key_columns"] == ["TENANT_ID"]   # only the leftover — APPS_ID landed on its hint
+
+
 def test_oidc_callback_fragment_redirect() -> None:
     from liberty.config import OIDCSettings
 

@@ -446,6 +446,29 @@ def _dump_screen(s: Screen) -> dict[str, Any]:
     for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
         for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, [])):
             a_dict["type"] = a_model.type
+    # Fold ``screen.key_columns`` (the old flat list — what pre-Phase-3 migration emitted
+    # and what hand-edited screens may still use) into each matching column hint as
+    # ``key: True``. The Visual Designer's Columns tab reads ``column.key`` per column;
+    # without this fold, an existing ``key_columns = [...]`` line would silently disappear
+    # from the UI on load. Saving back through PUT then writes ``key: true`` on the columns
+    # and drops the legacy list — file converges to the new shape after one round-trip.
+    if s.key_columns:
+        # Case-insensitive match, preserve the operator's original case for any leftover.
+        key_set = {k.upper() for k in s.key_columns}
+        dumped_cols = d.get("columns")
+        if isinstance(dumped_cols, list):
+            matched: set[str] = set()
+            for c in dumped_cols:
+                if isinstance(c, dict):
+                    nm = str(c.get("name", "")).upper()
+                    if nm in key_set:
+                        c["key"] = True
+                        matched.add(nm)
+            leftover = [k for k in s.key_columns if k.upper() not in matched]
+            if leftover:
+                d["key_columns"] = leftover     # unmatched keys keep the explicit list
+            else:
+                d.pop("key_columns", None)       # all keys landed on column hints — clean
     return d
 
 

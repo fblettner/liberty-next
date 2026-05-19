@@ -355,7 +355,10 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "audit": bool(screen.audit_table),
         "audit_table": screen.audit_table,
         "max_rows": screen.max_rows,
-        "key_columns": list(screen.key_columns),
+        # ``effective_key_columns`` folds the per-column ``key`` flags (Visual Designer Columns
+        # tab) into the explicit ``key_columns`` list — operators set it either way and the
+        # frontend reads the same result. The Pydantic field stays for explicit overrides.
+        "key_columns": screen.effective_key_columns(),
         "editable": screen.editable,
         "uploadable": screen.uploadable,
         "has_dialog": screen.dialog is not None,
@@ -398,8 +401,18 @@ def _full_view(
     # the lookup query's actual data pool (from the lookup_def).
     dict_scope = app
     if screen.columns:
+        # Resolve each ColumnHint through the dictionary (label / format / rule), then *fold
+        # in* any names listed in ``screen.key_columns`` as per-column ``key = true`` flags.
+        # Pre-migration screens.toml files set keys via the flat ``screen.key_columns`` list;
+        # the Visual Designer's Columns tab now reads ``column.key`` per column. Folding here
+        # means existing configs light up the "key" badge / lock in the dialog without
+        # needing a re-migration — and ``Screen.effective_key_columns()`` still returns the
+        # same final list either way.
+        key_set: set[str] = {k.upper() for k in screen.key_columns}
         body["columns"] = [
-            _hint_to_dict(h, dictionary, language, connector=dict_scope) for h in screen.columns
+            {**_hint_to_dict(h, dictionary, language, connector=dict_scope),
+             **({"key": True} if (h.key or h.name.upper() in key_set) else {})}
+            for h in screen.columns
         ]
     else:
         body.pop("columns", None)

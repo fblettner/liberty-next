@@ -544,6 +544,7 @@ const fr: Resources = {
         required: 'obligatoire',
         hidden: 'masqué',
         disabled: 'lecture seule',
+        key: 'clé',
         conditional: 'conditionnel',
         binds_one: '{{count}} lien',
         binds_other: '{{count}} liens',

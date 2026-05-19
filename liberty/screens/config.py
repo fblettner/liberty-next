@@ -547,8 +547,10 @@ class Screen(BaseModel):
     key_columns: list[str] = Field(
         default_factory=list,
         description=(
-            "Result columns that uniquely identify a row. Used by the Excel import to decide "
-            "whether an imported row updates an existing one or inserts a new one."
+            "Result columns that uniquely identify a row — also derivable per-column by ticking "
+            "``key`` on the column hint (the visual designer's Columns tab uses that). When this "
+            "list is empty, the runtime falls back to the column hints whose ``key`` is true. "
+            "Set this explicitly only when you want to override the column-derived list."
         ),
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
@@ -634,6 +636,15 @@ class Screen(BaseModel):
                     raise ValueError(f"screen {self.id!r}: duplicate dialog tab id {tab.id!r}")
                 seen.add(tab.id)
         return self
+
+    def effective_key_columns(self) -> list[str]:
+        """The row-identifying columns for this screen. Returns ``key_columns`` when set,
+        else the names of every column hint with ``key=True`` (in column-hint order). The
+        visual designer's Columns tab is where operators flip ``key`` per column; the General
+        tab's ``key_columns`` field stays as an explicit override for less-common cases."""
+        if self.key_columns:
+            return list(self.key_columns)
+        return [c.name for c in self.columns if c.key]
 
 
 class ScreensFile(BaseModel):
