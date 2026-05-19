@@ -30,13 +30,15 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 # ── Oracle write-time null coalesce helpers ────────────────────────────────────────────────
-# When the pool flag ``coalesce_nulls`` is set (auto-on for Oracle), the SQL connector inspects
-# the target table once and replaces ``None`` bind values with type-appropriate sentinels —
-# ``''`` for CHAR/NCHAR/VARCHAR2/NVARCHAR2/CLOB, ``0`` for NUMBER/BINARY_FLOAT/INTEGER. That's
-# v1's behaviour for JDE (whose NCHAR columns are NOT NULL with implicit space-padding; a NULL
-# bind would either fail the constraint or be coerced to NULL — Oracle treats ``''`` and NULL
-# as identical for VARCHAR2 anyway, so the coalesce is a no-op there; it's strictly meaningful
-# for CHAR/NCHAR and NUMBER NOT NULL columns).
+# When the pool flag ``coalesce_nulls`` is set (operator opts in per pool — typically Oracle
+# pools with NOT-NULL string columns like JD Edwards' NCHAR-heavy F00xxx tables), the SQL
+# connector inspects the target table once and replaces empty bind values (``None`` *or* ``""``
+# — the frontend submits ``""`` for blank inputs) with type-appropriate sentinels: a single
+# space for CHAR / NCHAR / VARCHAR2 / NVARCHAR2 / CLOB / NCLOB / LONG, ``0`` for NUMBER /
+# FLOAT / BINARY_FLOAT / BINARY_DOUBLE / INTEGER. Oracle treats ``""`` as ``NULL`` on every
+# string type, so binding ``""`` to a NCHAR NOT NULL column still violates the constraint —
+# only a real character (the space) does. The flag is off by default; not every Oracle
+# deployment uses CHAR/NCHAR, so the choice is left explicit per pool.
 
 # Match the target table in a write statement. Handles unquoted / "quoted" identifiers and an
 # optional schema prefix. The pattern is intentionally narrow — multi-statement queries or
@@ -390,7 +392,16 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -
 
 
 def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> dict[str, Any]:
-    """Replace ``None`` values in *bound* with type-appropriate sentinels based on *col_types*.
+    """Replace empty bind values (``None`` *or* ``""``) in *bound* with type-appropriate
+    sentinels based on *col_types* — the column type map from :func:`_oracle_target_table` +
+    ``ALL_TAB_COLUMNS``.
+
+    Oracle treats the empty string ``''`` as ``NULL`` on every string type (CHAR / NCHAR /
+    VARCHAR2 / NVARCHAR2 / CLOB / NCLOB / LONG), so binding ``""`` to a NOT-NULL column still
+    fails with ORA-01400. The only safe "blank but non-NULL" value is a single space, which
+    Oracle space-pads on CHAR/NCHAR and stores verbatim on VARCHAR2/NVARCHAR2 — same convention
+    v1's framework used against JDE tables.
+
     Bind names that don't match any column pass through unchanged (filter operator binds,
     extras the migration added, etc.). The migration's ``:<COL>_ORIGINAL`` rebind for ``_put``
     queries' WHERE strips the suffix to find the source column type."""
@@ -398,14 +409,14 @@ def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> 
         return bound
     out = dict(bound)
     for k, v in list(out.items()):
-        if v is not None:
+        if v is not None and v != "":
             continue
         base = k.upper()
         if base.endswith("_ORIGINAL"):
             base = base[: -len("_ORIGINAL")]
         t = col_types.get(base)
         if t == "char":
-            out[k] = ""
+            out[k] = " "  # space, not '' — Oracle treats '' as NULL on every string type
         elif t == "number":
             out[k] = 0
     return out

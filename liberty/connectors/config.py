@@ -97,14 +97,17 @@ class PoolConfig(BaseModel):
         "Default cap on rows a SELECT returns on this pool. Each screen and each request can override; "
         "the absolute fallback is 1000. Blank = no pool-level cap."
     ))
-    trim_strings: bool | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
-        "Strip trailing whitespace from every string cell. Useful for Oracle CHAR/NCHAR columns "
-        "(space-padded to their declared width). Blank = auto (on for Oracle, off elsewhere)."
+    trim_strings: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
+        "Strip trailing whitespace from every string cell on SELECT. Turn on for Oracle pools "
+        "that use space-padded CHAR / NCHAR columns (JD Edwards is the canonical case). Off by "
+        "default — not all Oracle deployments use CHAR, so the choice is left explicit."
     ))
-    coalesce_nulls: bool | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
-        "On INSERT/UPDATE, replace empty bind values with type-appropriate defaults (empty string for "
-        "CHAR/VARCHAR, 0 for NUMBER). Needed for Oracle NCHAR NOT-NULL columns that don't treat '' as "
-        "distinct from NULL. Blank = auto (on for Oracle, off elsewhere)."
+    coalesce_nulls: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
+        "On INSERT / UPDATE, replace empty bind values (None or empty string) with type-appropriate "
+        "defaults — a single space for CHAR / VARCHAR / NCHAR / NVARCHAR2 / CLOB / LONG, 0 for "
+        "NUMBER / FLOAT / INTEGER. Turn on for Oracle pools with NOT-NULL string columns (Oracle "
+        "treats '' as NULL on every string type, so only a real character satisfies the constraint). "
+        "Off by default — not every Oracle deployment hits this, so the choice is left explicit."
     ))
 
 

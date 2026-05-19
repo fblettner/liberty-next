@@ -66,26 +66,20 @@ class PoolRegistry:
 
     def trim_strings(self, name: str) -> bool:
         """Whether the SQL connector should strip trailing whitespace from string cells on this
-        pool's reads. Honours the pool's explicit ``trim_strings`` flag; auto-enables on Oracle
-        dialect (where CHAR/NCHAR columns are space-padded — v1's behaviour); off elsewhere.
-        Unknown pools default to off."""
+        pool's reads. Returns the pool's explicit ``trim_strings`` flag (off by default —
+        operator opts in per pool, typically for Oracle pools with CHAR / NCHAR space-padded
+        columns like JD Edwards). Unknown pools default to off."""
         cfg = self._configs.get(name)
-        if cfg is None:
-            return False
-        if cfg.trim_strings is not None:
-            return cfg.trim_strings
-        return self.dialect(name) == "oracle"
+        return bool(cfg.trim_strings) if cfg is not None else False
 
     def coalesce_nulls(self, name: str) -> bool:
-        """Whether the SQL connector should replace ``None`` bind values with type-appropriate
-        sentinels (``''`` for char columns, ``0`` for number columns) on INSERT / UPDATE / MERGE
-        against this pool. Honours the explicit flag; auto-enables on Oracle. Off elsewhere."""
+        """Whether the SQL connector should replace empty bind values (``None`` *or* ``""``)
+        with type-appropriate sentinels (``" "`` — a single space — for char columns, ``0`` for
+        number columns) on INSERT / UPDATE / MERGE against this pool. Returns the pool's explicit
+        ``coalesce_nulls`` flag (off by default — operator opts in per pool, typically for Oracle
+        pools whose NOT-NULL string columns can't accept ``''``). Unknown pools default to off."""
         cfg = self._configs.get(name)
-        if cfg is None:
-            return False
-        if cfg.coalesce_nulls is not None:
-            return cfg.coalesce_nulls
-        return self.dialect(name) == "oracle"
+        return bool(cfg.coalesce_nulls) if cfg is not None else False
 
     def _resolved_url(self, name: str, cfg: PoolConfig):
         """The pool's URL with its password resolved: a separate ``password`` (or an ``ENC:``

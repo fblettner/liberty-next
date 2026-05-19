@@ -684,12 +684,17 @@ export function ResultTable({
   const [saving, setSaving] = useState(false)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const editsRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())  // row → edited fields (uncontrolled inputs write here)
-  // ``editTick`` increments on every edit (new rows + existing rows alike) so the dataCols
-  // memo recomputes — TanStack then re-renders cells, picking up the new ``cur(row, …)``
-  // values for the dropdown's displayed selection and the cascading ``narrowBy`` deps. Distinct
-  // from ``dirtyRows`` (which is the *existing*-row dirty set used by Save) so we don't
-  // conflate new-row edits with "needs UPDATE".
+  // ``editTick`` increments on every edit to force a parent re-render — needed for *new* rows
+  // where ``setDirtyRows`` doesn't fire (new rows aren't in the dirty set, they're tracked
+  // separately as inserts). The cell functions read live values via ``cur(row, …)``, so a
+  // re-render alone is enough — we deliberately do NOT include this in ``dataCols`` deps to
+  // keep the cell ``columnDef.cell`` references stable: React reconciles same-type / same-
+  // position elements in-place, so the uncontrolled ``<input defaultValue>`` keeps its DOM
+  // value (and the user's cursor) across edits. Including the tick in the deps would rebuild
+  // the column defs on every keystroke → TanStack rebuilds rows → text inputs lose focus.
   const [editTick, setEditTick] = useState(0)
+  // Silence unused-var lint — the value is *read* implicitly via React's re-render scheduling.
+  void editTick
 
   const resetEdit = useCallback(() => {
     setEditMode(false); setDirtyRows(new Set()); setNewRows([]); setDeleted(new Set()); setSelected(new Set()); setSaveErrors([])
@@ -1101,13 +1106,14 @@ export function ResultTable({
       })
     }
     return out
-    // ``editTick`` is intentionally in the dep list even though the cell functions read live
-    // values via ``cur`` / ``editsRef`` (stable refs). Without this, TanStack's
-    // ``useReactTable`` keeps the same column reference across edits and doesn't re-render
-    // the cells — so a LOOKUP dropdown pick wouldn't reflect, and a cascading column
-    // (filter_from) wouldn't re-narrow when its source cell changes. Each edit bumps the
-    // tick → dataCols rebuilds → TanStack re-evaluates cells.
-  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span, editTick])
+    // ``editTick`` is deliberately NOT in the dep list — including it would rebuild the column
+    // defs on every keystroke, which makes TanStack re-instantiate row cells and the uncontrolled
+    // text inputs lose focus mid-typing. The cell functions read live row + edit values via
+    // ``cur(row, …)`` (a stable callback over a ref), so a parent re-render (triggered by
+    // ``setEditTick`` on every edit) is enough — flexRender is called fresh and the new
+    // ``defaultText`` flows to the SearchSelect / Checkbox / EditInput. Uncontrolled inputs
+    // ignore ``defaultValue`` changes after mount, so the DOM keeps the user's typed text.
+  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span])
 
   // the leftmost select + status columns — rebuild freely on edit-state changes; they hold no
   // <input>, only checkboxes/markers/buttons, so remounting them is harmless.

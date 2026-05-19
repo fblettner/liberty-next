@@ -672,10 +672,10 @@ async def test_trim_strings_off_keeps_whitespace() -> None:
 
 @pytest.mark.asyncio
 async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
-    """``coalesce_nulls = true`` introspects ``ALL_TAB_COLUMNS`` and replaces ``None`` bind
-    values with ``''`` (char) or ``0`` (number) before the bind. SQLite can't impersonate
-    Oracle's all_tab_columns, so the test sets the cache manually via the helpers and
-    verifies the coalesce step transforms the params dict."""
+    """``coalesce_nulls = true`` introspects ``ALL_TAB_COLUMNS`` and replaces *empty* bind
+    values (``None`` *or* ``""``) with a single space (char) or ``0`` (number) before the
+    bind. SQLite can't impersonate Oracle's all_tab_columns, so the test sets the cache
+    manually via the helpers and verifies the coalesce step transforms the params dict."""
     from liberty.connectors.sql import _coalesce_oracle_nulls, _oracle_target_table
 
     # Target-table extraction handles unquoted, quoted, schema-prefixed names + MERGE / DELETE.
@@ -687,39 +687,51 @@ async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
     # Garbage in → None out (skip coalesce; operator hand-rolls NVL).
     assert _oracle_target_table("/* hello */ SELECT 1") is None
 
-    # Coalesce: None values get the column's sentinel; non-None values + unknown columns pass
-    # through. The migration's `:<COL>_ORIGINAL` rebind on _put queries resolves to the source
-    # column's type — so a None on a CHAR column's ORIGINAL bind becomes ''.
+    # Coalesce: None *and* "" values get the column's sentinel; non-empty values + unknown
+    # columns pass through. The migration's `:<COL>_ORIGINAL` rebind on _put queries resolves
+    # to the source column's type — so an empty CHAR ORIGINAL bind becomes " " (space).
+    # Char sentinel is " " (space) not "" because Oracle treats "" as NULL on every string
+    # type — binding "" to a NCHAR NOT-NULL column still violates the constraint.
     col_types = {"NAME": "char", "AMOUNT": "number", "STATUS": "char"}
-    bound = {"NAME": None, "AMOUNT": None, "STATUS": "active", "EXTRA": None, "NAME_ORIGINAL": None}
+    bound = {
+        "NAME": None,            # CHAR none → space
+        "AMOUNT": "",            # NUMBER empty → 0 (frontend sends "" for blank inputs)
+        "STATUS": "active",      # non-empty untouched
+        "EXTRA": None,           # column unknown — pass through
+        "NAME_ORIGINAL": "",     # _ORIGINAL suffix strip → still CHAR → space
+    }
     out = _coalesce_oracle_nulls(bound, col_types)
     assert out == {
-        "NAME": "",                # CHAR null → ''
-        "AMOUNT": 0,               # NUMBER null → 0
-        "STATUS": "active",        # non-None untouched
-        "EXTRA": None,             # column unknown — pass through
-        "NAME_ORIGINAL": "",       # _ORIGINAL suffix strip → still CHAR → ''
+        "NAME": " ",                # CHAR none → space
+        "AMOUNT": 0,                # NUMBER empty → 0
+        "STATUS": "active",         # non-empty untouched
+        "EXTRA": None,              # column unknown — pass through
+        "NAME_ORIGINAL": " ",       # _ORIGINAL suffix strip → still CHAR → space
     }
 
 
-def test_coalesce_nulls_auto_on_for_oracle_dialect() -> None:
-    """``PoolRegistry.coalesce_nulls`` mirrors ``trim_strings``'s auto-on logic: explicit
-    flag wins; otherwise enabled on Oracle dialect, disabled elsewhere."""
+def test_trim_strings_and_coalesce_nulls_are_explicit_per_pool() -> None:
+    """``trim_strings`` / ``coalesce_nulls`` are plain bool flags on the pool — no dialect-based
+    auto-enable. Off by default; the operator opts in per pool (typically Oracle pools whose
+    schema uses space-padded CHAR / NCHAR — JD Edwards). An unknown pool reports both off."""
     cfgs = {
-        "ora_auto":   PoolConfig(url="oracle+oracledb://x@h/?service_name=s"),   # dialect derived → auto-on
-        "ora_off":    PoolConfig(url="oracle+oracledb://x@h/?service_name=s", coalesce_nulls=False),
-        "pg_auto":    PoolConfig(url="postgresql+asyncpg://x@h/db"),             # auto-off
-        "pg_on":      PoolConfig(url="postgresql+asyncpg://x@h/db", coalesce_nulls=True),
+        "ora_default": PoolConfig(url="oracle+oracledb://x@h/?service_name=s"),               # unset → off
+        "ora_on":      PoolConfig(url="oracle+oracledb://x@h/?service_name=s",
+                                   trim_strings=True, coalesce_nulls=True),
+        "pg_default":  PoolConfig(url="postgresql+asyncpg://x@h/db"),                          # unset → off
+        "pg_on":       PoolConfig(url="postgresql+asyncpg://x@h/db", coalesce_nulls=True),
     }
     pools = PoolRegistry(cfgs)
-    assert pools.coalesce_nulls("ora_auto") is True
-    assert pools.coalesce_nulls("ora_off") is False
-    assert pools.coalesce_nulls("pg_auto") is False
+    assert pools.coalesce_nulls("ora_default") is False    # off by default — no auto-on
+    assert pools.coalesce_nulls("ora_on") is True
+    assert pools.coalesce_nulls("pg_default") is False
     assert pools.coalesce_nulls("pg_on") is True
-    # Same default-auto pattern for trim_strings — pinning both side-by-side so a future change
-    # to one doesn't accidentally diverge.
-    assert pools.trim_strings("ora_auto") is True
-    assert pools.trim_strings("pg_auto") is False
+    assert pools.trim_strings("ora_default") is False
+    assert pools.trim_strings("ora_on") is True
+    assert pools.trim_strings("pg_default") is False
+    # Unknown pool — both flags report off (defensive default).
+    assert pools.coalesce_nulls("missing") is False
+    assert pools.trim_strings("missing") is False
 
 
 # --------------------------------------------------------------------------- #
