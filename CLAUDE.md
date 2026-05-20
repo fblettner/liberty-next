@@ -1481,9 +1481,42 @@ wired into `ScreenEditor.renderActionList`):
 * Expansion state keyed by `<parent action-list key>:<action idx>` so each action's prompt
   list remembers its open row across re-renders (e.g. `on_save:0`, `row_menu:1`).
 
-Still-loose ends: **top-level-key rename** (currently delete + re-add; cross-file refs in
-menus.toml / screens.toml / dictionary.toml need an in-one-shot updater); **frontend vitest +
-CI** (the Python side has 471 tests; the frontend has none).
+Shipped this slice — **top-level-key rename for connectors** lives in `liberty/web/rename.py`
++ `POST /admin/config/rename`:
+* `rename_connector(old, new, *, connectors_path, screens_path, menus_path, dictionary_path,
+  dashboards_path, charts_path)` walks every file via ``tomlkit`` (comments preserved), then
+  rewrites:
+  - `connectors.toml` — renames the top-level `[connectors.<old>]` subtree.
+  - `screens.toml` — every ``Screen.connector`` / ``NestedFormTab.connector`` /
+    ``NestedTableTab.connector`` / ``RunQueryAction.connector`` / ``CallApiAction.connector``
+    / ``NavigateAction.connector`` / ``row_click_connector`` field value (recursive walk so
+    deeply-nested ChainAction / IfAction / LoopAction steps all get visited).
+  - `menus.toml` — every ``MenuItem.connector`` value. The matching `[menus.<old>]` *app* key
+    is intentionally left alone (apps and connectors are distinct concepts even though they
+    conventionally share a name); a warning surfaces when an app key with the same name
+    exists so the operator can decide whether to follow up.
+  - `dictionary.toml` — renames `[connectors.<old>]` scope; updates every ``LookupDef.connector``
+    / ``SequenceDef.connector`` reference (shared + per-connector-scoped).
+  - `dashboards.toml` — every ``ChartWidget.connector`` / ``KpiWidget.connector`` /
+    ``DashboardFilterOptions.connector``.
+  - `charts.toml` — every ``ChartDef.connector``.
+* Two-pass strategy: in-memory rewrite + Pydantic validation of every rewritten doc; on any
+  validation failure (collision, broken ref) nothing gets written. ``RenameResult`` reports
+  ``{kind, old_name, new_name, files: {path: ref_count}, warnings, total_refs}`` so the
+  operator sees what was touched.
+* ConnectorsBuilder's Rename button now calls the endpoint, runs `/admin/reload` on success
+  + bumps the WorkspaceContext nonce so screens / menus / dashboards reflect the new name
+  app-wide. Refuses to fire with unsaved local edits (prompts the operator to save first —
+  the disk-side rewrite + reload would clobber pending changes otherwise).
+* 12 backend tests pin every cross-file reference + the edge cases (collision rejects, invalid
+  identifier, missing connector, self-rename, endpoint auth gating).
+* Other rename flavours (`sequence` / `lookup` / `screen_app`) — `RenameBody.kind` already
+  takes a string discriminator; the endpoint returns 422 with a useful message for unsupported
+  kinds. Follow-up slices wire them via the same module.
+
+Still-loose ends: **rename for sequence / lookup / screen-app / dictionary-entry keys**
+(same shape, different ref walks); **frontend vitest + CI** (the Python side has 486 tests;
+the frontend has none).
 
 **Phase 8 (Charts & Dashboards) — DONE (runtime + builder).** Lives in
 `liberty/web/dashboards.py` + `liberty/dashboards/config.py` + `frontend/src/pages/DashboardView/`
@@ -1514,10 +1547,11 @@ CI** (the Python side has 471 tests; the frontend has none).
   `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
   framework restores the dashboard via the home redirect even when the menu leaf is missing.
 
-471 backend tests pass.
+486 backend tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish **Phase 7** loose ends — top-level-key
-rename across files, frontend vitest + CI; finish **Phase 5** — validate-by-diff harness
+rename for the remaining kinds (sequence / lookup / screen-app), frontend vitest + CI;
+finish **Phase 5** — validate-by-diff harness
 against nomasx1's read paths +
 migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit *interceptor*, the historic
 rows from v1's `AUD_*` tables aren't carried over yet) + the real NOMAJDE cutover; →

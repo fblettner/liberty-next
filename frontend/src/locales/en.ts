@@ -262,6 +262,8 @@ const en = {
       button: 'Rename',
       empty: 'Name can\'t be empty.',
       exists: 'An entry named “{{name}}” already exists.',
+      invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
+      unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
     tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', dashboards: 'Dashboards' },
     menus: {
@@ -381,6 +383,8 @@ const en = {
       namePrompt: 'New connector name:',
       renamePrompt: 'Rename connector “{{name}}” to:',
       renamed: 'Renamed “{{from}}” → “{{to}}”. Update refs in menus.toml / screens.toml / dictionary.toml manually before the next reload.',
+      renamedAcross: 'Renamed “{{from}}” → “{{to}}” — {{refs}} ref(s) updated across {{files}} file(s); registry reloaded.',
+      renameFailed: 'Couldn\'t rename “{{name}}”: {{error}}',
       confirmDelete: 'Delete connector “{{name}}” (and all its queries/endpoints)?',
       empty: 'No connectors yet. Add a SQL or API connector.',
       pickOne: 'Pick a connector on the left.',

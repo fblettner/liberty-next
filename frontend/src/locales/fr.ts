@@ -264,6 +264,8 @@ const fr: Resources = {
       button: 'Renommer',
       empty: 'Le nom ne peut pas être vide.',
       exists: 'Une entrée nommée « {{name}} » existe déjà.',
+      invalidIdentifier: 'Utilisez des lettres minuscules, des chiffres et des underscores ; commencez par une lettre (compatible avec les clés TOML, les permissions et les segments d\'URL).',
+      unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
     tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', dashboards: 'Tableaux de bord' },
     menus: {
@@ -383,6 +385,8 @@ const fr: Resources = {
       namePrompt: 'Nom du nouveau connecteur :',
       renamePrompt: 'Renommer le connecteur « {{name}} » en :',
       renamed: 'Renommé « {{from}} » → « {{to}} ». Mettez à jour les références dans menus.toml / screens.toml / dictionary.toml manuellement avant le prochain rechargement.',
+      renamedAcross: 'Renommé « {{from}} » → « {{to}} » — {{refs}} référence(s) mise(s) à jour dans {{files}} fichier(s) ; registre rechargé.',
+      renameFailed: 'Impossible de renommer « {{name}} » : {{error}}',
       confirmDelete: 'Supprimer le connecteur « {{name}} » (et toutes ses requêtes/endpoints) ?',
       empty: 'Aucun connecteur. Ajoutez un connecteur SQL ou API.',
       pickOne: 'Choisissez un connecteur à gauche.',

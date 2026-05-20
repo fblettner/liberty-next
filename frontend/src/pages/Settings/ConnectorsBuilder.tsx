@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
-import { renameKey, validateRename } from '../../services/keyRename'
+import { validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
@@ -105,7 +105,7 @@ const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { findScreen } = useWorkspace()
+  const { findScreen, refresh: refreshWorkspace } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
   // the DD_ENTRIES dropdown that drives `ColumnHint.dd` and `FilterDep.source/column`.
@@ -230,14 +230,39 @@ export default function ConnectorsBuilder() {
     setConns((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
   }
-  // Rename the selected connector's dict key. Order-preserving (renamed item stays in place).
-  // Cross-file refs (Screen.connector / NestedFormTab.connector / NestedTableTab.connector /
-  // Action.connector in screens.toml, MenuItem.connector in menus.toml, LookupDef.connector in
-  // dictionary.toml) are **not** auto-updated — those live in separate files behind different
-  // PUT endpoints. A persistent banner reminds the operator after the rename. (A future slice
-  // can fetch + scan + cross-file batch update, with proper failure handling.)
+  // Rename the selected connector — and every cross-file reference. Goes through the
+  // ``POST /admin/config/rename`` endpoint so the connectors.toml top-level key change rides
+  // alongside the screen / menu / dictionary / dashboard / chart updates in one atomic pass.
+  // Failing that, a previous-generation rename would have left stale ``connector = "<old>"``
+  // values scattered across the other files, and the operator would have hunted them by hand.
+  //
+  // Constraints:
+  //   * Refuses to run when the builder has unsaved local edits — those would be clobbered by
+  //     the disk-side rewrite + reload that follows the rename. We prompt the operator to save
+  //     or discard first (their choice).
+  //   * Confirms loudly — the rename touches files outside this builder; surprising the
+  //     operator with edits they didn't expect to make is the wrong UX.
+  //   * After the endpoint succeeds, runs ``/admin/reload`` to swap the live registry, then
+  //     reloads the local connectors view AND refreshes the workspace context so screens /
+  //     menus reflect the new name everywhere in the app.
   const renameConnector = async (oldName: string) => {
     if (!conns) return
+    if (dirty) {
+      const choice = await modals.choose({
+        title: t('settings.rename.button'),
+        message: t('settings.rename.unsavedFirst'),
+        options: [
+          { value: 'save', label: t('common.save'), variant: 'primary', autoFocus: true },
+          { value: 'cancel', label: t('common.cancel'), variant: 'ghost' },
+        ],
+        cancelValue: 'cancel',
+      })
+      if (choice !== 'save') return
+      await save()
+      // ``save()`` clears ``dirty``; bail if it didn't (network failure / validation error
+      // already surfaced on the banner — the operator can retry the rename).
+      if (dirty) return
+    }
     const existing = Object.keys(conns)
     const next = (await modals.prompt({
       title: t('settings.rename.button'),
@@ -249,13 +274,43 @@ export default function ConnectorsBuilder() {
         if (err === 'unchanged') return null
         if (err === 'empty') return t('settings.rename.empty')
         if (err === 'exists') return t('settings.rename.exists', { name: v })
+        // v2 identifier shape (must match the backend's regex). Same rule slugify enforces on
+        // migration so the rename produces a name that reads like a TOML key, a permission
+        // string, and a URL segment all at once.
+        if (!/^[a-z][a-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
         return null
       },
     }))?.trim()
     if (!next || next === oldName) return
-    setConns((p) => renameKey(p ?? {}, oldName, next))
-    setSel(next)
-    setStatus(t('settings.connectors.renamed', { from: oldName, to: next }))
+    setBusy(true)
+    try {
+      const result = await api.post<{
+        files: Record<string, number>
+        warnings: string[]
+        total_refs: number
+      }>('/admin/config/rename', { kind: 'connector', old_name: oldName, new_name: next })
+      // The rename succeeded on disk; now make the running app pick it up.
+      await api.post('/admin/reload')
+      refreshWorkspace()                          // sync — bumps a nonce that triggers refetch
+      // Reload our own view (re-reads connectors.toml + dictionary.toml from disk, clears the
+      // dirty flag, points selection at the new key). Pick the new connector so the operator
+      // doesn't lose their place.
+      setSel(next)
+      load()
+      // Surface the result on the status banner — ref count tells the operator what was
+      // actually touched; any warnings the helper emitted (e.g. matching menu app key not
+      // renamed) ride alongside so they know to follow up.
+      const filesTouched = Object.values(result.files).filter((n) => n > 0).length
+      const tail = result.warnings.length ? ` · ${result.warnings.join(' · ')}` : ''
+      setStatus(t('settings.connectors.renamedAcross', {
+        from: oldName, to: next, refs: result.total_refs, files: filesTouched,
+      }) + tail)
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e)
+      setError(t('settings.connectors.renameFailed', { name: oldName, error: msg }))
+    } finally {
+      setBusy(false)
+    }
   }
   const addTable = async (connectorName: string) => {
     // Two flows for "+ Add table":

@@ -57,6 +57,7 @@ from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
 from liberty.dashboards.config import DashboardsFile, parse_dashboards
+from liberty.web.rename import RenameError, rename_connector
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -606,3 +607,51 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
+
+
+# ── rename top-level keys (Phase-7 loose ends) ─────────────────────────────────────────────
+
+
+class RenameBody(BaseModel):
+    """Payload for ``POST /admin/config/rename``. ``kind`` switches over the supported rename
+    flavours — currently ``"connector"`` (the highest-value case); ``"sequence"`` /
+    ``"lookup"`` / ``"screen_app"`` are pending follow-ups."""
+
+    kind: str
+    old_name: str
+    new_name: str
+
+
+@router.post("/config/rename")
+async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Rename a top-level config key + every cross-file reference in one atomic pass.
+
+    The structured builders edit each file's body wholesale via tomlkit, but a connector name
+    (or future: a sequence / lookup / screen-app key) is referenced from several files.
+    Renaming by hand means hunting every ``connector = "<old>"`` in screens / menus / dictionary
+    / dashboards / charts — error-prone and easy to miss a deeply-nested step in an action
+    chain. This endpoint walks every affected file, rewrites the references via
+    :mod:`liberty.web.rename`, validates each rewritten doc against its Pydantic schema, then
+    writes them all in one batch. On any validation failure nothing is written.
+
+    Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
+    everywhere (in-flight requests still see the old registry until they finish)."""
+    settings = request.app.state.settings
+    if body.kind == "connector":
+        try:
+            result = rename_connector(
+                body.old_name, body.new_name,
+                connectors_path=Path(settings.connectors.config_path),
+                screens_path=Path(settings.screens.config_path),
+                menus_path=Path(settings.menus.config_path),
+                dictionary_path=_dictionary_path(settings),
+                dashboards_path=Path(settings.dashboards.config_path),
+                charts_path=Path(settings.charts.config_path),
+            )
+        except RenameError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+        return result.to_dict()
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"rename kind {body.kind!r} not supported yet — only 'connector' for now",
+    )
