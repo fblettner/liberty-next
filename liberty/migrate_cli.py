@@ -41,6 +41,7 @@ import sys
 
 from liberty.migrations import (
     attach_actions_to_screens,
+    build_api_resolver,
     make_engine,
     merge_connectors,
     migrate_actions,
@@ -60,6 +61,7 @@ from liberty.migrations import (
     migrate_table_filters,
     migrate_table_meta,
     read_actions,
+    read_conditions,
     read_event_actions,
     read_api,
     read_applications,
@@ -178,8 +180,27 @@ async def _build_screen(args: argparse.Namespace, engine) -> dict:
         act_rows = await read_actions(engine)
     except Exception:
         act_rows = ([], [], [], [], [], [])
+    # Pull v1's API tables too — :func:`build_api_resolver` returns the ``{api_id:
+    # (connector, endpoint)}`` map (same naming :func:`migrate_api` uses) that
+    # :func:`migrate_actions` reads to turn ``evt_type='API'`` tasks into v2 ``call_api``
+    # actions (NOMAJDE's Reset Password / Update Password are all-API; without this they
+    # degrade to ``notify`` placeholders). A missing v1 API schema → an empty resolver,
+    # behaviour unchanged.
+    try:
+        api_conns, api_apis, _, _ = await read_api(engine)
+        api_resolver = build_api_resolver(api_conns, api_apis, connector_prefix=args.prefix)
+    except Exception:
+        api_resolver = {}
+    # ``ly_condition`` + ``ly_cdn_params`` — v1's IF predicate store. ``migrate_actions`` reads
+    # the param rows so the v2 ``IfAction.condition`` carries the real ``cdn_dd_id`` + operator
+    # + value (instead of a placeholder). A missing schema → an empty list, behaviour unchanged.
+    try:
+        _, cdn_params_rows = await read_conditions(engine)
+    except Exception:
+        cdn_params_rows = []
     actions_data: dict[str, Any] = migrate_actions(
-        *act_rows, sql_rows=sql_rows, app_name=args.connector,
+        *act_rows, sql_rows=sql_rows, app_name=args.connector, api_resolver=api_resolver,
+        condition_param_rows=cdn_params_rows,
     )
     seq_rows, _ = await read_sequences(engine)
     key_columns_by_qid = migrate_key_columns(tbl_cols, dlg_cols)
@@ -219,9 +240,21 @@ async def _build(args: argparse.Namespace) -> dict:
                 await read_actions(engine)
             )
             _, sql_rows = await read_sql_queries(engine)
+            # Pull v1's API tables too so ``migrate_actions`` can resolve ``evt_type='API'`` tasks
+            # to v2 ``(connector, endpoint)`` pairs — same flow the ``screen`` subcommand uses.
+            try:
+                api_conns, api_apis, _, _ = await read_api(engine)
+                api_resolver = build_api_resolver(api_conns, api_apis, connector_prefix=args.prefix)
+            except Exception:
+                api_resolver = {}
+            try:
+                _, cdn_params_rows = await read_conditions(engine)
+            except Exception:
+                cdn_params_rows = []
             return migrate_actions(
                 action_rows, task_rows, branch_rows, param_rows, task_param_rows, param_filter_rows,
-                sql_rows=sql_rows, app_name=args.connector,
+                sql_rows=sql_rows, app_name=args.connector, api_resolver=api_resolver,
+                condition_param_rows=cdn_params_rows,
             )
         if args.command == "screen":
             return await _build_screen(args, engine)

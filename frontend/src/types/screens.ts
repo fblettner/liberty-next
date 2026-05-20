@@ -167,21 +167,43 @@ interface PromptableAction {
   prompt_submit_label?: string | null
 }
 
+/** Predicate evaluated by an `IfAction`. v2's port of v1's `ly_conditions` — flat single-clause
+ *  (a multi-clause AND/OR predicate will land in a later slice). `source` is a dotted-path
+ *  reference into the chain context (same syntax `ParamBind.source` accepts inside a `ChainAction`)
+ *  or a plain form-field name; `operator` is the comparison; `value` is the literal to compare
+ *  against (only used by equality / numeric operators). */
+export interface Condition {
+  source: string
+  operator: 'equals' | 'not_equals' | 'has_rows' | 'no_rows' | 'truthy' | 'falsy' | 'greater_than' | 'less_than'
+  value?: string | null
+}
+
 /** One action attached to a dialog / screen / row. Discriminated union by `type` — every variant
  *  shares `id`, optional `label`, and `stop_on_error`. ParamBind-bearing variants resolve their
- *  binds at call time against the firing context (dialog form state, selected row, …). */
+ *  binds at call time against the firing context (dialog form state, selected row, …) — or, when
+ *  the action lives inside a `ChainAction`, against the chain's accumulated context.
+ *
+ *  **Workflow variants** (`chain` / `if` / `loop` / `return`) — slice B (Phase 6 4d). v2's port
+ *  of v1's named-action workflow shape; let one button run a sequence of typed steps with shared
+ *  context, branching via IF, iterating via LOOP, and writing values back to the caller via
+ *  RETURN. See `ChainAction.steps` for the chain-context semantics. */
 export type Action =
   | (ActionCommon & PromptableAction & {
       type: 'run_query'
       connector?: string | null
       query: string
       param_binds?: ParamBind[]
+      /** When true, store the action's rows in the chain context under this step's `id` as
+       *  `{rows, first_row, success}` so later steps can reference them via
+       *  `ParamBind {source: '<id>.first_row.<col>'}`. Only meaningful inside a `ChainAction`. */
+      bind_result?: boolean
     })
   | (ActionCommon & PromptableAction & {
       type: 'call_api'
       connector: string
       endpoint: string
       param_binds?: ParamBind[]
+      bind_result?: boolean
     })
   | (ActionCommon & PromptableAction & {
       type: 'navigate'
@@ -207,6 +229,33 @@ export type Action =
       tone?: 'info' | 'ok' | 'warn' | 'error'
     })
   | (ActionCommon & { type: 'refresh' })
+  | (ActionCommon & PromptableAction & {
+      /** One button → N inner steps run sequentially with a shared chain context. Each
+       *  `run_query` / `call_api` with `bind_result` lands its rows under its `id` so later
+       *  steps reference them. `prompt_fields` ride on the chain (one prompt per fire). */
+      type: 'chain'
+      steps?: Action[]
+    })
+  | (ActionCommon & {
+      /** Conditional branching. `condition` evaluates against the chain context; true →
+       *  `then_steps` runs, false → `else_steps` runs. Either branch may be empty. */
+      type: 'if'
+      condition: Condition
+      then_steps?: Action[]
+      else_steps?: Action[]
+    })
+  | (ActionCommon & {
+      /** Iterate over an array source. The current element binds under `loop.<field>` for
+       *  the nested `steps` to reference via `ParamBind {source: 'loop.<field>'}`. */
+      type: 'loop'
+      source: string
+      steps?: Action[]
+    })
+  | (ActionCommon & {
+      /** Write values back into the caller's form fields. v1's port of `evt_type='RETURN'`. */
+      type: 'return'
+      bindings?: Record<string, string>
+    })
 
 interface ActionCommon {
   id: string

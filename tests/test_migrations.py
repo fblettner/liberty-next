@@ -10,6 +10,7 @@ from liberty.connectors.config import ApiConnectorConfig, SqlConnectorConfig, pa
 from liberty.menus import parse_menus
 from liberty.migrate_cli import main as migrate_main
 from liberty.migrations import (
+    build_api_resolver,
     make_engine,
     merge_connectors,
     migrate_api,
@@ -1781,11 +1782,21 @@ def test_attach_actions_to_screens_event_driven() -> None:
         app_name="nomajde",
     )
     on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
-    # First task (f0092_put) skipped because it duplicates update_query. Two run_query
-    # entries remain, in seq order, each labelled from the v1 task.
-    assert [a["query"] for a in on_save] == ["f00921_put", "f0093_put"]
-    assert all(a["type"] == "run_query" for a in on_save)
-    assert all(a["id"].startswith("migrated_1_") for a in on_save)
+    # First task (f0092_put) skipped because it duplicates update_query. The remaining two
+    # tasks land as a single :class:`ChainAction` wrapper whose ``steps`` carry the work — that
+    # wrapper is the v2 form of a v1 named workflow (one fire site, one chain context). The
+    # chain's id is the slugified v1 ``act_label`` (no more ``migrated_<n>_<m>`` ids); each
+    # step's id is the slugified ``evt_label``.
+    assert len(on_save) == 1
+    chain = on_save[0]
+    assert chain["type"] == "chain"
+    assert chain["id"] == "create_role_in_all_tables"   # was: "migrated_1_…"
+    assert chain["label"] == "Create Role in all tables"
+    steps = chain["steps"]
+    assert [s["query"] for s in steps] == ["f00921_put", "f0093_put"]
+    assert all(s["type"] == "run_query" for s in steps)
+    # Step ids are readable now — derived from the v1 ``evt_label``.
+    assert [s["id"] for s in steps] == ["insert_role_lang", "insert_role_env"]
     # No ``Screen.actions`` block landed — events go on ``dialog.on_save``, not the toolbar.
     assert "actions" not in out["screens"]["nomajde"]["f0092"]
 
@@ -1817,8 +1828,12 @@ def test_attach_actions_to_screens_dedupes_table_and_dialog_events() -> None:
         app_name="nomajde",
     )
     on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
-    # Despite two events pointing at action 1, the chain lands once.
-    assert [a["query"] for a in on_save] == ["f00921_put"]
+    # Single-step chains unwrap to a flat ``run_query`` (no :class:`ChainAction` wrapper) so
+    # the emitted screens.toml stays close to what a hand-written button looks like. Despite
+    # two events pointing at action 1, the chain lands once (dedupe).
+    assert len(on_save) == 1
+    assert on_save[0]["type"] == "run_query"
+    assert on_save[0]["query"] == "f00921_put"
 
 
 def test_attach_actions_to_screens_scrubs_prior_heuristic_entries() -> None:
@@ -1904,19 +1919,387 @@ def test_attach_actions_to_screens_carries_prompt_fields() -> None:
         app_name="nomajde",
     )
     on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
-    assert [a["query"] for a in on_save] == ["f00921_put", "f0093_put"]
-    # Prompt fields land on the FIRST emitted task only — fires once per chain. Subsequent
-    # tasks resolve `source: 'MUSE'` against the merged context (the prompt values).
-    assert "prompt_fields" in on_save[0]
-    assert "prompt_fields" not in on_save[1]
-    names = [pf["name"] for pf in on_save[0]["prompt_fields"]]
+    # Two remaining tasks → a single :class:`ChainAction` wrapper. Prompt fields land on the
+    # outer chain (fires once per chain); the inner steps reference the values via
+    # ``source: 'INPUT.<name>'`` at runtime (slice B). The wrapper's id = ``slugify(act_label)``.
+    assert len(on_save) == 1
+    chain = on_save[0]
+    assert chain["type"] == "chain"
+    assert chain["id"] == "create_role"
+    assert [s["query"] for s in chain["steps"]] == ["f00921_put", "f0093_put"]
+    assert "prompt_fields" in chain
+    # The inner steps don't carry their own prompt_fields (one prompt per chain, on the wrapper).
+    assert all("prompt_fields" not in s for s in chain["steps"])
+    names = [pf["name"] for pf in chain["prompt_fields"]]
     assert names == ["AUUSER", "JOBN", "MUSE", "PID"]   # OUT 'UPMJ' skipped
-    pf_by_name = {pf["name"]: pf for pf in on_save[0]["prompt_fields"]}
+    pf_by_name = {pf["name"]: pf for pf in chain["prompt_fields"]}
     assert pf_by_name["AUUSER"]["default"] == "ADMIN"
     assert pf_by_name["AUUSER"]["lookup_param_binds"] == [{"param": "POOL", "value": "JDE"}]
     assert pf_by_name["MUSE"].get("hidden") is True
     # JOBN has no extras — just `name` is enough.
     assert pf_by_name["JOBN"] == {"name": "JOBN"}
+
+
+def test_build_api_resolver_matches_migrate_api_naming() -> None:
+    """``build_api_resolver`` mirrors :func:`migrate_api`'s slugify + uniquify + legacy-fallback
+    naming so a v1 ``ly_api.api_id`` maps to the same v2 ``(connector, endpoint)`` pair the
+    rendered connectors.toml uses. The resolver feeds :func:`migrate_actions` so an
+    ``evt_type='API'`` task becomes a v2 ``call_api`` action (NOMAJDE's Reset Password is the
+    motivating case — all-API workflow that used to degrade to a ``notify`` placeholder)."""
+    conns = [{"conn_id": 7, "conn_label": "AIS Connection", "conn_url": "http://ais"}]
+    apis = [
+        {"api_id": 100, "api_conn_id": 7, "api_label": "Reset Password",
+         "api_method": "POST", "api_url": "/jderest/reset", "api_body": None},
+        # Connectionless → legacy_api fallback connector.
+        {"api_id": 101, "api_conn_id": None, "api_label": "Health",
+         "api_method": "GET", "api_url": "https://ext/health", "api_body": None},
+    ]
+    resolver = build_api_resolver(conns, apis)
+    rendered = migrate_api(conns, apis)["connectors"]
+    # Same connector + endpoint names as the rendered connectors.toml — the whole point.
+    assert resolver[100] == ("ais_connection", "reset_password")
+    assert rendered["ais_connection"]["endpoints"][0]["name"] == "reset_password"
+    assert resolver[101] == ("legacy_api", "health")
+
+
+def test_migrate_actions_api_task_becomes_call_api_with_resolver() -> None:
+    """A v1 ``ly_act_tasks`` row with ``evt_type='API'`` + a resolvable ``evt_api_id`` should
+    surface on the task dict with ``connector`` + ``endpoint`` set, so the chain emitters
+    (:func:`_action_chain` / :func:`_input_action_to_button`) can build a v2 ``call_api``
+    action. Without a resolver these tasks used to drop into a ``notify`` placeholder — the
+    NOMAJDE Reset Password regression."""
+    action_rows = [{"act_id": 9, "act_label": "Reset Password"}]
+    task_rows = [{
+        "act_id": 9, "evt_id": 1, "evt_seq": 1, "evt_type": "API", "evt_label": "Reset",
+        "evt_query_id": None, "evt_query_crud": None, "evt_api_id": 100,
+        "evt_brc_id": None, "evt_brc_true": None, "evt_brc_false": None,
+        "evt_loop": "N", "evt_loop_array": None,
+    }]
+    api_resolver = {100: ("ais_connection", "reset_password")}
+    out = migrate_actions(
+        action_rows, task_rows, [], [], [], [],
+        sql_rows=[], app_name="nomajde", api_resolver=api_resolver,
+    )
+    task = out["migrated_actions"]["nomajde"]["reset_password"]["tasks"][0]
+    assert task["type"] == "API"
+    assert task["v1_api_id"] == 100
+    assert task["connector"] == "ais_connection"
+    assert task["endpoint"] == "reset_password"
+
+
+def test_attach_actions_to_screens_emits_call_api_for_api_tasks() -> None:
+    """End-to-end: a screen with an API-typed action wired via ``ly_evt_cpt`` lands a
+    ``call_api`` action on ``dialog.on_save`` (no longer a ``notify`` placeholder). The action's
+    ``param_binds`` ride through verbatim — NOMAJDE's Reset Password binds the user's MUSE +
+    PASSWORD via INPUT.X refs the prompt collects."""
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {
+            "id": "f0092", "read_query": "f0092_get",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+        },
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "reset_password": {
+            "id": "reset_password", "v1_act_id": 9, "label": "Reset Password",
+            "tasks": [{
+                "seq": 1, "type": "API",
+                "v1_api_id": 100,
+                "connector": "ais_connection",
+                "endpoint": "reset_password",
+                "param_binds": [
+                    {"param": "username", "source": "MUSE"},
+                    {"param": "newPassword", "source": "PASSWORD"},
+                ],
+                "label": "Reset",
+            }],
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 9}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f0092", "tbl_label": "Users / Roles", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
+    assert len(on_save) == 1
+    action = on_save[0]
+    assert action["type"] == "call_api"
+    assert action["connector"] == "ais_connection"
+    assert action["endpoint"] == "reset_password"
+    assert action["param_binds"] == [
+        {"param": "username", "source": "MUSE"},
+        {"param": "newPassword", "source": "PASSWORD"},
+    ]
+
+
+def test_chain_action_wraps_multi_step_workflow_with_readable_ids() -> None:
+    """A v1 named action with multiple resolved tasks lands as a single :class:`ChainAction`
+    wrapper whose ``steps`` carry the work. The chain's ``id`` is the slugified ``act_label``
+    (no more ``migrated_<n>_<m>``); each step's ``id`` is the slugified ``evt_label``."""
+    screens_data = {"screens": {"nomajde": {
+        "f00926": {
+            "id": "f00926", "read_query": "f00926_get",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+        },
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "import_security_from_user_role": {
+            "id": "import_security_from_user_role",
+            "v1_act_id": 3, "label": "Import Security from User / Role",
+            "tasks": [
+                {"seq": 1, "v1_evt_id": 11, "type": "QUERY",
+                 "label": "Delete Security Workbench", "query": "f00950_delete"},
+                {"seq": 2, "v1_evt_id": 12, "type": "QUERY",
+                 "label": "Import Security Workbench", "query": "f00950_post"},
+                {"seq": 3, "v1_evt_id": 13, "type": "QUERY",
+                 "label": "Delete UDO Security", "query": "f9860_delete"},
+            ],
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 3}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f00926", "tbl_label": "Role Description", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    on_save = out["screens"]["nomajde"]["f00926"]["dialog"]["on_save"]
+    assert len(on_save) == 1
+    chain = on_save[0]
+    assert chain["type"] == "chain"
+    # The chain's id is the slugified act_label — operators see the real workflow name.
+    assert chain["id"] == "import_security_from_user_role"
+    assert chain["label"] == "Import Security from User / Role"
+    # Step ids are readable too — derived from evt_label.
+    assert [s["id"] for s in chain["steps"]] == [
+        "delete_security_workbench", "import_security_workbench", "delete_udo_security",
+    ]
+
+
+def test_chain_action_emits_if_step_with_then_else_branches() -> None:
+    """v1 IF tasks (``evt_type='IF'`` with ``evt_brc_true`` / ``evt_brc_false``) collapse to a
+    v2 :class:`IfAction` whose ``then_steps`` / ``else_steps`` carry the matching branch's
+    tasks. The condition is a placeholder until ``ly_conditions`` is wired (Slice A part 3) —
+    the operator picks the real predicate in the builder. v2's IfAction is nested, not
+    label-jump-based, so the migrated screens.toml reads naturally."""
+    screens_data = {"screens": {"nomajde": {
+        "f00926": {
+            "id": "f00926", "read_query": "f00926_get",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+        },
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "import_security": {
+            "id": "import_security", "v1_act_id": 3, "label": "Import Security",
+            "tasks": [
+                # IF guard at the top level.
+                {"seq": 1, "v1_evt_id": 1, "type": "IF",
+                 "label": "Check if import workbench",
+                 "on_true_branch": 1, "on_false_branch": None},
+                # Task belonging to branch 1 (the "true" side).
+                {"seq": 2, "v1_evt_id": 2, "type": "QUERY",
+                 "label": "Delete Security Workbench", "query": "f00950_delete",
+                 "belongs_to_branch": 1},
+                {"seq": 3, "v1_evt_id": 3, "type": "QUERY",
+                 "label": "Import Security Workbench", "query": "f00950_post",
+                 "belongs_to_branch": 1},
+            ],
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 3}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f00926", "tbl_label": "x", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    chain = out["screens"]["nomajde"]["f00926"]["dialog"]["on_save"][0]
+    assert chain["type"] == "chain"
+    assert len(chain["steps"]) == 1   # The IF + its branch tasks collapse into one nested step.
+    if_step = chain["steps"][0]
+    assert if_step["type"] == "if"
+    assert if_step["id"] == "check_if_import_workbench"
+    # Condition is a placeholder — operator wires the real one. We emit ``operator='truthy'``
+    # against a source derived from the IF's label so the field name reads sensibly.
+    assert if_step["condition"]["operator"] == "truthy"
+    # then_steps populated from branch_id=1 tasks; else_steps absent (branch_id=None on the IF).
+    assert [s["query"] for s in if_step["then_steps"]] == ["f00950_delete", "f00950_post"]
+    assert "else_steps" not in if_step
+    # Round-trip via the Pydantic union — confirms the migrated shape validates.
+    from liberty.screens import parse_screens
+    parse_screens(out)
+
+
+def test_chain_action_rewrites_task_results_param_binds() -> None:
+    """v1's ``map_value = "TASK_<v1_evt_id>.RESULTS[0].COL"`` references rewrite to the v2
+    chain-context path ``"<slugified_step_id>.first_row.COL"`` (and ``rows.N.COL`` for non-zero
+    indices). ``INPUT.<X>`` paths stay as-is. Plain form-field source values (no dots) are
+    untouched too — they keep their existing form-field semantics in the runtime."""
+    actions_data = {"migrated_actions": {"nomajde": {
+        "lookup_and_update": {
+            "id": "lookup_and_update", "v1_act_id": 5, "label": "Look up and update",
+            "tasks": [
+                # SELECT step — captures rows into the chain context as ``find_user.rows``.
+                {"seq": 1, "v1_evt_id": 41, "type": "QUERY",
+                 "label": "Find user", "query": "users_select"},
+                # UPDATE step — binds from INPUT, from TASK_41.RESULTS[0].EMAIL, and from a
+                # form-field name. The runtime resolution sees a mix of chain-context and
+                # form-field references; only the dotted paths get rewritten.
+                {"seq": 2, "v1_evt_id": 42, "type": "QUERY",
+                 "label": "Update email", "query": "users_put",
+                 "param_binds": [
+                     {"param": "USR_ID", "source": "INPUT.USR_ID"},
+                     {"param": "EMAIL", "source": "TASK_41.RESULTS[0].EMAIL"},
+                     {"param": "FALLBACK", "source": "TASK_41.RESULTS[2].PHONE"},
+                     {"param": "PARENT_NAME", "source": "USR_NAME"},   # plain form-field ref
+                 ]},
+            ],
+        },
+    }}}
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {
+            "id": "f0092", "read_query": "f0092_get",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 5}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f0092", "tbl_label": "x", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    chain = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"][0]
+    assert chain["type"] == "chain"
+    select_step, update_step = chain["steps"]
+    # The SELECT step gets ``bind_result = True`` so its rows land in the chain context (the
+    # heuristic is: v2 query name ending in _select / _get).
+    assert select_step["id"] == "find_user"
+    assert select_step.get("bind_result") is True
+    # Param binds in the UPDATE step — the TASK_<id>.RESULTS[N].COL references rewrite to v2's
+    # chain-context paths. INPUT.X stays. Plain form-field refs stay.
+    binds = {b["param"]: b["source"] for b in update_step["param_binds"]}
+    assert binds["USR_ID"] == "INPUT.USR_ID"
+    assert binds["EMAIL"] == "find_user.first_row.EMAIL"     # RESULTS[0] → first_row
+    assert binds["FALLBACK"] == "find_user.rows.2.PHONE"     # RESULTS[2] → rows.2
+    assert binds["PARENT_NAME"] == "USR_NAME"                # plain form-field — untouched
+
+
+def test_chain_action_if_condition_from_ly_cdn_params() -> None:
+    """An IF task's ``evt_cdn_id`` resolves to the matching ``ly_cdn_params`` predicate(s) —
+    :func:`migrate_actions` attaches them to the task dump as ``condition_predicates``, then
+    :func:`_build_chain_action` builds the v2 :class:`Condition` from the first predicate.
+    Single-clause IFs migrate cleanly; multi-clause AND/OR predicates pick the first clause +
+    log a warning so the operator notices."""
+    action_rows = [{"act_id": 3, "act_label": "Import Security"}]
+    task_rows = [
+        # IF guard with condition id 7 — the predicate is "FROMUSER EQUAL 'ADMIN'" below.
+        {"act_id": 3, "evt_id": 1, "evt_seq": 1, "evt_type": "IF", "evt_label": "Guard",
+         "evt_query_id": None, "evt_query_crud": None, "evt_api_id": None,
+         "evt_brc_id": None, "evt_brc_true": 1, "evt_brc_false": None,
+         "evt_loop": "N", "evt_loop_array": None, "evt_cdn_id": 7},
+        # The body of branch 1 (runs when the IF holds).
+        {"act_id": 3, "evt_id": 2, "evt_seq": 2, "evt_type": "QUERY", "evt_label": "Delete",
+         "evt_query_id": 23, "evt_query_crud": "DELETE", "evt_api_id": None,
+         "evt_brc_id": 1, "evt_brc_true": None, "evt_brc_false": None,
+         "evt_loop": "N", "evt_loop_array": None, "evt_cdn_id": None},
+    ]
+    cdn_param_rows = [
+        # One predicate on cdn_id=7 → the IF's condition migrates to a real equals check.
+        {"cdn_id": 7, "cdn_params_id": 1, "cdn_seq": 1,
+         "cdn_dd_id": "FROMUSER", "cdn_operator": "EQUAL", "cdn_value": "ADMIN",
+         "cdn_enum_id": None, "cdn_lookup_id": None, "cdn_logical": None, "cdn_group": 1},
+    ]
+    sql_rows = [{"query_id": 23, "query_crud": "DELETE", "query_label": "f00950", "query_pool": "jdedwards"}]
+    out = migrate_actions(
+        action_rows, task_rows, [], [], [], [],
+        sql_rows=sql_rows, app_name="nomajde", condition_param_rows=cdn_param_rows,
+    )
+    if_task = out["migrated_actions"]["nomajde"]["import_security"]["tasks"][0]
+    # Predicates ride on the task dump for the chain emitter to consume.
+    assert if_task["v1_cdn_id"] == 7
+    assert if_task["condition_predicates"] == [{
+        "dd_id": "FROMUSER", "operator": "EQUAL", "value": "ADMIN",
+        "enum_id": None, "lookup_id": None, "logical": "", "group": 1, "seq": 1,
+    }]
+    # The end-to-end attach path produces a Condition with the right shape.
+    screens_data = {"screens": {"nomajde": {"f00926": {
+        "id": "f00926", "read_query": "f00926_get",
+        "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+    }}}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 3}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f00926", "tbl_label": "x", "tbl_frm_id": 2}]
+    attached = attach_actions_to_screens(
+        screens_data, out, event_rows=event_rows, table_rows=table_rows, app_name="nomajde",
+    )
+    chain = attached["screens"]["nomajde"]["f00926"]["dialog"]["on_save"][0]
+    if_step = chain["steps"][0]
+    assert if_step["type"] == "if"
+    # The v1 ``EQUAL`` op maps to v2's ``equals``; cdn_dd_id becomes the INPUT.<name> path.
+    assert if_step["condition"] == {
+        "source": "INPUT.FROMUSER", "operator": "equals", "value": "ADMIN",
+    }
+    # Round-trip via Pydantic — the migrated screens.toml validates.
+    from liberty.screens import parse_screens
+    parse_screens(attached)
+
+
+def test_chain_action_loop_wraps_query_in_loop_step() -> None:
+    """A v1 task with ``evt_loop = 'Y'`` becomes a :class:`LoopAction` whose ``steps`` contains
+    the original QUERY (re-named as ``<step_id>_body``). The loop's ``source`` rewrites the
+    v1 ``evt_loop_array`` path the same way :class:`ParamBind.source` does."""
+    actions_data = {"migrated_actions": {"nomajde": {
+        "import_workbench": {
+            "id": "import_workbench", "v1_act_id": 7, "label": "Import Workbench",
+            "tasks": [
+                {"seq": 1, "v1_evt_id": 71, "type": "QUERY",
+                 "label": "Fetch source rows", "query": "f00950_select"},
+                # LOOP modifier on the next QUERY — iterates over fetch_source_rows.rows.
+                {"seq": 2, "v1_evt_id": 72, "type": "QUERY",
+                 "label": "Insert one row", "query": "f00950_post",
+                 "loop": True, "loop_over": "TASK_71.RESULTS",
+                 "param_binds": [
+                     {"param": "OBJECT", "source": "loop.OBJECT"},
+                     {"param": "TARGET_USER", "source": "INPUT.TOUSER"},
+                 ]},
+            ],
+        },
+    }}}
+    screens_data = {"screens": {"nomajde": {
+        "f00926": {
+            "id": "f00926", "read_query": "f00926_get",
+            "dialog": {"tabs": [{"id": "g", "type": "form", "fields": []}]},
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 7}]
+    table_rows = [{"tbl_id": 11, "tbl_db_name": "f00926", "tbl_label": "x", "tbl_frm_id": 2}]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    chain = out["screens"]["nomajde"]["f00926"]["dialog"]["on_save"][0]
+    fetch, loop_step = chain["steps"]
+    assert fetch["id"] == "fetch_source_rows"
+    assert loop_step["type"] == "loop"
+    assert loop_step["id"] == "insert_one_row"
+    # ``loop_over = "TASK_71.RESULTS"`` rewrites to the v2 chain-context path.
+    assert loop_step["source"] == "fetch_source_rows.rows"
+    # The looped step lives inside ``steps`` — renamed so the loop owns the outer id.
+    assert len(loop_step["steps"]) == 1
+    body = loop_step["steps"][0]
+    assert body["type"] == "run_query"
+    assert body["query"] == "f00950_post"
+    assert body["id"] == "insert_one_row_body"
+    # ``loop.X`` source paths are kept verbatim (they don't need rewriting — the runtime resolves
+    # them against the current iteration's context).
+    binds = {b["param"]: b["source"] for b in body["param_binds"]}
+    assert binds["OBJECT"] == "loop.OBJECT"
+    assert binds["TARGET_USER"] == "INPUT.TOUSER"
+    # Round-trip via Pydantic — confirms the migrated shape validates.
+    from liberty.screens import parse_screens
+    parse_screens(out)
 
 
 def test_migrate_actions_unresolvable_query_keeps_warning() -> None:

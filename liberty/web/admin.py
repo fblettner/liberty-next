@@ -408,6 +408,28 @@ async def get_screens_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     }
 
 
+def _reinject_action_type(a_dict: dict[str, Any], a_model: Any) -> None:
+    """Re-inject the discriminator on an Action dict + every nested sub-list (so the frontend
+    union parser picks the right variant when round-tripping). ``model_dump(exclude_defaults=True)``
+    strips ``type`` because every variant's ``type: Literal[X] = X`` matches its own default —
+    without this fix, an :class:`IfAction` reaches the builder as ``{id, condition, then_steps,
+    else_steps}`` with no ``type`` field, and the frontend defaults the type picker to ``run_query``.
+
+    Slice 4d added :class:`ChainAction.steps` / :class:`IfAction.then_steps` / ``else_steps`` /
+    :class:`LoopAction.steps` — every one of those is a nested ``list[Action]`` that needs the
+    same treatment recursively."""
+    a_dict["type"] = a_model.type
+    # Recurse into the four step-list-bearing variants. The model attribute name matches the
+    # dict key, so a single ``getattr + dict.get`` zip covers each case.
+    for nested_key in ("steps", "then_steps", "else_steps"):
+        nested_list = a_dict.get(nested_key)
+        nested_models = getattr(a_model, nested_key, None)
+        if not nested_list or not nested_models:
+            continue
+        for sub_dict, sub_model in zip(nested_list, nested_models):
+            _reinject_action_type(sub_dict, sub_model)
+
+
 def _dump_screen(s: Screen) -> dict[str, Any]:
     """Default-stripped model dump + re-injected discriminators for every tab / action."""
     d = s.model_dump(exclude_defaults=True)
@@ -415,17 +437,18 @@ def _dump_screen(s: Screen) -> dict[str, Any]:
     if s.dialog is not None:
         for tab_dict, tab_model in zip(d.get("dialog", {}).get("tabs", []), s.dialog.tabs):
             tab_dict["type"] = tab_model.type
-            # Per-tab actions — same fix needed for the action union's discriminator.
+            # Per-tab actions — recursive so nested ChainAction.steps / IfAction.then_steps /
+            # else_steps / LoopAction.steps all keep their discriminators.
             for a_dict, a_model in zip(tab_dict.get("actions", []), tab_model.actions):
-                a_dict["type"] = a_model.type
+                _reinject_action_type(a_dict, a_model)
         # Dialog-level hook chains.
         for hook in ("on_load", "on_save", "on_cancel"):
             for a_dict, a_model in zip(d.get("dialog", {}).get(hook, []), getattr(s.dialog, hook, [])):
-                a_dict["type"] = a_model.type
+                _reinject_action_type(a_dict, a_model)
     # Screen-level action lists.
     for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
         for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, [])):
-            a_dict["type"] = a_model.type
+            _reinject_action_type(a_dict, a_model)
     # Fold ``screen.key_columns`` (the old flat list — what pre-Phase-3 migration emitted
     # and what hand-edited screens may still use) into each matching column hint as
     # ``key: True``. The Visual Designer's Columns tab reads ``column.key`` per column;

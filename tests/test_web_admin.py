@@ -445,6 +445,85 @@ def test_config_screens_parsed_get_and_put(env) -> None:
         assert client.post("/admin/reload", headers=h).json()["screen_apps"] == ["nomasx1"]
 
 
+def test_config_screens_parsed_preserves_workflow_step_discriminators(env) -> None:
+    """Regression for the F00926 chain that landed in screens.toml with the right shape but
+    came back from the admin endpoint with the IF step's ``type`` stripped — the Visual
+    Designer then read the IF as a ``run_query`` (the frontend's default when the
+    discriminator is missing), and the operator couldn't reach the Condition editor.
+
+    The fix in :func:`_dump_screen` recursively re-injects the discriminator on every nested
+    step list — :class:`ChainAction.steps`, :class:`IfAction.then_steps` / ``else_steps``,
+    :class:`LoopAction.steps`. This test wires one of each at every nesting depth and asserts
+    the GET payload keeps every ``type`` field through one round-trip + survives a PUT echo.
+    """
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        payload = {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "apps_get",
+                    "dialog": {
+                        "tabs": [
+                            {
+                                "id": "general", "type": "form", "fields": [{"name": "APPS_ID"}],
+                                "actions": [
+                                    {
+                                        "id": "wf_button", "type": "chain", "label": "Run",
+                                        "steps": [
+                                            {
+                                                "id": "guard", "type": "if",
+                                                "condition": {"source": "INPUT.MODE", "operator": "equals", "value": "Y"},
+                                                "then_steps": [
+                                                    {"id": "do_thing", "type": "run_query", "query": "apps_rebuild"},
+                                                    {
+                                                        "id": "for_each_app", "type": "loop",
+                                                        "source": "do_thing.rows",
+                                                        "steps": [
+                                                            {"id": "touch", "type": "run_query", "query": "apps_touch"},
+                                                        ],
+                                                    },
+                                                ],
+                                                "else_steps": [
+                                                    {"id": "notify_skip", "type": "notify", "message": "skipped", "tone": "info"},
+                                                ],
+                                            },
+                                            {"id": "wrap_up", "type": "refresh"},
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+        r = client.put("/admin/config/screens/parsed", json={"screens": payload}, headers=h)
+        assert r.status_code == 200, r.text
+
+        body = client.get("/admin/config/screens/parsed", headers=h).json()
+        tab_actions = body["screens"]["nomasx1"]["settings_applications"]["dialog"]["tabs"][0]["actions"]
+        chain = tab_actions[0]
+        # Every nested type discriminator survives the dump (the bug was: nested steps lost
+        # their ``type`` because Literal[X] = X matches the Pydantic default).
+        assert chain["type"] == "chain"
+        if_step = chain["steps"][0]
+        assert if_step["type"] == "if"
+        assert if_step["condition"] == {"source": "INPUT.MODE", "operator": "equals", "value": "Y"}
+        assert [s["type"] for s in if_step["then_steps"]] == ["run_query", "loop"]
+        # Loop's body keeps its discriminator at the next nesting level too.
+        loop_step = if_step["then_steps"][1]
+        assert loop_step["steps"][0]["type"] == "run_query"
+        # Else branch + the trailing refresh on the outer chain — also preserved.
+        assert [s["type"] for s in if_step["else_steps"]] == ["notify"]
+        assert chain["steps"][1]["type"] == "refresh"
+
+        # PUT echo — saving the GET'd body back doesn't 422 (every discriminator survives so
+        # the discriminated union validates without falling through to the wrong variant).
+        r2 = client.put("/admin/config/screens/parsed", json={"screens": body["screens"]}, headers=h)
+        assert r2.status_code == 200, r2.text
+
+
 def test_config_screens_parsed_preserves_tab_type_discriminator(env) -> None:
     """Regression: ``model_dump(exclude_defaults=True)`` strips the Literal ``type`` discriminator
     on nested tabs (its only-allowed value equals its default). The visual builder needs the

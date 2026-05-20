@@ -21,24 +21,11 @@ import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeade
 import type { Column } from '../../types/connectors'
 import type { Action, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { evalConditions, originalKeys, resolveBindList, type Row, withUpper } from './dialogHelpers'
+import { evalConditions, originalKeys, type Row, withUpper } from './dialogHelpers'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
-
-/** A ParamBind-bearing action with a non-empty ``prompt_fields`` list. The runner pauses on
- *  these to collect operator input and merge the result into the chain's running context. */
-function actionPrompt(a: Action): { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null } | null {
-  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'navigate') return null
-  const fields = a.prompt_fields ?? []
-  if (fields.length === 0) return null
-  return {
-    fields,
-    title: a.prompt_title ?? a.label ?? null,
-    cols: a.prompt_cols ?? null,
-    submitLabel: a.prompt_submit_label ?? a.label ?? null,
-  }
-}
+import { runChain } from './actionRunner'
 
 /** Narrow a ScreenTab to FormTab — the original "grid of fields" kind. A tab without a
  *  ``type`` discriminator is treated as a form (matches `parse_screens` backward compat).
@@ -260,74 +247,52 @@ export function ScreenDialog({
     r?.(null)
   }, [])
 
-  // Run a list of post-save actions sequentially against a *snapshot* of the form state — the
-  // dialog has just written its main update_query / insert_query; on_save actions are the v2 form
-  // of v1's `ly_act_tasks` for the form-save flow (multi-table writes, audit calls, post-save
-  // notifications). Each action's ParamBinds resolve against `ctx`; run_query POSTs to
-  // /api/sql/{c}/{q}; notify appends to the local status banner; refresh signals the caller (via
-  // the returned flag) to re-run the read query. Unimplemented variants log a console.warn and,
-  // when ``stop_on_error`` is false, are skipped — otherwise they abort the chain with a clear
-  // error so the operator knows their config references a not-yet-implemented runtime feature.
+  // Run a list of actions through the recursive runner (:file:`actionRunner.ts`). Slice B
+  // (Phase 6 4d) added the chain context — each action lands its prompt values under
+  // ``INPUT.<name>`` and (when ``bind_result = true``) its rows under the step's ``id``, so
+  // a later step can reference them via ``ParamBind {source: '<id>.first_row.<col>'}``.
+  // ChainAction / IfAction / LoopAction / ReturnAction execute recursively from there.
   //
-  // **Prompt-before-fire** (v2's port of v1's ``ly_act_params``): an action with non-empty
-  // ``prompt_fields`` opens the ActionPromptDialog *before* it runs; the operator's input merges
-  // into the running ctx, so this action's binds *and* every later one in the chain can reach
-  // the prompt values via ``source: "<NAME>"``. Cancelling the prompt aborts the chain (soft —
-  // no error). Returns the (possibly empty) list of human-readable warnings.
-  const runOnSaveActions = useCallback(async (actions: Action[], baseCtx: Row): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
-    const warnings: string[] = []
-    let refresh = false
-    let ctx: Row = { ...baseCtx }
-    for (const a of actions) {
-      // Prompt-before-fire — pause and collect input; cancel aborts the chain soft.
-      const prompt = actionPrompt(a)
-      if (prompt) {
-        const v = await requestPrompt(prompt, a.label || a.id)
-        if (v == null) {
-          return { ok: true, warnings, refresh }   // soft cancel — no error surfaced
+  // The runner is decoupled from React via ``ActionRunnerDeps``: we pass the screen's
+  // effective connector (``defaultConnector``) and the same imperative-prompt resolver the
+  // old inline runner used (``requestPrompt``). The result shape stays the same
+  // ``{ok, warnings, refresh, error?}`` the old runner returned, plus a ``returnedValues``
+  // dict from any :class:`ReturnAction` / :class:`SetFieldAction` — we merge that back into
+  // ``formValues`` so the dialog reflects the workflow's output (v1's RETURN semantics).
+  //
+  // Backward-compat: a hand-written flat ``list[Action]`` (no chain wrapper) still works —
+  // each top-level action runs sequentially against the same chain context, just without the
+  // explicit grouping a v1 named-workflow migration would emit.
+  const runOnSaveActions = useCallback(async (
+    actions: Action[],
+    baseCtx: Row,
+  ): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
+    const result = await runChain(actions, baseCtx, baseCtx, {
+      defaultConnector: connector,
+      requestPrompt,
+    })
+    // :class:`ReturnAction` / :class:`SetFieldAction` write into the caller's form — apply
+    // those before returning so the dialog reflects the workflow's output. Match by
+    // field-name case-insensitively (Postgres lowercases columns; v1 migration emits upper).
+    if (Object.keys(result.returnedValues).length > 0) {
+      setFormValues(prev => {
+        const next: Row = { ...prev }
+        for (const [k, v] of Object.entries(result.returnedValues)) {
+          const matched = Object.keys(next).find(existing => existing.toLowerCase() === k.toLowerCase())
+          next[matched ?? k] = v
         }
-        ctx = { ...ctx, ...v }
-      }
-      try {
-        switch (a.type) {
-          case 'run_query': {
-            const target = a.connector || connector
-            const bound = resolveBindList(a.param_binds, ctx)
-            await api.post(
-              `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
-              { params: withUpper(bound) },
-            )
-            break
-          }
-          case 'notify': {
-            warnings.push(a.message)
-            break
-          }
-          case 'refresh': {
-            refresh = true
-            break
-          }
-          case 'call_api':
-          case 'navigate':
-          case 'set_field':
-          case 'confirm': {
-            // Stubbed — model is in place but the runtime wires up in a later slice. The
-            // builder lets you create them already; an unsupported runtime is a console.warn
-            // rather than a hard fail unless `stop_on_error = true` (the default).
-            const msg = `on_save action '${a.id}' (${a.type}) — runtime not implemented yet`
-            console.warn(msg)  // eslint-disable-line no-console
-            if (a.stop_on_error !== false) return { ok: false, warnings, refresh, error: msg }
-            warnings.push(msg)
-            break
-          }
-        }
-      } catch (e) {
-        const msg = `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`
-        if (a.stop_on_error !== false) return { ok: false, warnings, refresh, error: msg }
-        warnings.push(msg)
-      }
+        return next
+      })
     }
-    return { ok: true, warnings, refresh }
+    // Soft cancel maps to ok=true with no error (no banner) — same convention the old runner
+    // used. The result.cancelled flag is the explicit signal but the previous shape only had
+    // ok/warnings/refresh/error so we keep it.
+    return {
+      ok: result.ok,
+      warnings: result.warnings,
+      refresh: result.refresh,
+      error: result.error,
+    }
   }, [connector, requestPrompt])
 
   // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —

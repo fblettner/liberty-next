@@ -351,11 +351,17 @@ class _PromptableMixin(BaseModel):
 class RunQueryAction(_PromptableMixin, _ActionBase):
     """Execute a connector query (the most common action — v1's ``ly_act_tasks evt_type='QUERY'``).
     ``param_binds`` resolves at call time against the firing context (the dialog form's live values,
-    or the row for a row-menu action): same :class:`ParamBind` shape used for lookups.
+    the row for a row-menu action, or the chain context inside a :class:`ChainAction`): same
+    :class:`ParamBind` shape used for lookups.
 
     The v2 form of v1's ``FormsDialog``: a screen whose main ``update_query`` writes one table can
     list extra ``RunQueryAction``s on its ``dialog.on_save`` to write related tables that share a
-    PK (e.g. NOMASX1's ``settings_applications`` → apps + apps_jde + apps_ldap)."""
+    PK (e.g. NOMASX1's ``settings_applications`` → apps + apps_jde + apps_ldap).
+
+    When ``bind_result = true`` the action's rows land in the chain context under this step's
+    ``id`` as ``{rows, first_row, success}`` so later steps in the same :class:`ChainAction` can
+    bind from them via a ``ParamBind {source: '<id>.first_row.COL'}`` (v2's port of v1's
+    ``TASK_<id>.RESULTS[0].COL`` references)."""
 
     type: Literal["run_query"] = "run_query"
     connector: str | None = Field(
@@ -367,17 +373,35 @@ class RunQueryAction(_PromptableMixin, _ActionBase):
         default_factory=list,
         description="Parameter bindings — same shape as ``ScreenField.lookup_param_binds`` / row menu binds.",
     )
+    bind_result: bool = Field(
+        default=False,
+        description=(
+            "When true, store this action's result in the chain context under this step's ``id`` "
+            "as ``{rows, first_row, success}``. Only meaningful inside a :class:`ChainAction` — "
+            "later steps reference the values via ``ParamBind {source: '<id>.first_row.<col>'}``."
+        ),
+    )
 
 
 class CallApiAction(_PromptableMixin, _ActionBase):
     """Call an API endpoint on a configured API connector — v1's ``evt_type='API'``. The
     endpoint's own ``{{placeholder}}`` template wins; ``param_binds`` is for the *query string /
-    body* parameters the endpoint declares as bindable."""
+    body* parameters the endpoint declares as bindable.
+
+    Same ``bind_result`` semantics as :class:`RunQueryAction` — the response items land in the
+    chain context under this step's ``id`` so later steps can bind from them."""
 
     type: Literal["call_api"] = "call_api"
     connector: str = Field(description="API connector name (must be of ``type = \"api\"``).")
     endpoint: str = Field(description="Endpoint name on that connector.")
     param_binds: list[ParamBind] = Field(default_factory=list)
+    bind_result: bool = Field(
+        default=False,
+        description=(
+            "When true, store this action's response in the chain context under this step's "
+            "``id`` as ``{rows, first_row, success}`` (response items appear as ``rows``)."
+        ),
+    )
 
 
 class NavigateAction(_PromptableMixin, _ActionBase):
@@ -439,22 +463,150 @@ class RefreshAction(_ActionBase):
     type: Literal["refresh"] = "refresh"
 
 
+# ── workflow steps (v1's named-action shape, ported as inline action variants) ──────────────
+# A v1 ``ly_actions`` row is one logical button that runs N tasks with shared context
+# (``allParams.current = {INPUT, TASK_<id>: {RESULTS: …}}``) and forks via IF / iterates via
+# LOOP / returns values to the caller via RETURN. v2 brings the same shape inline on screens —
+# one :class:`ChainAction` button whose ``steps`` list runs sequentially, with the chain
+# context resolving ``ParamBind {source: '<step_id>.first_row.COL'}`` references against each
+# step's recorded result. Shared / cross-screen actions are a later slice (Slice D in
+# CLAUDE.md); for now every chain lives where it's used.
+
+
+class Condition(BaseModel):
+    """Predicate evaluated by :class:`IfAction`. v2's port of v1's ``ly_conditions`` — but
+    flatter: a single ``source`` path resolved against the chain context (or form field),
+    compared to ``value`` with ``operator``. The migration falls back to ``operator = 'truthy'``
+    + a warning when v1's condition can't be expressed in this shape (multi-clause OR / AND
+    predicates the v2 builder will grow in a later slice)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(
+        description=(
+            "Chain-context dotted path (``INPUT.AUUSER`` / ``select_workbench.first_row.OBJECT``) "
+            "or a form-field name. Same resolution semantics as :class:`ParamBind.source`."
+        ),
+    )
+    operator: Literal[
+        "equals", "not_equals", "has_rows", "no_rows", "truthy", "falsy",
+        "greater_than", "less_than",
+    ] = Field(
+        default="truthy",
+        description=(
+            "Comparison: ``equals`` / ``not_equals`` compare to ``value``; ``has_rows`` / "
+            "``no_rows`` test the resolved value's array length; ``truthy`` / ``falsy`` is a "
+            "JavaScript-style boolean cast; ``greater_than`` / ``less_than`` numeric compare."
+        ),
+    )
+    value: str | None = Field(
+        default=None,
+        description="Comparison value for ``equals`` / ``not_equals`` / ``greater_than`` / ``less_than``. Ignored otherwise.",
+    )
+
+
+class ChainAction(_PromptableMixin, _ActionBase):
+    """One button (or hook entry) that fires a *sequence of steps* sharing a single context.
+    v2's form of a v1 named-action workflow (``ly_actions`` + N rows in ``ly_act_tasks``).
+
+    The chain context accumulates as the chain runs:
+
+    ::
+
+        {
+            INPUT:       { /* prompt_fields values + caller-passed params */ },
+            <step_id>:   { rows: [...], first_row: {...}, success: bool },
+            loop:        { /* current LoopAction iteration's element fields */ },
+        }
+
+    Steps reference values via ``ParamBind {source: '<dotted.path>'}`` — see :class:`Condition`
+    for the path syntax. Existing form-field bindings (no dots) keep working — the runtime tries
+    the chain context first, then falls back to the firing context (dialog form / clicked row).
+
+    ``prompt_fields`` from :class:`_PromptableMixin` ride on the *chain*: the operator's inputs
+    land in the chain context under ``INPUT.<name>`` once, fired before the first step. Steps
+    don't carry their own prompt_fields (the runner won't show a sub-dialog mid-chain) — that
+    keeps the UX predictable."""
+
+    type: Literal["chain"] = "chain"
+    steps: list["Action"] = Field(
+        default_factory=list,
+        description="Ordered sub-steps. May include :class:`IfAction` / :class:`LoopAction` for nested control flow.",
+    )
+
+
+class IfAction(_ActionBase):
+    """Conditional branching inside a :class:`ChainAction`. Evaluates :attr:`condition` against
+    the chain context, then walks :attr:`then_steps` (when true) or :attr:`else_steps` (when
+    false). Either branch may be empty — a one-armed IF is fine.
+
+    v2's port of v1's ``evt_type='IF'`` tasks (+ ``evt_brc_true`` / ``evt_brc_false`` branch
+    membership). The v1 model used labeled jumps (``currentBranch.current`` + ``evt_brc_id``
+    filtering); v2 inlines each branch's steps for a cleaner read."""
+
+    type: Literal["if"] = "if"
+    condition: Condition = Field(description="Predicate evaluated against the chain context.")
+    then_steps: list["Action"] = Field(default_factory=list)
+    else_steps: list["Action"] = Field(default_factory=list)
+
+
+class LoopAction(_ActionBase):
+    """Iterate over an array resolved from the chain context, running :attr:`steps` once per
+    element. The current element is bound under ``loop`` for the duration of the iteration — a
+    step inside the loop reads it via ``ParamBind {source: 'loop.<field>'}``.
+
+    v2's port of v1's ``evt_loop='Y'`` task modifier. v1 only allowed looping on QUERY tasks
+    over a single source (``evt_loop_array``); v2 makes LOOP a block with arbitrary nested
+    steps (still typed Actions)."""
+
+    type: Literal["loop"] = "loop"
+    source: str = Field(
+        description=(
+            "Chain-context dotted path resolving to an array (e.g. ``select_workbench.rows``). "
+            "Same syntax as :class:`Condition.source` / :class:`ParamBind.source`."
+        ),
+    )
+    steps: list["Action"] = Field(default_factory=list)
+
+
+class ReturnAction(_ActionBase):
+    """Bind chain-context values back into the **caller's** form fields. v2's port of v1's
+    ``evt_type='RETURN'`` task: after a workflow looked up a value (e.g. a SELECT that found
+    the user's email), this step writes it into the dialog's matching field. Useful for
+    "look up + populate" workflows."""
+
+    type: Literal["return"] = "return"
+    bindings: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "``{caller_field_name: chain_context_path}`` — each entry reads the chain context at "
+            "the given path and writes it into the caller's field of that name. Only meaningful "
+            "when the chain fires from a dialog (no caller form = silently ignored)."
+        ),
+    )
+
+
 # Discriminated union — every Action variant carries a ``type`` literal; Pydantic picks the right
 # subclass when validating a raw dict (so screens.toml's `[[on_save]] type = "run_query"` validates).
 Action = Annotated[
     Union[
         RunQueryAction, CallApiAction, NavigateAction, SetFieldAction,
         ConfirmAction, NotifyAction, RefreshAction,
+        ChainAction, IfAction, LoopAction, ReturnAction,
     ],
     Field(discriminator="type"),
 ]
 
 # ``_ScreenTabBase`` declares ``actions: list["Action"]`` as a forward reference (Action is
 # defined here, after the tab classes). Rebuild every tab variant so Pydantic resolves the
-# union before any model_validate call.
+# union before any model_validate call. ChainAction / IfAction / LoopAction also carry forward
+# references to the same union — rebuild them so their nested step schemas resolve.
 FormTab.model_rebuild()
 NestedFormTab.model_rebuild()
 NestedTableTab.model_rebuild()
+ChainAction.model_rebuild()
+IfAction.model_rebuild()
+LoopAction.model_rebuild()
 
 
 class ScreenDialog(BaseModel):

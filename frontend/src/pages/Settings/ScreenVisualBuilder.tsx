@@ -37,6 +37,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import ActionListEditor from './ActionListEditor'
 
 type Row = Record<string, unknown>
 
@@ -847,8 +848,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       return m
     })()
     const colsInconsistent = tabType !== 'nested_table' && cols < maxColspan
+    // Auto-open when the tab carries per-tab actions (operators land on F0092 / F00926 in
+    // NOMAJDE and need to find the workflow buttons; default-collapsed hid them).
+    const hasTabActions = tabActions.length > 0
     return (
-      <TabSettingsBox open={isNested || colsInconsistent}>
+      <TabSettingsBox open={isNested || colsInconsistent || hasTabActions}>
         <summary>
           <ChevronRightIcon size={12} />
           <span>{t('settings.screens.visual.tabSettings.title')}</span>
@@ -856,6 +860,12 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             <span className="kind" style={{ color: colors.orange.main, borderColor: colors.orange.border, background: colors.orange.bg }}>
               <AlertTriangle size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />
               {t('settings.screens.visual.tabSettings.colsWarningChip')}
+            </span>
+          )}
+          {hasTabActions && (
+            <span className="kind" title={t('settings.screens.tabActions.heading')}>
+              <Zap size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />
+              {tabActions.length}
             </span>
           )}
           <span className="kind">{tabType}</span>
@@ -979,6 +989,21 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               {renderTabBindsEditor()}
             </>
           )}
+          {/* Per-tab actions — v2's port of v1's ``col_component='InputAction'`` rows. Toolbar
+              buttons placed *inside* this tab (Roles tab on NOMASX1's settings_applications
+              carries Import Security + Merge Roles + an Activity Log next to its nested grid;
+              JDE F0092 / F00926 carry workflow buttons here too). Same shape every other action
+              attachment point uses — one editor everywhere. */}
+          <ActionListEditor
+            actions={tabActions}
+            onChange={(n) => patchTab({ actions: n.length ? (n as unknown as Row[]) : null })}
+            heading={t('settings.screens.tabActions.heading')}
+            hint={t('settings.screens.tabActions.hint')}
+            emptyMessage={t('settings.screens.tabActions.empty')}
+            defs={defs}
+            effectiveConnector={tabEffectiveConnector}
+            onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
+          />
         </div>
       </TabSettingsBox>
     )

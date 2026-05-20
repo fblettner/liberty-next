@@ -2063,6 +2063,316 @@ def _params_to_prompt_fields(params: Iterable[Mapping[str, Any]]) -> list[dict[s
     return out
 
 
+# v1 ``ly_cdn_params.cdn_operator`` → v2 :attr:`Condition.operator`. v1's vocabulary is wider
+# (LIKE / IN / EXISTS / …) than v2's — anything not in this map degrades to ``truthy`` + the
+# placeholder source so the migrated chain still loads, and the operator wires the real
+# predicate via the builder. v2 may grow more operators in a later slice; until then a
+# best-effort cast is better than dropping the IF entirely.
+_V1_TO_V2_COND_OP: dict[str, str] = {
+    # equality
+    "EQUAL": "equals", "EQ": "equals", "=": "equals", "==": "equals", "IS": "equals",
+    # inequality
+    "NOT_EQUAL": "not_equals", "NEQ": "not_equals", "!=": "not_equals", "<>": "not_equals",
+    "IS_NOT": "not_equals",
+    # presence
+    "EMPTY": "falsy", "IS_NULL": "falsy", "NULL": "falsy", "BLANK": "falsy", "ISNULL": "falsy",
+    "NOT_EMPTY": "truthy", "IS_NOT_NULL": "truthy", "NOT_NULL": "truthy",
+    # numeric
+    "GREATER": "greater_than", "GT": "greater_than", ">": "greater_than", "GE": "greater_than",
+    "LESS": "less_than", "LT": "less_than", "<": "less_than", "LE": "less_than",
+}
+
+
+def _v2_condition_from_predicates(preds: list[Mapping[str, Any]] | None) -> tuple[dict[str, Any], list[str]]:
+    """Build a v2 :class:`Condition` dict from a v1 ``ly_cdn_params`` predicate list.
+
+    v2's Condition is single-clause (one source + one operator + one value); v1 supports
+    multi-clause predicates chained via AND/OR groups. The migration picks the *first*
+    predicate (lowest ``cdn_seq``) and emits ``warnings`` describing any extra clauses the
+    operator needs to re-build in the Settings builder. Mapping:
+
+    * ``cdn_dd_id`` → ``source = "INPUT.<dd_id>"`` (the predicate evaluates against the
+      workflow's input params or a previous task's bound output)
+    * ``cdn_operator`` → :attr:`Condition.operator` via :data:`_V1_TO_V2_COND_OP`. Unknown
+      operators (LIKE / IN / EXISTS / …) degrade to ``truthy`` + a warning.
+    * ``cdn_value`` → ``value`` (kept as a string; v2's Condition coerces at runtime)
+
+    Returns ``(condition_dict, warnings)``. An empty / missing predicate list returns a
+    placeholder condition + a warning so the operator notices the gap."""
+    warnings: list[str] = []
+    if not preds:
+        return {"source": "INPUT.PLACEHOLDER", "operator": "truthy"}, ["v1 IF task had no ly_cdn_params predicates"]
+    first = preds[0]
+    dd_id = (first.get("dd_id") or "").strip()
+    v1_op = (first.get("operator") or "").strip().upper()
+    v2_op = _V1_TO_V2_COND_OP.get(v1_op)
+    if v2_op is None:
+        warnings.append(f"v1 condition operator {v1_op!r} doesn't map to v2 — defaulted to ``truthy``")
+        v2_op = "truthy"
+    cond: dict[str, Any] = {
+        "source": f"INPUT.{dd_id}" if dd_id else "INPUT.PLACEHOLDER",
+        "operator": v2_op,
+    }
+    value = first.get("value")
+    if value not in (None, "") and v2_op in {"equals", "not_equals", "greater_than", "less_than"}:
+        cond["value"] = str(value)
+    if len(preds) > 1:
+        warnings.append(
+            f"v1 condition had {len(preds)} predicates joined by AND/OR; v2 picked the first — wire the rest via the builder",
+        )
+    return cond, warnings
+
+
+def _build_chain_action(a: Mapping[str, Any], skip_query: str | None = None) -> dict[str, Any] | None:
+    """Convert a migrated v1 action (as :func:`migrate_actions` dumps it) into a single v2
+    :class:`ChainAction` dict. Returns ``None`` when the action has no resolvable steps.
+
+    Used by both :func:`attach_actions_to_screens` (event-driven on_save / on_insert / on_delete
+    chains) and :func:`migrate_screens`'s ``_input_action_to_button`` (per-tab button rows from
+    ``col_component='InputAction'`` columns). Same v1 → v2 mapping for both; the caller decides
+    where to attach the resulting chain and whether to override its id / label.
+
+    The chain carries:
+
+    * **Readable ``id``** — ``slugify(act_label)``. No more ``migrated_3_0`` ids in screens.toml.
+    * **prompt_fields** — from v1 ``ly_act_params`` (IN/INOUT only, OUT excluded).
+    * **steps** — typed sub-actions in v1 ``evt_seq`` order. The branch graph collapses to nested
+      :class:`IfAction` (then_steps / else_steps populated from ``ly_act_tasks.evt_brc_id``
+      membership). LOOP tasks wrap into :class:`LoopAction`. QUERY tasks → :class:`RunQueryAction`,
+      API tasks with a resolved (connector, endpoint) → :class:`CallApiAction`. Task param
+      ``map_value`` references — including ``INPUT.<X>`` and ``TASK_<v1_evt_id>.RESULTS[N].COL`` —
+      rewrite to v2's chain-context paths (``INPUT.<X>`` stays; v1 task refs become
+      ``<slugified_step_id>.first_row.<COL>`` or ``.rows.<N>.<COL>``).
+
+    ``skip_query`` drops the *first* task whose v2 query matches — used by ``attach_actions_to_screens``
+    to avoid re-running the dialog's main update/insert when the chain's first step duplicates it.
+    """
+    try:
+        v1_act_id = int(a["v1_act_id"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    chain_label = a.get("label")
+    chain_slug = slugify(chain_label or "", fallback=f"action_{v1_act_id}")
+    all_tasks: list[Mapping[str, Any]] = list(a.get("tasks") or [])
+
+    # ── step-id assignment (slugify evt_label, fall back to step_<seq>) ────────────────────
+    # v1 doesn't constrain evt_label uniqueness across tasks; disambiguate on collision so the
+    # rewritten ParamBind ``source = "<step_id>.first_row.COL"`` references stay unambiguous.
+    step_id_by_v1_evt: dict[int, str] = {}
+    used_step_ids: set[str] = set()
+    for t in all_tasks:
+        v1_evt_id = t.get("v1_evt_id")
+        if v1_evt_id is None:
+            continue
+        try:
+            v1_evt_id_int = int(v1_evt_id)
+        except (TypeError, ValueError):
+            continue
+        base = slugify(t.get("label") or "", fallback=f"step_{v1_evt_id_int}")
+        sid = _uniquify(base, used_step_ids)
+        step_id_by_v1_evt[v1_evt_id_int] = sid
+
+    # ── source-path rewrite — INPUT.X stays; TASK_<v1_evt_id>.RESULTS[N].COL → step.first_row/rows.N.COL ──
+    _task_re = re.compile(r"^TASK_(\d+)(?:\.RESULTS(?:\[(\d+)\])?)?(?:\.(.+))?$", re.IGNORECASE)
+    def _rewrite_source_path(path: str) -> str:
+        if not path or "." not in path:
+            return path                       # plain form-field reference — leave untouched
+        m = _task_re.match(path.strip())
+        if not m:
+            return path                       # INPUT.X / loop.Y / unknown shape — kept verbatim
+        v1_evt_id = int(m.group(1))
+        idx_raw = m.group(2)
+        rest = m.group(3) or ""
+        new_id = step_id_by_v1_evt.get(v1_evt_id, f"step_{v1_evt_id}")
+        if idx_raw is None:
+            # ``TASK_<id>.RESULTS`` (bare) → the whole rows list
+            return f"{new_id}.rows" if rest == "" else f"{new_id}.rows.{rest}"
+        idx = int(idx_raw)
+        prefix = "first_row" if idx == 0 else f"rows.{idx}"
+        return f"{new_id}.{prefix}.{rest}" if rest else f"{new_id}.{prefix}"
+
+    def _rewrite_param_binds(binds: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for b in binds or []:
+            entry: dict[str, Any] = {"param": b["param"]}
+            if "value" in b and b["value"] is not None:
+                entry["value"] = b["value"]
+            if "source" in b and b["source"]:
+                entry["source"] = _rewrite_source_path(str(b["source"]))
+            if "v1_map_type" in b:
+                entry["v1_map_type"] = b["v1_map_type"]
+            out.append(entry)
+        return out
+
+    # ── group tasks by branch_id (None = top-level) ───────────────────────────────────────
+    tasks_by_branch: dict[int | None, list[Mapping[str, Any]]] = {}
+    for t in all_tasks:
+        bid = t.get("belongs_to_branch")
+        try:
+            bid_key: int | None = int(bid) if bid is not None else None
+        except (TypeError, ValueError):
+            bid_key = None
+        tasks_by_branch.setdefault(bid_key, []).append(t)
+
+    skip_query_consumed = [False]
+
+    def _query_step(
+        t: Mapping[str, Any], step_id: str, label: str | None, param_binds: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        q = t.get("query")
+        if not q:
+            return None
+        # ``bind_result`` heuristic — SELECTs capture their rows into the chain context so
+        # subsequent steps can reference them via ``<step_id>.first_row.<COL>``. v1's
+        # ``query_crud`` isn't carried over in the dump (only the resolved v2 name is), so we
+        # infer from the v2 name suffix.
+        qname = str(q).lower()
+        is_select = qname.endswith(("_select", "_get"))
+        step: dict[str, Any] = {
+            "id": step_id,
+            "type": "run_query",
+            "query": q,
+        }
+        if label:
+            step["label"] = label
+        if param_binds:
+            step["param_binds"] = param_binds
+        if is_select:
+            step["bind_result"] = True
+        return step
+
+    def _v1_task_to_step(t: Mapping[str, Any]) -> dict[str, Any] | None:
+        try:
+            v1_evt_id = int(t.get("v1_evt_id") or 0)
+        except (TypeError, ValueError):
+            v1_evt_id = 0
+        step_id = step_id_by_v1_evt.get(v1_evt_id, f"step_{v1_evt_id}")
+        label = t.get("label")
+        ttype = (t.get("type") or "").strip().upper()
+        param_binds = _rewrite_param_binds(list(t.get("param_binds") or []))
+
+        # LOOP modifier on a QUERY: wrap the query in a LoopAction.
+        if t.get("loop") is True:
+            loop_over_raw = (t.get("loop_over") or "").strip()
+            inner = _query_step(t, step_id, label, param_binds)
+            if inner is None:
+                return None
+            inner["id"] = f"{step_id}_body"
+            return _drop_none({
+                "id": step_id,
+                "type": "loop",
+                "label": label,
+                "source": _rewrite_source_path(loop_over_raw) if loop_over_raw else "",
+                "steps": [inner],
+            })
+
+        if ttype == "API" and t.get("connector") and t.get("endpoint"):
+            return _drop_none({
+                "id": step_id,
+                "type": "call_api",
+                "label": label,
+                "connector": str(t["connector"]),
+                "endpoint": str(t["endpoint"]),
+                "param_binds": param_binds or None,
+            })
+        if ttype == "API":
+            # Unresolved API (api_id not migrated) → notify placeholder.
+            return {
+                "id": step_id,
+                "type": "notify",
+                "label": (label or f"step_{v1_evt_id}") + " (needs wiring)",
+                "message": f"v1 task {label!r} uses an unresolved API call — see migrated_actions.toml.",
+                "tone": "warn",
+            }
+        if ttype == "RETURN":
+            # v1 RETURN task → v2 :class:`ReturnAction`. v1's param dump lists which action-
+            # level params are OUT/BOTH (the ones to return); we map ``var -> INPUT.var`` as a
+            # starting point. The operator wires the source paths properly via the builder.
+            bindings: dict[str, str] = {}
+            for p in a.get("params") or []:
+                direction = (p.get("direction") or "").upper()
+                if direction in {"OUT", "BOTH"}:
+                    var = p.get("name")
+                    if var:
+                        bindings[var] = f"INPUT.{var}"
+            return _drop_none({
+                "id": step_id,
+                "type": "return",
+                "label": label,
+                "bindings": bindings or None,
+            })
+        return _query_step(t, step_id, label, param_binds)
+
+    def _build_branch(branch_id: int | None) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for t in tasks_by_branch.get(branch_id, []):
+            ttype = (t.get("type") or "").strip().upper()
+            q = t.get("query")
+            # ``skip_query`` — drop the first task whose v2 query matches the dialog's main save.
+            if skip_query and not skip_query_consumed[0] and q == skip_query and ttype == "QUERY":
+                skip_query_consumed[0] = True
+                continue
+            if ttype == "IF":
+                try:
+                    v1_evt_id = int(t.get("v1_evt_id") or 0)
+                except (TypeError, ValueError):
+                    v1_evt_id = 0
+                sid = step_id_by_v1_evt.get(v1_evt_id, f"if_{v1_evt_id}")
+                # Recurse into named branches only — ``on_true_branch = None`` means "no then
+                # clause" (a one-armed IF / a no-op). Calling ``_build_branch(None)`` would
+                # re-walk the top-level tasks (the IF's own siblings) and recurse forever.
+                t_branch = t.get("on_true_branch")
+                f_branch = t.get("on_false_branch")
+                then_steps = _build_branch(t_branch) if t_branch is not None else []
+                else_steps = _build_branch(f_branch) if f_branch is not None else []
+                # Build the v2 ``Condition`` from the v1 ``ly_cdn_params`` predicates the
+                # ``migrate_actions`` dump attached as ``condition_predicates``. Missing
+                # predicates → a placeholder condition + the migrator falls back to the
+                # IF's label so the field name reads sensibly in the screen builder.
+                preds = t.get("condition_predicates") or []
+                if preds:
+                    condition, cond_warnings = _v2_condition_from_predicates(preds)
+                else:
+                    condition = {
+                        "source": f"INPUT.{slugify(t.get('label') or 'if', fallback='if').upper()}",
+                        "operator": "truthy",
+                    }
+                    cond_warnings = []
+                if cond_warnings:
+                    _log.warning(
+                        "migration: action %s IF task %r — %s",
+                        a.get("id") or a.get("v1_act_id"), t.get("label"), "; ".join(cond_warnings),
+                    )
+                out.append(_drop_none({
+                    "id": sid,
+                    "type": "if",
+                    "label": t.get("label"),
+                    "condition": condition,
+                    "then_steps": then_steps or None,
+                    "else_steps": else_steps or None,
+                }))
+                continue
+            step = _v1_task_to_step(t)
+            if step is not None:
+                out.append(step)
+        return out
+
+    top_level = _build_branch(None)
+    if not top_level:
+        return None
+
+    prompt_fields = _params_to_prompt_fields(a.get("params") or [])
+    chain: dict[str, Any] = {
+        "id": chain_slug,
+        "type": "chain",
+        "label": chain_label,
+        "steps": top_level,
+    }
+    if prompt_fields:
+        chain["prompt_fields"] = prompt_fields
+    return _drop_none(chain)
+
+
 def migrate_actions(
     action_rows: Iterable[Mapping[str, Any]],
     task_rows: Iterable[Mapping[str, Any]] = (),
@@ -2073,6 +2383,8 @@ def migrate_actions(
     sql_rows: Iterable[Mapping[str, Any]] = (),
     *,
     app_name: str,
+    api_resolver: Mapping[int, tuple[str, str]] | None = None,
+    condition_param_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Dump v1's named-action workflows into a ``[migrated_actions.<app>.<slug>]`` block per
     action. **Not loadable by v2 at runtime** — v2's :class:`Action` discriminated union is flat
@@ -2161,6 +2473,31 @@ def migrate_actions(
         if aid is None or not var:
             continue
         param_filters_by_var.setdefault((int(aid), var), []).append(r)
+
+    # ── ly_cdn_params index ────────────────────────────────────────────────────────────────
+    # Each ``cdn_id`` (referenced by an IF task's ``evt_cdn_id``) gets a list of predicate
+    # dicts in seq order. :func:`_build_chain_action` uses the *first* predicate to seed the
+    # v2 :class:`IfAction.condition`; multi-clause predicates surface a warning (the operator
+    # wires AND/OR groups via the builder once that lands).
+    cdn_params_by_cdn: dict[int, list[dict[str, Any]]] = {}
+    for r in condition_param_rows or ():
+        cid = r.get("cdn_id")
+        if cid is None:
+            continue
+        try:
+            cid_int = int(cid)
+        except (TypeError, ValueError):
+            continue
+        cdn_params_by_cdn.setdefault(cid_int, []).append({
+            "dd_id": (r.get("cdn_dd_id") or "").strip(),
+            "operator": (r.get("cdn_operator") or "").strip().upper(),
+            "value": r.get("cdn_value"),
+            "enum_id": r.get("cdn_enum_id"),
+            "lookup_id": r.get("cdn_lookup_id"),
+            "logical": (r.get("cdn_logical") or "").strip().upper(),
+            "group": r.get("cdn_group"),
+            "seq": r.get("cdn_seq"),
+        })
 
     # ── build the TOML dict, action by action ──────────────────────────────────────────────
     actions: dict[str, dict[str, Any]] = {}
@@ -2284,9 +2621,34 @@ def migrate_actions(
             api_id = t.get("evt_api_id")
             if api_id is not None and str(api_id).strip() != "":
                 try:
-                    task["v1_api_id"] = int(api_id)
+                    api_id_int = int(api_id)
                 except (TypeError, ValueError):
-                    pass
+                    api_id_int = None
+                if api_id_int is not None:
+                    task["v1_api_id"] = api_id_int
+                    # Resolve against ``migrate_api``'s emitted (connector, endpoint) pair so
+                    # the chain emitters (_action_chain / _input_action_to_button) can build a
+                    # v2 ``call_api`` action instead of a ``notify`` placeholder. The resolver
+                    # is None when the CLI didn't run migrate_api ahead of migrate_actions —
+                    # in that case the task still keeps ``v1_api_id`` for the dump.
+                    if api_resolver:
+                        pair = api_resolver.get(api_id_int)
+                        if pair:
+                            task["connector"], task["endpoint"] = pair
+            # IF tasks reference an ``ly_condition`` row via ``evt_cdn_id``. The predicates
+            # (``ly_cdn_params``) are looked up by :func:`_build_chain_action` to populate the
+            # v2 :class:`IfAction.condition`; carry the id through so it can find them.
+            cdn_id = t.get("evt_cdn_id")
+            if cdn_id is not None and str(cdn_id).strip() != "":
+                try:
+                    cdn_id_int = int(cdn_id)
+                except (TypeError, ValueError):
+                    cdn_id_int = None
+                if cdn_id_int is not None:
+                    task["v1_cdn_id"] = cdn_id_int
+                    preds = cdn_params_by_cdn.get(cdn_id_int) or []
+                    if preds:
+                        task["condition_predicates"] = [dict(p) for p in preds]
 
             # Per-task param bindings — value vs source vs reference-to-action-param. The
             # convention varies on v1 (map_type can be DD / VALUE / FIELD / INPUT etc.); we
@@ -2431,61 +2793,46 @@ def attach_actions_to_screens(
             continue
 
     def _action_chain(a: Mapping[str, Any], skip_query: str | None = None) -> list[dict[str, Any]]:
-        """Convert a migrated v1 action's tasks into a list of v2 ``Action`` dicts. ``skip_query``
-        drops the first task whose query matches (used to avoid re-running the screen's own
-        update/insert when the dialog's main save is already the action's first step).
+        """Convert a v1 action's tasks into the v2 chain that fires from a screen hook. Returns
+        a list of v2 ``Action`` dicts ready to ``.extend()`` onto an ``on_save`` / ``on_insert``
+        / ``actions`` slot:
 
-        v1 action-level ``ly_act_params`` (the workflow's "arguments") become
-        :class:`PromptField`\\ s on the **first emitted task**: the operator fills the inputs
-        once, the values feed into the chain's resolution context, and every subsequent task's
-        ``ParamBind {source: '<NAME>'}`` reads from the merged prompt values. Output-only
-        params (``map_dir = 'OUT'``) are skipped — those are SP returns, not user inputs."""
-        v1_act_id = int(a["v1_act_id"])
-        slug = a.get("id") or f"action_{v1_act_id}"
-        prompt_fields = _params_to_prompt_fields(a.get("params") or [])
-        prompt_attached = False
-        out: list[dict[str, Any]] = []
-        skip_consumed = False
-        step = 0
-        for t in a.get("tasks") or []:
-            q = t.get("query")
-            if not q:
-                # API / IF / LOOP — not representable in v2's Action union yet. Surface a notify
-                # placeholder so the operator notices, then keep going.
-                if t.get("type") in {"API"}:
-                    out.append({
-                        "id": f"migrated_{v1_act_id}_{step}",
-                        "type": "notify",
-                        "label": t.get("label") or f"{slug} step {t.get('seq', step)}",
-                        "message": f"v1 task {t.get('label')!r} uses an API call — see migrated_actions.toml + wire via builder.",
-                        "tone": "warn",
-                    })
-                    step += 1
-                continue
-            if not skip_consumed and skip_query and q == skip_query:
-                skip_consumed = True   # the dialog's main save already runs this
-                continue
-            entry: dict[str, Any] = {
-                "id": f"migrated_{v1_act_id}_{step}",
-                "type": "run_query",
-                "query": q,
-            }
-            lbl = t.get("label")
-            if lbl:
-                entry["label"] = lbl
-            pb = t.get("param_binds")
-            if pb:
-                entry["param_binds"] = list(pb)
-            if prompt_fields and not prompt_attached:
-                # Attach prompts to the first task only — fires once per chain.
-                entry["prompt_fields"] = list(prompt_fields)
-                prompt_attached = True
-            out.append(entry)
-            step += 1
-        # Edge case: a chain with prompt_fields but every task either skipped or non-query (API-only).
-        # The notify placeholder above carries no prompt_fields (it's a stub variant). The prompt is
-        # silently dropped — operator notices via the warning + migrated_actions.toml entry.
-        return out
+        * **Multi-step workflows** (more than one resolved step, or any IF / LOOP) collapse into
+          a **single** :class:`ChainAction` wrapper whose ``steps`` carry the work. Wrapping is
+          needed for the chain context (the runtime accumulates ``{INPUT, <step_id>: {rows,
+          first_row, success}}`` as each step runs); a wrapper ensures one fire site + one
+          prompt dialog for the whole workflow.
+        * **Single-step workflows** stay flat — a plain ``run_query`` / ``call_api`` / …
+          directly on the hook. No need for the extra nesting overhead.
+
+        ``skip_query`` drops the first task whose query matches (so a dialog's main save isn't
+        run twice when the action's first task duplicates the screen's update/insert query).
+
+        v1 action-level ``ly_act_params`` (the workflow's "arguments") become :class:`PromptField`\\ s.
+        On a wrapped chain they ride on the outer :class:`ChainAction`; on a flat single-step
+        chain they ride on the lone step. The runtime opens the prompt sub-dialog once per fire,
+        merges the values into the chain context under ``INPUT.<name>``, and every step's
+        ``ParamBind {source: 'INPUT.<name>'}`` (or ``source: '<step_id>.first_row.<col>'``) reads
+        from there.
+
+        Output-only params (``map_dir = 'OUT'``) are skipped from prompts — those are SP returns,
+        not user inputs."""
+        chain = _build_chain_action(a, skip_query=skip_query)
+        if chain is None:
+            return []
+        # When the chain has one step + no control flow, unwrap to a flat single-step shape so
+        # the on_save list stays close to what hand-written screens look like.
+        steps = chain.get("steps") or []
+        prompts = chain.get("prompt_fields")
+        has_control = any((s.get("type") or "").lower() in {"if", "loop", "return"} for s in steps)
+        if len(steps) == 1 and not has_control:
+            only = dict(steps[0])
+            if prompts and "prompt_fields" not in only:
+                # Migrate the chain's prompt onto the lone step so the operator still gets the
+                # input dialog (the wrapper went away).
+                only["prompt_fields"] = list(prompts)
+            return [only]
+        return [chain]
 
     # ── walk the event junction; attach each action's chain to the right screen ────────────
     # FormsDialog events go on the screen's dialog.on_save; FormsTable events also map there
@@ -2935,12 +3282,12 @@ def migrate_screens(
                 pass
 
     def _input_action_to_button(c: Mapping[str, Any]) -> dict[str, Any] | None:
-        """Convert a v1 ``ly_dlg_col`` row with ``col_component='InputAction'`` into a single
-        v2 Action suitable for a ``FormTab.actions`` button. The button's label = ``col_label``
-        (falls back to the action's label); the underlying Action picks the action's first
-        task with a v2 query as a ``run_query`` (with param_binds verbatim), or a ``notify``
-        placeholder when the action is API-only (NOMAJDE's Reset Password) — same fallback
-        the event-driven attach uses for unresolved cases."""
+        """Convert a v1 ``ly_dlg_col`` row with ``col_component='InputAction'`` into a v2 Action
+        suitable for a ``FormTab.actions`` button. The button's label = ``col_label`` (falls
+        back to the action's label); the underlying Action is built via
+        :func:`_build_chain_action` so multi-step workflows land as a single :class:`ChainAction`
+        (with IF / LOOP / chained `TASK_X` refs all wired). Single-step chains unwrap to a flat
+        ``run_query`` / ``call_api``."""
         comp_id_raw = c.get("col_component_id")
         if comp_id_raw is None:
             return None
@@ -2949,8 +3296,6 @@ def migrate_screens(
         except (TypeError, ValueError):
             return None
         a = actions_by_v1_id.get(v1_act_id)
-        # The column's own label wins (v1 lets the operator override the button label per-tab
-        # placement); fall back to the action's label / id when the column carries no label.
         col_label = (c.get("col_label") or "").strip()
         action_label = (a or {}).get("label") if a else None
         button_label = col_label or action_label or f"action_{v1_act_id}"
@@ -2971,41 +3316,37 @@ def migrate_screens(
                 "message": f"v1 InputAction references missing action {v1_act_id}.",
                 "tone": "warn",
             }
-        # Find the first task that resolved to a v2 query; that's the button's primary step.
-        # Multi-task workflows surface a "(1/N)" hint in the label so the operator notices the
-        # full chain isn't wired (see ``migrated_actions.toml`` for the rest).
-        tasks = a.get("tasks") or []
-        primary = next((t for t in tasks if t.get("query")), None)
-        query_count = sum(1 for t in tasks if t.get("query"))
-        label = button_label
-        if query_count > 1:
-            label = f"{button_label} (1/{query_count})"
-        if primary:
-            entry: dict[str, Any] = {
+        chain = _build_chain_action(a)
+        if chain is None:
+            # The action exists but has no resolvable steps (every task is unresolvable API /
+            # IF without a v2 mapping, etc.) — surface a placeholder pointing at the dump.
+            return {
                 "id": btn_id,
-                "type": "run_query",
-                "label": label,
-                "query": primary["query"],
+                "type": "notify",
+                "label": f"{button_label} (needs wiring)",
+                "message": f"v1 action {a.get('id') or v1_act_id!r} has no v2-resolvable task — see migrated_actions.toml + wire via the builder.",
+                "tone": "warn",
             }
-            pb = primary.get("param_binds")
-            if pb:
-                entry["param_binds"] = list(pb)
-            # v1 ``ly_act_params`` → v2 ``prompt_fields``: the manual workflow asks the operator
-            # for its inputs before firing (NOMAJDE "Create Role" needs AUUSER/JOBN/MUSE/PID/UPMJ).
-            # See :func:`_params_to_prompt_fields` for the mapping caveats — output params drop,
-            # inline rules (LOOKUP/ENUM) need a dd in the builder for richer widgets.
-            prompts = _params_to_prompt_fields(a.get("params") or [])
-            if prompts:
-                entry["prompt_fields"] = prompts
+        # If the chain collapses to a single step + no control flow, unwrap so the button reads
+        # as a plain run_query / call_api in screens.toml (consistent with hand-written buttons).
+        steps = chain.get("steps") or []
+        has_control = any((s.get("type") or "").lower() in {"if", "loop", "return"} for s in steps)
+        if len(steps) == 1 and not has_control:
+            entry = dict(steps[0])
+            entry["id"] = btn_id
+            if button_label:
+                entry["label"] = button_label
+            prompts = chain.get("prompt_fields")
+            if prompts and "prompt_fields" not in entry:
+                entry["prompt_fields"] = list(prompts)
             return entry
-        # API-only / fully unresolved — notify placeholder pointing the operator at the dump.
-        return {
-            "id": btn_id,
-            "type": "notify",
-            "label": f"{button_label} (needs wiring)",
-            "message": f"v1 action {a.get('id') or v1_act_id!r} uses API calls — see migrated_actions.toml + wire via the builder.",
-            "tone": "warn",
-        }
+        # Multi-step / branching workflow → emit the ChainAction wrapper as the button. The
+        # column's own label + the per-column id override the chain's defaults.
+        entry = dict(chain)
+        entry["id"] = btn_id
+        if button_label:
+            entry["label"] = button_label
+        return entry
 
     def _binds_for_col(owning_frm: int, col_id: int) -> list[dict[str, Any]]:
         """Resolve a parent dlg_col's ly_dlg_filters into v2 ParamBind dicts — same shape as
@@ -3637,6 +3978,53 @@ def migrate_api(
     # drop connectors that ended up with no endpoints
     connectors = {n: c for n, c in connectors.items() if c.get("endpoints")}
     return {"connectors": connectors}
+
+
+def build_api_resolver(
+    conns: Iterable[Mapping[str, Any]],
+    apis: Iterable[Mapping[str, Any]],
+    *,
+    connector_prefix: str = "",
+) -> dict[int, tuple[str, str]]:
+    """Compute the ``{v1_api_id: (v2_connector_name, v2_endpoint_name)}`` map without rendering
+    the connectors. Mirrors :func:`migrate_api`'s naming logic exactly (slugify + uniquify +
+    legacy fallback) so a task with ``evt_type='API'`` can be turned into a v2 ``call_api``
+    action by :func:`migrate_actions`. NOMAJDE's Reset Password / Update Password workflows in
+    F0092 are all-API; without this resolver they degrade to ``notify`` placeholders. Kept as a
+    separate function so :func:`migrate_api`'s rendered output stays TOML-safe (integer keys
+    can't sit in a tomli_w-serialised dict)."""
+    apis_list = list(apis)
+    out: dict[int, tuple[str, str]] = {}
+    conn_name_by_id: dict[int, str] = {}
+    taken_connector_names: set[str] = set()
+    # First pass: name the connectors exactly as ``migrate_api`` does (same slugify + uniquify).
+    for c in conns:
+        cid = int(c["conn_id"])
+        name = _uniquify(
+            f"{connector_prefix}{slugify(c.get('conn_label'), fallback=f'conn{cid}')}",
+            taken_connector_names,
+        )
+        conn_name_by_id[cid] = name
+    # Second pass: name each endpoint inside its connector's namespace, then prune endpoint-less
+    # connectors at the end (same as ``migrate_api``).
+    endpoint_names: dict[str, set[str]] = {n: set() for n in conn_name_by_id.values()}
+    endpoints_seen: dict[str, list[int]] = {n: [] for n in conn_name_by_id.values()}
+    for a in apis_list:
+        aid = int(a["api_id"])
+        cid = a.get("api_conn_id")
+        if cid is not None and int(cid) in conn_name_by_id:
+            conn_name = conn_name_by_id[int(cid)]
+        else:
+            conn_name = f"{connector_prefix}{_LEGACY_CONNECTOR}"
+            endpoint_names.setdefault(conn_name, set())
+            endpoints_seen.setdefault(conn_name, [])
+        ep_name = _uniquify(slugify(a.get("api_label"), fallback=f"ep{aid}"), endpoint_names[conn_name])
+        endpoints_seen[conn_name].append(aid)
+        out[aid] = (conn_name, ep_name)
+    # Prune resolver entries whose connector ended up with no endpoints (matches ``migrate_api``'s
+    # "drop connectors that ended up with no endpoints" step).
+    populated = {n for n, eps in endpoints_seen.items() if eps}
+    return {aid: pair for aid, pair in out.items() if pair[0] in populated}
 
 
 # --------------------------------------------------------------------------- #

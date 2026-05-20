@@ -1011,6 +1011,187 @@ action fire, values merged into the chain's resolution context.
   hidden, UPMJ skipped), confirms, and the F0092 + F00921 + F0093 inserts fire in sequence
   with the prompt values bound into each.
 
+**Phase 6 slice 4c (API tasks → ``call_api`` actions in the migration) — DONE.** v1 actions
+that fire an API call (NOMAJDE's Reset Password on F0092, Update Password, … — all-API
+workflows) used to degrade to a ``notify`` placeholder on the migrated screen. The migrator
+now resolves them to real ``call_api`` actions:
+- `liberty/migrations/v1.py::build_api_resolver(conns, apis, *, connector_prefix="")` — exposes
+  the ``{v1 api_id: (v2 connector_name, v2 endpoint_name)}`` map ``migrate_api`` would
+  otherwise compute internally. Same slugify + uniquify + ``legacy_api`` fallback logic, so the
+  resolver picks the *same* names as the rendered ``connectors.toml``. Lives as a separate
+  helper so ``migrate_api``'s rendered output stays TOML-safe (integer keys can't sit in a
+  ``tomli_w``-serialised dict).
+- ``migrate_actions(..., api_resolver=...)`` reads the map. A task with ``evt_type='API'`` and
+  a resolved ``v1_api_id`` gets ``connector`` + ``endpoint`` set on the dumped task dict.
+- ``_action_chain`` (the on_save / on_insert / on_delete event-driven attach path) and
+  ``_input_action_to_button`` (the ``col_component='InputAction'`` button path) both look at the
+  task's ``connector`` + ``endpoint`` and emit a v2 ``call_api`` action instead of the
+  ``notify`` placeholder. ``param_binds`` carry over verbatim (so a JDE API call's INPUT-bound
+  username / password / token wire through correctly).
+- CLI: the ``screen`` and ``actions`` subcommands now run ``read_api`` + ``build_api_resolver``
+  ahead of ``migrate_actions`` and thread the resolver through. A v1 DB with no API schema → an
+  empty resolver, behaviour unchanged (the existing notify placeholder still emits for any
+  unresolved API task).
+- **Operators with an existing `screens.toml` should re-run `liberty-migrate screen` to pick
+  up the change** — any pre-existing notify-only stubs survive in the file otherwise.
+
+**Phase 6 slice 4d (Multi-step workflows — ChainAction / IfAction / LoopAction / ReturnAction)
+— Slices A + B + C DONE.** v1 named-action workflows are richer than v2's flat ``list[Action]``
+attachment points: a v1 button runs N tasks sharing a context (``allParams.current = {INPUT,
+TASK_<id>: {RESULTS: …}}``), branches via IF, iterates via LOOP, returns values to the caller
+via RETURN. F00926's "Import Security" is the motivating case (9 tasks with 3 IF guards →
+delete/insert pairs for Security Workbench + UDO + Menu Filtering). v2 now expresses the
+same shape inline on screens.
+
+- **Pydantic** (`liberty/screens/config.py`): new step variants in the Action union —
+  ``ChainAction`` (one outer button → ``steps`` list with shared context), ``IfAction``
+  (``condition`` + ``then_steps`` / ``else_steps``), ``LoopAction`` (``source`` + nested
+  ``steps``, iterating over an array path), ``ReturnAction`` (``bindings`` map writing back
+  to the caller's form fields), plus ``Condition`` (``source`` + ``operator`` ∈ ``equals`` /
+  ``not_equals`` / ``has_rows`` / ``no_rows`` / ``truthy`` / ``falsy`` / ``greater_than`` /
+  ``less_than`` + optional ``value``). ``RunQueryAction`` / ``CallApiAction`` gain
+  ``bind_result: bool = False`` — when true, the action's rows land in the chain context
+  under the step's ``id`` as ``{rows, first_row, success}`` so later steps reference them via
+  ``ParamBind {source: '<step_id>.first_row.<col>'}``. The Action union is rebuilt
+  recursively so steps can nest arbitrarily.
+- **Chain context** (semantics — Slice B wires the runtime): each chain accumulates ``{INPUT:
+  {…prompt values…}, <step_id>: {rows, first_row, success}, loop: {…}}`` as it runs. v1's
+  ``TASK_<id>.RESULTS[N].COL`` references become ``<slugified_step_id>.first_row.COL`` (or
+  ``.rows.<N>.COL`` for non-zero indices). ``INPUT.<X>`` paths stay verbatim. Plain
+  form-field references (no dots) keep their existing meaning — the runtime tries chain
+  context first, then falls back to the firing context.
+- **Migration** (`liberty/migrations/v1.py`):
+  - Module-level ``_build_chain_action(action_dict, *, skip_query=None)`` — single source of
+    truth for both ``_action_chain`` (event-driven attach) and ``_input_action_to_button``
+    (per-tab button rows). Slugs the workflow id from ``act_label`` (e.g.
+    ``import_security_from_user_role`` — no more ``migrated_3_0`` placeholder ids); each
+    step's id is the slugified ``evt_label`` (e.g. ``delete_security_workbench``).
+  - v1 IF tasks + branch groups (``evt_brc_id`` / ``evt_brc_true`` / ``evt_brc_false``)
+    collapse to nested :class:`IfAction` with ``then_steps`` / ``else_steps`` (no more
+    label-jump model; v2's nested shape reads naturally). LOOP tasks wrap into
+    :class:`LoopAction`. RETURN tasks become :class:`ReturnAction`. QUERY → ``run_query``
+    (with ``bind_result = True`` when the v2 query name suffix is ``_select`` / ``_get``).
+  - v1 ``ly_condition`` + ``ly_cdn_params`` are read via the new
+    ``read_conditions(engine)`` source helper; ``migrate_actions(..., condition_param_rows=…)``
+    attaches the predicates to each IF task's dump as ``condition_predicates``;
+    ``_build_chain_action`` picks the first clause and emits a real v2
+    :class:`Condition` (``source = "INPUT.<cdn_dd_id>"``, ``operator`` mapped via
+    ``_V1_TO_V2_COND_OP`` — ``EQUAL`` → ``equals``, ``NOT_EMPTY`` → ``truthy``, etc.).
+    Multi-clause predicates pick the first + log a warning.
+  - Source-path rewrite (``map_value``): ``TASK_<v1_evt_id>.RESULTS[0].COL`` becomes
+    ``<step_id>.first_row.COL``; ``TASK_<v1_evt_id>.RESULTS[N].COL`` becomes
+    ``<step_id>.rows.N.COL``. ``INPUT.<X>`` and form-field references stay verbatim.
+  - **Single-step chains unwrap** — when ``_build_chain_action`` produces a chain with one
+    resolvable step and no control flow, ``_action_chain`` / ``_input_action_to_button``
+    return the lone step directly (no ``ChainAction`` wrapper); the emitted screens.toml
+    stays close to what hand-written buttons look like. Multi-step or branching workflows
+    wrap (so the chain context is per-fire-site).
+- **CLI** (`liberty/migrate_cli.py`): both ``screen`` and ``actions`` subcommands now run
+  ``read_conditions`` ahead of ``migrate_actions`` and thread the condition_param_rows
+  through. Missing schema → empty rows, falls back to a placeholder condition + log warning.
+- **Real-data check** — `liberty-migrate screen --connector nomajde` on libnjde produces
+  F00926's Import Security as a single ``chain`` with 9 prompt fields and 3 ``IfAction``
+  guards (each with a real ``operator = "equals"`` / ``value = "Y"`` condition from
+  ``ly_cdn_params``). Each ``then_steps`` branch carries the delete + insert pair with
+  readable step ids (``delete_security_workbench`` / ``import_security_workbench`` / …).
+- **Operators with an existing `screens.toml` should re-run `liberty-migrate screen`** to
+  pick up the readable ids + IF / LOOP migration. Pre-existing flat chains keep loading
+  (Pydantic accepts both shapes); they just don't get the upgrade until they're re-migrated.
+
+**Slice B — frontend runtime** lives in ``frontend/src/pages/TableView/actionRunner.ts``:
+- A ``ChainCtx`` accumulates ``{INPUT, <step_id>: {rows, first_row, success}, loop}`` as the
+  chain walks. Each ``run_query`` / ``call_api`` with ``bind_result`` lands its rows under the
+  step's ``id`` so a later step's ``ParamBind {source: '<id>.first_row.<col>'}`` reads them.
+- ``resolveSource(path, ctx, formCtx)`` — dotted-path resolver. Plain (no dots) falls through
+  to the firing context (form / row) so hand-written screens keep working. Dotted paths walk
+  the chain context with case-insensitive object-key matching and numeric segments indexing
+  arrays. Reserved ``#``-prefixed paths are dropped (auth built-ins land in a future slice).
+- ``evalCondition`` — handles ``equals`` / ``not_equals`` / ``truthy`` / ``falsy`` /
+  ``has_rows`` / ``no_rows`` / ``greater_than`` / ``less_than``. ``truthy`` uses v1's
+  Y/N/0/false/null falsiness (so a migrated ``cdn_operator = NOT_EMPTY`` on a JDE Y/N flag
+  works without manual fixing). The actual values come from ``resolveSource`` so any chain
+  path is comparable.
+- ``runChain(actions, initialInput, formCtx, deps)`` — recursive walker. ``ChainAction``
+  recurses into ``steps``; ``IfAction`` evaluates its condition and walks ``then_steps`` /
+  ``else_steps``; ``LoopAction`` resolves its source to an array, iterates with ``ctx.loop``
+  set to each element, walks nested ``steps``; ``ReturnAction`` / ``SetFieldAction`` write
+  values into a ``returnedValues`` dict the caller merges back into its form state (v1's
+  ``RETURN`` semantics). ``ConfirmAction`` calls into an optional ``deps.confirm`` provider —
+  no provider = a warning + carry on (don't silently auto-confirm something irreversible).
+- ``ActionRunnerDeps`` — pluggable: ``defaultConnector`` (the screen's effective connector
+  for ``run_query`` with no explicit connector), ``requestPrompt`` (the imperative-from-async
+  prompt dialog plumbing ScreenDialog already had), optional ``confirm``. Keeps the runner
+  decoupled from React + makes mocking trivial.
+- **Wired into every action firing site:**
+  - ``frontend/src/pages/TableView/ScreenDialog.tsx``'s ``runOnSaveActions`` — covers
+    ``dialog.on_load`` / ``on_save`` / ``on_cancel`` / ``screen.on_insert`` / ``on_update`` /
+    ``on_delete`` / per-tab button clicks. ``returnedValues`` (from :class:`ReturnAction` /
+    :class:`SetFieldAction`) merge back into ``formValues`` (case-insensitive field name
+    match — Postgres lowercases columns; v1 migration emits upper).
+  - ``frontend/src/pages/TableView/ResultTable.tsx``'s ``runRowAction`` (right-click row
+    menu, slice 6) — passes the clicked row as ``formCtx`` so plain ``source: 'USR_ID'``
+    references keep reading from the row while ``INPUT.<X>`` / step-id-keyed dotted paths
+    resolve against the chain context. ``deps.navigate`` wires the v1 "drill into another
+    table" pattern (a ``navigate`` step opens ``/sql/<connector>/<to>?<qs>``).
+  - ``ResultTable``'s ``runScreenAction`` (toolbar buttons) — same as row-menu but with an
+    empty ``formCtx`` (no row context); operator-input flows in through prompt_fields → INPUT.
+  - ``ResultTable``'s inline ``fireChain`` (batch-save ``on_insert`` / ``on_update`` /
+    ``on_delete`` hooks per affected row) — single ``runChain`` call per row.
+  Hand-written flat chains (no ChainAction wrapper) still work — each top-level action sees
+  the same accumulating chain context, so a flat ``on_save`` chain that pins a value via
+  ``ReturnAction`` will write back to the form just like a wrapped chain.
+- **API response shapes** — ``run_query`` reads ``{rows, columns, …}`` from
+  ``QueryResult.to_dict``; ``call_api`` reads ``{success, status_code, data, error}`` from
+  ``ApiResult.to_dict``. A ``call_api`` with ``success: false`` is treated as a soft error
+  (the route returns 200 even on upstream failure — see :class:`liberty.connectors.api`).
+- Smoke-tested via ``resolveSource`` / ``resolveBinds`` / ``evalCondition`` with a synthetic
+  F00926-shaped context (INPUT, captured ``select_workbench.rows``, an active ``loop``
+  element, missing paths). All cases — including v1's Y/N truthiness convention,
+  case-insensitive segment matching, numeric array indexing — pass.
+
+**Slice C — builder UX** lives in ``frontend/src/pages/Settings/ActionListEditor.tsx``:
+- ``ACTION_TYPES`` extended with the four workflow-control variants
+  (``chain`` / ``if`` / ``loop`` / ``return``); the action-type SearchSelect inside an
+  expanded action body now offers all 11 variants.
+- ``blankActionOfType`` seeds each new variant with its required shape — ``chain`` starts
+  with ``steps: []``; ``if`` with a placeholder ``condition`` + empty then/else_steps;
+  ``loop`` with ``source: ''`` + empty ``steps``; ``return`` with ``bindings: {}``. So
+  switching an action's type doesn't drop the operator into a wall of validation red.
+- ``ACTION_OVERRIDE_KEYS`` strips ``steps`` / ``then_steps`` / ``else_steps`` / ``condition``
+  from the variant schema so SchemaForm doesn't render them as cramped object-list
+  accordions; dedicated UI takes over.
+- ``chain`` joins ``run_query`` / ``call_api`` / ``navigate`` as a *promptable* variant — a
+  chain-fired workflow can open a single pre-fire prompt for the operator's inputs (lands
+  under ``INPUT.<name>`` in the chain context). The existing prompt-fields editor handles it.
+- New ``renderWorkflowExtras(action, onPatch)`` emits the right inline editor per variant:
+  * **chain** → recursive ``<ActionListEditor>`` for the ``steps`` list (same component
+    rendering itself; nested steps get the full editing experience — type switcher,
+    prompt_fields, connector / query pickers, condition editors, …).
+  * **if** → a ``<SchemaForm>`` over the ``Condition`` ``$def`` (the operator literal renders
+    as a SearchSelect via the enum handling; ``source`` and ``value`` are text inputs) +
+    two recursive ``<ActionListEditor>`` instances for ``then_steps`` and ``else_steps``.
+  * **loop** → a hint about the dotted-path source syntax + recursive
+    ``<ActionListEditor>`` for the loop body's ``steps``.
+  * **return** → the ``bindings: dict[str, str]`` map renders through SchemaForm's existing
+    ``StringMapEditor`` (no extra UI needed). ``bind_result: bool`` on ``run_query`` /
+    ``call_api`` likewise — SchemaForm's checkbox handler covers it.
+- Existing F00926-style migrated chains open in the builder with every level editable: a
+  ChainAction at the top shows its 3 IfAction guards as expandable rows; each IF shows the
+  Condition editor + the then-branch's delete + insert run_query steps; each run_query
+  step's param_binds (with dotted-path sources like ``INPUT.LYF00950``) edit as ParamBind
+  rows. The whole tree is a recursive ActionListEditor at every depth.
+- i18n strings added under ``settings.screens.{chain,condition,if,loop}.*`` (EN + FR).
+
+Pending follow-ups for this slice:
+- **Slice D (later)** — shared / cross-screen actions in a new ``config/actions.toml`` +
+  ``action_ref`` outer variant. For now actions live inline per screen, which is fine for
+  the workflow library size of nomasx1 + nomajde.
+- Some UX polish that's not blocking real edits but would help:
+  * Pre-fill the LoopAction ``source`` SearchSelect from the preceding steps' ids that have
+    ``bind_result = true`` (today it's free-text — the hint tells you what to type).
+  * Show a step-id picker for ``ReturnAction.bindings`` and ``ParamBind.source`` values
+    instead of free-text (today both autocompletion is by hand).
+
 **Phase 6 slice 5 (AUD audit trail) — DONE.**
 - `liberty/connectors/config.py` — new ``QueryDef.audit: str | None``. When set on a writable
   query it names the audit table the SQL connector mirrors writes into. Lives in the
@@ -1185,35 +1366,159 @@ queries:
 
 457 tests pass.
 
-**Roadmap (planned, see `docs/PLAN.md`):** finish Phase 5 (validate-by-diff + the real
-nomasx1→NOMAJDE cutover; AIRFLOW is *not* migrated; migrate v1's `AUD_<table>` audit) → **Phase 6**
-the form/screen engine — **all slices done**: slice 1 (Screen + ParamBind + migration), slice 2
-(dialog runtime — row click → modal form, lookup param-binds, save → update/insert), slice 2b
-(nested_form / nested_table tabs + dialog UX polish — Delete, unsaved guard, footer actions,
-ModalBody flex, DataTable stretch, row_click_screen "Display Properties" promotion), slice 3
-(per-field `visible_when`/`required_when`/`disabled_when`, migrated from `ly_cdn_params`),
-slice 4 (actions & events — the 7-variant Action union + every lifecycle hook attachment;
-**event-driven attachment via `ly_evt_cpt`**: FormsDialog evt 1 → `dialog.on_save`,
-FormsTable evt 2 → `Screen.on_insert`, FormsTable evt 3 → `Screen.on_delete`; plus
-`FormTab.actions` from `ly_dlg_col col_component='InputAction'`), slice 4b (Action input
-dialog — `ly_act_params` → `prompt_fields`; sub-dialog ahead of action fire, values merged
-into the chain's resolution context), slice 5 (AUD audit trail — `QueryDef.audit =
-"AUD_<table>"` + SQL-connector interceptor in the same transaction, migrated from v1's
-`tbl_audit = 'Y'`), slice 6 (row context menus — right-click on a TableView row opens
-`Screen.row_menu`), slice 6b (migrate v1 `ly_ctxmenus` to row_menu / row_click_screen), slice 7
-(Oracle compatibility — pool-level `trim_strings` + `coalesce_nulls`, auto-on for Oracle).
-→ **Phase 7** the config builders (a *schema-driven* UI shell — `SchemaForm` over the
-Pydantic config — not raw TOML — **done so far**: the `[pools.*]` and `[connectors.*]`
-builders (sql + api), `SchemaForm` + `SchemaNavigator` (breadcrumb drill-down master-detail —
-no nested accordions), the `GET /admin/config/schema` + `GET/PUT /admin/config/pools` +
-`GET/PUT /admin/config/connectors/parsed` endpoints, dictionary builder, menus tree builder,
-screens builder (general + dialog tabs + fields + on_save + row_menu); **next**: builder
-editors for the slice-4 lifecycle hooks (`on_load` / `on_cancel` / `on_insert` / `on_update`
-/ `on_delete` / per-tab `actions`) and slice-4b `prompt_fields`; a SQL editor + "test run"
-preview for queries; top-level-key rename; + git-backed config-file versioning + frontend
-tests/CI) → **Phase 8** charts & dashboards → **Phase 9** notifications / reporting /
-backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs &
-scheduling).
+**Phase 7 (Config builders) — mostly DONE.** The Settings page (`liberty/web/admin.py` + the
+`/admin/config/<section>/parsed` endpoints + `frontend/src/pages/Settings/*Builder.tsx`) is the
+operator-facing way to edit every config section without touching TOML. Schema-driven through
+`/admin/config/schema` (each builder pulls the matching `model_json_schema()` and renders via
+`SchemaForm` / `SchemaNavigator`). Shipped this round:
+
+* **Themed `useModals` primitive** (`frontend/src/common/Modals.tsx`) — `confirm` / `prompt` /
+  `alert` / `choose` (multi-button for the unsaved-changes pattern). All four use a `TopOverlay`
+  (z-index 2000) + `createPortal` to `document.body` so they paint above every other modal
+  (Screen Designer at 400, SearchSelect dropdowns at 1000). Replaced 40+ browser-native dialogs
+  across the builders. Mounted as `<ModalsProvider>` near the top of the tree in `main.tsx`.
+* **Consolidated top toolbar** in every builder (Pools / Connectors / Dictionary / Menus /
+  Screens / Dashboards) — config path + dirty/status on the left, all actions (Add / Delete /
+  Save / Reload) on the right; the body flex-fills + only the inner list/form panels scroll.
+  No page-level scroll, the toolbar stays pinned.
+* **`ConnectorsBuilder` Tables / Sequences / Lookups switcher** — replaces the old Tables / Form
+  toggle. **Tables** = CRUD-grouped (the `ConnectorsTableEditor` view, unchanged); **Sequences**
+  = flat list of queries referenced by `[sequences.*]` in dictionary.toml; **Lookups** = same
+  for `[lookups.*]`. Each opens a single-query SchemaForm editor with a Back button on the
+  left. API connectors render straight into the SchemaNavigator. A small **Settings…** modal
+  on each SQL connector exposes the rare connector-wide fields (`type` / `pool` / `licensed` /
+  `max_rows`) — no longer a permanent pane.
+* **Scaffold modals** — `ScaffoldQueryModal` (sequence + lookup; `+ Add sequence` /
+  `+ Add lookup` in the Sequences/Lookups views) and `CrudWizardModal` (`+ Add table → Generate
+  from DB`). Both read the connector's pool via the lazy two-step introspection (`GET /api/sql/
+  <c>/_schemas` returns just schema names; `GET /api/sql/<c>/_schema?schema=<sch>&name_like=…`
+  returns one schema's tables with an optional `F009%` LIKE filter applied *before* the per-
+  table column walk — the wall-clock-expensive step on Oracle). Sequence scaffold emits
+  `SELECT COALESCE(MAX(col), 0) + 1` + a `[sequences.<id>]` entry with `dd_id` set; lookup
+  scaffold emits `SELECT value, label FROM table ORDER BY label` + a `[lookups.<id>]` entry
+  with `value` / `label` set; CRUD wizard emits all four `_get` / `_put` / `_post` / `_delete`
+  queries with `:NAME_ORIGINAL` rebinds on `_put`'s WHERE. The wizard's column grid is laid out
+  side-by-side (340px min width) with an `Include` checkbox + a `key` checkbox per column;
+  per-CRUD opt-out chips; SQL previews in `SqlEditor` cards (autocomplete on via
+  `SqlConnectorContext`) — operator can edit any preview to override the generated SQL.
+* **Shared `EditQueryModal`** — pencil button next to every query SearchSelect (Screen Editor's
+  Queries tab + Action overrides; NestedFormTab pickers in the visual builder). Opens the
+  picked query's QueryDef editor in place; Save PUTs the connectors back + reloads. Cancel with
+  unsaved edits triggers the Discard / Keep-editing prompt via `modals.choose`.
+* **Per-column `ColumnHint.key`** — row-identifying columns now ticked per column in the Visual
+  Designer's Columns tab (replaces the old flat `Screen.key_columns` field in the General tab).
+  `Screen.effective_key_columns()` derives the runtime list. The `/admin/config/screens/parsed`
+  GET payload folds any legacy `screen.key_columns` list onto the matching column hints as
+  `key: true` and drops the redundant list, so pre-existing screens.toml files light up the new
+  "key" badge without a re-migration.
+* **`AppMenu.home`** — per-app home page pointer (a menu item id). `GET /api/menus/{app}`
+  resolves it to `/dashboard/<id>` / `/sql/<c>/<t>` / `/http/<c>/<t>` on the wire as
+  `home_path`, emitted only when the caller can read the target. The frontend's
+  `WorkspaceContext.setCurrentApp` navigates there on an explicit picker change; a one-shot
+  mount effect also redirects from `/` on cold load. Settings → Menus has a `Home page`
+  SearchSelect on each app's header (over a new `MENU_HOME_ITEMS` augmented framework enum).
+* **Screen Designer unsaved-changes guard** — Cancel reverts every edit made inside the modal
+  session to a snapshot taken on open; the three-way prompt fires when there are pending edits
+  (Discard / Save / Keep editing). Delete-dialog button on the Dialog tab clears the entire
+  dialog after a confirm. Native `<select>` for the action type picker → themed `SearchSelect`.
+* **Bulk-edit + Oracle fixes** — text-input focus preserved across edits (was being lost by an
+  over-eager `dataCols` rebuild on `editTick`); Oracle empty-bind handling replaces `None` *and*
+  `""` with a single space for CHAR / NCHAR / VARCHAR2 (was just `""`, which Oracle still
+  treats as NULL); `trim_strings` / `coalesce_nulls` are explicit `bool` (no more "auto-on
+  for Oracle" guess — operator opts in per pool).
+* **General tab loop fix** — `setProp` was called in a loop over `GENERAL_FORM_KEYS`; each call
+  rebased `{...value}` from the closure's stale `value`, so only the last key in the iteration
+  order survived. Replaced with a single `onChange(next)` that builds the full patched value.
+* **Reset columns** — new `Reset` link in the `DataTable` Columns menu header — clears the
+  `dt-<tableId>` localStorage entry + re-applies `initialColumnVisibility`. Fixes the
+  `visible_when` ↔ stale-localStorage conflict (a column the rule wants shown stayed hidden
+  because of a prior session's tick).
+* **Raw TOML editor removed** — every section has a structured builder + a validator now; the
+  raw escape hatch was a foot-gun.
+
+Shipped this slice (continued) — **per-tab `FormTab.actions` editor** in the Visual Designer:
+* `renderActionList` + `renderPromptFields` + `renderActionOverrides` + `actionVariantSchema`
+  (and the action / PromptField shape constants) extracted from `ScreenEditor.tsx` into a new
+  shared `frontend/src/pages/Settings/ActionListEditor.tsx`. Same UX as before in the screen-
+  level attachment points (dialog `on_load` / `on_save` / `on_cancel`, screen `actions` /
+  `row_menu` / `on_insert` / `on_update` / `on_delete`); the Visual Designer's Tab Settings
+  panel now hosts a matching instance bound to the selected tab's `actions` array.
+* Operators land on F0092 / F00926 in NOMAJDE (which carry `dialog.tabs.actions` migrated from
+  v1's `col_component='InputAction'` rows — Import Security / Merge Roles / row-bound workflow
+  buttons), open a tab, and edit those buttons in place. Tab Settings auto-opens when actions
+  exist on the selected tab; a `Zap N` chip on its summary line surfaces the count even when
+  collapsed. The read-only `TabActionsRow` badges at the bottom of the canvas remain — they
+  serve as a live preview of which buttons land in the dialog footer at runtime.
+* Same shared editor handles ParamBind-bearing variants (`run_query` / `call_api` /
+  `navigate`) → it surfaces the connector + target dropdowns, the PromptField list below the
+  variant SchemaForm, and the pencil-button into `EditQueryModal` from inside the visual
+  designer's tab context (the modal itself stays in `ScreenVisualBuilder`).
+
+Shipped earlier this slice — **`prompt_fields` editor per action** (slice-4b's `ly_act_params` editing
+wired into `ScreenEditor.renderActionList`):
+* `actionVariantSchema()` strips `prompt_fields` from the variant schema so SchemaForm doesn't
+  inline-accordion it inside its auto-generated "Prompt" tab. The other four prompt_* fields
+  (`prompt_title` / `prompt_l` / `prompt_cols` / `prompt_submit_label`) stay on that tab — they
+  are simple strings/numbers and SchemaForm's auto-rendering is fine for them.
+* A dedicated `renderPromptFields(parentKey, idx, action, onPatch)` helper renders, below the
+  variant SchemaForm, a collapsible per-field list (same `FieldList` / `FieldHeader` /
+  `FieldBody` styled components used for the surrounding action list). Each row's collapsed
+  header shows the prompt field's `name` plus a `dd / format / required` summary; the expanded
+  body splits the PromptField's 11+ properties into four blocks — *Basic* (`name` / `dd` /
+  `label` / `format` / `required` / `default`, always-open SchemaForm), *Advanced* (`hidden`
+  / `disabled` / `colspan`, closed-by-default `<details>`), *Lookup binds* (the
+  `lookup_param_binds` ParamBind list — v2's port of v1's `ly_act_params_filters`), and
+  *Conditions* (`visible_when` / `required_when` / `disabled_when`). Each block is its own
+  SchemaForm over a `pickSchemaProperties` slice of `PromptField`'s `$def`, mirroring the
+  visual-builder field inspector.
+* Only rendered for the three ParamBind-bearing variants — `run_query` / `call_api` /
+  `navigate` (the `_PromptableMixin` carriers). The other four action types (`set_field` /
+  `confirm` / `notify` / `refresh`) don't carry prompt fields, so the editor stays hidden.
+* Expansion state keyed by `<parent action-list key>:<action idx>` so each action's prompt
+  list remembers its open row across re-renders (e.g. `on_save:0`, `row_menu:1`).
+
+Still-loose ends: **top-level-key rename** (currently delete + re-add; cross-file refs in
+menus.toml / screens.toml / dictionary.toml need an in-one-shot updater); **frontend vitest +
+CI** (the Python side has 471 tests; the frontend has none).
+
+**Phase 8 (Charts & Dashboards) — DONE (runtime + builder).** Lives in
+`liberty/web/dashboards.py` + `liberty/dashboards/config.py` + `frontend/src/pages/DashboardView/`
++ `frontend/src/pages/Settings/DashboardsBuilder.tsx`:
+
+* `MenuItem.type = "dashboard"` is a first-class menu kind. Sidebar resolves a dashboard leaf
+  to `/dashboard/<id>` (no connector segment — the catalog is flat, keyed by id only); the
+  `TabsContext` carries it like sql / http tabs. `TabHost` lazy-loads `<DashboardView>`.
+* `GET /api/dashboards/{id}` resolves chart references (`chart = "users_per_app"`) into inline
+  `connector` / `query` / `spec` shapes so the frontend sees one uniform widget payload; the
+  per-widget permission gate (`sql:{connector}:{query}`) filters out widgets the caller can't
+  read at request time. A dashboard with zero readable widgets still surfaces (placeholder for
+  admin who curated it).
+* Widgets — `ChartWidget` (over Recharts, same pipeline as TableView's chart mode) and
+  `KpiWidget` (aggregates a single column over the query's rows). Other widget kinds (table,
+  markdown, heading) flagged as later slices.
+* `DashboardFilter` — the dashboard-level filter bar; each filter binds to a dictionary key
+  so widgets whose query has a matching `dd` column get the value as a `:placeholder` bind.
+  `useLookupTables` resolves the options once per session.
+* Responsive 12-column CSS grid (12 desktop → 6 tablet → 1 mobile). Each widget carries
+  `col_span` / `row_span` (default 4 / 1). Per-widget row height is 150px.
+* Settings → Dashboards is the point-and-click builder over `config/dashboards.toml`. New
+  dashboards are routed via `MenusBuilder` (`type = "dashboard"`, `target = <id>`); the
+  `AppMenu.home` pointer above lets an operator make a dashboard the app's landing page.
+* Caveat: `config/menus.toml` is gitignored — operators who re-run `liberty-migrate menu`
+  after curating a dashboard menu leaf lose it on the next migration (v1's `ly_menus` has no
+  dashboard concept and the migrator emits the same set of items). The shipped
+  `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
+  framework restores the dashboard via the home redirect even when the menu leaf is missing.
+
+471 backend tests pass.
+
+**Roadmap (planned, see `docs/PLAN.md`):** finish **Phase 7** loose ends — top-level-key
+rename across files, frontend vitest + CI; finish **Phase 5** — validate-by-diff harness
+against nomasx1's read paths +
+migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit *interceptor*, the historic
+rows from v1's `AUD_*` tables aren't carried over yet) + the real NOMAJDE cutover; →
+**Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement
+(in-project Python/local-Spark jobs & scheduling).
 
 **Big-grid scaling (deferred, no phase yet — track when a screen actually needs it):** the
 TableView today loads up to `max_rows` rows into the browser (default 1000) and TanStack does

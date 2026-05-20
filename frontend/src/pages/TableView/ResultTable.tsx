@@ -31,21 +31,7 @@ import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { resolveBindList, type Row as CtxRow } from './dialogHelpers'
-
-/** A ParamBind-bearing action with a non-empty ``prompt_fields`` list — same predicate the
- *  ScreenDialog uses. Pulled out so both row-menu and toolbar action runners hit the same
- *  prompt-before-fire flow when the migrator emits ly_act_params. */
-function actionPrompt(a: Action): { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null } | null {
-  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'navigate') return null
-  const fields = a.prompt_fields ?? []
-  if (fields.length === 0) return null
-  return {
-    fields,
-    title: a.prompt_title ?? a.label ?? null,
-    cols: a.prompt_cols ?? null,
-    submitLabel: a.prompt_submit_label ?? a.label ?? null,
-  }
-}
+import { runChain } from './actionRunner'
 
 type DataRow = Record<string, unknown>
 type Align = CSSProperties['textAlign']
@@ -106,25 +92,10 @@ function originalKeys(row: Record<string, unknown>): Record<string, unknown> {
 
 // Slice 6 — row context menu action runner: resolve a list of ParamBinds against a row's live
 // values. `value` binds are literal; `source` binds read another column on the same row
-// (case-insensitive — the read result is lowercased by Postgres, ParamBinds usually carry the
-// uppercase v1 column name). Reserved built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) are skipped here;
-// they're wired in a future auth slice. Mirrors ScreenDialog's `resolveBindList` but bound
-// against a row dict rather than the dialog's form state — same shape, different context.
-function resolveRowBinds(
-  binds: ReadonlyArray<{ param: string; value?: string | null; source?: string | null }> | undefined,
-  row: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const b of binds ?? []) {
-    if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
-    if (b.source && !b.source.startsWith('#')) {
-      const key = Object.keys(row).find((k) => k.toLowerCase() === b.source!.toLowerCase())
-      const v = key != null ? row[key] : undefined
-      if (v != null && String(v) !== '') out[b.param] = v
-    }
-  }
-  return out
-}
+// (``resolveRowBinds`` lived here in the slice-6 row-menu runner — replaced by the shared
+// :func:`runChain` from ``actionRunner.ts`` in Slice B. The chain runner's ``resolveBinds`` /
+// ``resolveSource`` handle the same case-insensitive form-field fallback *and* the new
+// dotted-path chain-context refs (`<step_id>.first_row.<col>` / `INPUT.<X>` / `loop.<field>`).)
 
 // ── edit-mode controls ──────────────────────────────────────────────────────
 const EditInput = styled.input`
@@ -485,89 +456,44 @@ export function ResultTable({
     r?.(null)
   }, [])
 
-  // Action runner — sequentially runs the picked row-menu action(s); for v1 parity we run *one*
-  // selected action per right-click, but the helper is list-based so a future "multi-fire" item
-  // can reuse it. ParamBinds resolve against `ctx` (the row); run_query POSTs to /api/sql with
-  // bound + uppercased params (falls back to the screen's effective connector); notify is
-  // collected; refresh signals the parent. Unimplemented variants (call_api / navigate /
-  // set_field / confirm) log a warning and stop the chain unless ``stop_on_error = false`` —
-  // same convention the dialog on_save runner uses.
-  //
-  // **Prompt-before-fire** (v2's port of v1's ``ly_act_params``): an action with non-empty
-  // ``prompt_fields`` opens the ActionPromptDialog *before* it runs; the operator's input merges
-  // into ``ctx`` so this action's binds (and any cascading nested-context use) can read it.
-  // Cancelling the prompt aborts the row action soft — no error surfaced.
+  // Row-menu action runner — delegates to :func:`runChain` from ``actionRunner.ts`` (Slice B).
+  // The runner handles ChainAction recursion, IfAction branching, LoopAction iteration, and
+  // dotted-path ``ParamBind.source`` resolution against the chain context — so a migrated
+  // multi-step workflow (NOMAJDE's F00926 "Import Security" landed on a row-menu, hypothetically)
+  // executes end-to-end. ``formCtx = row`` so plain ``source: 'USR_ID'`` references still read
+  // from the clicked row (the existing v2 / hand-written row-menu semantics). ``deps.navigate``
+  // wires the v1 "drill into another table" pattern — opens ``/sql/<connector>/<to>`` with the
+  // resolved binds as URL params; the destination's TableView seeds its param form from those.
   const [menuBusy, setMenuBusy] = useState<string | null>(null)  // action id while it's running
   const [menuError, setMenuError] = useState<string | null>(null)
   const runRowAction = useCallback(async (a: Action, ctx: DataRow) => {
     setMenuBusy(a.id); setMenuError(null)
-    // Prompt-before-fire — merge the operator's input into ctx; cancel aborts soft.
-    let runCtx: DataRow = ctx
-    const prompt = actionPrompt(a)
-    if (prompt) {
-      const v = await requestPrompt(prompt, a.label || a.id)
-      if (v == null) { setMenuBusy(null); closeMenu(); return }
-      runCtx = { ...runCtx, ...v }
-    }
-    try {
-      switch (a.type) {
-        case 'run_query': {
-          const target = a.connector || connector
-          const bound = resolveRowBinds(a.param_binds, runCtx)
-          await api.post(
-            `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
-            { params: withUpper(bound) },
-          )
-          break
+    const result = await runChain([a], {}, ctx, {
+      defaultConnector: connector,
+      requestPrompt,
+      navigate: (to, conn, params) => {
+        const qs = new URLSearchParams()
+        for (const [k, v] of Object.entries(params)) {
+          if (v != null && v !== '') qs.set(k, String(v))
         }
-        case 'notify': {
-          // No global toast surface yet — surface in the menu's status line for now.
-          setMenuError(null)
-          // eslint-disable-next-line no-console
-          console.info('row-menu notify:', a.message)
-          break
-        }
-        case 'refresh': {
-          // implied by the onSaved() at the end of the success path
-          break
-        }
-        case 'navigate': {
-          // v1's "drill into another table" pattern: open the target TableView with the
-          // source row's values bound as URL search params. The destination's TableView reads
-          // those on mount and seeds its param form — so the destination opens already
-          // filtered to whatever the row carries (e.g. "View this user's roles" → opens the
-          // roles screen with USR_ID=<the-clicked-user-id>).
-          const targetConnector = a.connector || connector
-          const bound = resolveRowBinds(a.param_binds, runCtx)
-          const qs = new URLSearchParams()
-          for (const [k, v] of Object.entries(bound)) {
-            if (v != null && String(v) !== '') qs.set(k, String(v))
-          }
-          const url =
-            `/sql/${encodeURIComponent(targetConnector)}/${encodeURIComponent(a.to)}` +
-            (qs.toString() ? `?${qs.toString()}` : '')
-          // Close the menu *before* navigating — leaving it open during the route change makes the
-          // overlay flicker on the destination page until the document-mousedown listener fires.
-          setMenuBusy(null); closeMenu()
-          navigate(url)
-          return
-        }
-        case 'call_api':
-        case 'set_field':
-        case 'confirm': {
-          const msg = `row-menu action '${a.id}' (${a.type}) — runtime not implemented yet`
-          // eslint-disable-next-line no-console
-          console.warn(msg)
-          if (a.stop_on_error !== false) {
-            setMenuError(msg); setMenuBusy(null); return
-          }
-          break
-        }
-      }
-      setMenuBusy(null); closeMenu(); onSaved?.()
-    } catch (e) {
-      setMenuBusy(null)
-      setMenuError(`${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`)
+        const url =
+          `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}` +
+          (qs.toString() ? `?${qs.toString()}` : '')
+        // Close the menu *before* navigating — leaving it open during the route change makes the
+        // overlay flicker on the destination page until the document-mousedown listener fires.
+        setMenuBusy(null); closeMenu()
+        navigate(url)
+      },
+    })
+    setMenuBusy(null)
+    if (!result.ok) { setMenuError(result.error || (a.label || a.id)); return }
+    if (result.cancelled) { closeMenu(); return }   // soft cancel from a prompt — no error
+    closeMenu(); onSaved?.()
+    // Notify-action messages collect on ``result.warnings``; surface them in the menu's
+    // error/status slot (no global toast yet — same convention as before).
+    if (result.warnings.length > 0) {
+      // eslint-disable-next-line no-console
+      console.info('row-menu warnings:', result.warnings)
     }
   }, [connector, onSaved, closeMenu, navigate, requestPrompt])
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
@@ -580,68 +506,34 @@ export function ResultTable({
   const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
   const runScreenAction = useCallback(async (a: Action) => {
     setActionBusy(a.id); setActionStatus(null)
-    // Toolbar actions have no row context — but with ``prompt_fields`` the operator supplies
-    // the inputs the workflow needs (NOMAJDE "Create Role" / "Reset Password" / …). Merge the
-    // entered values into the resolution context so ParamBinds with ``source: "<NAME>"`` pick
-    // them up; cancel aborts soft (no error surfaced — operator clicked Cancel).
-    let runCtx: DataRow = {}
-    const prompt = actionPrompt(a)
-    if (prompt) {
-      const v = await requestPrompt(prompt, a.label || a.id)
-      if (v == null) { setActionBusy(null); return }
-      runCtx = v as DataRow
+    // Toolbar actions have no row context — ``formCtx = {}``. Prompt-collected values land
+    // under ``INPUT.<name>`` in the chain context (the runner orchestrates the prompt-before-
+    // fire). Same ``runChain`` recursion the row-menu uses → ChainAction / IfAction / LoopAction
+    // workflows fire correctly from a toolbar button too (NOMAJDE's "Create Role" etc.).
+    const result = await runChain([a], {}, {}, {
+      defaultConnector: connector,
+      requestPrompt,
+      navigate: (to, conn, params) => {
+        const qs = new URLSearchParams()
+        for (const [k, v] of Object.entries(params)) {
+          if (v != null && v !== '') qs.set(k, String(v))
+        }
+        navigate(
+          `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}` +
+          (qs.toString() ? `?${qs.toString()}` : ''),
+        )
+      },
+    })
+    setActionBusy(null)
+    if (!result.ok) {
+      setActionStatus({ message: result.error || (a.label || a.id), tone: 'error' })
+      return
     }
-    try {
-      switch (a.type) {
-        case 'run_query': {
-          const target = a.connector || connector
-          const bound = resolveRowBinds(a.param_binds, runCtx)
-          await api.post(
-            `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
-            { params: withUpper(bound) },
-          )
-          setActionStatus({ message: a.label || a.id, tone: 'ok' })
-          break
-        }
-        case 'notify': {
-          setActionStatus({ message: a.message, tone: a.tone === 'error' ? 'error' : 'ok' })
-          break
-        }
-        case 'refresh': {
-          // The onSaved() below also triggers a refetch; explicit refresh is a no-op here.
-          break
-        }
-        case 'navigate': {
-          const targetConnector = a.connector || connector
-          // Prompt values feed the URL query string (mirrors row-menu navigate).
-          const bound = resolveRowBinds(a.param_binds, runCtx)
-          const qs = new URLSearchParams()
-          for (const [k, v] of Object.entries(bound)) {
-            if (v != null && String(v) !== '') qs.set(k, String(v))
-          }
-          const url =
-            `/sql/${encodeURIComponent(targetConnector)}/${encodeURIComponent(a.to)}` +
-            (qs.toString() ? `?${qs.toString()}` : '')
-          navigate(url)
-          return
-        }
-        case 'call_api':
-        case 'set_field':
-        case 'confirm': {
-          const msg = `screen action '${a.id}' (${a.type}) — runtime not implemented yet`
-          // eslint-disable-next-line no-console
-          console.warn(msg)
-          setActionStatus({ message: msg, tone: 'error' })
-          if (a.stop_on_error !== false) { setActionBusy(null); return }
-          break
-        }
-      }
-      setActionBusy(null)
-      onSaved?.()
-    } catch (e) {
-      setActionBusy(null)
-      setActionStatus({ message: `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`, tone: 'error' })
-    }
+    if (result.cancelled) return   // soft cancel — no banner
+    // Notify messages → status banner; otherwise generic "<label> · OK".
+    const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : (a.label || a.id)
+    setActionStatus({ message: msg, tone: 'ok' })
+    onSaved?.()
   }, [connector, onSaved, navigate, requestPrompt])
 
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
@@ -847,33 +739,23 @@ export function ResultTable({
       setSaving(false); setSaveErrors(errs); return
     }
 
-    // Row-level lifecycle hooks (v2 extension of v1's ly_evt_cpt FormsTable events). For each
-    // affected row, fire the matching chain — once per row, with that row's values as context.
-    // Only ``run_query`` chain steps are supported here; ``notify`` is collected as a console
-    // log, other types skip with a warning. Failures append to ``saveErrors`` so the operator
-    // sees what went wrong; the row mutation itself already succeeded (the chains run *after*).
+    // Row-level lifecycle hooks (v2 extension of v1's ly_evt_cpt FormsTable events). Each
+    // affected row fires the matching chain once with that row's values as the firing context
+    // — :func:`runChain` handles ChainAction / IfAction / LoopAction recursion + dotted-path
+    // ``ParamBind.source`` resolution. ``notify`` messages collect on the result's warnings.
+    // Failures append to ``saveErrors`` so the operator sees what went wrong; the row mutation
+    // itself already succeeded (the chains run *after*).
     const fireChain = async (actions: Action[] | undefined, ctx: DataRow): Promise<string | null> => {
       if (!actions?.length) return null
-      for (const a of actions) {
-        try {
-          if (a.type === 'run_query') {
-            const tgt = a.connector || connector
-            const bound = resolveRowBinds(a.param_binds, ctx)
-            await api.post(`/api/sql/${encodeURIComponent(tgt)}/${encodeURIComponent(a.query)}`, { params: withUpper(bound) })
-          } else if (a.type === 'notify') {
-            // eslint-disable-next-line no-console
-            console.info('row-hook notify:', a.message)
-          } else if (a.type === 'refresh') {
-            // implied by the onSaved() below
-          } else if (a.stop_on_error !== false) {
-            return `${a.label || a.id} (${a.type}) — runtime not implemented yet`
-          }
-        } catch (e) {
-          const msg = `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`
-          if (a.stop_on_error !== false) return msg
-        }
+      const result = await runChain(actions, {}, ctx, {
+        defaultConnector: connector,
+        requestPrompt,   // batch-save hooks rarely prompt, but a migrated chain might carry one
+      })
+      if (result.warnings.length > 0) {
+        // eslint-disable-next-line no-console
+        console.info('row-hook warnings:', result.warnings)
       }
-      return null
+      return result.ok ? null : (result.error ?? null)
     }
     const hookErrs: string[] = []
     for (const row of dirtyRows) {

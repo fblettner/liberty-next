@@ -224,11 +224,28 @@ _CTX_FILTERS = text("""
 #     a specific tab of a form. Click to fire; some require params (a sub-dialog opens). v2
 #     needs a new ``FormTab.actions`` schema field to capture these — separate slice.
 _ACTIONS = text("SELECT act_id, act_label FROM ly_actions ORDER BY act_id")
+# ``evt_cdn_id`` is the IF task's link to ``ly_condition`` — the predicate the runtime
+# evaluates before picking ``evt_brc_true`` / ``evt_brc_false``. Added to the SELECT so
+# :func:`migrate_actions` can hand it through to the v2 :class:`IfAction` shape.
 _ACT_TASKS = text("""
     SELECT act_id, evt_id, evt_seq, evt_type, evt_label, evt_query_id, evt_query_crud, evt_api_id,
            evt_component, evt_component_id, evt_brc_id, evt_brc_true, evt_brc_false,
-           evt_loop, evt_loop_array
+           evt_loop, evt_loop_array, evt_cdn_id
     FROM ly_act_tasks ORDER BY act_id, COALESCE(evt_seq, evt_id)
+""")
+# ly_condition + ly_cdn_params — v1's IF predicate store. Each row in ``ly_cdn_params`` is one
+# clause (``cdn_dd_id <operator> cdn_value``); multi-clause conditions chain via ``cdn_logical``
+# (AND / OR) + ``cdn_group`` (paren grouping). v2's :class:`Condition` is single-clause for now
+# — the migrator picks the first predicate; the operator wires the rest via the builder.
+# Note: ``_CDN_PARAMS`` (defined above) already exists as the column-conditions reader's SELECT;
+# it deliberately selects only the columns the column-visibility migration needs. The
+# action-condition migration wants the same shape *plus* the AND/OR / paren-grouping
+# metadata, so it uses a separate, richer SELECT below.
+_CONDITIONS = text("SELECT cdn_id, cdn_label FROM ly_condition ORDER BY cdn_id")
+_ACT_CDN_PARAMS = text("""
+    SELECT cdn_id, cdn_params_id, cdn_seq, cdn_dd_id, cdn_operator, cdn_value,
+           cdn_enum_id, cdn_lookup_id, cdn_logical, cdn_group
+    FROM ly_cdn_params ORDER BY cdn_id, COALESCE(cdn_seq, cdn_params_id)
 """)
 _ACT_BRANCHES = text("SELECT act_id, brc_id, brc_label FROM ly_act_branch ORDER BY act_id, brc_id")
 _ACT_PARAMS = text("""
@@ -453,6 +470,23 @@ async def read_event_actions(engine: AsyncEngine) -> list[dict[str, Any]]:
     workflow attachments (libnsx1) just returns ``[]``. v2's :func:`migrate_action_events`
     then attaches each row's action to the matching screen's ``dialog.on_save``."""
     return await _rows_or_empty(engine, _EVT_CPT, what="ly_evt_cpt (event ↔ action junction)")
+
+
+async def read_conditions(
+    engine: AsyncEngine,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return v1's ``(ly_condition, ly_cdn_params)`` rows — the predicate store an IF task
+    references via ``evt_cdn_id``. Each ``cdn_id`` may carry several ``ly_cdn_params`` rows
+    (multi-clause predicate combined via ``cdn_logical`` AND/OR + ``cdn_group`` grouping).
+
+    v2's :class:`Condition` shape is single-clause for now — the migrator picks the first
+    clause and emits a placeholder + warning for multi-clause predicates (the operator wires
+    the rest via the Settings builder). v1 deployments without IF tasks just return
+    ``([], [])`` and the migration falls back to placeholder conditions."""
+    return (
+        await _rows_or_empty(engine, _CONDITIONS, what="ly_condition"),
+        await _rows_or_empty(engine, _ACT_CDN_PARAMS, what="ly_cdn_params (action-condition predicates)"),
+    )
 
 
 async def read_actions(

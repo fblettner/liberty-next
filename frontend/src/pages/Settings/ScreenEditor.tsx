@@ -17,15 +17,16 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Edit3, FileText, Plus, Trash2 } from 'lucide-react'
+import { Edit3, Plus, Trash2 } from 'lucide-react'
 import {
   Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, fonts } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import { EditQueryModal } from './EditQueryModal'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
+import ActionListEditor from './ActionListEditor'
 
 type Row = Record<string, unknown>
 
@@ -57,48 +58,12 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
-const FieldList = styled.div`display: flex; flex-direction: column; gap: 6px;`
-const FieldHeader = styled.button<{ $open?: boolean }>`
-  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; text-align: left;
-  border: 1px solid ${colors.border}; background: ${colors.bg.input}; cursor: pointer;
-  border-radius: ${({ $open }) => ($open ? `${radius.md} ${radius.md} 0 0` : radius.md)};
-  border-bottom-color: ${({ $open }) => ($open ? colors.blue.border : colors.border)};
-  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .dd { font-family: ${fonts.mono}; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
-  &:hover { border-color: ${colors.blue.border}; }
-`
-const FieldBody = styled.div`
-  border: 1px solid ${colors.blue.border}; border-top: none; padding: 12px;
-  border-radius: 0 0 ${radius.md} ${radius.md}; background: ${colors.bg.input};
-`
+// (``FieldList`` / ``FieldHeader`` / ``FieldBody`` moved into ``ActionListEditor.tsx`` — the
+// shared editor owns its own row look.)
 
-// Action discriminated union — maps the v2 `type` literal to its $def name (capitalised + "Action"
-// suffix). Used by the on_save editor to pick the right per-type form when the user changes type.
-const ACTION_TYPES = ['run_query', 'call_api', 'navigate', 'set_field', 'confirm', 'notify', 'refresh'] as const
-type ActionType = typeof ACTION_TYPES[number]
-const ACTION_DEF_NAME: Record<ActionType, string> = {
-  run_query: 'RunQueryAction',
-  call_api: 'CallApiAction',
-  navigate: 'NavigateAction',
-  set_field: 'SetFieldAction',
-  confirm: 'ConfirmAction',
-  notify: 'NotifyAction',
-  refresh: 'RefreshAction',
-}
-// Minimum-viable seed when the operator switches type — keeps required keys present so the form
-// validates immediately and the SchemaForm doesn't render a sea of red.
-function blankActionOfType(t: ActionType, id: string): Row {
-  const base: Row = { id, type: t }
-  if (t === 'run_query') base.query = ''
-  if (t === 'call_api') { base.connector = ''; base.endpoint = '' }
-  if (t === 'navigate') base.to = ''
-  if (t === 'set_field') base.target = ''
-  if (t === 'confirm') base.message = ''
-  if (t === 'notify') { base.message = ''; base.tone = 'info' }
-  return base
-}
-
+// (Action discriminated union + ``blankActionOfType`` + ``ACTION_*`` constants moved into
+// ``ActionListEditor.tsx`` — the shared editor used by both this file and the visual builder's
+// Tab Settings panel.)
 // (``pickFromDefs`` removed — it was used by the now-deleted schema-mode field/tab editor.
 // The visual builder picks its sub-schemas internally.)
 
@@ -299,233 +264,14 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     )
   }
 
-  // ── shared action-list editor (slice 4: dialog `on_save`; slice 6: screen `row_menu`) ────
-  // One editor for any `list[Action]` attachment point. Tracks its own expansion state so two
-  // editors on the same screen (one for on_save, one for row_menu) don't share open rows.
-  // Per-type SchemaForm subset — common fields (id/label/stop_on_error) are *also* rendered by
-  // SchemaForm from the variant's $def, so the action form is one block. We exclude `type` from
-  // the form (it's the picker above) by removing the property from the resolved schema.
-  // Properties we render as custom SearchSelects (above the SchemaForm) — strip them out of
-  // the variant schema so SchemaForm doesn't double-render them as text inputs. v1 operators
-  // had to remember the exact query name; v2's dropdowns pick from the live workspace catalog.
-  const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
-    run_query: ['connector', 'query'],
-    call_api: ['connector', 'endpoint'],
-    navigate: ['connector', 'to'],
-    set_field: [],
-    confirm: [],
-    notify: [],
-    refresh: [],
-  }
-  const actionVariantSchema = (a: Row): JsonSchema | null => {
-    const defName = ACTION_DEF_NAME[(a.type as ActionType) || 'run_query']
-    const v = defs[defName] as JsonSchema | undefined
-    if (!v) return null
-    const props: Record<string, JsonSchema> = { ...(v.properties ?? {}) }
-    delete props.type
-    // Strip the override fields — they render as SearchSelects above the SchemaForm body.
-    for (const k of ACTION_OVERRIDE_KEYS[(a.type as ActionType) || 'run_query']) delete props[k]
-    return { ...v, properties: props, $defs: defs }
-  }
-  // Connector + target dropdowns for the ParamBind-bearing action variants. Each picker reads
-  // from the workspace catalog; queries are scoped to the action's chosen connector (with the
-  // screen's effective connector as the fallback when the action's ``connector`` field is unset).
-  const renderActionOverrides = (a: Row, onPatch: (patch: Row) => void): ReactNode => {
-    const aType = (a.type as ActionType) || 'run_query'
-    if (aType !== 'run_query' && aType !== 'call_api' && aType !== 'navigate') return null
-    const isApi = aType === 'call_api'
-    const opts = isApi
-      ? (wsConnectors ?? []).filter((c) => c.type === 'api').map((c) => ({ value: c.name, label: c.name, mono: c.name }))
-      : connectorOptions
-    const actionConn = (a.connector as string | undefined) || effectiveConnector
-    const targetConnMeta = (wsConnectors ?? []).find((c) => c.name === actionConn)
-    // Target list depends on action type — SQL queries vs API endpoints. mono = the wire name,
-    // label = the friendly description / label so operators find by human name.
-    let targetOpts: SearchSelectOption[] = []
-    if (targetConnMeta) {
-      if ((aType === 'run_query' || aType === 'navigate') && targetConnMeta.type === 'sql') {
-        targetOpts = targetConnMeta.queries.map((q) => ({
-          value: q.name,
-          label: q.description || q.label || q.name,
-          mono: q.name,
-        }))
-      } else if (aType === 'call_api' && targetConnMeta.type === 'api') {
-        targetOpts = targetConnMeta.endpoints.map((e) => ({
-          value: e.name,
-          label: e.label || e.name,
-          mono: e.name,
-        }))
-      }
-    }
-    const targetKey: 'query' | 'endpoint' | 'to' = aType === 'run_query' ? 'query' : aType === 'call_api' ? 'endpoint' : 'to'
-    const targetLabel = t(`settings.screens.action.target.${aType}`)
-    return (
-      <>
-        <Field label={t('settings.screens.action.connector')}>
-          <SearchSelect
-            value={(a.connector as string | undefined) ?? ''}
-            options={opts}
-            onChange={(v) => onPatch({ connector: v && v !== effectiveConnector ? v : null })}
-            anyLabel={t('settings.screens.editor.connectorUseApp', { app: effectiveConnector })}
-            placeholder={effectiveConnector}
-          />
-        </Field>
-        <Field label={targetLabel + ' *'}>
-          <Row gap={6} style={{ alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <SearchSelect
-                value={(a[targetKey] as string | undefined) ?? ''}
-                options={targetOpts}
-                onChange={(v) => onPatch({ [targetKey]: v || '' })}
-                placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                loading={!targetConnMeta}
-              />
-            </div>
-            {/* Edit query — only meaningful for SQL targets (run_query / navigate). The
-                ``call_api`` endpoint editor lives elsewhere and is out of scope here. */}
-            {(aType === 'run_query' || aType === 'navigate') && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
-              <Button
-                $variant="ghost"
-                $size="sm"
-                onClick={() => setEditQuery({ connector: actionConn, queryName: String(a[targetKey]) })}
-                title={t('settings.editQuery.edit', 'Edit query')}
-              >
-                <Edit3 size={13} />
-              </Button>
-            )}
-          </Row>
-        </Field>
-      </>
-    )
-  }
+  // ── action editors (shared component) ──────────────────────────────────────────────
+  // ``renderActionList`` + its inline ``renderPromptFields`` / ``renderActionOverrides`` /
+  // ``actionVariantSchema`` blocks (and the action / PromptField constants) all moved into
+  // ``ActionListEditor.tsx`` so the visual builder's Tab Settings panel can reuse the same
+  // editor. Each attachment point below renders one ``<ActionListEditor>`` instance.
+  const onEditQueryRaise = (connector: string, queryName: string) =>
+    setEditQuery({ connector, queryName })
 
-  // The list is keyed by a label string so each editor (on_save / row_menu) keeps its own
-  // expansion state across re-renders. `Map<key, openIdx>` — small enough to live in one piece.
-  const [expandedByKey, setExpandedByKey] = useState<Record<string, number | null>>({})
-  const renderActionList = (opts: {
-    listKey: string                  // unique-per-editor key for expansion state
-    actions: Row[]
-    setActions: (next: Row[]) => void
-    heading: string
-    hint: string
-    emptyMessage: string
-  }): ReactNode => {
-    const { listKey, actions, setActions, heading, hint, emptyMessage } = opts
-    const expanded = expandedByKey[listKey] ?? null
-    const setExpanded = (v: number | null) =>
-      setExpandedByKey((prev) => ({ ...prev, [listKey]: v }))
-    const update = (idx: number, patch: Row) => {
-      const next = actions.slice()
-      next[idx] = { ...next[idx], ...patch }
-      for (const k of Object.keys(patch)) {
-        if (patch[k] === undefined || patch[k] === null || patch[k] === '' || patch[k] === false) delete (next[idx] as Row)[k]
-      }
-      setActions(next)
-    }
-    const add = async () => {
-      const existing = actions.map((a) => a.id)
-      const id = (await modals.prompt({
-        title: t('settings.screens.action.add'),
-        message: t('settings.screens.action.namePrompt'),
-        validate: (v) => {
-          if (!v) return null   // empty → close as if cancelled
-          if (existing.includes(v)) return t('settings.screens.action.idExists', { id: v })
-          return null
-        },
-      }))?.trim()
-      if (!id) return
-      setActions([...actions, blankActionOfType('run_query', id)])
-      setExpanded(actions.length)
-    }
-    const remove = async (idx: number) => {
-      const ok = await modals.confirm({
-        title: t('settings.screens.action.delete'),
-        message: t('settings.screens.action.confirmDelete', { id: actions[idx]?.id }),
-        variant: 'danger',
-        confirmLabel: t('common.delete'),
-      })
-      if (!ok) return
-      const next = actions.slice(); next.splice(idx, 1)
-      setActions(next)
-      setExpanded(expanded === idx ? null : expanded != null && expanded > idx ? expanded - 1 : expanded)
-    }
-    const changeType = (idx: number, newType: ActionType) => {
-      const cur = actions[idx] ?? {}
-      if (cur.type === newType) return
-      // Preserve id + label + stop_on_error; reset the rest to the new variant's minimum shape.
-      const seeded = blankActionOfType(newType, String(cur.id ?? ''))
-      if (cur.label != null) seeded.label = cur.label
-      if (cur.stop_on_error != null) seeded.stop_on_error = cur.stop_on_error
-      const next = actions.slice()
-      next[idx] = seeded
-      setActions(next)
-    }
-    return (
-      <Stack gap={8} style={{ marginTop: 14 }}>
-        <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>{heading}</strong>
-        <Sub>{hint}</Sub>
-        <FieldList>
-          {actions.length === 0 && <Empty>{emptyMessage}</Empty>}
-          {actions.map((a, i) => {
-            const open = expanded === i
-            const aType = String(a.type ?? 'run_query') as ActionType
-            const schema = actionVariantSchema(a)
-            return (
-              <div key={i}>
-                <FieldHeader $open={open} onClick={() => setExpanded(open ? null : i)}>
-                  {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <FileText size={13} />
-                  <span className="name">{String(a.id ?? '')}</span>
-                  <span className="dd">{aType}</span>
-                  {a.label != null && a.label !== '' && <span className="dd">· {String(a.label)}</span>}
-                </FieldHeader>
-                {open && (
-                  <FieldBody>
-                    <Stack gap={12}>
-                      {/* Themed dropdown to switch the action's discriminator. v1's UI used a
-                          native ``<select>`` here — replaced with SearchSelect for consistency
-                          with the rest of the app (every dropdown across the builders shares one
-                          look + portal-out-of-modal behaviour). */}
-                      <Field label={t('settings.screens.action.type')}>
-                        <SearchSelect
-                          value={aType}
-                          options={ACTION_TYPES.map((tt) => ({ value: tt, label: tt, mono: tt }))}
-                          onChange={(v) => changeType(i, v as ActionType)}
-                        />
-                      </Field>
-                      {/* Connector + target (query / endpoint / to) dropdowns — only for the
-                          three ParamBind-bearing variants (run_query / call_api / navigate).
-                          The remaining variant properties (id, label, stop_on_error, param_binds,
-                          prompt_fields, …) flow through SchemaForm below. */}
-                      {renderActionOverrides(a, (patch) => update(i, patch))}
-                      {schema ? (
-                        <SchemaForm
-                          schema={schema}
-                          defs={defs}
-                          value={a}
-                          onChange={(v) => update(i, v)}
-                        />
-                      ) : (
-                        <Empty>{t('settings.screens.action.unknownType', { type: aType })}</Empty>
-                      )}
-                      <Row gap={8}>
-                        <Button $variant="danger" $size="sm" onClick={() => remove(i)}>
-                          <Trash2 size={13} /> {t('settings.screens.action.delete')}
-                        </Button>
-                      </Row>
-                    </Stack>
-                  </FieldBody>
-                )}
-              </div>
-            )
-          })}
-        </FieldList>
-        <Button $variant="ghost" $size="sm" onClick={add} style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}>
-          <Plus size={13} /> {t('settings.screens.action.add')}
-        </Button>
-      </Stack>
-    )
-  }
 
   // Dialog lifecycle hook accessors — same pattern for each. ``setDialog`` strips empty hook
   // lists (we drop the key when the array empties) so the saved TOML stays terse.
@@ -540,24 +286,42 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   const onLoad = useMemo(() => dialogList('on_load'), [dialog])
   const onSave = useMemo(() => dialogList('on_save'), [dialog])
   const onCancel = useMemo(() => dialogList('on_cancel'), [dialog])
-  const renderOnLoad = (): ReactNode => renderActionList({
-    listKey: 'on_load', actions: onLoad, setActions: (n) => setDialogList('on_load', n),
-    heading: t('settings.screens.onLoad.heading'),
-    hint: t('settings.screens.onLoad.hint'),
-    emptyMessage: t('settings.screens.onLoad.empty'),
-  })
-  const renderOnSave = (): ReactNode => renderActionList({
-    listKey: 'on_save', actions: onSave, setActions: (n) => setDialogList('on_save', n),
-    heading: t('settings.screens.action.heading'),
-    hint: t('settings.screens.action.hint'),
-    emptyMessage: t('settings.screens.action.empty'),
-  })
-  const renderOnCancel = (): ReactNode => renderActionList({
-    listKey: 'on_cancel', actions: onCancel, setActions: (n) => setDialogList('on_cancel', n),
-    heading: t('settings.screens.onCancel.heading'),
-    hint: t('settings.screens.onCancel.hint'),
-    emptyMessage: t('settings.screens.onCancel.empty'),
-  })
+  const renderOnLoad = (): ReactNode => (
+    <ActionListEditor
+      actions={onLoad}
+      onChange={(n) => setDialogList('on_load', n)}
+      heading={t('settings.screens.onLoad.heading')}
+      hint={t('settings.screens.onLoad.hint')}
+      emptyMessage={t('settings.screens.onLoad.empty')}
+      defs={defs}
+      effectiveConnector={effectiveConnector}
+      onEditQuery={onEditQueryRaise}
+    />
+  )
+  const renderOnSave = (): ReactNode => (
+    <ActionListEditor
+      actions={onSave}
+      onChange={(n) => setDialogList('on_save', n)}
+      heading={t('settings.screens.action.heading')}
+      hint={t('settings.screens.action.hint')}
+      emptyMessage={t('settings.screens.action.empty')}
+      defs={defs}
+      effectiveConnector={effectiveConnector}
+      onEditQuery={onEditQueryRaise}
+    />
+  )
+  const renderOnCancel = (): ReactNode => (
+    <ActionListEditor
+      actions={onCancel}
+      onChange={(n) => setDialogList('on_cancel', n)}
+      heading={t('settings.screens.onCancel.heading')}
+      hint={t('settings.screens.onCancel.hint')}
+      emptyMessage={t('settings.screens.onCancel.empty')}
+      defs={defs}
+      effectiveConnector={effectiveConnector}
+      onEditQuery={onEditQueryRaise}
+    />
+  )
 
   // (Per-tab ``actions`` editor moved to the visual builder — it owns the dialog-tab selection
   // state, so the per-tab actions sit naturally on the selected tab's canvas. The renderActionList
@@ -576,12 +340,18 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     else v.actions = next
     onChange(v)
   }
-  const renderScreenActions = (): ReactNode => renderActionList({
-    listKey: 'actions', actions: screenActions, setActions: setScreenActions,
-    heading: t('settings.screens.actions.heading'),
-    hint: t('settings.screens.actions.hint'),
-    emptyMessage: t('settings.screens.actions.empty'),
-  })
+  const renderScreenActions = (): ReactNode => (
+    <ActionListEditor
+      actions={screenActions}
+      onChange={setScreenActions}
+      heading={t('settings.screens.actions.heading')}
+      hint={t('settings.screens.actions.hint')}
+      emptyMessage={t('settings.screens.actions.empty')}
+      defs={defs}
+      effectiveConnector={effectiveConnector}
+      onEditQuery={onEditQueryRaise}
+    />
+  )
 
   // Screen-level row lifecycle hooks — v2's port of v1's ``ly_evt_cpt`` FormsTable events
   // (evt 2 = on_insert, evt 3 = on_delete; on_update is v2's own extension). Fire after a row
@@ -599,30 +369,36 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   }
   const renderRowHooks = (): ReactNode => (
     <>
-      {renderActionList({
-        listKey: 'on_insert',
-        actions: screenHookList('on_insert'),
-        setActions: (n) => setScreenHook('on_insert', n),
-        heading: t('settings.screens.onInsert.heading'),
-        hint: t('settings.screens.onInsert.hint'),
-        emptyMessage: t('settings.screens.onInsert.empty'),
-      })}
-      {renderActionList({
-        listKey: 'on_update',
-        actions: screenHookList('on_update'),
-        setActions: (n) => setScreenHook('on_update', n),
-        heading: t('settings.screens.onUpdate.heading'),
-        hint: t('settings.screens.onUpdate.hint'),
-        emptyMessage: t('settings.screens.onUpdate.empty'),
-      })}
-      {renderActionList({
-        listKey: 'on_delete',
-        actions: screenHookList('on_delete'),
-        setActions: (n) => setScreenHook('on_delete', n),
-        heading: t('settings.screens.onDelete.heading'),
-        hint: t('settings.screens.onDelete.hint'),
-        emptyMessage: t('settings.screens.onDelete.empty'),
-      })}
+      <ActionListEditor
+        actions={screenHookList('on_insert')}
+        onChange={(n) => setScreenHook('on_insert', n)}
+        heading={t('settings.screens.onInsert.heading')}
+        hint={t('settings.screens.onInsert.hint')}
+        emptyMessage={t('settings.screens.onInsert.empty')}
+        defs={defs}
+        effectiveConnector={effectiveConnector}
+        onEditQuery={onEditQueryRaise}
+      />
+      <ActionListEditor
+        actions={screenHookList('on_update')}
+        onChange={(n) => setScreenHook('on_update', n)}
+        heading={t('settings.screens.onUpdate.heading')}
+        hint={t('settings.screens.onUpdate.hint')}
+        emptyMessage={t('settings.screens.onUpdate.empty')}
+        defs={defs}
+        effectiveConnector={effectiveConnector}
+        onEditQuery={onEditQueryRaise}
+      />
+      <ActionListEditor
+        actions={screenHookList('on_delete')}
+        onChange={(n) => setScreenHook('on_delete', n)}
+        heading={t('settings.screens.onDelete.heading')}
+        hint={t('settings.screens.onDelete.hint')}
+        emptyMessage={t('settings.screens.onDelete.empty')}
+        defs={defs}
+        effectiveConnector={effectiveConnector}
+        onEditQuery={onEditQueryRaise}
+      />
     </>
   )
 
@@ -639,12 +415,18 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     else v.row_menu = next
     onChange(v)
   }
-  const renderRowMenu = (): ReactNode => renderActionList({
-    listKey: 'row_menu', actions: rowMenu, setActions: setRowMenu,
-    heading: t('settings.screens.rowmenu.heading'),
-    hint: t('settings.screens.rowmenu.hint'),
-    emptyMessage: t('settings.screens.rowmenu.empty'),
-  })
+  const renderRowMenu = (): ReactNode => (
+    <ActionListEditor
+      actions={rowMenu}
+      onChange={setRowMenu}
+      heading={t('settings.screens.rowmenu.heading')}
+      hint={t('settings.screens.rowmenu.hint')}
+      emptyMessage={t('settings.screens.rowmenu.empty')}
+      defs={defs}
+      effectiveConnector={effectiveConnector}
+      onEditQuery={onEditQueryRaise}
+    />
+  )
 
   // Deletes the entire dialog (every tab + field + lookup_param_bind). Confirmed via the
   // shared ConfirmModal — the action is destructive and irreversible inside this designer
