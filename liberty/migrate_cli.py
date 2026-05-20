@@ -466,6 +466,45 @@ def _summary(data: dict, *, command: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="liberty-migrate", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # ``diff`` doesn't share the standard --source-url + -o layout of the other commands
+    # (no --prefix / --dbtype / --default-language; it takes the v2 config directory + the
+    # output is a free-form report, not a TOML fragment). Wire it separately + return early
+    # so the loop below doesn't try to attach the migration-shaped flags.
+    diff_p = sub.add_parser(
+        "diff",
+        help="compare a v1 database against the current v2 config and report gaps",
+        description=(
+            "Walk every v1 row (pools / queries / dictionary / screens / menus / API) and "
+            "verify it has a matching v2 entity. Surfaces what's missing or what diverges "
+            "from v1 — useful before re-running migrations or as a CI pre-deploy check. "
+            "Exit code 1 when missing / mismatched entries surface, 0 otherwise."
+        ),
+    )
+    diff_p.add_argument("--source-url", required=True, help="SQLAlchemy async URL of the v1 database")
+    diff_p.add_argument(
+        "--config-dir", default="config",
+        help="Path to the v2 config directory (default: config/). Reads connectors.toml + "
+        "dictionary.toml + screens.toml + menus.toml from here.",
+    )
+    diff_p.add_argument(
+        "--connector", default=None,
+        help="Restrict the SQL-side checks to this v2 connector (the slugified pool name). "
+        "Useful when the v1 DB carries several apps but you're only re-migrating one.",
+    )
+    diff_p.add_argument(
+        "--format", choices=["text", "json"], default="text",
+        help="Report format (default: text).",
+    )
+    diff_p.add_argument(
+        "--verbose", action="store_true",
+        help="Include ``ok`` rows in the report (at-a-glance verification the diff walked everything).",
+    )
+    diff_p.add_argument(
+        "-o", "--out", default=None,
+        help="Write the report here (default: stdout).",
+    )
+
     for name, help_ in [
         ("sql", "migrate ly_query/ly_qry_sql + ly_applications pools"),
         ("api", "migrate ly_api/ly_api_conn"),
@@ -622,8 +661,42 @@ async def _run_all(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_diff(args: argparse.Namespace) -> int:
+    """``liberty-migrate diff`` — compare a v1 DB against the v2 config tree, print or write
+    the report. Returns ``1`` when missing / mismatched entries surface (driving CI failure),
+    ``0`` otherwise.
+
+    Imports happen inside the function so the diff module's SQLAlchemy / sync dependencies
+    aren't pulled in for the unrelated migration subcommands (keeps ``--help`` snappy)."""
+    import json
+    from pathlib import Path
+    from liberty.migrations.diff import compute_diff, render_text
+
+    cfg_dir = Path(args.config_dir)
+    report = compute_diff(
+        source_url=args.source_url,
+        connectors_path=cfg_dir / "connectors.toml",
+        screens_path=cfg_dir / "screens.toml",
+        dictionary_path=cfg_dir / "dictionary.toml",
+        menus_path=cfg_dir / "menus.toml",
+        connector_filter=args.connector,
+        include_ok=args.verbose,
+    )
+    if args.format == "json":
+        text = json.dumps(report.to_dict(), indent=2)
+    else:
+        text = render_text(report, verbose=args.verbose)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+    else:
+        print(text)
+    return 1 if report.has_problems() else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "diff":
+        return _run_diff(args)
     if args.command == "all":
         return asyncio.run(_run_all(args))
     data = asyncio.run(_build(args))

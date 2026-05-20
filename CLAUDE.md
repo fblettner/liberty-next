@@ -614,7 +614,28 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `${MIGRATED_PW_*}` — recover from `ly_applications.apps_password` with `liberty-crypto decrypt`).
 v1 (`../liberty-framework/`) is **read-only** — the readers only SELECT. The output is a
 fragment to review + merge into `config/connectors.toml` (the `dictionary` output → `config/dictionary.toml`).
-*Not yet done:* validate-by-diff against nomasx1's read paths; migrate the real apps
+**`liberty-migrate diff`** (shipped) — validate-by-diff harness: walks every v1 row
+(pools / SQL queries / dictionary entries + enums + lookups + sequences / screens /
+menu items / API connectors + endpoints) and verifies each has a matching v2 entity.
+Surfaces what's missing (a sequence not in `dictionary.toml`, a screen not in
+`screens.toml`, a query whose v2 name doesn't exist), what diverges (a screen whose
+column count is far from v1's `ly_tbl_col`/`ly_dlg_col` total — usually means
+re-running `liberty-migrate screen` would pick up new hints), and what's a stub
+(`${LIBERTY_DB_URL_X}` placeholder pools the operator must fill in). Text or JSON
+output (`--format json` feeds CI / tooling). Exit code `1` when missing /
+mismatched entries land, `0` otherwise — drives pre-deploy checks. Real-data
+smoke against libnjde found 11 missing + 6 mismatched entries on the first run,
+guiding what to re-migrate next.
+
+Lives in `liberty/migrations/diff.py` (the engine — pure-ish, async readers from
+`source.py` + sync v2 loaders, returns a `DiffReport` of `DiffEntry` rows with
+`kind` / `severity` / `entity_id` / `message` / `details`) and is wired as the
+`diff` subcommand in `liberty/migrate_cli.py`. Tests in
+`tests/test_migration_diff.py` (12 cases against a SQLite-backed minimal v1
+schema, covers each entity kind + the text / JSON output shapes).
+
+*Not yet done:* migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit
+*interceptor*, but the historic rows aren't carried over); migrate the real apps
 (nomasx1 → NOMAJDE → AIRFLOW). Deps: `tomli-w`.
 
 **Crypto (field-level secrets, v1-byte-compatible).** v1 stores some DB columns
@@ -1570,12 +1591,10 @@ none).
 502 backend tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** finish **Phase 7** loose ends — frontend vitest +
-CI; finish **Phase 5** — validate-by-diff harness
-against nomasx1's read paths +
-migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit *interceptor*, the historic
-rows from v1's `AUD_*` tables aren't carried over yet) + the real NOMAJDE cutover; →
-**Phase 9** notifications / reporting / backports → **Phase 10** the Airflow replacement
-(in-project Python/local-Spark jobs & scheduling).
+CI; finish **Phase 5** — migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit
+*interceptor*, the historic rows from v1's `AUD_*` tables aren't carried over yet) + the
+real NOMAJDE cutover; → **Phase 9** notifications / reporting / backports → **Phase 10**
+the Airflow replacement (in-project Python/local-Spark jobs & scheduling).
 
 **Big-grid scaling (deferred, no phase yet — track when a screen actually needs it):** the
 TableView today loads up to `max_rows` rows into the browser (default 1000) and TanStack does
@@ -1603,6 +1622,7 @@ above — pull this in whenever a real screen hits the wall, not before.
 .venv/bin/liberty-migrate dictionary --source-url postgresql+asyncpg://…/libnsx1 -o config/dictionary.toml   # v1 ly_dictionary → shared field labels
 .venv/bin/liberty-migrate menu --source-url postgresql+asyncpg://…/libnsx1 --connector nomasx1 -o config/menus.toml   # v1 ly_menus → app nav tree
 .venv/bin/liberty-migrate screen --source-url postgresql+asyncpg://…/libnsx1 --connector nomasx1 -o config/screens.toml   # v1 ly_tables+ly_dlg_* → screens.toml
+.venv/bin/liberty-migrate diff --source-url postgresql+asyncpg://…/libnsx1 --config-dir config   # what didn't migrate (exit 1 if missing/mismatched)
 .venv/bin/liberty-crypto encrypt 'secret' --master-key "$LIBERTY_MASTER_KEY"   # v1-compatible ENC:… (decrypt / is-encrypted too)
 .venv/bin/liberty-license verify "$LIBERTY_LICENSE_KEY"   # inspect a license key → JSON status (exit 0=full, 1=restricted); `status` checks the configured one
 (cd frontend && npm install && npm run build)   # → frontend/dist (the backend serves it at /; no copy step)
