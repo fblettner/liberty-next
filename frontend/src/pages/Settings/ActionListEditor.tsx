@@ -27,6 +27,7 @@ import {
   Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, useModals,
   type JsonSchema, type SearchSelectOption,
 } from '../../common'
+import ParamBindList, { type ParamBind } from './ParamBindList'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
@@ -81,9 +82,9 @@ export function blankActionOfType(t: ActionType, id: string): Row {
 // those get dedicated recursive editors below; without stripping, SchemaForm would render
 // them as generic object-list accordions with cramped widget choices.
 export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
-  run_query: ['connector', 'query'],
-  call_api: ['connector', 'endpoint'],
-  navigate: ['connector', 'to'],
+  run_query: ['connector', 'query', 'param_binds'],
+  call_api: ['connector', 'endpoint', 'param_binds'],
+  navigate: ['connector', 'to', 'param_binds'],
   set_field: [],
   confirm: [],
   notify: [],
@@ -93,6 +94,10 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   loop: ['source', 'steps'],   // ``source`` → custom autocomplete (Theme B) in ActionTreeView;
                                 // ``steps`` → recursive sub-list editor in both views
   return: [],        // ``bindings: Record<str,str>`` renders fine via SchemaForm's StringMap
+  // ``param_binds`` on the three ParamBind-bearing variants is rendered by the dedicated
+  // ParamBindList component (one row per bind: param name + value/source toggle + the
+  // matching widget — autocomplete on source). SchemaForm's generic object-list accordion
+  // was too cramped for the workflow editing case.
 }
 // The four variants that carry ``prompt_fields`` (the ``_PromptableMixin`` in
 // :mod:`liberty.screens.config`). ``chain`` joins the trio so a chain-fired workflow can
@@ -110,6 +115,21 @@ export const PROMPT_FIELD_BASIC_KEYS = ['name', 'dd', 'label', 'format', 'requir
 export const PROMPT_FIELD_ADVANCED_KEYS = ['hidden', 'disabled', 'colspan'] as const
 export const PROMPT_FIELD_BINDS_KEY = 'lookup_param_binds'
 export const PROMPT_FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
+
+/** Lightweight ParamBind.source candidates derived from one action's own ``prompt_fields``.
+ *  ActionListEditor (the dialog-hook / screen-hook editor used by ScreenEditor) has no
+ *  chain-path context — it can't walk the tree to find preceding bind_result steps the way
+ *  ActionTreeView does. The next-best autocomplete is the action's *own* prompt fields:
+ *  each becomes ``INPUT.<name>`` since the runtime merges prompt values under ``ctx.INPUT``
+ *  before the action fires. Not exhaustive (no step results, no parent-chain prompts), but
+ *  covers the common ``{param: 'USER', source: 'INPUT.USER'}`` case operators write by hand. */
+export function promptFieldsToOptions(action: Row): SearchSelectOption[] {
+  const fields = Array.isArray(action.prompt_fields) ? (action.prompt_fields as Row[]) : []
+  return fields
+    .map((f) => String(f.name ?? '').trim())
+    .filter((n) => n.length > 0)
+    .map((n) => ({ value: `INPUT.${n}`, label: '(prompt input)', mono: `INPUT.${n}` }))
+}
 
 // ── styled bits (same look the rest of the Screen builders use) ─────────────────────────────
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
@@ -626,6 +646,25 @@ export default function ActionListEditor({
                       />
                     ) : (
                       <Empty>{t('settings.screens.action.unknownType', { type: aType })}</Empty>
+                    )}
+                    {/* ParamBindList — dedicated editor for the variant's ``param_binds``
+                        array (stripped from the SchemaForm above via ACTION_OVERRIDE_KEYS).
+                        ActionListEditor has no chain-path context so the source autocomplete
+                        falls back to the action's own ``prompt_fields`` (offering
+                        ``INPUT.<name>`` for each). The ActionTreeView in the Visual Designer
+                        has the full chain context — that surface gets richer candidates. */}
+                    {(aType === 'run_query' || aType === 'call_api' || aType === 'navigate') && (
+                      <Stack gap={6}>
+                        <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>
+                          {t('settings.screens.paramBinds.heading')}
+                        </strong>
+                        <Sub>{t('settings.screens.paramBinds.hint')}</Sub>
+                        <ParamBindList
+                          value={Array.isArray(a.param_binds) ? (a.param_binds as ParamBind[]) : []}
+                          onChange={(next) => updateAction(i, { param_binds: next.length ? next : null })}
+                          sourceOptions={promptFieldsToOptions(a)}
+                        />
+                      </Stack>
                     )}
                     {/* Slice 4b — prompt-fields list for the four promptable variants
                         (run_query / call_api / navigate / chain). */}

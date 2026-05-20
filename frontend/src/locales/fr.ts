@@ -701,6 +701,19 @@ const fr: Resources = {
         binds: 'Liaisons LOOKUP (filtrer les options à partir d’autres champs d’invite)',
         conditions: 'Règles conditionnelles (visible / requis / désactivé, sur l’état de l’invite elle-même)',
       },
+      // ParamBindList — éditeur dédié pour le tableau ``param_binds`` d'une action.
+      paramBinds: {
+        heading: 'Liaisons de paramètres',
+        hint: 'Liez des valeurs pour la requête / endpoint cible. ``value`` est une littérale ; ``source`` lit depuis le contexte de chaîne (``INPUT.<nom>`` / ``<id_étape>.first_row.<col>`` / ``loop.<col>``) ou un nom de champ du formulaire.',
+        empty: 'Aucune liaison — la requête / endpoint s\'exécute sans paramètres.',
+        add: 'Ajouter une liaison',
+        paramPlaceholder: 'paramètre',
+        valuePlaceholder: 'valeur littérale',
+        sourcePlaceholder: 'INPUT.<nom> / <id_étape>.first_row.<col>',
+        modeValue: 'val',
+        modeSource: 'src',
+        flipMode: 'Basculer entre valeur littérale et source du contexte',
+      },
       // Tranche 4d — variantes de contrôle de flux (ChainAction / IfAction / LoopAction).
       chain: {
         heading: 'Étapes',

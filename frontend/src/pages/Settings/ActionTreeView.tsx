@@ -46,6 +46,7 @@ import {
   appendAtPath, breadcrumbCrumbs, chainContextCandidates, pathEquals, removeAtPath,
   resolveAtPath, updateAtPath, type ActionPath, type SourceCandidate,
 } from './actionPath'
+import ParamBindList, { type ParamBind } from './ParamBindList'
 
 type Row = Record<string, unknown>
 
@@ -980,6 +981,22 @@ export default function ActionTreeView({
           />
         ) : (
           <Empty>{t('settings.screens.action.unknownType', { type: sType })}</Empty>
+        )}
+        {/* ParamBindList (Theme B follow-up) — dedicated editor for the ``param_binds`` array
+            on the three ParamBind-bearing variants. Each row has a value/source toggle; the
+            source field is the same chain-context autocomplete the Condition / LoopAction
+            source fields use. ``param_binds`` is stripped from the variant SchemaForm via
+            ACTION_OVERRIDE_KEYS so this is the single editing surface for binds. */}
+        {(sType === 'run_query' || sType === 'call_api' || sType === 'navigate') && (
+          <Stack gap={6}>
+            <SubHead>{t('settings.screens.paramBinds.heading')}</SubHead>
+            <Sub>{t('settings.screens.paramBinds.hint')}</Sub>
+            <ParamBindList
+              value={Array.isArray(selected.param_binds) ? (selected.param_binds as ParamBind[]) : []}
+              onChange={(next) => patchSelected({ param_binds: next.length ? next : null })}
+              sourceOptions={sourceOptions}
+            />
+          </Stack>
         )}
         {renderPromptFields(selected, (patch) => patchSelected(patch))}
         {renderBody()}

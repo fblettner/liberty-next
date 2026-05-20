@@ -699,6 +699,22 @@ const en = {
         binds: 'Lookup binds (narrow LOOKUP options from other prompt fields)',
         conditions: 'Conditional rules (visible / required / disabled, against the prompt\'s own state)',
       },
+      // ParamBindList — dedicated editor for an action's ``param_binds`` array. Each row
+      // carries the parameter name + a value/source toggle + the matching widget; the source
+      // widget is the chain-context autocomplete (when ActionTreeView renders) or a free-text
+      // input (when ActionListEditor renders — that surface has no chain path).
+      paramBinds: {
+        heading: 'Param binds',
+        hint: 'Bind values for the target query / endpoint. ``value`` is a literal; ``source`` reads from the chain context (``INPUT.<name>`` / ``<step_id>.first_row.<col>`` / ``loop.<col>``) or a form-field name.',
+        empty: 'No binds — the query / endpoint runs with no parameters.',
+        add: 'Add bind',
+        paramPlaceholder: 'param',
+        valuePlaceholder: 'literal value',
+        sourcePlaceholder: 'INPUT.<name> / <step_id>.first_row.<col>',
+        modeValue: 'val',
+        modeSource: 'src',
+        flipMode: 'Toggle between literal value and chain-context source',
+      },
       // Slice 4d — workflow-control variants (ChainAction / IfAction / LoopAction).
       chain: {
         heading: 'Steps',
