@@ -71,7 +71,7 @@ from liberty.migrations.source import (
     read_sequences,
     read_sql_queries,
 )
-from liberty.migrations.v1 import slugify
+from liberty.migrations.v1 import _uniquify, slugify
 from liberty.screens import load_screens
 
 
@@ -313,12 +313,57 @@ _READ_CRUD: frozenset[str] = frozenset({"GET", "SELECT"})
 
 
 def _v2_query_name(label: str | None, crud: str, query_id: int) -> str:
-    """Same naming convention as :func:`liberty.migrations.v1.migrate_sql_queries`. Kept in
-    sync by hand — if the migrator changes its convention this function and the tests must
-    be updated together. ``crud`` lowercased to match the v2 emitted names."""
+    """Base v2 query name (no uniquify suffix). Same shape as
+    :func:`liberty.migrations.v1.migrate_sql_queries` emits *before* dedup. Use
+    :func:`_resolve_v2_query_names` instead for the dedup-aware mapping when v1 has
+    multiple queries that slugify to the same base."""
     crud_u = (crud or "SELECT").upper()
     base_text = f"{label}_{crud_u}" if label else f"q{query_id}_{crud_u}"
     return slugify(base_text, fallback=f"q{query_id}_{crud_u.lower()}")
+
+
+def _resolve_v2_query_names(
+    queries: Iterable[Mapping[str, Any]],
+    sql_rows: Iterable[Mapping[str, Any]],
+) -> dict[tuple[int, str], tuple[str, str]]:
+    """Reproduce :func:`liberty.migrations.v1.migrate_sql_queries`'s naming convention
+    *including* the uniquify pass. Returns ``{(query_id, crud): (connector, v2_name)}``.
+
+    The migrator emits one v2 query per ``(query_pool, query_id, query_crud)``, named
+    ``slugify(label + '_' + crud)``. When two v1 queries slugify to the same base name
+    (commonly: two ``ly_tables`` rows both labelled ``"f0004"`` produce ``f0004_get`` for
+    one and ``f0004_get_2`` for the other), the migrator's ``_uniquify`` walks them in
+    order and suffixes the collisions. The diff has to replicate the order + dedup to
+    match v1 query #N to its actual v2 entity — slugifying once misses every collision.
+    """
+    labels: dict[int, str] = {int(q["query_id"]): (q.get("query_label") or "")
+                               for q in queries}
+    # Materialise sql_rows once (iterables can be one-shot).
+    rows = [dict(r) for r in sql_rows]
+    # Replicate the migrator's iteration order: by (conn_name, query_id, crud) as the
+    # rows are encountered. Track names_per_connector for uniquify; same call sequence
+    # the migrator follows.
+    names_per_conn: dict[str, set[str]] = {}
+    out: dict[tuple[int, str], tuple[str, str]] = {}
+    # First pass: collect distinct (qid, crud) per connector in row order (the migrator's
+    # ``groups`` dict preserves insertion order via the ``order`` list).
+    seen: dict[tuple[str, int, str], None] = {}
+    for r in rows:
+        sql = (r.get("query_sqlquery") or "").strip()
+        if not sql:
+            continue
+        qid = int(r["query_id"])
+        crud = str(r.get("query_crud") or "SELECT").upper()
+        pool = str(r.get("query_pool") or "default").strip() or "default"
+        conn_name = slugify(pool, fallback="default")
+        seen.setdefault((conn_name, qid, crud), None)
+    # Second pass: walk in order, assign uniquified names.
+    for conn_name, qid, crud in seen:
+        base = _v2_query_name(labels.get(qid, ""), crud, qid)
+        taken = names_per_conn.setdefault(conn_name, set())
+        v2_name = _uniquify(base, taken)
+        out[(qid, crud)] = (conn_name, v2_name)
+    return out
 
 
 def _diff_sql_queries(
@@ -335,18 +380,11 @@ def _diff_sql_queries(
     row) get reported with severity ``extra``. v1 queries with no SQL at all are skipped (the
     migrator drops them too)."""
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
+    name_map = _resolve_v2_query_names(queries, sql_rows)
     expected_per_conn: dict[str, set[tuple[int, str, str]]] = {}    # conn → {(qid, crud, v2_name)}
-    for r in sql_rows:
-        sql = (r.get("query_sqlquery") or "").strip()
-        if not sql:
-            continue
-        qid = int(r["query_id"])
-        crud = str(r.get("query_crud") or "SELECT").upper()
-        pool = str(r.get("query_pool") or "default").strip() or "default"
-        conn_name = slugify(pool, fallback="default")
+    for (qid, crud), (conn_name, v2_name) in name_map.items():
         if connector_filter and conn_name != connector_filter:
             continue
-        v2_name = _v2_query_name(labels.get(qid, ""), crud, qid)
         expected_per_conn.setdefault(conn_name, set()).add((qid, crud, v2_name))
 
     v2_connectors = dict(connectors.connectors or {})
@@ -422,14 +460,18 @@ def _diff_columns(
 
     Mismatches with a delta of 1–2 are usually fine (v1 had a placeholder column with empty
     target which the migrator drops); larger gaps indicate the migration is stale."""
-    # Build the v2 query → screen index.
-    by_read_query: dict[tuple[str | None, str], Any] = {}
+    # Build the v2 query → screen index. **Multi-map** because a single v1 query_id can
+    # back several v2 screens — v1 sometimes had multiple ``ly_tables`` rows with the same
+    # ``tbl_db_name`` referencing the same query; the migrator emits them as ``f0004`` +
+    # ``f0004_2`` (slugify uniquifies). When the lookup returns several, we sum the v2
+    # columns across all matches so the comparison stays sound.
+    by_read_query: dict[tuple[str | None, str], list[Any]] = {}
     for app, screens in (screens_file.screens or {}).items():
         for sid, screen in screens.items():
             key = (screen.connector or app, screen.read_query)
-            by_read_query[key] = (app, sid, screen)
+            by_read_query.setdefault(key, []).append((app, sid, screen))
 
-    labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
+    name_map = _resolve_v2_query_names(queries, sql_rows)
 
     # Per-source-table dedupe by (query_id, col_target) so the same column referenced from
     # several frm_ids only counts once. Then per query, the larger of the two counts is the
@@ -452,48 +494,66 @@ def _diff_columns(
     for qid in set(tbl_counts) | set(dlg_counts):
         v1_cols[qid] = max(tbl_counts.get(qid, 0), dlg_counts.get(qid, 0))
 
-    # Resolve each v1 query to its v2 (connector, name) and screen.
-    for r in sql_rows:
-        crud = str(r.get("query_crud") or "SELECT").upper()
+    # Resolve each v1 (query_id, crud) to its (connector, uniquified-v2-name) via the
+    # name resolver. Walking ``name_map`` rather than ``sql_rows`` directly avoids the
+    # dialect-multiplication that a single query_id can produce (one row per dbtype).
+    for (qid, crud), (conn_name, v2_name) in name_map.items():
         if crud not in _READ_CRUD:
             continue                                            # column hints only ride on reads
-        qid = int(r["query_id"])
         if qid not in v1_cols:
             continue
-        pool = str(r.get("query_pool") or "default").strip() or "default"
-        conn_name = slugify(pool, fallback="default")
-        v2_name = _v2_query_name(labels.get(qid, ""), crud, qid)
-        screen_match = by_read_query.get((conn_name, v2_name))
-        if screen_match is None:
+        matches = by_read_query.get((conn_name, v2_name)) or []
+        if not matches:
             # Screen-level diff already covers this; don't double-report.
             continue
-        app, sid, screen = screen_match
-        v2_count = len(screen.columns)
+        # Multi-screen sharing a read_query (v1 had two ly_tables rows with the same name →
+        # v2 emits ``foo`` + ``foo_2`` both pointing at ``foo_get``): take the **max** of
+        # the v2 column counts, not the sum. Both screens read the same data; they
+        # typically carry the same column set with different filtering / visibility, so the
+        # union is roughly the max of the two counts. ``sum`` over-counted (two screens
+        # with 36 identical columns each isn't 72 distinct columns; it's 36).
+        v2_count = max((len(m[2].columns) for m in matches), default=0)
         v1_count = v1_cols[qid]
+        # Pick the first match's app/sid for the entity id when there's only one; for the
+        # multi-screen case, name them all so the operator can tell.
+        if len(matches) == 1:
+            app, sid, _ = matches[0]
+            entity_id = f"{app}/{sid}"
+            screen_label = f"screen {app}/{sid}"
+        else:
+            app = matches[0][0]
+            sids = [m[1] for m in matches]
+            entity_id = f"{app}/" + "+".join(sids)
+            screen_label = f"screens {app}/{{{','.join(sids)}}} (share read_query)"
         details = {
-            "app": app, "screen": sid, "v1_count": v1_count, "v2_count": v2_count,
+            "app": app, "screens": [m[1] for m in matches],
+            "v1_count": v1_count, "v2_count": v2_count,
             "v1_tbl_count": tbl_counts.get(qid, 0),
             "v1_dlg_count": dlg_counts.get(qid, 0),
         }
         if v2_count == 0 and v1_count > 0:
             report.add(DiffEntry(
                 kind="screen_columns", severity="missing",
-                entity_id=f"{app}/{sid}",
-                message=f"screen {app}/{sid} has no Screen.columns but v1 query #{qid} has {v1_count} column hint(s)",
+                entity_id=entity_id,
+                message=f"{screen_label} has no Screen.columns but v1 query #{qid} has {v1_count} column hint(s)",
                 details=details,
             ))
-        elif abs(v2_count - v1_count) > 2:
+        elif v1_count - v2_count > 2:
+            # One-sided: only complain when v1 has noticeably more columns than v2 (genuine
+            # migration loss). v2 having more columns than v1 is fine — the migrator may
+            # have auto-discovered extra columns from the SQL result, or the operator
+            # added columns to the screen after migration; neither is a gap to fix.
             report.add(DiffEntry(
                 kind="screen_columns", severity="mismatched",
-                entity_id=f"{app}/{sid}",
-                message=f"screen {app}/{sid} has {v2_count} columns but v1 query #{qid} has {v1_count} (tbl={tbl_counts.get(qid, 0)}, dlg={dlg_counts.get(qid, 0)})",
+                entity_id=entity_id,
+                message=f"{screen_label} has {v2_count} columns but v1 query #{qid} has {v1_count} (tbl={tbl_counts.get(qid, 0)}, dlg={dlg_counts.get(qid, 0)})",
                 details=details,
             ))
         elif include_ok:
             report.add(DiffEntry(
                 kind="screen_columns", severity="ok",
-                entity_id=f"{app}/{sid}",
-                message=f"screen {app}/{sid} columns: v1={v1_count} v2={v2_count}",
+                entity_id=entity_id,
+                message=f"{screen_label} columns: v1={v1_count} v2={v2_count}",
                 details=details,
             ))
 
@@ -613,6 +673,9 @@ def _diff_dictionary_sequences(
     dictionary: Any,
     include_ok: bool,
 ) -> None:
+    """v1 ``ly_sequence`` rows → v2 ``[sequences.<slugify(seq_label)>]``. The migrator keys
+    by the slugified label (not the numeric ``seq_id``), so the diff has to match the same
+    way — looking up by ``seq_id`` would always miss."""
     all_keys: set[str] = set()
     for k in (dictionary.sequences or {}):
         all_keys.add(str(k))
@@ -622,20 +685,23 @@ def _diff_dictionary_sequences(
 
     for r in rows:
         sid = str(r.get("seq_id") or "").strip()
+        label = str(r.get("seq_label") or "").strip()
         if not sid:
             continue
-        if sid in all_keys:
+        v2_id = slugify(label, fallback=f"seq_{sid}")
+        if v2_id in all_keys:
             if include_ok:
                 report.add(DiffEntry(
-                    kind="dict_sequence", severity="ok", entity_id=sid,
-                    message=f"sequence {sid} → dictionary.toml",
-                    details={"seq_id": sid},
+                    kind="dict_sequence", severity="ok", entity_id=v2_id,
+                    message=f"sequence #{sid} ({label!r}) → dictionary.toml [sequences.{v2_id}]",
+                    details={"seq_id": sid, "v2_id": v2_id, "label": label},
                 ))
         else:
             report.add(DiffEntry(
-                kind="dict_sequence", severity="missing", entity_id=sid,
-                message=f"v1 sequence #{sid} not in dictionary.toml — run `liberty-migrate dictionary`",
-                details={"seq_id": sid, "v1_query_id": r.get("seq_query_id"),
+                kind="dict_sequence", severity="missing", entity_id=v2_id,
+                message=f"v1 sequence #{sid} ({label!r}) not in dictionary.toml as [sequences.{v2_id}] — run `liberty-migrate dictionary`",
+                details={"seq_id": sid, "v2_id": v2_id, "label": label,
+                         "v1_query_id": r.get("seq_query_id"),
                          "v1_dd_id": r.get("seq_dd_id")},
             ))
 
@@ -763,22 +829,28 @@ def _diff_api(
     connectors: Any,
     include_ok: bool,
 ) -> None:
-    """Every ``ly_api_conn`` → one v2 API connector named ``slugify(conn_name)``; every
-    ``ly_api`` → one endpoint on the resolved connector. v1 endpoints with no
-    ``conn_id`` migrate to a single ``legacy_api`` connector (matching the migrator's
-    fallback)."""
+    """Every ``ly_api_conn`` → one v2 API connector named ``slugify(conn_label)`` (the
+    migrator's convention — matches :func:`liberty.migrations.v1.build_api_resolver`); every
+    ``ly_api`` → one endpoint named ``slugify(api_label)`` on the resolved connector. v1
+    endpoints with no ``conn_id`` migrate to a single ``legacy_api`` connector.
+
+    Uniquify: when two v1 ``ly_api_conn`` rows share a label, the migrator suffixes
+    collisions (``conn`` → ``conn``, ``conn_2``). Same dance as the SQL query naming."""
     api_v2 = {name for name, c in (connectors.connectors or {}).items()
               if getattr(c, "type", None) == "api"}
     by_conn = {name: {e.name for e in (c.endpoints or [])}
                for name, c in (connectors.connectors or {}).items()
                if getattr(c, "type", None) == "api"}
 
+    # Replicate the migrator's iteration: connectors in row order, with _uniquify per name.
+    taken_conn: set[str] = set()
     v1_conn_names: dict[int, str] = {}
     for r in conn_rows:
         cid = r.get("conn_id")
         if cid is None:
             continue
-        name = slugify(str(r.get("conn_name") or ""), fallback=f"api_{cid}")
+        base = slugify(str(r.get("conn_label") or ""), fallback=f"conn{cid}")
+        name = _uniquify(base, taken_conn)
         v1_conn_names[int(cid)] = name
         if name in api_v2:
             if include_ok:
@@ -791,18 +863,24 @@ def _diff_api(
             report.add(DiffEntry(
                 kind="api_connector", severity="missing", entity_id=name,
                 message=f"v1 api_conn #{cid} not migrated to [connectors.{name}]",
-                details={"conn_id": cid, "v2_name": name, "v1_name": r.get("conn_name")},
+                details={"conn_id": cid, "v2_name": name, "v1_label": r.get("conn_label")},
             ))
 
+    # Endpoints — same naming convention (slugify(api_label) + uniquify per connector).
+    # NB: the reader's SELECT aliases the foreign-key column as ``api_conn_id`` (not
+    # ``conn_id``), since v1's ``ly_api`` table uses that name and a join would have
+    # collided otherwise.
+    taken_ep: dict[str, set[str]] = {}
     for r in ep_rows:
         eid = r.get("api_id")
         if eid is None:
             continue
-        cid = r.get("conn_id")
+        cid = r.get("api_conn_id")
         conn_name = v1_conn_names.get(int(cid)) if cid is not None else "legacy_api"
-        # Endpoint v2 name comes from the v1 ``api_label``. Same convention build_api_resolver
-        # uses (slugify of the label, fallback to ``api_<id>``).
-        v2_ep = slugify((r.get("api_label") or "").strip(), fallback=f"api_{eid}")
+        if conn_name is None:
+            conn_name = "legacy_api"
+        base = slugify((r.get("api_label") or "").strip(), fallback=f"ep{eid}")
+        v2_ep = _uniquify(base, taken_ep.setdefault(conn_name, set()))
         if conn_name in by_conn and v2_ep in by_conn[conn_name]:
             if include_ok:
                 report.add(DiffEntry(

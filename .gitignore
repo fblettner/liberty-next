@@ -38,3 +38,4 @@ config/dashboards.toml
 
 # Claude Code per-session runtime state — lock files, recall caches, etc.
 .claude/
+config_backups/

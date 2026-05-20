@@ -476,7 +476,9 @@ url = "sqlite+aiosqlite:///:memory:"
                    if e.kind == "dict_sequence" and e.severity == "missing"]
     assert {e.entity_id for e in enum_missing} == {"1"}
     assert {e.entity_id for e in lookup_missing} == {"1"}
-    assert {e.entity_id for e in seq_missing} == {"1"}
+    # Sequences are keyed in v2 by slugify(seq_label), not the v1 numeric ``seq_id``.
+    # The test fixture above seeded label="next_id" → v2 id = "next_id".
+    assert {e.entity_id for e in seq_missing} == {"next_id"}
 
 
 # ── screens checks ─────────────────────────────────────────────────────────────────────────
