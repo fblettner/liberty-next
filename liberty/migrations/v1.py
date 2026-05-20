@@ -2199,6 +2199,10 @@ def _build_chain_action(a: Mapping[str, Any], skip_query: str | None = None) -> 
                 entry["value"] = b["value"]
             if "source" in b and b["source"]:
                 entry["source"] = _rewrite_source_path(str(b["source"]))
+            # v1 ``map_default`` → v2 :attr:`ParamBind.default`. Carried as-is — it's a
+            # literal fallback string, not a path, so no source-rewrite needed.
+            if "default" in b and b["default"] not in (None, ""):
+                entry["default"] = str(b["default"])
             if "v1_map_type" in b:
                 entry["v1_map_type"] = b["v1_map_type"]
             out.append(entry)
@@ -2672,6 +2676,16 @@ def migrate_actions(
                         entry["value"] = mv
                     if mt and mt not in ("DD", "VALUE"):
                         entry["v1_map_type"] = mt   # FIELD / INPUT / etc. — operator decides
+                    # ``ly_act_tasks_params.map_default`` → v2 :attr:`ParamBind.default` —
+                    # v2's runtime binds this when the source resolves to NULL / empty.
+                    # Only meaningful in source mode (literal ``value`` already wins outright),
+                    # but carry it across uniformly — the operator may flip the mode later
+                    # without losing the fallback. Skipped when blank to keep the TOML terse.
+                    md = p.get("map_default")
+                    if isinstance(md, str):
+                        md = md.strip()
+                    if md not in (None, ""):
+                        entry["default"] = str(md)
                     pb_out.append(entry)
                 if pb_out:
                     task["param_binds"] = pb_out

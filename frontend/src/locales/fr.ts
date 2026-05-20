@@ -715,6 +715,10 @@ const fr: Resources = {
         modeValueTip: 'Valeur littérale — saisissez directement la valeur à lier',
         modeSourceTip: 'Chemin source — lit depuis la ligne déclenchante, le contexte de chaîne ou une variable intégrée (#LOGIN_USER# / #SYSDATE# / …)',
         flipMode: 'Basculer entre valeur littérale et source du contexte',
+        defaultPlaceholder: '#SYSDATE# / "0" / INPUT.<x> / …',
+        defaultTip: 'Valeur de repli liée lorsque la source vaut NULL / vide à l\'exécution (le ``map_default`` de v1). Accepte un littéral, une variable intégrée (#SYSDATE# / #LOGIN_USER# / …), ou un chemin du contexte de chaîne.',
+        addDefault: 'valeur par défaut si la source est vide',
+        defaultClear: 'Supprimer la valeur par défaut',
       },
       // Tranche 4d — variantes de contrôle de flux (ChainAction / IfAction / LoopAction).
       chain: {

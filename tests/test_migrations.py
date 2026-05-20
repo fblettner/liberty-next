@@ -1742,6 +1742,61 @@ def test_migrate_actions_dumps_v1_workflows() -> None:
     ]
 
 
+def test_migrate_actions_carries_map_default_on_task_param_binds() -> None:
+    """v1's ``ly_act_tasks_params.map_default`` (the fallback value when the source resolves
+    to NULL / empty at call time) → v2 :attr:`ParamBind.default`. Source mode + value mode
+    rows both carry the default — the operator may flip modes later without losing the
+    fallback. A blank / NULL ``map_default`` is dropped to keep the TOML terse."""
+    action_rows = [
+        {"act_id": 7, "act_label": "Insert F0092 Role"},
+    ]
+    task_rows = [
+        {"act_id": 7, "evt_id": 1, "evt_seq": 1, "evt_type": "QUERY",
+         "evt_label": "Insert a New Role", "evt_query_id": 50, "evt_query_crud": "PUT",
+         "evt_api_id": None, "evt_brc_id": None,
+         "evt_brc_true": None, "evt_brc_false": None,
+         "evt_loop": "N", "evt_loop_array": None},
+    ]
+    task_param_rows = [
+        # Source mode (INPUT.<X>) WITH a default — the JDE UPMJ defaults to today.
+        {"act_id": 7, "evt_id": 1, "map_id": 1, "map_type": "DD", "map_dir": "IN",
+         "map_var": "UPMJ", "map_label": None, "map_var_type": None,
+         "map_value": "INPUT.UPMJ", "map_rules": None, "map_rules_values": None,
+         "map_default": "#SYSDATE#"},
+        # Source mode WITHOUT a default — stays terse (no ``default`` key emitted).
+        {"act_id": 7, "evt_id": 1, "map_id": 2, "map_type": "DD", "map_dir": "IN",
+         "map_var": "AUUSER", "map_label": None, "map_var_type": None,
+         "map_value": "INPUT.AUUSER", "map_rules": None, "map_rules_values": None,
+         "map_default": None},
+        # Value mode WITH a default — the default still carries even though it's ignored
+        # at runtime in value mode (operator may flip later).
+        {"act_id": 7, "evt_id": 1, "map_id": 3, "map_type": "VALUE", "map_dir": "IN",
+         "map_var": "USKID", "map_label": None, "map_var_type": None,
+         "map_value": "ADMIN", "map_rules": None, "map_rules_values": None,
+         "map_default": "0"},
+        # Blank string default → dropped (terse TOML).
+        {"act_id": 7, "evt_id": 1, "map_id": 4, "map_type": "VALUE", "map_dir": "IN",
+         "map_var": "PID", "map_label": None, "map_var_type": None,
+         "map_value": "BATCH", "map_rules": None, "map_rules_values": None,
+         "map_default": ""},
+    ]
+    sql_rows = [
+        {"query_id": 50, "query_crud": "PUT", "query_label": "f0092", "query_pool": "jdedwards"},
+    ]
+    out = migrate_actions(
+        action_rows, task_rows, [], [], task_param_rows, [],
+        sql_rows=sql_rows, app_name="nomajde",
+    )
+    action = out["migrated_actions"]["nomajde"]["insert_f0092_role"]
+    binds = action["tasks"][0]["param_binds"]
+    assert binds == [
+        {"param": "UPMJ", "source": "UPMJ", "default": "#SYSDATE#"},
+        {"param": "AUUSER", "source": "AUUSER"},
+        {"param": "USKID", "value": "ADMIN", "default": "0"},
+        {"param": "PID", "value": "BATCH"},
+    ]
+
+
 def test_attach_actions_to_screens_event_driven() -> None:
     """v1's ``ly_evt_cpt`` is the *correct* attachment for actions: each row says "event N on
     component C fires action A". ``FormsDialog`` rows wire to the matching v2 screen's
@@ -1799,6 +1854,58 @@ def test_attach_actions_to_screens_event_driven() -> None:
     assert [s["id"] for s in steps] == ["insert_role_lang", "insert_role_env"]
     # No ``Screen.actions`` block landed — events go on ``dialog.on_save``, not the toolbar.
     assert "actions" not in out["screens"]["nomajde"]["f0092"]
+
+
+def test_attach_actions_to_screens_carries_default_into_chain_step() -> None:
+    """The chain builder (:func:`_build_chain_action` / :func:`_rewrite_param_binds`) must
+    carry ``ParamBind.default`` through from the migrated_actions dump onto the wired chain
+    step's ``param_binds``. Without this, v1's per-task ``map_default`` survives in the
+    reference dump but is silently dropped when the action is actually attached to a screen."""
+    screens_data = {"screens": {"nomajde": {
+        "f0092": {
+            "id": "f0092", "label": "Role Description",
+            "read_query": "f0092_get", "update_query": "f0092_put",
+            "dialog": {"tabs": [{"id": "general", "type": "form", "fields": []}]},
+        },
+    }}}
+    actions_data = {"migrated_actions": {"nomajde": {
+        "create_role": {
+            "id": "create_role", "v1_act_id": 1, "label": "Create Role",
+            "tasks": [
+                # First task duplicates update_query → skipped (dialog Save already writes it).
+                {"seq": 1, "v1_evt_id": 1, "type": "QUERY", "label": "Insert role",
+                 "query": "f0092_put"},
+                # The actual chain step we care about. UPMJ has #SYSDATE# as fallback; AUUSER
+                # has a literal "ADMIN" as fallback; USKID has no default at all.
+                {"seq": 2, "v1_evt_id": 2, "type": "QUERY", "label": "Insert role/lang",
+                 "query": "f00921_put",
+                 "param_binds": [
+                     {"param": "UPMJ", "source": "INPUT.UPMJ", "default": "#SYSDATE#"},
+                     {"param": "AUUSER", "source": "INPUT.AUUSER", "default": "ADMIN"},
+                     {"param": "USKID", "source": "INPUT.USKID"},
+                 ]},
+            ],
+        },
+    }}}
+    event_rows = [{"evt_component": "FormsDialog", "evt_cpt_id": 2, "evt_id": 1, "evt_act_id": 1}]
+    table_rows = [
+        {"tbl_id": 11, "tbl_db_name": "f0092", "tbl_label": "Role Description", "tbl_frm_id": 2},
+    ]
+    out = attach_actions_to_screens(
+        screens_data, actions_data,
+        event_rows=event_rows, table_rows=table_rows,
+        app_name="nomajde",
+    )
+    on_save = out["screens"]["nomajde"]["f0092"]["dialog"]["on_save"]
+    # Only one task survived (the duplicate `f0092_put` was skipped); a single-step chain with
+    # no control flow unwraps to the lone step directly, no ChainAction wrapper.
+    [step] = on_save
+    assert step["type"] == "run_query" and step["query"] == "f00921_put"
+    assert step["param_binds"] == [
+        {"param": "UPMJ", "source": "INPUT.UPMJ", "default": "#SYSDATE#"},
+        {"param": "AUUSER", "source": "INPUT.AUUSER", "default": "ADMIN"},
+        {"param": "USKID", "source": "INPUT.USKID"},   # no default → no key
+    ]
 
 
 def test_attach_actions_to_screens_dedupes_table_and_dialog_events() -> None:

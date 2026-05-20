@@ -164,7 +164,12 @@ class ParamBind(BaseModel):
     context-menu trigger, or a nested-tab filter. Two modes: bind a literal value, or bind
     another column's / field's current value (resolved at call time). Set exactly one of
     ``value`` or ``source``. ``source = "#LOGIN_USER#"`` and ``#SYSDATE#`` are reserved
-    built-ins."""
+    built-ins.
+
+    ``default`` is the fallback bound when *source mode* resolves to NULL / empty at call
+    time — v2's port of v1's ``ly_act_tasks_params.map_default``. Useful when a workflow
+    step needs a sane fallback for an optional input (e.g. JDE F0092 inserts where a blank
+    ``UPMJ`` should default to today). Ignored in value mode."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -173,6 +178,13 @@ class ParamBind(BaseModel):
     source: str | None = Field(
         default=None,
         description="Column / field whose current value to bind. Read at call time from the firing context (row, dialog form, …).",
+    )
+    default: str | None = Field(
+        default=None,
+        description=(
+            "Fallback value bound when *source mode* resolves to NULL / empty at call time. "
+            "v2's port of v1's ``ly_act_tasks_params.map_default``. Ignored in value mode."
+        ),
     )
 
 

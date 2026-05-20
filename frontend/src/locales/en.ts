@@ -716,6 +716,10 @@ const en = {
         modeValueTip: 'Literal value — type the bind value directly',
         modeSourceTip: 'Source path — read from the firing row, chain context, or a built-in (#LOGIN_USER# / #SYSDATE# / …)',
         flipMode: 'Toggle between literal value and chain-context source',
+        defaultPlaceholder: '#SYSDATE# / "0" / INPUT.<x> / …',
+        defaultTip: 'Fallback bound when the source resolves to NULL / empty at call time (v1\'s map_default). Accepts a literal, a built-in (#SYSDATE# / #LOGIN_USER# / …), or a chain-context path.',
+        addDefault: 'default if source is empty',
+        defaultClear: 'Remove default',
       },
       // Slice 4d — workflow-control variants (ChainAction / IfAction / LoopAction).
       chain: {

@@ -199,7 +199,14 @@ export const BUILTIN_SOURCE_PATHS: ReadonlyArray<{ value: string; label: string 
  *  the migrated queries omit-binding-the-key matches the desired "leave column unchanged"
  *  semantic). ``#X#`` built-ins (LOGIN_USER / SYSDATE / NOW / …) resolve via
  *  :func:`resolveBuiltin`; an *unknown* / uninstalled built-in is dropped (same as a missing
- *  chain-context path). */
+ *  chain-context path).
+ *
+ *  ``ParamBind.default`` (v2's port of v1's ``ly_act_tasks_params.map_default``) is the
+ *  fallback bound in *source mode* when the source resolves to NULL / empty. Useful for an
+ *  optional workflow input where a blank source should default to a sane literal (e.g. an
+ *  ``UPMJ`` defaulting to today / ``"0"`` for a numeric column). The default itself is also
+ *  built-in-aware — a default of ``"#SYSDATE#"`` resolves to today's date. In *value mode*
+ *  the literal already wins outright, so ``default`` is ignored. */
 export function resolveBinds(
   binds: ReadonlyArray<ParamBind> | undefined,
   ctx: ChainCtx,
@@ -210,7 +217,25 @@ export function resolveBinds(
     if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
     if (b.source) {
       const v = resolveSource(b.source, ctx, formCtx)
-      if (v != null && String(v) !== '') out[b.param] = String(v)
+      if (v != null && String(v) !== '') { out[b.param] = String(v); continue }
+    }
+    // Source resolved to nothing → try the default. v1's ``map_default`` was almost always
+    // a literal (``"0"``, ``""``, an account-code default), but v2 lets it also be a built-in
+    // (``"#SYSDATE#"`` / ``"#LOGIN_USER#"``) or a chain-context path. We dispatch by *shape*:
+    //   * starts + ends with ``#`` → built-in (resolves via ``resolveSource``);
+    //   * contains a dot → chain-context path (drops the default silently if it doesn't
+    //     resolve — a typo in a path shouldn't accidentally bind the path string itself);
+    //   * otherwise → literal, bound verbatim.
+    if (b.default != null && b.default !== '') {
+      const d = String(b.default)
+      const isBuiltin = d.startsWith('#') && d.endsWith('#') && d.length > 2
+      const isPath = d.includes('.')
+      if (isBuiltin || isPath) {
+        const dv = resolveSource(d, ctx, formCtx)
+        if (dv != null && String(dv) !== '') out[b.param] = String(dv)
+      } else {
+        out[b.param] = d
+      }
     }
   }
   return out

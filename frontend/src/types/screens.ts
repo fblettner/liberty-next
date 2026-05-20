@@ -6,11 +6,14 @@
 import type { Column } from './connectors'
 
 /** One ParamBind — same shape used by dialog field lookups, actions (slice 4), and row menus
- *  (slice 6). Exactly one of `value` / `source` is set in practice. */
+ *  (slice 6). Exactly one of `value` / `source` is set in practice. ``default`` is the
+ *  fallback bound when *source mode* resolves to NULL / empty at call time (v2's port of v1's
+ *  ``ly_act_tasks_params.map_default``); ignored in value mode. */
 export interface ParamBind {
   param: string
   value?: string | null
   source?: string | null
+  default?: string | null
 }
 
 /** One per-field predicate evaluated against the dialog's live form state. `field` is another

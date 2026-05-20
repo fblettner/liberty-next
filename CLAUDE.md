@@ -679,9 +679,13 @@ business object:
   ``ScreenDialog`` (``title?``, ``tabs[]``) → ``ScreenTab`` (``id``, ``label?``, ``l``, ``cols?``,
   ``hide_on_add``/``hide_on_edit``, ``fields[]``) → ``ScreenField`` (``name``, ``dd?``, ``label?``,
   ``hidden``/``disabled``/``required``, ``colspan?``, ``default?``, ``lookup_param_binds[]``), and
-  the unified ``ParamBind`` (``{param, value | source}``) — v2's port of v1's ``ly_dlg_filters``
+  the unified ``ParamBind`` (``{param, value | source, default?}``) — v2's port of v1's ``ly_dlg_filters``
   (and ``ly_tbl_filters`` / ``ly_dictionary_filters``: one mechanism for every kind of parameter
-  passing — dialog lookups, action arguments, row menu triggers, etc.). ``parse_screens`` injects
+  passing — dialog lookups, action arguments, row menu triggers, etc.). ``default`` is the
+  fallback bound when *source mode* resolves to NULL / empty at call time — v2's port of v1's
+  ``ly_act_tasks_params.map_default``; accepts a literal (``"0"``), a built-in (``"#SYSDATE#"``),
+  or a chain-context path. ``actionRunner.resolveBinds`` dispatches by default's shape so a
+  workflow step's missing input lands a sane fallback instead of being dropped. ``parse_screens`` injects
   each screen's ``id`` from its dict key; a mismatched explicit ``id`` is rejected. ``load_screens``
   → an empty ``ScreensFile`` when no file.
 - `liberty/migrations/source.py::read_screens(engine)` returns 8 row-sets (the seven dialog tables
