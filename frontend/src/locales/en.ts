@@ -266,6 +266,22 @@ const en = {
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
     tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', dashboards: 'Dashboards' },
+    // Test-connection button on API connectors. Sends the in-progress (unsaved) config to
+    // POST /admin/config/api/test, which fires the smallest meaningful call against the
+    // upstream (OAuth2 → token fetch; other auth → config validation) and returns a
+    // structured result. The strings drive the alert modal that surfaces it.
+    api: {
+      test: {
+        button: 'Test connection',
+        tip: 'Try the connector against the real upstream — does not save anything.',
+        tokenOk: 'Token acquired',
+        tokenBody: 'Got a token from the configured endpoint.\nPreview: {{preview}}\nCached for: {{ttl}}s',
+        tokenFailed: 'Token fetch failed',
+        tokenFailedDetail: 'Check auth_token_endpoint / auth_token_body / auth_token_field — the field hints under each input describe what each one needs.',
+        ok: 'Connector valid',
+        failed: 'Connector test failed',
+      },
+    },
     menus: {
       saved: 'Saved & reloaded.',
       hint: 'Save validates the menu tree (unique ids, parents exist, no cycles), writes menus.toml, and reloads.',

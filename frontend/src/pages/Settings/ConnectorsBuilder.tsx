@@ -14,8 +14,9 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SchemaNavigator, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
+import ApiConnectorEditor, { type ApiConnector as ApiConnectorEditorValue } from './ApiConnectorEditor'
 import { validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -219,6 +220,11 @@ export default function ConnectorsBuilder() {
     setConns((p) => ({ ...(p ?? {}), [name]: type === 'api' ? { type: 'api', base_url: '' } : { type: 'sql', queries: [] } }))
     setSel(name); setStatus(null)
   }
+  // Note: API connector testing is no longer a toolbar action — it lives in the editor's
+  // Test tab (see ``ApiConnectorEditor``), where the operator picks an endpoint, supplies
+  // its placeholder values, and sees the result in-place. Backed by the same
+  // ``POST /admin/config/api/test`` endpoint; that endpoint accepts ``test_endpoint`` +
+  // ``params`` so it can fire any named endpoint without saving first.
   const removeConnector = async (name: string) => {
     const ok = await modals.confirm({
       title: t('settings.connectors.delete'),
@@ -602,11 +608,14 @@ export default function ConnectorsBuilder() {
                 </Row>
               </Row>
               {!isSql && (
-                // API connectors render straight into the SchemaNavigator — no Tables / CRUD
-                // shape to group by, no sequences / lookups either.
-                <SqlConnectorContext.Provider value={undefined}>
-                  <SchemaNavigator root={{ label: sel!, schema: selSchema, value: selConn, onChange: (v) => update(sel!, v) }} />
-                </SqlConnectorContext.Provider>
+                // API connectors get a dedicated 5-tab editor (Connection / Authentication /
+                // Endpoints / Webhooks / Test) — matches the nomaubl shape, with conditional
+                // auth fields per method and an in-place Test tab that fires through
+                // ``POST /admin/config/api/test`` against the operator's *in-progress* config
+                // (no need to save first). SchemaNavigator was the previous render path; it
+                // surfaced 20+ flat fields including OAuth2 ones that didn't apply to a basic
+                // connector and vice versa, which made the editor noisy and hard to scan.
+                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
               {isSql && mode === 'tables' && (
                 selTable && queryDefSchema ? (() => {

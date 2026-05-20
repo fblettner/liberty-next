@@ -268,6 +268,18 @@ const fr: Resources = {
       unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
     tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', dashboards: 'Tableaux de bord' },
+    api: {
+      test: {
+        button: 'Tester la connexion',
+        tip: 'Essaie le connecteur contre le serveur réel — n\'enregistre rien.',
+        tokenOk: 'Jeton obtenu',
+        tokenBody: 'Jeton récupéré depuis l\'endpoint configuré.\nAperçu : {{preview}}\nMis en cache pendant : {{ttl}}s',
+        tokenFailed: 'Échec de récupération du jeton',
+        tokenFailedDetail: 'Vérifiez auth_token_endpoint / auth_token_body / auth_token_field — les aides sous chaque champ décrivent ce qu\'ils attendent.',
+        ok: 'Connecteur valide',
+        failed: 'Test du connecteur échoué',
+      },
+    },
     menus: {
       saved: 'Enregistré et rechargé.',
       hint: 'Enregistrer valide l\'arborescence (ids uniques, parents existants, sans cycle), écrit menus.toml et recharge.',

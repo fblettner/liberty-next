@@ -60,6 +60,12 @@ export interface JsonSchema {
    *  ``e.g. https://api.example.com``) without hard-coding a default value. Without this, the
    *  string-input placeholder falls back to ``default: <value>`` or ``required``. */
   x_placeholder?: string
+  /** Hide this field unless a sibling field matches a given value. Lets a form scope itself
+   *  to one of several modes — e.g. ApiConnectorConfig hides every OAuth2 field unless
+   *  ``auth_type === "oauth2"``. ``value`` can be a single value or a list of allowed values
+   *  (any match). Hidden fields are not rendered at all; their stored value (if any) stays in
+   *  the model — switching the gate back surfaces it again. */
+  x_visible_when?: { field: string; value: string | string[] }
 }
 
 /** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema).
@@ -529,6 +535,15 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
       )}
       {activeProps.map(([key, raw]) => {
         const sub = effective(raw, allDefs)
+        // ``x_visible_when`` — hide this field unless a sibling matches. The form's sibling
+        // ``value`` is the parent ``value`` prop. Multiple allowed values via a list. Hidden
+        // fields render nothing (returning ``null`` from the map preserves the array shape).
+        const vw = sub.x_visible_when ?? raw.x_visible_when
+        if (vw) {
+          const sibling = value[vw.field]
+          const allowed = Array.isArray(vw.value) ? vw.value : [vw.value]
+          if (!allowed.some((v) => v === sibling)) return null
+        }
         const isReq = required.has(key)
         const label = (sub.title ?? raw.title ?? key) + (isReq ? ' *' : '')
         const desc = sub.description ?? raw.description

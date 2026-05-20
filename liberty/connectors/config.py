@@ -408,19 +408,62 @@ class ApiConnectorConfig(BaseModel):
     base_url: str = Field(description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. (Leave blank only if every endpoint uses an absolute path.)")
     auth_type: AuthType = Field(
         default="none",
-        description="none / basic / bearer / api_key / oauth2.",
+        description="Authentication scheme. Pick the right one and only the fields it needs will appear.",
         json_schema_extra={"x_enum_ref": "AUTH_TYPE"},
     )
-    auth_username: str | None = Field(default=None, json_schema_extra={"x_group": "Auth"}, description="Username — for basic auth, and the {{username}} placeholder. May be an ENC: value.")
-    auth_password: str | None = Field(default=None, json_schema_extra={"x_group": "Auth", "format": "password"}, description="Password — for basic auth, and {{password}}. May be an ENC: value (decrypted at runtime via the crypto master key).")
-    auth_token: str | None = Field(default=None, json_schema_extra={"x_group": "Auth", "format": "password"}, description="Static bearer token / API key (for bearer & api_key auth), and the {{token}} placeholder. May be an ENC: value.")
-    auth_api_key_header: str = Field(default="X-Api-Key", json_schema_extra={"x_group": "Auth"}, description="Header name for api_key auth.")
-    auth_token_endpoint: str | None = Field(default=None, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: token-endpoint URL (POSTed to fetch a token).")
-    auth_token_field: str | None = Field(default=None, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: dot-path to the token in the token-endpoint response (e.g. \"access_token\").")
-    auth_token_body: str | None = Field(default=None, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: request body sent to the token endpoint.")
-    auth_token_content_type: str = Field(default="application/json", json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: Content-Type of that request body.")
-    auth_token_headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: extra headers for the token request.")
-    auth_token_ttl: int = Field(default=3300, json_schema_extra={"x_group": "OAuth2"}, description="OAuth2: how long (seconds) to cache a fetched token before refreshing (default 3300 = 55 min).")
+    # Auth fields are scoped to the matching ``auth_type`` via ``x_visible_when`` so the form
+    # only shows what's actually used. Switching auth_type doesn't drop the stored values —
+    # they stay in the model so flipping back to a previous mode restores them.
+    auth_username: str | None = Field(
+        default=None,
+        description="Username for the request. Also available as the ``{{username}}`` placeholder.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": ["basic", "oauth2"]}},
+    )
+    auth_password: str | None = Field(
+        default=None,
+        description="Password for the request. Also available as ``{{password}}``. May be an ``ENC:`` value (decrypted at runtime).",
+        json_schema_extra={"x_group": "Auth", "format": "password", "x_visible_when": {"field": "auth_type", "value": ["basic", "oauth2"]}},
+    )
+    auth_token: str | None = Field(
+        default=None,
+        description="Static bearer token / API key. Also available as ``{{token}}``. May be an ``ENC:`` value.",
+        json_schema_extra={"x_group": "Auth", "format": "password", "x_visible_when": {"field": "auth_type", "value": ["bearer", "api_key"]}},
+    )
+    auth_api_key_header: str = Field(
+        default="X-Api-Key",
+        description="Header name to carry the API key (e.g. ``X-Api-Key``, ``Authorization``).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "api_key"}},
+    )
+    auth_token_endpoint: str | None = Field(
+        default=None,
+        description="Token-endpoint URL the connector POSTs to fetch a fresh token.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
+    auth_token_field: str | None = Field(
+        default=None,
+        description="Dot-path to the token in the token-endpoint response (e.g. ``access_token`` or ``userInfo.token``).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
+    auth_token_body: str | None = Field(
+        default=None,
+        description="Request body posted to the token endpoint. Supports ``{{username}}`` / ``{{password}}`` placeholders.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
+    auth_token_content_type: str = Field(
+        default="application/json",
+        description="Content-Type of the token-request body (``application/json`` or ``application/x-www-form-urlencoded``).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
+    auth_token_headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Extra headers sent on the token request (e.g. a client-id header).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
+    auth_token_ttl: int = Field(
+        default=3300,
+        description="How long (seconds) to cache a fetched token before refreshing. Default 3300 = 55 min.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
     default_headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Transport"}, description="Headers sent on every request from this connector.")
     timeout: float = Field(default=30.0, json_schema_extra={"x_group": "Transport"}, description="Per-request timeout in seconds.")
     verify_ssl: bool = Field(default=True, json_schema_extra={"x_group": "Transport"}, description="Verify the server's TLS certificate (disable only for dev / self-signed).")

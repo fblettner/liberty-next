@@ -1414,9 +1414,20 @@ operator-facing way to edit every config section without touching TOML. Schema-d
   toggle. **Tables** = CRUD-grouped (the `ConnectorsTableEditor` view, unchanged); **Sequences**
   = flat list of queries referenced by `[sequences.*]` in dictionary.toml; **Lookups** = same
   for `[lookups.*]`. Each opens a single-query SchemaForm editor with a Back button on the
-  left. API connectors render straight into the SchemaNavigator. A small **Settings…** modal
-  on each SQL connector exposes the rare connector-wide fields (`type` / `pool` / `licensed` /
-  `max_rows`) — no longer a permanent pane.
+  left. API connectors get a **dedicated 5-tab editor** (`ApiConnectorEditor.tsx`):
+  *Connection* (base URL / timeout / SSL verify / default headers) · *Authentication* (method
+  picker + only the fields that method uses — OAuth2's token endpoint section appears only
+  when method = OAuth2, etc.) · *Endpoints* (collapsible list, per-endpoint Name/Label/
+  Method/URL/headers/body with Format-JSON button/query params/response field/description/
+  response mappings/parameters table) · *Webhooks* (placeholder for the Phase 9 inbound-
+  webhook slice) · *Test* (pick an endpoint, the declared parameters surface as inputs with
+  defaults, Run fires `POST /admin/config/api/test` against the in-progress config without
+  saving and shows status/URL/body/extracted/mapped as a JSON result panel). Headers display
+  as nomaubl's `Key:Value;Key:Value` semicolon-separated form; query params as
+  `key=val&key=val`. SchemaNavigator was the previous render path; it surfaced 20+ flat
+  fields including OAuth2 ones that didn't apply to a basic connector and vice versa. A small
+  **Settings…** modal on each SQL connector exposes the rare connector-wide fields (`type` /
+  `pool` / `licensed` / `max_rows`) — no longer a permanent pane.
 * **Scaffold modals** — `ScaffoldQueryModal` (sequence + lookup; `+ Add sequence` /
   `+ Add lookup` in the Sequences/Lookups views) and `CrudWizardModal` (`+ Add table → Generate
   from DB`). Both read the connector's pool via the lazy two-step introspection (`GET /api/sql/
