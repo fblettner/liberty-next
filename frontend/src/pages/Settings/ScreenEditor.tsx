@@ -26,7 +26,9 @@ import { colors, fontSize, fonts } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import { EditQueryModal } from './EditQueryModal'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
-import ActionListEditor from './ActionListEditor'
+import ActionTreeView from './ActionTreeView'
+import ActionEditorModal from './ActionEditorModal'
+import type { ActionPath } from './actionPath'
 
 type Row = Record<string, unknown>
 
@@ -266,11 +268,21 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
 
   // ── action editors (shared component) ──────────────────────────────────────────────
   // ``renderActionList`` + its inline ``renderPromptFields`` / ``renderActionOverrides`` /
-  // ``actionVariantSchema`` blocks (and the action / PromptField constants) all moved into
-  // ``ActionListEditor.tsx`` so the visual builder's Tab Settings panel can reuse the same
-  // editor. Each attachment point below renders one ``<ActionListEditor>`` instance.
+  // ``actionVariantSchema`` blocks moved into ``ActionListEditor.tsx`` / ``ActionTreeView.tsx``.
+  //
+  // Theme A extended to this surface: each hook list (on_load / on_save / on_cancel /
+  // screen.actions / on_insert / on_update / on_delete / row_menu) renders as a flat
+  // ``<ActionTreeView path={null}>`` list — clicking a row opens ``ActionEditorModal`` with
+  // ActionTreeView in editor mode. Without this, expanding one chain in the Actions tab
+  // pushed the other six lists off-screen.
   const onEditQueryRaise = (connector: string, queryName: string) =>
     setEditQuery({ connector, queryName })
+  // ``openEditor`` identifies WHICH hook list is being edited + the path within it. The modal
+  // mounts when this is non-null and reads / writes through the matching list's accessors.
+  // A ``listKey`` of ``'on_load'`` / ``'on_save'`` / ``'on_cancel'`` targets the dialog's hook;
+  // anything else targets the screen's top-level slot.
+  type ListKey = 'on_load' | 'on_save' | 'on_cancel' | 'actions' | 'on_insert' | 'on_update' | 'on_delete' | 'row_menu'
+  const [openEditor, setOpenEditor] = useState<{ listKey: ListKey; path: ActionPath } | null>(null)
 
 
   // Dialog lifecycle hook accessors — same pattern for each. ``setDialog`` strips empty hook
@@ -286,41 +298,57 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   const onLoad = useMemo(() => dialogList('on_load'), [dialog])
   const onSave = useMemo(() => dialogList('on_save'), [dialog])
   const onCancel = useMemo(() => dialogList('on_cancel'), [dialog])
-  const renderOnLoad = (): ReactNode => (
-    <ActionListEditor
-      actions={onLoad}
-      onChange={(n) => setDialogList('on_load', n)}
-      heading={t('settings.screens.onLoad.heading')}
-      hint={t('settings.screens.onLoad.hint')}
-      emptyMessage={t('settings.screens.onLoad.empty')}
+  // Each list renders as a flat ``<ActionTreeView path={null}>`` — clicking a row sets
+  // ``openEditor`` so the ``ActionEditorModal`` overlays the screen-editor with the focused
+  // action's chain editor. The ``listKey`` identifies the slot the modal writes back to.
+  // The screen's read-query columns — passed down to ParamBindList so the source dropdown
+  // surfaces the firing row's column names. The migration always emits ``Screen.columns``,
+  // but a hand-written screens.toml without them still works (empty list = no candidates
+  // from this source, only chain-context ones).
+  const screenReadColumns: Row[] = Array.isArray((value as Row).columns)
+    ? ((value as Row).columns as Row[])
+    : []
+  const renderHookList = (
+    listKey: ListKey,
+    actions: Row[],
+    onChange: (n: Row[]) => void,
+    heading: string,
+    hint: string,
+    emptyMessage: string,
+  ): ReactNode => (
+    <ActionTreeView
+      actions={actions}
+      onChange={onChange}
+      path={null}
+      onPathChange={(p) => p && p.length > 0 && setOpenEditor({ listKey, path: p })}
+      selectedPath={openEditor?.listKey === listKey ? openEditor.path : null}
       defs={defs}
       effectiveConnector={effectiveConnector}
       onEditQuery={onEditQueryRaise}
+      rootLabel={heading}
+      heading={heading}
+      hint={hint}
+      emptyMessage={emptyMessage}
+      screenReadColumns={screenReadColumns}
     />
   )
-  const renderOnSave = (): ReactNode => (
-    <ActionListEditor
-      actions={onSave}
-      onChange={(n) => setDialogList('on_save', n)}
-      heading={t('settings.screens.action.heading')}
-      hint={t('settings.screens.action.hint')}
-      emptyMessage={t('settings.screens.action.empty')}
-      defs={defs}
-      effectiveConnector={effectiveConnector}
-      onEditQuery={onEditQueryRaise}
-    />
+  const renderOnLoad = (): ReactNode => renderHookList(
+    'on_load', onLoad, (n) => setDialogList('on_load', n),
+    t('settings.screens.onLoad.heading'),
+    t('settings.screens.onLoad.hint'),
+    t('settings.screens.onLoad.empty'),
   )
-  const renderOnCancel = (): ReactNode => (
-    <ActionListEditor
-      actions={onCancel}
-      onChange={(n) => setDialogList('on_cancel', n)}
-      heading={t('settings.screens.onCancel.heading')}
-      hint={t('settings.screens.onCancel.hint')}
-      emptyMessage={t('settings.screens.onCancel.empty')}
-      defs={defs}
-      effectiveConnector={effectiveConnector}
-      onEditQuery={onEditQueryRaise}
-    />
+  const renderOnSave = (): ReactNode => renderHookList(
+    'on_save', onSave, (n) => setDialogList('on_save', n),
+    t('settings.screens.action.heading'),
+    t('settings.screens.action.hint'),
+    t('settings.screens.action.empty'),
+  )
+  const renderOnCancel = (): ReactNode => renderHookList(
+    'on_cancel', onCancel, (n) => setDialogList('on_cancel', n),
+    t('settings.screens.onCancel.heading'),
+    t('settings.screens.onCancel.hint'),
+    t('settings.screens.onCancel.empty'),
   )
 
   // (Per-tab ``actions`` editor moved to the visual builder — it owns the dialog-tab selection
@@ -340,17 +368,11 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     else v.actions = next
     onChange(v)
   }
-  const renderScreenActions = (): ReactNode => (
-    <ActionListEditor
-      actions={screenActions}
-      onChange={setScreenActions}
-      heading={t('settings.screens.actions.heading')}
-      hint={t('settings.screens.actions.hint')}
-      emptyMessage={t('settings.screens.actions.empty')}
-      defs={defs}
-      effectiveConnector={effectiveConnector}
-      onEditQuery={onEditQueryRaise}
-    />
+  const renderScreenActions = (): ReactNode => renderHookList(
+    'actions', screenActions, setScreenActions,
+    t('settings.screens.actions.heading'),
+    t('settings.screens.actions.hint'),
+    t('settings.screens.actions.empty'),
   )
 
   // Screen-level row lifecycle hooks — v2's port of v1's ``ly_evt_cpt`` FormsTable events
@@ -369,36 +391,24 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   }
   const renderRowHooks = (): ReactNode => (
     <>
-      <ActionListEditor
-        actions={screenHookList('on_insert')}
-        onChange={(n) => setScreenHook('on_insert', n)}
-        heading={t('settings.screens.onInsert.heading')}
-        hint={t('settings.screens.onInsert.hint')}
-        emptyMessage={t('settings.screens.onInsert.empty')}
-        defs={defs}
-        effectiveConnector={effectiveConnector}
-        onEditQuery={onEditQueryRaise}
-      />
-      <ActionListEditor
-        actions={screenHookList('on_update')}
-        onChange={(n) => setScreenHook('on_update', n)}
-        heading={t('settings.screens.onUpdate.heading')}
-        hint={t('settings.screens.onUpdate.hint')}
-        emptyMessage={t('settings.screens.onUpdate.empty')}
-        defs={defs}
-        effectiveConnector={effectiveConnector}
-        onEditQuery={onEditQueryRaise}
-      />
-      <ActionListEditor
-        actions={screenHookList('on_delete')}
-        onChange={(n) => setScreenHook('on_delete', n)}
-        heading={t('settings.screens.onDelete.heading')}
-        hint={t('settings.screens.onDelete.hint')}
-        emptyMessage={t('settings.screens.onDelete.empty')}
-        defs={defs}
-        effectiveConnector={effectiveConnector}
-        onEditQuery={onEditQueryRaise}
-      />
+      {renderHookList(
+        'on_insert', screenHookList('on_insert'), (n) => setScreenHook('on_insert', n),
+        t('settings.screens.onInsert.heading'),
+        t('settings.screens.onInsert.hint'),
+        t('settings.screens.onInsert.empty'),
+      )}
+      {renderHookList(
+        'on_update', screenHookList('on_update'), (n) => setScreenHook('on_update', n),
+        t('settings.screens.onUpdate.heading'),
+        t('settings.screens.onUpdate.hint'),
+        t('settings.screens.onUpdate.empty'),
+      )}
+      {renderHookList(
+        'on_delete', screenHookList('on_delete'), (n) => setScreenHook('on_delete', n),
+        t('settings.screens.onDelete.heading'),
+        t('settings.screens.onDelete.hint'),
+        t('settings.screens.onDelete.empty'),
+      )}
     </>
   )
 
@@ -415,17 +425,11 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     else v.row_menu = next
     onChange(v)
   }
-  const renderRowMenu = (): ReactNode => (
-    <ActionListEditor
-      actions={rowMenu}
-      onChange={setRowMenu}
-      heading={t('settings.screens.rowmenu.heading')}
-      hint={t('settings.screens.rowmenu.hint')}
-      emptyMessage={t('settings.screens.rowmenu.empty')}
-      defs={defs}
-      effectiveConnector={effectiveConnector}
-      onEditQuery={onEditQueryRaise}
-    />
+  const renderRowMenu = (): ReactNode => renderHookList(
+    'row_menu', rowMenu, setRowMenu,
+    t('settings.screens.rowmenu.heading'),
+    t('settings.screens.rowmenu.hint'),
+    t('settings.screens.rowmenu.empty'),
   )
 
   // Deletes the entire dialog (every tab + field + lookup_param_bind). Confirmed via the
@@ -548,6 +552,39 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
           onClose={() => setEditQuery(null)}
         />
       )}
+      {/* Per-hook chain editor modal — opens when the operator clicks an action row in any
+          of the Actions / Row menu tab lists. The modal hosts ``ActionTreeView`` in editor
+          mode with its own breadcrumb; ``openEditor.path`` updates as the operator dives in /
+          pops back. Closing the modal (``onClose`` / breadcrumb root / Esc / click-outside)
+          clears ``openEditor``; the underlying tab is left intact. The ``listKey`` resolves to
+          the matching list + setter so writes flow back to the right slot. */}
+      {openEditor && (() => {
+        const lookup: Record<ListKey, { list: Row[]; setList: (n: Row[]) => void; label: string }> = {
+          on_load:   { list: onLoad,    setList: (n) => setDialogList('on_load', n),  label: t('settings.screens.onLoad.heading') },
+          on_save:   { list: onSave,    setList: (n) => setDialogList('on_save', n),  label: t('settings.screens.action.heading') },
+          on_cancel: { list: onCancel,  setList: (n) => setDialogList('on_cancel', n),label: t('settings.screens.onCancel.heading') },
+          actions:   { list: screenActions, setList: setScreenActions,                label: t('settings.screens.actions.heading') },
+          on_insert: { list: screenHookList('on_insert'), setList: (n) => setScreenHook('on_insert', n), label: t('settings.screens.onInsert.heading') },
+          on_update: { list: screenHookList('on_update'), setList: (n) => setScreenHook('on_update', n), label: t('settings.screens.onUpdate.heading') },
+          on_delete: { list: screenHookList('on_delete'), setList: (n) => setScreenHook('on_delete', n), label: t('settings.screens.onDelete.heading') },
+          row_menu:  { list: rowMenu,   setList: setRowMenu,                          label: t('settings.screens.rowmenu.heading') },
+        }
+        const cfg = lookup[openEditor.listKey]
+        return (
+          <ActionEditorModal
+            actions={cfg.list}
+            onChange={cfg.setList}
+            path={openEditor.path}
+            onPathChange={(p) => setOpenEditor(p && p.length > 0 ? { listKey: openEditor.listKey, path: p } : null)}
+            defs={defs}
+            effectiveConnector={effectiveConnector}
+            onEditQuery={onEditQueryRaise}
+            rootLabel={cfg.label}
+            screenReadColumns={screenReadColumns}
+            onClose={() => setOpenEditor(null)}
+          />
+        )
+      })()}
     </Stack>
   )
 }

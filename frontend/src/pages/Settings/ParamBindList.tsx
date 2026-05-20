@@ -44,12 +44,24 @@ const Row = styled.div`
     & > :nth-child(3), & > :nth-child(4) { grid-column: 1 / -1; }
   }
 `
-const Toggle = styled.button<{ $mode: 'value' | 'source' }>`
-  height: 30px; padding: 0 8px; border: 1px solid ${colors.border}; background: ${colors.bg.input};
-  color: ${({ $mode }) => ($mode === 'source' ? colors.blue.main : colors.text.muted)};
-  border-radius: ${radius.sm}; cursor: pointer; font-family: ${fonts.mono}; font-size: ${fontSize.micro};
-  font-weight: 600; min-width: 38px;
-  &:hover { border-color: ${colors.blue.border}; color: ${colors.blue.main}; }
+// Segmented two-pill toggle: ``val`` on the left, ``src`` on the right. The *active* side is
+// highlighted in blue (no hover affordance — clicking it would be a no-op); the *inactive*
+// side is muted and flips the mode on click. This is the v2 replacement for the previous
+// single-button toggle, which read "src" / "val" as the *current* mode and flipped on every
+// click — operators kept clicking the active side expecting a popover and getting a wipe.
+const ToggleGroup = styled.div`
+  display: inline-flex; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
+  background: ${colors.bg.input}; overflow: hidden;
+`
+const ToggleSeg = styled.button<{ $active: boolean }>`
+  height: 30px; padding: 0 8px; border: none; background: transparent;
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)};
+  font-family: ${fonts.mono}; font-size: ${fontSize.micro}; font-weight: 600;
+  min-width: 34px; cursor: ${({ $active }) => ($active ? 'default' : 'pointer')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  & + & { border-left: 1px solid ${colors.border}; }
+  &:hover { color: ${({ $active }) => ($active ? colors.blue.main : colors.blue.main)};
+    background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.card)}; }
 `
 const RemoveBtn = styled.button`
   height: 30px; width: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
@@ -66,50 +78,68 @@ export interface ParamBindListProps {
    *  default-stripping convention) or keep it. The runtime treats both ``null`` and ``[]`` as
    *  "no binds", so callers usually pass through ``next.length ? next : null``. */
   onChange: (next: ParamBind[]) => void
-  /** Source-field autocomplete candidates. Pass ``[]`` to disable the dropdown (the operator
-   *  can still type a path — ``allowCustom`` stays on). */
+  /** Source-field autocomplete candidates. ``allowCustom`` stays on in the SearchSelect so
+   *  the operator can type any path the suggestions don't cover. */
   sourceOptions: SearchSelectOption[]
+  /** ``param``-field autocomplete candidates — the *target* query's declared params +
+   *  scanned ``:bind_params``, or an endpoint's declared params. v1's row context menus +
+   *  drill-into-another-table workflows surface these so the developer picks the destination
+   *  column name from a list instead of remembering it. ``[]`` falls back to a plain input. */
+  paramOptions?: SearchSelectOption[]
   /** Placeholder for the param-name input — defaults to ``param``. Lets a caller specialise
    *  ("loop binding name" inside a LoopAction, etc.) without re-i18n-ing the same key. */
   paramPlaceholder?: string
 }
 
 export default function ParamBindList({
-  value, onChange, sourceOptions, paramPlaceholder,
+  value, onChange, sourceOptions, paramOptions, paramPlaceholder,
 }: ParamBindListProps) {
   const { t } = useTranslation()
   const binds = value ?? []
 
-  // Mode detection: source mode iff ``source`` is set OR ``value`` is null/empty. A bind with
-  // both set (shouldn't happen in well-formed TOML but the runtime tolerates it) reads as
-  // source mode — matches actionRunner's source-wins-when-both convention.
+  // Mode detection: source mode iff the ``source`` *key* is present (string, including ``''``).
+  // Value mode iff ``value`` is present and ``source`` isn't. An empty bind (neither key set)
+  // defaults to source mode — matches the v1 dev convention "binds usually read from somewhere".
+  //
+  // Checking key *presence* (typeof === 'string') rather than non-empty content is what lets
+  // ``flipMode`` work: after a flip, the new mode's field is seeded as ``''`` and stays that way
+  // until the operator types into it; mode detection still reads "value mode" because the key
+  // exists. (The previous "non-empty content wins" check meant a freshly-flipped empty bind
+  // read back as source mode no matter what, and the operator's click looked silently broken.)
   const isSourceMode = (b: ParamBind): boolean => {
-    if (b.source != null && b.source !== '') return true
-    if (b.value != null && b.value !== '') return false
-    return true                                            // empty bind → default to source
+    if (typeof b.source === 'string') return true
+    if (typeof b.value === 'string') return false
+    return true
   }
 
+  // Generic patch — strip ``null``/``undefined`` so the saved TOML stays terse, but keep ``''``
+  // as a "field present" marker (mode flip relies on it, and the migrator's default-stripping
+  // pass on the backend already drops the empty when serialising to TOML).
   const updateBind = (idx: number, patch: Partial<ParamBind>) => {
     const next = binds.slice()
     next[idx] = { ...next[idx], ...patch }
-    // Empty string → drop the key so the saved TOML stays terse. Don't drop ``param`` (the
-    // operator typed it; even when empty it's meaningful — they're editing).
     for (const k of Object.keys(patch) as (keyof ParamBind)[]) {
       if (k === 'param') continue
       const v = (next[idx] as ParamBind)[k]
-      if (v === '' || v == null) delete (next[idx] as ParamBind)[k]
+      if (v == null) delete (next[idx] as ParamBind)[k]
     }
     onChange(next)
   }
+  // Flip the bind's mode. Doesn't go through ``updateBind`` because we want the *new* mode's
+  // field to land as ``''`` (the key-presence marker) AND the *old* mode's field to vanish —
+  // both in one ``onChange`` so the row re-renders against the new mode without flicker.
   const flipMode = (idx: number) => {
-    const b = binds[idx]
+    const next = binds.slice()
+    const b = { ...next[idx] }
     if (isSourceMode(b)) {
-      // source → value: clear source, seed empty value.
-      updateBind(idx, { source: undefined, value: '' })
+      delete b.source
+      b.value = ''
     } else {
-      // value → source: clear value, seed empty source.
-      updateBind(idx, { value: undefined, source: '' })
+      delete b.value
+      b.source = ''
     }
+    next[idx] = b
+    onChange(next)
   }
   const addBind = () => onChange([...binds, { param: '', source: '' }])
   const removeBind = (idx: number) => {
@@ -123,22 +153,47 @@ export default function ParamBindList({
         const sourceMode = isSourceMode(b)
         return (
           <Row key={i}>
-            <Input
-              value={b.param ?? ''}
-              onChange={(e) => updateBind(i, { param: e.target.value })}
-              placeholder={paramPlaceholder ?? t('settings.screens.paramBinds.paramPlaceholder')}
-            />
-            {/* Two-state toggle between literal value and chain-context source. The button text
-                shows the *current* mode (small + monospaced) so the operator at-a-glance reads
-                "val" or "src"; clicking flips to the other. */}
-            <Toggle
-              type="button"
-              $mode={sourceMode ? 'source' : 'value'}
-              onClick={() => flipMode(i)}
-              title={t('settings.screens.paramBinds.flipMode')}
-            >
-              {sourceMode ? t('settings.screens.paramBinds.modeSource') : t('settings.screens.paramBinds.modeValue')}
-            </Toggle>
+            {/* ``param`` autocompletes from the target query / endpoint's params + bind_params
+                when ``paramOptions`` is provided (the caller knows the action's target — see
+                ActionTreeView.targetParamOptions). ``allowCustom`` stays on so the operator
+                can type any param the dropdown doesn't list. Empty options → plain text input
+                so the SearchSelect's dropdown doesn't suggest the empty state is broken. */}
+            {paramOptions && paramOptions.length > 0 ? (
+              <SearchSelect
+                value={b.param ?? ''}
+                options={paramOptions}
+                onChange={(v) => updateBind(i, { param: v ?? '' })}
+                allowCustom
+                placeholder={paramPlaceholder ?? t('settings.screens.paramBinds.paramPlaceholder')}
+              />
+            ) : (
+              <Input
+                value={b.param ?? ''}
+                onChange={(e) => updateBind(i, { param: e.target.value })}
+                placeholder={paramPlaceholder ?? t('settings.screens.paramBinds.paramPlaceholder')}
+              />
+            )}
+            {/* Segmented mode picker: literal ``val`` ⇄ chain-context ``src``. The active side
+                paints blue + is a no-op; the inactive side flips. Tooltips on each segment
+                describe what it does so the operator knows what they're picking without a wipe. */}
+            <ToggleGroup>
+              <ToggleSeg
+                type="button"
+                $active={!sourceMode}
+                onClick={() => { if (sourceMode) flipMode(i) }}
+                title={t('settings.screens.paramBinds.modeValueTip')}
+              >
+                {t('settings.screens.paramBinds.modeValue')}
+              </ToggleSeg>
+              <ToggleSeg
+                type="button"
+                $active={sourceMode}
+                onClick={() => { if (!sourceMode) flipMode(i) }}
+                title={t('settings.screens.paramBinds.modeSourceTip')}
+              >
+                {t('settings.screens.paramBinds.modeSource')}
+              </ToggleSeg>
+            </ToggleGroup>
             {sourceMode ? (
               <SearchSelect
                 value={b.source ?? ''}

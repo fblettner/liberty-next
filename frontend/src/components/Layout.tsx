@@ -9,6 +9,7 @@ import { Sun, Moon, LogOut, User } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
+import { installAuthBuiltins } from '../pages/TableView/actionRunner'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { Banner, Centered } from '../common'
 import Sidebar from './Sidebar'
@@ -128,6 +129,18 @@ export default function Layout() {
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', !dark)
   }, [dark])
+
+  // Install the auth + language built-ins for the action runner. ``ParamBind {source: '#LOGIN_USER#'}``
+  // / ``#LOGIN_EMAIL#`` / ``#LANGUAGE#`` resolve to these values at run time; the date-bound
+  // built-ins (``#SYSDATE#`` / ``#NOW#``) compute lazily from the JS clock. Re-installs whenever
+  // the user logs in/out or the language changes — covers the post-login + post-switch races.
+  useEffect(() => {
+    installAuthBuiltins({
+      username: user?.username ?? null,
+      email: user?.email ?? null,
+      language: i18n.language ?? null,
+    })
+  }, [user?.username, user?.email, i18n.language])
 
   const toggleTheme = () => {
     setDark((d) => {

@@ -73,7 +73,7 @@ export interface ActionRunnerDeps {
 
 // ── source-path resolution ──────────────────────────────────────────────────────────────────
 //
-// ``source`` paths come in three flavours:
+// ``source`` paths come in four flavours:
 //
 // * **Plain** (no dots, e.g. ``USR_ID``) — a form-field reference. Falls back to ``formCtx``;
 //   keeps the slice-2 behaviour for hand-written dialogs that don't use chain context.
@@ -82,11 +82,15 @@ export interface ActionRunnerDeps {
 // * **``<step_id>.first_row.<col>`` / ``<step_id>.rows.<N>.<col>``** — references a previous
 //   step's captured result. Numeric segments index arrays; non-numeric segments lookup object
 //   keys (case-insensitive). ``loop.<field>`` reads the current iteration's element.
+// * **``#LOGIN_USER#`` / ``#SYSDATE#`` / …** — auth + runtime built-ins. v2's port of v1's
+//   `dd_rules` LOGIN / SYSDATE / CURRENT_DATE / PASSWORD resolvers. See :func:`resolveBuiltin`.
 //
-// Reserved built-ins (paths starting with ``#``) are silently dropped — wired in a later
-// auth slice (`#LOGIN_USER#` / `#SYSDATE#` / …).
+// Anything else starting with ``#`` (an unknown built-in) → ``undefined``, same as before.
 export function resolveSource(path: string, ctx: ChainCtx, formCtx: Row): unknown {
-  if (!path || path.startsWith('#')) return undefined
+  if (!path) return undefined
+  if (path.startsWith('#') && path.endsWith('#') && path.length > 2) {
+    return resolveBuiltin(path.slice(1, -1))
+  }
   if (!path.includes('.')) {
     // Plain key: try chain context first (covers ``INPUT`` / ``loop`` / step ids), then form.
     if (path in ctx) return ctx[path]
@@ -122,10 +126,80 @@ function resolveFromForm(name: string, formCtx: Row): unknown {
   return matched ? formCtx[matched] : undefined
 }
 
+// ── built-in resolvers (v2's port of v1's `dd_rules` LOGIN / SYSDATE / CURRENT_DATE) ─────────
+//
+// A small set of runtime-provided values an action's ``ParamBind {source: '#X#'}`` can read.
+// Static date / language values resolve from the JS runtime; auth-dependent ones (the user's
+// username / email) read from the auth context installed via :func:`installAuthBuiltins` —
+// the calling layer wires this up once at mount so the runner doesn't need a React handle.
+//
+// All built-ins return ``undefined`` if not installed; ``resolveBinds`` then skips the bind
+// (same behaviour as a missing chain-context path — no NULL gets sent server-side).
+
+interface BuiltinProvider {
+  /** Currently authenticated user's username — wired from ``useAuth().user?.username``. */
+  username?: string | null
+  /** Currently authenticated user's email — null if the IdP didn't return one. */
+  email?: string | null
+  /** Current i18n language tag, ``en`` / ``fr`` / …. */
+  language?: string | null
+}
+let authProvider: BuiltinProvider = {}
+
+/** Install the auth + language built-in values. Call once on app mount (Layout / App) +
+ *  whenever the user / language changes. Subsequent ``resolveSource('#LOGIN_USER#', …)`` calls
+ *  read from the installed provider. */
+export function installAuthBuiltins(next: BuiltinProvider): void {
+  authProvider = next
+}
+
+/** Resolve one built-in by its inner key (the part between the ``#`` markers). Returns
+ *  ``undefined`` for an unknown key or an uninstalled auth value — callers (``resolveBinds``)
+ *  drop the bind silently. */
+function resolveBuiltin(key: string): string | undefined {
+  const k = key.toUpperCase()
+  // Auth-bound — wait on the installed provider.
+  if (k === 'LOGIN_USER' || k === 'LOGIN' || k === 'USER') {
+    return authProvider.username ?? undefined
+  }
+  if (k === 'LOGIN_EMAIL' || k === 'EMAIL') {
+    return authProvider.email ?? undefined
+  }
+  if (k === 'LANGUAGE' || k === 'LANG') {
+    return authProvider.language ?? undefined
+  }
+  // Date / time — resolved lazily at each call (so a chain spanning seconds picks them up).
+  // ``SYSDATE`` matches Oracle's lingo; ``CURRENT_DATE`` matches Postgres + v1 dd_rules.
+  if (k === 'SYSDATE' || k === 'CURRENT_DATE' || k === 'TODAY') {
+    return new Date().toISOString().split('T')[0]    // YYYY-MM-DD
+  }
+  if (k === 'NOW' || k === 'CURRENT_TIMESTAMP') {
+    return new Date().toISOString()                  // YYYY-MM-DDTHH:mm:ss.sssZ
+  }
+  if (k === 'CURRENT_TIME') {
+    return new Date().toISOString().split('T')[1]?.slice(0, 8)   // HH:MM:SS
+  }
+  return undefined
+}
+
+/** Catalog of built-in source paths surfaced as autocomplete options in the ParamBind editor.
+ *  The runtime resolver above is the source of truth — keep them in sync. Labels are i18n-able
+ *  *only* at the caller (the editor is the single consumer); the runtime never reads these. */
+export const BUILTIN_SOURCE_PATHS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '#LOGIN_USER#',  label: 'Connected user (username)' },
+  { value: '#LOGIN_EMAIL#', label: 'Connected user (email)' },
+  { value: '#LANGUAGE#',    label: 'Current language (en / fr / …)' },
+  { value: '#SYSDATE#',     label: 'Today (YYYY-MM-DD)' },
+  { value: '#NOW#',         label: 'Now (ISO timestamp)' },
+  { value: '#CURRENT_TIME#', label: 'Current time (HH:MM:SS)' },
+]
+
 /** Resolve a ParamBind list to a string-keyed param dict. Drops null / empty values (the
  *  call site decides whether that means "skip the bind" or "send NULL" — for v2 SQL writes
  *  the migrated queries omit-binding-the-key matches the desired "leave column unchanged"
- *  semantic). Reserved ``#`` source paths are skipped — auth built-ins, future slice. */
+ *  semantic). ``#X#`` built-ins (LOGIN_USER / SYSDATE / NOW / …) resolve via
+ *  :func:`resolveBuiltin`; an *unknown* / uninstalled built-in is dropped (same as a missing
+ *  chain-context path). */
 export function resolveBinds(
   binds: ReadonlyArray<ParamBind> | undefined,
   ctx: ChainCtx,
@@ -134,7 +208,7 @@ export function resolveBinds(
   const out: Record<string, string> = {}
   for (const b of binds ?? []) {
     if (b.value != null && b.value !== '') { out[b.param] = String(b.value); continue }
-    if (b.source && !b.source.startsWith('#')) {
+    if (b.source) {
       const v = resolveSource(b.source, ctx, formCtx)
       if (v != null && String(v) !== '') out[b.param] = String(v)
     }

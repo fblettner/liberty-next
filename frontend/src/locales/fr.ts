@@ -712,6 +712,8 @@ const fr: Resources = {
         sourcePlaceholder: 'INPUT.<nom> / <id_étape>.first_row.<col>',
         modeValue: 'val',
         modeSource: 'src',
+        modeValueTip: 'Valeur littérale — saisissez directement la valeur à lier',
+        modeSourceTip: 'Chemin source — lit depuis la ligne déclenchante, le contexte de chaîne ou une variable intégrée (#LOGIN_USER# / #SYSDATE# / …)',
         flipMode: 'Basculer entre valeur littérale et source du contexte',
       },
       // Tranche 4d — variantes de contrôle de flux (ChainAction / IfAction / LoopAction).

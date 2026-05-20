@@ -713,6 +713,8 @@ const en = {
         sourcePlaceholder: 'INPUT.<name> / <step_id>.first_row.<col>',
         modeValue: 'val',
         modeSource: 'src',
+        modeValueTip: 'Literal value — type the bind value directly',
+        modeSourceTip: 'Source path — read from the firing row, chain context, or a built-in (#LOGIN_USER# / #SYSDATE# / …)',
         flipMode: 'Toggle between literal value and chain-context source',
       },
       // Slice 4d — workflow-control variants (ChainAction / IfAction / LoopAction).

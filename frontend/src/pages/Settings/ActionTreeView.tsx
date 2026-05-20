@@ -34,6 +34,9 @@ import {
   type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { api } from '../../api/client'
+import type { ScreenDetail } from '../../types/screens'
+import type { Column } from '../../types/connectors'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import {
@@ -47,6 +50,9 @@ import {
   resolveAtPath, updateAtPath, type ActionPath, type SourceCandidate,
 } from './actionPath'
 import ParamBindList, { type ParamBind } from './ParamBindList'
+import {
+  builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
+} from './actionCandidates'
 
 type Row = Record<string, unknown>
 
@@ -219,15 +225,21 @@ export interface ActionTreeViewProps {
    *  so we don't paint two breadcrumb rows stacked on top of each other. Default ``true`` —
    *  consumers that don't have an outer breadcrumb get the editor's own crumb. */
   showBreadcrumb?: boolean
+  /** The firing screen's read-query columns (a row's columns at runtime). Used by
+   *  :class:`ParamBindList` to autocomplete ``source`` paths against the firing context —
+   *  plain (no-dot) source values resolve against the row at runtime, so listing the row's
+   *  columns gives the operator the names without remembering them. Pass ``screen.columns``
+   *  from the parent (ScreenVisualBuilder / ScreenEditor). */
+  screenReadColumns?: Row[]
 }
 
 export default function ActionTreeView({
   actions, onChange, path, onPathChange, defs, effectiveConnector, onEditQuery, rootLabel,
-  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true,
+  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true, screenReadColumns,
 }: ActionTreeViewProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors: wsConnectors } = useWorkspace()
+  const { connectors: wsConnectors, findScreen } = useWorkspace()
 
   // ── workspace catalog → dropdown options ───────────────────────────────────────────────
   const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
@@ -309,17 +321,96 @@ export default function ActionTreeView({
   const [dragState, setDragState] = useState<{ listKey: string; from: number; over: number | null } | null>(null)
 
   // ── source-autocomplete candidates (Theme B polish) ─────────────────────────────────────
-  // Suggestions for a ``Condition.source`` / ``LoopAction.source`` field on the action at
-  // ``path``. Recomputed when the path or the underlying actions list shifts; the operator
-  // picks from the dropdown or types a custom path (the SearchSelect ``allowCustom`` mode).
+  // Suggestions for a ``Condition.source`` / ``LoopAction.source`` / ``ParamBind.source``
+  // field on the action at ``path``. Built by union-ing two lists:
+  //
+  //   1. **Chain-context** candidates from :func:`chainContextCandidates` — preceding
+  //      ``bind_result`` captures, enclosing ChainAction ``prompt_fields`` (as ``INPUT.X``),
+  //      and the enclosing ``LoopAction``'s loop binding. These are most-specific to where
+  //      the action sits in the workflow tree, so they sort first.
+  //   2. **Firing-screen row columns** from :func:`screenReadColumnOptions` — the columns the
+  //      screen's read query returns. At runtime a plain (no-dot) ``source`` resolves
+  //      against the firing row, so an operator binding ``USR_ID`` from a row-menu / on_save
+  //      / on_insert action wants to pick from the screen's column names. v1 surfaced these
+  //      everywhere a filter / param needed wiring; v2's editor does the same.
+  //
+  // ``allowCustom`` stays on in the SearchSelect so the operator can type any path the
+  // suggestions don't cover (``#LOGIN_USER#`` built-ins, dotted suffixes after a
+  // ``.first_row`` capture, etc.). Recomputed when the path or the underlying actions
+  // list shifts.
   const sourceCandidates = useMemo<SourceCandidate[]>(
     () => (path && path.length > 0 ? chainContextCandidates(actions, path) : []),
     [actions, path],
   )
-  const sourceOptions = useMemo<SearchSelectOption[]>(
-    () => sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value })),
-    [sourceCandidates],
+  const screenColumnOptions = useMemo<SearchSelectOption[]>(
+    () => screenReadColumnOptions(screenReadColumns),
+    [screenReadColumns],
   )
+  // Built-ins (``#LOGIN_USER#`` / ``#SYSDATE#`` / …) are session-stable so we don't memo on
+  // anything specific — the function returns the same dehydrated catalog every render.
+  const sourceOptions = useMemo<SearchSelectOption[]>(
+    () => mergeCandidates(
+      sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value })),
+      screenColumnOptions,
+      builtinSourceOptions(),
+    ),
+    [sourceCandidates, screenColumnOptions],
+  )
+
+  // ── target-screen column lookup (paramOptions enrichment) ──────────────────────────────
+  // For a ``run_query`` / ``navigate`` action whose target query *is* a screen's read_query,
+  // surface the target screen's ``columns`` as ParamBind target candidates. Covers the case
+  // where the destination's filter wrap isn't in the catalog's ``bind_params`` yet (a pre-
+  // Phase-6-update connectors.toml, or a destination that doesn't filter at all) — the v1 dev
+  // pattern of "drill into security_assignments by binding RLU_APPS_ID / RLU_USER_ID" reads
+  // those names off the destination *screen's* column list rather than the wrapped SQL.
+  //
+  // Looked up via the workspace's ``findScreen(connector, query)`` (synchronous index of every
+  // accessible screen); the matched ``ScreenListItem`` carries ``app`` + ``id`` but not the
+  // columns, so we lazy-fetch ``/api/screens/<app>/<id>`` once per (app, id) and cache in a
+  // ref keyed by ``${app}/${id}``. The cache persists for the lifetime of this component
+  // (re-rendering ActionTreeView for a different action re-reads from the same map). Hot-
+  // reload re-mounts the editor, which discards the cache — correct since screens.toml may
+  // have changed.
+  const targetScreenColumnsCacheRef = useMemo<Map<string, Column[] | null>>(() => new Map(), [])
+  const [targetScreenColumnsTick, setTargetScreenColumnsTick] = useState(0)
+  const selectedForTarget = path && path.length > 0 ? resolveAtPath(actions, path) : null
+  const targetScreenKey = useMemo<{ app: string; id: string } | null>(() => {
+    if (!selectedForTarget) return null
+    const aType = String(selectedForTarget.type ?? '')
+    if (aType !== 'run_query' && aType !== 'navigate') return null
+    const targetConn = (typeof selectedForTarget.connector === 'string' && selectedForTarget.connector.trim()
+      ? selectedForTarget.connector
+      : effectiveConnector) as string
+    const targetQuery = String((aType === 'navigate' ? selectedForTarget.to : selectedForTarget.query) ?? '')
+    if (!targetConn || !targetQuery) return null
+    const hit = findScreen(targetConn, targetQuery)
+    if (!hit) return null
+    return { app: hit.app, id: hit.id }
+  }, [selectedForTarget, effectiveConnector, findScreen])
+  useEffect(() => {
+    if (!targetScreenKey) return
+    const cacheKey = `${targetScreenKey.app}/${targetScreenKey.id}`
+    if (targetScreenColumnsCacheRef.has(cacheKey)) return     // already fetched (success or null)
+    targetScreenColumnsCacheRef.set(cacheKey, null)            // mark in-flight so we don't refetch
+    api.get<ScreenDetail>(`/api/screens/${encodeURIComponent(targetScreenKey.app)}/${encodeURIComponent(targetScreenKey.id)}`)
+      .then((d) => {
+        targetScreenColumnsCacheRef.set(cacheKey, Array.isArray(d.columns) ? d.columns : [])
+        setTargetScreenColumnsTick((n) => n + 1)              // re-render so paramOptions picks up the cache
+      })
+      .catch(() => {
+        // Permission-pruned (403→404) or just missing — keep the null so we don't retry.
+        targetScreenColumnsCacheRef.set(cacheKey, [])
+      })
+  }, [targetScreenKey, targetScreenColumnsCacheRef])
+  const targetScreenColumnOptions = useMemo<SearchSelectOption[]>(() => {
+    if (!targetScreenKey) return []
+    const cols = targetScreenColumnsCacheRef.get(`${targetScreenKey.app}/${targetScreenKey.id}`)
+    return screenReadColumnOptions(cols as unknown as Row[])
+    // ``targetScreenColumnsTick`` is in deps so the memo re-fires once the fetch completes.
+    // ESLint can't see through the ref — explicitly listing the tick is the idiomatic dance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetScreenKey, targetScreenColumnsTick])
 
   // ── path-aware mutators (delegating to the immutable helpers) ──────────────────────────
   const patchSelected = (patch: Row) => {
@@ -991,10 +1082,24 @@ export default function ActionTreeView({
           <Stack gap={6}>
             <SubHead>{t('settings.screens.paramBinds.heading')}</SubHead>
             <Sub>{t('settings.screens.paramBinds.hint')}</Sub>
+            {/* ``paramOptions`` (target / left column) = the **destination** query / endpoint's
+                columns:
+                  · declared ``params`` + scanned ``:bind_params`` (from the catalog), and
+                  · the target screen's ``columns`` (lazy-fetched below) — covers a freshly-
+                    migrated read query that doesn't yet carry filter binds in its SQL but whose
+                    ``Screen.columns`` lists the columns the operator is binding to.
+                Never mixes in the firing screen's own columns — that would be a v1-shaped foot
+                gun (target = where you're writing, not where you came from).
+                ``sourceOptions`` (right column) = the firing context (firing screen's columns +
+                chain context + standard built-ins). */}
             <ParamBindList
               value={Array.isArray(selected.param_binds) ? (selected.param_binds as ParamBind[]) : []}
               onChange={(next) => patchSelected({ param_binds: next.length ? next : null })}
               sourceOptions={sourceOptions}
+              paramOptions={mergeCandidates(
+                targetParamOptions(selected, wsConnectors, effectiveConnector),
+                targetScreenColumnOptions,
+              )}
             />
           </Stack>
         )}

@@ -1031,6 +1031,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             heading={t('settings.screens.tabActions.heading')}
             hint={t('settings.screens.tabActions.hint')}
             emptyMessage={t('settings.screens.tabActions.empty')}
+            screenReadColumns={screenColumns}
           />
         </div>
       </TabSettingsBox>
@@ -1427,6 +1428,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
             rootLabel={t('settings.screens.tabActions.heading')}
             showBreadcrumb={false}
+            screenReadColumns={screenColumns}
           />
         ) : selField ? (
           <>

@@ -31,6 +31,9 @@ import ParamBindList, { type ParamBind } from './ParamBindList'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import {
+  builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
+} from './actionCandidates'
 
 type Row = Record<string, unknown>
 
@@ -169,10 +172,17 @@ export interface ActionListEditorProps {
   /** Called when the operator clicks the pencil next to an action's query/navigate target —
    *  the consumer raises ``EditQueryModal`` (the modal itself lives in the parent screen). */
   onEditQuery: (connector: string, queryName: string) => void
+  /** The firing screen's read-query columns (the row-context-row's columns at runtime). Used
+   *  by :class:`ParamBindList` to autocomplete ``source`` paths against the firing context —
+   *  plain (no-dot) values resolve against the row at runtime. Pass ``screen.columns`` from
+   *  the parent (ScreenEditor / dialog-hook hosts). Empty / undefined → only the action's own
+   *  ``prompt_fields`` show in the source dropdown. */
+  screenReadColumns?: Row[]
 }
 
 export default function ActionListEditor({
   actions, onChange, heading, hint, emptyMessage, defs, effectiveConnector, onEditQuery,
+  screenReadColumns,
 }: ActionListEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -522,6 +532,7 @@ export default function ActionListEditor({
           defs={defs}
           effectiveConnector={effectiveConnector}
           onEditQuery={onEditQuery}
+          screenReadColumns={screenReadColumns}
         />
       )
     }
@@ -649,10 +660,13 @@ export default function ActionListEditor({
                     )}
                     {/* ParamBindList — dedicated editor for the variant's ``param_binds``
                         array (stripped from the SchemaForm above via ACTION_OVERRIDE_KEYS).
-                        ActionListEditor has no chain-path context so the source autocomplete
-                        falls back to the action's own ``prompt_fields`` (offering
-                        ``INPUT.<name>`` for each). The ActionTreeView in the Visual Designer
-                        has the full chain context — that surface gets richer candidates. */}
+                        Source autocomplete = the action's own ``prompt_fields`` (offered as
+                        ``INPUT.<name>``) merged with the firing screen's row columns (plain
+                        column names resolve against the row at runtime). ``paramOptions`` =
+                        the action's target query / endpoint params. ActionListEditor lacks
+                        the chain-path context the ActionTreeView (Visual Designer's
+                        Inspector) carries, so chain-context candidates (preceding
+                        bind_result captures, loop bindings) don't appear here. */}
                     {(aType === 'run_query' || aType === 'call_api' || aType === 'navigate') && (
                       <Stack gap={6}>
                         <strong style={{ color: colors.text.primary, fontSize: fontSize.sm }}>
@@ -662,7 +676,12 @@ export default function ActionListEditor({
                         <ParamBindList
                           value={Array.isArray(a.param_binds) ? (a.param_binds as ParamBind[]) : []}
                           onChange={(next) => updateAction(i, { param_binds: next.length ? next : null })}
-                          sourceOptions={promptFieldsToOptions(a)}
+                          sourceOptions={mergeCandidates(
+                            promptFieldsToOptions(a),
+                            screenReadColumnOptions(screenReadColumns),
+                            builtinSourceOptions(),
+                          )}
+                          paramOptions={targetParamOptions(a, wsConnectors, effectiveConnector)}
                         />
                       </Stack>
                     )}
