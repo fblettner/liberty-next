@@ -38,7 +38,7 @@ import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import ActionTreeView from './ActionTreeView'
-import type { ActionPath } from './actionPath'
+import { breadcrumbCrumbs, type ActionPath } from './actionPath'
 
 type Row = Record<string, unknown>
 
@@ -1373,23 +1373,50 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               <CrumbBtn type="button" $active>{String(selField.name ?? '')}</CrumbBtn>
             </>
           )}
-          {selActionPath != null && (
-            <>
-              <ChevronRightIcon size={11} />
-              <CrumbBtn type="button" $active>
-                {t('settings.screens.tabActions.heading')}
-              </CrumbBtn>
-            </>
-          )}
+          {selActionPath != null && (() => {
+            // Build the unified action breadcrumb: ``Tab actions`` (clickable — pops back to
+            // list mode) followed by one crumb per path segment. ``breadcrumbCrumbs`` walks
+            // the path against ``tabActions`` and gives us a (label, path) for each crumb;
+            // its first entry is the root with an empty path → we wire that to clear
+            // ``selActionPath`` (which puts the inspector back in list mode). The last entry
+            // (the deepest action) is the active crumb — muted, not clickable. Avoids the
+            // earlier two-row breadcrumb (outer "Dialog title › Tab actions" + inner "Tab
+            // actions › Merge Roles") that stacked vertically in the inspector head.
+            const crumbs = breadcrumbCrumbs(
+              tabActions,
+              selActionPath,
+              t('settings.screens.tabActions.heading'),
+            )
+            return crumbs.map((c, i) => {
+              const isLast = i === crumbs.length - 1
+              return (
+                <span key={`a-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <ChevronRightIcon size={11} />
+                  <CrumbBtn
+                    type="button"
+                    $active={isLast}
+                    onClick={() => {
+                      if (isLast) return
+                      // Root crumb (empty path) → exit action mode entirely; deeper crumb →
+                      // pop the path to that prefix.
+                      selectActionPath(c.path.length === 0 ? null : c.path)
+                    }}
+                  >
+                    {c.label || '(unnamed)'}
+                  </CrumbBtn>
+                </span>
+              )
+            })
+          })()}
         </Crumbs>
         <InspBody>
         {selActionPath != null ? (
           // Theme A — action editor lives in the Inspector. The Tab Settings panel keeps the
           // flat action list; clicking a list row sets ``selActionPath`` and this branch
-          // takes over. ActionTreeView in editor mode renders its own internal breadcrumb +
-          // the focused action's body (variant SchemaForm + prompt_fields + nested sub-lists
-          // with click-to-dive). Setting ``onPathChange`` to ``selectActionPath`` lets the
-          // breadcrumb's pop-back-to-list use ``null`` to close the action editor.
+          // takes over. ActionTreeView renders the focused action's body (variant SchemaForm
+          // + prompt_fields + nested sub-lists with click-to-dive). ``showBreadcrumb={false}``
+          // — the unified breadcrumb above already covers the path; without this we'd render
+          // two stacked breadcrumb rows in the inspector head.
           <ActionTreeView
             actions={tabActions}
             onChange={(n) => patchTab({ actions: n.length ? (n as unknown as Row[]) : null })}
@@ -1399,6 +1426,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             effectiveConnector={tabEffectiveConnector}
             onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
             rootLabel={t('settings.screens.tabActions.heading')}
+            showBreadcrumb={false}
           />
         ) : selField ? (
           <>

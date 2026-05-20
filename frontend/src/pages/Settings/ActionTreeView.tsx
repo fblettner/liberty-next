@@ -213,11 +213,16 @@ export interface ActionTreeViewProps {
    *  which action is currently being edited in the Inspector (the action editor is a sibling
    *  ActionTreeView in editor mode bound to the same selection state). */
   selectedPath?: ActionPath | null
+  /** When ``false``, suppress the in-editor breadcrumb. The Visual Designer renders its own
+   *  combined breadcrumb (``Dialog title › Tab actions › <chain> › <step>``) above the body
+   *  so we don't paint two breadcrumb rows stacked on top of each other. Default ``true`` —
+   *  consumers that don't have an outer breadcrumb get the editor's own crumb. */
+  showBreadcrumb?: boolean
 }
 
 export default function ActionTreeView({
   actions, onChange, path, onPathChange, defs, effectiveConnector, onEditQuery, rootLabel,
-  heading, hint, emptyMessage, selectedPath,
+  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true,
 }: ActionTreeViewProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -925,28 +930,33 @@ export default function ActionTreeView({
 
   return (
     <Stack gap={12}>
-      {/* Breadcrumb — every crumb is clickable; the active one (last) is muted. */}
-      <CrumbBar>
-        {crumbs.map((c, i) => {
-          const isLast = i === crumbs.length - 1
-          return (
-            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {i > 0 && <ChevronRight size={12} style={{ color: colors.text.muted }} />}
-              <CrumbBtn
-                type="button"
-                $active={isLast}
-                onClick={() => {
-                  if (isLast) return
-                  // Empty path means "back to list mode".
-                  onPathChange(c.path.length === 0 ? null : c.path)
-                }}
-              >
-                {c.label || '(unnamed)'}
-              </CrumbBtn>
-            </span>
-          )
-        })}
-      </CrumbBar>
+      {/* Breadcrumb — every crumb is clickable; the active one (last) is muted. Suppressed
+          when the parent renders its own combined breadcrumb (the Visual Designer does this
+          to avoid two stacked breadcrumb rows in the Inspector — one for "Dialog title › Tab
+          actions" outside and one for "Tab actions › <step>" inside). */}
+      {showBreadcrumb && (
+        <CrumbBar>
+          {crumbs.map((c, i) => {
+            const isLast = i === crumbs.length - 1
+            return (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {i > 0 && <ChevronRight size={12} style={{ color: colors.text.muted }} />}
+                <CrumbBtn
+                  type="button"
+                  $active={isLast}
+                  onClick={() => {
+                    if (isLast) return
+                    // Empty path means "back to list mode".
+                    onPathChange(c.path.length === 0 ? null : c.path)
+                  }}
+                >
+                  {c.label || '(unnamed)'}
+                </CrumbBtn>
+              </span>
+            )
+          })}
+        </CrumbBar>
+      )}
       {/* Editor body — variant SchemaForm + prompt-fields + (for workflow variants) sub-list. */}
       <Stack gap={12}>
         <Field label={t('settings.screens.action.type')}>
