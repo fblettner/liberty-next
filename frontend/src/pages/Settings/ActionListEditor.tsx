@@ -24,7 +24,8 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Edit3, FileText, Plus, Trash2 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption,
+  Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, useModals,
+  type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -89,7 +90,8 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   refresh: [],
   chain: ['steps'],
   if: ['condition', 'then_steps', 'else_steps'],
-  loop: ['steps'],   // ``source`` stays — it's a string the auto-renderer handles fine
+  loop: ['source', 'steps'],   // ``source`` → custom autocomplete (Theme B) in ActionTreeView;
+                                // ``steps`` → recursive sub-list editor in both views
   return: [],        // ``bindings: Record<str,str>`` renders fine via SchemaForm's StringMap
 }
 // The four variants that carry ``prompt_fields`` (the ``_PromptableMixin`` in
@@ -552,10 +554,22 @@ export default function ActionListEditor({
     }
     if (aType === 'loop') {
       const steps = Array.isArray(action.steps) ? (action.steps as Row[]) : []
+      const source = typeof action.source === 'string' ? action.source : ''
       return (
         <Stack gap={14} style={{ marginTop: 4 }}>
-          {/* The ``source`` field is rendered by the generic SchemaForm above (we don't strip
-              it). The note here is a hint about the dotted-path syntax for chain-context refs. */}
+          {/* ``source`` is stripped from the variant SchemaForm (it lives in the loop's
+              ACTION_OVERRIDE_KEYS) so we can render it manually with the dotted-path hint
+              right next to it. ActionListEditor's consumers don't carry a chain path, so this
+              stays a plain text input here — the ActionTreeView in the Visual Designer's
+              Inspector renders the same field as a SearchSelect with chain-context candidates
+              (Theme B autocomplete). */}
+          <Field label={t('settings.screens.loop.sourceLabel')}>
+            <Input
+              value={source}
+              onChange={(e) => onPatch({ source: e.target.value })}
+              placeholder={t('settings.screens.loop.sourcePlaceholder')}
+            />
+          </Field>
           <Sub style={{ marginTop: -6 }}>{t('settings.screens.loop.sourceHint')}</Sub>
           <ActionListEditor
             actions={steps}

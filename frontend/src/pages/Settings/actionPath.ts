@@ -186,3 +186,93 @@ export function pathEquals(a: ActionPath | null, b: ActionPath | null): boolean 
   }
   return true
 }
+
+// ── chain-context source candidates (Theme B autocomplete) ──────────────────────────────────
+//
+// When the operator wires a ``ParamBind.source`` / ``Condition.source`` / ``LoopAction.source``,
+// the resolvable paths at the firing site are: prompt-field values from the nearest enclosing
+// :class:`ChainAction` (``INPUT.<name>``), bind_result captures from *preceding* sibling steps
+// at any ancestor level (``<step_id>.first_row`` / ``<step_id>.rows``), and the current loop
+// iteration element when we're somewhere inside a :class:`LoopAction.steps`. The text is the
+// runtime semantics; the helper here walks the path to produce that catalog as design-time
+// suggestions for the editor.
+//
+// Column suffixes (``find_user.first_row.EMAIL``) are *not* listed — the columns are only known
+// once the query runs. The operator picks the step prefix from the dropdown, then types the
+// column name. Same pattern as v1's TASK_<id>.RESULTS[0].<col> — the result-row path was
+// shipped as a dotted prefix; the column was hand-typed.
+export interface SourceCandidate {
+  /** The dotted path to insert into the source field. */
+  value: string
+  /** Short human-friendly hint (rendered as the SearchSelect option's label). */
+  label: string
+  /** Grouping for visual organisation in the dropdown. */
+  group: 'inputs' | 'step_results' | 'loop'
+}
+
+/** Build the candidate list for the action at ``path``. Walks from the root, gathering:
+ *  - prompt fields from every enclosing ``ChainAction`` (the runtime merges them into INPUT
+ *    when the chain fires; nested steps see them as ``INPUT.<name>``);
+ *  - bind_result-capturing steps that *preceded* the current one at any ancestor level (the
+ *    chain context accumulates as steps run; later steps reference earlier ones);
+ *  - ``loop`` when any path segment dives into a ``LoopAction.steps`` (the loop binds the
+ *    current element under ``loop`` for the nested body's binds to read).
+ *
+ *  Order matches the typical operator scan: inputs first (cheapest to wire), then step
+ *  results (the workflow-internal data), then the loop binding (transient, only inside a loop).
+ *
+ *  An empty / invalid ``path`` returns ``[]`` — callers gate the suggestions with a length check. */
+export function chainContextCandidates(root: Row[], path: ActionPath): SourceCandidate[] {
+  if (path.length === 0) return []
+  const seen = new Set<string>()
+  const out: SourceCandidate[] = []
+  const add = (cand: SourceCandidate): void => {
+    if (seen.has(cand.value)) return
+    seen.add(cand.value)
+    out.push(cand)
+  }
+
+  let arr: Row[] = root
+  let cur: Row | undefined
+  let inLoop = false
+
+  for (let depth = 0; depth < path.length; depth++) {
+    const seg = path[depth]
+    if (depth > 0) {
+      if (seg.field == null) return out  // malformed — stop here
+      arr = (cur![seg.field] as Row[] | undefined) ?? []
+    }
+    // Preceding siblings at this depth ran *before* the action we're editing.
+    for (let i = 0; i < seg.i; i++) {
+      addStepResultCandidates(arr[i] as Row, add)
+    }
+    cur = arr[seg.i]
+    if (!cur) break
+    // Mid-path action (not the leaf) — if it's a chain, its prompts are in scope for nested
+    // steps. If it's a loop, ``loop`` is in scope.
+    if (depth < path.length - 1) {
+      if (cur.type === 'chain') {
+        const prompts = Array.isArray(cur.prompt_fields) ? (cur.prompt_fields as Row[]) : []
+        for (const pf of prompts) {
+          const name = String(pf.name ?? '').trim()
+          if (name) add({ value: `INPUT.${name}`, label: '(prompt input)', group: 'inputs' })
+        }
+      }
+      if (cur.type === 'loop') inLoop = true
+    }
+  }
+  if (inLoop) {
+    add({ value: 'loop', label: '(current loop iteration — append .<col>)', group: 'loop' })
+  }
+  return out
+}
+
+function addStepResultCandidates(action: Row, add: (c: SourceCandidate) => void): void {
+  const t = action?.type
+  if ((t === 'run_query' || t === 'call_api') && action?.bind_result) {
+    const id = String(action.id ?? '').trim()
+    if (!id) return
+    add({ value: `${id}.first_row`, label: '(1st row — append .<col>)', group: 'step_results' })
+    add({ value: `${id}.rows`, label: '(all rows)', group: 'step_results' })
+  }
+}

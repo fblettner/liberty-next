@@ -641,6 +641,7 @@ const fr: Resources = {
           navigate: 'Requête cible',
         },
         unknownType: 'Type d\'action inconnu : « {{type}} ».',
+        wrapInChain: 'Englober dans une chaîne',
       },
       actionsTab: {
         dialogHooksGroup: "Hooks du dialogue — déclenchés quand le formulaire est ouvert (on_load / on_save / on_cancel)",
@@ -710,6 +711,8 @@ const fr: Resources = {
         heading: 'Condition',
         hint: '``source`` est un chemin pointé dans le contexte de chaîne (``INPUT.AUUSER`` / ``select_workbench.first_row.OBJECT`` / ``loop.OBJECT``) ou un nom de champ du formulaire. ``operator`` choisit la comparaison ; ``value`` n’est utilisé que par equals / not_equals / greater_than / less_than.',
         unavailable: 'Schéma Condition indisponible — vérifiez /admin/config/schema.',
+        sourceLabel: 'Source',
+        sourcePlaceholder: 'INPUT.<nom> / <id_étape>.first_row.<col> / loop.<col>',
       },
       if: {
         thenHeading: 'Branche « alors » (condition vraie)',
@@ -720,6 +723,8 @@ const fr: Resources = {
         elseEmpty: 'Aucune étape dans la branche sinon.',
       },
       loop: {
+        sourceLabel: 'Source',
+        sourcePlaceholder: '<id_étape>.rows  (le tableau d’une étape bind_result précédente)',
         sourceHint: '``source`` doit se résoudre en tableau (par ex. ``select_workbench.rows`` issu d’une étape bind_result précédente). Chaque itération expose l’élément sous ``loop.<champ>`` pour les étapes imbriquées.',
         bodyHeading: 'Corps de la boucle',
         bodyHint: 'Étapes exécutées une fois par élément. ParamBind ``source: "loop.<col>"`` lit la valeur de l’itération courante.',

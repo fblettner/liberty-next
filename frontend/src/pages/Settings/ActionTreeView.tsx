@@ -26,10 +26,12 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  ChevronDown, ChevronRight, Edit3, FileText, GitBranch, LayoutList, Plus, Repeat, Trash2, Zap,
+  ChevronDown, ChevronRight, CornerDownLeft, Edit3, FileText, GitBranch, LayoutList, Layers,
+  Plus, Repeat, Trash2, Zap,
 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption,
+  Button, Field, Row, SchemaForm, SearchSelect, Stack, useModals,
+  type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -41,8 +43,8 @@ import {
   type ActionType,
 } from './ActionListEditor'
 import {
-  appendAtPath, breadcrumbCrumbs, pathEquals, removeAtPath, resolveAtPath, updateAtPath,
-  type ActionPath,
+  appendAtPath, breadcrumbCrumbs, chainContextCandidates, pathEquals, removeAtPath,
+  resolveAtPath, updateAtPath, type ActionPath, type SourceCandidate,
 } from './actionPath'
 
 type Row = Record<string, unknown>
@@ -54,16 +56,27 @@ type Row = Record<string, unknown>
 // different right-icon (chevron) than the editor-mode sub-list rows (also chevron, but
 // semantically different — "dive in" vs "expand inline").
 const RowBox = styled.div`display: flex; flex-direction: column; gap: 6px;`
-const RowItem = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; text-align: left;
+// Row item — clickable + draggable for reorder. ``$active`` highlights the selected action;
+// ``$dropTarget`` paints a 2-px top border to show the operator where the dragged row would
+// land if released. Drag handle lives on the leading icon area; clicking elsewhere on the row
+// selects it.
+const RowItem = styled.button<{ $active?: boolean; $dropTarget?: boolean }>`
+  display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px; text-align: left;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  border-top: ${({ $dropTarget }) => ($dropTarget ? `2px solid ${colors.blue.main}` : undefined)};
   background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.input)};
   cursor: pointer; border-radius: ${radius.md};
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .name-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  & .name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  & .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .dd { font-family: ${fonts.mono}; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
+  & .summary { color: ${colors.text.muted}; font-family: ${fonts.sans}; font-size: ${fontSize.micro};
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .lead, & .trail { flex-shrink: 0; color: ${colors.text.muted}; }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.bg.card}; }
+  &[draggable='true'] { cursor: grab; }
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 16px 4px; text-align: center; font-style: italic;`
@@ -97,19 +110,76 @@ const FieldBody = styled.div`
   border-radius: 0 0 ${radius.md} ${radius.md}; background: ${colors.bg.input};
 `
 
-// Per-variant icon (Theme B preview) so the row leads with a glyph that says "this is an if"
-// / "this is a loop" rather than just text. Cheap visual cue, big help when scanning a chain
-// with 6+ steps of mixed kinds.
+// Per-variant icon so the row leads with a glyph that says "this is an if" / "this is a loop"
+// rather than just text. Cheap visual cue, big help when scanning a chain with 6+ steps of
+// mixed kinds.
 function variantIcon(type: ActionType): ReactNode {
   switch (type) {
     case 'run_query': return <Zap size={13} />
-    case 'call_api': return <Zap size={13} />     // same icon for now — Theme B can split
-    case 'navigate': return <FileText size={13} />
+    case 'call_api': return <Layers size={13} />
+    case 'navigate': return <CornerDownLeft size={13} />
     case 'if': return <GitBranch size={13} />
     case 'loop': return <Repeat size={13} />
     case 'chain': return <LayoutList size={13} />
     default: return <FileText size={13} />
   }
+}
+
+// ── per-row summary (Theme C polish) ────────────────────────────────────────────────────────
+// At-a-glance description for an action row in the list / sub-list. Reads more usefully than
+// just ``id · type · label``: ``→ jdedwards/f00950_post · 3 binds`` for a run_query, ``if
+// INPUT.LYF00950 equals "Y" → 2 / 0 steps`` for an if, etc. Truncated when over ~60 chars by
+// the row's ellipsis CSS, so don't worry about length here — favour informativeness.
+function summarize(a: Row): string {
+  const t = a?.type
+  if (t === 'run_query') {
+    const conn = a.connector ? `${a.connector}/` : ''
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
+    const captureHint = a.bind_result ? ' · captures result' : ''
+    return `→ ${conn}${a.query ?? '?'}${bindHint}${captureHint}`
+  }
+  if (t === 'call_api') {
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
+    const captureHint = a.bind_result ? ' · captures result' : ''
+    return `→ ${a.connector ?? '?'}/${a.endpoint ?? '?'}${bindHint}${captureHint}`
+  }
+  if (t === 'navigate') {
+    const conn = a.connector ? String(a.connector) : '<screen connector>'
+    return `→ /sql/${conn}/${a.to ?? '?'}`
+  }
+  if (t === 'if') {
+    const c = (a.condition && typeof a.condition === 'object' ? a.condition : null) as Row | null
+    const thenN = Array.isArray(a.then_steps) ? a.then_steps.length : 0
+    const elseN = Array.isArray(a.else_steps) ? a.else_steps.length : 0
+    if (c?.source && c?.operator) {
+      const val = c.value != null && c.value !== '' ? ` "${c.value}"` : ''
+      return `${String(c.source)} ${String(c.operator)}${val} → ${thenN} / ${elseN}`
+    }
+    return `${thenN} then / ${elseN} else`
+  }
+  if (t === 'loop') {
+    const n = Array.isArray(a.steps) ? a.steps.length : 0
+    return `for each in ${a.source ?? '<source>'} · ${n} step${n === 1 ? '' : 's'}`
+  }
+  if (t === 'chain') {
+    const n = Array.isArray(a.steps) ? a.steps.length : 0
+    const prompts = Array.isArray(a.prompt_fields) ? a.prompt_fields.length : 0
+    return `${n} step${n === 1 ? '' : 's'}${prompts ? ` · ${prompts} prompt${prompts === 1 ? '' : 's'}` : ''}`
+  }
+  if (t === 'notify') {
+    const tone = a.tone ?? 'info'
+    return `[${tone}] ${a.message ?? ''}`
+  }
+  if (t === 'confirm') return `? ${a.message ?? ''}`
+  if (t === 'set_field') return `→ ${a.target ?? '?'}`
+  if (t === 'return') {
+    const n = a.bindings && typeof a.bindings === 'object' ? Object.keys(a.bindings).length : 0
+    return `→ ${n} binding${n === 1 ? '' : 's'}`
+  }
+  if (t === 'refresh') return '(re-runs the screen query)'
+  return ''
 }
 
 // ── component props ─────────────────────────────────────────────────────────────────────────
@@ -178,6 +248,16 @@ export default function ActionTreeView({
     () => (defs.Condition ? { ...(defs.Condition as JsonSchema), $defs: defs } : null),
     [defs],
   )
+  // Theme B — Condition's ``source`` field renders separately as an autocomplete combobox over
+  // the chain-context candidates; the rest of the Condition shape (operator + value) flows
+  // through SchemaForm with ``source`` stripped from the picked properties.
+  const conditionSchemaNoSource = useMemo<JsonSchema | null>(() => {
+    if (!conditionSchema) return null
+    const props = { ...(conditionSchema.properties ?? {}) }
+    delete props.source
+    const required = (conditionSchema.required ?? []).filter((r) => r !== 'source')
+    return { ...conditionSchema, properties: props, required }
+  }, [conditionSchema])
   const promptFieldDef = useMemo<JsonSchema>(
     () => ({ ...((defs[PROMPT_FIELD_DEF_NAME] as JsonSchema | undefined) ?? { type: 'object' }), $defs: defs }),
     [defs],
@@ -214,6 +294,26 @@ export default function ActionTreeView({
       onPathChange(null)
     }
   }, [actions, path, onPathChange])
+
+  // ── drag-reorder state (Theme C polish) ────────────────────────────────────────────────
+  // Scoped to ONE step list at a time — the operator drags rows within the currently-rendered
+  // list (top-level in list mode, or one of the editor's sub-lists). The ``listKey`` segments
+  // the state so a drag in the editor's "then_steps" sub-list doesn't leak feedback into the
+  // adjacent "else_steps" sub-list.
+  const [dragState, setDragState] = useState<{ listKey: string; from: number; over: number | null } | null>(null)
+
+  // ── source-autocomplete candidates (Theme B polish) ─────────────────────────────────────
+  // Suggestions for a ``Condition.source`` / ``LoopAction.source`` field on the action at
+  // ``path``. Recomputed when the path or the underlying actions list shifts; the operator
+  // picks from the dropdown or types a custom path (the SearchSelect ``allowCustom`` mode).
+  const sourceCandidates = useMemo<SourceCandidate[]>(
+    () => (path && path.length > 0 ? chainContextCandidates(actions, path) : []),
+    [actions, path],
+  )
+  const sourceOptions = useMemo<SearchSelectOption[]>(
+    () => sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value })),
+    [sourceCandidates],
+  )
 
   // ── path-aware mutators (delegating to the immutable helpers) ──────────────────────────
   const patchSelected = (patch: Row) => {
@@ -288,6 +388,62 @@ export default function ActionTreeView({
     if (cur.label != null) seeded.label = cur.label
     if (cur.stop_on_error != null) seeded.stop_on_error = cur.stop_on_error
     replaceSelected(seeded)
+  }
+  // Theme C — wrap the focused action in a ChainAction. Lets the operator promote a single
+  // step into a workflow without manually re-adding it: the new chain takes the action's id,
+  // the original action moves into ``steps[0]``. After the wrap we leave the path pointing at
+  // the new chain (the operator can now add sibling steps via the chain's editor).
+  const wrapInChain = () => {
+    if (!path || path.length === 0) return
+    const cur = resolveAtPath(actions, path)
+    if (!cur || cur.type === 'chain') return    // already a chain — nothing to wrap
+    const innerId = `${cur.id ?? 'step'}_inner`
+    const inner = { ...cur, id: innerId }
+    const chain: Row = {
+      id: cur.id ?? `chain_${Date.now()}`,
+      type: 'chain',
+      label: cur.label ?? null,
+      steps: [inner],
+    }
+    if (cur.label == null) delete chain.label
+    replaceSelected(chain)
+  }
+  // Theme C — reorder a step within its parent list. ``listPath`` is the parent path (the
+  // chain / if / loop containing the list) — empty array for the top-level. ``field`` is the
+  // nested field name (null for top-level). ``from`` / ``to`` are indices within the matching
+  // list. We rebuild immutably + use ``updateAtPath`` for nested writes; the top-level case is
+  // a plain array splice on ``actions``.
+  const reorder = (
+    listPath: ActionPath,
+    field: 'steps' | 'then_steps' | 'else_steps' | null,
+    from: number,
+    to: number,
+  ) => {
+    if (from === to) return
+    const move = (arr: Row[]): Row[] => {
+      if (from < 0 || from >= arr.length) return arr
+      const next = arr.slice()
+      const [moved] = next.splice(from, 1)
+      // ``to`` is the index of the row being dragged *onto*. When dragging downwards (from <
+      // to), splice has already shifted everything down by one, so the visual drop slot is at
+      // ``to - 1`` after the removal. Operators usually expect the dropped row to land at the
+      // visual position they released over — clamp accordingly.
+      const insertAt = from < to ? to - 1 : to
+      next.splice(insertAt, 0, moved)
+      return next
+    }
+    if (listPath.length === 0) {
+      // Top-level reorder.
+      onChange(move(actions))
+      return
+    }
+    if (field == null) return
+    // Nested reorder — splice inside the matching field of the parent at ``listPath``.
+    const parent = resolveAtPath(actions, listPath)
+    if (!parent) return
+    const curList = Array.isArray(parent[field]) ? (parent[field] as Row[]) : []
+    const movedList = move(curList)
+    onChange(updateAtPath(actions, listPath, { [field]: movedList.length ? movedList : null }))
   }
 
   // ── append helpers — used by the "Add step" buttons in the editor's sub-lists ──────────
@@ -539,9 +695,93 @@ export default function ActionTreeView({
     )
   }
 
-  // ── nested step sub-list (the in-editor click-to-dive list for chain / if / loop) ──────
-  // Different from the top-level list: each row's click pushes a new segment onto the parent
-  // path (instead of *replacing* the path the way the top-level list does).
+  // ── unified row renderer for both the top-level list and the in-editor sub-lists ──────
+  // ``listKey`` scopes the drag-feedback state so dragging in one sub-list doesn't paint a
+  // drop-target indicator on a sibling sub-list. ``parentPath`` + ``field`` identify which
+  // step list this is so :func:`reorder` can write back to the right slot:
+  //   - top-level list: ``parentPath=[]``, ``field=null`` → reorders the root ``actions``
+  //   - chain's steps:  ``parentPath=<chain>``, ``field='steps'`` → reorders ``chain.steps``
+  //   - if's then:      ``parentPath=<if>``,    ``field='then_steps'`` → ditto for else
+  //   - loop's body:    ``parentPath=<loop>``,  ``field='steps'``
+  const renderActionRows = (opts: {
+    list: Row[]
+    listKey: string
+    parentPath: ActionPath
+    field: 'steps' | 'then_steps' | 'else_steps' | null
+    onRowClick: (idx: number) => void
+    isSelected?: (idx: number) => boolean
+    onAdd: () => void
+    emptyMsg: string
+  }): ReactNode => {
+    const { list, listKey, parentPath, field, onRowClick, isSelected, onAdd, emptyMsg } = opts
+    return (
+      <RowBox>
+        {list.length === 0 && <Empty>{emptyMsg}</Empty>}
+        {list.map((s, i) => {
+          const sType = String(s.type ?? 'run_query') as ActionType
+          const sum = summarize(s)
+          const isDropTarget =
+            dragState?.listKey === listKey && dragState?.over === i && dragState?.from !== i
+          return (
+            <RowItem
+              key={`${listKey}-${i}`}
+              type="button"
+              $active={isSelected?.(i) ?? false}
+              $dropTarget={isDropTarget}
+              draggable
+              onDragStart={(e) => {
+                setDragState({ listKey, from: i, over: null })
+                e.dataTransfer.effectAllowed = 'move'
+              }}
+              onDragEnter={() => {
+                if (dragState?.listKey !== listKey) return
+                setDragState({ ...dragState, over: i })
+              }}
+              onDragOver={(e) => {
+                if (dragState?.listKey !== listKey) return
+                e.preventDefault()              // allow drop
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDragLeave={() => {
+                if (dragState?.listKey !== listKey || dragState.over !== i) return
+                setDragState({ ...dragState, over: null })
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (dragState?.listKey !== listKey || dragState.from === i) {
+                  setDragState(null); return
+                }
+                reorder(parentPath, field, dragState.from, i)
+                setDragState(null)
+              }}
+              onDragEnd={() => setDragState(null)}
+              onClick={() => onRowClick(i)}
+            >
+              <span className="lead">{variantIcon(sType)}</span>
+              <span className="name-block">
+                <span className="name-row">
+                  <span className="name">{String(s.id ?? '')}</span>
+                  <span className="dd">{sType}</span>
+                  {s.label != null && s.label !== '' && <span className="dd">· {String(s.label)}</span>}
+                </span>
+                {sum && <span className="summary">{sum}</span>}
+              </span>
+              <span></span>
+              <span className="trail"><ChevronRight size={13} /></span>
+            </RowItem>
+          )
+        })}
+        <Button
+          $variant="ghost"
+          $size="sm"
+          onClick={() => void onAdd()}
+          style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}
+        >
+          <Plus size={13} /> {t('settings.screens.action.add')}
+        </Button>
+      </RowBox>
+    )
+  }
   const renderSubList = (
     label: string,
     field: 'steps' | 'then_steps' | 'else_steps',
@@ -551,33 +791,15 @@ export default function ActionTreeView({
   ): ReactNode => (
     <Stack gap={6}>
       <SubHead>{label}</SubHead>
-      <RowBox>
-        {list.length === 0 && <Empty>{emptyMsg}</Empty>}
-        {list.map((s, i) => {
-          const sType = String(s.type ?? 'run_query') as ActionType
-          return (
-            <RowItem
-              key={`${field}-${i}`}
-              type="button"
-              onClick={() => onPathChange([...parentPath, { field, i }])}
-            >
-              <span className="lead">{variantIcon(sType)}</span>
-              <span className="name">{String(s.id ?? '')}</span>
-              <span className="dd">{sType}</span>
-              {s.label != null && s.label !== '' && <span className="dd">· {String(s.label)}</span>}
-              <span className="trail"><ChevronRight size={13} /></span>
-            </RowItem>
-          )
-        })}
-        <Button
-          $variant="ghost"
-          $size="sm"
-          onClick={() => void addToSelected(field)}
-          style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}
-        >
-          <Plus size={13} /> {t('settings.screens.action.add')}
-        </Button>
-      </RowBox>
+      {renderActionRows({
+        list,
+        listKey: `${parentPath.map((s) => `${s.field ?? ''}.${s.i}`).join('/')}-${field}`,
+        parentPath,
+        field,
+        onRowClick: (i) => onPathChange([...parentPath, { field, i }]),
+        onAdd: () => void addToSelected(field),
+        emptyMsg,
+      })}
     </Stack>
   )
 
@@ -587,40 +809,23 @@ export default function ActionTreeView({
       <Stack gap={8}>
         {heading != null && <SubHead>{heading}</SubHead>}
         {hint != null && <Sub>{hint}</Sub>}
-        <RowBox>
-          {actions.length === 0 && <Empty>{emptyMessage ?? t('settings.screens.action.empty')}</Empty>}
-          {actions.map((a, i) => {
-            const aType = String(a.type ?? 'run_query') as ActionType
-            // Highlight the row whose path-prefix matches ``selectedPath``. We compare just the
-            // root segment so the row stays highlighted even when the operator has dived deeper
-            // (the breadcrumb in the Inspector shows the current depth).
+        {renderActionRows({
+          list: actions,
+          listKey: 'root',
+          parentPath: [],
+          field: null,
+          onRowClick: (i) => onPathChange([{ field: null, i }]),
+          // Highlight the top-level row whose root segment matches ``selectedPath``. The row
+          // stays highlighted even when the operator has dived deeper (the breadcrumb in the
+          // Inspector shows the current depth).
+          isSelected: (i) => {
             const rowPath: ActionPath = [{ field: null, i }]
-            const isSelected = selectedPath != null && selectedPath.length > 0
+            return selectedPath != null && selectedPath.length > 0
               && pathEquals(selectedPath.slice(0, 1), rowPath)
-            return (
-              <RowItem
-                key={i}
-                type="button"
-                $active={isSelected}
-                onClick={() => onPathChange(rowPath)}
-              >
-                <span className="lead">{variantIcon(aType)}</span>
-                <span className="name">{String(a.id ?? '')}</span>
-                <span className="dd">{aType}</span>
-                {a.label != null && a.label !== '' && <span className="dd">· {String(a.label)}</span>}
-                <span className="trail"><ChevronRight size={13} /></span>
-              </RowItem>
-            )
-          })}
-        </RowBox>
-        <Button
-          $variant="ghost"
-          $size="sm"
-          onClick={() => void addAtRoot()}
-          style={{ justifyContent: 'flex-start', alignSelf: 'flex-start' }}
-        >
-          <Plus size={13} /> {t('settings.screens.action.add')}
-        </Button>
+          },
+          onAdd: () => void addAtRoot(),
+          emptyMsg: emptyMessage ?? t('settings.screens.action.empty'),
+        })}
       </Stack>
     )
   }
@@ -638,6 +843,28 @@ export default function ActionTreeView({
 
   // For workflow variants, the editor body grows by the matching sub-list (or two for IF).
   // For non-workflow variants, the body ends after the variant SchemaForm / prompt-fields.
+  // ── source-field autocomplete (Theme B) ─────────────────────────────────────────────────
+  // The :class:`Condition.source` / :class:`LoopAction.source` fields read paths from the
+  // chain context (``INPUT.<X>`` / ``<step_id>.first_row`` / ``loop.<col>`` / a plain
+  // form-field name). The SearchSelect over ``sourceOptions`` surfaces the candidates the
+  // path resolver computed (preceding bind_result steps + enclosing chain's prompt fields +
+  // loop binding when applicable); ``allowCustom`` lets the operator type any path the
+  // suggestions don't cover (column suffixes after ``.first_row.``, custom built-ins like
+  // ``#LOGIN_USER#``, etc.).
+  const renderSourceField = (
+    value: string,
+    onChangeValue: (next: string) => void,
+    placeholder: string,
+  ): ReactNode => (
+    <SearchSelect
+      value={value}
+      options={sourceOptions}
+      onChange={(v) => onChangeValue(v ?? '')}
+      allowCustom
+      placeholder={placeholder}
+    />
+  )
+
   const renderBody = (): ReactNode => {
     if (sType === 'chain') {
       const steps = Array.isArray(selected.steps) ? (selected.steps as Row[]) : []
@@ -654,12 +881,19 @@ export default function ActionTreeView({
           <Stack gap={6}>
             <SubHead>{t('settings.screens.condition.heading')}</SubHead>
             <Sub>{t('settings.screens.condition.hint')}</Sub>
-            {conditionSchema ? (
+            <Field label={t('settings.screens.condition.sourceLabel')}>
+              {renderSourceField(
+                String(condition.source ?? ''),
+                (next) => patchSelected({ condition: { ...condition, source: next } }),
+                t('settings.screens.condition.sourcePlaceholder'),
+              )}
+            </Field>
+            {conditionSchemaNoSource ? (
               <SchemaForm
-                schema={conditionSchema}
+                schema={conditionSchemaNoSource}
                 defs={defs}
                 value={condition}
-                onChange={(v) => patchSelected({ condition: v })}
+                onChange={(v) => patchSelected({ condition: { ...condition, ...v } })}
               />
             ) : (
               <Empty>{t('settings.screens.condition.unavailable')}</Empty>
@@ -674,6 +908,13 @@ export default function ActionTreeView({
       const steps = Array.isArray(selected.steps) ? (selected.steps as Row[]) : []
       return (
         <Stack gap={14}>
+          <Field label={t('settings.screens.loop.sourceLabel')}>
+            {renderSourceField(
+              String(selected.source ?? ''),
+              (next) => patchSelected({ source: next }),
+              t('settings.screens.loop.sourcePlaceholder'),
+            )}
+          </Field>
           <Sub style={{ marginTop: -2 }}>{t('settings.screens.loop.sourceHint')}</Sub>
           {renderSubList(t('settings.screens.loop.bodyHeading'), 'steps', steps, path, t('settings.screens.loop.bodyEmpty'))}
         </Stack>
@@ -732,10 +973,18 @@ export default function ActionTreeView({
         )}
         {renderPromptFields(selected, (patch) => patchSelected(patch))}
         {renderBody()}
-        <Row gap={8}>
+        <Row gap={8} style={{ flexWrap: 'wrap' }}>
           <Button $variant="danger" $size="sm" onClick={() => void removeSelected()}>
             <Trash2 size={13} /> {t('settings.screens.action.delete')}
           </Button>
+          {/* Theme C — wrap a single action in a ChainAction so the operator can grow it
+              into a workflow (add sibling steps via the chain's editor) without manually
+              re-adding the original. Hidden when the focused action is already a chain. */}
+          {sType !== 'chain' && (
+            <Button $variant="ghost" $size="sm" onClick={wrapInChain}>
+              <LayoutList size={13} /> {t('settings.screens.action.wrapInChain')}
+            </Button>
+          )}
         </Row>
       </Stack>
     </Stack>

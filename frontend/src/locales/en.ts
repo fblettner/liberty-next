@@ -639,6 +639,7 @@ const en = {
           navigate: 'Target query',
         },
         unknownType: 'Unknown action type "{{type}}".',
+        wrapInChain: 'Wrap in chain',
       },
       actionsTab: {
         dialogHooksGroup: 'Dialog hooks — fire while the form is open (on_load / on_save / on_cancel)',
@@ -708,6 +709,8 @@ const en = {
         heading: 'Condition',
         hint: '``source`` is a dotted path against the chain context (``INPUT.AUUSER`` / ``select_workbench.first_row.OBJECT`` / ``loop.OBJECT``) or a plain form-field name. ``operator`` picks the comparison; ``value`` is only used by equals / not_equals / greater_than / less_than.',
         unavailable: 'Condition schema unavailable — check /admin/config/schema.',
+        sourceLabel: 'Source',
+        sourcePlaceholder: 'INPUT.<name> / <step_id>.first_row.<col> / loop.<col>',
       },
       if: {
         thenHeading: 'Then steps (condition is true)',
@@ -718,6 +721,8 @@ const en = {
         elseEmpty: 'No steps in the else-branch.',
       },
       loop: {
+        sourceLabel: 'Source',
+        sourcePlaceholder: '<step_id>.rows  (a prior bind_result step\'s rows array)',
         sourceHint: '``source`` must resolve to an array (e.g. ``select_workbench.rows`` from a prior bind_result step). Each iteration binds the element under ``loop.<field>`` for the nested steps to read.',
         bodyHeading: 'Loop body',
         bodyHint: 'Steps run once per element. ParamBind ``source: "loop.<col>"`` reads the current iteration\'s value.',
