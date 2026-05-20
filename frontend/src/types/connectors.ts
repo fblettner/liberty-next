@@ -65,6 +65,14 @@ export type DisplayRule =
     }
   | { kind: 'enum'; values: { value: string; label: string }[] }
   | {
+      /** Form-layer auto-fill — seeds the field on dialog open (add mode only). ``source``
+       *  is a built-in id the runtime resolves via the auth-builtins layer: ``current_date``
+       *  (today's YYYY-MM-DD, from the JS clock) / ``login_user`` (the authenticated user's
+       *  username). v2's port of v1's ``dd_rules`` SYSDATE / CURRENT_DATE / LOGIN. */
+      kind: 'auto_fill'
+      source: 'current_date' | 'login_user' | string
+    }
+  | {
       kind: 'lookup'
       connector: string
       query: string

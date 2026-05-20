@@ -388,7 +388,21 @@ class DictionaryFile(BaseModel):
             if lk.return_params:
                 wire["return_params"] = list(lk.return_params)
             return wire
-        return None  # the form-layer rules (SEQUENCE/SYSDATE/LOGIN/PASSWORD/…) — not a display transform
+        # Form-layer auto-fill rules — v1's `dd_rules` shapes the dialog runtime can act on at
+        # *open time* (add mode only). Each maps to a built-in source the frontend resolves
+        # against its installed providers (auth username, JS clock). The matching source ids
+        # mirror the action-runner ``#NAME#`` built-ins so a future widget-side reuse stays
+        # consistent. PASSWORD is intentionally NOT here — the masking is driven by the
+        # ``format = "password"`` flag, not the rule; treating it as auto_fill would seed the
+        # column with the user's password, which is the bug we already fixed elsewhere.
+        # SEQUENCE / NN are server-side (SQLConnector._resolve_sequences fires the sequence
+        # query inside the INSERT transaction); auto-filling the form would mean firing the
+        # sequence on every Open and reverting on Cancel — not worth the complexity.
+        if rule in ("SYSDATE", "CURRENT_DATE"):
+            return {"kind": "auto_fill", "source": "current_date"}
+        if rule == "LOGIN":
+            return {"kind": "auto_fill", "source": "login_user"}
+        return None
 
 
 def infer_false_value(true_value: str | None) -> str | None:

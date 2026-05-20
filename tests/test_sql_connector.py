@@ -986,6 +986,35 @@ def test_resolve_rule_boolean_surfaces_false_value() -> None:
     assert d.resolve_rule(e) == {"kind": "boolean", "true_value": "Y", "false_value": "N"}
 
 
+def test_resolve_rule_form_layer_auto_fill() -> None:
+    """v1's `dd_rules` form-layer cases (SYSDATE / CURRENT_DATE / LOGIN) resolve to an
+    ``auto_fill`` rule that carries a stable source id the frontend dispatches against its
+    auth-builtins layer. PASSWORD and SEQUENCE / NN don't auto-fill — PASSWORD is driven by
+    the `format = "password"` flag (masking only), and SEQUENCE / NN are server-side (the
+    SQL connector fires them inside the INSERT transaction). Unknown / blank rules stay None
+    so the existing widget-detection path isn't perturbed."""
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile
+    d = DictionaryFile()
+    # SYSDATE + CURRENT_DATE both map to the same source — v1 used SYSDATE on Oracle and
+    # CURRENT_DATE on Postgres; v2 normalises.
+    assert d.resolve_rule(DictionaryEntry(rules="SYSDATE")) == {"kind": "auto_fill", "source": "current_date"}
+    assert d.resolve_rule(DictionaryEntry(rules="CURRENT_DATE")) == {"kind": "auto_fill", "source": "current_date"}
+    # LOGIN — the current user's username (auth-installed at the frontend layer).
+    assert d.resolve_rule(DictionaryEntry(rules="LOGIN")) == {"kind": "auto_fill", "source": "login_user"}
+    # PASSWORD intentionally returns None — masking is driven by ``format = "password"``, not
+    # by the rule kind. Treating it as auto_fill would seed the column with whatever the source
+    # resolves to (typically the username), which is the v1 / v2 bug we already fixed.
+    assert d.resolve_rule(DictionaryEntry(rules="PASSWORD")) is None
+    # SEQUENCE / NN are server-side (fired in SQLConnector._resolve_sequences during INSERT).
+    assert d.resolve_rule(DictionaryEntry(rules="SEQUENCE", rules_values="1")) is None
+    assert d.resolve_rule(DictionaryEntry(rules="NN", rules_values="1")) is None
+    # Unknown rule still returns None (existing behaviour — widget-detection won't fire).
+    assert d.resolve_rule(DictionaryEntry(rules="UNKNOWN_RULE")) is None
+    # Blank / missing rule → None.
+    assert d.resolve_rule(DictionaryEntry()) is None
+    assert d.resolve_rule(DictionaryEntry(rules="")) is None
+
+
 @pytest.mark.asyncio
 async def test_boolean_rule_value_not_coerced_to_python_bool(pools: PoolRegistry) -> None:
     """Regression — a column with ``format = "boolean"`` *and* ``rules = "BOOLEAN"`` stores

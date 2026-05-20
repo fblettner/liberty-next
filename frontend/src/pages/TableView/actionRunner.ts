@@ -182,6 +182,16 @@ function resolveBuiltin(key: string): string | undefined {
   return undefined
 }
 
+/** Resolve a form-side ``auto_fill`` rule's source id (e.g. ``"current_date"`` / ``"login_user"``)
+ *  to the value that should pre-fill the field on dialog open (add mode only). v2's port of
+ *  v1's ``dd_rules`` SYSDATE / CURRENT_DATE / LOGIN. Source ids match the matching built-ins
+ *  (uppercased), so a single source of truth keeps action-bind built-ins + form auto-fills
+ *  consistent. Unknown source → ``undefined`` (the seeder treats that as "no auto-fill"). */
+export function resolveAutoFill(source: string): string | undefined {
+  const v = resolveBuiltin(source.toUpperCase())
+  return v == null || v === '' ? undefined : v
+}
+
 /** Catalog of built-in source paths surfaced as autocomplete options in the ParamBind editor.
  *  The runtime resolver above is the source of truth — keep them in sync. Labels are i18n-able
  *  *only* at the caller (the editor is the single consumer); the runtime never reads these. */

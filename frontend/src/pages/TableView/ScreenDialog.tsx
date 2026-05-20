@@ -25,7 +25,7 @@ import { evalConditions, originalKeys, type Row, withUpper } from './dialogHelpe
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
-import { runChain } from './actionRunner'
+import { resolveAutoFill, runChain } from './actionRunner'
 
 /** Narrow a ScreenTab to FormTab — the original "grid of fields" kind. A tab without a
  *  ``type`` discriminator is treated as a form (matches `parse_screens` backward compat).
@@ -171,6 +171,15 @@ export function ScreenDialog({
         if (isPassword(col)) continue   // seeded blank — user types a new password to change it
         if (v !== undefined) seeded[f.name] = v
         else if (mode === 'add' && f.default != null && f.default !== '') seeded[f.name] = f.default
+        else if (mode === 'add' && col?.rule?.kind === 'auto_fill') {
+          // v1's `dd_rules` SYSDATE / CURRENT_DATE / LOGIN — auto-fill the field on add. The
+          // operator can still type over the seed. Explicit `f.default` above wins (the operator
+          // set it on this dialog specifically, so they meant it). Edit mode keeps the row's
+          // existing value, even when the column is auto_fill-ruled — we don't want to overwrite
+          // the original SYSDATE / LOGIN that was captured at insert time.
+          const filled = resolveAutoFill(col.rule.source)
+          if (filled != null) seeded[f.name] = filled
+        }
       }
     }
     setFormValues(seeded)

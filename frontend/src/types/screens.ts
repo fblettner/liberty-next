@@ -31,6 +31,7 @@ export interface FieldCondition {
 export type DisplayRule =
   | { kind: 'boolean'; true_value: string; false_value?: string }
   | { kind: 'enum'; values: { value: string; label: string }[] }
+  | { kind: 'auto_fill'; source: 'current_date' | 'login_user' | string }
   | {
       kind: 'lookup'
       connector: string

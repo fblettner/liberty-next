@@ -75,8 +75,9 @@ Full dep set pinned in `pyproject.toml`.
   (BOOLEAN / ENUM / LOOKUP — the v2 form of v1's `dd_rules`) — its own `[connectors.<conn>.…]`
   section first, then the shared top-level. `DictionaryFile.find_entry(key, *, connector)` returns
   the entry; `.resolve_rule(entry, *, connector, language)` returns a wire-ready
-  `{kind:"boolean", true_value}` / `{kind:"enum", values:[…]}` / `{kind:"lookup", connector, query, value, label}`
-  dict (None for form-layer rules — SEQUENCE/SYSDATE/LOGIN/PASSWORD/CURRENT_DATE — those wait for Phase 6).
+  `{kind:"boolean", true_value}` / `{kind:"enum", values:[…]}` / `{kind:"lookup", connector, query, value, label}` /
+  `{kind:"auto_fill", source:"current_date"|"login_user"}` dict (None for PASSWORD — masking is driven by
+  `format = "password"`, not the rule — and for SEQUENCE / NN — server-side via `SQLConnector._resolve_sequences`).
   `Column.rule` rides on the result so the frontend renders ✓/✗ for booleans, the enum label, or — via
   `services/lookups.useLookupBatch` — the lookup label after a one-shot per-session fetch. A missing
   file = an empty dictionary. `/info` reports `dictionary.{entries, default_language}`.
@@ -875,8 +876,11 @@ and row menus.
   grows three lists — ``visible_when`` / ``required_when`` / ``disabled_when`` — each AND-ed;
   when a list is non-empty *and* every predicate holds, the rule fires (the field shows / is
   required / is locked); the static flags act as the fallback when the corresponding ``*_when``
-  list is empty. (``default_when`` is form-rule territory — SEQUENCE / SYSDATE / LOGIN / CURRENT_DATE
-  derived defaults — and waits for a later slice.)
+  list is empty. (v1's `dd_rules` form-side auto-fills — SYSDATE / CURRENT_DATE / LOGIN — are now
+  wired via the dictionary's `auto_fill` rule kind: the resolver emits
+  `{kind:"auto_fill", source:"current_date"|"login_user"}` and ScreenDialog's add-mode seeder
+  calls `actionRunner.resolveAutoFill` to set the field's initial value. Explicit
+  `ScreenField.default` still wins; edit mode keeps the row's stored value untouched.)
 - `liberty/migrations/v1.py` — the cdn-graph parser (``_cdn_to_field_groups`` / ``_cdn_resolve``)
   is factored out and shared between :func:`migrate_column_visibility` (grid columns) and
   :func:`migrate_screens` (dialog fields). ``migrate_screens(*, cdn_param_rows=…)`` resolves each
