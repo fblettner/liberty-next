@@ -423,6 +423,11 @@ export default function ConnectorsBuilder() {
       // re-reads everything; ``load()`` resets both originals so the dirty flag clears.
       if (dictDirty) await api.put<{ saved: boolean }>('/admin/config/dictionary/parsed', { dictionary })
       const r = await api.post<{ connectors: string[] }>('/admin/reload')
+      // Bump the workspace nonce so every consumer (the ScreenDesigner's action editor,
+      // the dashboards, …) refetches /api/connectors + /api/screens with the new shape.
+      // Without this, freshly-added endpoint params don't surface in the call_api action's
+      // param-bind dropdown until the operator hard-refreshes the page.
+      refreshWorkspace()
       setStatus(t('settings.connectors.saved', { connectors: r.connectors.join(', ') || `(${t('common.none')})` }))
       load()
     } catch (e) {

@@ -577,6 +577,8 @@ const en = {
           cols: 'Columns',
           search: 'filter…',
           hint: 'Click an item to add it to the current tab. Dictionary entries pre-fill `dd` so the widget picks up the right rule; columns add a plain field bound to the read query.',
+          collapse: 'Hide palette',
+          expand: 'Show palette',
         },
         canvas: {
           title: 'Dialog',
@@ -588,6 +590,8 @@ const en = {
           title: 'Inspector',
           empty: 'Pick a field on the canvas to edit its properties.',
           advanced: 'Advanced — display flags, lookup binds, conditional rules',
+          collapse: 'Hide inspector',
+          expand: 'Show inspector',
         },
         bindsTitle: 'Lookup bindings',
         tabSettings: {

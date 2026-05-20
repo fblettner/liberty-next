@@ -167,7 +167,12 @@ export default function ScreensBuilder() {
   // Fullscreen toggle for the designer modal — the default 1400×900 envelope can still feel
   // tight on a complex screen (palette + many fields + inspector). Operator clicks the maximize
   // icon in the header, the modal grows to 100vw / 100vh + drops its border-radius.
-  const [designerFullscreen, setDesignerFullscreen] = useState(false)
+  // Default to fullscreen: the Screen Designer carries a lot of information (the dialog's
+  // tabs + fields + every action's prompt fields + the inspector) and almost always benefits
+  // from the whole viewport. Operators can hit the restore button (top-right of the modal
+  // header) to drop back to the windowed envelope when they want to see the underlying
+  // Screens list behind it.
+  const [designerFullscreen, setDesignerFullscreen] = useState(true)
   // Open / close helpers — Cancel restores the snapshot, Save just discards it (the in-memory
   // doc already reflects every edit, the parent's Save button commits to disk).
   const openDesigner = () => {
@@ -237,7 +242,7 @@ export default function ScreensBuilder() {
   // Close the designer when the operator picks a different screen — would otherwise show the
   // wrong screen's data until they reopen. Reset fullscreen too so each open starts windowed.
   // Don't revert here — the operator switched screens, they didn't ask to undo edits.
-  useEffect(() => { setDesignerOpen(false); setDesignerSnapshot(null); setDesignerFullscreen(false) }, [selApp, selId])
+  useEffect(() => { setDesignerOpen(false); setDesignerSnapshot(null); setDesignerFullscreen(true) }, [selApp, selId])
 
   const load = () => {
     setError(null); setStatus(null)

@@ -575,6 +575,8 @@ const fr: Resources = {
           cols: 'Colonnes',
           search: 'filtrer…',
           hint: "Cliquez sur un élément pour l'ajouter à l'onglet courant. Les entrées du dictionnaire pré-remplissent `dd` afin que le widget reprenne la bonne règle ; les colonnes ajoutent un champ brut lié à la requête de lecture.",
+          collapse: 'Masquer la palette',
+          expand: 'Afficher la palette',
         },
         canvas: {
           title: 'Dialogue',
@@ -586,6 +588,8 @@ const fr: Resources = {
           title: 'Inspecteur',
           empty: "Sélectionnez un champ sur le canevas pour modifier ses propriétés.",
           advanced: 'Avancé — flags d\'affichage, liaisons de lookup, règles conditionnelles',
+          collapse: 'Masquer l\'inspecteur',
+          expand: 'Afficher l\'inspecteur',
         },
         bindsTitle: 'Liaisons de lookup',
         tabSettings: {

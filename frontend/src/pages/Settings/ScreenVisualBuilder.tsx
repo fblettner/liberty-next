@@ -25,8 +25,9 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  AlertTriangle, AlignLeft, Calendar, CheckSquare, ChevronRight as ChevronRightIcon, Code2,
-  Edit3, Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, Plus, Search, Trash2, Zap,
+  AlertTriangle, AlignLeft, Calendar, CheckSquare, ChevronLeft, ChevronRight as ChevronRightIcon, Code2,
+  Edit3, Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, PanelLeftOpen, PanelRightOpen,
+  Plus, Search, Trash2, Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
@@ -112,15 +113,48 @@ function OverrideToggle(props: {
 // constrained Stack). The `min-height: 0` on Col is the flex-child quirk that lets each
 // column's PaletteList / CanvasBody / inspector content scroll on its own — without it the
 // children's natural content height would force the whole row to grow and overflow the modal.
+//
+// Layout: flex row with three Cols. The left + right Cols carry a width set from state +
+// localStorage so the operator can drag a Splitter between them to resize. Either side
+// panel can collapse to a thin CollapsedRail (vertical strip with an arrow button to
+// re-expand) so the canvas gets the full viewport when the side panel isn't needed.
 const Shell = styled.div`
-  display: grid; grid-template-columns: 240px 1fr 340px; gap: 12px;
-  flex: 1 1 auto; min-height: 0; height: 100%;
+  display: flex; flex-direction: row; gap: 12px;
+  flex: 1 1 auto; min-height: 0; height: 100%; min-width: 0;
 `
 const Col = styled.div`
   display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0;
   border: 1px solid ${colors.border}; border-radius: ${radius.md};
   background: ${colors.bg.card}; padding: 12px;
-  overflow: hidden;
+  overflow: hidden; flex-shrink: 0;
+`
+// Drag handle between two panels. 6 px wide hit-target with a centred 2-px visual bar that
+// highlights on hover / while dragging. ``pointerEvents: auto`` keeps it clickable even when
+// the operator's mouse is over a busy panel.
+const Splitter = styled.div<{ $active?: boolean }>`
+  flex: 0 0 6px; cursor: col-resize; position: relative; align-self: stretch;
+  &::before {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px;
+    background: ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
+    border-radius: 1px; transition: background 80ms ease;
+  }
+  &:hover::before { background: ${colors.blue.border}; }
+`
+// Collapsed-panel rail. Narrow vertical strip with an arrow button that expands the panel
+// back. We keep it the same width on both sides for visual symmetry; the rail's icon
+// rotates so the arrow always points "outward" (toward the panel that would open).
+const CollapsedRail = styled.button`
+  flex: 0 0 24px; align-self: stretch; padding: 6px 0;
+  background: ${colors.bg.card}; border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  color: ${colors.text.muted}; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 8px;
+  &:hover { color: ${colors.blue.main}; border-color: ${colors.blue.border}; }
+`
+const CollapseBtn = styled.button`
+  background: transparent; border: none; padding: 2px; cursor: pointer; color: ${colors.text.muted};
+  display: inline-flex; align-items: center; justify-content: center;
+  &:hover { color: ${colors.blue.main}; }
 `
 const ColTitle = styled.div`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; color: ${colors.text.muted};
@@ -345,10 +379,70 @@ export interface ScreenVisualBuilderProps {
   onChange: (next: Row) => void
 }
 
+// localStorage keys for the panel-layout preferences (one set across every screen — the
+// operator's preferred ratio rarely depends on which screen is open). Tolerate a missing /
+// corrupt entry by falling back to the design defaults.
+const LS_LEFT_WIDTH = 'screenDesigner.leftWidth'
+const LS_RIGHT_WIDTH = 'screenDesigner.rightWidth'
+const LS_LEFT_COLL = 'screenDesigner.leftCollapsed'
+const LS_RIGHT_COLL = 'screenDesigner.rightCollapsed'
+const PANEL_MIN = 180   // can't shrink narrower than this — title + icon need room
+const PANEL_MAX = 640   // and not wider — otherwise the canvas gets squeezed
+const readInt = (key: string, fallback: number): number => {
+  try { const v = Number(window.localStorage.getItem(key)); return Number.isFinite(v) && v > 0 ? v : fallback }
+  catch { return fallback }
+}
+const readBool = (key: string): boolean => {
+  try { return window.localStorage.getItem(key) === '1' } catch { return false }
+}
+
+
 export default function ScreenVisualBuilder({ app, value, schema, onChange }: ScreenVisualBuilderProps) {
   const { t } = useTranslation()
   const modals = useModals()
   const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
+
+  // ── panel layout state ──────────────────────────────────────────────────────────────
+  // Three flexible columns: palette (left), canvas (center, grows), inspector (right).
+  // The two side panels carry an explicit pixel width (drag-resizable + persisted) and a
+  // collapsed bool (toggle a button to hide → canvas takes the whole space; a thin rail
+  // remains so the operator can re-expand). Defaults match the original grid layout.
+  const [leftWidth, setLeftWidth] = useState(() => readInt(LS_LEFT_WIDTH, 240))
+  const [rightWidth, setRightWidth] = useState(() => readInt(LS_RIGHT_WIDTH, 340))
+  const [leftCollapsed, setLeftCollapsed] = useState(readBool(LS_LEFT_COLL))
+  const [rightCollapsed, setRightCollapsed] = useState(readBool(LS_RIGHT_COLL))
+  useEffect(() => { try { window.localStorage.setItem(LS_LEFT_WIDTH, String(leftWidth)) } catch { /* ignore */ } }, [leftWidth])
+  useEffect(() => { try { window.localStorage.setItem(LS_RIGHT_WIDTH, String(rightWidth)) } catch { /* ignore */ } }, [rightWidth])
+  useEffect(() => { try { window.localStorage.setItem(LS_LEFT_COLL, leftCollapsed ? '1' : '0') } catch { /* ignore */ } }, [leftCollapsed])
+  useEffect(() => { try { window.localStorage.setItem(LS_RIGHT_COLL, rightCollapsed ? '1' : '0') } catch { /* ignore */ } }, [rightCollapsed])
+  // Splitter drag — captures the pointer on mousedown so the operator can drag across the
+  // whole window without losing the gesture. ``which`` says which side's width we're
+  // updating (left or right); ``startX`` + ``startW`` are the snapshot at drag start so we
+  // compute new = startW ± (clientX - startX). The right side subtracts because moving
+  // right shrinks the right panel.
+  const [draggingSide, setDraggingSide] = useState<'left' | 'right' | null>(null)
+  const startDrag = (side: 'left' | 'right') => (e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = side === 'left' ? leftWidth : rightWidth
+    setDraggingSide(side)
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX
+      const next = side === 'left' ? startW + dx : startW - dx
+      const clamped = Math.max(PANEL_MIN, Math.min(PANEL_MAX, next))
+      if (side === 'left') setLeftWidth(clamped)
+      else setRightWidth(clamped)
+    }
+    const onUp = () => {
+      setDraggingSide(null)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
 
   // The selected screen's connector (explicit, else app). All palette fetches scope to this.
   const connector = (value.connector as string | undefined) ?? app
@@ -1120,9 +1214,28 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
 
   return (
     <Shell>
-      {/* ─── PALETTE (left) ─── */}
-      <Col>
-        <ColTitle>{t('settings.screens.visual.palette.title')}</ColTitle>
+      {/* ─── PALETTE (left) ─── collapsible to a thin rail (PanelLeftOpen expands).
+          Width is operator-resizable via the splitter that follows. */}
+      {leftCollapsed ? (
+        <CollapsedRail
+          type="button"
+          onClick={() => setLeftCollapsed(false)}
+          title={t('settings.screens.visual.palette.expand', { defaultValue: 'Show palette' })}
+        >
+          <PanelLeftOpen size={14} />
+        </CollapsedRail>
+      ) : (
+      <Col style={{ flex: `0 0 ${leftWidth}px`, width: leftWidth }}>
+        <Row gap={6} style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <ColTitle>{t('settings.screens.visual.palette.title')}</ColTitle>
+          <CollapseBtn
+            type="button"
+            onClick={() => setLeftCollapsed(true)}
+            title={t('settings.screens.visual.palette.collapse', { defaultValue: 'Hide palette' })}
+          >
+            <ChevronLeft size={13} />
+          </CollapseBtn>
+        </Row>
         <SubTabs>
           <SubTab type="button" $active={paletteSrc === 'dict'} onClick={() => setPaletteSrc('dict')}>
             {t('settings.screens.visual.palette.dict')}
@@ -1168,9 +1281,13 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
           {t('settings.screens.visual.palette.hint')}
         </div>
       </Col>
+      )}
+      {/* Drag-resize handle between the palette and the canvas. Only when the palette
+          isn't collapsed (no panel to resize otherwise). */}
+      {!leftCollapsed && <Splitter $active={draggingSide === 'left'} onPointerDown={startDrag('left')} />}
 
-      {/* ─── CANVAS (center) ─── */}
-      <Col>
+      {/* ─── CANVAS (center) ─── grows to fill the leftover space. */}
+      <Col style={{ flex: '1 1 auto', minWidth: 0 }}>
         <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <ColTitle>{t('settings.screens.visual.canvas.title')}</ColTitle>
           <div style={{ color: colors.text.muted, fontSize: fontSize.micro, fontFamily: fonts.mono }}>
@@ -1350,9 +1467,31 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         </CanvasBody>
       </Col>
 
-      {/* ─── INSPECTOR (right) ─── */}
-      <Col>
-        <ColTitle>{t('settings.screens.visual.inspector.title')}</ColTitle>
+      {/* Drag-resize handle between the canvas and the inspector. Only when the inspector
+          isn't collapsed. */}
+      {!rightCollapsed && <Splitter $active={draggingSide === 'right'} onPointerDown={startDrag('right')} />}
+
+      {/* ─── INSPECTOR (right) ─── collapsible to a thin rail. */}
+      {rightCollapsed ? (
+        <CollapsedRail
+          type="button"
+          onClick={() => setRightCollapsed(false)}
+          title={t('settings.screens.visual.inspector.expand', { defaultValue: 'Show inspector' })}
+        >
+          <PanelRightOpen size={14} />
+        </CollapsedRail>
+      ) : (
+      <Col style={{ flex: `0 0 ${rightWidth}px`, width: rightWidth }}>
+        <Row gap={6} style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+          <ColTitle>{t('settings.screens.visual.inspector.title')}</ColTitle>
+          <CollapseBtn
+            type="button"
+            onClick={() => setRightCollapsed(true)}
+            title={t('settings.screens.visual.inspector.collapse', { defaultValue: 'Hide inspector' })}
+          >
+            <ChevronRightIcon size={13} />
+          </CollapseBtn>
+        </Row>
         {/* Breadcrumb: "Dialog ▸ <field>" or "Dialog ▸ <action>" — clicking "Dialog"
             deselects so the dialog-level view comes back (title editor + events). The
             inspector hosts EITHER a field editor OR an action editor (path-routed via
@@ -1567,6 +1706,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         )}
         </InspBody>
       </Col>
+      )}
       {/* Edit query — raised from a nested-form tab's pencil button. Self-contained: fetches
           its own connectors copy + PUTs it back on Save (the visual builder doesn't track
           query edits itself). */}
