@@ -37,7 +37,8 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
-import ActionListEditor from './ActionListEditor'
+import ActionTreeView from './ActionTreeView'
+import type { ActionPath } from './actionPath'
 
 type Row = Record<string, unknown>
 
@@ -369,7 +370,25 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   const tabActions: Row[] = useMemo(() => (Array.isArray(selTab?.actions) ? (selTab!.actions as Row[]) : []), [selTab])
   const cols = Math.max(1, Number(selTab?.cols ?? 2))
   const [selFieldIdx, setSelFieldIdx] = useState<number | null>(null)
-  useEffect(() => { setSelFieldIdx(null) }, [tabIdx])
+  // Theme A polish — Inspector hosts the per-tab action editor. When this path is non-null,
+  // the Inspector renders ``ActionTreeView`` in editor mode (focused on the action at the
+  // path); the Tab Settings panel keeps a flat *list* of actions with the matching row
+  // highlighted. Selecting an action clears any field selection (and vice versa) — the
+  // Inspector shows one thing at a time.
+  const [selActionPath, setSelActionPath] = useState<ActionPath | null>(null)
+  // Reset both selections when the operator switches tabs — the per-tab actions live on a
+  // specific tab and a stale path would reach into the new tab's (different) actions list.
+  useEffect(() => { setSelFieldIdx(null); setSelActionPath(null) }, [tabIdx])
+  // Mutual-exclusion helpers — clicking a field clears the action selection; clicking an
+  // action clears the field selection. Either way the Inspector switches modes.
+  const selectField = useCallback((idx: number | null) => {
+    setSelFieldIdx(idx)
+    if (idx != null) setSelActionPath(null)
+  }, [])
+  const selectActionPath = useCallback((next: ActionPath | null) => {
+    setSelActionPath(next)
+    if (next != null) setSelFieldIdx(null)
+  }, [])
   // Phase 2 — display metadata (dd / label / format / lookup_param_binds / rules / default)
   // lives on ``Screen.columns`` (single source of truth, shared between grid + dialog). Build
   // a case-insensitive lookup once so each field card can resolve its matching ColumnHint.
@@ -683,15 +702,15 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     if (fields.some((f) => f.name === fieldName)) {
       // duplicate — just select the existing one rather than silently doing nothing.
       const ex = fields.findIndex((f) => f.name === fieldName)
-      setSelFieldIdx(ex)
+      selectField(ex)
       return
     }
     const entry: Row = { name: fieldName }
     if (ddId && ddId !== fieldName) entry.dd = ddId
     const nextFields = [...fields, entry]
     updateFields(nextFields)
-    setSelFieldIdx(nextFields.length - 1)
-  }, [fields, updateFields])
+    selectField(nextFields.length - 1)
+  }, [fields, updateFields, selectField])
   const updateField = useCallback((idx: number, patch: Row) => {
     const next = fields.slice()
     next[idx] = { ...next[idx], ...patch }
@@ -736,7 +755,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     const [moved] = next.splice(dragIdx, 1)
     next.splice(idx, 0, moved)
     updateFields(next)
-    setSelFieldIdx(idx)
+    selectField(idx)
     setDragIdx(null); setDragOverIdx(null)
   }
   // Cross-tab drop on the tabs strip — moves a field from the current tab to a different one.
@@ -757,7 +776,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     const targetFields = Array.isArray(next[targetTabIdx]?.fields) ? (next[targetTabIdx].fields as Row[]) : []
     next[targetTabIdx] = { ...next[targetTabIdx], fields: [...targetFields, movedField] }
     setDialog({ ...(dialog ?? {}), tabs: next })
-    setTabIdx(targetTabIdx); setSelFieldIdx(targetFields.length); setDragIdx(null)
+    setTabIdx(targetTabIdx); selectField(targetFields.length); setDragIdx(null)
   }
 
   // ── inspector sub-schemas ────────────────────────────────────────────────────────────────
@@ -994,15 +1013,24 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               carries Import Security + Merge Roles + an Activity Log next to its nested grid;
               JDE F0092 / F00926 carry workflow buttons here too). Same shape every other action
               attachment point uses — one editor everywhere. */}
-          <ActionListEditor
+          {/* Theme A polish — flat list of action rows (no inline expansion). Clicking a row
+              sets ``selActionPath``; the Inspector swaps to ``ActionTreeView`` in editor mode
+              focused on that action, with breadcrumb dive-in for nested steps. Matching
+              row gets the highlighted style so the operator sees which action is currently
+              under edit. ``path={null}`` keeps this instance permanently in list mode. */}
+          <ActionTreeView
             actions={tabActions}
             onChange={(n) => patchTab({ actions: n.length ? (n as unknown as Row[]) : null })}
-            heading={t('settings.screens.tabActions.heading')}
-            hint={t('settings.screens.tabActions.hint')}
-            emptyMessage={t('settings.screens.tabActions.empty')}
+            path={null}
+            onPathChange={selectActionPath}
+            selectedPath={selActionPath}
             defs={defs}
             effectiveConnector={tabEffectiveConnector}
             onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
+            rootLabel={t('settings.screens.tabActions.heading')}
+            heading={t('settings.screens.tabActions.heading')}
+            hint={t('settings.screens.tabActions.hint')}
+            emptyMessage={t('settings.screens.tabActions.empty')}
           />
         </div>
       </TabSettingsBox>
@@ -1225,7 +1253,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                   onDragLeave={onDragLeave}
                   onDragOver={onDragOver}
                   onDrop={onDrop(i)}
-                  onClick={() => setSelFieldIdx(i)}
+                  onClick={() => selectField(i)}
                 >
                   <div className="lbl">
                     <Icon size={13} className="icon" />
@@ -1324,12 +1352,19 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       {/* ─── INSPECTOR (right) ─── */}
       <Col>
         <ColTitle>{t('settings.screens.visual.inspector.title')}</ColTitle>
-        {/* Breadcrumb: "Dialog ▸ <field>" — clicking "Dialog" deselects so the dialog-level
-            view comes back (title editor + events). Always rendered; "Dialog" is muted when
-            already there. The breadcrumb sits ABOVE the scroll body so it doesn't disappear
-            when the operator scrolls a long inspector. */}
+        {/* Breadcrumb: "Dialog ▸ <field>" or "Dialog ▸ <action>" — clicking "Dialog"
+            deselects so the dialog-level view comes back (title editor + events). The
+            inspector hosts EITHER a field editor OR an action editor (path-routed via
+            ActionTreeView); the two are mutually exclusive — selecting one clears the other.
+            The breadcrumb sits ABOVE the scroll body so it doesn't disappear when the
+            operator scrolls a long inspector. When in action mode, ActionTreeView renders
+            its own deeper breadcrumb on top of the body. */}
         <Crumbs>
-          <CrumbBtn type="button" $active={!selField} onClick={() => setSelFieldIdx(null)}>
+          <CrumbBtn
+            type="button"
+            $active={!selField && selActionPath == null}
+            onClick={() => { selectField(null); selectActionPath(null) }}
+          >
             {t('settings.screens.visual.dialog.title')}
           </CrumbBtn>
           {selField && (
@@ -1338,9 +1373,34 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               <CrumbBtn type="button" $active>{String(selField.name ?? '')}</CrumbBtn>
             </>
           )}
+          {selActionPath != null && (
+            <>
+              <ChevronRightIcon size={11} />
+              <CrumbBtn type="button" $active>
+                {t('settings.screens.tabActions.heading')}
+              </CrumbBtn>
+            </>
+          )}
         </Crumbs>
         <InspBody>
-        {selField ? (
+        {selActionPath != null ? (
+          // Theme A — action editor lives in the Inspector. The Tab Settings panel keeps the
+          // flat action list; clicking a list row sets ``selActionPath`` and this branch
+          // takes over. ActionTreeView in editor mode renders its own internal breadcrumb +
+          // the focused action's body (variant SchemaForm + prompt_fields + nested sub-lists
+          // with click-to-dive). Setting ``onPathChange`` to ``selectActionPath`` lets the
+          // breadcrumb's pop-back-to-list use ``null`` to close the action editor.
+          <ActionTreeView
+            actions={tabActions}
+            onChange={(n) => patchTab({ actions: n.length ? (n as unknown as Row[]) : null })}
+            path={selActionPath}
+            onPathChange={selectActionPath}
+            defs={defs}
+            effectiveConnector={tabEffectiveConnector}
+            onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
+            rootLabel={t('settings.screens.tabActions.heading')}
+          />
+        ) : selField ? (
           <>
             {/* Basic — always visible, the fields operators set on every field. */}
             <InspSection>

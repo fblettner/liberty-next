@@ -43,7 +43,7 @@ export const ACTION_TYPES = [
   'chain', 'if', 'loop', 'return',
 ] as const
 export type ActionType = typeof ACTION_TYPES[number]
-const ACTION_DEF_NAME: Record<ActionType, string> = {
+export const ACTION_DEF_NAME: Record<ActionType, string> = {
   run_query: 'RunQueryAction',
   call_api: 'CallApiAction',
   navigate: 'NavigateAction',
@@ -79,7 +79,7 @@ export function blankActionOfType(t: ActionType, id: string): Row {
 // variants (chain / if / loop / return) carry nested ``Action[]`` arrays + a ``Condition`` —
 // those get dedicated recursive editors below; without stripping, SchemaForm would render
 // them as generic object-list accordions with cramped widget choices.
-const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
+export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   run_query: ['connector', 'query'],
   call_api: ['connector', 'endpoint'],
   navigate: ['connector', 'to'],
@@ -97,17 +97,17 @@ const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
 // open a single pre-fire prompt for the operator's inputs. For the rest (set_field / confirm
 // / notify / refresh / if / loop / return) the PromptField editor stays hidden — these are
 // internal steps that don't fire their own prompt sub-dialogs.
-const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'navigate', 'chain'])
-const PROMPT_FIELDS_KEY = 'prompt_fields'
+export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'navigate', 'chain'])
+export const PROMPT_FIELDS_KEY = 'prompt_fields'
 // PromptField has 11+ properties; split into Basic / Advanced / Lookup binds / Conditions so
 // each per-field expander reads like the visual builder's field inspector instead of a wall of
 // toggles. ``pickSchemaProperties`` flattens ``x_group`` so the picked fields all sit on one
 // SchemaForm (no tab strip inside an already-expanded row).
-const PROMPT_FIELD_DEF_NAME = 'PromptField'
-const PROMPT_FIELD_BASIC_KEYS = ['name', 'dd', 'label', 'format', 'required', 'default'] as const
-const PROMPT_FIELD_ADVANCED_KEYS = ['hidden', 'disabled', 'colspan'] as const
-const PROMPT_FIELD_BINDS_KEY = 'lookup_param_binds'
-const PROMPT_FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
+export const PROMPT_FIELD_DEF_NAME = 'PromptField'
+export const PROMPT_FIELD_BASIC_KEYS = ['name', 'dd', 'label', 'format', 'required', 'default'] as const
+export const PROMPT_FIELD_ADVANCED_KEYS = ['hidden', 'disabled', 'colspan'] as const
+export const PROMPT_FIELD_BINDS_KEY = 'lookup_param_binds'
+export const PROMPT_FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
 
 // ── styled bits (same look the rest of the Screen builders use) ─────────────────────────────
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
