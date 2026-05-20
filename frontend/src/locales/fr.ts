@@ -270,7 +270,7 @@ const fr: Resources = {
     tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', dashboards: 'Tableaux de bord' },
     menus: {
       saved: 'Enregistré et rechargé.',
-      hint: "Enregistrer valide tout le fichier (ids uniques, parents existants, sans cycle, dossier vs feuille), réécrit menus.toml — la table [menus] est remplacée en bloc, puis recharge.",
+      hint: 'Enregistrer valide l\'arborescence (ids uniques, parents existants, sans cycle), écrit menus.toml et recharge.',
       scopeLabel: 'Application :',
       app: {
         add: 'Ajouter une application',
@@ -302,14 +302,13 @@ const fr: Resources = {
         hint: "Édition de l'élément ci-dessous. Les opérations d'arbre (déplacer / reparenter / supprimer) sont sur les boutons de la ligne.",
         pickOne: "Choisissez un élément dans l'arbre.",
         empty: "Aucun élément dans cette application.",
-        parentHint: 'Parents autorisés (sans cycle) : {{ids}}',
       },
     },
     dictionary: {
       lang: 'Langue par défaut :',
       langHint: "Utilisée quand la requête ne fournit ni X-Liberty-Lang ni Accept-Language. Courant : en, fr.",
       saved: 'Enregistré et rechargé.',
-      hint: "Enregistrer valide tout le fichier dictionary.toml puis le réécrit (les sections de premier niveau — default_language, entries, enums, lookups, connectors — sont remplacées en bloc ; les commentaires hors de ces sections sont préservés), puis recharge.",
+      hint: 'Enregistrer valide chaque entrée / enum / lookup / séquence, écrit dictionary.toml et recharge. Les commentaires hors des sections réécrites sont préservés.',
       scope: {
         label: 'Portée :',
         shared: 'Partagé',
@@ -393,7 +392,7 @@ const fr: Resources = {
       empty: 'Aucun connecteur. Ajoutez un connecteur SQL ou API.',
       pickOne: 'Choisissez un connecteur à gauche.',
       saved: 'Enregistré et rechargé. Connecteurs : {{connectors}}',
-      hint: "Enregistrer valide chaque connecteur, réécrit uniquement les tables [connectors.*] de connectors.toml (les pools et les commentaires restent intacts ; le sous-arbre d'un connecteur modifié est ré-rendu, donc ses tableaux columns = [{…}] en ligne peuvent devenir des tables [[…]] — fonctionnellement identique), puis recharge. Relisez le fichier dans git.",
+      hint: 'Enregistrer valide chaque connecteur, écrit connectors.toml et recharge. Les pools et les commentaires restent intacts.',
     },
     crudWizard: {
       title: 'Générer une table depuis la BDD',
@@ -472,7 +471,7 @@ const fr: Resources = {
       pickOne: 'Choisissez un pool à gauche.',
       reloadFromDisk: 'Recharger depuis le disque',
       saved: 'Enregistré et rechargé. Pools : {{pools}}',
-      hint: "Enregistrer valide chaque pool, réécrit uniquement les tables [pools.*] de connectors.toml (les commentaires et les connecteurs restent intacts), puis recharge. Les valeurs par défaut sont omises ; relisez le fichier dans git. Renommer un pool ne met PAS à jour les références ``pool = …`` des connecteurs (même fichier, PUT différent) ; éditez-les dans l'onglet Connecteurs.",
+      hint: 'Enregistrer valide chaque pool, écrit la section [pools.*] de connectors.toml et recharge. Renommer un pool ne met PAS à jour les références ``pool`` des connecteurs — éditez-les dans l\'onglet Connecteurs.',
     },
     screens: {
       add: 'Ajouter un écran',
@@ -518,7 +517,7 @@ const fr: Resources = {
       pickApp: 'Choisissez une application à gauche.',
       pickOne: 'Choisissez un écran à gauche.',
       saved: 'Enregistré et rechargé. Applications avec écrans : {{apps}}',
-      hint: "Enregistrer valide le fichier ScreensFile complet (id correspond à sa clé, dialog/tabs/fields/lookup_param_binds aller-retour cleanly), réécrit screens.toml — la table [screens] est remplacée en bloc, puis recharge.",
+      hint: 'Enregistrer valide chaque écran, écrit screens.toml et recharge.',
       editor: {
         tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne' },
         generalHint: "Indicateurs de comportement pour cet écran — chargement auto, table d'audit, plafond de lignes, colonnes clés. Le connecteur n'est utile que si l'écran tourne sur un connecteur différent de l'application.",
@@ -636,7 +635,7 @@ const fr: Resources = {
       },
       action: {
         heading: 'À la sauvegarde (chaîne d\'actions)',
-        hint: "Les actions s'exécutent séquentiellement après le succès de l'update_query / insert_query principal du dialogue. Les ParamBind de chaque action sont résolus contre l'état vivant du formulaire. Port v2 de ly_act_tasks de v1 pour le flux de sauvegarde — les écritures multi-tables (FormsDialog) vivent ici.",
+        hint: "S'exécute après le succès de l'update / insert principal du dialogue. Les ParamBind se résolvent contre l'état vivant du formulaire. À utiliser pour les écritures multi-tables qui partagent une clé.",
         add: 'Ajouter une action',
         delete: 'Supprimer l\'action',
         empty: 'Aucune action à la sauvegarde — le dialogue écrit juste la ligne principale et ferme.',
@@ -660,47 +659,47 @@ const fr: Resources = {
       },
       rowmenu: {
         heading: 'Menu contextuel de ligne',
-        hint: "Actions affichées au clic droit sur une ligne du TableView. Les ParamBind de chaque action sont résolus contre les valeurs de la ligne cliquée. Même forme d'Action que la chaîne on_save du dialogue — seul le contexte de déclenchement diffère.",
+        hint: 'Affichées au clic droit sur une ligne du tableau. Les ParamBind de chaque action se résolvent contre les valeurs de la ligne cliquée.',
         empty: 'Aucune action de menu contextuel — un clic droit ne fait rien sur cet écran.',
       },
       actions: {
         heading: 'Actions de l’écran',
-        hint: "Boutons de barre d’outils affichés au-dessus du TableView. Chaque action déclenche sa chaîne de tâches au clic. Les ParamBind se résolvent par défaut en valeurs littérales (pas de contexte de ligne) ; un bind `source` sur un formulaire vide est ignoré. Les workflows NOMAJDE v1 (« Créer rôle » / « Réinitialiser mot de passe » / « Importer sécurité » / …) se branchent ici — consultez la sortie de `liberty-migrate actions` pour la forme v1 brute, puis câblez chaque étape manuellement en run_query / call_api / notify.",
+        hint: "Boutons de barre d'outils au-dessus du tableau. Chaque action déclenche sa chaîne au clic. Les ParamBind sans contexte de ligne ont besoin de valeurs littérales.",
         empty: 'Aucune action d’écran — la barre d’outils n’affiche que les boutons standard Ajouter une ligne / Modifier / Importer.',
       },
       onLoad: {
         heading: 'À l’ouverture (chaîne d’actions)',
-        hint: "S’exécute juste après l’ouverture du dialogue et le chargement des données (mode édition) ou l’application des valeurs par défaut (mode ajout). Utile pour rafraîchir une lookup, précharger des données liées, ou journaliser l’ouverture. Les ParamBind se résolvent contre l’état du formulaire qui vient d’être chargé.",
+        hint: "S'exécute après l'ouverture du dialogue et le chargement des données. Utile pour rafraîchir une lookup ou précharger des données liées.",
         empty: 'Aucune action à l’ouverture — le dialogue s’ouvre silencieusement.',
       },
       onCancel: {
         heading: 'À l’annulation (chaîne d’actions)',
-        hint: "S’exécute quand l’utilisateur ferme le dialogue sans enregistrer (Annuler / clic à l’extérieur / Abandonner). Utile pour le nettoyage — libérer un verrou, supprimer un brouillon, journaliser les modifications abandonnées. Se déclenche *avant* la fermeture effective du dialogue ; une erreur bloque la fermeture (l’utilisateur peut alors réessayer).",
+        hint: "S'exécute quand l'utilisateur ferme le dialogue sans enregistrer. Se déclenche avant la fermeture effective — une erreur bloque la fermeture.",
         empty: 'Aucune action à l’annulation — fermer le dialogue abandonne simplement les modifications.',
       },
       tabActions: {
         heading: 'Actions de l’onglet',
-        hint: "Boutons placés dans cet onglet — version v2 des lignes ``col_component=\"InputAction\"`` de v1. Disponible sur tous les types d’onglet (form / nested_form / nested_table) ; un onglet « Roles » peut porter Import Security + Merge Roles à côté de sa table imbriquée. Les ParamBind de chaque bouton se résolvent contre l’état vivant du formulaire du dialogue.",
+        hint: "Boutons placés dans cet onglet. Chaque action se déclenche au clic ; les ParamBind se résolvent contre l'état vivant du formulaire.",
         empty: 'Aucun bouton sur cet onglet pour le moment.',
       },
       onInsert: {
         heading: 'À l’insertion (hook de ligne)',
-        hint: "S’exécute après l’insertion d’une ligne — via Enregistrer du dialogue en mode ajout *ou* via Enregistrer du mode modification en lot. Version v2 de l’événement 2 FormsTable de v1. Les ParamBind se résolvent contre les valeurs de la nouvelle ligne.",
+        hint: "S'exécute après l'insertion d'une ligne — via Enregistrer du dialogue en mode ajout, ou via Enregistrer du tableau. Les ParamBind se résolvent contre la nouvelle ligne.",
         empty: 'Aucune action à l’insertion — les insertions écrivent simplement la ligne.',
       },
       onUpdate: {
         heading: 'À la mise à jour (hook de ligne)',
-        hint: "S’exécute après la mise à jour d’une ligne — via Enregistrer du dialogue en mode édition *ou* via Enregistrer du mode modification en lot. Extension v2 (v1 n’exposait pas cet événement) ; utilisez-la pour vous greffer sur le moment post-update sans le simuler dans on_save.",
+        hint: "S'exécute après la mise à jour d'une ligne — via Enregistrer du dialogue en mode édition, ou via Enregistrer du tableau. Les ParamBind se résolvent contre la ligne mise à jour.",
         empty: 'Aucune action à la mise à jour — les mises à jour écrivent simplement la ligne.',
       },
       onDelete: {
         heading: 'À la suppression (hook de ligne)',
-        hint: "S’exécute après la suppression d’une ligne — via le bouton Supprimer du dialogue *ou* via Enregistrer après une suppression en lot. Version v2 de l’événement 3 FormsTable de v1. Les ParamBind se résolvent contre les valeurs de la ligne supprimée.",
+        hint: "S'exécute après la suppression d'une ligne — via le bouton Supprimer du dialogue, ou via le tableau. Les ParamBind se résolvent contre la ligne supprimée.",
         empty: 'Aucune action à la suppression — les suppressions retirent simplement la ligne.',
       },
       prompt: {
         heading: 'Champs d’invite',
-        hint: "Entrées demandées à l’opérateur avant le déclenchement de cette action (tranche 4b — version v2 de ly_act_params de v1). Vide = pas d’invite ; l’action se déclenche immédiatement. Les valeurs alimentent le contexte de résolution de la chaîne — chaque ParamBind ultérieur dont le ``source`` correspond lit dans l’invite plutôt que dans le formulaire / la ligne parent.",
+        hint: "Entrées demandées à l'opérateur avant le déclenchement de cette action. Les valeurs atterrissent sous ``INPUT.<nom>`` dans le contexte de chaîne ; les ParamBind avec ``source: \"INPUT.<nom>\"`` les y lisent.",
         empty: 'Aucune invite — cette action se déclenche immédiatement.',
         add: 'Ajouter un champ d’invite',
         delete: 'Supprimer le champ d’invite',
@@ -714,7 +713,7 @@ const fr: Resources = {
       // ParamBindList — éditeur dédié pour le tableau ``param_binds`` d'une action.
       paramBinds: {
         heading: 'Liaisons de paramètres',
-        hint: 'Liez des valeurs pour la requête / endpoint cible. ``value`` est une littérale ; ``source`` lit depuis le contexte de chaîne (``INPUT.<nom>`` / ``<id_étape>.first_row.<col>`` / ``loop.<col>``) ou un nom de champ du formulaire.',
+        hint: 'Lie les valeurs pour la requête / endpoint cible. ``value`` est une littérale ; ``source`` lit depuis le contexte de chaîne ou un nom de champ du formulaire.',
         empty: 'Aucune liaison — la requête / endpoint s\'exécute sans paramètres.',
         add: 'Ajouter une liaison',
         paramPlaceholder: 'paramètre',
@@ -733,12 +732,12 @@ const fr: Resources = {
       // Tranche 4d — variantes de contrôle de flux (ChainAction / IfAction / LoopAction).
       chain: {
         heading: 'Étapes',
-        hint: 'Exécutées séquentiellement avec un contexte de chaîne partagé. Chaque étape run_query / call_api avec bind_result enregistre ses lignes sous l’id de l’étape — les étapes suivantes y accèdent via ``source: "<id_étape>.first_row.<col>"`` (ou ``rows.<N>.<col>``). Les valeurs d’invite atterrissent sous ``INPUT.<name>`` et sont accessibles de la même façon.',
+        hint: "Les étapes s'exécutent dans l'ordre, partageant un contexte de chaîne. Une étape avec ``bind_result`` enregistre ses lignes sous son id ; les étapes suivantes y accèdent via ``source: \"<id_étape>.first_row.<col>\"``.",
         empty: 'Aucune étape — ajoutez la première pour démarrer le workflow.',
       },
       condition: {
         heading: 'Condition',
-        hint: '``source`` est un chemin pointé dans le contexte de chaîne (``INPUT.AUUSER`` / ``select_workbench.first_row.OBJECT`` / ``loop.OBJECT``) ou un nom de champ du formulaire. ``operator`` choisit la comparaison ; ``value`` n’est utilisé que par equals / not_equals / greater_than / less_than.',
+        hint: "``source`` choisit ce qui est comparé (champ du formulaire, chemin du contexte de chaîne, ou ``#BUILTIN#``). ``value`` n'est utilisé que par equals / not_equals / greater_than / less_than.",
         unavailable: 'Schéma Condition indisponible — vérifiez /admin/config/schema.',
         sourceLabel: 'Source',
         sourcePlaceholder: 'INPUT.<nom> / <id_étape>.first_row.<col> / loop.<col>',
@@ -769,7 +768,7 @@ const fr: Resources = {
       empty: "Aucun tableau de bord pour le moment. Ajoutez-en un pour commencer.",
       pickOne: 'Choisissez un tableau de bord à gauche.',
       saved: 'Enregistré et rechargé. Tableaux de bord : {{dashboards}}',
-      hint: "Save valide tout le DashboardsFile (discriminator des widgets + bornes de la grille + options de filtre), réécrit dashboards.toml (la table [dashboards] est remplacée intégralement via tomlkit), puis recharge. Référencez les tableaux de bord depuis menus.toml avec `type = \"dashboard\"` et `target = \"<id>\"`.",
+      hint: 'Enregistrer valide chaque tableau de bord + widget, écrit dashboards.toml et recharge. Référencez les tableaux de bord depuis menus.toml avec ``type = "dashboard"`` et ``target = "<id>"``.',
     },
     tables: {
       tablesView: 'Tables',

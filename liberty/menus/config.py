@@ -50,43 +50,43 @@ class MenuItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(description="Stable unique id within the app — used by descendant items as their parent.")
+    id: str = Field(description="Unique id within this app. Other items reference it via their ``parent``.")
     parent: str | None = Field(
         default=None,
-        description="Parent item id (blank = top-level). Normally managed by the tree UI; the inspector dropdown lists every item in the app (except the current one's descendants — that would form a cycle).",
+        description="Pick a parent folder, or leave blank for a top-level item.",
         json_schema_extra={"x_group": "Advanced", "x_enum_ref": "MENU_PARENT_IDS"},
     )
-    label: str = Field(description="Default-language display label (v1's menu_label).")
+    label: str = Field(description="Display label in the sidebar.")
     l: dict[str, str] = Field(
         default_factory=dict,
         title="Translations",
-        description="Per-language overrides: {language_code: translated_label} (v1's ly_menus_l).",
+        description="Per-language label overrides.",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
-    icon: str | None = Field(default=None, description="Lucide icon name (a UI hint — e.g. 'shield', 'users').")
+    icon: str | None = Field(default=None, description="Lucide icon name (e.g. ``shield``, ``users``).")
     type: ItemType | None = Field(
         default=None,
-        description="Blank = folder. 'query' = TableView screen, 'endpoint' = HttpRunner, 'dashboard' = DashboardView.",
+        description="Blank = folder; ``query`` opens a screen; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard.",
         json_schema_extra={"x_enum_ref": "MENU_ITEM_TYPE"},
     )
     connector: str | None = Field(
         default=None,
-        description="Connector the `target` lives in (blank → the app's own connector).",
+        description="Connector hosting the target. Blank uses the app's own connector.",
         json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
     )
     target: str | None = Field(
         default=None,
-        description="Query or endpoint name (required for leaves; ignored on folders). Dropdown lists the queries / endpoints exposed by `connector` (or the app's own connector when blank), filtered by `type`.",
+        description="The query / endpoint / dashboard this item opens. Required on leaves; ignored on folders.",
         json_schema_extra={"x_enum_ref": "MENU_TARGETS"},
     )
     params: dict[str, Any] = Field(
         default_factory=dict,
-        description="Fixed params passed to the target on open.",
+        description="Fixed parameters passed to the target when it opens.",
         json_schema_extra={"x_group": "Advanced"},
     )
     roles: list[str] = Field(
         default_factory=list,
-        description="Visibility filter — empty = visible to anyone allowed to run the target.",
+        description="Restrict to these roles. Leave empty to show whenever the user can run the target.",
         json_schema_extra={"x_group": "Advanced"},
     )
 
@@ -119,10 +119,8 @@ class AppMenu(BaseModel):
     home: str | None = Field(
         default=None,
         description=(
-            "Default landing menu item id (within this app's ``items``). When set + the caller "
-            "can read the target, picking this app from the workspace picker navigates straight "
-            "there — typically the app's overview dashboard. Unset = stay on the current page "
-            "(or land on /, the connectors index)."
+            "Landing page when the user picks this app — pick a menu item id (typically an "
+            "overview dashboard). Blank leaves the user on the current page."
         ),
         json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
     )

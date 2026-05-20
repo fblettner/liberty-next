@@ -108,9 +108,8 @@ class ScreenField(BaseModel):
     visible_when: list[FieldCondition] = Field(
         default_factory=list,
         description=(
-            "Conditional visibility (v2's port of v1's ``col_cdn_id``). When non-empty, every "
-            "predicate must hold against the form's live state for the field to render; "
-            "otherwise the static ``hidden`` flag decides."
+            "Show the field only when every rule matches the live form state. Leave empty to "
+            "fall back to the static ``hidden`` flag."
         ),
     )
     required_when: list[FieldCondition] = Field(
@@ -140,7 +139,7 @@ class _ScreenTabBase(BaseModel):
 
     id: str = Field(description="Stable id within the dialog (used as the tab's key in builders).")
     label: str | None = Field(default=None, description="Default-language tab title.")
-    l: dict[str, str] = Field(default_factory=dict, description="Per-language overrides: {language_code: translated_label}.")
+    l: dict[str, str] = Field(default_factory=dict, description="Per-language label overrides.")
     hide_on_add: bool = Field(default=False, description="Hide this tab when adding a new row.")
     hide_on_edit: bool = Field(default=False, description="Hide this tab when editing an existing row.")
     actions: list["Action"] = Field(
@@ -277,9 +276,9 @@ class PromptField(BaseModel):
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
         description=(
-            "Parameter bindings for this prompt field's own *lookup* query — when the field's "
-            "dd resolves to a LOOKUP rule. ``source`` reads another prompt field on the same "
-            "prompt dialog; ``value`` is a literal. v2's port of v1's ``ly_act_params_filters``."
+            "Parameters bound to this field's LOOKUP query (when the field's dd resolves to "
+            "LOOKUP). ``source`` reads another prompt field on the same dialog; ``value`` is "
+            "a literal."
         ),
     )
     visible_when: list[FieldCondition] = Field(
@@ -322,8 +321,8 @@ class _PromptableMixin(BaseModel):
         default_factory=list,
         json_schema_extra={"x_group": "Prompt"},
         description=(
-            "Inputs to collect from the operator before this action fires (v2's port of v1's "
-            "``ly_act_params``). Empty = no prompt; the action fires immediately."
+            "Inputs to collect from the operator before this action fires. Empty fires the "
+            "action immediately."
         ),
     )
     prompt_title: str | None = Field(
@@ -366,19 +365,18 @@ class RunQueryAction(_PromptableMixin, _ActionBase):
     type: Literal["run_query"] = "run_query"
     connector: str | None = Field(
         default=None,
-        description="Connector the query lives on; blank → the screen's effective connector (or app name).",
+        description="Connector hosting the query. Blank uses the screen's connector.",
     )
-    query: str = Field(description="Name of the connector query to run (e.g. ``apps_jde_post``).")
+    query: str = Field(description="Connector query to run.")
     param_binds: list[ParamBind] = Field(
         default_factory=list,
-        description="Parameter bindings — same shape as ``ScreenField.lookup_param_binds`` / row menu binds.",
+        description="Bind the query's ``:placeholder`` parameters from the firing context.",
     )
     bind_result: bool = Field(
         default=False,
         description=(
-            "When true, store this action's result in the chain context under this step's ``id`` "
-            "as ``{rows, first_row, success}``. Only meaningful inside a :class:`ChainAction` — "
-            "later steps reference the values via ``ParamBind {source: '<id>.first_row.<col>'}``."
+            "Capture this query's rows into the chain context so later steps in the same "
+            "Chain can reference them via ``source: '<step_id>.first_row.<col>'``."
         ),
     )
 
@@ -392,15 +390,15 @@ class CallApiAction(_PromptableMixin, _ActionBase):
     chain context under this step's ``id`` so later steps can bind from them."""
 
     type: Literal["call_api"] = "call_api"
-    connector: str = Field(description="API connector name (must be of ``type = \"api\"``).")
+    connector: str = Field(description="API connector to call (must be type = ``api``).")
     endpoint: str = Field(description="Endpoint name on that connector.")
-    param_binds: list[ParamBind] = Field(default_factory=list)
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Bind values into the endpoint's placeholders from the firing context.",
+    )
     bind_result: bool = Field(
         default=False,
-        description=(
-            "When true, store this action's response in the chain context under this step's "
-            "``id`` as ``{rows, first_row, success}`` (response items appear as ``rows``)."
-        ),
+        description="Capture the API response into the chain context so later steps can reference it.",
     )
 
 
@@ -414,12 +412,15 @@ class NavigateAction(_PromptableMixin, _ActionBase):
     "usr_id"}]}`` and ends up opening ``/sql/nomasx1/roles_get?USR_ID=<the-clicked-user-id>``."""
 
     type: Literal["navigate"] = "navigate"
-    to: str = Field(description="Target query name on ``connector`` (e.g. ``roles_get``) — the destination's URL is ``/sql/{connector}/{to}``.")
+    to: str = Field(description="Target query name (the destination URL is ``/sql/<connector>/<to>``).")
     connector: str | None = Field(
         default=None,
-        description="Connector that holds the target query; blank → the firing screen's effective connector.",
+        description="Connector hosting the target query. Blank uses the firing screen's connector.",
     )
-    param_binds: list[ParamBind] = Field(default_factory=list)
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Forwarded as ``?<param>=<value>`` query-string entries. The target's filter panel seeds from these.",
+    )
 
 
 class SetFieldAction(_ActionBase):
@@ -428,11 +429,11 @@ class SetFieldAction(_ActionBase):
     field's current value (the same ParamBind value-vs-source dichotomy)."""
 
     type: Literal["set_field"] = "set_field"
-    target: str = Field(description="Field name to write into (matches ``ScreenField.name``).")
-    value: str | None = Field(default=None, description="Literal value (mode A).")
+    target: str = Field(description="Field name to write into.")
+    value: str | None = Field(default=None, description="Literal value to set.")
     source: str | None = Field(
         default=None,
-        description="Source field name to read from at call time (mode B). Reserved built-ins start with ``#``.",
+        description="Read the value at call time from another field, the chain context, or a ``#BUILTIN#``.",
     )
 
 
@@ -484,8 +485,8 @@ class Condition(BaseModel):
 
     source: str = Field(
         description=(
-            "Chain-context dotted path (``INPUT.AUUSER`` / ``select_workbench.first_row.OBJECT``) "
-            "or a form-field name. Same resolution semantics as :class:`ParamBind.source`."
+            "What to compare. Pick a form field, a chain-context path (``INPUT.<name>`` / "
+            "``<step_id>.first_row.<col>``), or a ``#BUILTIN#``."
         ),
     )
     operator: Literal[
@@ -494,14 +495,14 @@ class Condition(BaseModel):
     ] = Field(
         default="truthy",
         description=(
-            "Comparison: ``equals`` / ``not_equals`` compare to ``value``; ``has_rows`` / "
-            "``no_rows`` test the resolved value's array length; ``truthy`` / ``falsy`` is a "
-            "JavaScript-style boolean cast; ``greater_than`` / ``less_than`` numeric compare."
+            "``equals`` / ``not_equals`` compare to ``value``. ``has_rows`` / ``no_rows`` test "
+            "the array length. ``truthy`` / ``falsy`` is a boolean cast. ``greater_than`` / "
+            "``less_than`` compare numerically."
         ),
     )
     value: str | None = Field(
         default=None,
-        description="Comparison value for ``equals`` / ``not_equals`` / ``greater_than`` / ``less_than``. Ignored otherwise.",
+        description="The value to compare against (used by equals / not_equals / greater_than / less_than).",
     )
 
 
@@ -531,7 +532,7 @@ class ChainAction(_PromptableMixin, _ActionBase):
     type: Literal["chain"] = "chain"
     steps: list["Action"] = Field(
         default_factory=list,
-        description="Ordered sub-steps. May include :class:`IfAction` / :class:`LoopAction` for nested control flow.",
+        description="Ordered sub-steps. May include If / Loop for nested control flow.",
     )
 
 
@@ -562,11 +563,11 @@ class LoopAction(_ActionBase):
     type: Literal["loop"] = "loop"
     source: str = Field(
         description=(
-            "Chain-context dotted path resolving to an array (e.g. ``select_workbench.rows``). "
-            "Same syntax as :class:`Condition.source` / :class:`ParamBind.source`."
+            "Path to an array in the chain context (e.g. ``select_workbench.rows``). The body "
+            "runs once per element, with the element bound under ``loop``."
         ),
     )
-    steps: list["Action"] = Field(default_factory=list)
+    steps: list["Action"] = Field(default_factory=list, description="Body of the loop — runs once per element.")
 
 
 class ReturnAction(_ActionBase):
@@ -579,9 +580,8 @@ class ReturnAction(_ActionBase):
     bindings: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "``{caller_field_name: chain_context_path}`` — each entry reads the chain context at "
-            "the given path and writes it into the caller's field of that name. Only meaningful "
-            "when the chain fires from a dialog (no caller form = silently ignored)."
+            "``{form_field: chain_context_path}`` — each entry reads the chain context and writes "
+            "it into the dialog's matching field. Only meaningful when the chain fires from a dialog."
         ),
     )
 
@@ -635,10 +635,9 @@ class ScreenDialog(BaseModel):
     on_save: list[Action] = Field(
         default_factory=list,
         description=(
-            "Runs sequentially *after* the dialog's main update_query / insert_query succeeds. "
-            "Each action's ParamBinds resolve against the form's live state. Stops on the first "
-            "failure unless an action sets ``stop_on_error = false``. v2's port of v1's "
-            "``ly_act_tasks`` for the FormsDialog save flow — multi-table writes land here."
+            "Runs after the dialog's main update / insert succeeds. Each action's ParamBinds "
+            "resolve against the form's live state. Use this for multi-table writes — chain "
+            "extra ``run_query`` actions to update related tables on the same PK."
         ),
     )
     on_cancel: list[Action] = Field(
@@ -729,25 +728,15 @@ class Screen(BaseModel):
     # *deleted row's* values for on_delete.
     on_insert: list[Action] = Field(
         default_factory=list,
-        description=(
-            "Runs after a row has been inserted (via dialog Save in add mode OR via the inline "
-            "grid's Save). v2's port of v1's FormsTable evt 2."
-        ),
+        description="Runs after a row is inserted — via dialog Save in add mode, or via the inline grid's Save.",
     )
     on_update: list[Action] = Field(
         default_factory=list,
-        description=(
-            "Runs after a row has been updated (via dialog Save in edit mode OR via the inline "
-            "grid's Save). v1 didn't expose this event; v2 adds it so operators can hook into "
-            "the post-update moment without faking it into ``dialog.on_save``."
-        ),
+        description="Runs after a row is updated — via dialog Save in edit mode, or via the inline grid's Save.",
     )
     on_delete: list[Action] = Field(
         default_factory=list,
-        description=(
-            "Runs after a row has been deleted (via the dialog's Delete button OR via the "
-            "inline grid's delete-then-Save). v2's port of v1's FormsTable evt 3."
-        ),
+        description="Runs after a row is deleted — via the dialog's Delete button, or via the inline grid.",
     )
     # Row-click → sibling-screen dialog. v2's port of v1's "FormsDialog inside a ly_ctxmenus"
     # pattern: a screen that itself has no ``tbl_frm_id`` but whose context menu carried a single

@@ -268,7 +268,7 @@ const en = {
     tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', dashboards: 'Dashboards' },
     menus: {
       saved: 'Saved & reloaded.',
-      hint: 'Save validates the whole MenusFile (unique ids, parents exist, no cycles, folder-vs-leaf shape), rewrites menus.toml — the [menus] table is replaced wholesale, then reloads.',
+      hint: 'Save validates the menu tree (unique ids, parents exist, no cycles), writes menus.toml, and reloads.',
       scopeLabel: 'App:',
       app: {
         add: 'Add app',
@@ -300,14 +300,13 @@ const en = {
         hint: 'Editing the item below. Tree operations (move / reparent / delete) live on the row buttons.',
         pickOne: 'Pick an item in the tree.',
         empty: 'No items in this app yet.',
-        parentHint: 'Allowed parents (no cycle): {{ids}}',
       },
     },
     dictionary: {
       lang: 'Default language:',
       langHint: 'Used when a request has no X-Liberty-Lang / Accept-Language header. Common: en, fr.',
       saved: 'Saved & reloaded.',
-      hint: 'Save validates the whole DictionaryFile, then rewrites dictionary.toml (the four top-level sections — default_language, entries, enums, lookups, connectors — are replaced wholesale; comments outside them are preserved), then reloads.',
+      hint: 'Save validates every entry / enum / lookup / sequence, writes dictionary.toml, and reloads. Comments outside the rewritten sections are preserved.',
       scope: {
         label: 'Scope:',
         shared: 'Shared',
@@ -391,7 +390,7 @@ const en = {
       empty: 'No connectors yet. Add a SQL or API connector.',
       pickOne: 'Pick a connector on the left.',
       saved: 'Saved & reloaded. Connectors: {{connectors}}',
-      hint: 'Save validates each connector against the schema, rewrites only the [connectors.*] tables in connectors.toml (the pools and comments are left intact; a changed connector\'s subtree is re-rendered, so its inline columns = [{…}] arrays may become [[…]] tables — functionally identical), then reloads. Review the file in git.',
+      hint: 'Save validates every connector, writes connectors.toml, and reloads. Pools and comments are left intact.',
     },
     crudWizard: {
       title: 'Generate table from DB',
@@ -470,7 +469,7 @@ const en = {
       pickOne: 'Pick a pool on the left.',
       reloadFromDisk: 'Reload from disk',
       saved: 'Saved & reloaded. Pools: {{pools}}',
-      hint: 'Save validates each pool against the schema, rewrites only the [pools.*] tables in connectors.toml (comments and the connectors are left intact), then reloads. Default values are written back as omitted; review the file in git. Renaming a pool does NOT update connector ``pool = …`` refs (they live in the same file but a different PUT); edit them in the Connectors tab.',
+      hint: 'Save validates every pool, writes the [pools.*] section of connectors.toml, and reloads. Renaming a pool does not update connector ``pool`` references — edit those in the Connectors tab.',
     },
     screens: {
       add: 'Add screen',
@@ -516,7 +515,7 @@ const en = {
       pickApp: 'Pick an app on the left.',
       pickOne: 'Pick a screen on the left.',
       saved: 'Saved & reloaded. Screen apps: {{apps}}',
-      hint: 'Save validates the whole ScreensFile (id matches its key, dialog/tabs/fields/lookup_param_binds round-trip cleanly), rewrites screens.toml — the [screens] table is replaced wholesale, then reloads.',
+      hint: 'Save validates every screen, writes screens.toml, and reloads.',
       editor: {
         tabs: { general: 'General', queries: 'Queries', columns: 'Columns', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu' },
         generalHint: 'Behaviour flags for this screen — auto-load, audit table, row cap, key columns. The connector picker only matters when the screen runs against a different connector than the app.',
@@ -634,7 +633,7 @@ const en = {
       },
       action: {
         heading: 'On save (action chain)',
-        hint: 'Actions run sequentially after the dialog\'s main update_query / insert_query succeeds. Each action\'s ParamBinds resolve against the form\'s live state. v2\'s port of v1\'s ly_act_tasks for the form-save flow — multi-table writes (FormsDialog) live here.',
+        hint: 'Runs after the dialog\'s main update / insert succeeds. Each action\'s ParamBinds resolve against the form\'s live state. Use this for multi-table writes that share a PK.',
         add: 'Add action',
         delete: 'Delete action',
         empty: 'No on-save actions yet — the dialog just writes the main row and closes.',
@@ -658,47 +657,47 @@ const en = {
       },
       rowmenu: {
         heading: 'Row context menu',
-        hint: 'Actions shown when the user right-clicks a row in the TableView. Each action\'s ParamBinds resolve against the clicked row\'s values (the column names match the result set, so a `{param: "USR_ID", source: "usr_id"}` bind feeds the row\'s USR_ID into the target query). Same Action shape as the dialog\'s on_save chain — only the firing context differs.',
+        hint: 'Shown when the user right-clicks a row in the table. Each action\'s ParamBinds resolve against the clicked row\'s values.',
         empty: 'No row-menu actions yet — right-click on a row does nothing on this screen.',
       },
       actions: {
         heading: 'Screen actions',
-        hint: 'Toolbar buttons shown above the TableView. Each action fires its task chain when clicked. ParamBinds resolve to literal `value`s by default (no row context); a `source` bind against an unset form silently drops. v1\'s NOMAJDE workflows ("Create Role" / "Reset Password" / "Import Security" / …) attach here — see the `liberty-migrate actions` dump for the raw v1 shape and hand-wire each step as a run_query / call_api / notify.',
+        hint: 'Toolbar buttons above the table. Each action fires its chain when clicked. ParamBinds without a row context need literal ``value``s.',
         empty: 'No screen actions yet — the toolbar shows only the standard Add row / Edit / Import buttons.',
       },
       onLoad: {
         heading: 'On load (action chain)',
-        hint: 'Runs immediately after the dialog opens + the row data has been loaded (edit) or default values seeded (add). Useful for refreshing a lookup, prefetching related rows, or logging the open. ParamBinds resolve against the just-loaded form state.',
+        hint: 'Runs after the dialog opens and the row data loads. Useful for refreshing a lookup or prefetching related rows.',
         empty: 'No on-load actions yet — the dialog opens silently.',
       },
       onCancel: {
         heading: 'On cancel (action chain)',
-        hint: 'Runs when the user closes the dialog without saving (Cancel / click-outside / Discard). Useful for cleanup — release a lock, drop a draft row, log abandoned edits. Fires *before* the dialog actually closes; an error blocks the close (so the user can retry).',
+        hint: 'Runs when the user closes the dialog without saving. Fires before the dialog actually closes — an error blocks the close.',
         empty: 'No on-cancel actions yet — closing the dialog just discards changes.',
       },
       tabActions: {
         heading: 'Tab actions',
-        hint: 'Buttons placed in this tab — v2\'s port of v1\'s ``col_component="InputAction"`` rows. Available on every tab kind (form / nested_form / nested_table); a "Roles" tab can carry Import Security + Merge Roles alongside its nested table. Each button\'s ParamBinds resolve against the dialog\'s live form state.',
+        hint: 'Buttons placed inside this tab. Each fires its action when clicked; ParamBinds resolve against the dialog\'s live form state.',
         empty: 'No buttons on this tab yet.',
       },
       onInsert: {
         heading: 'On insert (row hook)',
-        hint: 'Runs after a row has been inserted — via dialog Save in add mode *or* the inline batch-edit grid\'s Save. v2\'s port of v1\'s FormsTable evt 2. ParamBinds resolve against the new row\'s values.',
+        hint: 'Runs after a row is inserted — via dialog Save in add mode, or via the inline grid\'s Save. ParamBinds resolve against the new row.',
         empty: 'No on-insert actions yet — inserts just write the row.',
       },
       onUpdate: {
         heading: 'On update (row hook)',
-        hint: 'Runs after a row has been updated — via dialog Save in edit mode *or* the inline grid\'s Save. v2 extension (v1 had no such event); use it to hook into the post-update moment without faking it into on_save.',
+        hint: 'Runs after a row is updated — via dialog Save in edit mode, or via the inline grid\'s Save. ParamBinds resolve against the updated row.',
         empty: 'No on-update actions yet — updates just write the row.',
       },
       onDelete: {
         heading: 'On delete (row hook)',
-        hint: 'Runs after a row has been deleted — via the dialog\'s Delete button *or* the inline grid\'s delete-then-Save. v2\'s port of v1\'s FormsTable evt 3. ParamBinds resolve against the deleted row\'s values.',
+        hint: 'Runs after a row is deleted — via the dialog\'s Delete button, or via the inline grid. ParamBinds resolve against the deleted row.',
         empty: 'No on-delete actions yet — deletes just drop the row.',
       },
       prompt: {
         heading: 'Prompt fields',
-        hint: 'Inputs collected from the operator before this action fires (slice 4b — v2\'s port of v1\'s ly_act_params). Empty = no prompt; the action fires immediately. Values flow into the chain\'s resolution context — every later ParamBind with a matching ``source`` reads from the prompt instead of the parent form / row.',
+        hint: 'Inputs collected from the operator before this action fires. Values land under ``INPUT.<name>`` in the chain context, so later ParamBinds with ``source: "INPUT.<name>"`` read them.',
         empty: 'No prompts — this action fires immediately when triggered.',
         add: 'Add prompt field',
         delete: 'Delete prompt field',
@@ -734,12 +733,12 @@ const en = {
       // Slice 4d — workflow-control variants (ChainAction / IfAction / LoopAction).
       chain: {
         heading: 'Steps',
-        hint: 'Run sequentially with a shared chain context. Each run_query / call_api step with bind_result captures its rows under the step\'s id — later steps reference them via ``source: "<step_id>.first_row.<col>"`` (or ``rows.<N>.<col>``). Prompt values land under ``INPUT.<name>`` and are accessible the same way.',
+        hint: 'Steps run in order, sharing a chain context. A step with ``bind_result`` captures its rows under the step\'s id; later steps reference them via ``source: "<step_id>.first_row.<col>"``.',
         empty: 'No steps yet — add the first one to start the workflow.',
       },
       condition: {
         heading: 'Condition',
-        hint: '``source`` is a dotted path against the chain context (``INPUT.AUUSER`` / ``select_workbench.first_row.OBJECT`` / ``loop.OBJECT``) or a plain form-field name. ``operator`` picks the comparison; ``value`` is only used by equals / not_equals / greater_than / less_than.',
+        hint: '``source`` picks what to compare (form field, chain-context path, or ``#BUILTIN#``). ``value`` is only used by equals / not_equals / greater_than / less_than.',
         unavailable: 'Condition schema unavailable — check /admin/config/schema.',
         sourceLabel: 'Source',
         sourcePlaceholder: 'INPUT.<name> / <step_id>.first_row.<col> / loop.<col>',
@@ -770,7 +769,7 @@ const en = {
       empty: 'No dashboards yet. Add one to get started.',
       pickOne: 'Pick a dashboard on the left.',
       saved: 'Saved & reloaded. Dashboards: {{dashboards}}',
-      hint: 'Save validates the whole DashboardsFile (widget discriminator + grid bounds + filter options), rewrites dashboards.toml (the [dashboards] table is replaced wholesale via tomlkit), then reloads. Reference dashboards from menus.toml with `type = "dashboard"` and `target = "<id>"`.',
+      hint: 'Save validates every dashboard + widget, writes dashboards.toml, and reloads. Reference dashboards from menus.toml with ``type = "dashboard"`` and ``target = "<id>"``.',
     },
     tables: {
       tablesView: 'Tables',

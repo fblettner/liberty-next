@@ -265,15 +265,6 @@ export default function MenusBuilder() {
     return direct
   }, [apps, selApp, treeQ])
 
-  // Inspector's "allowed parents" list — descendants of the selected item form a cycle, drop them.
-  // Same rule of hooks dance: keep this above the early returns.
-  const safeParents = useMemo(() => {
-    if (!apps || !selApp || !selItem) return [] as string[]
-    const items: MenuItem[] = apps[selApp]?.items ?? []
-    const forbidden = descendantIds(items, selItem)
-    return items.filter((it) => !forbidden.has(it.id)).map((it) => it.id)
-  }, [apps, selApp, selItem])
-
   // Augment the framework enums with the three menus-specific data-driven dropdowns the inspector
   // needs. All three are recomputed when the selected item changes (because `target` depends on
   // *that* item's `type` + `connector`, `parent` excludes the item's own descendants, etc.).
@@ -637,9 +628,12 @@ export default function MenusBuilder() {
                             updateItems(items.map((it) => (it.id === selItemRec.id ? (v as unknown as MenuItem) : it)))
                           }}
                         />
-                        {safeParents.length > 0 && (
-                          <Hint>{t('settings.menus.inspector.parentHint', { ids: safeParents.join(', ') })}</Hint>
-                        )}
+                        {/* No "Allowed parents:" hint here — the ``parent`` field already renders
+                            as a SearchSelect populated with the valid ids via the
+                            ``MENU_PARENT_IDS`` framework enum (set up in this builder, just
+                            below). Dumping the same list as a hint added a wall of text
+                            without telling the operator anything they couldn't see in the
+                            dropdown. */}
                       </Stack>
                     ) : (
                       <Empty>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>

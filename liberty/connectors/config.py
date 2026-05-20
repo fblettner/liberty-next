@@ -84,30 +84,25 @@ class PoolConfig(BaseModel):
         json_schema_extra={"x_enum_ref": "DATASOURCE_TYPE"},
     )
     schemas: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Schemas"}, description=(
-        "Maps #SCHEMA.<NAME># placeholders in this pool's queries to the real schema name. Lets the "
-        "same query target dev vs prod schemas — or several schemas under one DB user — without "
-        "editing the SQL. Values must be plain identifiers (SY920, db.schema). Case-insensitive."
+        "Map ``#SCHEMA.<NAME>#`` placeholders in this pool's queries to real schema names. Lets the "
+        "same query target dev vs prod (or several schemas under one DB user) without editing SQL."
     ))
-    pool_size: int = Field(default=5, description="Persistent connections kept in the pool.", json_schema_extra={"x_group": "Pool"})
-    max_overflow: int = Field(default=10, description="Extra connections allowed beyond `pool_size` under load.", json_schema_extra={"x_group": "Pool"})
-    pool_pre_ping: bool = Field(default=True, description="Test a connection's liveness before handing it out (recovers from dropped connections).", json_schema_extra={"x_group": "Pool"})
-    pool_recycle: int = Field(default=-1, description="Recycle a connection after this many seconds; -1 = never.", json_schema_extra={"x_group": "Pool"})
-    echo: bool = Field(default=False, description="Log every SQL statement (debug only — very noisy).", json_schema_extra={"x_group": "Pool"})
+    pool_size: int = Field(default=5, description="Persistent connections kept open.", json_schema_extra={"x_group": "Pool"})
+    max_overflow: int = Field(default=10, description="Extra connections allowed beyond ``pool_size`` under load.", json_schema_extra={"x_group": "Pool"})
+    pool_pre_ping: bool = Field(default=True, description="Test connection liveness before handing it out.", json_schema_extra={"x_group": "Pool"})
+    pool_recycle: int = Field(default=-1, description="Recycle a connection after this many seconds (-1 = never).", json_schema_extra={"x_group": "Pool"})
+    echo: bool = Field(default=False, description="Log every SQL statement (debug only).", json_schema_extra={"x_group": "Pool"})
     max_rows: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
-        "Default cap on rows a SELECT returns on this pool. Each screen and each request can override; "
-        "the absolute fallback is 1000. Blank = no pool-level cap."
+        "Default row cap for SELECTs on this pool. Falls back to 1000. Per-screen / per-request overrides win."
     ))
     trim_strings: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
-        "Strip trailing whitespace from every string cell on SELECT. Turn on for Oracle pools "
-        "that use space-padded CHAR / NCHAR columns (JD Edwards is the canonical case). Off by "
-        "default — not all Oracle deployments use CHAR, so the choice is left explicit."
+        "Strip trailing whitespace from string cells on SELECT. Enable for Oracle pools with "
+        "space-padded CHAR / NCHAR columns (JD Edwards is the canonical case)."
     ))
     coalesce_nulls: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
-        "On INSERT / UPDATE, replace empty bind values (None or empty string) with type-appropriate "
-        "defaults — a single space for CHAR / VARCHAR / NCHAR / NVARCHAR2 / CLOB / LONG, 0 for "
-        "NUMBER / FLOAT / INTEGER. Turn on for Oracle pools with NOT-NULL string columns (Oracle "
-        "treats '' as NULL on every string type, so only a real character satisfies the constraint). "
-        "Off by default — not every Oracle deployment hits this, so the choice is left explicit."
+        "On INSERT / UPDATE, replace empty binds with type-appropriate defaults (a space for "
+        "CHAR-family columns, 0 for numerics). Enable for Oracle pools with NOT-NULL string "
+        "columns (Oracle treats ``''`` as NULL)."
     ))
 
 
@@ -173,18 +168,15 @@ class ParamBind(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    param: str = Field(description="The :placeholder parameter to bind on the target query.")
+    param: str = Field(description="Target parameter name (the ``:placeholder`` on the destination query).")
     value: str | None = Field(default=None, description="Literal value to bind.")
     source: str | None = Field(
         default=None,
-        description="Column / field whose current value to bind. Read at call time from the firing context (row, dialog form, …).",
+        description="Read the value at call time from a column / form field / chain context path.",
     )
     default: str | None = Field(
         default=None,
-        description=(
-            "Fallback value bound when *source mode* resolves to NULL / empty at call time. "
-            "v2's port of v1's ``ly_act_tasks_params.map_default``. Ignored in value mode."
-        ),
+        description="Fallback bound when the source resolves to NULL / empty. Ignored in value mode.",
     )
 
 
@@ -202,35 +194,33 @@ class ColumnHint(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="The result column this entry applies to (matched case-insensitively).")
+    name: str = Field(description="Result column this entry applies to (case-insensitive match).")
     dd: str | None = Field(
         default=None,
-        description="Dictionary entry to inherit label / format / rule from. Blank = use ``name`` as the key. Empty string = no dictionary lookup.",
+        description="Inherit label / format / rule from this dictionary entry. Blank uses the column ``name`` as the key; set to ``\"\"`` to opt out.",
         json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
     )
-    label: str | None = Field(default=None, description="Display title in the grid header and the dialog field label.")
-    hidden: bool = Field(default=False, description="Hide this column in the grid (operator can still un-hide it via the Columns menu).")
+    label: str | None = Field(default=None, description="Display title in the grid header and the dialog field.")
+    hidden: bool = Field(default=False, description="Hide this column by default. The operator can un-hide it via the grid's Columns menu.")
     key: bool = Field(
         default=False,
         description=(
-            "Mark this column as part of the row's primary key — drives the Excel import's "
-            "update-vs-insert match (a row whose key columns match a loaded row updates that row; "
-            "otherwise inserts) and locks the column on edit-mode dialogs so the operator can't "
-            "type over an identifying value. v1's ``col_key = 'Y'``."
+            "Mark this column as part of the row's primary key. Drives Excel-import "
+            "update-vs-insert matching and locks the column on edit dialogs."
         ),
     )
-    filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Show this column in the grid's filter panel for pre-narrowing the query.")
-    filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading filters — narrow this column's lookup options when another filter is set.")
-    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Show this column only when another filter has a given value. Multiple rules are AND-ed.")
-    width: int | None = Field(default=None, description="Fixed grid column width in pixels. Blank = auto-size to content.")
+    filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Show this column in the table's filter panel.")
+    filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading filters — narrow this column's options based on other filters.")
+    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Show this column only when a filter has a specific value. Multiple rules are AND-ed.")
+    width: int | None = Field(default=None, description="Fixed column width in pixels (blank = auto-size).")
     align: Literal["left", "right", "center"] | None = Field(
         default=None,
-        description="Grid cell alignment. Blank auto-aligns (numbers right, booleans centred, everything else left).",
+        description="Cell alignment (blank auto-picks based on type).",
         json_schema_extra={"x_enum_ref": "COLUMN_ALIGN"},
     )
     format: str | None = Field(
         default=None,
-        description="How to render the value — date / datetime / number / boolean / currency / password / … Overrides the dictionary's format.",
+        description="How to render the value (date / number / boolean / currency / …). Overrides the dictionary format.",
         json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
     )
     # ── form-side metadata (drives both the grid cell renderer and the dialog form) ──────
@@ -337,12 +327,12 @@ class QueryDef(BaseModel):
     # repopulate the matching ``Screen`` fields.
     model_config = ConfigDict(extra="ignore")
 
-    name: str = Field(description="Unique name within the connector; the permission string is sql:<connector>:<name>.")
-    sql: str | dict[str, str] = Field(description="The SQL statement (`:name` placeholders). Either one string, or a per-dialect map { default = \"…\", oracle = \"…\" } keyed by SQLAlchemy backend name (the connector picks the variant matching its pool, falling back to `default`, which is then required).")
-    writable: bool = Field(default=False, description="Allow non-SELECT statements (INSERT/UPDATE/DELETE/…). Required for any mutating query — plus the caller must hold the permission.")
-    params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters — give a `:name` placeholder a form label and a default.")
-    label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Friendly name for the query (shown in listings).")
-    description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what the query returns.")
+    name: str = Field(description="Unique name within the connector. The permission string is ``sql:<connector>:<name>``.")
+    sql: str | dict[str, str] = Field(description="The SQL statement with ``:name`` placeholders. Use a per-dialect map (``{ default = \"…\", oracle = \"…\" }``) to ship variants per database backend; ``default`` is required.")
+    writable: bool = Field(default=False, description="Allow non-SELECT statements (INSERT / UPDATE / DELETE). Required for any mutating query.")
+    params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters — give each ``:name`` placeholder a form label and a default.")
+    label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Short name shown in listings.")
+    description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what this query returns.")
 
     @field_validator("sql")
     @classmethod
@@ -374,9 +364,9 @@ class SqlConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["sql"]
-    pool: str = Field(default="default", description="Which [pools.*] this connector's queries run on.")
-    licensed: bool = Field(default=False, description="Gate this connector behind a valid [license] key — without one (the open framework) it isn't loaded.")
-    max_rows: int | None = Field(default=None, description="Default SELECT row cap for this connector's queries (else the pool's, then 1000). A query's max_rows / a per-request override take precedence.")
+    pool: str = Field(default="default", description="Which pool this connector's queries run on.")
+    licensed: bool = Field(default=False, description="Require a valid [license] key. Without one this connector isn't loaded.")
+    max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")
     queries: list[QueryDef] = Field(default_factory=list, json_schema_extra={"x_group": "Queries"}, description="The named SQL queries this connector exposes.")
 
 
@@ -392,22 +382,22 @@ class EndpointDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="Unique name within the connector; the permission string is api:<connector>:<name>.")
+    name: str = Field(description="Unique name within the connector. The permission string is ``api:<connector>:<name>``.")
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] = Field(
         default="GET",
         description="HTTP method.",
         json_schema_extra={"x_enum_ref": "HTTP_METHOD"},
     )
-    path: str = Field(default="", description="Path appended to the connector's base_url. Supports {{placeholder}} substitution (params + built-ins {{username}}/{{password}}/{{token}}). An absolute http(s):// path overrides base_url.")
-    headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Per-endpoint request headers (merged over the connector's default_headers); values support {{placeholders}}.")
-    query_params: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Query-string parameters; values support {{placeholders}}.")
-    body: str | None = Field(default=None, description="Request body template ({{placeholders}}). For multipart/form-data: lines of `name=value` (text) or `name=@path;filename=X;contentType=Y` (file).")
+    path: str = Field(default="", description="Path appended to the connector's base URL. Supports ``{{placeholder}}`` substitution. Use an absolute URL to bypass the base URL.")
+    headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Per-endpoint headers (merged over the connector's defaults). Values support ``{{placeholders}}``.")
+    query_params: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Query-string parameters. Values support ``{{placeholders}}``.")
+    body: str | None = Field(default=None, description="Request body template with ``{{placeholders}}``. For multipart: ``name=value`` (text) or ``name=@path;filename=X;contentType=Y`` (file).")
     content_type: str = Field(default="application/json", description="Content-Type of the request body.")
-    response_field: str | None = Field(default=None, json_schema_extra={"x_group": "Response"}, description='Dot-path into the JSON response to extract (e.g. "data.0.id" indexes lists). Blank → return the whole response.')
-    response_map: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Response"}, description="Pick several fields out of the response: {output_name = dot.path}.")
-    params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters for the {{placeholders}}.")
-    label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Friendly name (shown in listings).")
-    description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what the endpoint does.")
+    response_field: str | None = Field(default=None, json_schema_extra={"x_group": "Response"}, description="Dot-path into the JSON response to extract (e.g. ``data.0.id``). Blank returns the whole response.")
+    response_map: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Response"}, description="Extract several fields from the response: ``{output_name = dot.path}``.")
+    params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters for the ``{{placeholders}}``.")
+    label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Short name shown in listings.")
+    description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what this endpoint does.")
 
 
 class ApiConnectorConfig(BaseModel):

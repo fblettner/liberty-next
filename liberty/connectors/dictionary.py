@@ -53,20 +53,20 @@ class DictionaryEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None = Field(default=None, description="Default-language display title (v1's dd_label).")
+    label: str | None = Field(default=None, description="Display title for this field.")
     format: str | None = Field(
         default=None,
-        description="Display format hint — e.g. 'date' / 'number' / 'boolean' / 'textarea' (v1's dd_type). The frontend uses it to render the cell. Free-text — values come from the DICTIONARY_TYPE framework enum but a custom value (numeric / decimal / …) is still accepted.",
+        description="How to render the cell — pick a built-in (date / number / boolean / …) or type a custom format.",
         json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
     )
     rules: str | None = Field(
         default=None,
-        description="Display rule (v1's dd_rules) — BOOLEAN / ENUM / LOOKUP show a ✓/✗ / label / lookup-resolved label in the grid. SEQUENCE / SYSDATE / LOGIN / PASSWORD / CURRENT_DATE are form-layer (Phase 6).",
+        description="Display rule. BOOLEAN renders ✓/✗, ENUM shows a label per code, LOOKUP resolves a code to a label via a query, SEQUENCE / NN auto-fill on insert, PASSWORD masks input.",
         json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
     )
     rules_values: str | None = Field(
         default=None,
-        description="The rule's argument — true-value for BOOLEAN (default 'Y'), enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN (resolved at runtime through DictionaryFile.sequences). The builder swaps the dropdown to the right source based on `rules`.",
+        description="The rule's argument — true-value for BOOLEAN, enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN. The dropdown changes based on the chosen rule.",
         json_schema_extra={
             "x_group": "Rule",
             "x_enum_ref_when": {
@@ -83,31 +83,31 @@ class DictionaryEntry(BaseModel):
     )
     false_value: str | None = Field(
         default=None,
-        description="BOOLEAN-only — the false value to write to the DB when the checkbox is unchecked. v1 stored only the true value (``rules_values``); for tables like NOMASX1's CSI_STATUS the DB expects 'Y' or 'N', not 'Y' or NULL. When unset, inferred from `rules_values`: 'Y'→'N', '1'→'0', 'true'→'false'; everything else → null (the checkbox sends SQL NULL on uncheck). The frontend uses this on submit and the SQL connector substitutes any null BOOLEAN bind with this value as a safety net.",
+        description=(
+            "BOOLEAN-only — value to write when the checkbox is unchecked. Blank infers it from "
+            "the true value (``Y``→``N``, ``1``→``0``, ``true``→``false``); anything else sends NULL."
+        ),
         json_schema_extra={"x_group": "Rule"},
     )
     default: str | None = Field(
         default=None,
-        description="Default value (form-layer, pass-through — v1's dd_default).",
+        description="Initial value when a new row is added.",
         json_schema_extra={"x_group": "Rule"},
     )
     lookup_params: dict[str, str] = Field(
         default_factory=dict,
         title="Lookup params",
         description=(
-            "Static parameter bindings for the LOOKUP rule's query — {param_name: literal_value}. "
-            "v1's ly_dictionary_filters (flt_type='VALUE'). Used when the lookup's query expects "
-            "params to even run (e.g. UDC: SY='01', RT='LP' for the Languages table) — without "
-            "these the query returns nothing or the wrong rows. Ignored for non-LOOKUP rules. "
-            "The builder's key dropdown auto-shows the param names declared on the selected "
-            "lookup (LookupDef.params)."
+            "Static values bound to the LOOKUP query's parameters — needed when the query has "
+            "``:param`` placeholders (a JDE UDC query usually needs SY / RT to return rows). "
+            "Keys auto-suggest the params declared on the picked lookup."
         ),
         json_schema_extra={"x_group": "Rule", "x_key_enum_ref": "CURRENT_LOOKUP_PARAMS"},
     )
     l: dict[str, str] = Field(
         default_factory=dict,
         title="Translations",
-        description="Per-language overrides for the label: {language_code: translated_label} (v1's ly_dictionary_l).",
+        description="Per-language label overrides.",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
 
@@ -124,12 +124,12 @@ class EnumValue(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    value: str = Field(description="Code as it appears in the cell (e.g. 'JDE').")
-    label: str | None = Field(default=None, description="Default-language label (e.g. 'JD Edwards').")
+    value: str = Field(description="The code stored in the cell (e.g. ``JDE``).")
+    label: str | None = Field(default=None, description="What to show in place of the code (e.g. ``JD Edwards``).")
     l: dict[str, str] = Field(
         default_factory=dict,
         title="Translations",
-        description="Per-language label overrides: {language_code: translated_label}.",
+        description="Per-language label overrides.",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
 
@@ -144,10 +144,10 @@ class EnumDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None = Field(default=None, description="Display name for the enum set (informational).")
+    label: str | None = Field(default=None, description="Short name for this enum set.")
     values: list[EnumValue] = Field(
         default_factory=list,
-        description="Members of the enum — each row is one {value, label, l?} pair.",
+        description="The code → label pairs.",
         json_schema_extra={"x_group": "Values"},
     )
 
@@ -159,38 +159,35 @@ class LookupDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str | None = Field(default=None, description="Display name / description (informational).")
+    description: str | None = Field(default=None, description="Short description of this lookup.")
     connector: str | None = Field(
         default=None,
-        description="Connector the lookup query lives on. Blank → the asking connector (the one the lookup is referenced from). Drives the dropdowns below — query/value/label are scoped to whichever connector this resolves to.",
+        description="Connector hosting the lookup query. Blank uses the connector that references this lookup.",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "CONNECTOR_NAMES"},
     )
     query: str = Field(
-        description="The lookup's *read* query (e.g. 'security_roles_get'). The dropdown lists the resolved connector's tables (its `<base>_get` queries) plus any non-CRUD reads.",
+        description="The query that produces the code → label rows.",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
     )
     value: str = Field(
-        description="The result column whose value matches the cell. Dropdown lists the dictionary entries of the resolved connector — columns are typically named after their dd entry.",
+        description="Result column matching the cell's value (the code).",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
     label: str = Field(
-        description="The result column whose value to display in place of the code. Same scope as `value`.",
+        description="Result column to display instead of the code.",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
     group: str | None = Field(
         default=None,
-        description="Optional secondary key (v1's lkp_dd_group — not used yet).",
+        description="Optional grouping key (not currently used).",
         json_schema_extra={"x_group": "Advanced"},
     )
     params: list[str] = Field(
         default_factory=list,
         title="Params",
         description=(
-            "The `:placeholder` parameter names the lookup's query expects (v1's ly_lkp_params "
-            "with ``lkp_dir = 'IN'``). Informational on the LookupDef itself — the entries that "
-            "reference this lookup bind values to these names via `DictionaryEntry.lookup_params` "
-            "(the dictionary-builder's Rule tab auto-surfaces one input per name when the entry's "
-            "rule is LOOKUP)."
+            "Parameter names the lookup query expects. Each entry that uses this lookup "
+            "binds values via ``DictionaryEntry.lookup_params``."
         ),
         json_schema_extra={"x_group": "Target"},
     )
@@ -198,14 +195,8 @@ class LookupDef(BaseModel):
         default_factory=list,
         title="Return params",
         description=(
-            "Additional dd_ids the lookup writes back to the form / row when the user picks a "
-            "value (v1's ``ly_lkp_params`` with ``lkp_dir = 'OUT'``). Beyond the rule's headline "
-            "``value`` / ``label`` columns, the picked row's matching columns are written to "
-            "every other form field / grid cell whose ``dd`` matches a name here. Example: lkp 9 "
-            "on F00950's FSOBNM picks an object; ``return_params = [\"SY\"]`` writes the picked "
-            "row's SY column to FSSY (the field with ``dd = \"SY\"``) so the form auto-populates "
-            "the system code alongside the object name. Each entry is a dd_id; the runtime "
-            "case-folds when looking up the result column."
+            "Extra fields written back to the form when the user picks a row. Each name is a "
+            "dictionary entry key; the picked row's column with that name fills the matching field."
         ),
         json_schema_extra={"x_group": "Target"},
     )
@@ -224,24 +215,22 @@ class SequenceDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    description: str | None = Field(default=None, description="Display name / description (informational).")
+    description: str | None = Field(default=None, description="Short description of this sequence.")
     connector: str | None = Field(
         default=None,
-        description="Connector the sequence query lives on. Blank → the asking connector (the one the SEQUENCE-ruled entry is referenced from).",
+        description="Connector hosting the sequence query. Blank uses the connector that fires it.",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "CONNECTOR_NAMES"},
     )
     query: str = Field(
-        description="The sequence's read query (e.g. 'get_act_ukid_from_sod_activities_get'). The dropdown lists the resolved connector's tables.",
+        description="The query that returns the next number (typically ``SELECT COALESCE(MAX(col),0)+1 FROM table``).",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
     )
     dd_id: str | None = Field(
         default=None,
         description=(
-            "The dictionary entry (column) this sequence generates values for. Lets the SQL "
-            "connector auto-fire the sequence at INSERT time for any column referencing this "
-            "dd — even when the dd's own rule is something else (e.g. APPS_ID is both a "
-            "LOOKUP target *and* gets an auto-ID from this sequence). Blank → only the "
-            "``rules = \"SEQUENCE\"``-via-rules_values path fires this sequence."
+            "Auto-fire this sequence for any column whose dictionary entry has this key — even "
+            "if the entry's rule isn't SEQUENCE. Blank limits firing to entries with "
+            "``rules = SEQUENCE`` pointing at this id."
         ),
         json_schema_extra={"x_group": "Target", "x_enum_ref": "DD_ENTRIES"},
     )
@@ -249,10 +238,8 @@ class SequenceDef(BaseModel):
         default_factory=list,
         title="Params",
         description=(
-            "The `:placeholder` parameter names the sequence's query expects (v1's "
-            "``ly_seq_params``). Informational only at runtime — ``text()`` binds whatever the "
-            "SQL references against the in-flight INSERT row, so a sequence narrowing by APPS_ID "
-            "picks it up automatically without extra plumbing."
+            "Parameter names the sequence query expects. Values come from the in-flight INSERT "
+            "row automatically — listing them here is documentation."
         ),
         json_schema_extra={"x_group": "Target"},
     )
