@@ -56,6 +56,10 @@ export interface JsonSchema {
    *  whatever the additionalProperties type produces). e.g. `l: dict[str, str]` for translations
    *  uses `SUPPORTED_LANGUAGES` so the user picks "fr" / "Français" instead of typing a code. */
   x_key_enum_ref?: string
+  /** Per-field placeholder text. Surfaces the convention or expected shape (e.g. ``AUD_<TABLE>`` /
+   *  ``e.g. https://api.example.com``) without hard-coding a default value. Without this, the
+   *  string-input placeholder falls back to ``default: <value>`` or ``required``. */
+  x_placeholder?: string
 }
 
 /** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema).
@@ -598,7 +602,11 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           control = <Input type="number" value={cur == null ? '' : String(cur)} placeholder={sub.default != null ? `default: ${sub.default}` : isReq ? 'required' : ''}
             onChange={(e) => { const txt = e.target.value; set(key, txt === '' ? undefined : sub.type === 'integer' ? Math.trunc(Number(txt)) : Number(txt)) }} />
         } else if (sub.type === 'string' || sub.type === undefined) {
-          const placeholder = sub.default ? `default: ${sub.default}` : isReq ? 'required' : ''
+          // ``x_placeholder`` (from Pydantic ``Field(json_schema_extra={"x_placeholder": "…"})``)
+          // wins outright — it's the field-specific hint the operator types into. Falls back
+          // to ``default: <value>`` or ``required`` so existing fields without an explicit
+          // x_placeholder keep their current behaviour.
+          const placeholder = sub.x_placeholder ?? (sub.default ? `default: ${sub.default}` : isReq ? 'required' : '')
           // `format: "password"` (set via Field(json_schema_extra={"format": "password"})) → masked
           // input with a reveal toggle, so ENC: ciphertext / auth tokens / etc. don't sit in plain
           // sight in the builder. The stored value is still the raw string — purely a visual mask.

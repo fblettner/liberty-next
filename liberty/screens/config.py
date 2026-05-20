@@ -686,10 +686,13 @@ class Screen(BaseModel):
     audit_table: str | None = Field(
         default=None,
         description=(
-            "Mirror every successful write on this screen into this audit table. Each row gets "
-            "three extra columns added: AUD_ACTION (INSERT / UPDATE / DELETE), AUD_USER (the "
-            "caller's username), AUD_DATE (server timestamp). Blank = no auditing."
+            "Mirror every successful write on this screen into this audit table — convention is "
+            "``AUD_<TABLE>``. Each row gets three extra columns: AUD_ACTION (INSERT/UPDATE/DELETE), "
+            "AUD_USER (the caller's username), AUD_DATE (server timestamp). Blank = no auditing. "
+            "v1 only let you toggle audit on/off (the name was hardcoded); v2 lets you name the "
+            "table so several screens can share one (e.g. all security screens → ``AUD_SECURITY``)."
         ),
+        json_schema_extra={"x_placeholder": "e.g. AUD_USERS — leave blank to disable"},
     )
     max_rows: int | None = Field(
         default=None,

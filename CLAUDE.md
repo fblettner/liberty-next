@@ -1590,11 +1590,11 @@ none).
 
 502 backend tests pass.
 
-**Roadmap (planned, see `docs/PLAN.md`):** finish **Phase 7** loose ends — frontend vitest +
-CI; finish **Phase 5** — migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit
-*interceptor*, the historic rows from v1's `AUD_*` tables aren't carried over yet) + the
-real NOMAJDE cutover; → **Phase 9** notifications / reporting / backports → **Phase 10**
-the Airflow replacement (in-project Python/local-Spark jobs & scheduling).
+**Roadmap (planned, see `docs/PLAN.md`):** **Phase 5** is effectively complete from a
+framework standpoint — the NOMAJDE cutover is operator work, and the historic AUD_<table>
+data carry-over is per-customer (handled manually). → **Phase 9** notifications / reporting
+/ backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs &
+scheduling).
 
 **Big-grid scaling (deferred, no phase yet — track when a screen actually needs it):** the
 TableView today loads up to `max_rows` rows into the browser (default 1000) and TanStack does
