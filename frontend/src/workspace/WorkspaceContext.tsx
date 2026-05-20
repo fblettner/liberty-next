@@ -15,6 +15,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -179,6 +180,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       navigate(menus[name].home_path!)
     }
   }, [menus, navigate])
+
+  // **Initial-load redirect** — when ``menus`` first resolves *after sign-in* AND the
+  // operator's URL is the connectors index (``/``), navigate to the current app's
+  // ``home_path`` once. This is what kicks the operator into the dashboard on a fresh visit
+  // — without it, ``setCurrentApp`` only fires on an explicit picker change, and refreshing
+  // while ``localStorage[liberty.app]`` still pointed at the previously-picked app kept the
+  // operator on the connectors index. We fire it exactly once per sign-in (the ref guard);
+  // a later manual click on the Connectors page stays on ``/`` without bouncing.
+  //
+  // ``replace: true`` swaps ``/`` out of history so the back button doesn't trap the
+  // operator on the index page they just got redirected away from.
+  const didInitialRedirect = useRef(false)
+  useEffect(() => { didInitialRedirect.current = false }, [user?.username])
+  useEffect(() => {
+    if (didInitialRedirect.current) return
+    if (!menus) return
+    didInitialRedirect.current = true
+    if (pathname !== '/') return  // operator deep-linked or refreshed on a specific page — respect it
+    const app = currentApp ?? (apps?.length === 1 ? apps[0].name : null)
+    if (!app) return
+    const home = menus[app]?.home_path
+    if (home) navigate(home, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot per sign-in via the ref guard
+  }, [menus])
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
