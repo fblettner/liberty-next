@@ -57,7 +57,14 @@ from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
 from liberty.dashboards.config import DashboardsFile, parse_dashboards
-from liberty.web.rename import RenameError, rename_connector
+from liberty.web.rename import (
+    RenameError,
+    rename_connector,
+    rename_dictionary_entry,
+    rename_lookup,
+    rename_screen_app,
+    rename_sequence,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -613,32 +620,44 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
 
 
 class RenameBody(BaseModel):
-    """Payload for ``POST /admin/config/rename``. ``kind`` switches over the supported rename
-    flavours — currently ``"connector"`` (the highest-value case); ``"sequence"`` /
-    ``"lookup"`` / ``"screen_app"`` are pending follow-ups."""
+    """Payload for ``POST /admin/config/rename``. ``kind`` selects the rename flavour:
+
+    * ``"connector"`` — top-level ``[connectors.<old>]`` in :file:`connectors.toml` + every
+      cross-file ``connector = "<old>"`` reference (screens / menus / dictionary / dashboards
+      / charts).
+    * ``"sequence"`` / ``"lookup"`` — ``[sequences.<old>]`` / ``[lookups.<old>]`` in
+      :file:`dictionary.toml` + the matching ``DictionaryEntry.rules_values`` references.
+      ``scope`` optional: connector name to target ``[connectors.<scope>.sequences.<old>]`` etc.
+    * ``"screen_app"`` — ``[screens.<old>]`` in :file:`screens.toml` + the matching
+      ``[menus.<old>]`` in :file:`menus.toml` (if it exists). ``scope`` ignored.
+    * ``"dictionary_entry"`` — ``[entries.<old>]`` in :file:`dictionary.toml` + every
+      ``ColumnHint.dd`` / ``PromptField.dd`` in :file:`screens.toml` + ``SequenceDef.dd_id``
+      and ``LookupDef.return_params`` references in the same scope. ``scope`` optional.
+    """
 
     kind: str
     old_name: str
     new_name: str
+    scope: str | None = None
 
 
 @router.post("/config/rename")
 async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Rename a top-level config key + every cross-file reference in one atomic pass.
 
-    The structured builders edit each file's body wholesale via tomlkit, but a connector name
-    (or future: a sequence / lookup / screen-app key) is referenced from several files.
-    Renaming by hand means hunting every ``connector = "<old>"`` in screens / menus / dictionary
-    / dashboards / charts — error-prone and easy to miss a deeply-nested step in an action
-    chain. This endpoint walks every affected file, rewrites the references via
-    :mod:`liberty.web.rename`, validates each rewritten doc against its Pydantic schema, then
-    writes them all in one batch. On any validation failure nothing is written.
+    The structured builders edit each file's body wholesale via tomlkit, but a top-level key
+    is referenced from several files. Renaming by hand means hunting every reference —
+    error-prone and easy to miss a deeply-nested step in an action chain. This endpoint walks
+    every affected file, rewrites the references via :mod:`liberty.web.rename`, validates each
+    rewritten doc against its Pydantic schema, then writes them all in one batch. On any
+    validation failure nothing is written.
 
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
-    everywhere (in-flight requests still see the old registry until they finish)."""
+    everywhere (in-flight requests still see the old registry until they finish).
+    """
     settings = request.app.state.settings
-    if body.kind == "connector":
-        try:
+    try:
+        if body.kind == "connector":
             result = rename_connector(
                 body.old_name, body.new_name,
                 connectors_path=Path(settings.connectors.config_path),
@@ -648,10 +667,36 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 dashboards_path=Path(settings.dashboards.config_path),
                 charts_path=Path(settings.charts.config_path),
             )
-        except RenameError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-        return result.to_dict()
-    raise HTTPException(
-        status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail=f"rename kind {body.kind!r} not supported yet — only 'connector' for now",
-    )
+        elif body.kind == "sequence":
+            result = rename_sequence(
+                body.old_name, body.new_name,
+                dictionary_path=_dictionary_path(settings),
+                scope=body.scope,
+            )
+        elif body.kind == "lookup":
+            result = rename_lookup(
+                body.old_name, body.new_name,
+                dictionary_path=_dictionary_path(settings),
+                scope=body.scope,
+            )
+        elif body.kind == "screen_app":
+            result = rename_screen_app(
+                body.old_name, body.new_name,
+                screens_path=Path(settings.screens.config_path),
+                menus_path=Path(settings.menus.config_path),
+            )
+        elif body.kind == "dictionary_entry":
+            result = rename_dictionary_entry(
+                body.old_name, body.new_name,
+                dictionary_path=_dictionary_path(settings),
+                screens_path=Path(settings.screens.config_path),
+                scope=body.scope,
+            )
+        else:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen_app, dictionary_entry",
+            )
+    except RenameError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    return result.to_dict()

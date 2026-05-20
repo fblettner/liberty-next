@@ -23,14 +23,19 @@ What's covered (Phase 7 loose-ends slice):
   in :file:`dictionary.toml`) renames; ``LookupDef.connector`` / ``SequenceDef.connector``
   references (in both ``connectors.toml`` and ``dictionary.toml``) update.
 
-Out of scope here (delete + re-add for now, or a later slice):
-
-* Renaming a *screen app* (``[screens.<app>]``) — distinct from the connector even though they
-  conventionally share a name. The matching ``[menus.<app>]`` and any cross-references would
-  need a separate operation.
-* Renaming a *sequence id* / *lookup id* / *dictionary entry key* — narrower scope (just
-  ``dictionary.toml`` + the queries that ``#SEQUENCE.<id>#`` / ``LOOKUP.<id>`` in their SQL),
-  but the same shape would apply.
+* :func:`rename_sequence` / :func:`rename_lookup` — dictionary-side keys plus the
+  ``DictionaryEntry.rules_values`` references that point at the renamed sequence / lookup.
+  Optional ``scope`` (a connector name) narrows the rename to a per-connector overlay
+  (``[connectors.<scope>.sequences.<old>]`` etc.); ``scope = None`` operates on the shared
+  ``[sequences.<old>]`` top-level.
+* :func:`rename_screen_app` — renames a ``[screens.<old>]`` top-level key plus the matching
+  ``[menus.<old>]`` block when one exists (apps and connectors are distinct concepts, but in
+  practice a screen app and its menu share a name; renaming one without the other usually
+  leaks).
+* :func:`rename_dictionary_entry` — the deepest walk. ``[entries.<old>]`` (shared or scoped)
+  renames; every ``Screen.columns[].dd`` / ``PromptField.dd`` (in actions' prompt_fields)
+  across :file:`screens.toml` updates; ``SequenceDef.dd_id`` + ``LookupDef.return_params``
+  references in :file:`dictionary.toml` update.
 """
 
 from __future__ import annotations
@@ -329,4 +334,328 @@ def _replace_connector_field_recursive(node: Any, *, old: str, new: str) -> int:
     elif isinstance(node, list):
         for v in node:
             n += _replace_connector_field_recursive(v, old=old, new=new)
+    return n
+
+
+# ── sequence / lookup rename ─────────────────────────────────────────────────────────────────
+
+
+def rename_sequence(
+    old: str,
+    new: str,
+    *,
+    dictionary_path: Path,
+    scope: str | None = None,
+) -> RenameResult:
+    """Rename a sequence id. With ``scope = None`` operates on the shared
+    ``[sequences.<old>]`` top-level; with ``scope = "<conn>"`` operates on the per-connector
+    overlay ``[connectors.<scope>.sequences.<old>]``. The matching ``DictionaryEntry.rules_values``
+    references (where ``rules == "SEQUENCE"`` or ``"NN"``) update in the *same scope* — a
+    sequence id is dictionary-internal so we don't need to scan other config files."""
+    return _rename_dict_collection(
+        kind="sequence",
+        coll="sequences",
+        ref_rules={"SEQUENCE", "NN"},
+        old=old, new=new,
+        dictionary_path=dictionary_path,
+        scope=scope,
+    )
+
+
+def rename_lookup(
+    old: str,
+    new: str,
+    *,
+    dictionary_path: Path,
+    scope: str | None = None,
+) -> RenameResult:
+    """Same shape as :func:`rename_sequence` — renames ``[lookups.<old>]`` (shared or scoped)
+    + every ``DictionaryEntry.rules_values`` whose ``rules == "LOOKUP"`` matches. Lookups are
+    referenced exclusively from dictionary entries (the SQL connector resolves them via the
+    entry's rules_values), so no cross-file walk is needed."""
+    return _rename_dict_collection(
+        kind="lookup",
+        coll="lookups",
+        ref_rules={"LOOKUP"},
+        old=old, new=new,
+        dictionary_path=dictionary_path,
+        scope=scope,
+    )
+
+
+def _rename_dict_collection(
+    *,
+    kind: str,
+    coll: str,
+    ref_rules: set[str],
+    old: str,
+    new: str,
+    dictionary_path: Path,
+    scope: str | None,
+) -> RenameResult:
+    """Shared implementation for :func:`rename_sequence` / :func:`rename_lookup` (and any
+    future "dictionary-internal" collection rename). The two functions only differ in:
+
+    * which subtable holds the definitions (``sequences`` vs ``lookups``), and
+    * which ``DictionaryEntry.rules`` values point at this kind (``SEQUENCE``/``NN`` for
+      sequences, ``LOOKUP`` for lookups).
+    """
+    if old == new:
+        raise RenameError(f"old and new names are identical ({old!r}) — nothing to do")
+    # v2 id rules — same as connector names. (Sequence / lookup ids are typically integer-like
+    # strings in v1 migrations — "1", "2" — but operators may want to rename them to readable
+    # names like ``user_status``; we allow any v2 identifier here.)
+    validate_identifier(new, what="new name")
+
+    result = RenameResult(kind=kind, old_name=old, new_name=new)
+    if scope is not None:
+        validate_identifier(scope, what="scope")
+
+    # Pre-load the dictionary doc. A missing / empty dictionary file means there's nothing to
+    # rename — surface a useful error rather than silently no-op.
+    if not dictionary_path.exists() or not dictionary_path.read_text(encoding="utf-8").strip():
+        raise RenameError(f"dictionary file {dictionary_path} is missing or empty")
+    doc = tomlkit.parse(dictionary_path.read_text(encoding="utf-8"))
+
+    # Resolve the section we'll mutate. Shared = doc[<coll>]; scoped = doc[connectors][scope][<coll>].
+    if scope is None:
+        section = doc.get(coll)
+        entries_section = doc.get("entries")
+        scope_label = "shared"
+    else:
+        conns = doc.get("connectors") or {}
+        scope_table = conns.get(scope) if isinstance(conns, dict) else None
+        if not isinstance(scope_table, dict):
+            raise RenameError(
+                f"connector scope {scope!r} not found in dictionary — add the section first "
+                f"or rename without a scope to target the shared [{coll}.<id>] tables"
+            )
+        section = scope_table.get(coll)
+        entries_section = scope_table.get("entries")
+        scope_label = f"connectors.{scope}"
+
+    if not isinstance(section, dict) or old not in section:
+        raise RenameError(
+            f"{kind} {old!r} not found under [{scope_label}.{coll}] — nothing to rename. "
+            "(Pass a scope=<connector> to operate on a per-connector overlay.)"
+        )
+    if new in section:
+        raise RenameError(
+            f"{kind} {new!r} already exists under [{scope_label}.{coll}] — pick another name"
+        )
+
+    # 1) rename the definition key itself.
+    section[new] = section[old]
+    del section[old]
+    n = 1
+
+    # 2) update DictionaryEntry.rules_values references within the same scope. Entries from
+    #    other scopes are intentionally left alone — they may carry the same id (a v1 migration
+    #    can produce two scopes referencing different sequences both numbered "1" — narrower
+    #    rename is the safer default).
+    if isinstance(entries_section, dict):
+        for _entry_key, entry in entries_section.items():
+            if not isinstance(entry, dict):
+                continue
+            rules = entry.get("rules")
+            if isinstance(rules, str) and rules.upper() in ref_rules and entry.get("rules_values") == old:
+                entry["rules_values"] = new
+                n += 1
+
+    # Validate the rewritten doc before writing.
+    _validate("dictionary", doc, parse_dictionary, dictionary_path)
+    dictionary_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+    result.files[str(dictionary_path)] = n
+    return result
+
+
+# ── screen-app rename ────────────────────────────────────────────────────────────────────────
+
+
+def rename_screen_app(
+    old: str,
+    new: str,
+    *,
+    screens_path: Path,
+    menus_path: Path,
+) -> RenameResult:
+    """Rename a screen *app* key — the top-level dict key in :file:`screens.toml` and the
+    matching ``[menus.<old>]`` block when one exists (apps and connectors are distinct concepts
+    but in practice they share a name; renaming the screens app without the menu would leave
+    a dead navigation root).
+
+    Does **not** touch ``Screen.connector`` / ``MenuItem.connector`` field values — those are
+    *connector* references, which the operator renames via :func:`rename_connector` (a
+    separate operation; the connector and the screen-app can diverge in name).
+    """
+    if old == new:
+        raise RenameError(f"old and new names are identical ({old!r}) — nothing to do")
+    validate_identifier(new, what="new name")
+
+    result = RenameResult(kind="screen_app", old_name=old, new_name=new)
+
+    # screens.toml — the required side. The app MUST exist here (an app key with no screens
+    # makes no sense; if the operator wants to "rename" the menu app only, that's a future
+    # ``rename_menu_app`` op).
+    if not screens_path.exists() or not screens_path.read_text(encoding="utf-8").strip():
+        raise RenameError(f"screens file {screens_path} is missing or empty")
+    scr_doc = tomlkit.parse(screens_path.read_text(encoding="utf-8"))
+    screens_table = scr_doc.get("screens") or {}
+    if not isinstance(screens_table, dict) or old not in screens_table:
+        raise RenameError(f"screens app {old!r} not found in {screens_path}")
+    if new in screens_table:
+        raise RenameError(f"screens app {new!r} already exists — pick another name")
+    screens_table[new] = screens_table[old]
+    del screens_table[old]
+    result.files[str(screens_path)] = 1
+
+    # menus.toml — same app key OR no-op + warning. Renaming the menu when the operator just
+    # wanted a rename of the screen side would surprise them; renaming both is the typical
+    # case, so do it but tell them what happened.
+    if menus_path.exists() and menus_path.read_text(encoding="utf-8").strip():
+        menu_doc = tomlkit.parse(menus_path.read_text(encoding="utf-8"))
+        menus_table = menu_doc.get("menus") or {}
+        if isinstance(menus_table, dict) and old in menus_table:
+            if new in menus_table:
+                raise RenameError(f"menus app {new!r} already exists — pick another name")
+            menus_table[new] = menus_table[old]
+            del menus_table[old]
+            result.files[str(menus_path)] = 1
+            _validate("menus", menu_doc, parse_menus, menus_path)
+            menus_path.write_text(tomlkit.dumps(menu_doc), encoding="utf-8")
+        else:
+            result.warnings.append(
+                f"no matching [menus.{old}] block in {menus_path} — left untouched."
+            )
+            result.files[str(menus_path)] = 0
+    else:
+        result.files[str(menus_path)] = 0
+
+    _validate("screens", scr_doc, parse_screens, screens_path)
+    screens_path.write_text(tomlkit.dumps(scr_doc), encoding="utf-8")
+    return result
+
+
+# ── dictionary entry rename ─────────────────────────────────────────────────────────────────
+
+
+def rename_dictionary_entry(
+    old: str,
+    new: str,
+    *,
+    dictionary_path: Path,
+    screens_path: Path,
+    scope: str | None = None,
+) -> RenameResult:
+    """Rename a dictionary entry key — ``[entries.<old>]`` (shared) or
+    ``[connectors.<scope>.entries.<old>]`` — plus every reference to it:
+
+    * In :file:`dictionary.toml`: ``SequenceDef.dd_id`` (same scope) and
+      ``LookupDef.return_params`` (same scope) entries.
+    * In :file:`screens.toml`: every ``ColumnHint.dd == old`` (Phase 3: columns live on
+      ``Screen.columns``) and every ``PromptField.dd == old`` (inside actions' prompt_fields).
+      The screens-side walk is scope-blind — dd references are free strings and there's no
+      scope mechanism on a ``Screen.columns[].dd`` field. The operator sees the touched-refs
+      count in the result; if a refs target was a different scope's entry with the same name,
+      they can manually revert via the builder.
+
+    No cross-file ref in :file:`menus.toml` / :file:`dashboards.toml` / :file:`charts.toml`
+    points at a dd entry — they reference queries / endpoints / charts by name.
+    """
+    if old == new:
+        raise RenameError(f"old and new names are identical ({old!r}) — nothing to do")
+    # Dictionary entry keys are typically uppercase (v1's dd_id convention: APPS_ID,
+    # USR_NAME, etc.). Accept either case; the identifier regex would reject uppercase, so
+    # use a looser shape for entry keys.
+    if not isinstance(new, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new):
+        raise RenameError(f"invalid new name: {new!r} — must be a valid identifier (letters / digits / underscore; leading letter)")
+
+    result = RenameResult(kind="dictionary_entry", old_name=old, new_name=new)
+    if scope is not None:
+        validate_identifier(scope, what="scope")
+
+    # 1) dictionary.toml — rename the key + update SequenceDef.dd_id + LookupDef.return_params.
+    if not dictionary_path.exists() or not dictionary_path.read_text(encoding="utf-8").strip():
+        raise RenameError(f"dictionary file {dictionary_path} is missing or empty")
+    d_doc = tomlkit.parse(dictionary_path.read_text(encoding="utf-8"))
+
+    if scope is None:
+        entries_section = d_doc.get("entries")
+        scope_table = d_doc
+        scope_label = "shared"
+    else:
+        conns = d_doc.get("connectors") or {}
+        scope_table = conns.get(scope) if isinstance(conns, dict) else None
+        if not isinstance(scope_table, dict):
+            raise RenameError(f"connector scope {scope!r} not found in dictionary")
+        entries_section = scope_table.get("entries")
+        scope_label = f"connectors.{scope}"
+
+    if not isinstance(entries_section, dict) or old not in entries_section:
+        raise RenameError(
+            f"entry {old!r} not found under [{scope_label}.entries] — nothing to rename"
+        )
+    if new in entries_section:
+        raise RenameError(
+            f"entry {new!r} already exists under [{scope_label}.entries] — pick another name"
+        )
+    entries_section[new] = entries_section[old]
+    del entries_section[old]
+    n_dict = 1
+
+    # Update SequenceDef.dd_id + LookupDef.return_params within the same scope. Sequences's
+    # dd_id is a single string; LookupDef.return_params is a list (each element is a dd_id).
+    sequences = scope_table.get("sequences") if isinstance(scope_table, dict) else None
+    if isinstance(sequences, dict):
+        for _sid, seq in sequences.items():
+            if isinstance(seq, dict) and seq.get("dd_id") == old:
+                seq["dd_id"] = new
+                n_dict += 1
+    lookups = scope_table.get("lookups") if isinstance(scope_table, dict) else None
+    if isinstance(lookups, dict):
+        for _lid, lk in lookups.items():
+            if not isinstance(lk, dict):
+                continue
+            rp = lk.get("return_params")
+            if isinstance(rp, list):
+                for i, p in enumerate(rp):
+                    if p == old:
+                        rp[i] = new
+                        n_dict += 1
+    _validate("dictionary", d_doc, parse_dictionary, dictionary_path)
+    result.files[str(dictionary_path)] = n_dict
+
+    # 2) screens.toml — walk every ColumnHint.dd / PromptField.dd field. Both live somewhere
+    #    deep under [screens.<app>.<id>] — recursive walk is simplest.
+    n_scr = 0
+    if screens_path.exists() and screens_path.read_text(encoding="utf-8").strip():
+        s_doc = tomlkit.parse(screens_path.read_text(encoding="utf-8"))
+        n_scr = _replace_dd_field_recursive(s_doc.get("screens"), old=old, new=new)
+        if n_scr:
+            _validate("screens", s_doc, parse_screens, screens_path)
+            screens_path.write_text(tomlkit.dumps(s_doc), encoding="utf-8")
+        result.files[str(screens_path)] = n_scr
+    else:
+        result.files[str(screens_path)] = 0
+
+    dictionary_path.write_text(tomlkit.dumps(d_doc), encoding="utf-8")
+    return result
+
+
+def _replace_dd_field_recursive(node: Any, *, old: str, new: str) -> int:
+    """Recursive replacement of ``dd = "<old>"`` field values in any nested object. Used by
+    :func:`rename_dictionary_entry` to walk screens.toml — ColumnHint + PromptField both carry
+    a ``dd`` field, and they appear under several levels of nesting (per-screen columns,
+    dialog tab nested actions' prompt_fields, screen-level actions' prompt_fields, …)."""
+    n = 0
+    if isinstance(node, dict):
+        if node.get("dd") == old:
+            node["dd"] = new
+            n += 1
+        for v in node.values():
+            n += _replace_dd_field_recursive(v, old=old, new=new)
+    elif isinstance(node, list):
+        for v in node:
+            n += _replace_dd_field_recursive(v, old=old, new=new)
     return n

@@ -1510,13 +1510,33 @@ Shipped this slice — **top-level-key rename for connectors** lives in `liberty
   the disk-side rewrite + reload would clobber pending changes otherwise).
 * 12 backend tests pin every cross-file reference + the edge cases (collision rejects, invalid
   identifier, missing connector, self-rename, endpoint auth gating).
-* Other rename flavours (`sequence` / `lookup` / `screen_app`) — `RenameBody.kind` already
-  takes a string discriminator; the endpoint returns 422 with a useful message for unsupported
-  kinds. Follow-up slices wire them via the same module.
+* Rename flavours now covered by ``POST /admin/config/rename`` (``kind`` discriminator):
+  - ``connector`` — top-level ``[connectors.<old>]`` in connectors.toml + every cross-file
+    ``connector = "<old>"`` reference (screens / menus / dictionary / dashboards / charts).
+  - ``sequence`` / ``lookup`` — ``[sequences.<old>]`` / ``[lookups.<old>]`` (shared OR per-
+    connector scope via ``scope=<conn>``) + every same-scope ``DictionaryEntry.rules_values``
+    reference (matched by the entry's ``rules`` kind — only SEQUENCE/NN entries cascade on
+    sequence rename, only LOOKUP entries on lookup rename). Shared and scoped sequences/
+    lookups can carry the same id (a v1 migration produces that shape — every app's sequence
+    is numbered ``1``); scope narrows the rename to one side.
+  - ``screen_app`` — ``[screens.<old>]`` top-level + the matching ``[menus.<old>]`` in
+    menus.toml when one exists (apps and connectors are distinct concepts but in practice
+    share a name; warning fires when no matching menu block exists).
+  - ``dictionary_entry`` — ``[entries.<old>]`` (shared or scoped) + every ``ColumnHint.dd`` /
+    ``PromptField.dd`` reference across screens.toml (scope-blind walk — ``dd`` fields are
+    free strings without a scope mechanism) + ``SequenceDef.dd_id`` and
+    ``LookupDef.return_params`` references in the same scope.
+* Frontend wiring lands on each builder's existing Rename… button:
+  - ``ConnectorsBuilder`` → connector rename.
+  - ``DictionaryBuilder`` → routes ``entries`` / ``lookups`` / ``sequences`` rename through
+    the endpoint (scope-aware via the chip strip); ``enums`` / ``framework_enums`` keep the
+    local in-memory rename (no backend endpoint, narrower cascade).
+  - ``ScreensBuilder`` → new Rename chip on each app row.
+  All four refuse to fire with unsaved local edits + auto-reload + bump the WorkspaceContext
+  nonce after success so screens / menus / dashboards everywhere reflect the new name.
 
-Still-loose ends: **rename for sequence / lookup / screen-app / dictionary-entry keys**
-(same shape, different ref walks); **frontend vitest + CI** (the Python side has 486 tests;
-the frontend has none).
+Still-loose ends: **frontend vitest + CI** (the Python side has 502 tests; the frontend has
+none).
 
 **Phase 8 (Charts & Dashboards) — DONE (runtime + builder).** Lives in
 `liberty/web/dashboards.py` + `liberty/dashboards/config.py` + `frontend/src/pages/DashboardView/`
@@ -1547,11 +1567,10 @@ the frontend has none).
   `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
   framework restores the dashboard via the home redirect even when the menu leaf is missing.
 
-486 backend tests pass.
+502 backend tests pass.
 
-**Roadmap (planned, see `docs/PLAN.md`):** finish **Phase 7** loose ends — top-level-key
-rename for the remaining kinds (sequence / lookup / screen-app), frontend vitest + CI;
-finish **Phase 5** — validate-by-diff harness
+**Roadmap (planned, see `docs/PLAN.md`):** finish **Phase 7** loose ends — frontend vitest +
+CI; finish **Phase 5** — validate-by-diff harness
 against nomasx1's read paths +
 migrate v1's `AUD_<table>` audit data (Slice 5 wired the audit *interceptor*, the historic
 rows from v1's `AUD_*` tables aren't carried over yet) + the real NOMAJDE cutover; →

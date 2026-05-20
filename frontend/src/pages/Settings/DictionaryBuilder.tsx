@@ -14,6 +14,7 @@ import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { groupQueriesByTable } from './connectorTables'
 
@@ -137,6 +138,7 @@ function setSection(
 export default function DictionaryBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
+  const { refresh: refreshWorkspace } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [path, setPath] = useState('')
   const [dict, setDict] = useState<DictionaryData | null>(null)
@@ -349,12 +351,19 @@ export default function DictionaryBuilder() {
     setDict(setSection(dict, scope, kind, next))
     setSel((s) => (s === key ? null : s)); setStatus(null)
   }
-  // Rename a record's dict key. Order-preserving. **Intra-scope cascade**: renaming an enum or
-  // lookup also rewrites any same-scope ``DictionaryEntry.rules_values`` references that pointed
-  // at it (matching by the entry's `rules` kind — only an ENUM rule's ``rules_values`` cascades
-  // when an enum is renamed, etc.). Cross-scope and cross-file refs (``ScreenField.dd`` in
-  // screens.toml, ``ColumnHint.dd`` in connectors.toml) are **not** auto-updated — the operator
-  // sees a status banner reminding them. Framework-enum overrides have no cascade.
+  // Rename a record's dict key. Routes through the backend endpoint
+  // ``POST /admin/config/rename`` for the three kinds the backend supports — ``entries``
+  // (→ ``dictionary_entry``: also walks screens.toml for ``ColumnHint.dd`` /
+  // ``PromptField.dd`` references), ``lookups`` (→ ``lookup``: walks DictionaryEntry rules_values
+  // in the same scope), and ``sequences`` (→ ``sequence``: same). For ``enums`` and
+  // ``framework_enums`` (no backend endpoint), keeps the local in-memory rename + intra-scope
+  // cascade — same behaviour as before. Refuses to fire with unsaved local edits so the disk
+  // rewrite + reload doesn't clobber pending changes.
+  const ENDPOINT_KINDS: Record<string, string> = {
+    entries: 'dictionary_entry',
+    lookups: 'lookup',
+    sequences: 'sequence',
+  }
   const renameRecord = async (oldKey: string) => {
     if (!dict) return
     const existing = Object.keys(section)
@@ -368,14 +377,62 @@ export default function DictionaryBuilder() {
         if (err === 'unchanged') return null
         if (err === 'empty') return t('settings.rename.empty')
         if (err === 'exists') return t('settings.rename.exists', { name: v })
+        // entries are typically uppercase (USR_ID, APPS_ID, …); the rest are lowercase v2 ids.
+        // Both shapes accepted by the backend; the regex enforces letters/digits/underscores
+        // with a leading letter.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
         return null
       },
     }))?.trim()
     if (!next || next === oldKey) return
+
+    const endpointKind = ENDPOINT_KINDS[kind]
+    if (endpointKind) {
+      if (dirty) {
+        const choice = await modals.choose({
+          title: t('settings.rename.button'),
+          message: t('settings.rename.unsavedFirst'),
+          options: [
+            { value: 'save', label: t('common.save'), variant: 'primary', autoFocus: true },
+            { value: 'cancel', label: t('common.cancel'), variant: 'ghost' },
+          ],
+          cancelValue: 'cancel',
+        })
+        if (choice !== 'save') return
+        await save()
+        if (dirty) return
+      }
+      setBusy(true)
+      try {
+        const body: Record<string, unknown> = { kind: endpointKind, old_name: oldKey, new_name: next }
+        // Backend's "shared" scope = no scope arg; the builder uses '' (SCOPE_SHARED) for that.
+        if (scope !== SCOPE_SHARED) body.scope = scope
+        const result = await api.post<{ files: Record<string, number>; warnings: string[]; total_refs: number }>(
+          '/admin/config/rename', body,
+        )
+        await api.post('/admin/reload')
+        refreshWorkspace()
+        setSel(next)
+        load()
+        const filesTouched = Object.values(result.files).filter((n) => n > 0).length
+        const tail = result.warnings.length ? ` · ${result.warnings.join(' · ')}` : ''
+        setStatus(t('settings.dictionary.renamedAcross', {
+          from: oldKey, to: next, refs: result.total_refs, files: filesTouched,
+        }) + tail)
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : String(e)
+        setError(t('settings.dictionary.renameFailed', { name: oldKey, error: msg }))
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
+    // Enums / framework_enums — no backend endpoint, keep the local in-memory rename
+    // with the same intra-scope cascade for enum refs.
     let updated = setSection(dict, scope, kind, renameKey(section, oldKey, next))
     let cascaded = 0
-    if (kind === 'enums' || kind === 'lookups') {
-      const ruleKind = kind === 'enums' ? 'ENUM' : 'LOOKUP'
+    if (kind === 'enums') {
       const entries = getSection(updated, scope, 'entries')
       const nextEntries: Record<string, Record<string, unknown>> = {}
       for (const [eid, rec] of Object.entries(entries)) {
@@ -383,7 +440,7 @@ export default function DictionaryBuilder() {
           ? ((rec as Record<string, unknown>).rules as string).toUpperCase()
           : ''
         const rv = (rec as Record<string, unknown>)?.rules_values
-        if (r === ruleKind && rv === oldKey) {
+        if (r === 'ENUM' && rv === oldKey) {
           nextEntries[eid] = { ...(rec as Record<string, unknown>), rules_values: next }
           cascaded++
         } else {

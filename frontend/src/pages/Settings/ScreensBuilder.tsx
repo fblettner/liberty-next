@@ -33,6 +33,7 @@ import {
   type JsonSchema,
 } from '../../common'
 import type { ConfigSchemas, ScreensDoc, Screen } from '../../types/config'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ScreenEditor from './ScreenEditor'
 
@@ -131,6 +132,7 @@ const StatChip = styled.span<{ $tone?: 'orange' | 'green' | 'muted' }>`
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
+  const { refresh: refreshWorkspace } = useWorkspace()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
@@ -339,6 +341,64 @@ export default function ScreensBuilder() {
     setDoc((p) => ({ ...(p ?? {}), [name]: { ...((p ?? {})[name] ?? {}) } }))
     setSelApp(name); setStatus(null)
   }
+  // Rename a screen app — calls ``POST /admin/config/rename`` with ``kind=screen_app`` so the
+  // ``[screens.<old>]`` top-level key in :file:`screens.toml` AND the matching
+  // ``[menus.<old>]`` in :file:`menus.toml` (if it exists) rename together. Refuses to fire
+  // with unsaved local edits (the disk rewrite + reload would clobber them). After the
+  // endpoint succeeds, runs ``/admin/reload`` + ``refreshWorkspace()`` so the app picker
+  // everywhere picks up the new name.
+  const renameApp = async (oldName: string) => {
+    if (!doc) return
+    if (dirty) {
+      const choice = await modals.choose({
+        title: t('settings.rename.button'),
+        message: t('settings.rename.unsavedFirst'),
+        options: [
+          { value: 'save', label: t('common.save'), variant: 'primary', autoFocus: true },
+          { value: 'cancel', label: t('common.cancel'), variant: 'ghost' },
+        ],
+        cancelValue: 'cancel',
+      })
+      if (choice !== 'save') return
+      await save()
+      if (dirty) return
+    }
+    const existing = Object.keys(doc)
+    const next = (await modals.prompt({
+      title: t('settings.rename.button'),
+      message: t('settings.screens.renameAppPrompt', { name: oldName }),
+      defaultValue: oldName,
+      submitLabel: t('settings.rename.button'),
+      validate: (v) => {
+        if (!v) return t('settings.rename.empty')
+        if (v === oldName) return null
+        if (existing.includes(v)) return t('settings.rename.exists', { name: v })
+        if (!/^[a-z][a-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
+        return null
+      },
+    }))?.trim()
+    if (!next || next === oldName) return
+    setBusy(true)
+    try {
+      const result = await api.post<{ files: Record<string, number>; warnings: string[]; total_refs: number }>(
+        '/admin/config/rename', { kind: 'screen_app', old_name: oldName, new_name: next },
+      )
+      await api.post('/admin/reload')
+      refreshWorkspace()
+      setSelApp(next)
+      load()
+      const filesTouched = Object.values(result.files).filter((n) => n > 0).length
+      const tail = result.warnings.length ? ` · ${result.warnings.join(' · ')}` : ''
+      setStatus(t('settings.screens.appRenamedAcross', {
+        from: oldName, to: next, refs: result.total_refs, files: filesTouched,
+      }) + tail)
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e)
+      setError(t('settings.screens.appRenameFailed', { name: oldName, error: msg }))
+    } finally {
+      setBusy(false)
+    }
+  }
   const removeApp = async (name: string) => {
     const ok = await modals.confirm({
       title: t('settings.screens.deleteApp'),
@@ -440,6 +500,9 @@ export default function ScreensBuilder() {
           <>
             <Chip type="button" onClick={() => addScreen(selApp)} title={t('settings.screens.add')} style={{ marginLeft: 'auto' }}>
               <Plus size={12} /> {t('settings.screens.add')}
+            </Chip>
+            <Chip type="button" onClick={() => renameApp(selApp)} title={t('settings.screens.renameAppOne', { name: selApp })} disabled={busy}>
+              <Edit3 size={12} /> {t('settings.rename.button')}
             </Chip>
             <Chip type="button" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteAppOne', { name: selApp })} style={{ color: colors.red.main, borderColor: colors.red.border }}>
               <Trash2 size={12} /> {t('settings.screens.deleteAppOne', { name: selApp })}
