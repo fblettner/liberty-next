@@ -116,6 +116,16 @@ class AppMenu(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str | None = None  # the app's display name (defaults to the app / connector name)
+    home: str | None = Field(
+        default=None,
+        description=(
+            "Default landing menu item id (within this app's ``items``). When set + the caller "
+            "can read the target, picking this app from the workspace picker navigates straight "
+            "there — typically the app's overview dashboard. Unset = stay on the current page "
+            "(or land on /, the connectors index)."
+        ),
+        json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
+    )
     items: list[MenuItem] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -135,6 +145,12 @@ class AppMenu(BaseModel):
                     raise ValueError(f"menu item {it.id!r}: parent cycle through {cur.parent!r}")
                 seen.add(cur.id)
                 cur = by_id[cur.parent]
+        # ``home`` (when set) must reference an existing item id. We deliberately don't
+        # require it to be a leaf — a folder home is harmless (the wire payload resolves to
+        # no path and the redirect silently skips), and pinning is on item *id* not on its
+        # *type* so renaming a folder's children doesn't break the pointer.
+        if self.home is not None and self.home not in by_id:
+            raise ValueError(f"app menu home {self.home!r} does not reference any item id")
         return self
 
 

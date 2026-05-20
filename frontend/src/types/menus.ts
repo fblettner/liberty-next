@@ -22,6 +22,11 @@ export interface AppMenuTree {
   app: string
   label: string
   items: MenuNode[]
+  /** Default landing path for this app (e.g. ``/dashboard/nomasx1_overview``). Set by the
+   *  operator via ``AppMenu.home`` in menus.toml; emitted only when the caller can read the
+   *  target (so a non-permitted user just falls back to the connector index). Picking this
+   *  app from the workspace picker navigates here. */
+  home_path?: string
 }
 
 export type MenusByApp = Record<string, AppMenuTree>

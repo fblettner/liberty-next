@@ -77,6 +77,11 @@ export interface MenuItem {
 /** One `[menus.<app>]` block. */
 export interface AppMenu {
   label?: string
+  /** Default landing menu item id — when set + the caller can reach it, picking this app
+   *  from the workspace picker navigates to that item's path (``/dashboard/<id>`` for a
+   *  dashboard, ``/sql/<connector>/<query>`` for a query, ``/http/<c>/<endpoint>`` for an
+   *  endpoint). Unset → fall through to the connector index. */
+  home?: string | null
   items: MenuItem[]
 }
 

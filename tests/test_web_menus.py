@@ -242,3 +242,70 @@ def test_menu_with_dashboard_leaf(tmp_path) -> None:
         assert [l["target"] for l in leaves] == ["overview"]
         # `connector` is absent on a dashboard leaf (the catalog is flat, no connector segment).
         assert "connector" not in leaves[0]
+        # No ``home`` set on this app → no ``home_path`` on the wire.
+        assert "home_path" not in tree
+
+
+def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
+    """``AppMenu.home`` (a menu item id) resolves to a frontend route on the wire — the
+    workspace picker reads ``home_path`` and navigates the operator straight there when they
+    pick an app. A dashboard home → ``/dashboard/<id>``; a query home → ``/sql/<c>/<q>``."""
+    from liberty.config import ChartSettings, DashboardSettings
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(textwrap.dedent(f"""
+        [pools.default]
+        url = "{db_url}"
+
+        [connectors.app1]
+        type = "sql"
+        pool = "default"
+        queries = [{{ name = "users_get", sql = "SELECT 1" }}]
+    """))
+    (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
+        [dashboards.overview]
+        label = "Overview"
+    """))
+    (tmp_path / "menus.toml").write_text(textwrap.dedent("""
+        [menus.app1]
+        label = "App One"
+        home = "dash.overview"
+
+        [[menus.app1.items]]
+        id = "dash"
+        label = "Dashboards"
+
+        [[menus.app1.items]]
+        id = "dash.overview"
+        parent = "dash"
+        label = "Overview"
+        type = "dashboard"
+        target = "overview"
+    """))
+
+    async def go() -> None:
+        pools = PoolRegistry({"default": PoolConfig(url=db_url)})
+        db = AuthDatabase(pools, "default")
+        await db.create_schema()
+        async with db.session() as s:
+            svc = AuthService(s)
+            await svc.get_or_create_role("admin", permissions=["*"])
+            await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
+        await pools.dispose()
+
+    asyncio.run(go())
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
+        menus=MenuSettings(config_path=Path(tmp_path / "menus.toml")),
+        charts=ChartSettings(config_path=Path(tmp_path / "_no_charts.toml")),
+        dashboards=DashboardSettings(config_path=Path(tmp_path / "dashboards.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        tree = client.get("/api/menus/app1", headers=_h(client, "admin")).json()
+        # The dashboard's ``home`` resolves to a frontend ``/dashboard/<id>`` route.
+        assert tree["home_path"] == "/dashboard/overview"
+        # Pointing ``home`` at a missing item id fails parse — covered separately by the
+        # ``AppMenu._check`` validator (raises ValueError on load_menus / parse_menus).

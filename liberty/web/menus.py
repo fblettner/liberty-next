@@ -57,13 +57,44 @@ def _keeper(principal: Principal, dashboards: DashboardsFile):
     return keep
 
 
+def _home_path(app: str, app_menu: AppMenu, *, keep) -> str | None:
+    """Resolve ``AppMenu.home`` (a menu item id) to a frontend route — ``/dashboard/<id>`` for
+    ``type = 'dashboard'``, ``/sql/<connector>/<target>`` for queries, ``/http/<c>/<t>`` for
+    endpoints. ``None`` when no home is set, the target isn't a leaf (e.g. operator pointed it
+    at a folder), or the caller can't see the target (in which case the workspace picker just
+    falls through to the default landing — never leaks the home pointer to non-permitted users)."""
+    if not app_menu.home:
+        return None
+    target = next((it for it in app_menu.items if it.id == app_menu.home), None)
+    if target is None or not target.type or not target.target:
+        return None
+    # Resolve the effective connector exactly like ``build_menu_tree`` does (item.connector
+    # else the app name) so the permission predicate ``keep(target, connector)`` runs against
+    # the right scope. Dashboards have no connector — ``keep`` checks their existence instead.
+    effective_connector = target.connector or app
+    if not keep(target, effective_connector):
+        return None
+    if target.type == "dashboard":
+        return f"/dashboard/{target.target}"
+    prefix = "sql" if target.type == "query" else "http"
+    return f"/{prefix}/{effective_connector}/{target.target}"
+
+
 def _app_tree(
     app: str, app_menu: AppMenu, *, language: str | None, principal: Principal, dashboards: DashboardsFile,
 ) -> dict[str, Any] | None:
-    items = build_menu_tree(app_menu, app=app, language=language, keep=_keeper(principal, dashboards))
+    keep = _keeper(principal, dashboards)
+    items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items:
         return None  # nothing the caller can see → no menu for this app
-    return {"app": app, "label": app_menu.label or app, "items": items}
+    out: dict[str, Any] = {"app": app, "label": app_menu.label or app, "items": items}
+    # Only emit ``home_path`` when set AND the caller can reach it — non-permitted users see
+    # the menu without the home pointer (and the workspace picker falls back to the default
+    # landing). Keeps the wire payload terse for the common no-home case.
+    home_path = _home_path(app, app_menu, keep=keep)
+    if home_path:
+        out["home_path"] = home_path
+    return out
 
 
 @router.get("/menus")

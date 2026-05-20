@@ -18,7 +18,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
@@ -89,6 +89,7 @@ function writeApp(name: string | null): void {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
   const [screens, setScreens] = useState<Record<string, ScreenListItem[]> | null>(null)
@@ -168,7 +169,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)
     writeApp(name)
-  }, [])
+    // When the operator explicitly picks an app (the workspace picker → this callback) and
+    // that app has a configured ``home_path``, navigate straight there. Cancel the redirect
+    // when ``name == null`` (the "all apps" reset) — the operator stays on whatever page
+    // they were on. The pickup-from-URL path (the CONNECTOR_ROUTE effect above) DOESN'T
+    // call this, so deep-linking to /sql/nomasx1/x doesn't yank the page to /dashboard/…
+    // — the implicit-follow stays on the URL the operator opened.
+    if (name && menus && menus[name]?.home_path) {
+      navigate(menus[name].home_path!)
+    }
+  }, [menus, navigate])
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
