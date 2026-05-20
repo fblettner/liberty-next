@@ -406,16 +406,22 @@ def _diff_columns(
 ) -> None:
     """v1 column hints (``ly_tbl_col`` / ``ly_dlg_col``) → v2 ``Screen.columns`` entries.
 
-    The check is *count-based* rather than per-column-name (v1 → v2 column names go through
-    slugify and a few normalisations; matching by name would produce false positives). For
-    each v1 query that has at least one column hint, find the matching v2 screen (any screen
-    whose ``read_query`` matches the v2 query name); compare ``len(v1_cols)`` to
-    ``len(screen.columns)``. A v1 query with hints but no matching v2 screen is a missing
-    screen, surfaced under the screens check; we just note the column count divergence here
-    when the screen DOES exist.
+    Count-based rather than name-based (v1 → v2 column names go through slugify and a few
+    normalisations; matching by name would produce false positives). For each v1 query with
+    hints, find the matching v2 screen and compare counts.
 
-    Mismatches with a delta of 1-2 are usually fine (v1 had a placeholder column with empty
-    target, which the migrator drops); larger gaps indicate the migration is stale."""
+    **Tricky bit** — v1 had *two* column tables per query: ``ly_tbl_col`` (grid columns) and
+    ``ly_dlg_col`` (dialog fields). They usually carry the *same* column set but different
+    presentations (the grid hides some columns the dialog shows, and vice versa). v2's
+    ``Screen.columns`` is the unified source — so we compare against the **larger** of the
+    two v1 counts, not the sum. Summing was the bug that made every screen look 2× too small
+    (a 56-column F0092 reported as 112 because tbl+dlg both contributed). Also: a single
+    query_id can have multiple ``ly_dlg_col`` rows per frm_id (one dialog can carry several
+    forms), so dedupe by (query_id, col_target) within each source table — same column
+    appearing on two forms still counts once.
+
+    Mismatches with a delta of 1–2 are usually fine (v1 had a placeholder column with empty
+    target which the migrator drops); larger gaps indicate the migration is stale."""
     # Build the v2 query → screen index.
     by_read_query: dict[tuple[str | None, str], Any] = {}
     for app, screens in (screens_file.screens or {}).items():
@@ -424,16 +430,27 @@ def _diff_columns(
             by_read_query[key] = (app, sid, screen)
 
     labels = {int(q["query_id"]): (q.get("query_label") or "") for q in queries}
-    # v1 column rows by query_id.
+
+    # Per-source-table dedupe by (query_id, col_target) so the same column referenced from
+    # several frm_ids only counts once. Then per query, the larger of the two counts is the
+    # number of distinct columns v2's Screen.columns should mirror.
+    def _count_distinct(rows: Iterable[Mapping[str, Any]]) -> dict[int, int]:
+        per_qid: dict[int, set[str]] = {}
+        for r in rows:
+            qid = r.get("query_id")
+            if qid is None:
+                continue
+            target = (r.get("col_target") or "").strip()
+            if not target:
+                continue
+            per_qid.setdefault(int(qid), set()).add(target.upper())
+        return {qid: len(targets) for qid, targets in per_qid.items()}
+
+    tbl_counts = _count_distinct(tbl_col_rows)
+    dlg_counts = _count_distinct(dlg_col_rows)
     v1_cols: dict[int, int] = {}
-    for r in list(tbl_col_rows) + list(dlg_col_rows):
-        qid = r.get("query_id")
-        if qid is None:
-            continue
-        target = (r.get("col_target") or "").strip()
-        if not target:
-            continue                                          # placeholder rows the migrator drops
-        v1_cols[int(qid)] = v1_cols.get(int(qid), 0) + 1
+    for qid in set(tbl_counts) | set(dlg_counts):
+        v1_cols[qid] = max(tbl_counts.get(qid, 0), dlg_counts.get(qid, 0))
 
     # Resolve each v1 query to its v2 (connector, name) and screen.
     for r in sql_rows:
@@ -453,26 +470,31 @@ def _diff_columns(
         app, sid, screen = screen_match
         v2_count = len(screen.columns)
         v1_count = v1_cols[qid]
+        details = {
+            "app": app, "screen": sid, "v1_count": v1_count, "v2_count": v2_count,
+            "v1_tbl_count": tbl_counts.get(qid, 0),
+            "v1_dlg_count": dlg_counts.get(qid, 0),
+        }
         if v2_count == 0 and v1_count > 0:
             report.add(DiffEntry(
                 kind="screen_columns", severity="missing",
                 entity_id=f"{app}/{sid}",
                 message=f"screen {app}/{sid} has no Screen.columns but v1 query #{qid} has {v1_count} column hint(s)",
-                details={"app": app, "screen": sid, "v1_count": v1_count, "v2_count": v2_count},
+                details=details,
             ))
         elif abs(v2_count - v1_count) > 2:
             report.add(DiffEntry(
                 kind="screen_columns", severity="mismatched",
                 entity_id=f"{app}/{sid}",
-                message=f"screen {app}/{sid} has {v2_count} columns but v1 query #{qid} has {v1_count}",
-                details={"app": app, "screen": sid, "v1_count": v1_count, "v2_count": v2_count},
+                message=f"screen {app}/{sid} has {v2_count} columns but v1 query #{qid} has {v1_count} (tbl={tbl_counts.get(qid, 0)}, dlg={dlg_counts.get(qid, 0)})",
+                details=details,
             ))
         elif include_ok:
             report.add(DiffEntry(
                 kind="screen_columns", severity="ok",
                 entity_id=f"{app}/{sid}",
                 message=f"screen {app}/{sid} columns: v1={v1_count} v2={v2_count}",
-                details={"app": app, "screen": sid, "v1_count": v1_count, "v2_count": v2_count},
+                details=details,
             ))
 
 
