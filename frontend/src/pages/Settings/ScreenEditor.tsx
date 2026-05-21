@@ -28,7 +28,9 @@ import { EditQueryModal } from './EditQueryModal'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
 import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
+import ExportEditor from './ExportEditor'
 import type { ActionPath } from './actionPath'
+import type { Column } from '../../types/connectors'
 
 type Row = Record<string, unknown>
 
@@ -435,14 +437,13 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   // Workbook export — Phase 9. ``Screen.export = WorkbookExport`` configures multi-file /
   // multi-sheet xlsx generation. The TableView shows an "Export workbooks" button once this
   // is set; clicking it fires ``POST /api/screens/{app}/{id}/export`` which streams the
-  // file(s). Editor uses SchemaForm against the WorkbookExport $def — split_by + sheets
-  // (list of SheetSpec drill-ins) + file_name_template + archive_name. The Create / Delete
-  // affordances mirror the dialog tab's pattern (empty state shows a Create button; once
-  // configured, a Delete button at the top wipes the whole thing).
-  const exportSchema = useMemo<JsonSchema | null>(() => {
-    const def = defs?.WorkbookExport
-    return def ? { ...def, $defs: defs } : null
-  }, [defs])
+  // file(s).
+  //
+  // Dedicated ExportEditor (since generic SchemaForm couldn't surface connector / query
+  // dropdowns or the placeholder helpers): split_by reads from the screen's resolved columns,
+  // each sheet's connector + query are SearchSelects over the workspace's connectors, and
+  // every template field has a click-to-insert placeholder chip strip ({{screen}},
+  // {{split_value}}, {{sheet_value}} where applicable).
   const exportValue = (value as Row).export as Row | undefined
   const setExport = (next: Row | null) => setProp('export', next)
   const createExport = () => setExport({ sheets: [] })
@@ -457,9 +458,6 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     setExport(null)
   }
   const renderExport = (): ReactNode => {
-    if (!exportSchema) {
-      return <Empty>{t('settings.screens.export.schemaUnavailable', 'Export schema unavailable — check /admin/config/schema.')}</Empty>
-    }
     if (!exportValue) {
       return (
         <Stack gap={14}>
@@ -476,6 +474,8 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         </Stack>
       )
     }
+    const readQueryName = (typeof value.read_query === 'string' ? value.read_query : '') || ''
+    const screenColumns = Array.isArray(value.columns) ? (value.columns as Column[]) : undefined
     return (
       <Stack gap={14}>
         <Row gap={8} style={{ justifyContent: 'flex-end' }}>
@@ -483,13 +483,13 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
             <Trash2 size={13} /> {t('settings.screens.export.delete', 'Delete export config')}
           </Button>
         </Row>
-        <Sub>{t('settings.screens.export.editHint',
-          '``split_by`` names a column on the screen\'s read query. Each sheet\'s ParamBinds bind ``source = "split_value"`` to receive the current group key.')}</Sub>
-        <SchemaForm
-          schema={exportSchema}
-          defs={defs ?? {}}
+        <ExportEditor
           value={exportValue}
-          onChange={(v) => setExport(v as Row)}
+          onChange={(next) => setExport(next)}
+          effectiveConnector={effectiveConnector}
+          readQuery={readQueryName}
+          columns={screenColumns}
+          defs={defs}
         />
       </Stack>
     )
