@@ -119,6 +119,7 @@ const en = {
     grouped: 'grouped',
     export: 'Export',
     rowsPerPage: 'Rows per page',
+    showAll: 'All',
     maxRows: 'Max rows',
     maxRowsHint: 'default',
     showing: 'Showing {{from}}–{{to}} of {{total}}',

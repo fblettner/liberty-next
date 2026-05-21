@@ -14,6 +14,7 @@
     "@emotion/styled": "^11.14.0",
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-table": "^8.21.0",
+    "@tanstack/react-virtual": "^3.13.25",
     "i18next": "^24.2.0",
     "lucide-react": "^0.513.0",
     "monaco-editor": "^0.52.0",

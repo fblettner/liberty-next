@@ -473,8 +473,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   `loader.config({ monaco })`; it's `import`-ed (side-effect) from the Settings page so it
   rides in that lazy chunk. So the app works offline (the only remaining CDN dep is the DM
   Sans webfont, which just falls back to system fonts). Still TODO toward full nomaubl parity:
-  a self-service change-password flow (needs a backend endpoint), `@tanstack/react-virtual`
-  for huge result grids, Vitest/RTL frontend tests, frontend build in CI. Reference app:
+  a self-service change-password flow (needs a backend endpoint), Vitest/RTL frontend tests,
+  frontend build in CI. (`@tanstack/react-virtual` is wired — see the *Big-grid scaling*
+  section below.) Reference app:
   `../../JavaProjects/nomaubl/src/web-react/`.
 
 **Phase 5 (Migration tools) — IN PROGRESS.** `liberty/migrations/` + the
@@ -1671,18 +1672,40 @@ data carry-over is per-customer (handled manually). → **Phase 9** notification
 / backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs &
 scheduling).
 
-**Big-grid scaling (deferred, no phase yet — track when a screen actually needs it):** the
-TableView today loads up to `max_rows` rows into the browser (default 1000) and TanStack does
-*every* filter / sort / search / group / paginate in-memory over that array. That stays
-responsive into the ~10K row range; a screen that genuinely needs more wants two things together:
-**(a) `@tanstack/react-virtual` on the grid** so the DOM only mounts the visible rows (already
-on the standing "still TODO toward full nomaubl parity" list in the Phase-4 frontend block), and
-**(b) cursor-based server pagination** on the SQL connector — a new request shape that takes a
-`{cursor, limit}` and returns `{rows, next_cursor}`, with the frontend feeding the cursor when
-the virtualizer scrolls past a high-water mark. v2's `FilterPanel` already does the
-"pre-narrow on the server" half of this story (the v1 `col_filter` columns); the missing
-half is just the pagination cursor. Both pieces are independent of every form-engine phase
-above — pull this in whenever a real screen hits the wall, not before.
+**Big-grid scaling — slice 1 (row virtualization) DONE.** `frontend/src/common/DataTable.tsx`
+now wraps the tbody with `@tanstack/react-virtual`'s `useVirtualizer`. Only the visible rows
+plus a small overscan window (`overscan: 10`) mount to the DOM; off-screen rows are replaced
+by top + bottom spacer `<tr>`s that hold the scroll extent. Row heights start from a 26px
+estimate and re-measure via the default `measureElement` callback (each row carries
+`data-index` + `ref={rowVirtualizer.measureElement}`) so a group row, an edit-mode row with
+taller cell content, or a wrapped cell doesn't drift the spacer math. Always-on — no
+behavioural cliff between small and large grids; the same code path renders 25 rows or 100K.
+
+`<table>` semantics stay intact (no div-grid switch); the existing `table-layout: auto`
+keeps content-fit column sizing, and every existing feature (multi-sort, grouping,
+hide/reorder, filter row, hover states, edit-mode row classes, group toggles, CSV/Excel
+export, row click + right-click) keeps working unchanged — virtualization only changes which
+rows are *mounted*, not how a mounted row renders. The column-width-jitter risk that exists
+in principle (different visible rows = different natural widths) hasn't shown up at the
+content widths v2's screens have; revisit if it does.
+
+The `PageSizeSelect` gained a sentinel **"All"** option (`Number.MAX_SAFE_INTEGER`) — picks
+"no pagination, show every loaded row in one scrollable list", which is the natural shape
+once virtualization is in place. The 500 / 1000 in-between options ride alongside. The
+"Showing X–Y of Z" line + the pagination chrome handle the sentinel correctly (overflow
+clamped to the row count). Operators with a screen whose pool sets `max_rows = 100000` now
+pick "All" and get a smooth single-scroll experience.
+
+Slice 2 — **cursor-based server pagination** — still deferred. The frontend now uses
+virtualization to keep the DOM small no matter the row count, but the *initial load* still
+ships every row in one JSON payload. For screens past ~100K rows where the JSON parse +
+TanStack's in-memory filter/sort starts hurting, the next step is a new request shape
+(`?_cursor=…&_limit=N` → `{rows, next_cursor}`) per-screen opt-in. The screen's
+`key_columns` (already collected per Phase 3) become the cursor's stable ORDER BY
+tiebreaker; the FilterPanel's `filter`-flagged columns already pre-narrow server-side, so
+the cursor only needs to thread through that wrapping. Sort + in-grid TanStack filters would
+either move server-side or get an "applies only to loaded pages" semantic. Pull this in
+whenever a real screen needs >100K rows in a single shot, not before.
 
 ## Run it
 

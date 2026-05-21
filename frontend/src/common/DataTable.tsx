@@ -6,6 +6,17 @@
 // menu (columns aren't user-resizable — `table-layout: auto` lets the browser content-size them);
 // CSV / Excel export; page-size + page navigation; and localStorage persistence of column
 // visibility + order keyed by `tableId`. Theme-driven throughout.
+//
+// **Row virtualization (always-on)** — via `@tanstack/react-virtual` against the scroll
+// container (TableScroll). Only the visible rows + a small overscan window are mounted to the
+// DOM; off-screen rows are replaced by top + bottom spacer ``<tr>``s that hold the scroll
+// extent. Row heights are auto-measured (`measureElement`) so an edit-mode row that grows
+// taller or a group header doesn't break the layout. Columns stay browser-sized
+// (``table-layout: auto``) — there's some practical column jitter on extreme scrolls when the
+// visible window's content widths shift, accepted as the price of always-on virtualization
+// (the alternative is locking widths via colgroup which makes drag-reorder + content-fit
+// worse). Threshold = always — there's no behavioural cliff between small and large grids;
+// virtualization has no cost when there are only 25 rows on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
@@ -25,6 +36,7 @@ import {
   type SortingState,
   type VisibilityState,
 } from '@tanstack/react-table'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
@@ -34,7 +46,11 @@ import {
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
 
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
+// "All" (Number.MAX_SAFE_INTEGER) renders every loaded row in one virtualised page — the
+// pagination chrome collapses into a single page. Useful for screens with high ``max_rows``
+// where the operator wants to scroll through the whole result without paging.
+const PAGE_SIZE_ALL = Number.MAX_SAFE_INTEGER
+const PAGE_SIZE_OPTIONS: number[] = [25, 50, 100, 200, 500, 1000, PAGE_SIZE_ALL]
 
 export interface DataTableProps<T extends object> {
   columns: ColumnDef<T, unknown>[]
@@ -367,6 +383,41 @@ export function DataTable<T extends object>({
     )
     return { headers, rows }
   }
+  // ── row virtualizer ───────────────────────────────────────────────────────────────────
+  // Mount only the rows that fit (plus a small overscan window) into the DOM. The scroll
+  // container is `TableScroll`; the virtualizer takes the **post-pagination** row list (so
+  // TanStack's existing per-page slicing still scopes what's reachable). When the user picks
+  // page size = "All", the row list is the full filtered/grouped set — virtualization is the
+  // *only* thing keeping the DOM small at that scale.
+  //
+  // Row heights: we estimate ~26px from the existing typography (5px top/bottom padding +
+  // 11px monospace line-height + small fudge). Each row gets a `data-index` and uses
+  // `measureElement` so group rows / edit-mode rows / dialog-changed rows that grow a few
+  // pixels taller get measured for real — no need to hardcode multiple sizes per kind.
+  const tableScrollRef = useRef<HTMLDivElement | null>(null)
+  const visibleRows = table.getRowModel().rows
+  const rowVirtualizer = useVirtualizer({
+    count: visibleRows.length,
+    getScrollElement: () => tableScrollRef.current,
+    estimateSize: () => 26,
+    overscan: 10,
+    // The default `measureElement` reads each row's true height via getBoundingClientRect +
+    // correlates by `data-index`. We pass `ref={rowVirtualizer.measureElement}` on each row
+    // (below) so a group row, edit-mode row, or wrapped cell that's taller than the estimate
+    // gets re-measured automatically — no need to override the function here.
+  })
+  const virtualItems = rowVirtualizer.getVirtualItems()
+  // Spacer math: top spacer pushes content down to the first visible row's `start`; bottom
+  // spacer fills the gap between the last visible row's `end` and the total height. Both
+  // empty rows are styled with the right height; cell content is intentionally empty (a
+  // single `<td colSpan>` keeps the `<tr>` shape valid without rendering anything).
+  const totalSize = rowVirtualizer.getTotalSize()
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0
+  const paddingBottom = virtualItems.length > 0 ? totalSize - virtualItems[virtualItems.length - 1].end : 0
+  // The thead carries 1 sticky row (headers) + optionally 1 sticky row (column filters). The
+  // virtualizer's body is everything below that. `colCount` is what each spacer row needs
+  // to span — equal to the visible column count.
+
   const exportCsv = () => {
     const { headers, rows } = exportRows()
     const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
@@ -391,8 +442,11 @@ export function DataTable<T extends object>({
   const totalRows = table.getRowModel().rows.length // post-filter, post-group flat-ish count for display
   const filteredLeafCount = table.getFilteredRowModel().rows.length
   const totalPages = Math.max(1, table.getPageCount())
-  const from = totalRows === 0 ? 0 : pageIndex * pageSize + 1
-  const to = Math.min((pageIndex + 1) * pageSize, totalRows)
+  // ``PAGE_SIZE_ALL`` makes `pageIndex * pageSize` overflow into Infinity; clamp to the row
+  // count so the "Showing X-Y of Z" line stays sensible at the All setting.
+  const showAll = pageSize === PAGE_SIZE_ALL
+  const from = totalRows === 0 ? 0 : (showAll ? 1 : pageIndex * pageSize + 1)
+  const to = showAll ? totalRows : Math.min((pageIndex + 1) * pageSize, totalRows)
   const visibleColCount = table.getVisibleLeafColumns().length
   const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
 
@@ -488,7 +542,7 @@ export function DataTable<T extends object>({
         </ActionGroup>
       </ToolbarRow>
 
-      <TableScroll>
+      <TableScroll ref={tableScrollRef}>
         {/* Stretch-when-narrow, scroll-when-wide. ``minWidth`` = sum of natural column widths
             keeps each column at least content-fit, but the styled ``width: 100%`` lets the
             table fill the scroll container when the total is *less* than the viewport — no
@@ -564,64 +618,88 @@ export function DataTable<T extends object>({
             )}
           </thead>
           <tbody>
-            {table.getRowModel().rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <tr><td colSpan={visibleColCount}><Empty>{t('table.noResults')}</Empty></td></tr>
             ) : (
-              table.getRowModel().rows.map((row) => {
-                const RowEl = row.getIsGrouped() ? GroupTr : Tr
-                const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
-                // Whole-row click → onRowClick. Bail if the click landed on an interactive child
-                // (input/button/a/select/textarea — the edit-mode cells, copy buttons, group toggles,
-                // etc.) so those keep working without firing the screen dialog underneath. Group
-                // rows never trigger — they're a grouping affordance, not a real record.
-                const clickable = !row.getIsGrouped() && onRowClick != null
-                const onClick = clickable
-                  ? (e: React.MouseEvent<HTMLTableRowElement>) => {
-                      if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
-                      onRowClick!(row.original)
-                    }
-                  : undefined
-                // Right-click on a (non-grouped) row → onRowContextMenu(row, event). We
-                // preventDefault so the browser's native menu doesn't fight the consumer's
-                // overlay; the consumer is expected to read `event.clientX`/`clientY` to
-                // position the menu. Headers + pagination keep their native menu (we don't
-                // attach this on <th> or the toolbar).
-                const contextable = !row.getIsGrouped() && onRowContextMenu != null
-                const onContextMenu = contextable
-                  ? (e: React.MouseEvent<HTMLTableRowElement>) => {
-                      e.preventDefault()
-                      onRowContextMenu!(row.original, e)
-                    }
-                  : undefined
-                return (
-                  <RowEl
-                    key={row.id} className={cls}
-                    onClick={onClick} onContextMenu={onContextMenu}
-                    style={clickable ? { cursor: 'pointer' } : undefined}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <Td
-                        key={cell.id}
-                        style={{
-                          ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
-                          paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
-                          textAlign: colAlign(cell.column),
-                        }}
-                      >
-                        {cell.getIsGrouped() ? (
-                          <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
-                            {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            <GroupCount>({row.subRows.length})</GroupCount>
-                          </GroupCellBtn>
-                        ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
-                          flexRender(cell.column.columnDef.cell, cell.getContext())
-                        )}
+              <>
+                {/* Top spacer — pushes the first visible row down to its virtual `start`
+                    offset. Empty `<td colSpan>` keeps the row a valid `<tr>` without
+                    contributing to column auto-sizing (no inline content to measure). */}
+                {paddingTop > 0 && (
+                  <tr aria-hidden="true" style={{ height: paddingTop }}>
+                    <td colSpan={visibleColCount} />
+                  </tr>
+                )}
+                {virtualItems.map((virtualItem) => {
+                  const row = visibleRows[virtualItem.index]
+                  const RowEl = row.getIsGrouped() ? GroupTr : Tr
+                  const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
+                  // Whole-row click → onRowClick. Bail if the click landed on an interactive child
+                  // (input/button/a/select/textarea — the edit-mode cells, copy buttons, group toggles,
+                  // etc.) so those keep working without firing the screen dialog underneath. Group
+                  // rows never trigger — they're a grouping affordance, not a real record.
+                  const clickable = !row.getIsGrouped() && onRowClick != null
+                  const onClick = clickable
+                    ? (e: React.MouseEvent<HTMLTableRowElement>) => {
+                        if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
+                        onRowClick!(row.original)
+                      }
+                    : undefined
+                  // Right-click on a (non-grouped) row → onRowContextMenu(row, event). We
+                  // preventDefault so the browser's native menu doesn't fight the consumer's
+                  // overlay; the consumer is expected to read `event.clientX`/`clientY` to
+                  // position the menu. Headers + pagination keep their native menu (we don't
+                  // attach this on <th> or the toolbar).
+                  const contextable = !row.getIsGrouped() && onRowContextMenu != null
+                  const onContextMenu = contextable
+                    ? (e: React.MouseEvent<HTMLTableRowElement>) => {
+                        e.preventDefault()
+                        onRowContextMenu!(row.original, e)
+                      }
+                    : undefined
+                  return (
+                    <RowEl
+                      // `data-index` + `ref={rowVirtualizer.measureElement}` let the virtualizer
+                      // measure each row's real height after layout — so a group row, an
+                      // edit-mode row with taller cell content, or a dialog-changed row that
+                      // wraps don't drift the spacer math.
+                      key={row.id} className={cls}
+                      data-index={virtualItem.index}
+                      ref={rowVirtualizer.measureElement}
+                      onClick={onClick} onContextMenu={onContextMenu}
+                      style={clickable ? { cursor: 'pointer' } : undefined}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <Td
+                          key={cell.id}
+                          style={{
+                            ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
+                            paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
+                            textAlign: colAlign(cell.column),
+                          }}
+                        >
+                          {cell.getIsGrouped() ? (
+                            <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
+                              {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              <GroupCount>({row.subRows.length})</GroupCount>
+                            </GroupCellBtn>
+                          ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
+                            flexRender(cell.column.columnDef.cell, cell.getContext())
+                          )}
                       </Td>
                     ))}
                   </RowEl>
-                )
-              })
+                  )
+                })}
+                {/* Bottom spacer — fills the gap between the last visible row's `end` and the
+                    virtualizer's total scrollable height. Same shape as the top spacer. */}
+                {paddingBottom > 0 && (
+                  <tr aria-hidden="true" style={{ height: paddingBottom }}>
+                    <td colSpan={visibleColCount} />
+                  </tr>
+                )}
+              </>
             )}
           </tbody>
         </Table>
@@ -631,7 +709,12 @@ export function DataTable<T extends object>({
         <PagLeft>
           <span>{t('table.rowsPerPage')}</span>
           <PageSizeSelect value={pageSize} onChange={(e) => { table.setPageSize(+e.target.value); table.setPageIndex(0) }}>
-            {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              // ``PAGE_SIZE_ALL`` is the sentinel for "no pagination — show every loaded row".
+              // The virtualizer keeps the DOM small even at this size; the operator gets a
+              // single scrollable list instead of paging through 50-row chunks.
+              <option key={n} value={n}>{n === PAGE_SIZE_ALL ? t('table.showAll', 'All') : n}</option>
+            ))}
           </PageSizeSelect>
           <span>
             {t('table.showing', { from, to, total: totalRows })}

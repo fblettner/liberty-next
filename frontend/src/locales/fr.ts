@@ -121,6 +121,7 @@ const fr: Resources = {
     grouped: 'groupé',
     export: 'Exporter',
     rowsPerPage: 'Lignes par page',
+    showAll: 'Tout',
     maxRows: 'Lignes max',
     maxRowsHint: 'défaut',
     showing: 'Affichage {{from}}–{{to}} sur {{total}}',
