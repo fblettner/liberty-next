@@ -330,11 +330,19 @@ export interface ScreenListItem {
  *  dialog body + the toolbar (`actions`) and right-click (`row_menu`) action lists. Each
  *  carries the slice-4 `Action` discriminated union. The runtime fires `row_menu` items on
  *  right-click on a TableView row (slice 6); `actions` (toolbar) wires up in a later slice. */
-/** One sheet inside a workbook export — runs a query, writes its rows to a tab. */
+/** One sheet inside a workbook export — runs a query, writes its rows to a tab.
+ *
+ *  Two layout modes, controlled by ``split_by``:
+ *   - Blank → one worksheet, name = ``name`` (with ``{{split_value}}`` substituted to the
+ *     workbook's group key).
+ *   - Set → the query's rows are partitioned by that column into N worksheets (one per
+ *     distinct value, first-seen order). ``name`` may reference ``{{sheet_value}}`` for the
+ *     partition value. v2's port of v1's ``tbl_sheet``. */
 export interface SheetSpec {
   name: string
   connector?: string | null
   query: string
+  split_by?: string | null
   param_binds?: ParamBind[]
 }
 

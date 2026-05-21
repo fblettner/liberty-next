@@ -1403,12 +1403,18 @@ each pulling from its own query (filtered by the split value). NOMASX1's referen
 of all LDAP users in that group. v2's port lives on the ``Screen``:
 
 - `liberty/screens/config.py` — new shapes alongside ``ScreenDialog``:
-  - ``SheetSpec`` (``{name, connector?, query, param_binds[]}``) — one sheet inside a workbook.
-    ``name`` supports ``{{split_value}}`` interpolation so each split's sheet can be named
-    after the value. ``connector`` is optional (defaults to the screen's effective connector).
+  - ``SheetSpec`` (``{name, connector?, query, split_by?, param_binds[]}``) — one sheet inside
+    a workbook. ``name`` supports ``{{split_value}}`` (the workbook's group key) and
+    ``{{sheet_value}}`` (the sheet partition value, only when ``split_by`` is set)
+    interpolation. ``connector`` is optional (defaults to the screen's effective connector).
     ``param_binds`` is the same :class:`ParamBind` shape used for lookups / actions / row
-    menus; ``source = "split_value"`` resolves to the current split value (the rest of the
-    sources read from the running export ctx — currently just ``split_value``).
+    menus; ``source = "split_value"`` resolves to the current workbook's split value (the
+    rest of the sources read from the running export ctx). ``split_by`` (optional) names a
+    *result column* of the sheet's own query — when set, the query's rows are partitioned
+    in-memory by that column into one worksheet per distinct value (single DB roundtrip,
+    first-seen order). v2's port of v1's ``tbl_sheet`` — together with the workbook-level
+    ``split_by`` this covers the full v1 ``ldap_apps_get`` layout (file per department
+    group + sheet per app within each file + an optional flat "all users" sheet alongside).
   - ``WorkbookExport`` (``{split_by?, sheets[], file_name_template?, archive_name?}``):
     ``split_by`` names a *result column* from the screen's ``read_query`` whose distinct
     values drive the burst (omit → one workbook). ``sheets`` is a non-empty list of
@@ -1440,11 +1446,14 @@ of all LDAP users in that group. v2's port lives on the ``Screen``:
   the other ``$def``\\ s, so the editor renders for free.
 - `frontend/src/types/screens.ts` — ``SheetSpec`` / ``WorkbookExport`` / ``ScreenDetail.export``.
 - `pyproject.toml` — adds ``openpyxl>=3.1`` (workbook export).
-- `tests/test_web_export.py` — six end-to-end tests using a SQLite fixture: single-workbook
+- `tests/test_web_export.py` — eight end-to-end tests using a SQLite fixture: single-workbook
   mode produces a raw .xlsx with the configured sheet, multi-workbook mode bursts into a
   .zip with one .xlsx per group (each carrying both sheets filtered by ``:GROUP`` via
-  ``ParamBind`` ``source = "split_value"``), auth gate 404s a user lacking perm for any
-  sheet's query, unknown screen returns 404. 521 backend tests pass.
+  ``ParamBind`` ``source = "split_value"``), the v1 ``ldap_apps_get`` layout (file split +
+  sheet split + flat "all users" sheet alongside the fan-out) round-trips with correct
+  worksheet names from ``{{sheet_value}}``, single-xlsx + sheet-level split produces several
+  worksheets in one file, auth gate 404s a user lacking perm for any sheet's query, unknown
+  screen returns 404. 523 backend tests pass.
 
 **Phase 7 (Config builders) — mostly DONE.** The Settings page (`liberty/web/admin.py` + the
 `/admin/config/<section>/parsed` endpoints + `frontend/src/pages/Settings/*Builder.tsx`) is the
@@ -1654,7 +1663,7 @@ none).
   `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
   framework restores the dashboard via the home redirect even when the menu leaf is missing.
 
-521 backend tests pass.
+523 backend tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** **Phase 5** is effectively complete from a
 framework standpoint — the NOMAJDE cutover is operator work, and the historic AUD_<table>

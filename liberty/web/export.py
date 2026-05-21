@@ -136,8 +136,6 @@ async def _build_one_workbook(
     ctx: dict[str, Any] = {"split_value": split_value, "screen": screen.id, "app": app}
     taken_sheet_names: set[str] = set()
     for sheet in spec.sheets:
-        sheet_name = _safe_sheet_name(_substitute(sheet.name, ctx) or sheet.query, taken_sheet_names)
-        ws = wb.create_sheet(title=sheet_name)
         conn_name = sheet.connector or screen.connector or app
         try:
             conn = connectors.sql(conn_name)
@@ -151,16 +149,59 @@ async def _build_one_workbook(
         except ConnectorError as exc:
             raise http_for_connector_error(exc) from exc
 
-        # Header row first — the resolved column labels (operator's display titles) when
-        # available, falling back to the raw discovered name otherwise. Same convention
-        # the frontend's TableView CSV/XLSX export uses.
+        # Header row + body shared by every worksheet emitted from this query. ``result.rows``
+        # is keyed by the discovered (cursor.description) name; pull values by that order so
+        # the header line and data lines stay column-aligned. Labels use the dictionary's
+        # resolved display titles when present, same convention as TableView's CSV/XLSX export.
         col_names = [c.name for c in result.columns]
         col_labels = [c.label or c.name for c in result.columns]
-        ws.append(col_labels)
-        # Then every row. ``result.rows`` is keyed by the discovered name; we pull by that
-        # order so the header line + data lines stay column-aligned.
-        for row in result.rows:
-            ws.append([_cell_value(row.get(n)) for n in col_names])
+
+        if sheet.split_by:
+            # **Fan-out**: partition this query's rows by ``split_by`` into N worksheets.
+            # Case-insensitive column match (Postgres folds unquoted identifiers; the operator
+            # may type the column in any case). One DB roundtrip per ``SheetSpec`` either way
+            # — the partition is purely in-memory.
+            target = sheet.split_by.upper()
+            name_map = {n.upper(): n for n in col_names}
+            real_name = name_map.get(target)
+            if real_name is None:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"sheet split_by column {sheet.split_by!r} not in query "
+                        f"{sheet.query!r}'s result columns"
+                    ),
+                )
+            # Preserve first-seen order so the sheet sequence is deterministic + matches what
+            # the operator sees in the TableView. Empty / None values share a single bucket.
+            buckets: dict[Any, list[dict[str, Any]]] = {}
+            for row in result.rows:
+                rv = row.get(real_name)
+                key = rv if (rv is not None and rv != "") else None
+                buckets.setdefault(key, []).append(row)
+            if not buckets:
+                # No rows at all — emit a single empty worksheet so the operator can see the
+                # sheet exists (no rows but headers). Use ``{{sheet_value}}`` → empty string.
+                buckets = {None: []}
+            for sheet_value, rows in buckets.items():
+                sub_ctx = {**ctx, "sheet_value": sheet_value}
+                sheet_name = _safe_sheet_name(
+                    _substitute(sheet.name, sub_ctx) or sheet.query, taken_sheet_names,
+                )
+                ws = wb.create_sheet(title=sheet_name)
+                ws.append(col_labels)
+                for row in rows:
+                    ws.append([_cell_value(row.get(n)) for n in col_names])
+        else:
+            # **Single sheet** — historical behaviour, kept identical so existing screens.toml
+            # files keep producing the same workbook layout.
+            sheet_name = _safe_sheet_name(
+                _substitute(sheet.name, ctx) or sheet.query, taken_sheet_names,
+            )
+            ws = wb.create_sheet(title=sheet_name)
+            ws.append(col_labels)
+            for row in result.rows:
+                ws.append([_cell_value(row.get(n)) for n in col_names])
 
     buf = io.BytesIO()
     wb.save(buf)

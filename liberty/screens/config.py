@@ -616,15 +616,26 @@ class SheetSpec(BaseModel):
     ``WorkbookExport.split_by``). Operator binds the split value into the sheet's
     ``:placeholder`` params via :class:`ParamBind` — typically ``source = "split_value"``,
     so a single declared param ``:DEP_GROUP`` becomes the running group key. The same
-    ``param_binds`` shape used elsewhere keeps the editor + runtime consistent."""
+    ``param_binds`` shape used elsewhere keeps the editor + runtime consistent.
+
+    Two layout modes, controlled by ``split_by``:
+
+    * **Single sheet** (``split_by`` blank): the query's rows fill one worksheet, name from
+      ``name`` (with ``{{split_value}}`` resolved against the workbook's group key).
+    * **Fan-out** (``split_by = "<column>"``): the query's rows are partitioned in-memory by
+      that column → one worksheet per distinct value. ``name`` may reference
+      ``{{sheet_value}}`` for the partition value. Same single DB roundtrip — the partition
+      is purely client-side. This is v2's port of v1's ``tbl_sheet`` (per-app sheets within
+      a per-group xlsx)."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(
         description=(
-            "Sheet name inside the xlsx. Supports ``{{split_value}}`` substitution. "
-            "Excel truncates names past 31 characters and rejects some special characters; "
-            "the exporter sanitises automatically."
+            "Sheet name inside the xlsx. Supports ``{{split_value}}`` (the workbook's group key) "
+            "and ``{{sheet_value}}`` (the sheet partition value, only when ``split_by`` is set) "
+            "substitution. Excel truncates names past 31 characters and rejects some special "
+            "characters; the exporter sanitises automatically."
         ),
     )
     connector: str | None = Field(
@@ -632,6 +643,14 @@ class SheetSpec(BaseModel):
         description="Connector that hosts the sheet's query. Blank uses the screen's connector.",
     )
     query: str = Field(description="Query that produces the sheet's rows.")
+    split_by: str | None = Field(
+        default=None,
+        description=(
+            "Optional: column on the sheet's query whose distinct values produce one worksheet "
+            "each (v1's ``tbl_sheet``). Blank produces a single worksheet. The query still runs "
+            "once; partitioning is done client-side in declaration / first-seen order."
+        ),
+    )
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description=(
