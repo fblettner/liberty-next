@@ -1395,6 +1395,57 @@ queries:
 
 457 tests pass.
 
+**Phase 6 follow-up (Workbook export — v1's ``tbl_workbook`` / ``tbl_sheet``) — DONE.**
+v1 lets a screen export to xlsx with two layout dimensions: **split** the result by a column
+into one xlsx-per-distinct-value, and within each xlsx **fan out** to several **sheets**
+each pulling from its own query (filtered by the split value). NOMASX1's reference case is
+``ldap_apps_get`` — one .xlsx per department group, each carrying a sheet per app + a sheet
+of all LDAP users in that group. v2's port lives on the ``Screen``:
+
+- `liberty/screens/config.py` — new shapes alongside ``ScreenDialog``:
+  - ``SheetSpec`` (``{name, connector?, query, param_binds[]}``) — one sheet inside a workbook.
+    ``name`` supports ``{{split_value}}`` interpolation so each split's sheet can be named
+    after the value. ``connector`` is optional (defaults to the screen's effective connector).
+    ``param_binds`` is the same :class:`ParamBind` shape used for lookups / actions / row
+    menus; ``source = "split_value"`` resolves to the current split value (the rest of the
+    sources read from the running export ctx — currently just ``split_value``).
+  - ``WorkbookExport`` (``{split_by?, sheets[], file_name_template?, archive_name?}``):
+    ``split_by`` names a *result column* from the screen's ``read_query`` whose distinct
+    values drive the burst (omit → one workbook). ``sheets`` is a non-empty list of
+    ``SheetSpec``. ``file_name_template`` defaults to ``{{screen}}_{{split_value}}.xlsx``
+    when ``split_by`` is set, ``{{screen}}.xlsx`` otherwise; ``archive_name`` defaults to
+    ``{{screen}}.zip`` for the multi-file case.
+  - ``Screen.export: WorkbookExport | None`` — the screen's optional export config.
+- `liberty/web/export.py` — ``POST /api/screens/{app}/{id}/export``. Builds the workbook(s)
+  in-memory with **openpyxl** (already streaming-friendly), one ``Workbook`` per split value,
+  one ``Worksheet`` per ``SheetSpec``. Permission gate: the caller must hold
+  ``sql:{conn}:{read_query}`` (to discover split values) **and** ``sql:{conn}:{sheet.query}``
+  for every sheet — missing any → 404 (existence not leaked, same convention as the
+  ``GET /api/screens`` route). Helpers: ``_safe_sheet_name`` (Excel's 31-char / no
+  ``:\\/?*[]`` rule + ``_2``/``_3`` dedupe), ``_split_values`` (preserves first-seen order,
+  case-insensitive column match against the discovered result), ``_cell_value`` (strips
+  openpyxl's ``ILLEGAL_CHARACTERS_RE`` from strings). Output: a single ``.xlsx`` when there's
+  one workbook (Content-Type ``…spreadsheetml.sheet``), a ``.zip`` of ``.xlsx`` otherwise
+  (Content-Type ``application/zip``). Single-workbook mode also works fine when
+  ``split_by`` is set but the read query returns just one value.
+- `frontend/src/pages/TableView/ResultTable.tsx` — toolbar **Export** button (next to Import)
+  appears when ``screen.export`` is set; fires the endpoint, downloads the blob via a
+  hidden anchor + ``URL.createObjectURL``. Per-button busy state so a slow export doesn't
+  double-fire on impatient clicks.
+- `frontend/src/pages/Settings/ScreenEditor.tsx` — new **Export** tab in the Visual Designer
+  / Screen editor. Empty state shows a "Create export" button; configured state renders
+  ``WorkbookExport`` via SchemaForm (``$def``-driven — sheet picker, split_by free-text,
+  filename templates, per-sheet ParamBind editor) with a Delete-config button. The
+  ``WorkbookExport`` / ``SheetSpec`` shapes ride along on ``GET /admin/config/schema`` like
+  the other ``$def``\\ s, so the editor renders for free.
+- `frontend/src/types/screens.ts` — ``SheetSpec`` / ``WorkbookExport`` / ``ScreenDetail.export``.
+- `pyproject.toml` — adds ``openpyxl>=3.1`` (workbook export).
+- `tests/test_web_export.py` — six end-to-end tests using a SQLite fixture: single-workbook
+  mode produces a raw .xlsx with the configured sheet, multi-workbook mode bursts into a
+  .zip with one .xlsx per group (each carrying both sheets filtered by ``:GROUP`` via
+  ``ParamBind`` ``source = "split_value"``), auth gate 404s a user lacking perm for any
+  sheet's query, unknown screen returns 404. 521 backend tests pass.
+
 **Phase 7 (Config builders) — mostly DONE.** The Settings page (`liberty/web/admin.py` + the
 `/admin/config/<section>/parsed` endpoints + `frontend/src/pages/Settings/*Builder.tsx`) is the
 operator-facing way to edit every config section without touching TOML. Schema-driven through
@@ -1603,7 +1654,7 @@ none).
   `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
   framework restores the dashboard via the home redirect even when the menu leaf is missing.
 
-502 backend tests pass.
+521 backend tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** **Phase 5** is effectively complete from a
 framework standpoint — the NOMAJDE cutover is operator work, and the historic AUD_<table>
@@ -1700,7 +1751,7 @@ liberty/        main.py, config.py, crypto.py, cli.py, admin_cli.py, migrate_cli
                 · auth/{authstore,password,tokens,principal,oidc,dependencies,routes, models,db,service}.py
                   (authstore = the TOML/DB backend abstraction + config/auth.toml schema; models/db/service = the DB backend's internals)
                 · ai/{tools,connector_tools,assistant,routes}.py
-                · web/{deps,errors,connectors,menus,screens,license,admin}.py
+                · web/{deps,errors,connectors,menus,screens,export,license,admin}.py
                 · migrations/{v1,source}.py
 frontend/       Vite + React 19 + TS (emotion + react-i18next) — src/{App,main,theme,i18n}.* +
                 src/{api,auth,workspace,types,services,common,pages,components,locales}/* (nomaubl layout:

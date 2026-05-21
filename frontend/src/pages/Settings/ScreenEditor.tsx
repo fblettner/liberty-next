@@ -45,8 +45,8 @@ const GENERAL_FORM_KEYS = ['label', 'description', 'audit_table', 'max_rows', 'a
 // via SchemaNavigator on a dedicated tab.
 const COLUMNS_KEYS = ['columns'] as const
 
-type TabKey = 'general' | 'queries' | 'columns' | 'dialog' | 'actions' | 'rowmenu'
-const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'dialog', 'actions', 'rowmenu']
+type TabKey = 'general' | 'queries' | 'columns' | 'dialog' | 'actions' | 'rowmenu' | 'export'
+const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'dialog', 'actions', 'rowmenu', 'export']
 
 // ── styled bits ─────────────────────────────────────────────────────────────
 const TabsBar = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; margin-bottom: 14px;`
@@ -432,6 +432,69 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
     t('settings.screens.rowmenu.empty'),
   )
 
+  // Workbook export — Phase 9. ``Screen.export = WorkbookExport`` configures multi-file /
+  // multi-sheet xlsx generation. The TableView shows an "Export workbooks" button once this
+  // is set; clicking it fires ``POST /api/screens/{app}/{id}/export`` which streams the
+  // file(s). Editor uses SchemaForm against the WorkbookExport $def — split_by + sheets
+  // (list of SheetSpec drill-ins) + file_name_template + archive_name. The Create / Delete
+  // affordances mirror the dialog tab's pattern (empty state shows a Create button; once
+  // configured, a Delete button at the top wipes the whole thing).
+  const exportSchema = useMemo<JsonSchema | null>(() => {
+    const def = defs?.WorkbookExport
+    return def ? { ...def, $defs: defs } : null
+  }, [defs])
+  const exportValue = (value as Row).export as Row | undefined
+  const setExport = (next: Row | null) => setProp('export', next)
+  const createExport = () => setExport({ sheets: [] })
+  const deleteExport = async () => {
+    const ok = await modals.confirm({
+      title: t('settings.screens.export.deleteTitle', 'Delete export config?'),
+      message: t('settings.screens.export.deleteMsg', "Remove the screen's workbook export configuration. The Export button disappears from the TableView."),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
+    setExport(null)
+  }
+  const renderExport = (): ReactNode => {
+    if (!exportSchema) {
+      return <Empty>{t('settings.screens.export.schemaUnavailable', 'Export schema unavailable — check /admin/config/schema.')}</Empty>
+    }
+    if (!exportValue) {
+      return (
+        <Stack gap={14}>
+          <Sub>{t('settings.screens.export.hint',
+            'Configure multi-file / multi-sheet xlsx export. Set ``split_by`` to a column on the read query and the export produces one xlsx per distinct value; each sheet runs its own query with the running ``split_value`` bound through its ParamBinds. Leave ``split_by`` blank for a single xlsx with all sheets.')}</Sub>
+          <Empty>
+            <Stack gap={12} style={{ alignItems: 'center' }}>
+              <div>{t('settings.screens.export.empty', 'No export configured.')}</div>
+              <Button $variant="primary" $size="sm" onClick={createExport}>
+                <Plus size={13} /> {t('settings.screens.export.create', 'Configure export')}
+              </Button>
+            </Stack>
+          </Empty>
+        </Stack>
+      )
+    }
+    return (
+      <Stack gap={14}>
+        <Row gap={8} style={{ justifyContent: 'flex-end' }}>
+          <Button $variant="danger" $size="sm" onClick={deleteExport}>
+            <Trash2 size={13} /> {t('settings.screens.export.delete', 'Delete export config')}
+          </Button>
+        </Row>
+        <Sub>{t('settings.screens.export.editHint',
+          '``split_by`` names a column on the screen\'s read query. Each sheet\'s ParamBinds bind ``source = "split_value"`` to receive the current group key.')}</Sub>
+        <SchemaForm
+          schema={exportSchema}
+          defs={defs ?? {}}
+          value={exportValue}
+          onChange={(v) => setExport(v as Row)}
+        />
+      </Stack>
+    )
+  }
+
   // Deletes the entire dialog (every tab + field + lookup_param_bind). Confirmed via the
   // shared ConfirmModal — the action is destructive and irreversible inside this designer
   // session (the only way back is to Cancel the whole designer modal, which reverts to the
@@ -514,6 +577,7 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
         </Stack>
       )
       case 'rowmenu': return renderRowMenu()
+      case 'export':  return renderExport()
     }
   }
 

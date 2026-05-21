@@ -20,6 +20,7 @@ dependencies = [
     "cryptography>=42",  # field-level AES-256-GCM (v1-compatible) — liberty.crypto
     "tomli-w>=1.0",  # write connectors.toml (migration tools)
     "tomlkit>=0.13",  # comment/format-preserving TOML edits — the config builders (POST/PUT /admin/config/*)
+    "openpyxl>=3.1",  # workbook export — multi-file / multi-sheet xlsx (v1's tbl_workbook / tbl_sheet feature)
 ]
 
 [project.optional-dependencies]

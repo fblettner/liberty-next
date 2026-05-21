@@ -330,10 +330,35 @@ export interface ScreenListItem {
  *  dialog body + the toolbar (`actions`) and right-click (`row_menu`) action lists. Each
  *  carries the slice-4 `Action` discriminated union. The runtime fires `row_menu` items on
  *  right-click on a TableView row (slice 6); `actions` (toolbar) wires up in a later slice. */
+/** One sheet inside a workbook export — runs a query, writes its rows to a tab. */
+export interface SheetSpec {
+  name: string
+  connector?: string | null
+  query: string
+  param_binds?: ParamBind[]
+}
+
+/** Multi-file / multi-sheet xlsx export config — v2's port of v1's ``tbl_workbook`` /
+ *  ``tbl_sheet``. Triggered from the TableView's "Export workbooks" button when set; the
+ *  backend ``POST /api/screens/{app}/{id}/export`` streams a single .xlsx or a .zip. */
+export interface WorkbookExport {
+  /** Column on the screen's read query whose distinct values produce one xlsx per group.
+   *  Blank → a single xlsx file. */
+  split_by?: string | null
+  sheets: SheetSpec[]
+  /** Template for each xlsx file name. ``{{split_value}}`` + ``{{screen}}`` substitution. */
+  file_name_template?: string | null
+  /** Name of the .zip when several workbooks are produced. */
+  archive_name?: string | null
+}
+
 export interface ScreenDetail extends ScreenListItem {
   dialog?: ScreenDialog | null
   actions?: Action[]
   row_menu?: Action[]
+  /** Workbook export configuration. When set, the TableView shows an "Export workbooks"
+   *  button. */
+  export?: WorkbookExport | null
   /** Row-level lifecycle hooks. Fire after a row is mutated — by either path: dialog Save
    *  in the matching mode, *or* the inline grid's Save button. v1 ``FormsTable`` evt 2/3
    *  map to ``on_insert`` / ``on_delete``; ``on_update`` is new in v2 (no v1 source). */

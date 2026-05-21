@@ -609,6 +609,89 @@ IfAction.model_rebuild()
 LoopAction.model_rebuild()
 
 
+class SheetSpec(BaseModel):
+    """One sheet inside a workbook export — a named tab whose rows come from a connector query.
+
+    The query runs once per workbook (per ``split_value`` produced by the parent screen's
+    ``WorkbookExport.split_by``). Operator binds the split value into the sheet's
+    ``:placeholder`` params via :class:`ParamBind` — typically ``source = "split_value"``,
+    so a single declared param ``:DEP_GROUP`` becomes the running group key. The same
+    ``param_binds`` shape used elsewhere keeps the editor + runtime consistent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description=(
+            "Sheet name inside the xlsx. Supports ``{{split_value}}`` substitution. "
+            "Excel truncates names past 31 characters and rejects some special characters; "
+            "the exporter sanitises automatically."
+        ),
+    )
+    connector: str | None = Field(
+        default=None,
+        description="Connector that hosts the sheet's query. Blank uses the screen's connector.",
+    )
+    query: str = Field(description="Query that produces the sheet's rows.")
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description=(
+            "Bind values into the query's ``:placeholder`` params. ``source = \"split_value\"`` "
+            "is the current workbook's group key (the value of the parent's ``split_by`` column); "
+            "literal ``value`` is also accepted."
+        ),
+    )
+
+
+class WorkbookExport(BaseModel):
+    """Configure multi-file / multi-sheet xlsx export for this screen — v2's port of v1's
+    ``ly_tables.tbl_workbook`` / ``tbl_sheet`` (Phase 9). Triggered from the TableView's
+    ``Export workbooks`` button; the backend ``POST /api/screens/{app}/{id}/export``
+    streams a single ``.xlsx`` or a ``.zip`` of multiple xlsx files.
+
+    Two flavours, controlled by ``split_by``:
+
+    * **Single workbook** (``split_by`` blank): one xlsx file containing every sheet, each
+      sheet running its own query without splitting.
+    * **Per-group workbooks** (``split_by = "<column>"``): the screen's read query runs first
+      to collect the distinct values of that column. One xlsx is produced per distinct
+      value; inside it, each :class:`SheetSpec` query runs with ``"split_value"`` bound to
+      the current group key.
+
+    Example — the ``ldap_apps_get`` screen exports one file per ``DEP_GROUP``, each file
+    holding an "Apps" sheet (rows of ``ldap_apps_get`` filtered to that group) plus an
+    "LDAP Users" sheet (rows of a sibling ``ldap_users_get`` filtered the same way).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    split_by: str | None = Field(
+        default=None,
+        description=(
+            "Column on the screen's read query whose distinct values produce one xlsx file each. "
+            "Blank produces a single xlsx file. Sheets bind to the current group via "
+            "``source = \"split_value\"`` on their ``param_binds``."
+        ),
+    )
+    sheets: list[SheetSpec] = Field(
+        default_factory=list,
+        description="One sheet per entry, in display order inside the xlsx.",
+    )
+    file_name_template: str | None = Field(
+        default=None,
+        description=(
+            "How to name each xlsx file. ``{{split_value}}`` is the current group key; "
+            "``{{screen}}`` is the screen id. Blank defaults to ``<screen>_<split_value>.xlsx``."
+        ),
+    )
+    archive_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the .zip downloaded when several workbooks are produced. Blank defaults to "
+            "``<screen>.zip``."
+        ),
+    )
+
+
 class ScreenDialog(BaseModel):
     """The form shown when the user adds / edits a row of this screen. Optional — a screen
     with no dialog renders as a read-only / grid-edit table."""
@@ -709,6 +792,15 @@ class Screen(BaseModel):
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
     uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
+    export: WorkbookExport | None = Field(
+        default=None,
+        description=(
+            "Multi-file / multi-sheet xlsx export config — v2's port of v1's "
+            "``tbl_workbook`` / ``tbl_sheet``. When set, the TableView gains an "
+            "``Export workbooks`` button that streams one xlsx (or a .zip of several) from "
+            "``POST /api/screens/{app}/{id}/export``. Blank hides the button."
+        ),
+    )
     dialog: ScreenDialog | None = Field(default=None, description="Form for adding / editing a row — optional.")
     actions: list[Action] = Field(
         default_factory=list,

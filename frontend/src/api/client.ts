@@ -21,7 +21,10 @@ export class ApiError extends Error {
   }
 }
 
-function authHeaders(extra?: Record<string, string>): Record<string, string> {
+/** Standard Bearer + ``X-Liberty-Lang`` headers used by every request. Exported so callers
+ *  that need to hit ``fetch()`` directly (file downloads via blob — the ``api.*`` JSON
+ *  helpers don't fit) can reuse the same auth shape. */
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...(extra ?? {}) };
   if (accessToken) h["Authorization"] = `Bearer ${accessToken}`;
   // The server resolves query-result column labels in this language (the shared dictionary).

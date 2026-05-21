@@ -17,10 +17,10 @@ import { useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap } from 'lucide-react'
+import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, PromptField, ScreenDetail } from '../../types/screens'
-import { api, ApiError } from '../../api/client'
+import { api, ApiError, authHeaders } from '../../api/client'
 import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
@@ -504,6 +504,44 @@ export function ResultTable({
   const screenActions: Action[] = useMemo(() => (screen?.actions ?? []) as Action[], [screen])
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
+
+  // Workbook export — fire ``POST /api/screens/{app}/{id}/export``, read the streamed bytes,
+  // hand the browser an anchor with a blob URL so it downloads with the response's
+  // Content-Disposition filename. Surfaced on the toolbar only when ``screen.export`` is set.
+  const [exportBusy, setExportBusy] = useState(false)
+  const runWorkbookExport = useCallback(async () => {
+    if (!screen) return
+    setExportBusy(true); setActionStatus(null)
+    try {
+      const resp = await fetch(
+        `/api/screens/${encodeURIComponent(screen.app)}/${encodeURIComponent(screen.id)}/export`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({}),
+        },
+      )
+      if (!resp.ok) {
+        const detail = await resp.text().catch(() => '')
+        throw new Error(`HTTP ${resp.status} ${resp.statusText} — ${detail.slice(0, 200)}`)
+      }
+      // Pull the filename out of the Content-Disposition (the backend names it ``screen.xlsx``
+      // / ``screen.zip`` / a per-group ``screen_<value>.xlsx``); fall back to a sensible default.
+      const dispo = resp.headers.get('Content-Disposition') || ''
+      const m = /filename="([^"]+)"/.exec(dispo)
+      const filename = m?.[1] || `${screen.id}.xlsx`
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename
+      document.body.appendChild(a); a.click()
+      document.body.removeChild(a); URL.revokeObjectURL(url)
+    } catch (e) {
+      setActionStatus({ message: (e as Error).message, tone: 'error' })
+    } finally {
+      setExportBusy(false)
+    }
+  }, [screen])
   const runScreenAction = useCallback(async (a: Action) => {
     setActionBusy(a.id); setActionStatus(null)
     // Toolbar actions have no row context — ``formCtx = {}``. Prompt-collected values land
@@ -1105,7 +1143,7 @@ export function ResultTable({
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
         toolbar={
-          !canEdit && screenActions.length === 0 ? undefined : !editMode ? (
+          !canEdit && screenActions.length === 0 && !screen?.export ? undefined : !editMode ? (
             <>
               {canEdit && hasDialog && screen?.insert_query && (
                 <TbBtn $tone="primary" onClick={openDialogForAdd} title={t('dialog.addTooltip')}>
@@ -1120,6 +1158,19 @@ export function ResultTable({
               {canEdit && insertQuery && (
                 <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
                   <Upload size={13} /> {t('table.import')}
+                </TbBtn>
+              )}
+              {/* Workbook export — visible when ``screen.export`` is configured. Fires
+                  ``POST /api/screens/{app}/{id}/export``; the backend streams a single
+                  .xlsx or a .zip of several. The download uses the Content-Disposition
+                  filename, so the browser writes the file the operator expects. */}
+              {screen?.export && (
+                <TbBtn
+                  onClick={() => { void runWorkbookExport() }}
+                  disabled={exportBusy}
+                  title={t('table.exportTip', { defaultValue: 'Export configured workbook(s) — one xlsx per split value when split_by is set, a single xlsx otherwise.' })}
+                >
+                  <FileSpreadsheet size={13} /> {exportBusy ? t('table.exporting', { defaultValue: 'Exporting…' }) : t('table.exportWorkbooks', { defaultValue: 'Export workbooks' })}
                 </TbBtn>
               )}
               {/* Screen-level action buttons (v1 NOMAJDE "Create Role" / "Reset Password" / etc.).
