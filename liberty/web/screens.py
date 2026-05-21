@@ -442,7 +442,13 @@ def _full_view(
         body["dialog"] = _resolve_dialog_prompts(
             body.get("dialog"), connector=dict_scope, language=language, dictionary=dictionary,
         )
-    return {**_list_view(screen, app=app, language=language), **body}
+    # Merge order matters: ``body`` is the raw model dump (the raw ``screen.key_columns``
+    # list is empty when keys are declared via per-column ``key = true`` instead of the flat
+    # field, same goes for the raw ``screen.connector`` vs the effective one). ``_list_view``
+    # *computes* those values correctly — so spread it LAST so its values win over the raw
+    # model fields. The dialog / actions / row_menu / columns body comes through unchanged
+    # since ``_list_view`` doesn't define those keys.
+    return {**body, **_list_view(screen, app=app, language=language)}
 
 
 @router.get("/screens")

@@ -25,6 +25,7 @@
     "react-router-dom": "^7.1.0",
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

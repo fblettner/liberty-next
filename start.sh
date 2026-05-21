@@ -78,8 +78,10 @@ run_api() {  # $1 = "dev" → enable --reload
   init_config
   [ -f config/auth.toml ] || echo "==> config/auth.toml missing — no users yet. Run: ./start.sh init-db   (bootstraps an 'admin')"
   [ -n "${LIBERTY_JWT_SECRET:-}" ] || echo "==> LIBERTY_JWT_SECRET unset → ephemeral JWT key (tokens won't survive a restart)"
-  echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs)"
-  exec "$PY" -m uvicorn liberty.main:app --host "$HOST" --port "$PORT" "${extra[@]}"
+  echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs   sio: /socket.io/)"
+  # ``asgi_app`` = the Socket.IO + FastAPI wrapped ASGI app (so /socket.io/*
+  # reaches the SIO engine; everything else falls through to FastAPI).
+  exec "$PY" -m uvicorn liberty.main:asgi_app --host "$HOST" --port "$PORT" "${extra[@]}"
 }
 
 cmd="${1:-serve}"

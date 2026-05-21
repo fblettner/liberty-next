@@ -77,6 +77,24 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
 
+    # ── Socket.IO ───────────────────────────────────────────────────────────
+    # The Socket.IO server is created up-front (outside the lifespan) so we can
+    # wrap the FastAPI app in ``socketio.ASGIApp`` below — uvicorn needs the
+    # wrapped ASGI app as its entry point, and that's a sync operation that runs
+    # before lifespan. The TokenService is also built early because the SIO
+    # connect handler needs it for JWT verification.
+    #
+    # ``LibertySio`` registers its event handlers in __init__ and reads
+    # ``self.app.state`` lazily inside the dashboard / log paths, so it's safe to
+    # construct here even though ``app.state.connectors`` / .screens / .license
+    # don't exist yet — they're populated by the lifespan before any client can
+    # actually subscribe.
+    token_service = _build_token_service(settings.auth)
+    from liberty.sio import LibertySio
+    # ``app`` itself doesn't exist yet — we'll set ``sio_layer.app`` once FastAPI
+    # is constructed (a couple of lines down).
+    sio_layer = LibertySio.__new__(LibertySio)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
@@ -94,17 +112,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.charts = load_charts(settings.charts.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
-        app.state.token_service = _build_token_service(settings.auth)
+        app.state.token_service = token_service
         app.state.oidc = build_oidc(settings.oidc)
         app.state.ai = build_assistant(settings.ai, app.state.connectors)
+        # Log-handler attach against the running loop. The SIO server itself is
+        # already initialised + registered with ASGIApp (below) — handlers fire
+        # the moment a client connects.
+        import asyncio
+        sio_layer.attach_log_handler(loop=asyncio.get_running_loop())
+        app.state.sio = sio_layer
         try:
             yield
         finally:
+            await sio_layer.stop()
             if app.state.ai is not None:
                 await app.state.ai.aclose()
             await app.state.connectors.aclose()
 
     app = FastAPI(title="Liberty Next", version=__version__, lifespan=lifespan)
+    # Finish wiring the Socket.IO layer now that the FastAPI app exists. This
+    # runs at create_app time (before the lifespan), so `LibertySio.__init__`
+    # registers the event handlers on a real ``AsyncServer`` that's about to be
+    # mounted onto the ASGI wrapper below. ``self.app.state`` reads inside the
+    # dashboard / log handlers happen lazily (only when a client subscribes), so
+    # missing state at construction time is fine — the lifespan populates it
+    # before any client can actually connect.
+    LibertySio.__init__(sio_layer, app, token_service)
 
     if settings.oidc.enabled:
         # Authlib's Starlette client stashes the OAuth state/nonce in the session.
@@ -181,10 +214,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.frontend_dir = str(dist)
             app.mount("/", SPAStaticFiles(directory=dist, html=True), name="spa")
 
+    # ── Socket.IO ASGI wrapping ─────────────────────────────────────────────
+    # Wrap the FastAPI app with python-socketio's ASGI shim — every request whose
+    # path starts with ``/socket.io/`` routes to the SIO engine; everything else
+    # falls through to FastAPI. The lifespan + dependency-injection machinery
+    # *stays on the FastAPI app*; the wrapper is transparent to those.
+    #
+    # We expose the wrapped app on ``app.asgi_app`` (a regular attribute) so
+    # uvicorn's ``liberty.main:asgi_app`` entry point picks it up. Tests that
+    # already call ``create_app(...)`` and use the returned FastAPI app keep
+    # working unchanged — they hit the FastAPI surface directly (no SIO).
+    from liberty.sio import make_asgi_app
+    app.asgi_app = make_asgi_app(sio_layer.sio, app)   # type: ignore[attr-defined]
+
     return app
 
 
 app = create_app()
+# ``asgi_app`` is the wrapped Socket.IO + FastAPI composition. uvicorn / start.sh
+# point at this so the ``/socket.io/*`` path routes through python-socketio's
+# Engine.IO server, and everything else falls through to FastAPI.
+asgi_app = app.asgi_app   # type: ignore[attr-defined]
 
 
 def run() -> None:
@@ -192,7 +242,7 @@ def run() -> None:
 
     settings = load_settings()
     uvicorn.run(
-        "liberty.main:app",
+        "liberty.main:asgi_app",
         host=settings.app.host,
         port=settings.app.port,
         log_level=settings.app.log_level,

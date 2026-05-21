@@ -19,8 +19,9 @@ const DictionaryBuilder = lazy(() => import('./DictionaryBuilder'))
 const MenusBuilder = lazy(() => import('./MenusBuilder'))
 const ScreensBuilder = lazy(() => import('./ScreensBuilder'))
 const DashboardsBuilder = lazy(() => import('./DashboardsBuilder'))
+const TechnicalDashboard = lazy(() => import('./TechnicalDashboard'))
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'dashboards'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'dashboards', 'technical'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -58,6 +59,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'dashboards'} onClick={() => setTab('dashboards')}>{t('settings.tabs.dashboards')}</TabBtn>
+        <TabBtn $active={tab === 'technical'} onClick={() => setTab('technical')}>{t('settings.tabs.technical')}</TabBtn>
       </Tabs>
       <Suspense fallback={<Centered />}>
         {tab === 'pools' ? <PoolsBuilder />
@@ -65,7 +67,8 @@ export default function Settings() {
           : tab === 'dictionary' ? <DictionaryBuilder />
           : tab === 'menus' ? <MenusBuilder />
           : tab === 'screens' ? <ScreensBuilder />
-          : <DashboardsBuilder />}
+          : tab === 'dashboards' ? <DashboardsBuilder />
+          : <TechnicalDashboard />}
       </Suspense>
     </PageLayout>
   )

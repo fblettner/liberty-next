@@ -269,7 +269,7 @@ const fr: Resources = {
       invalidIdentifier: 'Utilisez des lettres minuscules, des chiffres et des underscores ; commencez par une lettre (compatible avec les clés TOML, les permissions et les segments d\'URL).',
       unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', dashboards: 'Tableaux de bord' },
+    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', dashboards: 'Tableaux de bord', technical: 'Technique' },
     api: {
       test: {
         button: 'Tester la connexion',

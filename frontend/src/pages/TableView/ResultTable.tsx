@@ -1264,6 +1264,11 @@ export function ResultTable({
           columns={proxyColumns}
           row={proxyRow}
           connector={proxyScreen.connector || connector}
+          // Phase 9 record lock: the proxy dialog's lock identity comes from the
+          // *target* screen's key_columns (the screen whose dialog we're actually
+          // showing), not the parent screen. Without this prop the lock effect
+          // builds a null payload and no lock is acquired.
+          keyColumns={proxyScreen.key_columns}
           onClose={() => { setProxyOpen(false); setProxyScreen(null) }}
           onSaved={() => { setProxyOpen(false); setProxyScreen(null); onSaved?.() }}
         />

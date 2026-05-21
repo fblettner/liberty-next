@@ -5,6 +5,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { WorkspaceProvider } from "./workspace/WorkspaceContext";
 import { TabsProvider } from "./tabs/TabsContext";
 import { ModalsProvider } from "./common/Modals";
+import { SioProvider } from "./sio/SioContext";
 import App from "./App";
 import "./i18n";
 import "./index.css";
@@ -14,11 +15,13 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <ModalsProvider>
         <AuthProvider>
-          <WorkspaceProvider>
-            <TabsProvider>
-              <App />
-            </TabsProvider>
-          </WorkspaceProvider>
+          <SioProvider>
+            <WorkspaceProvider>
+              <TabsProvider>
+                <App />
+              </TabsProvider>
+            </WorkspaceProvider>
+          </SioProvider>
         </AuthProvider>
       </ModalsProvider>
     </BrowserRouter>

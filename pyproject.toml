@@ -21,6 +21,8 @@ dependencies = [
     "tomli-w>=1.0",  # write connectors.toml (migration tools)
     "tomlkit>=0.13",  # comment/format-preserving TOML edits — the config builders (POST/PUT /admin/config/*)
     "openpyxl>=3.1",  # workbook export — multi-file / multi-sheet xlsx (v1's tbl_workbook / tbl_sheet feature)
+    "python-socketio>=5.11",   # Socket.IO server — record locks (rooms-as-locks, v1 pattern) + technical dashboard / log tail
+    "fastapi-socketio>=0.0.10",   # mounts python-socketio on a FastAPI app
 ]
 
 [project.optional-dependencies]
@@ -29,6 +31,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-html>=4.1",        # `pytest --html=test-report.html --self-contained-html` → browsable HTML report
     "aiosqlite>=0.20",
+    "aiohttp>=3.10",     # required by python-socketio's AsyncClient (test_sio.py)
 ]
 
 [project.scripts]

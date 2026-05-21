@@ -15,9 +15,11 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
+import { Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
+import { useSio, useLockState } from '../../sio/SioContext'
+import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
 import type { Action, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
@@ -187,6 +189,85 @@ export function ScreenDialog({
     setTabIdx(0)
     setError(null)
   }, [open, mode, row, dlg, valueFor, colByName])
+
+  // ── record lock (Phase 9 — Socket.IO) ────────────────────────────────────────────────
+  // On open in ``edit`` mode we acquire a row-level lock so a concurrent edit by another
+  // user opens the dialog read-only with a "Locked by Alice (Xm ago)" banner. ``add`` mode
+  // skips locking — the row doesn't exist yet, there's no composite key to lock.
+  //
+  // **Why we destructure the callbacks instead of depending on the whole ``sio`` object**:
+  // ``useSio()`` returns a memoised value whose identity rebuilds every time ``locks`` or
+  // ``status`` changes. Putting that value in the effect's deps caused a tight loop on every
+  // broadcast — acquire → broadcast → ``locks`` updates → ``sio`` identity changes → effect
+  // cleanup releases → effect re-runs and acquires again. ``acquireLock`` / ``releaseLock``
+  // are wrapped in ``useCallback([])`` on the provider so their identities are stable; depend
+  // on those refs and the loop is gone.
+  const { acquireLock, releaseLock } = useSio()
+  const lockPayload = useMemo<LockPayload | null>(() => {
+    if (mode !== 'edit') {
+      console.info("[lock] skip — mode is", mode)
+      return null
+    }
+    if (!keyColumns || keyColumns.length === 0) {
+      console.info("[lock] skip — keyColumns is",
+        keyColumns, "for screen", `${screen.app}.${screen.id}`)
+      return null
+    }
+    const kv: Record<string, string> = {}
+    for (const k of keyColumns) {
+      const v = valueFor(k, row)
+      if (v == null || v === '') {
+        console.info("[lock] skip — key column", k, "is null/empty in row.",
+          { keyColumns, rowKeys: Object.keys(row), screen: `${screen.app}.${screen.id}` })
+        return null
+      }
+      kv[k] = String(v)
+    }
+    return { app: screen.app, screen: screen.id, key_values: kv }
+  }, [mode, keyColumns, row, valueFor, screen.app, screen.id])
+
+  // Watch the live lock map for this payload. ``locks`` updates as the server's
+  // ``lock.acquired`` / ``lock.released`` broadcasts arrive; when Alice releases her lock,
+  // ``foreignLock`` clears and the form becomes editable — no reopen needed.
+  const { lock: heldLock, ownedByMe } = useLockState(lockPayload)
+  const foreignLock = heldLock && !ownedByMe ? heldLock : null
+  const readOnly = foreignLock != null
+
+  // Acquire on open / release on close. ``cancelled`` covers a fast close while the ack
+  // is still in flight — releases the lock if we happened to win it after unmount.
+  //
+  // Diagnostic console logs (Phase 9) so a "no lock visible in dashboard" report can be
+  // diagnosed without re-instrumenting the build. Open DevTools → Console and look for the
+  // ``[lock]`` entries: ``no payload`` (keyColumns missing / row empty), ``acquire request``
+  // (effect fired the emit), ``result`` (server ack or denial), ``release on cleanup``
+  // (effect cleanup, expected on dialog close).
+  useEffect(() => {
+    if (!open || lockPayload == null) return
+    let cancelled = false
+    console.info("[lock] acquire request", lockPayload)
+    void (async () => {
+      const result = await acquireLock(lockPayload)
+      console.info("[lock] result", result)
+      if (cancelled && result.ok) releaseLock(lockPayload)
+    })()
+    return () => {
+      cancelled = true
+      console.info("[lock] release on cleanup", lockPayload)
+      releaseLock(lockPayload)
+    }
+    // ``mode`` is used only for the diagnostic log; the actual reactive trigger is
+    // ``lockPayload`` (which itself depends on mode). Listed in deps for the lint rule.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, lockPayload, acquireLock, releaseLock])
+
+  // Human-friendly "X minutes ago" for the banner. Recomputed every render — the WS broadcasts
+  // already drive re-renders frequently enough that no setInterval is needed.
+  const formatLockTime = (ts: number): string => {
+    const diff = Date.now() / 1000 - ts
+    if (diff < 60) return t('dialog.lockedSecondsAgo', { count: Math.max(1, Math.floor(diff)), defaultValue: '{{count}}s ago' })
+    if (diff < 3600) return t('dialog.lockedMinutesAgo', { count: Math.floor(diff / 60), defaultValue: '{{count}}m ago' })
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
 
   const onFieldChange = useCallback((name: string, v: unknown) => {
     setFormValues((p) => ({ ...p, [name]: v }))
@@ -663,7 +744,10 @@ export function ScreenDialog({
                           column={colByName.get(f.name.toLowerCase()) ?? null}
                           formValues={formValues}
                           onChange={onFieldChange}
-                          disabled={st.disabled}
+                          // Foreign-lock wins over per-field rules: every input is
+                          // disabled when someone else holds the row's lock. The
+                          // banner above the body explains why.
+                          disabled={st.disabled || readOnly}
                           required={st.required}
                           suppressLookup={mode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
                           onLookupPick={onLookupReturnValues}
@@ -679,6 +763,22 @@ export function ScreenDialog({
                 )
               })}
             </>
+          )}
+          {/* Foreign-lock banner — shown when another user holds the row's lock. Every
+              input is disabled (see ``disabled={st.disabled || readOnly}`` above), Save
+              + Delete are hidden in the footer; the banner tells the operator *why*.
+              Auto-clears when the other user releases the lock — no reopen needed,
+              the live broadcast updates ``foreignLock`` and the form becomes editable. */}
+          {foreignLock && (
+            <Banner $tone="info">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <LockIcon size={14} />
+                {t('dialog.lockedBy', {
+                  user: foreignLock.username, when: formatLockTime(foreignLock.acquired_at),
+                  defaultValue: 'Locked by {{user}} ({{when}}) — read-only',
+                })}
+              </span>
+            </Banner>
           )}
           {error && <Banner $tone="error">{error}</Banner>}
           {actionStatus && (
@@ -724,7 +824,7 @@ export function ScreenDialog({
             {/* Delete (edit mode + delete_query). v1 didn't have this — delete lived on the
                 table — but it's a useful v2 extension: you may want to edit + decide to drop
                 the row without closing the dialog first. Confirms before firing. */}
-            {mode === 'edit' && screen.delete_query && (
+            {mode === 'edit' && screen.delete_query && !readOnly && (
               <Button
                 $size="sm"
                 $variant="danger"
@@ -738,9 +838,14 @@ export function ScreenDialog({
             <Button $size="sm" $variant="ghost" onClick={() => { void handleClose() }} disabled={saving || closing || deleting}>
               {closing ? <SpinnerRing size={13} thickness={2} /> : <X size={13} />} {t('common.cancel')}
             </Button>
-            <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || closing || deleting || tabs.length === 0}>
-              {saving ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-            </Button>
+            {/* Save hidden when another user holds the lock — they can't save anyway
+                (every input is disabled), and removing the button makes the read-only
+                state unambiguous. Cancel stays so the operator can close the dialog. */}
+            {!readOnly && (
+              <Button $size="sm" $variant="primary" onClick={submit} disabled={saving || closing || deleting || tabs.length === 0}>
+                {saving ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+              </Button>
+            )}
           </FlexRow>
         </ModalFooter>
       </ModalEl>
