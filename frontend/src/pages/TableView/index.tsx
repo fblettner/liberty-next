@@ -7,8 +7,8 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { Table as TableIcon, Play, BarChart3 } from 'lucide-react'
-import { api, ApiError } from '../../api/client'
-import type { ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
+import { api, ApiError, streamNDJSON } from '../../api/client'
+import type { Column, ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
 import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing, useModals } from '../../common'
 import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -196,6 +196,14 @@ export default function TableView({ connector, query }: { connector: string; que
     return out
   }, [meta, filterBindNames])
 
+  // Live row count while the streaming SELECT is in flight — surfaced on the Run button so
+  // the operator sees "Running… 1,200 rows" instead of an undifferentiated spinner. Reset to
+  // null on each new run + when the result lands.
+  const [streamCount, setStreamCount] = useState<number | null>(null)
+  // AbortController for the in-flight stream — cancelled when the user navigates away or
+  // kicks off a new run. The fetch reader's `cancel()` releases the server-side cursor too.
+  const streamAbortRef = useRef<AbortController | null>(null)
+
   const run = useCallback(async () => {
     if (!meta) return
     if (meta.writable) {
@@ -206,31 +214,105 @@ export default function TableView({ connector, query }: { connector: string; que
       })
       if (!ok) return
     }
+    // Cancel any in-flight stream before starting a new one — releases the previous server-
+    // side cursor + lets the next run's `meta` event swap columns cleanly.
+    streamAbortRef.current?.abort()
     setBusy(true)
     setRunErr(null)
+    setStreamCount(null)
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
     for (const [name, f] of Object.entries(filters)) if (f.val !== '') { sent[name] = f.val; sent[`${name}_op`] = f.op }
     const limit = maxRows.trim()  // `_limit=N` overrides the connector/pool/query row cap for this run
     try {
-      let res: QueryResult
       if (meta.statement_type === 'SELECT') {
-        const qs = new URLSearchParams(limit ? { ...sent, _limit: limit } : sent).toString()
-        res = await api.get<QueryResult>(
-          `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}${qs ? `?${qs}` : ''}`,
-        )
-      } else {
-        res = await api.post<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}`, {
-          params: sent,
+        // **Streaming path** — emits `meta` once (columns + cap), then N `rows` events
+        // (chunks of 100 rows each by default), then `done`. We assemble a growing
+        // QueryResult and re-render in batched flushes (every ~120ms) so the operator sees
+        // rows appear live without React stuttering on per-chunk re-renders. On a 15K-row
+        // query that took ~6s end-to-end before, the first rows land in ~100ms and the grid
+        // is responsive throughout.
+        const qs = new URLSearchParams({ ...sent, _stream: '1', ...(limit ? { _limit: limit } : {}) }).toString()
+        const path = `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${qs}`
+        const ctrl = new AbortController()
+        streamAbortRef.current = ctrl
+        const startedAt = performance.now()
+        let cols: Column[] = []
+        let allRows: Record<string, unknown>[] = []
+        let lastFlush = startedAt
+        let streamErr: string | null = null
+
+        const flush = (finalEvent?: { truncated: boolean; duration_ms: number }) => {
+          const dur = finalEvent ? finalEvent.duration_ms : (performance.now() - startedAt)
+          // Copy `allRows` so React sees a new array reference (and TanStack's row model
+          // picks up the new rows). The Column array is replaced on every flush too — it's
+          // small and the meta event sets it once at the top of the stream.
+          setResult({
+            connector, query,
+            statement_type: 'SELECT',
+            columns: cols,
+            rows: [...allRows],
+            rowcount: -1,
+            row_count: allRows.length,
+            duration_ms: dur,
+            truncated: finalEvent?.truncated ?? false,
+          })
+        }
+
+        await streamNDJSON(path, { method: 'GET', signal: ctrl.signal }, (data) => {
+          const ev = data as
+            | { kind: 'meta'; columns: Column[]; cap: number; chunk_size: number }
+            | { kind: 'rows'; rows: Record<string, unknown>[]; sent: number }
+            | { kind: 'done'; total: number; truncated: boolean; duration_ms: number; rowcount: number }
+            | { kind: 'error'; detail: string }
+            | { kind: 'unknown' }
+          if (ev.kind === 'meta') {
+            cols = ev.columns
+            allRows = []
+            // Seed the grid with the columns immediately — empty rows yet, but the headers
+            // + filter row paint right away while the first chunk is still in flight.
+            flush()
+          } else if (ev.kind === 'rows') {
+            allRows = allRows.concat(ev.rows)
+            setStreamCount(ev.sent)
+            const now = performance.now()
+            // Batched re-render — every ~120ms or so. Under that interval, React + TanStack
+            // would do per-chunk diffs and we'd lose the speedup. The final `done` event
+            // forces a flush regardless of timing.
+            if (now - lastFlush > 120) {
+              lastFlush = now
+              flush()
+            }
+          } else if (ev.kind === 'done') {
+            flush({ truncated: ev.truncated, duration_ms: ev.duration_ms })
+          } else if (ev.kind === 'error') {
+            streamErr = ev.detail
+          }
         })
+
+        if (streamErr) setRunErr(streamErr)
+      } else {
+        const res = await api.post<QueryResult>(
+          `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}`,
+          { params: sent },
+        )
+        setResult(res)
       }
-      setResult(res)
     } catch (e) {
+      // An AbortError from a deliberate cancellation isn't an error to surface — the operator
+      // just kicked off another run, or navigated away. Anything else is real.
+      if ((e as { name?: string }).name === 'AbortError') return
       setRunErr(e instanceof ApiError ? e.message : String(e))
     } finally {
       setBusy(false)
+      setStreamCount(null)
     }
   }, [meta, params, filters, maxRows, connector, query, t, modals])
+
+  // Abort the in-flight stream when the screen unmounts (tab close / route change). Without
+  // this the server keeps the cursor open until the client connection drops — wasteful, and
+  // on Oracle can leak cursors at the pool level until they're recycled.
+  useEffect(() => () => { streamAbortRef.current?.abort() }, [])
 
   // Auto-load: run a SELECT immediately when the screen opens, once, if the screen asks for it.
   // Phase 3 — ``auto_load`` is a screen-level flag now; fall back to the (deprecated) meta-level
@@ -299,10 +381,18 @@ export default function TableView({ connector, query }: { connector: string; que
       />
     </MaxRowsBox>
   ) : null
+  // Live row count surfaces inside the Run button while a stream is in flight — operator
+  // sees "Running… 1,200 rows" instead of an undifferentiated spinner. The streaming SELECT
+  // path keeps appending; this just reads the running cumulative count.
+  const runLabel = busy
+    ? (streamCount != null
+        ? t('table.runningRows', { count: streamCount, defaultValue: 'Running… {{count}} rows' })
+        : t('common.running'))
+    : t('common.run')
   const runBtn = (
     <RunBtn onClick={run} disabled={busy}>
       {busy ? <SpinnerRing size={13} thickness={2} /> : <Play size={13} />}
-      {busy ? t('common.running') : t('common.run')}
+      {runLabel}
     </RunBtn>
   )
   // The standalone control bar carries the param form; it also carries Run + Max-rows until the

@@ -25,7 +25,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, AsyncIterator
 
 _log = logging.getLogger(__name__)
 
@@ -594,6 +594,46 @@ class QueryResult:
         }
 
 
+@dataclass(slots=True, frozen=True)
+class StreamMeta:
+    """First event yielded by :meth:`SQLConnector.execute_stream`. Carries the resolved column
+    list + the effective row cap + the per-chunk size. Frontend uses ``columns`` to populate
+    the grid headers before any data lands; ``cap`` is the upper bound so a progress UI can
+    show "X of up to Y rows"."""
+    columns: list[Column]
+    cap: int
+    chunk_size: int
+
+
+@dataclass(slots=True, frozen=True)
+class StreamRows:
+    """One chunk of rows from :meth:`SQLConnector.execute_stream`. ``sent`` is the cumulative
+    row count *after* this chunk — lets the consumer drive a progress indicator without doing
+    its own running sum. The rows are post-processed (trim_strings, JDE-date) just like the
+    non-streaming path."""
+    rows: list[dict[str, Any]]
+    sent: int
+
+
+@dataclass(slots=True, frozen=True)
+class StreamDone:
+    """Final event from :meth:`SQLConnector.execute_stream`. ``total`` is the actual row count
+    delivered (≤ cap); ``truncated`` is true iff the cap was hit before the query exhausted;
+    ``duration_ms`` measures the full streaming span (query open → done). ``rowcount`` is
+    always ``-1`` for SELECT — kept on the shape so the consumer can tell streaming SELECT
+    apart from a hypothetical streaming write."""
+    total: int
+    truncated: bool
+    duration_ms: float
+    rowcount: int = -1
+
+
+# Union type for the events yielded by :meth:`SQLConnector.execute_stream` — one Meta, then N
+# Rows, then exactly one Done. Caller iterates via ``async for ev in conn.execute_stream(...)``
+# and switches on type. Web layer renders these to NDJSON lines.
+StreamEvent = StreamMeta | StreamRows | StreamDone
+
+
 class SQLConnector:
     """A connector exposing a fixed set of named queries against one pool."""
 
@@ -601,6 +641,12 @@ class SQLConnector:
     # "give me everything" from OOM-ing the server.
     HARD_MAX_ROWS = 1_000_000
     DEFAULT_MAX_ROWS = 1000
+    # Streaming defaults. ``DEFAULT_CHUNK_SIZE`` is what the route layer falls back to when the
+    # caller doesn't supply ``?_chunk_size=N`` — 100 is the sweet spot between "first chunk
+    # arrives fast" and "framing overhead is amortised". Clamped to ``[1, MAX_CHUNK_SIZE]`` by
+    # ``execute_stream`` so a misconfigured caller can't ask for 10M-row chunks.
+    DEFAULT_CHUNK_SIZE = 100
+    MAX_CHUNK_SIZE = 5000
 
     def __init__(
         self,
@@ -1248,6 +1294,132 @@ class SQLConnector:
             rowcount=rowcount,
             duration_ms=duration_ms,
         )
+
+    async def execute_stream(
+        self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
+        max_rows: int | None = None, user: str | None = None,
+        column_hints: list[ColumnHint] | None = None, screen_max_rows: int | None = None,
+        dictionary_scope: str | None = None, chunk_size: int = DEFAULT_CHUNK_SIZE,  # type: ignore[name-defined]
+    ) -> AsyncIterator[StreamEvent]:
+        """Run a **SELECT** query and yield :class:`StreamMeta`, then N :class:`StreamRows`,
+        then exactly one :class:`StreamDone`. Server-side cursor under the hood via SQLAlchemy
+        ``conn.stream()`` — rows trickle in as the DB advances rather than buffering the whole
+        result first. Works on both asyncpg (Postgres) and oracledb-async (Oracle) — both
+        report ``supports_server_side_cursors = True``; the chunk size maps to asyncpg's
+        cursor fetch size + Oracle's ``arraysize`` respectively. SQLite (aiosqlite) effectively
+        buffers but still produces the expected event sequence — fine for tests.
+
+        Same prep as :meth:`execute` (filter wrap, form rules, schema placeholders, allow-list
+        + writable gate). Streaming is **SELECT-only**: any other statement type raises
+        :class:`StatementNotAllowedError` even if ``writable = true``. Writes don't fit the
+        streaming protocol (no row stream + need transactional commit) — caller falls back to
+        :meth:`execute` for those.
+
+        Args:
+          chunk_size: rows per :class:`StreamRows` event. Clamped to
+            ``[1, MAX_CHUNK_SIZE]``; the default matches ``DEFAULT_CHUNK_SIZE`` (100, see the
+            class constants). The route layer plumbs through a ``?_chunk_size=N`` query param.
+
+        Yields events that the web layer renders to NDJSON lines (``application/x-ndjson``):
+
+          * ``{"kind":"meta","columns":[…],"cap":N,"chunk_size":N}`` — once at the top.
+          * ``{"kind":"rows","rows":[…],"sent":N}`` — repeatedly, ``len(rows) <= chunk_size``.
+            ``sent`` is the cumulative count *after* this chunk so the consumer drives a
+            progress indicator without its own running sum.
+          * ``{"kind":"done","total":N,"truncated":bool,"duration_ms":…}`` — exactly once at
+            the end. ``truncated = true`` iff the row cap was hit before the cursor exhausted.
+
+        Errors propagate as exceptions; the route layer catches and emits a final
+        ``{"kind":"error","detail":…}`` line so a half-streamed response still terminates
+        cleanly (the chunked transfer is closed and the consumer's NDJSON parser sees the line).
+        """
+        # ── prep — mirrors execute() for SELECT (kept inline for now; refactoring the shared
+        # prep into a helper would touch every call site and isn't worth the diff for this slice).
+        lang = language or self._dict.default_language
+        dict_scope = dictionary_scope or self.name
+        qdef = self.get_query(query_name)
+        cap = self._row_cap(qdef, max_rows, screen_max_rows)
+        chunk = max(1, min(int(chunk_size or self.DEFAULT_CHUNK_SIZE), self.MAX_CHUNK_SIZE))
+        sql_text = _apply_schema_placeholders(
+            qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            connector=self.name, query=query_name, pool=self.pool_name,
+        )
+        stmt_type = detect_statement_type(sql_text)
+        if stmt_type != "SELECT":
+            # Streaming is SELECT-only — writes don't fit the protocol (need a single
+            # transactional commit; no row stream). Caller falls back to :meth:`execute`.
+            raise StatementNotAllowedError(
+                f"{self.name}.{query_name}: execute_stream only supports SELECT, got "
+                f"{stmt_type or '(unknown)'!r}."
+            )
+        sql_text, params = self._apply_filter_wrap(
+            sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
+            dict_scope=dict_scope,
+        )
+        bound = self._build_params(sql_text, qdef, params)
+        bound = self._apply_form_rules(
+            bound, qdef, stmt_type=stmt_type, user=user, column_hints=column_hints,
+            dict_scope=dict_scope,
+        )
+        _ = lang  # lang used only by columns hint resolution + audit (none here on SELECT)
+        stmt = text(sql_text)
+        engine: AsyncEngine = self._pools.engine(self.pool_name)
+        _trim = self._pools.trim_strings(self.pool_name)
+        started = time.perf_counter()
+
+        # Server-side cursor via conn.stream(). The ``stream_results=True`` execution option
+        # tells SQLAlchemy "don't pre-buffer"; asyncpg honours this via a Postgres cursor,
+        # oracledb-async via REF cursor + arraysize. The fetch batch size we ask for matches
+        # the chunk size so each cursor.fetchmany() roughly corresponds to one chunk we
+        # forward to the client.
+        async with engine.connect() as conn:
+            # ``execution_options`` rides through `stream()`'s kwarg — SQLAlchemy's async
+            # `Connection.execution_options()` is itself a coroutine, awkward to chain.
+            # ``stream_results=True`` enables the server-side cursor; ``max_row_buffer``
+            # caps the per-fetch batch (asyncpg cursor fetch size + oracledb arraysize).
+            result = await conn.stream(
+                stmt, bound,
+                execution_options={"stream_results": True, "max_row_buffer": chunk},
+            )
+            columns = _apply_column_hints(
+                _columns_from_result(result), column_hints or [], self._dict, lang, connector=dict_scope,
+            )
+            # JDE Julian date columns — same case-insensitive convention as execute().
+            _jdedate_cols = {c.name for c in columns if (c.format or "").lower() == "jdedate"}
+            yield StreamMeta(columns=columns, cap=cap, chunk_size=chunk)
+
+            sent = 0
+            truncated = False
+            async for partition in result.mappings().partitions(chunk):
+                if sent >= cap:
+                    truncated = True
+                    break
+                # Build the outgoing chunk row by row — coerce each row + apply trim_strings +
+                # JDE date conversion inline so the consumer sees fully-post-processed rows
+                # (same shape as the QueryResult.rows on the non-streaming path).
+                out: list[dict[str, Any]] = []
+                for raw in partition:
+                    if sent + len(out) >= cap:
+                        truncated = True
+                        break
+                    row = dict(raw)
+                    if _trim:
+                        for k, v in row.items():
+                            if isinstance(v, str):
+                                row[k] = v.rstrip()
+                    if _jdedate_cols:
+                        for cn in _jdedate_cols:
+                            if cn in row:
+                                row[cn] = _from_jde_julian(row[cn])
+                    out.append(row)
+                if out:
+                    sent += len(out)
+                    yield StreamRows(rows=out, sent=sent)
+                if truncated:
+                    break
+
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        yield StreamDone(total=sent, truncated=truncated, duration_ms=duration_ms)
 
     async def test_run(
         self, sql_text: str, params: dict[str, Any] | None = None, *,

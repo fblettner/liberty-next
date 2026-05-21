@@ -120,6 +120,7 @@ const en = {
     export: 'Export',
     rowsPerPage: 'Rows per page',
     showAll: 'All',
+    runningRows: 'Running… {{count}} rows',
     maxRows: 'Max rows',
     maxRowsHint: 'default',
     showing: 'Showing {{from}}–{{to}} of {{total}}',

@@ -16,9 +16,12 @@ and the caller's permission. (The OpenAPI docs at ``/docs`` describe all of this
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+import json
+import logging
+from typing import Annotated, Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from liberty.auth.dependencies import CurrentPrincipal
@@ -26,9 +29,12 @@ from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError, detect_statement_type
 from liberty.connectors.config import ColumnHint
 from liberty.connectors.introspect import introspect_pool, list_pool_schemas
+from liberty.connectors.sql import StreamDone, StreamMeta, StreamRows
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, public_connector, request_language, require_permission
 from liberty.web.errors import http_for_connector_error
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["connectors"])
 
@@ -152,6 +158,110 @@ async def _run_sql(
     return result.to_dict()
 
 
+def _stream_sql_ndjson(
+    connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
+    language: str | None = None, max_rows: int | None = None, user: str | None = None,
+    screens: ScreensFile | None = None, chunk_size: int | None = None,
+) -> StreamingResponse:
+    """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
+    :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
+    rejected (streaming is SELECT-only; the SQLConnector enforces this and raises). The
+    response body is a sequence of newline-delimited JSON objects:
+
+      * ``{"kind":"meta","columns":[…],"cap":N,"chunk_size":N}`` — once at the top.
+      * ``{"kind":"rows","rows":[…],"sent":N}`` — repeatedly, ``chunk_size`` rows each.
+      * ``{"kind":"done","total":N,"truncated":bool,"duration_ms":…}`` — exactly once.
+      * ``{"kind":"error","detail":…}`` — emitted instead of the ``done`` line if the query
+        raises mid-stream. The HTTP status is still 200 (the headers have already been sent
+        by then); the consumer's NDJSON parser sees the error line and reports it as a
+        terminal event.
+
+    Errors raised **before** any byte ships (permission check, missing connector / query,
+    non-SELECT) propagate as standard HTTP errors via ``http_for_connector_error``.
+    """
+    # ── prep (mirrors _run_sql) — done synchronously so any failure raises before we start
+    # streaming. Once the generator below begins yielding, headers have been sent and we
+    # can't change the status code; preflight everything we can up here.
+    screen, _slot, screen_app = (
+        _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+    )
+    column_hints = _column_hints_for(screen)
+    screen_max_rows = screen.max_rows if screen else None
+    dict_scope = screen_app if screen is not None else None
+    try:
+        conn = connectors.sql(connector)
+        # Reject non-SELECT up front so we don't 200-then-error. ``execute_stream`` also
+        # raises, but doing it here gives a clean 405 / 422 instead of an NDJSON error line.
+        qdef = conn.get_query(query)
+    except ConnectorError as exc:
+        raise http_for_connector_error(exc) from exc
+    if detect_statement_type(qdef.default_sql) != "SELECT":
+        raise HTTPException(
+            status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail="Streaming is SELECT-only; use POST /api/sql/{c}/{q} for writes.",
+        )
+
+    async def gen() -> AsyncIterator[bytes]:
+        """Render each StreamEvent to a single NDJSON line (UTF-8 bytes, trailing ``\\n``).
+        Wraps the connector's async generator with an exception handler so a mid-stream
+        failure becomes a terminal ``error`` event instead of a hung connection."""
+        try:
+            async for ev in conn.execute_stream(
+                query, params, language=language, max_rows=max_rows, user=user,
+                column_hints=column_hints, screen_max_rows=screen_max_rows,
+                dictionary_scope=dict_scope, chunk_size=chunk_size or 100,
+            ):
+                # The three concrete event types render to plain dicts; ``json.dumps`` with
+                # ``default=str`` handles dates / datetimes / Decimals the same way the
+                # non-streaming response does (FastAPI uses jsonable_encoder which falls back
+                # to str() for unknown types — keep parity).
+                if isinstance(ev, StreamMeta):
+                    payload = {
+                        "kind": "meta",
+                        "columns": [c.to_dict() for c in ev.columns],
+                        "cap": ev.cap,
+                        "chunk_size": ev.chunk_size,
+                    }
+                elif isinstance(ev, StreamRows):
+                    payload = {"kind": "rows", "rows": ev.rows, "sent": ev.sent}
+                elif isinstance(ev, StreamDone):
+                    payload = {
+                        "kind": "done",
+                        "total": ev.total,
+                        "truncated": ev.truncated,
+                        "duration_ms": round(ev.duration_ms, 3),
+                        "rowcount": ev.rowcount,
+                    }
+                else:
+                    # Defensive — keeps a future StreamEvent variant from silently breaking
+                    # the stream (the consumer would see an unknown ``kind`` field).
+                    payload = {"kind": "unknown"}
+                yield (json.dumps(payload, default=str) + "\n").encode("utf-8")
+        except (ConnectorError, SQLAlchemyError) as exc:
+            # The HTTP headers have already gone out (``StreamingResponse`` flushes on the
+            # first yield) so we can't switch to a 4xx/5xx. Emit a terminal error line; the
+            # consumer's NDJSON parser sees ``{"kind":"error",…}`` and treats it as end-of-
+            # stream + reports the detail. Logged at warning level so an operator sees it
+            # in the server log without scraping the response body.
+            _log.warning(
+                "execute_stream %s.%s failed mid-stream: %s",
+                connector, query, exc,
+            )
+            yield (json.dumps({
+                "kind": "error",
+                "detail": f"{type(exc).__name__}: {exc}",
+            }) + "\n").encode("utf-8")
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        # Hint downstream proxies (nginx) to not buffer. Without this, the operator's first
+        # chunk may sit in the proxy buffer until the *whole* response lands — defeats the
+        # purpose of streaming.
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/sql/{connector}/_schemas")
 async def sql_pool_schemas(
     connector: str, principal: CurrentPrincipal, connectors: Connectors,
@@ -218,11 +328,21 @@ async def sql_pool_schema(
         ) from exc
 
 
+def _streaming_requested(qp: dict[str, Any]) -> bool:
+    """``?_stream=1`` (or any truthy spelling) opts the response into NDJSON streaming
+    mode. Lives on the query string so a browser can swap modes without changing the body
+    shape; mirrors the existing ``?_limit=N`` convention."""
+    raw = qp.get("_stream")
+    if raw is None:
+        return False
+    return str(raw).lower() in {"1", "true", "yes", "y", "on"}
+
+
 @router.get("/sql/{connector}/{query}")
 async def sql_query_get(
     connector: str, query: str, request: Request, principal: CurrentPrincipal,
     connectors: Connectors, screens: Screens,
-) -> dict[str, Any]:
+):
     require_permission(principal, f"sql:{connector}:{query}")
     # GET must not mutate — only SELECTs are allowed here; everything else uses POST.
     try:
@@ -232,7 +352,17 @@ async def sql_query_get(
     if detect_statement_type(qdef.default_sql) != "SELECT":
         raise HTTPException(status.HTTP_405_METHOD_NOT_ALLOWED, detail="Non-SELECT queries must be run with POST")
     qp = dict(request.query_params)
-    limit = _as_int(qp.pop("_limit", None))  # ?_limit=N overrides the row cap; the rest are query params
+    # ``_stream`` / ``_limit`` / ``_chunk_size`` are reserved query keys — pop them out before
+    # passing the rest as SQL params. Matches the existing ``_limit`` convention.
+    stream = _streaming_requested(qp); qp.pop("_stream", None)
+    limit = _as_int(qp.pop("_limit", None))
+    chunk_size = _as_int(qp.pop("_chunk_size", None))
+    if stream:
+        return _stream_sql_ndjson(
+            connectors, connector, query, qp,
+            language=request_language(request), max_rows=limit, user=principal.username,
+            screens=screens, chunk_size=chunk_size,
+        )
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
@@ -245,11 +375,21 @@ async def sql_query_post(
     connector: str, query: str, request: Request, principal: CurrentPrincipal,
     connectors: Connectors, screens: Screens,
     body: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+):
     require_permission(principal, f"sql:{connector}:{query}")
+    qp = dict(request.query_params)
+    stream = _streaming_requested(qp)
+    chunk_size = _as_int(qp.get("_chunk_size"))
     limit = _as_int(body.get("max_rows")) if body else None  # body {"params": …, "max_rows": N}
+    params = _params_from_body(body)
+    if stream:
+        return _stream_sql_ndjson(
+            connectors, connector, query, params,
+            language=request_language(request), max_rows=limit, user=principal.username,
+            screens=screens, chunk_size=chunk_size,
+        )
     return await _run_sql(
-        connectors, connector, query, _params_from_body(body),
+        connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
         screens=screens,
     )

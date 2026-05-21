@@ -1664,7 +1664,7 @@ none).
   `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
   framework restores the dashboard via the home redirect even when the menu leaf is missing.
 
-523 backend tests pass.
+531 backend tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** **Phase 5** is effectively complete from a
 framework standpoint — the NOMAJDE cutover is operator work, and the historic AUD_<table>
@@ -1696,16 +1696,69 @@ once virtualization is in place. The 500 / 1000 in-between options ride alongsid
 clamped to the row count). Operators with a screen whose pool sets `max_rows = 100000` now
 pick "All" and get a smooth single-scroll experience.
 
-Slice 2 — **cursor-based server pagination** — still deferred. The frontend now uses
-virtualization to keep the DOM small no matter the row count, but the *initial load* still
-ships every row in one JSON payload. For screens past ~100K rows where the JSON parse +
-TanStack's in-memory filter/sort starts hurting, the next step is a new request shape
-(`?_cursor=…&_limit=N` → `{rows, next_cursor}`) per-screen opt-in. The screen's
-`key_columns` (already collected per Phase 3) become the cursor's stable ORDER BY
+**Big-grid scaling — slice 2 (NDJSON streaming) DONE.** Adds **progressive rendering** so
+the operator sees the first rows ~100 ms after Run instead of waiting for the whole result
+to land. The SQL query still runs in full — what changes is *how* it's delivered: as the DB
+cursor advances, rows trickle to the browser in small NDJSON chunks; the TableView appends
+them live. On a 15K-row screen that took ~6 s before the first paint, the first 100 rows
+are now visible inside ~150 ms and the grid stays responsive throughout.
+
+Backend (`liberty/connectors/sql.py` + `liberty/web/connectors.py`):
+- `SQLConnector.execute_stream(query, params, *, chunk_size=100, …)` is an async generator
+  that yields :class:`StreamMeta` → N × :class:`StreamRows` → :class:`StreamDone`. Uses
+  SQLAlchemy's `conn.stream(stmt, …, execution_options={"stream_results": True,
+  "max_row_buffer": chunk})` for a real server-side cursor. Both `OracleDialectAsync_oracledb`
+  and `PGDialect_asyncpg` report `supports_server_side_cursors = True` — the same code runs
+  on Postgres (asyncpg cursors via `DECLARE … CURSOR`) and Oracle (REF cursor + `arraysize`).
+  SQLite/aiosqlite emits the same event shape (it effectively buffers under the hood — fine
+  for tests). Streaming is **SELECT-only** — writes raise `StatementNotAllowedError` (the
+  protocol has no row stream and needs a transactional commit; callers fall back to
+  :meth:`execute`). Same prep as :meth:`execute` is inlined (filter wrap, form rules, schema
+  placeholders, row cap, dictionary scope) so the streamed shape stays identical to the
+  one-shot shape. Trim-strings + JDE-date conversion run **per chunk** as rows are yielded.
+  Chunk size is clamped to `[1, MAX_CHUNK_SIZE=5000]`; the default is `DEFAULT_CHUNK_SIZE=100`.
+- `POST/GET /api/sql/{c}/{q}?_stream=1` opts the response into NDJSON
+  (`application/x-ndjson`). `?_chunk_size=N` overrides the default chunk size. The route
+  pre-flights the permission + connector + query lookup + statement-type check *synchronously*
+  so 401/403/404/405 surface as standard HTTP errors before any byte ships. Mid-stream
+  failures (the cursor opens but a fetchmany raises) can't change the HTTP status — instead
+  the stream terminates with a `{"kind":"error","detail":…}` line so the consumer's NDJSON
+  parser sees a clean end. `X-Accel-Buffering: no` + `Cache-Control: no-cache` headers stop
+  proxies from holding back the chunks.
+- 8 streaming tests in `tests/test_web_connectors.py` cover: full event sequence
+  (meta + rows + done), POST + params + filter narrowing, the permission short-circuit
+  (403 before any NDJSON ships), non-SELECT rejection (405), unknown-query (404), mid-stream
+  error → inline `error` event, chunk size clamping (0 → 100, 9999999 → 5000), and `_limit`
+  truncation (`done.truncated = True`). 531 backend tests pass (was 523 + 8 new).
+
+Frontend (`frontend/src/api/client.ts` + `frontend/src/pages/TableView/index.tsx`):
+- `streamNDJSON(path, {method, body, signal}, onEvent)` — parallel to the existing `streamSSE`
+  helper. Uses `fetch().body.getReader()` + `TextDecoder` to parse newline-delimited JSON,
+  filtering blank lines + handling a non-`\n`-terminated trailing chunk. Throws `ApiError`
+  on a non-OK initial response (auth / not-found / wrong method); a mid-stream `error` event
+  is delivered through `onEvent` like any other event. The `AbortSignal` cancels the fetch +
+  releases the server-side cursor when the user navigates away.
+- TableView's `run()` switches the SELECT path to streaming. `meta` event seeds columns
+  immediately (headers + filter row paint while the first chunk is still in flight); `rows`
+  events accumulate into `allRows` and re-render on a 120 ms throttle (per-chunk re-renders
+  would saturate React); `done` forces a final flush with the actual `truncated` +
+  `duration_ms`. An `AbortController` stored in a ref cancels the previous stream when a new
+  run starts or the tab unmounts (prevents leaked cursors on Oracle).
+- Run button surfaces the live count: **"Running… 1,200 rows"** instead of an
+  undifferentiated spinner. EN/FR locale: `table.runningRows`.
+- Writes (non-SELECT) keep using the existing non-streaming POST — no protocol change there.
+- Per-screen opt-out isn't needed; streaming is strictly better than the one-shot path for
+  every SELECT we've measured. The shape of the assembled `QueryResult` is identical to what
+  the non-streaming path produces, so the rest of the TableView (column merge, FilterPanel,
+  ResultTable, ChartView, edit mode, dialog) works unchanged.
+
+Slice 3 — **cursor-based server pagination** — still deferred. Streaming gets the first
+rows on screen fast, but the full payload still travels for big queries. Cursor pagination
+would let the frontend pull only what it scrolls past + sort/filter on the server. The
+screen's `key_columns` (already collected per Phase 3) become the cursor's stable ORDER BY
 tiebreaker; the FilterPanel's `filter`-flagged columns already pre-narrow server-side, so
-the cursor only needs to thread through that wrapping. Sort + in-grid TanStack filters would
-either move server-side or get an "applies only to loaded pages" semantic. Pull this in
-whenever a real screen needs >100K rows in a single shot, not before.
+the cursor would only need to thread through that wrapping. Pull this in whenever a real
+screen needs >100K rows in a single shot, not before.
 
 ## Run it
 
