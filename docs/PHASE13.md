@@ -27,7 +27,7 @@ nomaflow is a configuration-driven ETL + scheduler that runs **inside the libert
 - **Distributed execution.** v1's Spark setup was justified by perceived scale; the actual JDE table volumes (millions of rows, not billions) do not need it. If a job ever grows beyond single-node throughput, revisit then.
 - **A general-purpose DAG engine.** No branching, no XCom, no SubDAGs. Linear step sequences only; if you need a DAG, write a Python step.
 - **Backwards compatibility with Airflow DAG files.** v1 source stays in `liberty-apps/legacy/` as reference. Once nomaflow covers production, the Airflow deployment is decommissioned.
-- **A web-facing job submission API.** Internal trigger only (cron, manual via Screen action, or another step calling out). No `POST /jobs/run` from the public surface in v1 of nomaflow.
+- **An unauthenticated job submission API.** Triggers come from three places: the scheduler (cron), the admin-protected `POST /admin/jobs/<id>/run` (used by the Settings page "Run now" button — same auth as every other `/admin/*` endpoint), and other jobs calling out via `http`. No public surface, no per-job webhook URLs, no anonymous trigger tokens.
 
 ---
 
@@ -178,28 +178,49 @@ base_seconds = 60
 type = "sql_copy"
 mode = "overwrite"
 type_coercion = "jde"
+source = { connector = "jde" }
+target = { connector = "nomajde" }
 
 [[jobs.steps]]
-name = "F0004"; source.schema = "PS920CTL"; target.schema = "nomajde"
-[[jobs.steps]]
-name = "F0005"; source.schema = "PS920CTL"; target.schema = "nomajde"
-[[jobs.steps]]
-name = "F9200"; source.schema = "DD920"; target.schema = "nomajde"
-[[jobs.steps]]
-name = "F9202"; source.schema = "DD920"; target.schema = "nomajde"
-[[jobs.steps]]
-name = "F9210"; source.schema = "DD920"; target.schema = "nomajde"
-[[jobs.steps]]
-name = "F9860"; source.schema = "OL920"; target.schema = "nomajde"
-[[jobs.steps]]
-name = "F9865"; source.schema = "OL920"; target.schema = "nomajde"
+name = "F0004"
+source = { schema = "PS920CTL", table = "F0004" }
+target = { schema = "nomajde",  table = "f0004" }
 
-# defaults expand each step to:
-#   source = { connector = "jde", schema = <inline>, table = <name> }
-#   target = { connector = "nomajde", schema = <inline>, table = <name lowercased> }
+[[jobs.steps]]
+name = "F0005"
+source = { schema = "PS920CTL", table = "F0005" }
+target = { schema = "nomajde",  table = "f0005" }
+
+[[jobs.steps]]
+name = "F9200"
+source = { schema = "DD920", table = "F9200" }
+target = { schema = "nomajde", table = "f9200" }
+
+[[jobs.steps]]
+name = "F9202"
+source = { schema = "DD920", table = "F9202" }
+target = { schema = "nomajde", table = "f9202" }
+
+[[jobs.steps]]
+name = "F9210"
+source = { schema = "DD920", table = "F9210" }
+target = { schema = "nomajde", table = "f9210" }
+
+[[jobs.steps]]
+name = "F9860"
+source = { schema = "OL920", table = "F9860" }
+target = { schema = "nomajde", table = "f9860" }
+
+[[jobs.steps]]
+name = "F9865"
+source = { schema = "OL920", table = "F9865" }
+target = { schema = "nomajde", table = "f9865" }
+
+# step_defaults provides connector/mode/coercion;
+# each step supplies its own schema/table pair.
 ```
 
-65 lines of Python → 25 lines of TOML, with explicit retry policy, monitoring out of the box, and no Spark startup cost.
+65 lines of Python → ~40 lines of TOML, with explicit retry policy, monitoring out of the box, and no Spark startup cost. (Inline tables, not the semicolon syntax that isn't valid TOML — every key/value pair gets its own line or lives inside `{...}`.)
 
 ### 3.5 Worked example — reproducing `nomasx1-agent.py`
 
@@ -214,7 +235,7 @@ schedule = "30 2 * * *"
 [[jobs.steps]]
 type = "python"
 name = "collect"
-callable = "liberty_apps_plugins.nomaflow.nomasx1.collect:run"
+callable = "nomaflow.nomasx1.collect:run"
 op_kwargs = { apps_id = "10", module = "ACTIVITY_LOG", debug_enabled = "N", table = "all", user_id = "all", role_only = "N" }
 
 [[jobs]]
@@ -225,11 +246,15 @@ schedule = "0 3 * * SUN"
 [[jobs.steps]]
 type = "python"
 name = "collect"
-callable = "liberty_apps_plugins.nomaflow.nomasx1.collect:run"
+callable = "nomaflow.nomasx1.collect:run"
 op_kwargs = { apps_id = "10", module = "all", debug_enabled = "N", table = "all", user_id = "all", role_only = "N" }
 ```
 
-The `liberty_apps_plugins.nomaflow.nomasx1.collect` module is the ported version of the v1 `collect_nomasx1_dag` body. Per the plan: ~1 week per major workflow to port; this is one of those workflows. The TOML stays small; the heavy lifting is in the Python (which is fine — that's what `python` is for).
+The `nomaflow.nomasx1.collect` module is the ported version of the v1
+`collect_nomasx1_dag` body, living at `liberty-apps/plugins/nomaflow/nomasx1/collect.py`
+(see §5.3 for how `plugins/` becomes the importable package root). Per the plan:
+~1 week per major workflow to port; this is one of those workflows. The TOML stays
+small; the heavy lifting is in the Python (which is fine — that's what `python` is for).
 
 ---
 
@@ -262,7 +287,7 @@ QUEUED ──► RUNNING ──► SUCCEEDED
                   └──► CANCELED (manual stop)
 ```
 
-No PAUSED, no UPSTREAM_FAILED, no DEFERRED — Airflow's full taxonomy isn't needed for linear sequences.
+No PAUSED, no UPSTREAM_FAILED, no DEFERRED — Airflow's full taxonomy isn't needed for linear sequences. (The `enabled = false` flag in jobs.toml is *scheduler-level*, not run-level: it tells APScheduler not to register the cron trigger at all. The state machine above describes the lifecycle of a `nomaflow_job_runs` row, which only ever gets created when a job actually fires.)
 
 **Concurrency:** one `JobRunner` instance per worker process; jobs run in parallel asyncio tasks. Within a job, steps are strictly serial. No `max_active_runs_per_dag` — if a schedule fires while the previous run is still RUNNING, the new fire is **dropped** with a logged warning (matching v1's `depends_on_past=False, catchup=False` defaults).
 
@@ -294,25 +319,55 @@ async def execute_sql_copy(self, step: SqlCopyStep, ctx: RunContext) -> StepResu
     # 2. Derive target DDL (apply jde coercion → pick PG types)
     target_ddl = build_target_ddl(columns, coercion=step.type_coercion)
 
-    # 3. Recreate target (overwrite mode)
-    async with tgt_pool.connect() as tgt:
-        await tgt.execute(text(f'DROP TABLE IF EXISTS "{step.target.schema}"."{step.target.table}"'))
-        await tgt.execute(text(target_ddl))
+    # 3. For overwrite mode: build a fresh "_new" table; rename atomically at the end.
+    #    Production stays pointed at the existing rows until the swap commits, so a
+    #    mid-stream failure leaves the previous run's data intact — no "stale → empty"
+    #    window. (v1 Spark mode="overwrite" did DROP→CREATE→INSERT, which DID have
+    #    that window; this is an intentional improvement.)
+    tgt_table = step.target.table
+    work_table = f"{tgt_table}__new" if step.mode == "overwrite" else tgt_table
 
-    # 4. Stream + write in batches
     rows_written = 0
-    async with src_pool.connect() as src:
-        stmt = text(f'SELECT * FROM "{step.source.schema}"."{step.source.table}"')
-        result = await src.stream(stmt)
-        async for batch in result.partitions(step.batch_size):
-            transformed = [coerce_row(r, columns, step.type_coercion) for r in batch]
-            async with tgt_pool.connect() as tgt:
-                await tgt.execute(insert_stmt(step.target), transformed)
-            rows_written += len(transformed)
-            await self._broadcast_progress(ctx, rows_written)
+    async with tgt_pool.connect() as tgt:               # one target connection for the whole step
+        if step.mode == "overwrite":
+            await tgt.execute(text(
+                f'DROP TABLE IF EXISTS "{step.target.schema}"."{work_table}"'))
+            await tgt.execute(text(target_ddl.replace(tgt_table, work_table)))
+
+        # 4. Stream + write in batches, all on the same target connection
+        async with src_pool.connect() as src:           # one source connection too
+            stmt = text(
+                f'SELECT * FROM "{step.source.schema}"."{step.source.table}"')
+            result = await src.stream(stmt)
+            insert = insert_stmt(step.target.schema, work_table, columns)
+            async for batch in result.partitions(step.batch_size):
+                transformed = [coerce_row(r, columns, step.type_coercion) for r in batch]
+                await tgt.execute(insert, transformed)
+                rows_written += len(transformed)
+                await self._broadcast_progress(ctx, rows_written)
+
+        # 5. Atomic swap (overwrite mode only). On Postgres this is one transaction.
+        if step.mode == "overwrite":
+            async with tgt.begin():
+                await tgt.execute(text(
+                    f'DROP TABLE IF EXISTS "{step.target.schema}"."{tgt_table}"'))
+                await tgt.execute(text(
+                    f'ALTER TABLE "{step.target.schema}"."{work_table}" '
+                    f'RENAME TO "{tgt_table}"'))
 
     return StepResult(rows_affected=rows_written)
 ```
+
+Two behaviors worth noting in this sketch beyond the data-loss fix:
+
+- **Single source + single target connection per step.** Opening/closing per batch
+  is a common anti-pattern that shows up in async ETL code; for a 10K-batch sync
+  of a 1M-row table, that's 100 connect/close cycles per step. The sketch holds
+  one of each for the step's whole lifetime.
+- **`_new` suffix + RENAME** assumes the target dialect supports cheap `ALTER TABLE
+  ... RENAME TO`. Postgres, Oracle, MySQL: yes. SQLite: no (requires CREATE+COPY).
+  Production target is Postgres, so this works. If a tenant ever targets SQLite the
+  executor falls back to v1's DROP-then-INSERT semantics with a logged warning.
 
 **Why this is going to work without Spark:**
 
@@ -368,7 +423,7 @@ op_kwargs = { foo = "bar", run_id = "${run.id}" }
 
 The function signature: `def fn(**kwargs) -> dict | None`. The return dict's `rows_affected` (if present) populates `${prev.rows_affected}` for the next step. Sync or async — the runner detects via `inspect.iscoroutinefunction`.
 
-**Where the callable lives:** modules importable from `liberty_apps_plugins.nomaflow.*` (the Python package inside `liberty-apps/plugins/nomaflow/`). liberty-next adds that path to `sys.path` at startup when `LIBERTY_APPS_DIR` is set, just like it picks up `config/`.
+**Where the callable lives.** When `LIBERTY_APPS_DIR` is set, liberty-next prepends `${LIBERTY_APPS_DIR}/plugins/` to `sys.path` at startup. That makes every subdirectory of `plugins/` (each with an `__init__.py`) an importable top-level package. So `liberty-apps/plugins/nomaflow/nomasx1/collect.py` resolves as `nomaflow.nomasx1.collect`. No registration step, no central allowlist — the package layout *is* the contract. (Option (b), an explicit `[nomaflow.callables]` allowlist in `app.toml`, was considered and rejected for v1: the plugins repo is private and trusted, and an allowlist would force every new job author to touch app.toml. Re-evaluate if/when third-party job authors appear.)
 
 ---
 
@@ -379,6 +434,7 @@ The function signature: `def fn(**kwargs) -> dict | None`. The return dict's `ro
 - **Execution:** APScheduler fires a coroutine → `JobRunner.run(job, ScheduledTrigger(fired_at=now))`.
 - **Missed fires:** if the process was down when a schedule should have fired, the next startup does NOT replay missed fires (catchup=False, matching v1). A `[scheduler] catchup_window_minutes = N` option can later allow a grace period if needed.
 - **Manual trigger:** a `POST /admin/jobs/<id>/run` endpoint (admin permission required) → enqueues a `ManualTrigger(triggered_by=user_id)` run. This is what the Settings page UI fires when an operator clicks "Run now."
+- **Crash recovery on startup.** If the process died mid-run, `nomaflow_job_runs` will have rows in state `RUNNING` whose owning process is gone — without intervention they stay `RUNNING` forever, blocking the dedup `UNIQUE (job_id, scheduled_at)` from firing the next scheduled instance. On scheduler startup, before any schedules are registered, a sweep marks every `RUNNING`/`QUEUED` row as `FAILED` with `error_message = "abandoned: process restart during run"`. The same sweep cascades to `nomaflow_step_runs` (any RUNNING step gets `FAILED` + the same message). Cheap (one UPDATE … WHERE state IN (...)), runs once at boot, idempotent.
 
 **Why APScheduler and not a hand-rolled cron loop:** cron parsing alone is enough to justify a library; APScheduler also handles DST, timezones, interval triggers, and per-job tz overrides. The footprint is ~30 LOC of glue.
 
@@ -541,7 +597,7 @@ After 13c lands, the Airflow deployment is decommissioned and `liberty-apps/lega
 
 1. **APScheduler 4.0 vs 3.x.** 4.0 has a much cleaner async story but as of writing was still beta. Decide at start of 13a; if 4.0 isn't trustworthy yet, 3.x with `AsyncIOScheduler` works.
 2. **Single-process vs gunicorn workers.** If liberty-next runs under multiple gunicorn workers, only one should run the scheduler. Solutions: a startup election via Postgres advisory lock (`pg_try_advisory_lock(NOMAFLOW_LOCK_KEY)`) — the worker that gets it owns the scheduler, others run job execution from a shared queue. Defer to 13a implementation; the lock-based approach is well-known and ~30 LOC.
-3. **Where `python` step callables live.** Decision pending: are they (a) modules under `liberty-apps/plugins/nomaflow/` (importable because liberty-next adds that path to `sys.path`), or (b) registered explicitly in `app.toml` via `[nomaflow.callables] custom_id = "my.module:fn"` with the TOML referring to `custom_id`? Option (a) is simpler; option (b) is safer (explicit allowlist of what can be invoked). Lean toward (a) for v1, add (b) if a tenant ever runs untrusted job authors — which today is never.
+3. ~~Where `python` step callables live.~~ **Decided (in spec).** Option (a): `${LIBERTY_APPS_DIR}/plugins/` goes on `sys.path`; callables are referenced by their natural import path (`nomaflow.nomasx1.collect:run`). No allowlist. See §5.3 "Where the callable lives." Revisit if a tenant ever runs untrusted job authors.
 4. **JDE Decimal(p,s) with s>0 → bigint** is a v1 bug-or-feature. The migrator preserves it because the production tables expect it; nomaflow must do the same. Add a regression test that asserts a Decimal(10,2) source column lands as bigint in target. If/when this is fixed in v1, fix it here too.
 5. **`upsert` mode for `sql_copy`.** Specified above but the executor doesn't have a clean cross-DB implementation. Postgres has `ON CONFLICT`, Oracle has `MERGE`, MSSQL has `MERGE`. Either (a) require a `primary_key` column and emit the right dialect, or (b) drop `upsert` from v1 and force users to write a `sql_query` step against a pre-existing MERGE statement. Decide during 13a; (b) is the YAGNI choice.
 6. **Logs storage beyond 4 KB.** The file logger already exists; the question is operator UX. If `journalctl`-style filtering by run_id over the Socket.IO log tail (Phase 9) is unwieldy, add a `GET /admin/jobs/runs/<id>/logs` endpoint that returns the full log slice from the on-disk file. Punt until an operator complains.
