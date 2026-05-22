@@ -81,3 +81,15 @@ api_tool = false                 # expose api_call (off — API endpoints may ha
 allowed_connectors = []          # restrict which connectors the assistant may use; empty = all
 web_fetch_domains = []           # e.g. ["docs.example.com"]; empty = web_fetch disabled
 web_fetch_max_uses = 5
+
+# nomaflow — Phase 13a's in-process ETL + scheduler. Loads jobs.toml at startup,
+# self-bootstraps the nomaflow_* tables on `pool`, runs the orphan-recovery sweep,
+# registers cron triggers. See ../../liberty-apps/docs/NOMAFLOW.md for the
+# operator guide and docs/PHASE13.md for the spec. Missing/unreachable pool →
+# nomaflow logs a warning and skips startup (rest of the app boots normally).
+[jobs]
+# Default → ${LIBERTY_APPS_DIR}/plugins/nomaflow/jobs.toml when LIBERTY_APPS_DIR
+# is set; ./config/jobs.toml otherwise. Explicit value here wins over both.
+# config_path = "config/jobs.toml"
+pool = "session"                 # which connector pool holds the nomaflow_* tables (session/auth DB)
+enabled = true                   # false → catalogue loads, scheduler doesn't start (maintenance mode)
