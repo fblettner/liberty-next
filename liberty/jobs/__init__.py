@@ -14,7 +14,7 @@ no admin endpoints yet — those land in subsequent chunks.
 from __future__ import annotations
 
 from liberty.jobs.db import JobDatabase
-from liberty.jobs.models import Base, JobRun, RunState, StepRun, TriggerKind
+from liberty.jobs.models import Base, JobRun, RunLog, RunState, StepRun, TriggerKind
 from liberty.jobs.recovery import list_orphan_run_ids, mark_orphan_runs_failed
 from liberty.jobs.registry import JobRegistry, UnknownJobError, load_jobs
 from liberty.jobs.runner import Broadcaster, JobRunner, compute_backoff_delay
@@ -56,6 +56,7 @@ __all__ = [
     "JobRunner",
     "JobScheduler",
     "JobsFile",
+    "RunLog",
     "ManualTrigger",
     "RunContext",
     "RunState",

@@ -30,7 +30,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from liberty.jobs.db import JobDatabase
-from liberty.jobs.models import JobRun, RunState, StepRun
+from liberty.jobs.models import JobRun, RunLog, RunState, StepRun
+from liberty.jobs.runlog import finish_run, reset_run_context, set_run_context
 from liberty.jobs.schema import BackoffKind, Job, JobRetry, Step, StepType
 from liberty.jobs.steps.base import (
     RunContext,
@@ -162,6 +163,11 @@ class JobRunner:
         if current is not None:
             self._active_runs[run.id] = current
 
+        # Bind this run id to the async context so every log line emitted from
+        # here on — including from the executor tasks — is captured into the
+        # run's log buffer (see liberty.jobs.runlog). Reset in the finally.
+        log_token = set_run_context(run.id)
+
         _log.info(
             "nomaflow.runner started job=%s run=%s trigger=%s steps=%d",
             job.id, run.id, trigger.kind, len(job.steps),
@@ -198,8 +204,11 @@ class JobRunner:
         finally:
             # Always clear the active-run registration — even on cancellation,
             # even on early return for resumed-terminal runs. cancel() lookups
-            # on a finished run should be a clean miss.
+            # on a finished run should be a clean miss. Unbind the log context
+            # too (the run's buffer is flushed to the DB by _finalize, which
+            # took the run id explicitly — it doesn't need the contextvar).
             self._active_runs.pop(run.id, None)
+            reset_run_context(log_token)
 
         await self._finalize(run, terminal, total_rows=total_rows)
         _log.info(
@@ -293,6 +302,10 @@ class JobRunner:
         total_rows: int,
         error: str | None = None,
     ) -> None:
+        # Flush the run's in-memory log buffer to its durable nomaflow_run_logs
+        # row. finish_run() pops the buffer — after this the logs endpoint reads
+        # the DB for this (now-terminal) run, not the live buffer.
+        log_text = finish_run(run.id)
         async with self._db.session() as session:
             row = await session.get(JobRun, run.id)
             assert row is not None
@@ -301,6 +314,8 @@ class JobRunner:
             row.rows_affected = total_rows
             if error is not None:
                 row.error_message = error[:4096]
+            if log_text:
+                session.add(RunLog(run_id=run.id, logs=log_text))
         if self._broadcaster is not None:
             await self._broadcaster.broadcast(
                 "job_run.state",

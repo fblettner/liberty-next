@@ -32,6 +32,8 @@ const MetaRow = styled.div`
 const Meta = styled.span`display: inline-flex; align-items: center; gap: 5px;`
 const Actions = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 28px 4px; text-align: center;`
+// The last-run state badge, clickable → that run's detail page (its log).
+const RunLink = styled.span`display: inline-flex; cursor: pointer; &:hover { opacity: 0.8; }`
 // A real toggle styled as a pill — clearly clickable, clearly stateful.
 const Toggle = styled.button<{ $on: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
@@ -138,9 +140,13 @@ export default function JobsList() {
               <JobCard key={job.id}>
                 <CardTop>
                   <JobId>{job.id}</JobId>
-                  {job.in_flight && <Tag $tone="blue">{t('nomaflow.jobs.running')}</Tag>}
                   {job.last_run && (
-                    <Tag $tone={STATE_TONE[job.last_run.state]}>{job.last_run.state}</Tag>
+                    <RunLink
+                      onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(job.last_run!.run_id)}`)}
+                      title={t('nomaflow.jobs.viewRun')}
+                    >
+                      <Tag $tone={STATE_TONE[job.last_run.state]}>{job.last_run.state}</Tag>
+                    </RunLink>
                   )}
                   {job.tags.map((tg) => <Tag key={tg}>{tg}</Tag>)}
                   <ToolbarSpacer />

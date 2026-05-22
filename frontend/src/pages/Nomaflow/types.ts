@@ -77,3 +77,39 @@ export interface JobsParsedResponse {
   path: string
   jobs: JobConfig[]
 }
+
+// ── run detail (GET /admin/jobs/runs/<id>) ───────────────────────────────────────
+
+export interface RunInfo {
+  id: string
+  job_id: string
+  state: RunState
+  trigger_kind: string
+  triggered_by: string | null
+  scheduled_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  rows_affected: number | null
+  error_message: string | null
+}
+
+export interface StepRunInfo {
+  step_index: number
+  step_name: string
+  step_type: string
+  attempt: number
+  state: RunState
+  started_at: string | null
+  finished_at: string | null
+  rows_affected: number | null
+  error_message: string | null
+}
+
+export interface RunDetailResponse {
+  run: RunInfo
+  steps: StepRunInfo[]
+  /** The run's log text — live in-memory buffer while it's running, the
+   *  durable nomaflow_run_logs row once finished. */
+  logs: string
+}
+

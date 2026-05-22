@@ -16,6 +16,7 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
 const NomaflowSchedule = lazy(() => import("./pages/Nomaflow/Schedule"));
+const NomaflowRunDetail = lazy(() => import("./pages/Nomaflow/RunDetail"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
@@ -65,6 +66,7 @@ export default function App() {
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
         <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
         <Route path="nomaflow/schedule" element={<NomaflowSchedule />} />
+        <Route path="nomaflow/runs/:runId" element={<NomaflowRunDetail />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

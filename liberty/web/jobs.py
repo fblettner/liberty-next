@@ -222,6 +222,73 @@ async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dic
     return {"run_id": run_id, "cancelled_by": principal.username, "status": "requested"}
 
 
+def _run_dict(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.id,
+        "job_id": run.job_id,
+        "state": run.state,
+        "trigger_kind": run.trigger_kind,
+        "triggered_by": run.triggered_by,
+        "scheduled_at": run.scheduled_at.isoformat() if run.scheduled_at else None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "rows_affected": run.rows_affected,
+        "error_message": run.error_message,
+    }
+
+
+def _step_dict(step: Any) -> dict[str, Any]:
+    return {
+        "step_index": step.step_index,
+        "step_name": step.step_name,
+        "step_type": step.step_type,
+        "attempt": step.attempt,
+        "state": step.state,
+        "started_at": step.started_at.isoformat() if step.started_at else None,
+        "finished_at": step.finished_at.isoformat() if step.finished_at else None,
+        "rows_affected": step.rows_affected,
+        "error_message": step.error_message,
+    }
+
+
+@router.get("/runs/{run_id}")
+async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[str, Any]:
+    """One run — its summary, its step rows, and its **log** (NOMAFLOW-UI.md
+    live-logs increment). Powers the Run detail page.
+
+    The log comes from the in-memory buffer while the run is still active —
+    so a poll mid-step (even a *hung* step) sees the latest lines — and from
+    the durable ``nomaflow_run_logs`` row once the run has finished. The
+    runner flushes buffer → DB at finalize, so exactly one of the two has it."""
+    from sqlalchemy import select
+    from liberty.jobs.models import JobRun, RunLog, StepRun
+    from liberty.jobs.runlog import run_logs as live_run_logs
+
+    comps = _components(request)
+    async with comps.db.session() as session:
+        run = await session.get(JobRun, run_id)
+        if run is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no run {run_id!r}")
+        steps = (await session.execute(
+            select(StepRun)
+            .where(StepRun.run_id == run_id)
+            .order_by(StepRun.step_index, StepRun.attempt)
+        )).scalars().all()
+        run_payload = _run_dict(run)
+        step_payload = [_step_dict(s) for s in steps]
+
+    # Live buffer for an active run; the persisted row once it's finished.
+    live = live_run_logs(run_id)
+    if live is not None:
+        logs = live
+    else:
+        async with comps.db.session() as session:
+            row = await session.get(RunLog, run_id)
+        logs = row.logs if row is not None else ""
+
+    return {"run": run_payload, "steps": step_payload, "logs": logs}
+
+
 @router.get("/cron-preview")
 async def cron_preview(
     schedule: str,

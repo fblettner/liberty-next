@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -120,3 +120,28 @@ class StepRun(Base):
             f"StepRun(id={self.id!r}, run_id={self.run_id!r}, "
             f"step={self.step_index}:{self.step_name!r}, state={self.state!r})"
         )
+
+
+class RunLog(Base):
+    """The captured log text for one run — see :mod:`liberty.jobs.runlog`.
+
+    One row per run, written once at run finalize (the in-memory buffer is the
+    live source while a run is active; this is the durable copy for after).
+    A separate table, not a column on ``nomaflow_job_runs``, so ``create_all``
+    adds it on the next boot with no ALTER — nomaflow has no Alembic yet.
+    """
+
+    __tablename__ = "nomaflow_run_logs"
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("nomaflow_job_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    logs: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return f"RunLog(run_id={self.run_id!r}, chars={len(self.logs)})"

@@ -128,6 +128,11 @@ async def build_nomaflow(
     previous instance first; the second scheduler's APScheduler instance would
     happily run alongside the first and fire every job twice.
     """
+    # Attach the per-run log-capture handler (idempotent). Done before the
+    # scheduler starts so the very first run's log lines are captured.
+    from liberty.jobs.runlog import install as install_run_log_capture
+    install_run_log_capture()
+
     # Gate on the pool existing AND being reachable. Two failure modes:
     #   1. Pool not in the registry → ``names()`` won't list it.
     #   2. Pool listed but ``url`` is empty (an unset env var) → ``engine()``

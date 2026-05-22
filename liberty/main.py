@@ -255,19 +255,28 @@ def _setup_app_logging(level: str) -> None:
     adds a handler to the root logger. So application logs (``liberty.*``,
     including ``liberty.jobs.*``) propagate to a handler-less root and Python's
     last-resort handler drops everything below WARNING. Result: a running job's
-    ``_log.info`` progress lines are invisible. This attaches a handler directly
-    to the ``liberty`` logger at the configured level, with ``propagate = False``
-    so messages don't also bubble to root (no double emit)."""
+    ``_log.info`` progress lines are invisible.
+
+    The *logger* is pinned at INFO so INFO records always reach the attached
+    handlers — the nomaflow run-log capture (:mod:`liberty.jobs.runlog`) depends
+    on that. The *stdout handler* carries the operator's configured ``log_level``,
+    so a deployment that sets ``log_level = "warning"`` still gets a quiet
+    console while the run-log buffer keeps capturing INFO. ``propagate = False``
+    avoids a double emit via root."""
     lg = logging.getLogger("liberty")
-    if lg.handlers:  # already configured — don't stack a second handler
+    if lg.level == logging.NOTSET or lg.level > logging.INFO:
+        lg.setLevel(logging.INFO)
+    lg.propagate = False
+    # Skip if a stdout handler is already attached (the run-log capture handler
+    # is a plain logging.Handler, not a StreamHandler, so it doesn't count).
+    if any(isinstance(h, logging.StreamHandler) for h in lg.handlers):
         return
     handler = logging.StreamHandler()
+    handler.setLevel(level.upper())
     handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-7s %(name)s — %(message)s", datefmt="%H:%M:%S",
     ))
     lg.addHandler(handler)
-    lg.setLevel(level.upper())
-    lg.propagate = False
 
 
 def run() -> None:

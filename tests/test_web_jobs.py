@@ -364,6 +364,46 @@ def test_cron_preview_requires_superuser(env) -> None:
         assert client.get("/admin/jobs/cron-preview", params=params, headers=_h(client, "reader")).status_code == 403
 
 
+# --------------------------------------------------------------------------- #
+# GET /admin/jobs/runs/<id> — run detail + captured log (live-logs increment)
+# --------------------------------------------------------------------------- #
+
+
+def test_get_run_detail_returns_run_steps_and_log(env) -> None:
+    """After ping runs, its run-detail carries the run summary, the step rows,
+    and the captured log — the runner's progress lines, persisted to
+    nomaflow_run_logs at finalize."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        client.post("/admin/jobs/ping/run", headers=h)
+        jobs = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
+        run_id = jobs["ping"]["last_run"]["run_id"]
+
+        r = client.get(f"/admin/jobs/runs/{run_id}", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["run"]["job_id"] == "ping"
+        assert body["run"]["state"] == "SUCCEEDED"
+        assert isinstance(body["steps"], list) and len(body["steps"]) >= 1
+        # The per-run log capture ran — the runner's start line is in there.
+        assert "nomaflow.runner started" in body["logs"]
+
+
+def test_get_run_detail_unknown_run_404(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        r = client.get("/admin/jobs/runs/no-such-run", headers=_h(client, "admin"))
+        assert r.status_code == 404
+
+
+def test_get_run_detail_requires_superuser(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        assert client.get("/admin/jobs/runs/x").status_code == 401
+        assert client.get("/admin/jobs/runs/x", headers=_h(client, "reader")).status_code == 403
+
+
 def test_run_now_for_manual_only_job_works(env) -> None:
     """``manual-only`` has no cron schedule; it's not registered with APScheduler
     but the manual fire endpoint still triggers it (that's the whole point)."""
