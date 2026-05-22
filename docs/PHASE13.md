@@ -89,7 +89,7 @@ nomaflow is a configuration-driven ETL + scheduler that runs **inside the libert
 
 ## 3. The job model — `jobs.toml`
 
-A single file. One section per job. Lives in `liberty-apps/plugins/nomaflow/jobs.toml` (env: `${NOMAFLOW_JOBS}` overrides; defaults to `${LIBERTY_APPS_DIR}/plugins/nomaflow/jobs.toml`).
+A single file. One section per job. Lives in `liberty-apps/plugins/nomaflow/jobs.toml`. The framework resolves the default path via `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml` — `LIBERTY_APPS_DIR` is set by convention to the `config/` subdirectory of the apps repo (see [DEPLOYMENT.md](../../liberty-apps/docs/DEPLOYMENT.md)), and `plugins/` is its sibling. An explicit `[jobs] config_path` in `app.toml` overrides the default.
 
 ### 3.1 Top-level shape
 

@@ -43,13 +43,17 @@ def _default_jobs_path() -> Path:
     """Default location for ``jobs.toml`` — special-cased from :func:`_default_config_path`
     because nomaflow lives under ``plugins/`` in the apps repo, not at the top of ``config/``.
 
-    ``${LIBERTY_APPS_DIR}/plugins/nomaflow/jobs.toml`` when the env var is set
-    (the layout :file:`liberty-apps/README.md` describes); ``./config/jobs.toml``
-    otherwise (the dev / API-only fallback). An explicit ``[jobs] config_path``
-    in ``app.toml`` wins over both. See ``docs/PHASE13.md`` §3."""
+    ``LIBERTY_APPS_DIR`` is set by convention to the ``config/`` subdir of the apps
+    repo (see :file:`liberty-apps/README.md` + :file:`docs/DEPLOYMENT.md`), so
+    ``plugins/`` is a *sibling* of that directory — we resolve to ``<apps_dir>/../
+    plugins/nomaflow/jobs.toml``. If the operator points ``LIBERTY_APPS_DIR``
+    elsewhere (e.g. at the repo root itself), set ``[jobs] config_path`` explicitly.
+
+    Falls back to ``./config/jobs.toml`` when the env var is unset (dev / API-only).
+    See ``docs/PHASE13.md`` §3."""
     apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
     if apps:
-        return Path(apps) / "plugins" / "nomaflow" / "jobs.toml"
+        return Path(apps).parent / "plugins" / "nomaflow" / "jobs.toml"
     return Path("config/jobs.toml")
 
 # ${NAME}  or  ${NAME:-default}  (shell semantics: the default is used when NAME is

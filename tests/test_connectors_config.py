@@ -109,9 +109,12 @@ def test_pool_config_dialect_override_and_derivation() -> None:
 
 
 def test_shipped_config_parses() -> None:
-    cfg = load_connectors_file(REPO_ROOT / "config" / "connectors.toml")
+    # Reads the tracked example (config/connectors.toml is gitignored — operators
+    # copy the example or set LIBERTY_APPS_DIR; neither is required to be present
+    # at test time). The example is the framework's defaults reference.
+    cfg = load_connectors_file(REPO_ROOT / "config" / "connectors.toml.example")
     assert "default" in cfg.pools  # the framework pool
-    # whatever connectors the deployment config defines must be valid SQL/API connectors
+    # whatever connectors the example defines must be valid SQL/API connectors
     for conn in cfg.connectors.values():
         assert isinstance(conn, (SqlConnectorConfig, ApiConnectorConfig))
 
