@@ -124,6 +124,8 @@ class Step(BaseModel):
     target: SqlEndpoint | None = None
     connector: str | None = None
     query: str | None = None
+    # sql_query: bound parameters passed through to SQLConnector.execute(params=...)
+    params: dict[str, Any] = Field(default_factory=dict)
 
     # sql_copy specifics
     mode: CopyMode | None = None
