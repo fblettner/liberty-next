@@ -76,6 +76,38 @@ async def registry(tmp_path):
     await reg.aclose()
 
 
+@pytest_asyncio.fixture
+async def registry_strings(tmp_path):
+    """Like ``registry`` but the **source** pool sets ``trim_strings=true`` and
+    the **target** pool ``coalesce_nulls=true`` — the JDE-shaped configuration
+    where sql_copy must strip Oracle CHAR/NCHAR padding on read and pad/zero
+    empties on write (PHASE13 §5.1)."""
+    cfg = ConnectorsFile(
+        pools={
+            "source": PoolConfig(
+                url=f"sqlite+aiosqlite:///{tmp_path / 'source.db'}",
+                trim_strings=True,
+            ),
+            "target": PoolConfig(
+                url=f"sqlite+aiosqlite:///{tmp_path / 'target.db'}",
+                coalesce_nulls=True,
+            ),
+        },
+        connectors={
+            "src": SqlConnectorConfig(type="sql", pool="source", queries=[]),
+            "tgt": SqlConnectorConfig(type="sql", pool="target", queries=[]),
+        },
+    )
+    reg = ConnectorRegistry(cfg)
+    src_engine = reg.pools.engine("source")
+    async with src_engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE TABLE F0901 (UPMJ INTEGER, NAME VARCHAR(50), AMOUNT NUMERIC(10, 2))"
+        ))
+    yield reg
+    await reg.aclose()
+
+
 async def _seed_source_rows(registry, rows: list[tuple]) -> None:
     src_engine = registry.pools.engine("source")
     async with src_engine.begin() as conn:
@@ -133,10 +165,12 @@ async def test_overwrite_copies_rows_with_jde_coercion(registry) -> None:
     result = await executor.execute(_copy_step(batch_size=2), _ctx())
 
     assert result.rows_affected == 3
-    # JDE: column names lowercased; decimals truncated; strings rstripped + null-stripped
+    # JDE: column names lowercased; decimals truncated; \x00 stripped from strings.
+    # Trailing whitespace is NOT stripped here — the source pool has the default
+    # trim_strings=false; the trim is exercised in test_overwrite_honors_pool_*.
     rows = await _read_target_rows(registry, "f0901")
     # Order: ordering by column 1 (upmj) — preserves insert order here
-    assert rows[0] == (123, "  alpha", 100)
+    assert rows[0] == (123, "  alpha ", 100)
     assert rows[1] == (456, "beta", 200)
     assert rows[2] == (789, "gamma", 300)
 
@@ -175,6 +209,26 @@ async def test_overwrite_empty_source_creates_empty_target(registry) -> None:
     result = await executor.execute(_copy_step(), _ctx())
     assert result.rows_affected == 0
     assert await _read_target_rows(registry, "f0901") == []
+
+
+@pytest.mark.asyncio
+async def test_overwrite_honors_pool_string_settings(registry_strings) -> None:
+    """sql_copy reads the **source** pool's ``trim_strings`` (strip Oracle
+    CHAR/NCHAR padding on read) and the **target** pool's ``coalesce_nulls``
+    (pad/zero empties on write) — the two pool flags from PHASE13 §5.1."""
+    await _seed_source_rows(registry_strings, [
+        (1, "padded     ", "10.0"),   # trailing padding → trimmed on read
+        (2, None, None),              # NULLs → coalesced on write
+    ])
+    executor = SqlCopyExecutor(registry_strings)
+    result = await executor.execute(_copy_step(batch_size=10), _ctx())
+
+    assert result.rows_affected == 2
+    rows = await _read_target_rows(registry_strings, "f0901")
+    # row 1: trailing padding stripped by the source pool's trim_strings
+    assert rows[0] == (1, "padded", 10)
+    # row 2: NULL name → " ", NULL amount → 0 (target pool's coalesce_nulls)
+    assert rows[1] == (2, " ", 0)
 
 
 # --------------------------------------------------------------------------- #

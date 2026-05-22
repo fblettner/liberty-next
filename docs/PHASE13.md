@@ -402,11 +402,20 @@ Real per-table wall times aren't known until 13a runs the harness. The Phase 13 
 
 | Source type | v1 Spark cast | nomaflow target (Postgres) |
 |---|---|---|
-| `Decimal(p, 0)` with p ≤ 9 | `IntegerType` | `integer` |
-| `Decimal(p, 0)` with p > 9 | `LongType` | `bigint` |
+| `Decimal(p, 0)` — any precision | `IntegerType` (p≤9) / `LongType` (p>9) | **`bigint`** (always) |
 | `Decimal(p, s)` with s > 0 | `LongType` (truncates) | `bigint` (truncates) — see `decimal_mode` below |
-| `String` | `trim` + strip `\x00` | server-side `trim()` + Python `.replace("\x00", "")` per row |
+| `Integer` / `SmallInteger` / `BigInteger` | — | `bigint` |
+| `String` | `trim` + strip `\x00` | Python `.replace("\x00", "")` per row; trailing-whitespace trim is pool-governed — see below |
 | anything else | identity | identity |
+
+> **`Decimal(p,0)` → `bigint`, not `integer`** — even for small precision. v1 split
+> `IntegerType` (p≤9) / `LongType` (p>9), but that was a footgun: Oracle reflects
+> `NUMBER(p,0)` as a generic integer whose *reflected* precision doesn't bound the
+> *actual* values — JDE ids/timestamps run past int32's 2.1-billion ceiling, and a
+> 32-bit `integer` target column rejects them (`asyncpg` `DataError: value out of
+> int32 range`). Every integer-valued JDE column maps to `bigint`; it can't overflow
+> on real data and the 4-byte saving isn't worth a failed sync. (Discovered syncing
+> JDE `F9210` — a `frddid` value of 3,722,380,362.)
 
 Plus: lowercase all column names (v1 `toDF(*[c.lower() for c in cols])`).
 
@@ -423,6 +432,13 @@ decimal_mode = "truncate"   # default. JDE: numeric columns are integer-valued a
 ```
 
 Default is `"truncate"` so existing nomajde tables stay byte-equivalent across the v1→nomaflow cutover (acceptance criterion §10). New jobs targeting non-JDE sources set `decimal_mode = "preserve"` explicitly. The Decimal(p,s>0) regression test in §11 covers both modes.
+
+**String handling is governed by the connector *pools*, not the step.** v1 trimmed `NCHAR`/`CHAR` padding during the copy; nomaflow keeps that, but the decision lives where it belongs — the pool. `sql_copy` reads two `[pools.*]` flags directly (the raw stream→insert path bypasses the `SQLConnector` query machinery that applies them on ordinary queries):
+
+- **`trim_strings`** — read off the **source** pool. When true, every string cell has trailing whitespace stripped (`rstrip()`) as it's read. This is the Oracle `CHAR`/`NCHAR` space-padding cleanup: a JDE source pads a `CHAR(10)` to width, and the Postgres `varchar` target shouldn't carry the padding. Leading whitespace is left intact — JDE string values are left-aligned. Set `trim_strings = true` on `[pools.jdedwards]` for the daily sync.
+- **`coalesce_nulls`** — read off the **target** pool. When true, an empty value written to the target is replaced with a type-appropriate default: `" "` for a string column (covers `None` *and* `""` — Oracle treats `''` as `NULL`, so a NOT-NULL `CHAR` needs a space), `0` for a numeric column. This is the Postgres→JDE write direction: padding + null management for an Oracle-style target.
+
+Both default to `false`, so a copy between two plain Postgres pools is untouched. The §11 regression suite covers the trim/coalesce wiring end-to-end.
 
 A diff-test against the existing nomajde Postgres tables is the cutover acceptance criterion: same row count, same column types, same byte values per cell. Detailed in §10.
 

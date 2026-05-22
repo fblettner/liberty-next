@@ -59,17 +59,19 @@ def test_normalize_passthrough_for_none() -> None:
 
 
 @pytest.mark.parametrize("source_type, expected_pg", [
-    # Decimal(p, 0): p ≤ 9 → integer
-    (Numeric(precision=5, scale=0), "integer"),
-    (Numeric(precision=9, scale=0), "integer"),
-    # Decimal(p, 0): p > 9 → bigint
+    # Every integer-valued JDE numeric → bigint, regardless of precision. A
+    # 32-bit `integer` overflows on real JDE data (ids/timestamps past 2.1e9);
+    # bigint can't, and the storage saving isn't worth a failed sync.
+    (Numeric(precision=5, scale=0), "bigint"),
+    (Numeric(precision=9, scale=0), "bigint"),
     (Numeric(precision=10, scale=0), "bigint"),
     (Numeric(precision=18, scale=0), "bigint"),
     # Decimal(p, s>0) → bigint (default TRUNCATE mode)
     (Numeric(precision=10, scale=2), "bigint"),
-    # Other integer types
-    (Integer(), "integer"),
-    (SmallInteger(), "integer"),
+    # Integer source types → bigint too (Oracle NUMBER(p,0) reflects as a
+    # generic Integer but can still carry a 10+-digit value).
+    (Integer(), "bigint"),
+    (SmallInteger(), "bigint"),
     (BigInteger(), "bigint"),
     # Strings
     (String(50), "varchar(50)"),
@@ -97,12 +99,12 @@ def test_decimal_preserve_mode_keeps_scale() -> None:
         type_coercion=JDE_COERCION,
         decimal_mode=DecimalMode.PRESERVE,
     ) == "numeric(10, 2)"
-    # s=0 is unaffected by decimal_mode (no decimal places to preserve)
+    # s=0 is unaffected by decimal_mode (no decimal places to preserve) → bigint
     assert derive_target_pg_type(
         Numeric(precision=8, scale=0),
         type_coercion=JDE_COERCION,
         decimal_mode=DecimalMode.PRESERVE,
-    ) == "integer"
+    ) == "bigint"
 
 
 def test_decimal_with_no_precision_treated_as_max() -> None:
@@ -149,15 +151,47 @@ def test_coerce_row_preserves_keys_for_none() -> None:
     assert coerce_row(row, cols, type_coercion=NO_COERCION) == {"UPMJ": 12345}
 
 
-def test_coerce_row_trims_and_strips_null_bytes() -> None:
-    """v1 db_copy: trim + regexp_replace('\\x00', ''). Match per-value."""
+def test_coerce_row_strips_null_bytes_for_jde() -> None:
+    """JDE data hygiene: ``\\x00`` removed from strings (Postgres text can't
+    hold a null byte). Independent of trim_strings — always applied for JDE."""
     cols = _cols(("NAME", String(50)))
-    row = {"NAME": "  hello \x00world   \x00\x00"}
-    # Note: rstrip() only — leading whitespace is NOT stripped (matches v1 trim()
-    # semantics: most JDE string values are left-aligned + space-padded right).
-    assert coerce_row(row, cols, type_coercion=JDE_COERCION) == {
-        "name": "  hello world",
-    }
+    row = {"NAME": "hel\x00lo"}
+    assert coerce_row(row, cols, type_coercion=JDE_COERCION) == {"name": "hello"}
+
+
+def test_coerce_row_trims_trailing_whitespace_when_enabled() -> None:
+    """``trim_strings`` (the **source** pool setting) strips Oracle CHAR/NCHAR
+    space padding read off the source. rstrip() only — leading whitespace is
+    left intact (JDE string values are left-aligned + right-padded)."""
+    cols = _cols(("NAME", String(50)))
+    row = {"NAME": "  hello   "}
+    # Off by default — padding preserved (matches a pool with trim_strings=false).
+    assert coerce_row(row, cols, type_coercion=JDE_COERCION) == {"name": "  hello   "}
+    # On — trailing padding stripped, leading kept.
+    assert coerce_row(
+        row, cols, type_coercion=JDE_COERCION, trim_strings=True,
+    ) == {"name": "  hello"}
+
+
+def test_coerce_row_coalesce_nulls_pads_strings_and_zeros_numerics() -> None:
+    """``coalesce_nulls`` (the **target** pool setting) replaces empties for an
+    Oracle-style target: ``" "`` for a string column, ``0`` for a numeric one.
+    Oracle treats ``''`` as NULL, so empty strings are coalesced too."""
+    cols = _cols(("NAME", String(10)), ("AMT", Numeric(precision=8, scale=0)))
+    # None on both → padded / zeroed.
+    assert coerce_row(
+        {"NAME": None, "AMT": None}, cols,
+        type_coercion=JDE_COERCION, coalesce_nulls=True,
+    ) == {"name": " ", "amt": 0}
+    # Empty string also coalesced; a present numeric is left alone.
+    assert coerce_row(
+        {"NAME": "", "AMT": 5}, cols,
+        type_coercion=JDE_COERCION, coalesce_nulls=True,
+    ) == {"name": " ", "amt": 5}
+    # Off by default — None passes straight through.
+    assert coerce_row(
+        {"NAME": None, "AMT": None}, cols, type_coercion=JDE_COERCION,
+    ) == {"name": None, "amt": None}
 
 
 def test_coerce_row_decimal_truncate_default() -> None:
@@ -225,7 +259,7 @@ def test_build_ddl_jde_with_schema() -> None:
     ddl = build_target_ddl("nomajde", "f0901", cols, type_coercion=JDE_COERCION)
     assert ddl == (
         'CREATE TABLE "nomajde"."f0901" (\n'
-        '    "upmj" integer,\n'
+        '    "upmj" bigint,\n'
         '    "amount" bigint,\n'
         '    "name" varchar(50)\n'
         ')'

@@ -101,17 +101,18 @@ def derive_target_pg_type(
     +------------------------------+--------------------------------+
     | Source                       | Target                         |
     +==============================+================================+
-    | ``Decimal(p, 0)``, p ≤ 9     | ``integer``                    |
-    +------------------------------+--------------------------------+
-    | ``Decimal(p, 0)``, p > 9     | ``bigint``                     |
+    | ``Decimal(p, 0)`` (any p)    | ``bigint`` — every integer-    |
+    |                              | valued JDE column; never       |
+    |                              | ``integer`` (int32 overflows)  |
     +------------------------------+--------------------------------+
     | ``Decimal(p, s)``, s > 0     | ``bigint`` (decimal_mode=      |
     |                              | TRUNCATE — default) or         |
     |                              | ``numeric(p, s)`` (PRESERVE)   |
     +------------------------------+--------------------------------+
-    | ``Integer``/``SmallInteger`` | ``integer``                    |
-    +------------------------------+--------------------------------+
-    | ``BigInteger``               | ``bigint``                     |
+    | ``Integer`` / ``SmallInteger`` | ``bigint`` — Oracle reflects  |
+    | / ``BigInteger``             | NUMBER(p,0) as a generic       |
+    |                              | Integer that can still hold a  |
+    |                              | 10+-digit value                |
     +------------------------------+--------------------------------+
     | ``String(n)`` / ``VARCHAR``  | ``varchar(n)`` (``text`` if    |
     |                              | length is unset)               |
@@ -140,19 +141,27 @@ def derive_target_pg_type(
     # Decimal/Numeric — the JDE-specific rules. NB: SQLAlchemy's Oracle dialect
     # returns NUMBER as ``Numeric``, which is the right hook for this rule.
     if isinstance(source_type, Numeric) and not isinstance(source_type, (Integer, BigInteger, SmallInteger)):
-        precision = source_type.precision or 38  # NUMBER without precision → max
         scale = source_type.scale or 0
         if scale == 0:
-            return "integer" if precision <= 9 else "bigint"
+            # Integer-valued → bigint, unconditionally. The earlier rule mapped
+            # precision ≤ 9 to a 32-bit `integer`, but JDE columns routinely
+            # hold values past int32's 2.1-billion ceiling (ids, timestamps),
+            # and Oracle's reflected precision doesn't reliably bound them — an
+            # asyncpg "value out of int32 range" DataError is the result.
+            # bigint (int64, ~9.2e18) can't overflow on any realistic JDE
+            # value; the 4-byte-vs-8-byte saving isn't worth a failed sync.
+            return "bigint"
+        precision = source_type.precision or 38  # NUMBER without precision → max
         if decimal_mode is DecimalMode.PRESERVE:
             return f"numeric({precision}, {scale})"
         # TRUNCATE — the v1 LongType-cast equivalent; intentional, see module docstring
         return "bigint"
 
-    if isinstance(source_type, BigInteger):
+    # Any integer-typed source → bigint too. Oracle reflects NUMBER(p,0) as a
+    # generic Integer; that "integer" can still carry a 10+-digit value, so a
+    # 32-bit Postgres `integer` would overflow. Same reasoning as above.
+    if isinstance(source_type, (Integer, BigInteger, SmallInteger)):
         return "bigint"
-    if isinstance(source_type, (Integer, SmallInteger)):
-        return "integer"
     if isinstance(source_type, String):
         # NB: Text is a subclass of String in SQLAlchemy; check it first.
         if isinstance(source_type, Text):
@@ -197,32 +206,36 @@ def coerce_row(
     *,
     type_coercion: str,
     decimal_mode: DecimalMode = DecimalMode.TRUNCATE,
+    trim_strings: bool = False,
+    coalesce_nulls: bool = False,
 ) -> dict[str, Any]:
-    """Apply the JDE coercions to one source-row mapping → target-row mapping.
+    """Transform one source-row mapping into a target-row mapping for a copy.
 
-    Rules applied (only when ``type_coercion == "jde"``):
+    Three independent layers, applied in order:
 
-    * Column names → lowercase. Target keys differ from source keys for any
-      column with non-lower-case source name.
-    * String values → ``.replace("\\x00", "").rstrip()``. Matches v1's
-      ``trim`` + ``regexp_replace`` on the JDBC read path.
-    * ``Decimal(p, s>0)`` values, ``decimal_mode = TRUNCATE`` → ``int(value)``
-      (truncates toward zero, matching the Spark LongType cast).
-    * ``Decimal(p, s>0)`` values, ``decimal_mode = PRESERVE`` → unchanged
-      (asyncpg + numeric(p,s) on the target round-trip cleanly).
+    1. **Source read** — when *trim_strings* (the **source** pool's
+       ``trim_strings`` setting), trailing whitespace is stripped from every
+       string cell. This is the Oracle CHAR/NCHAR space-padding cleanup: a
+       JDE source pads ``CHAR(10)`` to width, the target (Postgres ``varchar``)
+       shouldn't carry the padding.
+    2. **JDE coercion** — when ``type_coercion == "jde"``: column names →
+       lowercase; ``\\x00`` stripped from strings (JDE data hygiene; Postgres
+       text can't hold a null byte anyway); ``Decimal(p, s>0)`` truncated to
+       ``int`` under ``decimal_mode = TRUNCATE`` (the v1 LongType cast),
+       left intact under ``PRESERVE``.
+    3. **Target write** — when *coalesce_nulls* (the **target** pool's
+       ``coalesce_nulls`` setting), an empty value is replaced with a
+       type-appropriate default: ``" "`` for a string column (``None`` *and*
+       ``""`` — Oracle treats ``''`` as NULL, a NOT-NULL CHAR needs a space),
+       ``0`` for a numeric column. This is the Postgres→JDE direction —
+       padding + null management for an Oracle target.
 
-    Passthrough otherwise — including for None.
-
-    The row dict's keys are looked up by **source** column name (``col.name``);
-    the output dict's keys use the **normalised** target name. The two are the
-    same for non-JDE; for JDE they differ in case.
+    Keys are looked up by **source** column name (case-insensitively — drivers
+    vary) and written under the **target** name (lowercased for JDE, the source
+    name otherwise).
     """
+    jde = type_coercion == JDE_COERCION
     out: dict[str, Any] = {}
-    if type_coercion != JDE_COERCION:
-        # Even passthrough still benefits from a copy (don't mutate the caller's dict).
-        out.update(row)
-        return out
-
     for col in columns:
         # Source drivers may return the column with any casing — try the
         # column-defined name, then upper, then lower; the first hit wins.
@@ -234,23 +247,32 @@ def coerce_row(
             val = row[col.name.lower()]
         else:
             val = None
-        target_key = col.name.lower()
+        target_key = col.name.lower() if jde else col.name
 
-        if val is None:
-            out[target_key] = None
-            continue
+        # 1. source read — trim Oracle CHAR/NCHAR padding
+        if trim_strings and isinstance(val, str):
+            val = val.rstrip()
 
-        if isinstance(val, str):
-            val = val.replace("\x00", "").rstrip()
-        elif isinstance(col.type, Numeric) and isinstance(val, (int, float, Decimal)):
-            scale = col.type.scale or 0
-            if scale > 0 and decimal_mode is DecimalMode.TRUNCATE:
-                # int(123.45) / int(Decimal("123.45")) → 123, matching Spark LongType
-                # cast (truncate toward zero). Drivers vary on what Python type they
-                # return for NUMERIC(p, s>0) — Oracle gives Decimal, SQLite gives
-                # float; either way, when the *column* says scale > 0 and decimal_mode
-                # is TRUNCATE, the value loses its fractional part.
-                val = int(val)
+        # 2. JDE coercion
+        if jde and val is not None:
+            if isinstance(val, str):
+                val = val.replace("\x00", "")
+            elif isinstance(col.type, Numeric) and isinstance(val, (int, float, Decimal)):
+                scale = col.type.scale or 0
+                if scale > 0 and decimal_mode is DecimalMode.TRUNCATE:
+                    # int(123.45) → 123, matching the Spark LongType cast (toward
+                    # zero). Drivers vary on the Python type for NUMERIC(p, s>0)
+                    # — Oracle gives Decimal, SQLite float; either truncates here.
+                    val = int(val)
+
+        # 3. target write — coalesce empties for an Oracle-style target
+        if coalesce_nulls:
+            if isinstance(col.type, String):
+                if val is None or val == "":
+                    val = " "
+            elif isinstance(col.type, (Numeric, Integer, BigInteger, SmallInteger)):
+                if val is None:
+                    val = 0
 
         out[target_key] = val
     return out
