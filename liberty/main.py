@@ -248,10 +248,33 @@ app = create_app()
 asgi_app = app.asgi_app   # type: ignore[attr-defined]
 
 
+def _setup_app_logging(level: str) -> None:
+    """Give the ``liberty`` logger tree its own stdout handler.
+
+    uvicorn's logging config only wires up the ``uvicorn`` loggers — it never
+    adds a handler to the root logger. So application logs (``liberty.*``,
+    including ``liberty.jobs.*``) propagate to a handler-less root and Python's
+    last-resort handler drops everything below WARNING. Result: a running job's
+    ``_log.info`` progress lines are invisible. This attaches a handler directly
+    to the ``liberty`` logger at the configured level, with ``propagate = False``
+    so messages don't also bubble to root (no double emit)."""
+    lg = logging.getLogger("liberty")
+    if lg.handlers:  # already configured — don't stack a second handler
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s — %(message)s", datefmt="%H:%M:%S",
+    ))
+    lg.addHandler(handler)
+    lg.setLevel(level.upper())
+    lg.propagate = False
+
+
 def run() -> None:
     import uvicorn
 
     settings = load_settings()
+    _setup_app_logging(settings.app.log_level)
     uvicorn.run(
         "liberty.main:asgi_app",
         host=settings.app.host,

@@ -162,6 +162,11 @@ class JobRunner:
         if current is not None:
             self._active_runs[run.id] = current
 
+        _log.info(
+            "nomaflow.runner started job=%s run=%s trigger=%s steps=%d",
+            job.id, run.id, trigger.kind, len(job.steps),
+        )
+
         ctx = RunContext(run_id=run.id, job_id=job.id, trigger=trigger)
         terminal = RunState.SUCCEEDED  # optimistic; flipped on first failure
         total_rows = 0
@@ -331,6 +336,10 @@ class JobRunner:
                 await self._sleep(delay)
 
             step_run = await self._record_step_start(run, index, step, attempt)
+            _log.info(
+                "nomaflow.runner run=%s step[%d]=%r type=%s attempt=%d/%d",
+                run.id, index, step.name, step.type.value, attempt, attempts,
+            )
             executor = self._executors.get(step.type)
             if executor is None:
                 await self._record_step_failure(

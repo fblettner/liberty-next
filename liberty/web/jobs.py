@@ -79,6 +79,13 @@ def _job_summary(
     Carries what the Jobs list (NOMAFLOW-UI.md §3.1) renders: the catalogue fields,
     the operational flags, the last-run badge (``last_run``: latest run's state +
     timestamps, or None if never run), and the next scheduled fire (``next_run``)."""
+    # "in flight" must cover BOTH a scheduler-fired run (tracked in the scheduler's
+    # _in_flight set) AND a manual "Run now" — which goes through fire_now → runner.run
+    # directly and never touches that set. The reliable signal for either is the latest
+    # run's state: RUNNING/QUEUED → in flight. Without this the Jobs-list Cancel button
+    # never appears for a manually-started job (it gates on `in_flight`).
+    last_state = (last_run or {}).get("state")
+    in_flight = job.id in in_flight_ids or last_state in ("RUNNING", "QUEUED")
     return {
         "id": job.id,
         "description": job.description,
@@ -88,7 +95,7 @@ def _job_summary(
         "tags": list(job.tags),
         "step_count": len(job.steps),
         "registered_with_scheduler": job.id in scheduled_ids,
-        "in_flight": job.id in in_flight_ids,
+        "in_flight": in_flight,
         "last_run": last_run,
         "next_run": next_run.isoformat() if next_run is not None else None,
     }

@@ -234,6 +234,31 @@ def test_list_jobs_carries_last_run_and_next_run(env) -> None:
         assert lr["run_id"] and lr["started_at"] and lr["finished_at"]
 
 
+def test_list_jobs_reports_in_flight_for_a_running_manual_run(env) -> None:
+    """A manual 'Run now' goes fire_now → runner.run directly — it never enters
+    the scheduler's _in_flight set. in_flight must still be true (the latest run
+    is RUNNING), else the Jobs-list Cancel button never shows for a manual run."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        jobs = app.state.jobs
+
+        async def seed_running() -> None:
+            from liberty.jobs import TriggerKind
+            async with jobs.db.session() as s:
+                s.add(JobRun(
+                    job_id="ping", trigger_kind=TriggerKind.MANUAL.value,
+                    triggered_by="admin", state=RunState.RUNNING.value,
+                ))
+        asyncio.run(seed_running())
+
+        body = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
+        assert body["ping"]["in_flight"] is True
+        assert body["ping"]["last_run"]["state"] == "RUNNING"
+        # The other jobs, with no run, stay not-in-flight.
+        assert body["manual-only"]["in_flight"] is False
+
+
 # --------------------------------------------------------------------------- #
 # GET / PUT /admin/config/jobs/parsed (increment 1)
 # --------------------------------------------------------------------------- #

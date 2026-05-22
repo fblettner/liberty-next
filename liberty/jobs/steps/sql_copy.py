@@ -78,9 +78,20 @@ class SqlCopyExecutor:
             mode.value, type_coercion, decimal_mode.value,
         )
 
-        # Step 1 — introspect source columns (one short connection use).
+        # Step 1 — introspect source columns (one short connection use). Logged
+        # before *and* after: if the source DB is unreachable this connect is
+        # where the step hangs, and the "introspecting…" line with no following
+        # "introspected" line pins the hang to the connection, not the copy.
+        _log.info(
+            "nomaflow.sql_copy run=%s step=%r introspecting source %s.%s (connector %s)",
+            ctx.run_id, step.name, step.source.schema_, step.source.table, src_conn.name,  # type: ignore[union-attr]
+        )
         columns = await _introspect_columns(
             src_engine, schema=step.source.schema_, table=step.source.table,  # type: ignore[union-attr]
+        )
+        _log.info(
+            "nomaflow.sql_copy run=%s step=%r introspected %d column(s)",
+            ctx.run_id, step.name, len(columns),
         )
         if not columns:
             raise StepFailed(
