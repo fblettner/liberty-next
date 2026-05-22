@@ -305,68 +305,89 @@ The critical path. v1's `db_copy.copy_table` ([legacy/.../db_copy.py](../../libe
 3. Lowercase column names.
 4. Spark `write.format("jdbc").mode("overwrite")` to target with explicit `createTableColumnTypes`.
 
-nomaflow equivalent in pure Python/SQLAlchemy:
+nomaflow equivalent in pure Python/SQLAlchemy (overwrite mode):
 
 ```python
 async def execute_sql_copy(self, step: SqlCopyStep, ctx: RunContext) -> StepResult:
-    src_pool = self.pools[step.source.connector]
-    tgt_pool = self.pools[step.target.connector]
+    src_engine = self.pools.engine(src_connector.pool_name)
+    tgt_engine = self.pools.engine(tgt_connector.pool_name)
 
-    # 1. Discover source schema (once)
-    columns = await self._introspect(src_pool, step.source.schema, step.source.table)
+    # 1. Discover source schema (one short connection use).
+    columns = await self._introspect(src_engine, step.source.schema, step.source.table)
 
-    # 2. Derive target DDL (apply jde coercion → pick PG types)
+    # 2. Derive target DDL (apply jde coercion → pick PG types).
     target_ddl = build_target_ddl(columns, coercion=step.type_coercion)
 
-    # 3. For overwrite mode: build a fresh "_new" table; rename atomically at the end.
-    #    Production stays pointed at the existing rows until the swap commits, so a
-    #    mid-stream failure leaves the previous run's data intact — no "stale → empty"
-    #    window. (v1 Spark mode="overwrite" did DROP→CREATE→INSERT, which DID have
-    #    that window; this is an intentional improvement.)
-    tgt_table = step.target.table
-    work_table = f"{tgt_table}__new" if step.mode == "overwrite" else tgt_table
-
+    # 3. Build a fresh "_new" work table.  Stash + rename pattern (see below)
+    #    means we never DROP the live table inside a transaction — production
+    #    stays pointed at the previous run's data until the swap completes,
+    #    so a mid-stream failure leaves the previous data intact.
+    live, work, stash = (step.target.table, f"{live}__new", f"{live}__old")
     rows_written = 0
-    async with tgt_pool.connect() as tgt:               # one target connection for the whole step
-        if step.mode == "overwrite":
-            await tgt.execute(text(
-                f'DROP TABLE IF EXISTS "{step.target.schema}"."{work_table}"'))
-            await tgt.execute(text(target_ddl.replace(tgt_table, work_table)))
 
-        # 4. Stream + write in batches, all on the same target connection
-        async with src_pool.connect() as src:           # one source connection too
-            stmt = text(
-                f'SELECT * FROM "{step.source.schema}"."{step.source.table}"')
-            result = await src.stream(stmt)
-            insert = insert_stmt(step.target.schema, work_table, columns)
+    async with tgt_engine.connect() as tgt:      # one target connection for the whole step
+        # Clear leftovers from any prior failed run, then create work fresh.
+        await tgt.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{work}"'))
+        await tgt.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{stash}"'))
+        await tgt.execute(text(target_ddl))      # CREATE work
+        await tgt.commit()
+
+        # 4. Stream + write in batches on the same target connection.
+        async with src_engine.connect() as src:  # one source connection
+            result = await src.stream(text(f'SELECT * FROM "{schema}"."{src_table}"'))
+            insert = insert_stmt(schema, work, columns)
             async for batch in result.partitions(step.batch_size):
-                transformed = [coerce_row(r, columns, step.type_coercion) for r in batch]
-                await tgt.execute(insert, transformed)
-                rows_written += len(transformed)
-                await self._broadcast_progress(ctx, rows_written)
+                rows = [coerce_row(r, columns, step.type_coercion) for r in batch]
+                await tgt.execute(insert, rows)
+                await tgt.commit()               # short tx per batch
+                rows_written += len(rows)
 
-        # 5. Atomic swap (overwrite mode only). On Postgres this is one transaction.
-        if step.mode == "overwrite":
-            async with tgt.begin():
-                await tgt.execute(text(
-                    f'DROP TABLE IF EXISTS "{step.target.schema}"."{tgt_table}"'))
-                await tgt.execute(text(
-                    f'ALTER TABLE "{step.target.schema}"."{work_table}" '
-                    f'RENAME TO "{tgt_table}"'))
+        # 5. Stash + rename swap.
+        live_existed = await _table_exists(tgt, schema, live)
+        if live_existed:
+            await tgt.execute(text(f'ALTER TABLE "{schema}"."{live}" RENAME TO "{stash}"'))
+            await tgt.commit()
+        try:
+            await tgt.execute(text(f'ALTER TABLE "{schema}"."{work}" RENAME TO "{live}"'))
+            await tgt.commit()
+        except Exception:
+            if live_existed:
+                # Best-effort recovery: put the previous live table back.
+                await tgt.execute(text(f'ALTER TABLE "{schema}"."{stash}" RENAME TO "{live}"'))
+                await tgt.commit()
+            raise
+        if live_existed:
+            await tgt.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{stash}"'))
+            await tgt.commit()
 
     return StepResult(rows_affected=rows_written)
 ```
 
-Two behaviors worth noting in this sketch beyond the data-loss fix:
+**Why stash + rename and not "DROP live + RENAME work, all in one transaction":**
+the obvious-looking pattern (one transaction wrapping the DROP and RENAME) does
+NOT roll back ``DROP TABLE`` on SQLite via aiosqlite — the DROP commits even when
+the surrounding ``async with conn.begin()`` exits with an exception. Postgres
+has fully transactional DDL, Oracle is partial, SQLite doesn't. Stash + rename
+works on every dialect without relying on driver quirks: each ALTER TABLE is
+its own statement, and recovery from a half-applied swap is the third rename
+in the ``except`` block (``stash → live``).
+
+The visibility window where ``<table>`` doesn't exist (between the two renames)
+is two ALTER TABLE statements back to back — microseconds. Postgres concurrent
+readers queue on AccessExclusiveLock; SQLite readers see "no such table"
+briefly if they hit the gap. v1 Spark's ``mode="overwrite"`` had a DROP→CREATE
+window that lasted however long the INSERT took (minutes); this collapses it
+to two RENAME calls.
+
+Two other behaviors worth noting:
 
 - **Single source + single target connection per step.** Opening/closing per batch
   is a common anti-pattern that shows up in async ETL code — a sync of N rows at
   batch size B does N/B connect/close cycles, all redundant. The sketch holds one
-  of each for the step's whole lifetime.
-- **`_new` suffix + RENAME** assumes the target dialect supports cheap `ALTER TABLE
-  ... RENAME TO`. Postgres, Oracle, MySQL: yes. SQLite: no (requires CREATE+COPY).
-  Production target is Postgres, so this works. If a tenant ever targets SQLite the
-  executor falls back to v1's DROP-then-INSERT semantics with a logged warning.
+  of each for the step's whole lifetime, with short transactions per batch.
+- **``ALTER TABLE ... RENAME TO``** works on Postgres, Oracle, MySQL, and
+  SQLite 3.25+. Production target is Postgres; SQLite is for tests + the dev
+  fallback pool. No special-casing needed.
 
 **Why this is going to work without Spark:**
 
