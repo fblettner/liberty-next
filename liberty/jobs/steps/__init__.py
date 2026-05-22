@@ -19,10 +19,12 @@ from liberty.jobs.steps.base import (
     StepFailed,
     StepResult,
 )
+from liberty.jobs.steps.sql_copy import SqlCopyExecutor
 from liberty.jobs.steps.sql_query import SqlQueryExecutor
 
 __all__ = [
     "RunContext",
+    "SqlCopyExecutor",
     "SqlQueryExecutor",
     "StepCancelled",
     "StepExecutor",

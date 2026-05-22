@@ -30,6 +30,7 @@ from liberty.jobs.schema import (
 )
 from liberty.jobs.steps import (
     RunContext,
+    SqlCopyExecutor,
     SqlQueryExecutor,
     StepCancelled,
     StepExecutor,
@@ -56,6 +57,7 @@ __all__ = [
     "RunContext",
     "RunState",
     "ScheduledTrigger",
+    "SqlCopyExecutor",
     "SqlQueryExecutor",
     "Step",
     "StepCancelled",
