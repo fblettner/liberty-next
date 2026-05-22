@@ -47,6 +47,13 @@ const SubHead = styled.div`
 const AddBar = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px;`
 const Note = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted};`
 const KvRow = styled.div`display: flex; gap: 6px; align-items: center;`
+const TextArea = styled.textarea`
+  width: 100%; min-height: 72px; padding: 8px 10px; resize: vertical;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  background: ${colors.bg.input}; color: ${colors.text.primary};
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; outline: none;
+  &:focus { border-color: ${colors.blue.main}; }
+`
 
 const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral'> = {
   sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral',
@@ -243,6 +250,121 @@ function SqlQueryForm({ step, patch, sqlConnectors }: FormProps) {
   )
 }
 
+function PythonForm({ step, patch }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  return (
+    <Grid>
+      <Field $span={3}>
+        <FieldLabel>{t('nomaflow.steps.callable')}</FieldLabel>
+        <Input
+          value={String(f.callable ?? '')}
+          onChange={(e) => patch({ callable: e.target.value } as Partial<StepConfig>)}
+          placeholder="nomaflow.nomasx1.collect:run"
+        />
+      </Field>
+      <Field $span={3}>
+        <FieldLabel>{t('nomaflow.steps.opKwargs')}</FieldLabel>
+        <KeyValueEditor
+          value={(f.op_kwargs ?? {}) as Record<string, unknown>}
+          onChange={(v) => patch({ op_kwargs: v } as Partial<StepConfig>)}
+        />
+      </Field>
+    </Grid>
+  )
+}
+
+function LdapSyncForm({ step, patch, sqlConnectors }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  const text = (key: string, label: string, span?: number, placeholder?: string) => (
+    <Field $span={span}>
+      <FieldLabel>{label}</FieldLabel>
+      <Input
+        value={String(f[key] ?? '')}
+        onChange={(e) => patch({ [key]: e.target.value } as Partial<StepConfig>)}
+        placeholder={placeholder}
+      />
+    </Field>
+  )
+  return (
+    <>
+      <Grid>
+        {text('server', t('nomaflow.steps.server'), 3, 'ldaps://ad.example.com')}
+        {text('bind_dn', t('nomaflow.steps.bindDn'), 3)}
+        {text('bind_password', t('nomaflow.steps.bindPassword'), 3)}
+        {text('search_base', t('nomaflow.steps.searchBase'), 3)}
+        {text('search_filter', t('nomaflow.steps.searchFilter'), 3)}
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.attributes')}</FieldLabel>
+          <Input
+            value={(Array.isArray(f.attributes) ? f.attributes : []).join(', ')}
+            onChange={(e) => patch({
+              attributes: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+            } as Partial<StepConfig>)}
+            placeholder="sAMAccountName, mail, displayName"
+          />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.targetConnector')}</FieldLabel>
+          <Select
+            value={String(f.target_connector ?? '')}
+            onChange={(e) => patch({ target_connector: e.target.value } as Partial<StepConfig>)}
+          >
+            <option value="">—</option>
+            {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </Select>
+        </Field>
+        {text('target_query', t('nomaflow.steps.targetQuery'), 2)}
+      </Grid>
+      <SubHead>{t('nomaflow.steps.mapping')}</SubHead>
+      <KeyValueEditor
+        value={(f.mapping ?? {}) as Record<string, unknown>}
+        onChange={(v) => patch({ mapping: v } as Partial<StepConfig>)}
+      />
+    </>
+  )
+}
+
+function HttpForm({ step, patch }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  return (
+    <>
+      <Grid>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.method')}</FieldLabel>
+          <Select value={String(f.method ?? 'GET')} onChange={(e) => patch({ method: e.target.value } as Partial<StepConfig>)}>
+            {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map((m) => <option key={m} value={m}>{m}</option>)}
+          </Select>
+        </Field>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.url')}</FieldLabel>
+          <Input
+            value={String(f.url ?? '')}
+            onChange={(e) => patch({ url: e.target.value } as Partial<StepConfig>)}
+            placeholder="https://api.example.com/hook"
+          />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.headers')}</FieldLabel>
+          <KeyValueEditor
+            value={(f.headers ?? {}) as Record<string, unknown>}
+            onChange={(v) => patch({ headers: v } as Partial<StepConfig>)}
+          />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.body')}</FieldLabel>
+          <TextArea
+            value={typeof f.body === 'string' ? f.body : (f.body == null ? '' : JSON.stringify(f.body, null, 2))}
+            onChange={(e) => patch({ body: e.target.value } as Partial<StepConfig>)}
+          />
+        </Field>
+      </Grid>
+    </>
+  )
+}
+
 // ── one step card ──────────────────────────────────────────────────────────────────
 function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplicate, onDelete }: {
   step: StepConfig
@@ -281,9 +403,9 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
           </Field>
           {step.type === 'sql_copy' && <SqlCopyForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'sql_query' && <SqlQueryForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
-          {(step.type === 'python' || step.type === 'ldap_sync' || step.type === 'http') && (
-            <Note>{t('nomaflow.steps.formPending', { type: step.type })}</Note>
-          )}
+          {step.type === 'python' && <PythonForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'ldap_sync' && <LdapSyncForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'http' && <HttpForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
         </Body>
       )}
     </Card>
