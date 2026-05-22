@@ -65,7 +65,7 @@ schedule = "*/5 * * * *"
 [[jobs.steps]]
 type = "sql_query"
 name = "select 1"
-connector = "session"
+connector = "default"
 query = "select_one"
 """)
     registry = load_jobs(path)
@@ -78,7 +78,7 @@ query = "select_one"
     assert len(job.steps) == 1
     step = job.steps[0]
     assert step.type is StepType.SQL_QUERY
-    assert step.connector == "session"
+    assert step.connector == "default"
 
 
 # --------------------------------------------------------------------------- #

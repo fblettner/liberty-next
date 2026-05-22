@@ -440,7 +440,7 @@ bind_password = "${LDAP_BIND_PASSWORD}"   # or ENC: + master_key
 search_base = "OU=Users,DC=corp,DC=example,DC=com"
 search_filter = "(&(objectClass=user)(memberOf=CN=NomaUsers,...))"
 attributes = ["sAMAccountName", "mail", "displayName", "memberOf"]
-target_connector = "session"
+target_connector = "default"
 target_query = "upsert_ldap_user"          # named query already in connectors.toml
 mapping = { username = "sAMAccountName", email = "mail", full_name = "displayName" }
 ```
@@ -478,7 +478,7 @@ The function signature: `def fn(**kwargs) -> dict | None`. The return dict's `ro
 
 ## 7. Persistence — `nomaflow_*` tables
 
-Lives in the existing `session` pool (the auth/session DB). Two tables:
+Lives on the `default` pool (the shared liberty-next framework DB that also holds auth tables and is the planned home for future framework concerns like notifications). Two tables:
 
 ```sql
 CREATE TABLE nomaflow_job_runs (
@@ -530,7 +530,7 @@ Two pieces of TOML in `liberty-apps/config/`:
 ```toml
 [connectors.nomaflow]
 type = "sql"
-pool = "session"
+pool = "default"
 
 [connectors.nomaflow.queries.list_runs]
 sql = """

@@ -97,5 +97,5 @@ web_fetch_max_uses = 5
 # ${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml. Falls back to ./config/jobs.toml
 # when LIBERTY_APPS_DIR is unset. Explicit value here wins over both.
 # config_path = "config/jobs.toml"
-pool = "session"                 # which connector pool holds the nomaflow_* tables (session/auth DB)
+pool = "default"                 # the shared framework pool (auth + nomaflow + future notifications)
 enabled = true                   # false → catalogue loads, scheduler doesn't start (maintenance mode)
