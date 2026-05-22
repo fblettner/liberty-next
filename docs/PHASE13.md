@@ -521,7 +521,17 @@ CREATE INDEX idx_step_runs_run ON nomaflow_step_runs (run_id, step_index);
 
 ---
 
-## 8. Monitoring UI — zero new code
+## 8. UI — run monitoring (config) + job authoring (custom)
+
+> **Superseded in part by [NOMAFLOW-UI.md](NOMAFLOW-UI.md).** This section originally
+> claimed the *entire* nomaflow UI was "zero new code — just a Screen." That holds for
+> **run monitoring** (runs are real connector data in `nomaflow_job_runs`, so a config
+> Screen is exactly right) — but **not** for **job authoring**: the job catalogue is a
+> TOML file, not connector data, and building a step pipeline is a guided flow a generic
+> grid can't deliver. Job authoring is a custom feature area — see NOMAFLOW-UI.md. The
+> run-monitoring half, below, is unchanged and shipped in chunk 4.
+
+### Run monitoring — config-driven, zero new code
 
 Two pieces of TOML in `liberty-apps/config/`:
 
@@ -557,7 +567,17 @@ params = ["run_id"]
 
 **A screen** (added to `screens.toml`): a `tableview` over `nomaflow.list_runs` with a master/detail dialog opening `nomaflow.list_steps`. Row actions: "Re-run" (calls `/admin/jobs/<id>/run`), "Cancel" (calls `/admin/jobs/runs/<id>/cancel`). The chart toggle gives a free duration trend; the existing filter chips work out of the box.
 
-That's the entire monitoring UI. The same Screen engine that renders nomajde tables renders the nomaflow run history — no React component, no Vite build for the UI.
+That's the entire *monitoring* UI — the same Screen engine that renders nomajde tables
+renders the nomaflow run history, no React component needed.
+
+### Job authoring — a custom feature area
+
+Listing the catalogue, creating/editing jobs, and building step pipelines is **not**
+config-driven — see [NOMAFLOW-UI.md](NOMAFLOW-UI.md) for the full design. Summary: a
+custom React feature area at `pages/Nomaflow/` (Jobs list + Job editor), backed by new
+`GET/PUT /admin/config/jobs/parsed` endpoints (the same parsed-config pattern the other
+builders use). It is *not* a Screen, *not* a Settings config-builder, and explicitly
+*not* a `nomaflow_jobs` mirror table (a rejected second source of truth).
 
 ---
 
