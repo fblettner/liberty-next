@@ -17,6 +17,27 @@ from pydantic import BaseModel, Field
 
 DEFAULT_APP_CONFIG = Path("config/app.toml")
 
+
+def _default_config_path(name: str) -> Path:
+    """Default location for a per-section TOML (``connectors`` / ``screens`` / etc.).
+
+    When ``LIBERTY_APPS_DIR`` is set in the environment, every default per-section path
+    resolves to ``${LIBERTY_APPS_DIR}/<name>.toml`` — the convention for the **liberty-apps**
+    private repo where customer-specific configuration lives separately from the framework
+    (see ``../liberty-apps/README.md``). Unset → falls back to ``./config/<name>.toml``,
+    the historical layout where everything sat under the framework checkout's ``config/``.
+
+    An explicit ``config_path`` set in ``app.toml`` still wins over both — it's a Pydantic
+    field default, so any value the operator provides overrides the factory.
+
+    Note: ``auth.toml`` is **not** routed through here. It carries Argon2 password hashes
+    and stays per-installation under the framework's own ``config/`` regardless of the
+    apps dir (gitignored in both repos)."""
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    if apps:
+        return Path(apps) / f"{name}.toml"
+    return Path(f"config/{name}.toml")
+
 # ${NAME}  or  ${NAME:-default}  (shell semantics: the default is used when NAME is
 # unset *or* empty). The default may contain anything except '}'.
 _ENV_REF = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
@@ -51,7 +72,10 @@ class AppSettings(BaseModel):
 
 
 class ConnectorSettings(BaseModel):
-    config_path: Path = Path("config/connectors.toml")
+    # Path resolves through ``_default_config_path`` so ``LIBERTY_APPS_DIR`` (when set)
+    # redirects the default to ``${LIBERTY_APPS_DIR}/connectors.toml``; explicit
+    # ``config_path`` in app.toml still wins. Same convention for every section below.
+    config_path: Path = Field(default_factory=lambda: _default_config_path("connectors"))
     # Shared field dictionary (labels/types referenced by query column hints). Empty → use
     # `dictionary.toml` next to `config_path`. A missing file is fine (no shared entries).
     dictionary_path: Path | None = None
@@ -62,7 +86,7 @@ class MenuSettings(BaseModel):
 
     # `[menus.<app>]` per app; a missing file is fine (no menus → the UI falls back to
     # the flat connector list).
-    config_path: Path = Path("config/menus.toml")
+    config_path: Path = Field(default_factory=lambda: _default_config_path("menus"))
 
 
 class ScreenSettings(BaseModel):
@@ -71,7 +95,7 @@ class ScreenSettings(BaseModel):
 
     # `[screens.<app>.<id>]` per screen; a missing file is fine (no screens → only the raw
     # connector/queries flow is available in the UI).
-    config_path: Path = Path("config/screens.toml")
+    config_path: Path = Field(default_factory=lambda: _default_config_path("screens"))
 
 
 class ChartSettings(BaseModel):
@@ -81,14 +105,14 @@ class ChartSettings(BaseModel):
 
     # `[charts.<id>]` per chart; a missing file is fine (no shared charts → the runtime still
     # works via localStorage specs).
-    config_path: Path = Path("config/charts.toml")
+    config_path: Path = Field(default_factory=lambda: _default_config_path("charts"))
 
 
 class DashboardSettings(BaseModel):
     """Dashboard layouts — Phase 8 slice 3 (see :mod:`liberty.dashboards`). A dashboard is a
     grid of widgets (chart, kpi, …) surfaced through the menu system like any other screen."""
 
-    config_path: Path = Path("config/dashboards.toml")
+    config_path: Path = Field(default_factory=lambda: _default_config_path("dashboards"))
 
 
 class AuthSettings(BaseModel):

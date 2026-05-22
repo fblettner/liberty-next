@@ -1664,13 +1664,57 @@ none).
   `config/menus.toml` carries a warning comment + has nomasx1's `home = "overview"` set so the
   framework restores the dashboard via the home redirect even when the menu leaf is missing.
 
-531 backend tests pass.
+542 backend tests pass.
 
 **Roadmap (planned, see `docs/PLAN.md`):** **Phase 5** is effectively complete from a
 framework standpoint — the NOMAJDE cutover is operator work, and the historic AUD_<table>
-data carry-over is per-customer (handled manually). → **Phase 9** notifications / reporting
-/ backports → **Phase 10** the Airflow replacement (in-project Python/local-Spark jobs &
-scheduling).
+data carry-over is per-customer (handled manually). **Phase 9** WebSocket layer (record
+locks + technical dashboard + log tail) **DONE** via Socket.IO — see the dedicated section
+above. → **Phase 11** repo split (liberty-apps for per-deployment TOML) **DONE** — see
+below. → **Phase 12** import the v1 Airflow plugins into liberty-apps/legacy/ for
+reference. → **Phase 13** **nomaflow** — native ETL + scheduler module on liberty-next
+(declarative `jobs.toml`, APScheduler-driven, replaces the v1 Airflow plugin suite).
+
+**Phase 11 — Repo split (liberty-apps) — DONE.** Customer-specific TOML configuration
+(nomasx1 + nomajde: `connectors.toml`, `dictionary.toml`, `menus.toml`, `screens.toml`,
+`charts.toml`, `dashboards.toml`) lives in a **separate private repo** at
+`../liberty-apps/`. The framework stays open-source; the per-deployment configuration
+is owned by the customer.
+
+Wiring (`liberty/config.py`):
+- New env var `LIBERTY_APPS_DIR`. When set, every per-section `config_path` default
+  resolves to `${LIBERTY_APPS_DIR}/<file>.toml` instead of `./config/<file>.toml`. Each
+  section uses `Field(default_factory=lambda: _default_config_path("connectors"))` so the
+  redirect is transparent — an explicit `config_path` in `app.toml` still wins.
+- `auth.toml` is **not** rerouted — it carries Argon2 password hashes and stays
+  per-installation under the framework's own `config/` (gitignored in both repos).
+- `start.sh` prints the `LIBERTY_APPS_DIR` value at startup + warns if the directory
+  doesn't exist; `init-config` skips seeding `.example` → real files when it's set.
+
+Operator setup:
+```bash
+git clone https://github.com/fblettner/liberty-next.git
+git clone <private-org>/liberty-apps.git              # the customer's configs + future apps
+cd liberty-next
+export LIBERTY_APPS_DIR=$PWD/../liberty-apps/config
+./start.sh
+```
+
+Layout of `liberty-apps/` (mirrors what's in its README):
+```
+liberty-apps/
+├── README.md                        # how the repo plugs into liberty-next
+├── config/                          # the 6 TOML files liberty-next reads
+│   ├── connectors.toml              # 141 KB — pool defs + sql/api connectors
+│   ├── dictionary.toml              # 115 KB — shared field labels + enums + lookups
+│   ├── menus.toml                   # per-app nav tree
+│   ├── screens.toml                 # 169 KB — every screen's columns + dialog
+│   ├── charts.toml                  # saved chart specs
+│   └── dashboards.toml              # dashboard layouts
+├── plugins/                         # custom apps built on liberty-next (Phase 13: nomaflow)
+├── legacy/                          # the v1 source kept for reference (Phase 12: airflow-plugins/)
+└── docs/
+```
 
 **Big-grid scaling — slice 1 (row virtualization) DONE.** `frontend/src/common/DataTable.tsx`
 now wraps the tbody with `@tanstack/react-virtual`'s `useVirtualizer`. Only the visible rows
@@ -1786,10 +1830,14 @@ screen needs >100K rows in a single shot, not before.
 `start.sh` (repo root): `serve` (default) | `dev` | `api [dev]` | `build` | `frontend` |
 `init-db` | `init-config` | `help`. `fastapi-cli` is a dependency, so `fastapi dev liberty/main.py` works too.
 
-**Pools / DB / secrets:** `config/connectors.toml`, `config/dictionary.toml`, `config/menus.toml` are
-the *per-deployment* config and are **not committed** — the open framework ships only `*.toml.example`
-templates (copy them with `./start.sh init-config`, or fill them with `liberty-migrate`); licensed
-apps (**nomasx1**, **NOMAJDE**) ship these files separately. A fresh checkout with none of them runs
+**Pools / DB / secrets:** `connectors.toml`, `dictionary.toml`, `menus.toml`, `screens.toml`,
+`charts.toml`, `dashboards.toml` are the *per-deployment* config. The open framework ships
+only `*.toml.example` templates (copy them with `./start.sh init-config`, or fill them with
+`liberty-migrate`); the live configs are **not committed in liberty-next** — they live in a
+**separate private repo at `../liberty-apps/config/`** (see Phase 11 above). Set
+`LIBERTY_APPS_DIR=$PWD/../liberty-apps/config` and every per-section default `config_path`
+resolves there. With `LIBERTY_APPS_DIR` unset, the framework falls back to the local `config/`
+(legacy layout, still supported for dev / API-only deployments). A fresh checkout with none of them runs
 API-only (just `[pools.default]`). (Reference shape — what nomasx1/NOMAJDE put there: the migrated
 nomasx1 app (Postgres) plus the NOMAJDE app, whose v1 DB spans three v2 connectors: `jdedwards` (the
 Oracle JDE business DB), `nomajde` (its Postgres app DB), `session` (a stub) — and the `ais_connection`

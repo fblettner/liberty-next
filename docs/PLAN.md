@@ -665,5 +665,56 @@ phase; it makes v2 self-sufficient for what those apps actually need.
    `AIRFLOW` is *not* migrated, never finalized — v1 stays read-only), which interleaves with **Phase 6**
    (the form/screen engine — design it only against real migrated screens). Then **Phase 7** (the
    schema-driven config builders + config-file versioning + frontend tests/CI), **Phase 8** (charts &
-   dashboards), **Phase 9** (notifications / reporting / leftover backports), **Phase 10** (the
-   Airflow-replacement: Python/Spark jobs & scheduling, in-project).
+   dashboards), **Phase 9** (WebSocket — record locks + technical dashboard + log tail, **DONE** via
+   Socket.IO). **Phase 11** repo split → **Phase 12** Airflow legacy import → **Phase 13** the
+   nomaflow ETL+scheduler app (see §7 below); supersedes the original "Phase 10".
+
+## 7. Phases 11 + 12 + 13 — Repo split, Airflow legacy, nomaflow
+
+A late addition to the roadmap (May 2026): split the codebase into **two repos** + plan the
+v1 Airflow-plugin replacement as a first-class app on liberty-next.
+
+**Phase 11 — Repo split (DONE).** Customer-specific TOML (nomasx1 + nomajde rolled together
+— 141 KB connectors + 169 KB screens + 115 KB dictionary + smaller menus/charts/dashboards)
+moves out of liberty-next entirely. The framework stays public; the configs live in
+**`../liberty-apps/`** (private). Wiring is a single env var: `LIBERTY_APPS_DIR` redirects
+the default per-section `config_path` to `${LIBERTY_APPS_DIR}/<file>.toml`. Unset → fallback
+to the local `./config/` (legacy layout, still supported for dev / API-only deployments).
+`auth.toml` stays per-installation under liberty-next/config/ regardless.
+
+`liberty-apps/` layout:
+- `config/` — the live TOML files (everything liberty-next reads).
+- `plugins/` — custom apps built on liberty-next (Phase 13: `nomaflow/`).
+- `legacy/` — v1 source kept verbatim for reference (Phase 12).
+- `docs/` — bootstrapping + deployment notes.
+
+**Phase 12 — Import the v1 Airflow plugins (planned).** Copy
+`liberty-enterprise-airflow-plugins/` (~9.8 KLOC, 47 files) into
+`liberty-apps/legacy/airflow-plugins/` verbatim. Don't rewrite yet — the production
+deployment still runs these. Keeps the working code reachable as a reference while
+Phase 13 develops.
+
+**Phase 13 — `nomaflow` (planned).** A native ETL + scheduler app on liberty-next that
+replaces the v1 Airflow plugin set. Architecture:
+
+| Concern | Airflow today | nomaflow equivalent |
+|---|---|---|
+| Job definition | Python DAG file | `jobs.toml` per customer (declarative) |
+| Connection mgmt | Airflow Connections | reuse v2's `[pools]` + `[connectors]` |
+| Scheduling | `schedule_interval` | APScheduler (cron + interval) in a background task |
+| Task execution | PythonOperator + custom operators | a `JobRunner` that calls connector queries (read SQL → write SQL — the v2 way) |
+| Spark transfers | PySpark JDBC | SQLAlchemy `conn.stream()` → batched inserts (already proven by Phase 9's streaming SELECT) |
+| LDAP sync | ldap3 in operator | the same `ldap3`, wrapped in `run_in_executor` |
+| Job state | Airflow metadata DB | new `ly2_job_runs` table |
+| Monitoring UI | Airflow webserver | a new Screen built on the existing config-driven Screen engine + a `JobRunner` connector (zero new UI code) |
+| Retries / alerts | Airflow retry policy | per-job in `jobs.toml`, alerts via Phase 9's WS broadcast |
+
+The new app is **purely configuration**: `[jobs.<id>]` blocks declaring schedule + steps +
+connections. The framework handles execution. nomasx1's JDE syncs become ~20 `[jobs.*]`
+entries instead of 9.8 KLOC of Python.
+
+Feasibility: ~3 weeks for the framework side (jobs module + APScheduler + the runner) +
+~1 week per major workflow to port. Single-process; the Spark→native streaming swap is the
+biggest risk, but for the JDE table volumes Liberty handles (millions of rows, not
+billions), `conn.stream()` + chunked inserts should match Spark's throughput on a single
+node — distributed Spark was only justified for very large datasets we don't see here.

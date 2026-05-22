@@ -23,7 +23,17 @@
 # which mounts it at "/" after the API routes — no copying to a "public" folder needed.
 # To serve the static files from elsewhere, set [app] static_dir in config/app.toml.
 #
-# Env overrides: HOST, PORT, VENV  (e.g. PORT=9000 ./start.sh).
+# Env overrides:
+#   HOST, PORT, VENV         e.g. PORT=9000 ./start.sh
+#   LIBERTY_APPS_DIR         path to the liberty-apps repo's `config/` dir; when set,
+#                            every per-section TOML (connectors / dictionary / menus /
+#                            screens / charts / dashboards) is loaded from there instead
+#                            of the local `config/`. See ../liberty-apps/README.md.
+#                            `auth.toml` stays per-installation under the local `config/`.
+#   LIBERTY_JWT_SECRET       JWT signing key — unset = ephemeral key (tokens die on restart)
+#   LIBERTY_MASTER_KEY       v1 ENC: field-decryption key (must equal v1's MASTER_KEY)
+#   LIBERTY_LICENSE_KEY      RS256 JWT unlocking `licensed = true` connectors
+#   ANTHROPIC_API_KEY        for the AI assistant
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -61,6 +71,11 @@ maybe_build_frontend() {
 }
 
 init_config() {  # copy the *.example templates to the real (uncommitted) config files when absent
+  # When LIBERTY_APPS_DIR is set, per-section TOML lives in the liberty-apps repo
+  # (see ../liberty-apps/README.md) — don't seed local copies in config/ then.
+  if [ -n "${LIBERTY_APPS_DIR:-}" ]; then
+    return 0
+  fi
   local f changed=0
   for f in connectors dictionary menus screens charts dashboards; do
     if [ ! -f "config/$f.toml" ] && [ -f "config/$f.toml.example" ]; then
@@ -78,6 +93,13 @@ run_api() {  # $1 = "dev" → enable --reload
   init_config
   [ -f config/auth.toml ] || echo "==> config/auth.toml missing — no users yet. Run: ./start.sh init-db   (bootstraps an 'admin')"
   [ -n "${LIBERTY_JWT_SECRET:-}" ] || echo "==> LIBERTY_JWT_SECRET unset → ephemeral JWT key (tokens won't survive a restart)"
+  # ``LIBERTY_APPS_DIR`` (when set) redirects every per-section default config_path to
+  # ``${LIBERTY_APPS_DIR}/<file>.toml`` — that's the liberty-apps private repo. Print it
+  # so an operator can verify the deployment is pointed at the right place.
+  if [ -n "${LIBERTY_APPS_DIR:-}" ]; then
+    echo "==> LIBERTY_APPS_DIR=$LIBERTY_APPS_DIR   (per-section TOML loaded from there)"
+    [ -d "$LIBERTY_APPS_DIR" ] || echo "==> warning: \$LIBERTY_APPS_DIR does not exist or isn't a directory"
+  fi
   echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs   sio: /socket.io/)"
   # ``asgi_app`` = the Socket.IO + FastAPI wrapped ASGI app (so /socket.io/*
   # reaches the SIO engine; everything else falls through to FastAPI).
