@@ -38,6 +38,20 @@ def _default_config_path(name: str) -> Path:
         return Path(apps) / f"{name}.toml"
     return Path(f"config/{name}.toml")
 
+
+def _default_jobs_path() -> Path:
+    """Default location for ``jobs.toml`` — special-cased from :func:`_default_config_path`
+    because nomaflow lives under ``plugins/`` in the apps repo, not at the top of ``config/``.
+
+    ``${LIBERTY_APPS_DIR}/plugins/nomaflow/jobs.toml`` when the env var is set
+    (the layout :file:`liberty-apps/README.md` describes); ``./config/jobs.toml``
+    otherwise (the dev / API-only fallback). An explicit ``[jobs] config_path``
+    in ``app.toml`` wins over both. See ``docs/PHASE13.md`` §3."""
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    if apps:
+        return Path(apps) / "plugins" / "nomaflow" / "jobs.toml"
+    return Path("config/jobs.toml")
+
 # ${NAME}  or  ${NAME:-default}  (shell semantics: the default is used when NAME is
 # unset *or* empty). The default may contain anything except '}'.
 _ENV_REF = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
@@ -191,6 +205,24 @@ class LicenseSettings(BaseModel):
     key: str = ""   # ${LIBERTY_LICENSE_KEY}
 
 
+class JobsSettings(BaseModel):
+    """nomaflow — config-driven ETL + scheduler (see ``docs/PHASE13.md``).
+
+    ``config_path`` resolves through :func:`_default_jobs_path` so
+    ``LIBERTY_APPS_DIR`` (when set) redirects the default to
+    ``${LIBERTY_APPS_DIR}/plugins/nomaflow/jobs.toml`` — nomaflow is an *app*, so
+    its catalogue lives in the apps repo under ``plugins/`` (not at the
+    config-root level like connectors/screens/etc). ``pool`` defaults to
+    ``"default"`` so the ``nomaflow_*`` tables land on the same pool the auth
+    tables use; override only when an operator wants them on a separate DB."""
+
+    config_path: Path = Field(default_factory=_default_jobs_path)
+    pool: str = "default"
+    # Master toggle. False → the registry still loads (so /admin views work) but the
+    # scheduler + runner won't start at app boot. Useful for one-off maintenance windows.
+    enabled: bool = True
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
@@ -203,6 +235,7 @@ class Settings(BaseModel):
     ai: AISettings = Field(default_factory=AISettings)
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     license: LicenseSettings = Field(default_factory=LicenseSettings)
+    jobs: JobsSettings = Field(default_factory=JobsSettings)
 
 
 def load_settings(

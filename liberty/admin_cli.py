@@ -74,7 +74,13 @@ def _print(obj) -> None:
 async def _cmd_init_db(ctx: _Context, args: argparse.Namespace) -> int:
     await ctx.backend.ready()
     await ctx.backend.get_or_create_role(ADMIN_ROLE, permissions=["*"], description="Full access (wildcard).")
-    base = {"backend": ctx.settings.auth.backend, "ready": True}
+    # Create the nomaflow run-history tables on the same pool (idempotent — create_all
+    # is a no-op if they exist). Done unconditionally because the tables are tiny and
+    # creating them up-front avoids a "first job run errors because the table is missing"
+    # foot-gun. `jobs.enabled = false` only gates the scheduler/runner, not the schema.
+    from liberty.jobs.db import JobDatabase
+    await JobDatabase(ctx.registry.pools, ctx.settings.jobs.pool).create_schema()
+    base = {"backend": ctx.settings.auth.backend, "ready": True, "nomaflow_schema": "ready"}
     if await ctx.backend.count_users() > 0:
         _print({**base, "admin_created": False})
         return 0
