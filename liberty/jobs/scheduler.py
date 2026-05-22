@@ -215,6 +215,19 @@ class JobScheduler:
         return [j.id for j in self._scheduler.get_jobs()]
 
     @property
+    def next_fire_times(self) -> dict[str, datetime]:
+        """``{job_id: next_run_time}`` for every registered job APScheduler will fire.
+
+        Reads APScheduler's in-memory ``next_run_time`` — cheap, no I/O. A job whose
+        ``next_run_time`` is None (paused, or never scheduled) is omitted. Powers the
+        "next run" column of the Jobs list (``GET /admin/jobs``)."""
+        return {
+            j.id: j.next_run_time
+            for j in self._scheduler.get_jobs()
+            if j.next_run_time is not None
+        }
+
+    @property
     def in_flight_job_ids(self) -> frozenset[str]:
         return frozenset(self._in_flight)
 

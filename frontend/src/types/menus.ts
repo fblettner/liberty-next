@@ -9,11 +9,12 @@ export interface MenuNode {
   // folder:
   items?: MenuNode[]
   // leaf:
-  type?: 'query' | 'endpoint' | 'dashboard'
-  /** Connector name. Absent on `dashboard` leaves (dashboards have a flat namespace, no
-   *  connector); always present on `query` / `endpoint` leaves. */
+  type?: 'query' | 'endpoint' | 'dashboard' | 'page'
+  /** Connector name. Absent on `dashboard` and `page` leaves (no connector); always
+   *  present on `query` / `endpoint` leaves. */
   connector?: string
-  /** The query / endpoint name (sql / api) or the dashboard id (dashboard). */
+  /** The query / endpoint name (sql / api), the dashboard id (dashboard), or the
+   *  frontend route path (page — e.g. `/nomaflow`). */
   target?: string
   params?: Record<string, unknown>
 }

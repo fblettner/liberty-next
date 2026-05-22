@@ -206,6 +206,100 @@ def test_run_now_for_unknown_job_returns_404(env) -> None:
         assert "no-such-job" in r.json()["detail"]
 
 
+# --------------------------------------------------------------------------- #
+# GET /admin/jobs — last-run + next-fire extension (increment 1)
+# --------------------------------------------------------------------------- #
+
+
+def test_list_jobs_carries_last_run_and_next_run(env) -> None:
+    """After a manual run of `ping`, GET /admin/jobs carries that run as `last_run`;
+    a scheduled job carries a `next_run` ISO timestamp."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Before any run: last_run is None for every job
+        before = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
+        assert before["ping"]["last_run"] is None
+        # `ping` is scheduled → it has a next_run timestamp; manual-only / disabled don't
+        assert before["ping"]["next_run"] is not None
+        assert before["manual-only"]["next_run"] is None
+        assert before["disabled"]["next_run"] is None
+
+        # Fire ping, then last_run reflects it
+        client.post("/admin/jobs/ping/run", headers=h)
+        after = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
+        lr = after["ping"]["last_run"]
+        assert lr is not None
+        assert lr["state"] == "SUCCEEDED"
+        assert lr["run_id"] and lr["started_at"] and lr["finished_at"]
+
+
+# --------------------------------------------------------------------------- #
+# GET / PUT /admin/config/jobs/parsed (increment 1)
+# --------------------------------------------------------------------------- #
+
+
+def test_get_jobs_parsed_returns_catalogue(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        r = client.get("/admin/config/jobs/parsed", headers=_h(client, "admin"))
+        assert r.status_code == 200
+        body = r.json()
+        assert body["path"].endswith("jobs.toml")
+        ids = {j["id"] for j in body["jobs"]}
+        assert ids == {"ping", "manual-only", "disabled"}
+
+
+def test_get_jobs_parsed_requires_superuser(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        assert client.get("/admin/config/jobs/parsed").status_code == 401
+        assert client.get("/admin/config/jobs/parsed", headers=_h(client, "reader")).status_code == 403
+
+
+def test_put_jobs_parsed_round_trip(env) -> None:
+    """PUT a new job list, GET it back — the edit persisted to jobs.toml."""
+    app, jobs_toml = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        new_jobs = [
+            {
+                "id": "added-via-put",
+                "schedule": "0 5 * * *",
+                "steps": [
+                    {"type": "sql_query", "name": "s", "connector": "db", "query": "answer"},
+                ],
+            },
+        ]
+        r = client.put("/admin/config/jobs/parsed", json={"jobs": new_jobs}, headers=h)
+        assert r.status_code == 200 and r.json()["saved"] is True
+
+        back = client.get("/admin/config/jobs/parsed", headers=h).json()
+        assert [j["id"] for j in back["jobs"]] == ["added-via-put"]
+        # The file on disk really changed
+        assert "added-via-put" in jobs_toml.read_text()
+
+
+def test_put_jobs_parsed_rejects_invalid(env) -> None:
+    """A job with an unknown step type → 422, file untouched."""
+    app, jobs_toml = env
+    original = jobs_toml.read_text()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        bad = [{"id": "broken", "steps": [{"type": "spark_submit", "name": "x"}]}]
+        r = client.put("/admin/config/jobs/parsed", json={"jobs": bad}, headers=h)
+        assert r.status_code == 422
+        assert jobs_toml.read_text() == original  # not written
+
+
+def test_put_jobs_parsed_requires_superuser(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        body = {"jobs": []}
+        assert client.put("/admin/config/jobs/parsed", json=body).status_code == 401
+        assert client.put("/admin/config/jobs/parsed", json=body, headers=_h(client, "reader")).status_code == 403
+
+
 def test_run_now_for_manual_only_job_works(env) -> None:
     """``manual-only`` has no cron schedule; it's not registered with APScheduler
     but the manual fire endpoint still triggers it (that's the whole point)."""

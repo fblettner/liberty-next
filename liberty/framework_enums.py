@@ -116,6 +116,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "query", "label": "Query (table / screen)"},
             {"value": "endpoint", "label": "Endpoint (API call)"},
             {"value": "dashboard", "label": "Dashboard (widget grid)"},
+            {"value": "page", "label": "Page (frontend route)"},
         ],
     },
     "SUPPORTED_LANGUAGES": {

@@ -10,6 +10,8 @@ A leaf is kept iff:
 * ``endpoint`` — the caller holds ``api:{connector}:{target}``
 * ``dashboard`` — the dashboard with id ``target`` exists in the catalog (per-widget
   permission gating happens at render time; an "empty" dashboard still surfaces)
+* ``page`` — always kept (the target frontend route enforces its own auth); only the
+  item's ``roles`` filter applies
 
 …plus any ``roles`` filter on the item. The frontend uses these to render the sidebar;
 with no ``menus.toml`` (or nothing accessible) it falls back to the flat connector list.
@@ -51,6 +53,10 @@ def _keeper(principal: Principal, dashboards: DashboardsFile):
             return False
         if item.type == "dashboard":
             return (item.target or "") in dashboards.dashboards
+        if item.type == "page":
+            # A page leaf points at a frontend route; the route enforces its own auth.
+            # Only the roles filter (checked above) gates it here.
+            return True
         perm = f"{'sql' if item.type == 'query' else 'api'}:{connector}:{item.target}"
         return principal.has_permission(perm)
 

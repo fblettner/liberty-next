@@ -637,6 +637,74 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
     return {"saved": True, "path": str(path)}
 
 
+# ── nomaflow jobs.toml (Phase 13 — see docs/NOMAFLOW-UI.md §5) ────────────────────────────────
+# Unlike pools/connectors/charts/dashboards (dict-keyed sections), jobs.toml's top level is a
+# ``[[jobs]]`` *array of tables*. So the wire shape is a list, not a {key: value} map: GET
+# returns ``{path, jobs: [...]}``, PUT accepts ``{jobs: [...]}``. The GET returns *merged* jobs
+# (``[jobs.step_defaults]`` expanded into each step) — the editor works on fully-expanded steps;
+# see NOMAFLOW-UI.md §4.
+
+
+@router.get("/config/jobs/parsed")
+async def get_jobs_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``jobs.toml`` parsed and normalised — ``{path, jobs: [<Job dict>...]}``.
+
+    A missing file → an empty job list. ``step_defaults`` is merged into each step (the
+    loader does this); default-valued keys are dropped so the wire payload stays terse.
+    ``by_alias=True`` so the ``schema`` field on SQL endpoints round-trips as ``schema``
+    (the model's Python attribute is ``schema_`` — see :class:`liberty.jobs.schema.SqlEndpoint`)."""
+    from liberty.jobs import load_jobs
+
+    path = Path(request.app.state.settings.jobs.config_path)
+    registry = load_jobs(path)
+    return {
+        "path": str(path),
+        "jobs": [
+            j.model_dump(by_alias=True, exclude_defaults=True, exclude_none=True)
+            for j in registry.jobs()
+        ],
+    }
+
+
+class JobsBody(BaseModel):
+    jobs: list[dict[str, Any]]
+
+
+@router.put("/config/jobs/parsed")
+async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted job list against :class:`liberty.jobs.JobsFile`, then rewrite
+    ``jobs.toml`` via ``tomlkit`` — replacing only the top-level ``[[jobs]]`` array (a
+    ``[meta]`` table and any surrounding comments are preserved). Re-parses the result before
+    writing. Does not reload — call ``POST /admin/reload`` afterwards to apply.
+
+    The body carries already-expanded steps (no ``step_defaults``); ``Job``'s ``extra="forbid"``
+    rejects a stray ``step_defaults`` key. Saving therefore normalises a hand-authored
+    ``step_defaults`` block away — the documented behaviour (NOMAFLOW-UI.md §4)."""
+    from liberty.jobs import JobsFile
+
+    try:
+        JobsFile.model_validate({"jobs": body.jobs})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid jobs: {exc}") from exc
+
+    path = Path(request.app.state.settings.jobs.config_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    if body.jobs:
+        doc["jobs"] = body.jobs
+    elif "jobs" in doc:
+        del doc["jobs"]
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        JobsFile.model_validate({"jobs": tomllib.loads(new_text).get("jobs", [])})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting jobs are invalid: {exc}") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
 # ── API connector test ──────────────────────────────────────────────────────────────────────
 
 

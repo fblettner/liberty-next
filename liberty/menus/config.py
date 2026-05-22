@@ -42,7 +42,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ItemType = Literal["query", "endpoint", "dashboard"]  # a leaf's kind; ``None`` = a folder/group node
+# A leaf's kind; ``None`` = a folder/group node.
+#  query     → a SELECT screen / TableView
+#  endpoint  → an API call / HttpRunner
+#  dashboard → a dashboard
+#  page      → a registered frontend route (a custom feature area, e.g. /nomaflow) —
+#              ``target`` is the route path, ``connector`` is unused. See NOMAFLOW-UI.md §2.
+ItemType = Literal["query", "endpoint", "dashboard", "page"]
 
 
 class MenuItem(BaseModel):
@@ -66,7 +72,7 @@ class MenuItem(BaseModel):
     icon: str | None = Field(default=None, description="Lucide icon name (e.g. ``shield``, ``users``).")
     type: ItemType | None = Field(
         default=None,
-        description="Blank = folder; ``query`` opens a screen; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard.",
+        description="Blank = folder; ``query`` opens a screen; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard; ``page`` navigates to a registered frontend route.",
         json_schema_extra={"x_enum_ref": "MENU_ITEM_TYPE"},
     )
     connector: str | None = Field(
@@ -107,6 +113,10 @@ class MenuItem(BaseModel):
             # Dashboards live in their own flat namespace (config/dashboards.toml, keyed by id);
             # they don't belong to a connector. A `connector` field here is a misconfiguration.
             raise ValueError(f"menu item {self.id!r}: a 'dashboard' item must not carry a `connector` (target = the dashboard id)")
+        elif self.type == "page" and self.connector is not None:
+            # A page leaf's target is a frontend route, not a connector resource — a
+            # `connector` here is a misconfiguration (same shape as the dashboard rule).
+            raise ValueError(f"menu item {self.id!r}: a 'page' item must not carry a `connector` (target = the route path)")
         return self
 
 
@@ -199,13 +209,15 @@ def build_menu_tree(
                 return None  # an empty folder collapses away
             d["items"] = kids
             return d
-        # Dashboard leaves carry just `target` (the dashboard id) — no connector. The validator
-        # already rejected a connector on dashboard items, so we don't need to handle a stray one.
-        connector = "" if it.type == "dashboard" else (it.connector or app)
+        # Dashboard + page leaves carry just `target` (the dashboard id / route path) — no
+        # connector. The validator already rejected a stray connector on both, so we don't
+        # need to handle one here.
+        connectorless = it.type in ("dashboard", "page")
+        connector = "" if connectorless else (it.connector or app)
         if keep is not None and not keep(it, connector):
             return None
         d["type"] = it.type
-        if it.type != "dashboard":
+        if not connectorless:
             d["connector"] = connector
         d["target"] = it.target
         if it.params:

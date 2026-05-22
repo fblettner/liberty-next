@@ -64,6 +64,25 @@ def test_build_menu_tree_nests_resolves_labels_and_drops_empty_folders() -> None
     assert ext == {"id": "ext", "label": "Things", "type": "endpoint", "connector": "other_api", "target": "list_things"}
 
 
+def test_page_leaf_type() -> None:
+    """The `page` leaf type (NOMAFLOW-UI.md §2) — points at a frontend route, carries
+    no connector, emits with `type=page` + `target` + no `connector` key."""
+    # A valid page leaf
+    item = MenuItem(id="jobs", label="Jobs", type="page", target="/nomaflow")
+    assert item.type == "page" and item.target == "/nomaflow"
+    # A page leaf with a connector is a misconfiguration (target is a route, not a resource)
+    with pytest.raises(Exception):
+        MenuItem(id="bad", label="x", type="page", target="/x", connector="c")
+    # A page leaf still needs a target
+    with pytest.raises(Exception):
+        MenuItem(id="bad", label="x", type="page")
+    # build_menu_tree emits it connector-less, like a dashboard leaf
+    menu = AppMenu(items=[MenuItem(id="jobs", label="Jobs", type="page", target="/nomaflow")])
+    tree = build_menu_tree(menu, app="nomaflow")
+    assert tree == [{"id": "jobs", "label": "Jobs", "type": "page", "target": "/nomaflow"}]
+    assert "connector" not in tree[0]
+
+
 def test_build_menu_tree_prunes_with_keep_and_collapses_now_empty_folders() -> None:
     # keep only the "users" leaf — "sec" survives (has a kept child), "ext" drops, and so does
     # "sec.roles"/"sec.admin_only".

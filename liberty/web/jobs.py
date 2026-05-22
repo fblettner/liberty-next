@@ -24,6 +24,7 @@ the brief JSON the reload endpoint returns (a couple of fields, no envelope).
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -64,12 +65,19 @@ def _components(request: Request):
     return comps
 
 
-def _job_summary(job, *, scheduled_ids: set[str], in_flight_ids: frozenset[str]) -> dict[str, Any]:
+def _job_summary(
+    job,
+    *,
+    scheduled_ids: set[str],
+    in_flight_ids: frozenset[str],
+    last_run: dict[str, Any] | None,
+    next_run: datetime | None,
+) -> dict[str, Any]:
     """Compact JSON representation of one Job — for ``GET /admin/jobs``.
 
-    Carries just enough for the UI's job picker to render rows + decide which
-    buttons (Run / Cancel) to enable. Full step detail comes from a separate
-    config endpoint (chunk 4+); this is the operational view, not the editor."""
+    Carries what the Jobs list (NOMAFLOW-UI.md §3.1) renders: the catalogue fields,
+    the operational flags, the last-run badge (``last_run``: latest run's state +
+    timestamps, or None if never run), and the next scheduled fire (``next_run``)."""
     return {
         "id": job.id,
         "description": job.description,
@@ -80,7 +88,43 @@ def _job_summary(job, *, scheduled_ids: set[str], in_flight_ids: frozenset[str])
         "step_count": len(job.steps),
         "registered_with_scheduler": job.id in scheduled_ids,
         "in_flight": job.id in in_flight_ids,
+        "last_run": last_run,
+        "next_run": next_run.isoformat() if next_run is not None else None,
     }
+
+
+async def _latest_runs_by_job(db) -> dict[str, dict[str, Any]]:
+    """``{job_id: {run_id, state, started_at, finished_at, rows_affected, error_message}}``
+    for the most recent run of each job.
+
+    One query: an inner aggregate (max ``started_at`` per ``job_id``) joined back to the
+    run rows. Works on every dialect — no ``DISTINCT ON``. A theoretical tie (two runs of
+    one job with an identical microsecond ``started_at``) would yield two rows; the dict
+    build below just keeps the last seen — harmless for a display badge."""
+    from sqlalchemy import func, select
+    from liberty.jobs.models import JobRun
+
+    newest = (
+        select(JobRun.job_id, func.max(JobRun.started_at).label("max_started"))
+        .group_by(JobRun.job_id)
+        .subquery()
+    )
+    stmt = select(JobRun).join(
+        newest,
+        (JobRun.job_id == newest.c.job_id) & (JobRun.started_at == newest.c.max_started),
+    )
+    out: dict[str, dict[str, Any]] = {}
+    async with db.session() as session:
+        for run in (await session.execute(stmt)).scalars().all():
+            out[run.job_id] = {
+                "run_id": run.id,
+                "state": run.state,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "rows_affected": run.rows_affected,
+                "error_message": run.error_message,
+            }
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -90,9 +134,9 @@ def _job_summary(job, *, scheduled_ids: set[str], in_flight_ids: frozenset[str])
 
 @router.get("")
 async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
-    """Return every job in the registry + a couple of operational flags
-    (whether each is registered with the scheduler, currently in flight).
-    Mirrors the brief-JSON shape of ``POST /admin/reload``."""
+    """Return every job in the registry + operational state: scheduler-registered /
+    in-flight flags, the last run's status (badge), and the next scheduled fire.
+    Powers the Jobs list (NOMAFLOW-UI.md §3.1)."""
     comps = _components(request)
     registry: JobRegistry = comps.registry
     scheduler: JobScheduler = comps.scheduler
@@ -100,9 +144,17 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
 
     scheduled_ids = set(scheduler.scheduled_job_ids)
     in_flight = scheduler.in_flight_job_ids
+    next_fires = scheduler.next_fire_times
+    last_runs = await _latest_runs_by_job(comps.db)
     return {
         "jobs": [
-            _job_summary(j, scheduled_ids=scheduled_ids, in_flight_ids=in_flight)
+            _job_summary(
+                j,
+                scheduled_ids=scheduled_ids,
+                in_flight_ids=in_flight,
+                last_run=last_runs.get(j.id),
+                next_run=next_fires.get(j.id),
+            )
             for j in registry.jobs()
         ],
         "active_run_ids": sorted(runner.active_run_ids),

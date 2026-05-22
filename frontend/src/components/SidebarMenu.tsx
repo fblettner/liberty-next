@@ -154,6 +154,9 @@ function leafPath(node: MenuNode): string | null {
   const t = encodeURIComponent(node.target)
   // Dashboards have no connector segment — the catalog is flat (keyed by id).
   if (node.type === 'dashboard') return `/dashboard/${t}`
+  // A `page` leaf's target IS the route — navigate straight to it (e.g. /nomaflow).
+  // No connector, no encoding (it's a path, not an identifier). See NOMAFLOW-UI.md §2.
+  if (node.type === 'page') return node.target
   if (!node.connector) return null
   const c = encodeURIComponent(node.connector)
   return node.type === 'endpoint' ? `/http/${c}/${t}` : `/sql/${c}/${t}`
