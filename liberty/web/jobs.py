@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from datetime import timezone as dt_timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -212,3 +213,40 @@ async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dic
         run_id, principal.username,
     )
     return {"run_id": run_id, "cancelled_by": principal.username, "status": "requested"}
+
+
+@router.get("/cron-preview")
+async def cron_preview(
+    schedule: str,
+    _: Superuser,
+    timezone: str = "",
+    count: int = 5,
+) -> dict[str, Any]:
+    """Preview the next *count* fire times of a cron *schedule* — powers the
+    schedule editor's live preview (NOMAFLOW-UI.md §3.2 / increment 6).
+
+    Reuses APScheduler's ``CronTrigger`` (already a dependency) rather than a
+    hand-rolled cron evaluator or a new frontend lib — the same parser the
+    scheduler fires jobs with, so the preview can't disagree with reality. A
+    malformed cron / unknown timezone → 422 with the parser's message."""
+    from apscheduler.triggers.cron import CronTrigger
+
+    try:
+        trigger = CronTrigger.from_crontab(schedule, timezone=timezone or None)
+    except Exception as exc:  # noqa: BLE001 — APScheduler raises ValueError + others
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"invalid cron expression: {exc}",
+        ) from exc
+
+    fires: list[str] = []
+    prev: datetime | None = None
+    cursor = datetime.now(dt_timezone.utc)
+    for _i in range(max(1, min(count, 20))):
+        nxt = trigger.get_next_fire_time(prev, cursor)
+        if nxt is None:
+            break
+        fires.append(nxt.isoformat())
+        prev = nxt
+        cursor = nxt
+    return {"schedule": schedule, "timezone": timezone or None, "next": fires}

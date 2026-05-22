@@ -338,6 +338,16 @@ const fr: Resources = {
       headers: 'En-têtes',
       body: 'Corps',
     },
+    schedule: {
+      manual: 'Manuelle',
+      hourly: 'Horaire',
+      daily: 'Quotidienne',
+      weekly: 'Hebdomadaire',
+      monthly: 'Mensuelle',
+      manualHint: 'Aucune planification — cette tâche ne s\'exécute que sur déclenchement manuel.',
+      nextFires: 'Prochaines exécutions',
+      computing: 'calcul…',
+    },
   },
   settings: {
     title: 'Configuration',

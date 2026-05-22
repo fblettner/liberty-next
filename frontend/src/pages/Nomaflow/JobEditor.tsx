@@ -18,6 +18,7 @@ import {
 import { colors, fontSize } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor from './StepEditor'
+import ScheduleField from './ScheduleField'
 import type { JobConfig, JobsParsedResponse } from './types'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
@@ -133,20 +134,18 @@ export default function JobEditor() {
                 />
                 {!isNew && <FieldHint>{t('nomaflow.editor.idImmutable')}</FieldHint>}
               </FieldWrap>
-              <FieldWrap>
-                <FieldLabel>{t('nomaflow.editor.fieldSchedule')}</FieldLabel>
-                <Input
-                  value={job.schedule ?? ''}
-                  onChange={(e) => patch({ schedule: e.target.value || null })}
-                  placeholder="30 2 * * *"
-                />
-                <FieldHint>{t('nomaflow.editor.scheduleHint')}</FieldHint>
-              </FieldWrap>
               <FieldWrap $full>
                 <FieldLabel>{t('nomaflow.editor.fieldDescription')}</FieldLabel>
                 <Input
                   value={job.description ?? ''}
                   onChange={(e) => patch({ description: e.target.value || null })}
+                />
+              </FieldWrap>
+              <FieldWrap $full as="div">
+                <ScheduleField
+                  value={job.schedule ?? null}
+                  timezone={job.timezone ?? null}
+                  onChange={(schedule) => patch({ schedule })}
                 />
               </FieldWrap>
               <FieldWrap>

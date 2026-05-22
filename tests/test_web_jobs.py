@@ -300,6 +300,45 @@ def test_put_jobs_parsed_requires_superuser(env) -> None:
         assert client.put("/admin/config/jobs/parsed", json=body, headers=_h(client, "reader")).status_code == 403
 
 
+# --------------------------------------------------------------------------- #
+# GET /admin/jobs/cron-preview (increment 6)
+# --------------------------------------------------------------------------- #
+
+
+def test_cron_preview_returns_next_fires(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        r = client.get(
+            "/admin/jobs/cron-preview",
+            params={"schedule": "30 2 * * *", "timezone": "Europe/Paris", "count": 3},
+            headers=_h(client, "admin"),
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["next"]) == 3
+        # All three are valid ascending ISO timestamps
+        assert body["next"] == sorted(body["next"])
+
+
+def test_cron_preview_rejects_bad_expression(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        r = client.get(
+            "/admin/jobs/cron-preview",
+            params={"schedule": "not a cron"},
+            headers=_h(client, "admin"),
+        )
+        assert r.status_code == 422
+
+
+def test_cron_preview_requires_superuser(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        params = {"schedule": "0 * * * *"}
+        assert client.get("/admin/jobs/cron-preview", params=params).status_code == 401
+        assert client.get("/admin/jobs/cron-preview", params=params, headers=_h(client, "reader")).status_code == 403
+
+
 def test_run_now_for_manual_only_job_works(env) -> None:
     """``manual-only`` has no cron schedule; it's not registered with APScheduler
     but the manual fire endpoint still triggers it (that's the whole point)."""

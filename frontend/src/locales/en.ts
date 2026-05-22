@@ -336,6 +336,16 @@ const en = {
       headers: 'Headers',
       body: 'Body',
     },
+    schedule: {
+      manual: 'Manual',
+      hourly: 'Hourly',
+      daily: 'Daily',
+      weekly: 'Weekly',
+      monthly: 'Monthly',
+      manualHint: 'No schedule — this job only runs when triggered manually.',
+      nextFires: 'Next runs',
+      computing: 'computing…',
+    },
   },
   settings: {
     title: 'Configuration',
