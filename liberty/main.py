@@ -32,6 +32,7 @@ from liberty.web import (
     connectors_router,
     dashboards_router,
     export_router,
+    jobs_router,
     license_router,
     menus_router,
     screens_router,
@@ -121,9 +122,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         import asyncio
         sio_layer.attach_log_handler(loop=asyncio.get_running_loop())
         app.state.sio = sio_layer
+        # nomaflow (Phase 13a chunk 3): build the registry + runner + scheduler,
+        # start the scheduler (recovery sweep runs here, then APScheduler kicks
+        # in for cron). app.state.jobs = NomaflowComponents (registry/runner/
+        # scheduler/db). Lifespan shutdown stops the scheduler cleanly.
+        from liberty.jobs.wiring import build_nomaflow, shutdown_nomaflow
+        app.state.jobs = await build_nomaflow(
+            settings, app.state.connectors, sio_layer=sio_layer,
+        )
         try:
             yield
         finally:
+            await shutdown_nomaflow(app.state.jobs)
             await sio_layer.stop()
             if app.state.ai is not None:
                 await app.state.ai.aclose()
@@ -164,6 +174,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(license_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
+    app.include_router(jobs_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

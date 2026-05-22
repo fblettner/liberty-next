@@ -89,6 +89,26 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     request.app.state.charts = load_charts(settings.charts.config_path)
     request.app.state.dashboards = load_dashboards(settings.dashboards.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
+
+    # nomaflow (Phase 13a chunk 3): also reload jobs.toml and reconcile the
+    # live scheduler (add/remove/reschedule cron triggers per the diff). The
+    # JobDatabase + JobRunner keep using the new connectors.pools — they don't
+    # need rebuilding because the wiring.NomaflowComponents.db points at the
+    # pool by name, not by engine reference. New jobs requesting executors for
+    # step types that don't have one (python/ldap/http until those land) will
+    # fail at run time, not here, with the clear "no executor registered"
+    # message — same behaviour as before this reload.
+    jobs_components = getattr(request.app.state, "jobs", None)
+    nomaflow_reloaded: dict[str, Any] = {"enabled": False}
+    if jobs_components is not None:
+        from liberty.jobs.wiring import hot_reload_registry
+        new_registry = await hot_reload_registry(jobs_components, settings)
+        nomaflow_reloaded = {
+            "enabled": True,
+            "jobs": [j.id for j in new_registry.jobs()],
+            "scheduled_jobs": jobs_components.scheduler.scheduled_job_ids,
+        }
+
     await old.aclose()
     return {
         "reloaded": True,
@@ -100,6 +120,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "charts": list(request.app.state.charts.charts),
         "dashboards": list(request.app.state.dashboards.dashboards),
         "license_mode": license_result.mode,
+        "nomaflow": nomaflow_reloaded,
     }
 
 

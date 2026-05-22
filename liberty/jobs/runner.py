@@ -122,6 +122,11 @@ class JobRunner:
         self._executors = dict(executors)
         self._broadcaster = broadcaster
         self._sleep = sleep
+        # run_id → the asyncio.Task currently running it. Populated at the top of
+        # run() and cleared in its finally block. Drives :meth:`cancel`: the admin
+        # endpoint looks up the task and calls .cancel() on it, which raises
+        # CancelledError inside the run loop → terminal state CANCELED.
+        self._active_runs: dict[str, asyncio.Task] = {}
 
     # -- public ----------------------------------------------------------- #
 
@@ -148,6 +153,14 @@ class JobRunner:
             return run
 
         await self._transition(run, RunState.RUNNING)
+
+        # Register this run's task so cancel() can find + interrupt it. Using
+        # current_task() means the registration matches the actual asyncio Task
+        # the scheduler / admin endpoint is awaiting, so .cancel() on it raises
+        # CancelledError exactly inside our run loop (not in some sibling).
+        current = asyncio.current_task()
+        if current is not None:
+            self._active_runs[run.id] = current
 
         ctx = RunContext(run_id=run.id, job_id=job.id, trigger=trigger)
         terminal = RunState.SUCCEEDED  # optimistic; flipped on first failure
@@ -177,6 +190,11 @@ class JobRunner:
             terminal = RunState.FAILED
             await self._finalize(run, terminal, total_rows=total_rows, error=str(exc))
             return await self._reload(run.id)
+        finally:
+            # Always clear the active-run registration — even on cancellation,
+            # even on early return for resumed-terminal runs. cancel() lookups
+            # on a finished run should be a clean miss.
+            self._active_runs.pop(run.id, None)
 
         await self._finalize(run, terminal, total_rows=total_rows)
         _log.info(
@@ -184,6 +202,28 @@ class JobRunner:
             job.id, run.id, executed_step_count, terminal.value,
         )
         return await self._reload(run.id)
+
+    def cancel(self, run_id: str) -> bool:
+        """Cancel an in-flight run by id. Returns True if a task was found and
+        cancellation requested; False if the run isn't currently in flight
+        (already terminated, or never existed under this runner instance).
+
+        The actual transition to CANCELED happens inside :meth:`run`'s
+        ``CancelledError`` handler — this method just signals; the persistence
+        update is the run loop's responsibility. Idempotent: cancelling an
+        already-cancelled task is a harmless no-op.
+        """
+        task = self._active_runs.get(run_id)
+        if task is None:
+            return False
+        if not task.done():
+            task.cancel()
+        return True
+
+    @property
+    def active_run_ids(self) -> frozenset[str]:
+        """Snapshot of in-flight run ids — diagnostic + test helper."""
+        return frozenset(self._active_runs.keys())
 
     # -- internals: run lifecycle ----------------------------------------- #
 
