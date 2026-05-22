@@ -13,10 +13,12 @@ import { ArrowLeft, Save, Workflow, Layers } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   PageLayout, Button, Banner, Centered, Card, Input, Select, Checkbox,
-  Tag, SpinnerRing, Stack,
+  SpinnerRing, Stack,
 } from '../../common'
-import { colors, fontSize, fonts } from '../../theme'
-import type { JobConfig, JobsParsedResponse, StepConfig, StepType } from './types'
+import { colors, fontSize } from '../../theme'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
+import StepEditor from './StepEditor'
+import type { JobConfig, JobsParsedResponse } from './types'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
 const SectionTitle = styled.div`
@@ -32,15 +34,6 @@ const FieldWrap = styled.label<{ $full?: boolean }>`
 `
 const FieldLabel = styled.span`font-size: ${fontSize.sm}; color: ${colors.text.secondary};`
 const FieldHint = styled.span`font-size: ${fontSize.sm}; color: ${colors.text.muted};`
-const StepRow = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border: 1px solid ${colors.border}; border-radius: 8px;
-`
-const StepName = styled.span`font-family: ${fonts.mono}; color: ${colors.text.primary};`
-const StepSummary = styled.span`
-  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.muted};
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1;`
 const StatusText = styled.span<{ $tone: 'muted' | 'ok' }>`
@@ -48,32 +41,12 @@ const StatusText = styled.span<{ $tone: 'muted' | 'ok' }>`
   color: ${({ $tone }) => ($tone === 'ok' ? colors.green.main : colors.text.muted)};
 `
 
-const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral'> = {
-  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral',
-}
-
-/** A one-line, type-aware summary of a step — shown on the read-only step row. */
-function stepSummary(step: StepConfig): string {
-  const f = step as Record<string, unknown>
-  const ep = (e: unknown): string => {
-    const o = (e ?? {}) as Record<string, unknown>
-    return [o.connector, o.schema, o.table].filter(Boolean).join('.')
-  }
-  switch (step.type) {
-    case 'sql_copy': return `${ep(f.source)} → ${ep(f.target)}`
-    case 'sql_query': return `${f.connector ?? '?'}.${f.query ?? '?'}`
-    case 'python': return String(f.callable ?? '')
-    case 'ldap_sync': return String(f.server ?? '')
-    case 'http': return `${f.method ?? 'GET'} ${f.url ?? ''}`
-    default: return ''
-  }
-}
-
 const blankJob = (): JobConfig => ({ id: '', description: '', schedule: '', enabled: true, tags: [], steps: [] })
 
 export default function JobEditor() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { connectors } = useWorkspace()      // for the step forms' connector dropdowns
   const { id } = useParams()                 // undefined on /nomaflow/jobs/new
   const isNew = id === undefined
 
@@ -295,20 +268,14 @@ export default function JobEditor() {
             )}
           </Section>
 
-          {/* ── steps (read-only here; editable in increment 4) ────────────── */}
+          {/* ── step pipeline ──────────────────────────────────────────────── */}
           <Section>
             <SectionTitle><Layers size={15} /> {t('nomaflow.editor.stepsSection', { count: job.steps.length })}</SectionTitle>
-            {job.steps.length === 0 && (
-              <FieldHint>{t('nomaflow.editor.noSteps')}</FieldHint>
-            )}
-            {job.steps.map((step, i) => (
-              <StepRow key={i}>
-                <Tag $tone={STEP_TONE[step.type] ?? 'neutral'}>{step.type}</Tag>
-                <StepName>{step.name}</StepName>
-                <StepSummary>{stepSummary(step)}</StepSummary>
-              </StepRow>
-            ))}
-            <Banner $tone="info">{t('nomaflow.editor.stepsReadOnly')}</Banner>
+            <StepEditor
+              steps={job.steps}
+              onChange={(steps) => patch({ steps })}
+              connectors={connectors}
+            />
           </Section>
         </Stack>
       )}
