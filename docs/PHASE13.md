@@ -77,7 +77,7 @@ nomaflow is a configuration-driven ETL + scheduler that runs **inside the libert
 ```
 
 **Two new modules** in liberty-next:
-- `liberty/jobs/` — `JobRegistry`, `JobRunner`, `StepExecutor` implementations, `nomaflow_*` ORM models. ~1.5 KLOC target.
+- `liberty/jobs/` — `JobRegistry`, `JobRunner`, `StepExecutor` implementations, `nomaflow_*` ORM models. Aim for a focused module, not a framework — most logic per step type belongs in `steps/<type>.py`.
 - `liberty/jobs/connectors/` — a synthetic `JobRunsConnector` so the Screen engine can read `nomaflow_job_runs` like any other table.
 
 **Zero new code** in:
@@ -147,7 +147,7 @@ The framework ships **five** step types. Anything else lives in a user `python` 
 | `ldap_sync` | Bind, search, write user/group rows to a target connector via a configured mapping. | `nomasx1.agent.ldap` |
 | `http` | Fan-out HTTP requests (calling an `APIConnector` or a raw URL) with parameter substitution. | future webhook needs |
 
-**Why a closed set:** Airflow's "anything goes" model is the reason v1 has 9.8 KLOC of operators. 90% of those operators are variants of "read table A, transform, write table B." Five well-spec'd step types cover everything in production; the long tail goes through `python`. (The same principle that turned 9.8 KLOC into ~20 TOML entries earlier in the plan.)
+**Why a closed set:** Airflow's "anything goes" model is the reason v1 has ~10 KLOC of operators (measured: `airflow-plugins-enterprise/` is 9974 lines). Most of those operators are variants of "read table A, transform, write table B" — the boilerplate that vanishes when configuration replaces code. Five well-spec'd step types cover everything in production; the long tail goes through `python`.
 
 ### 3.3 Substitution
 
@@ -252,8 +252,7 @@ op_kwargs = { apps_id = "10", module = "all", debug_enabled = "N", table = "all"
 
 The `nomaflow.nomasx1.collect` module is the ported version of the v1
 `collect_nomasx1_dag` body, living at `liberty-apps/plugins/nomaflow/nomasx1/collect.py`
-(see §5.3 for how `plugins/` becomes the importable package root). Per the plan:
-~1 week per major workflow to port; this is one of those workflows. The TOML stays
+(see §5.3 for how `plugins/` becomes the importable package root). The TOML stays
 small; the heavy lifting is in the Python (which is fine — that's what `python` is for).
 
 ---
@@ -289,7 +288,7 @@ QUEUED ──► RUNNING ──► SUCCEEDED
 
 No PAUSED, no UPSTREAM_FAILED, no DEFERRED — Airflow's full taxonomy isn't needed for linear sequences. (The `enabled = false` flag in jobs.toml is *scheduler-level*, not run-level: it tells APScheduler not to register the cron trigger at all. The state machine above describes the lifecycle of a `nomaflow_job_runs` row, which only ever gets created when a job actually fires.)
 
-**Concurrency:** one `JobRunner` instance per worker process; jobs run in parallel asyncio tasks. Within a job, steps are strictly serial. No `max_active_runs_per_dag` — if a schedule fires while the previous run is still RUNNING, the new fire is **dropped** with a logged warning (matching v1's `depends_on_past=False, catchup=False` defaults).
+**Concurrency:** one `JobRunner` instance per worker process; jobs run in parallel asyncio tasks. Within a job, steps are strictly serial. No `max_active_runs_per_dag` — if a schedule fires while the previous run is still RUNNING, the new fire is **dropped and an alert fires on the Phase 9 Socket.IO `/technical` room** (same channel the alerts policy in §3.1 uses). Matching v1's `depends_on_past=False, catchup=False` defaults on the drop semantics; differing from v1 by being loud about it — a long-running job that silently skips its next day is the exact failure mode this design fixes. Operators see the dropped fire in real time and can decide whether to investigate the long run or accept the skip.
 
 **Timeouts:** each step gets `step.timeout_seconds` (default 3600); the runner cancels the asyncio task on timeout. `job.timeout_seconds` (default 14400 = 4h) is a hard ceiling on the whole run.
 
@@ -361,9 +360,9 @@ async def execute_sql_copy(self, step: SqlCopyStep, ctx: RunContext) -> StepResu
 Two behaviors worth noting in this sketch beyond the data-loss fix:
 
 - **Single source + single target connection per step.** Opening/closing per batch
-  is a common anti-pattern that shows up in async ETL code; for a 10K-batch sync
-  of a 1M-row table, that's 100 connect/close cycles per step. The sketch holds
-  one of each for the step's whole lifetime.
+  is a common anti-pattern that shows up in async ETL code — a sync of N rows at
+  batch size B does N/B connect/close cycles, all redundant. The sketch holds one
+  of each for the step's whole lifetime.
 - **`_new` suffix + RENAME** assumes the target dialect supports cheap `ALTER TABLE
   ... RENAME TO`. Postgres, Oracle, MySQL: yes. SQLite: no (requires CREATE+COPY).
   Production target is Postgres, so this works. If a tenant ever targets SQLite the
@@ -371,24 +370,40 @@ Two behaviors worth noting in this sketch beyond the data-loss fix:
 
 **Why this is going to work without Spark:**
 
-- `conn.stream()` + `result.partitions(N)` is the **same streaming pattern Phase 9 already uses** for big-grid SELECTs. Same JDBC drivers (cx_Oracle / asyncpg / pyodbc), same fetch-size tuning.
-- JDE table volumes top out around ~10M rows for the biggest dimensions (F0101 etc.). At a 10K batch size + asyncpg COPY, that's ~3-5 minutes per table on a modest box — comparable to Spark's overhead-dominated runtime for the same task on a single node. Spark only wins when you can parallelize across executors, which we don't have.
+- `conn.stream()` + `result.partitions(N)` is the **same streaming pattern Phase 9 already uses** for big-grid SELECTs. Same drivers (cx_Oracle / asyncpg / pyodbc), same fetch-size tuning.
+- Spark's wins (parallel executors, partition pruning) all require a real cluster. Run Spark single-node and you get its overhead without its parallelism — which is what v1 actually deployed. nomaflow drops the overhead and matches the parallelism (zero, in both cases).
 - The `numPartitions` Spark option is gone, but it was only meaningful when Spark could parallelize the read across executors. Single-process, it was a no-op.
-- The Spark JVM startup cost (~30s per task) is gone too; small jobs go from "slow" to "instant."
+- The Spark JVM startup cost (tens of seconds per task on a cold start) is gone too; small jobs go from "slow" to "instant."
 
-**The `type_coercion = "jde"` profile** must reproduce v1's exact rules:
+Real per-table wall times aren't known until 13a runs the harness. The Phase 13 acceptance criterion (§12) is "not significantly slower than the Spark equivalent on the same hardware" — measured, not asserted here.
+
+**The `type_coercion = "jde"` profile** reproduces v1's rules. The "JDE convention" they encode: JD Edwards never actually stores decimals — every numeric column in the JDE schema is integer-valued at the source even when the source's data dictionary types it as `Decimal(p, s)` with `s > 0`. v1's Spark→Postgres path discovered this the hard way: without an explicit cast, Spark's default JDBC adapter mapped Oracle `NUMBER` to Postgres `float` (a lossy round-trip for what JDE actually stores). The integer/long cast in `db_copy.py` was the workaround that forced the Postgres schema to bigint/integer, matching JDE's actual data shape:
 
 | Source type | v1 Spark cast | nomaflow target (Postgres) |
 |---|---|---|
-| `DecimalType(p, 0)` with p ≤ 9 | `IntegerType` | `integer` |
-| `DecimalType(p, 0)` with p > 9 | `LongType` | `bigint` |
-| `DecimalType(p, s)` with s > 0 | `LongType` (!) | `bigint` — matches v1; this is a JDE convention, not a sensible default |
-| `StringType` | `trim` + `regexp_replace("\x00", "")` | server-side `trim()` + Python `.replace("\x00", "")` per row |
+| `Decimal(p, 0)` with p ≤ 9 | `IntegerType` | `integer` |
+| `Decimal(p, 0)` with p > 9 | `LongType` | `bigint` |
+| `Decimal(p, s)` with s > 0 | `LongType` (truncates) | `bigint` (truncates) — see `decimal_mode` below |
+| `String` | `trim` + strip `\x00` | server-side `trim()` + Python `.replace("\x00", "")` per row |
 | anything else | identity | identity |
 
 Plus: lowercase all column names (v1 `toDF(*[c.lower() for c in cols])`).
 
-A diff-test against the existing nomajde Postgres tables is the acceptance criterion: same row count, same column types, same byte values per cell. Detailed in §10.
+**`decimal_mode` — escape hatch for non-JDE sources.** The truncating cast is correct for JDE but wrong for any source where decimal places actually carry information. The step takes an optional `decimal_mode`:
+
+```toml
+[[jobs.steps]]
+type = "sql_copy"
+type_coercion = "jde"
+decimal_mode = "truncate"   # default. JDE: numeric columns are integer-valued at source.
+                            # other values:
+                            #   "preserve" — cast Decimal(p, s>0) to Postgres numeric(p, s)
+                            #               instead of bigint; keeps the decimal places.
+```
+
+Default is `"truncate"` so existing nomajde tables stay byte-equivalent across the v1→nomaflow cutover (acceptance criterion §10). New jobs targeting non-JDE sources set `decimal_mode = "preserve"` explicitly. The Decimal(p,s>0) regression test in §11 covers both modes.
+
+A diff-test against the existing nomajde Postgres tables is the cutover acceptance criterion: same row count, same column types, same byte values per cell. Detailed in §10.
 
 ### 5.2 `ldap_sync` — replacing `nomasx1.agent.ldap`
 
@@ -436,7 +451,7 @@ The function signature: `def fn(**kwargs) -> dict | None`. The return dict's `ro
 - **Manual trigger:** a `POST /admin/jobs/<id>/run` endpoint (admin permission required) → enqueues a `ManualTrigger(triggered_by=user_id)` run. This is what the Settings page UI fires when an operator clicks "Run now."
 - **Crash recovery on startup.** If the process died mid-run, `nomaflow_job_runs` will have rows in state `RUNNING` whose owning process is gone — without intervention they stay `RUNNING` forever, blocking the dedup `UNIQUE (job_id, scheduled_at)` from firing the next scheduled instance. On scheduler startup, before any schedules are registered, a sweep marks every `RUNNING`/`QUEUED` row as `FAILED` with `error_message = "abandoned: process restart during run"`. The same sweep cascades to `nomaflow_step_runs` (any RUNNING step gets `FAILED` + the same message). Cheap (one UPDATE … WHERE state IN (...)), runs once at boot, idempotent.
 
-**Why APScheduler and not a hand-rolled cron loop:** cron parsing alone is enough to justify a library; APScheduler also handles DST, timezones, interval triggers, and per-job tz overrides. The footprint is ~30 LOC of glue.
+**Why APScheduler and not a hand-rolled cron loop:** cron parsing alone is enough to justify a library; APScheduler also handles DST, timezones, interval triggers, and per-job tz overrides. The glue layer is small — a registration loop over `jobs.toml` and a coroutine hand-off to `JobRunner.run`.
 
 ---
 
@@ -577,17 +592,19 @@ plugins/
 
 The whole thing is too big for one push. Three sub-phases:
 
-### 13a — Framework (~3 weeks)
+### 13a — Framework
 
 Everything in `liberty/jobs/` + the `nomaflow_*` tables + the admin endpoints + tests. Acceptance: `pytest tests/jobs/` green; a hello-world `jobs.toml` with one `sql_query` step runs on its schedule + shows up in the Screen. **No production workload touches it yet.**
 
-### 13b — Cutover: nomajde JDE sync (~1 week)
+### 13b — Cutover: nomajde JDE sync
 
-Port `nomajde-sync.py` to TOML (§3.4). Build the JDE-coercion test harness: pick 3 representative source tables (small / int-heavy / decimal-heavy), run both v1 Spark and nomaflow against the same source DB, byte-diff the resulting Postgres tables. **All three must match.** Cut over when they do; v1 nomajde stays running for a week in parallel as a fallback.
+Port `nomajde-sync.py` to TOML (§3.4). Build the JDE-coercion test harness: pick 3 representative source tables (small / int-heavy / decimal-heavy), run both v1 Spark and nomaflow against the same source DB, byte-diff the resulting Postgres tables. **All three must match.** Cut over when they do; v1 nomajde stays running in parallel as a fallback for at least one full schedule cycle (one week of daily runs).
 
-### 13c — Cutover: nomasx1 agents (~2 weeks)
+### 13c — Cutover: nomasx1 agents
 
-Port `nomasx1-agent.py` + the underlying `collect_nomasx1_dag` body into `liberty_apps_plugins.nomaflow.nomasx1.collect`. This is the bulk of the v1 enterprise plugin LOC (~5 KLOC of agent / security / etl logic). Most of it ports as-is into a `python` step; the SQL-heavy bits (security writes, audit upserts) become named queries on existing connectors and get called from `sql_query` steps. Acceptance: a week of parallel runs produces equivalent rows in the target tables.
+Port `nomasx1-agent.py` + the underlying `collect_nomasx1_dag` body into `nomaflow.nomasx1.collect`. The agent + security + etl + target subtrees in `airflow-plugins-enterprise/` measure 5,422 lines today — the bulk of the v1 enterprise plugin LOC. Most of it ports as-is into a `python` step; the SQL-heavy bits (security writes, audit upserts) become named queries on existing connectors and get called from `sql_query` steps. Acceptance: parallel runs over one full schedule cycle (daily + weekly) produce equivalent rows in the target tables.
+
+**On sequencing:** the three sub-phases are sequential — 13b can't start until 13a is green, and 13c needs the framework patterns 13b shakes out. Don't estimate calendar time here; estimates without measurement are noise. Track 13a's tests-green date as the real signal.
 
 After 13c lands, the Airflow deployment is decommissioned and `liberty-apps/legacy/` becomes deletable (but stays until someone audits and confirms).
 
@@ -596,9 +613,9 @@ After 13c lands, the Airflow deployment is decommissioned and `liberty-apps/lega
 ## 11. Open decisions / risks
 
 1. **APScheduler 4.0 vs 3.x.** 4.0 has a much cleaner async story but as of writing was still beta. Decide at start of 13a; if 4.0 isn't trustworthy yet, 3.x with `AsyncIOScheduler` works.
-2. **Single-process vs gunicorn workers.** If liberty-next runs under multiple gunicorn workers, only one should run the scheduler. Solutions: a startup election via Postgres advisory lock (`pg_try_advisory_lock(NOMAFLOW_LOCK_KEY)`) — the worker that gets it owns the scheduler, others run job execution from a shared queue. Defer to 13a implementation; the lock-based approach is well-known and ~30 LOC.
+2. **Single-process vs gunicorn workers.** If liberty-next runs under multiple gunicorn workers, only one should run the scheduler. Solutions: a startup election via Postgres advisory lock (`pg_try_advisory_lock(NOMAFLOW_LOCK_KEY)`) — the worker that gets it owns the scheduler, others run job execution from a shared queue. Defer to 13a implementation; the lock-based approach is well-known.
 3. ~~Where `python` step callables live.~~ **Decided (in spec).** Option (a): `${LIBERTY_APPS_DIR}/plugins/` goes on `sys.path`; callables are referenced by their natural import path (`nomaflow.nomasx1.collect:run`). No allowlist. See §5.3 "Where the callable lives." Revisit if a tenant ever runs untrusted job authors.
-4. **JDE Decimal(p,s) with s>0 → bigint** is a v1 bug-or-feature. The migrator preserves it because the production tables expect it; nomaflow must do the same. Add a regression test that asserts a Decimal(10,2) source column lands as bigint in target. If/when this is fixed in v1, fix it here too.
+4. ~~JDE Decimal(p,s>0) → bigint is a v1 bug-or-feature.~~ **Decided (in spec).** Not a bug — it's the JDE convention (JDE never stores decimals; the cast forces the Postgres schema to bigint instead of float, which is what v1's default Spark JDBC adapter produced). `type_coercion = "jde"` defaults to `decimal_mode = "truncate"` to keep existing nomajde tables byte-equivalent; non-JDE sources set `decimal_mode = "preserve"` to map to `numeric(p, s)` instead. Two regression tests (one per mode); see §5.1.
 5. **`upsert` mode for `sql_copy`.** Specified above but the executor doesn't have a clean cross-DB implementation. Postgres has `ON CONFLICT`, Oracle has `MERGE`, MSSQL has `MERGE`. Either (a) require a `primary_key` column and emit the right dialect, or (b) drop `upsert` from v1 and force users to write a `sql_query` step against a pre-existing MERGE statement. Decide during 13a; (b) is the YAGNI choice.
 6. **Logs storage beyond 4 KB.** The file logger already exists; the question is operator UX. If `journalctl`-style filtering by run_id over the Socket.IO log tail (Phase 9) is unwieldy, add a `GET /admin/jobs/runs/<id>/logs` endpoint that returns the full log slice from the on-disk file. Punt until an operator complains.
 7. **License gating.** v2's license layer (Phase 5) gates `licensed = true` connectors. Should nomaflow itself be license-gated? Lean **no** — it's a generic capability; license-gating individual jobs (or the nomasx1/nomajde-specific job templates) is the right granularity. The framework is free; the customer-specific job catalog is the licensed asset.
@@ -609,6 +626,6 @@ After 13c lands, the Airflow deployment is decommissioned and `liberty-apps/lega
 
 1. **Functional parity:** every job that ran on v1 Airflow in production runs on nomaflow with equivalent output. Acceptance is byte-equivalence for the JDE tables (§10) and row-count + spot-check parity for the nomasx1 agents.
 2. **Operability:** an admin can create / edit / disable a job from the Settings page → reload → see the schedule change reflect in APScheduler within 1 reload cycle. Can manually trigger any job; can cancel a running job; can see run history + step detail + recent logs from a Screen.
-3. **Reliability:** a 1M-row JDE table sync completes in ≤ 1.5× the Spark equivalent's wall time. (Spark's parallelism advantage is moot single-node; the JVM startup penalty disappears entirely.)
-4. **Footprint:** the entire `liberty/jobs/` module is ≤ 2 KLOC. (If it grows past that, something is wrong; the v1 code being replaced is 9.8 KLOC, and most of that is operator boilerplate that doesn't repeat here.)
+3. **Reliability:** a representative JDE table sync (pick a small / int-heavy / decimal-heavy trio in 13b) completes within the same order of magnitude as the v1 Spark equivalent on the same hardware. Worse than that → investigate; we're not racing Spark on parallelism, but we shouldn't be paying overhead it doesn't.
+4. **Footprint:** `liberty/jobs/` stays *substantially* smaller than the v1 plugin code it replaces (the enterprise plugins alone are 9,974 lines). If `liberty/jobs/` approaches that size, the framework is absorbing logic that should be in user `python` steps — re-evaluate the split.
 5. **Decommission:** Airflow deployment is shut down. `liberty-apps/legacy/` is deletable (kept for one release as historical reference, then dropped).
