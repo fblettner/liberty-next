@@ -666,8 +666,9 @@ phase; it makes v2 self-sufficient for what those apps actually need.
    (the form/screen engine — design it only against real migrated screens). Then **Phase 7** (the
    schema-driven config builders + config-file versioning + frontend tests/CI), **Phase 8** (charts &
    dashboards), **Phase 9** (WebSocket — record locks + technical dashboard + log tail, **DONE** via
-   Socket.IO). **Phase 11** repo split → **Phase 12** Airflow legacy import → **Phase 13** the
-   nomaflow ETL+scheduler app (see §7 below); supersedes the original "Phase 10".
+   Socket.IO). **Phase 11** repo split (**DONE**) → **Phase 12** Airflow legacy import (**DONE**)
+   → **Phase 13** the nomaflow ETL+scheduler app (planned — see §7 below + `docs/PHASE13.md` for
+   the spec); supersedes the original "Phase 10".
 
 ## 7. Phases 11 + 12 + 13 — Repo split, Airflow legacy, nomaflow
 
@@ -688,14 +689,22 @@ to the local `./config/` (legacy layout, still supported for dev / API-only depl
 - `legacy/` — v1 source kept verbatim for reference (Phase 12).
 - `docs/` — bootstrapping + deployment notes.
 
-**Phase 12 — Import the v1 Airflow plugins (planned).** Copy
-`liberty-enterprise-airflow-plugins/` (~9.8 KLOC, 47 files) into
-`liberty-apps/legacy/airflow-plugins/` verbatim. Don't rewrite yet — the production
-deployment still runs these. Keeps the working code reachable as a reference while
-Phase 13 develops.
+**Phase 12 — Import the v1 Airflow plugins (DONE, 2026-05-22).** Both v1 plugin repos
+copied verbatim into `liberty-apps/legacy/` (commit `9b5a1ac`):
+- `legacy/airflow-plugins/` — `fblettner/liberty-airflow-plugins` @ `18aab2e` (36 files,
+  generic plugins: Postgres/Oracle copy + backup + purge, git utils, Airflow self-purge).
+- `legacy/airflow-plugins-enterprise/` — `fblettner/liberty-enterprise-airflow-plugins`
+  @ `a65646a` (72 files, nomasx1-specific: JDE/DB2/MSSQL extracts, LDAP, security/SOD/
+  audit, employees, license).
+
+Stripped: `.git/`, `.venv/`, `build/`, `dist/`, `*.egg-info/`, `__pycache__/`. The third
+sibling repo (`liberty-airflow/`, the runtime app) is **not** imported — Phase 13
+replaces the runtime entirely; only the plugins are needed as reference. Don't run
+anything from `legacy/`; production keeps using the upstream repos until nomaflow
+takes over. `legacy/README.md` carries the provenance + an `rsync` refresh recipe.
 
 **Phase 13 — `nomaflow` (planned).** A native ETL + scheduler app on liberty-next that
-replaces the v1 Airflow plugin set. Architecture:
+replaces the v1 Airflow plugin set. **Detailed spec in [PHASE13.md](PHASE13.md).** Summary:
 
 | Concern | Airflow today | nomaflow equivalent |
 |---|---|---|
