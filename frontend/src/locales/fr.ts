@@ -272,6 +272,7 @@ const fr: Resources = {
       lastRun: 'dernière',
       stepCount_one: '{{count}} étape',
       stepCount_other: '{{count}} étapes',
+      scheduleView: 'Planning',
     },
     editor: {
       newTitle: 'Nouvelle tâche',
@@ -347,6 +348,17 @@ const fr: Resources = {
       manualHint: 'Aucune planification — cette tâche ne s\'exécute que sur déclenchement manuel.',
       nextFires: 'Prochaines exécutions',
       computing: 'calcul…',
+    },
+    scheduleView: {
+      title: 'Planning',
+      subtitle: 'Toutes les tâches, par prochaine exécution',
+      upcoming: 'À venir ({{count}})',
+      manual: 'Manuelles / désactivées ({{count}})',
+      noScheduled: 'Aucune tâche planifiée — rien sur la frise.',
+      colJob: 'Tâche',
+      colSchedule: 'Planification',
+      colNextRun: 'Prochaine exécution',
+      colLastRun: 'Dernière exécution',
     },
   },
   settings: {

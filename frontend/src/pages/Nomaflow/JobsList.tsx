@@ -13,7 +13,8 @@ import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock } fr
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import type { JobSummary, JobsListResponse, JobsParsedResponse, RunState } from './types'
+import type { JobSummary, JobsListResponse, JobsParsedResponse } from './types'
+import { STATE_TONE, relative } from './util'
 
 const Toolbar = styled.div`
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
@@ -40,25 +41,6 @@ const Toggle = styled.button<{ $on: boolean }>`
   color: ${({ $on }) => ($on ? colors.green.main : colors.text.muted)};
   &:disabled { opacity: 0.5; cursor: default; }
 `
-
-const STATE_TONE: Record<RunState, 'green' | 'red' | 'orange' | 'blue' | 'neutral'> = {
-  SUCCEEDED: 'green', FAILED: 'red', CANCELED: 'orange', RUNNING: 'blue', QUEUED: 'neutral',
-}
-
-function relative(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  const diffMs = Date.now() - d.getTime()
-  const abs = Math.abs(diffMs)
-  const fut = diffMs < 0
-  const mins = Math.round(abs / 60000)
-  if (mins < 1) return fut ? 'in <1m' : 'just now'
-  if (mins < 60) return fut ? `in ${mins}m` : `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 48) return fut ? `in ${hrs}h` : `${hrs}h ago`
-  const days = Math.round(hrs / 24)
-  return fut ? `in ${days}d` : `${days}d ago`
-}
 
 export default function JobsList() {
   const { t } = useTranslation()
@@ -134,6 +116,9 @@ export default function JobsList() {
       <Toolbar>
         <Button $variant="primary" $size="sm" onClick={newJob}>
           <Plus size={14} /> {t('nomaflow.jobs.new')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => navigate('/nomaflow/schedule')}>
+          <CalendarClock size={14} /> {t('nomaflow.jobs.scheduleView')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={load}>
           <RefreshCw size={14} /> {t('common.reload')}

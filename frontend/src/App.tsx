@@ -15,6 +15,7 @@ const Chat = lazy(() => import("./pages/Chat"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
+const NomaflowSchedule = lazy(() => import("./pages/Nomaflow/Schedule"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
@@ -59,10 +60,11 @@ export default function App() {
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
         <Route path="chat" element={<Chat />} />
         <Route path="settings" element={<Settings />} />
-        {/* nomaflow feature area — Jobs list + Job editor (NOMAFLOW-UI.md) */}
+        {/* nomaflow feature area — Jobs list + Job editor + Schedule (NOMAFLOW-UI.md) */}
         <Route path="nomaflow" element={<Nomaflow />} />
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
         <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
+        <Route path="nomaflow/schedule" element={<NomaflowSchedule />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

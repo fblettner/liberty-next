@@ -270,6 +270,7 @@ const en = {
       lastRun: 'last',
       stepCount_one: '{{count}} step',
       stepCount_other: '{{count}} steps',
+      scheduleView: 'Schedule',
     },
     editor: {
       newTitle: 'New job',
@@ -345,6 +346,17 @@ const en = {
       manualHint: 'No schedule — this job only runs when triggered manually.',
       nextFires: 'Next runs',
       computing: 'computing…',
+    },
+    scheduleView: {
+      title: 'Schedule',
+      subtitle: 'Every job, by when it next runs',
+      upcoming: 'Upcoming ({{count}})',
+      manual: 'Manual / disabled ({{count}})',
+      noScheduled: 'No scheduled jobs — nothing on the timeline.',
+      colJob: 'Job',
+      colSchedule: 'Schedule',
+      colNextRun: 'Next run',
+      colLastRun: 'Last run',
     },
   },
   settings: {
