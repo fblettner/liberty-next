@@ -23,6 +23,7 @@ dependencies = [
     "openpyxl>=3.1",  # workbook export — multi-file / multi-sheet xlsx (v1's tbl_workbook / tbl_sheet feature)
     "python-socketio>=5.11",   # Socket.IO server — record locks (rooms-as-locks, v1 pattern) + technical dashboard / log tail
     "fastapi-socketio>=0.0.10",   # mounts python-socketio on a FastAPI app
+    "apscheduler>=3.11,<4",   # nomaflow (Phase 13a) — in-process cron + interval scheduler (4.0 still pre-release on PyPI)
 ]
 
 [project.optional-dependencies]
