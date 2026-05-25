@@ -24,6 +24,7 @@ dependencies = [
     "python-socketio>=5.11",   # Socket.IO server — record locks (rooms-as-locks, v1 pattern) + technical dashboard / log tail
     "fastapi-socketio>=0.0.10",   # mounts python-socketio on a FastAPI app
     "apscheduler>=3.11,<4",   # nomaflow (Phase 13a) — in-process cron + interval scheduler (4.0 still pre-release on PyPI)
+    "watchfiles>=0.21",       # filesystem watcher behind ``[app] hot_reload = true`` — picks up TOML edits without an explicit /admin/reload
     "alembic>=1.13",          # nomaflow plugins ship versioned schema migrations (plugins/<name>/db/alembic/) — the upgrade path
     "psycopg2-binary>=2.9",   # sync Postgres driver — Alembic's online runner is sync (the async asyncpg pool is unused there)
 ]

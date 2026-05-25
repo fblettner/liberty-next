@@ -87,6 +87,15 @@ class AppSettings(BaseModel):
     log_level: str = "info"
     # Built frontend (Vite `dist/`) served as static; empty or missing dir → not mounted.
     static_dir: str = "frontend/dist"
+    # When true, the server watches the config TOML files (menus / screens / dictionary /
+    # charts / dashboards / jobs / the [connectors.*] half of connectors.toml) and reloads
+    # the matching subsystem on change. Off by default — operators get the explicit
+    # POST /admin/reload by default. Flip on in app.toml ``[app] hot_reload = true`` when
+    # actively editing config from disk (vim / scp / git pull) and you want changes live
+    # without clicking Reload. ``[pools.*]`` changes are intentionally NOT auto-reloaded —
+    # swapping a live SQL engine mid-query is too risky; use the Pools page's manual reload
+    # for those. See liberty.web.hot_reload for the per-file dispatch.
+    hot_reload: bool = False
 
 
 class ConnectorSettings(BaseModel):

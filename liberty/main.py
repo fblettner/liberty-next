@@ -162,9 +162,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
         )
+        # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
+        # config TOMLs reload the matching subsystem without an explicit Settings →
+        # Reload click. Started AFTER nomaflow + everything else is in place so handler
+        # imports see the live app.state. No-op task when the setting is off.
+        from liberty.web.hot_reload import start_watcher
+        app.state.hot_reload_task = await start_watcher(app)
         try:
             yield
         finally:
+            app.state.hot_reload_task.cancel()
+            try:
+                await app.state.hot_reload_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 — best-effort
+                pass
             await shutdown_nomaflow(app.state.jobs)
             await sio_layer.stop()
             if app.state.ai is not None:
