@@ -26,6 +26,7 @@ import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, type LookupData, type LookupSpec } from '../../services/lookups'
+import { useTabs } from '../../tabs/TabsContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
@@ -343,6 +344,9 @@ export function ResultTable({
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
   // which keeps the workspace's tab manager in charge (no full page reload).
   const navigate = useNavigate()
+  // openOrActivate is the workspace-tab counterpart of ``navigate`` — used by the row_click_route
+  // path to add the destination as a tab in the strip (instead of replacing the current view).
+  const { openOrActivate } = useTabs()
   const canEdit = !!(updateQuery || insertQuery)
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -374,6 +378,36 @@ export function ResultTable({
   const [proxyError, setProxyError] = useState<string | null>(null)
 
   const hasRowClickProxy = !hasDialog && !!screen?.row_click_screen
+  // Row-click → SPA route. The escape hatch for screens that drill into a hand-written React
+  // page rather than another Screen dialog — needed when the destination renders things SQL
+  // can't (live log streaming, custom charts). The route template uses ``{column_name}``
+  // placeholders that resolve against the clicked row; values are URL-encoded. Wins over
+  // hasDialog / hasRowClickProxy when set — opting into a route is the more specific intent.
+  //
+  // Opens as a **workspace tab** (the in-app tab strip), not a browser tab — same UX as
+  // clicking a query in the connector tree. The source list stays open as its own tab; the
+  // destination joins the strip and stays active until closed. ``/nomaflow/runs/<id>`` maps
+  // to the ``nomaflow_run`` tab kind (TabsContext.tabPath ↔ App's TabRoute marker); routes
+  // outside that allow-list fall back to plain SPA navigation.
+  const rowClickRoute = screen?.row_click_route ?? null
+  const openRouteForRow = useCallback((row: Record<string, unknown>) => {
+    if (!rowClickRoute) return
+    // Replace every ``{name}`` with the row's column value (URL-encoded so columns containing
+    // ``/`` / ``?`` / ``#`` don't break the route). An unknown column produces an empty segment
+    // — the screen's validator caught that at config-load time, this is the runtime safety net.
+    const url = rowClickRoute.replace(/\{([^{}]+)\}/g, (_, name: string) => {
+      const v = row[name]
+      return v == null ? '' : encodeURIComponent(String(v))
+    })
+    // Route → workspace-tab mapping. Add another branch here when a new ``row_click_route``
+    // destination needs tab hosting (and add its kind to TabsContext + TabHost in the same
+    // change). Falls through to plain navigation for un-tabbed routes.
+    const nomaflowRun = url.match(/^\/nomaflow\/runs\/([^/?#]+)/)
+    if (nomaflowRun) {
+      openOrActivate({ kind: 'nomaflow_run', connector: '', target: decodeURIComponent(nomaflowRun[1]) })
+    }
+    navigate(url)
+  }, [rowClickRoute, navigate, openOrActivate])
   const openProxyForRow = useCallback(async (row: Record<string, unknown>) => {
     if (!screen?.row_click_screen) return
     setProxyOpen(true); setProxyLoading(true); setProxyError(null)
@@ -1128,15 +1162,19 @@ export function ResultTable({
         toolbarRight={maxRowsControl}
         initialColumnVisibility={initialVisibility}
         rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : dirtyRows.has(row) ? 'dt-row-dirty' : undefined)}
-        // Row click opens the screen dialog (when a dialog exists *and* we're not in batch-edit mode)
-        // — same v1 affordance: click a row to edit it via the form.
+        // Row click opens, in priority order: a SPA route (row_click_route — explicit operator
+        // opt-in); the screen's own dialog (the v1 "edit a row by clicking it" affordance); a
+        // sibling-screen dialog proxy (row_click_screen — the v1 ctx-menu "Display Properties"
+        // promotion). Batch-edit mode disables all of them — the row controls are the actions.
         onRowClick={
           !editMode
-            ? hasDialog
-              ? (row) => openDialogForRow(row)
-              : hasRowClickProxy
-                ? (row) => { void openProxyForRow(row) }
-                : undefined
+            ? rowClickRoute
+              ? (row) => openRouteForRow(row)
+              : hasDialog
+                ? (row) => openDialogForRow(row)
+                : hasRowClickProxy
+                  ? (row) => { void openProxyForRow(row) }
+                  : undefined
             : undefined
         }
         // Right-click → row context menu when the screen carries any `row_menu` actions and

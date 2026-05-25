@@ -6,7 +6,7 @@ import type { MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, X } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, X } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -75,8 +75,16 @@ export default function TabStrip() {
   return (
     <Bar>
       {tabs.map((tab) => {
-        const Icon = tab.kind === 'http' ? Globe : TableIcon
-        const label = findMenuLabel(menus, tab) ?? tab.target
+        const Icon =
+          tab.kind === 'http' ? Globe :
+          tab.kind === 'nomaflow_run' ? Workflow :
+          TableIcon
+        // Nomaflow run tabs aren't menu-tree entries; label them "Run <short-id>". The full
+        // run_id stays in the title attribute for hover. Other kinds keep the menu lookup,
+        // which needs the narrower ScreenKey shape (sql/http/dashboard only).
+        const label = tab.kind === 'nomaflow_run'
+          ? t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
+          : findMenuLabel(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string }) ?? tab.target
         return (
           <TabBtn key={tab.id} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${label} — ${tab.connector}.${tab.target}`}>
             <Icon className="tic" size={13} />

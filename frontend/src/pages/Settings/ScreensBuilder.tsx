@@ -25,7 +25,6 @@ import {
   Row,
   Stack,
   SpinnerRing,
-  Mono,
   FrameworkEnumsContext,
   VisualBuilderModal,
   useModals,
@@ -145,7 +144,6 @@ export default function ScreensBuilder() {
   // right level when the user drills in.
   const [screenSchema, setScreenSchema] = useState<JsonSchema | null>(null)
   const [enums, setEnums] = useState<FrameworkEnums | null>(null)
-  const [path, setPath] = useState('')
   const [doc, setDoc] = useState<AppScreens | null>(null)
   const [original, setOriginal] = useState<string>('')
   const [selApp, setSelApp] = useState<string | null>(null)
@@ -258,7 +256,7 @@ export default function ScreensBuilder() {
         const merged: JsonSchema = { ...screen, $defs: defs }
         setScreenSchema(merged)
         setEnums(s.framework_enums)
-        setPath(d.path); setDoc(d.screens); setOriginal(JSON.stringify(d.screens))
+        setDoc(d.screens); setOriginal(JSON.stringify(d.screens))
         const apps = Object.keys(d.screens)
         // Deep-link: `?app=X&screen=Y` (e.g. from ConnectorsBuilder) pre-selects the screen.
         // Only honoured once per mount and only when the requested screen actually exists; we
@@ -488,7 +486,6 @@ export default function ScreensBuilder() {
           the old "scope bar at top + bottom Save Row" split — the operator never has to scroll
           past a long screen list to reach Save / Reload. */}
       <ScopeBar>
-        <Mono>{path}</Mono>
         {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
         {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
         {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
@@ -698,6 +695,9 @@ export default function ScreensBuilder() {
               id={selId}
               value={selScreen as unknown as Record<string, unknown>}
               schema={screenSchema}
+              // Sibling screen IDs feed the "open dialog" row-click picker — the operator
+              // picks from a dropdown of real screens in this app instead of typing the id.
+              siblingScreenIds={Object.keys(doc?.[selApp] ?? {}).filter((i) => i !== selId)}
               onChange={(v) => updateScreen(selApp, selId, v)}
             />
           </div>

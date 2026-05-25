@@ -324,6 +324,12 @@ export interface ScreenListItem {
   row_click_screen?: string | null
   row_click_connector?: string | null
   row_click_binds?: ParamBind[]
+  /** SPA route opened on row click instead of a sibling-screen dialog. The escape hatch for
+   *  screens that drill into a hand-written React page (live-streamed logs, custom charts,
+   *  things SQL can't render). Use ``{column_name}`` placeholders to interpolate the clicked
+   *  row's columns; values are URL-encoded. Example: ``/nomaflow/runs/{id}``. Wins over
+   *  ``row_click_screen`` when both are set — explicit route is the more specific intent. */
+  row_click_route?: string | null
 }
 
 /** Full screen detail — what `GET /api/screens/{app}/{id}` returns: list-view fields + the

@@ -7,21 +7,27 @@
 // tab persist to sessionStorage, so a page refresh restores them.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-export type TabKind = 'sql' | 'http' | 'dashboard'
+// The set of "tab kinds" the workspace knows how to host. Adding a new one means three coordinated
+// edits: the union here, the path builder below, and the TabHost render switch. ``nomaflow_run``
+// is the first non-SQL/HTTP page wrapped as a tab — opened from row_click_route on the Job Runs
+// screen so the run detail lives alongside Job Runs / Users / etc. in the tab strip instead of
+// hijacking the workspace or popping a browser tab.
+export type TabKind = 'sql' | 'http' | 'dashboard' | 'nomaflow_run'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind
-  /** Empty for dashboard tabs (a dashboard is identified by `target` alone). */
+  /** Empty for dashboard / nomaflow_run tabs (the target alone identifies them). */
   connector: string
-  /** The query name (sql), endpoint name (http), or dashboard id (dashboard). */
+  /** The query name (sql), endpoint name (http), dashboard id (dashboard), or run_id (nomaflow_run). */
   target: string
 }
 export function tabId(kind: TabKind, connector: string, target: string): string {
   return `${kind}:${connector}:${target}`
 }
 export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
-  // Dashboards have no connector segment in the URL — just /dashboard/<id>.
+  // Dashboards / nomaflow_run have no connector segment in the URL — just /<base>/<id>.
   if (t.kind === 'dashboard') return `/dashboard/${encodeURIComponent(t.target)}`
+  if (t.kind === 'nomaflow_run') return `/nomaflow/runs/${encodeURIComponent(t.target)}`
   return `/${t.kind}/${encodeURIComponent(t.connector)}/${encodeURIComponent(t.target)}`
 }
 

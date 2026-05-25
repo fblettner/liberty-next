@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Edit3, Plus, Trash2 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption,
+  Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts } from '../../theme'
@@ -42,7 +42,32 @@ type Row = Record<string, unknown>
 // via the Columns tab (``ColumnHint.key``) — the runtime's ``Screen.effective_key_columns()``
 // derives the list from those flags. The explicit ``key_columns`` field stays on the schema
 // for hand-edited overrides, but it doesn't render here (less duplication, one place to set).
-const GENERAL_FORM_KEYS = ['label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable'] as const
+// Row-click fields are NOT in GENERAL_FORM_KEYS — they get their own section below the schema
+// form, behind a mode picker. The Pydantic model has four flat fields (row_click_screen +
+// _connector + _binds for the "open a sibling Screen as a modal" path, row_click_route for the
+// "navigate to a React page" path); rendering them flat confuses operators (you'd see 4 fields
+// with no hint that some are mutually exclusive). The picker turns it into one decision per
+// screen — "what happens when a row is clicked" — then reveals only the relevant fields.
+const GENERAL_FORM_KEYS = [
+  'label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable',
+] as const
+
+// Sub-schema for the "open dialog" mode — the three fields that go together. We render this
+// through SchemaForm so the ParamBind list editor (Add row, source/value picker, …) comes for
+// free instead of being hand-rolled here.
+const ROW_CLICK_DIALOG_KEYS = ['row_click_screen', 'row_click_connector', 'row_click_binds'] as const
+
+// Known SPA-route targets the row-click can drill into. Hand-curated because these are
+// React-defined routes (not discoverable via the API), so the dropdown ships with the frontend
+// and grows as new ones are added (NOMAFLOW-UI chunk 5 dashboards, future detail pages…).
+// ``allowCustom`` on the SearchSelect lets an operator type one that isn't in the list yet —
+// the typed value becomes the route verbatim, so a typo'd path won't silently fail at click time
+// (the Screen.row_click_route validator already catches missing column placeholders at save).
+const ROW_CLICK_ROUTE_OPTIONS: SearchSelectOption[] = [
+  { value: '/nomaflow/runs/{id}', label: 'Nomaflow run detail', mono: '/nomaflow/runs/{id}' },
+]
+
+type RowClickMode = 'none' | 'dialog' | 'route'
 // Phase 3 — Screen.columns drives both grid + dialog display (single source of truth). Edited
 // via SchemaNavigator on a dedicated tab.
 const COLUMNS_KEYS = ['columns'] as const
@@ -62,6 +87,13 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
+// Section divider for the row-click block in General — visually separates it from the schema-form
+// fields above so the mode picker reads as "a different decision", not "yet another field".
+const RowClickHeader = styled.div`
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid ${colors.border};
+  font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+`
 // (``FieldList`` / ``FieldHeader`` / ``FieldBody`` moved into ``ActionListEditor.tsx`` — the
 // shared editor owns its own row look.)
 
@@ -79,11 +111,14 @@ export interface ScreenEditorProps {
   value: Row
   /** The Screen JSON schema (the one carrying all the $defs for ScreenDialog/Tab/Field/ParamBind). */
   schema: JsonSchema
+  /** Sibling screen IDs in the same app — feeds the row-click "open dialog" target picker.
+   *  Empty when the parent doesn't have the list handy; the picker falls back to a text input. */
+  siblingScreenIds?: string[]
   /** Called whenever any field changes — the parent (ScreensBuilder) owns the dirty flag. */
   onChange: (next: Row) => void
 }
 
-export default function ScreenEditor({ app, id, value, schema, onChange }: ScreenEditorProps) {
+export default function ScreenEditor({ app, id, value, schema, siblingScreenIds = [], onChange }: ScreenEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
   const [tab, setTab] = useState<TabKey>('general')
@@ -124,6 +159,22 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
   // its field-level enums + descriptions kick in.
   const generalSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, GENERAL_FORM_KEYS as unknown as string[]), [schema])
+  // Sub-schema for the row-click "open dialog" mode's three fields. We render this with
+  // SchemaForm to reuse its ParamBind list editor for ``row_click_binds``; the screen +
+  // connector strings get text inputs (we override row_click_screen with a SearchSelect of
+  // sibling screens further below — the schema render is the fallback when the parent
+  // didn't pass siblingScreenIds).
+  const rowClickDialogSchema = useMemo<JsonSchema>(() => {
+    const picked = pickSchemaProperties(schema, ROW_CLICK_DIALOG_KEYS as unknown as string[])
+    // When we have a sibling-screen dropdown, hide the auto-rendered text field for it so we
+    // don't show two controls for the same thing.
+    if (siblingScreenIds.length > 0 && picked.properties && typeof picked.properties === 'object') {
+      const p = { ...(picked.properties as Record<string, JsonSchema>) }
+      delete p.row_click_screen
+      return { ...picked, properties: p }
+    }
+    return picked
+  }, [schema, siblingScreenIds.length])
   // Phase 3 — the Columns tab edits ``Screen.columns`` via SchemaNavigator. Same ColumnHint
   // shape used elsewhere; carries the full ``$defs`` map so nested ``filter_from`` /
   // ``visible_when`` / ``lookup_param_binds`` drill in via the breadcrumb navigator.
@@ -191,8 +242,91 @@ export default function ScreenEditor({ app, id, value, schema, onChange }: Scree
           onChange(next)
         }}
       />
+      {renderRowClickSection()}
     </>
   )
+
+  // The Pydantic model carries four flat row_click_* fields, but they're really two mutually-
+  // exclusive modes: dialog (screen + connector + binds) or route (a SPA path). The picker
+  // turns "fill in 4 fields, hope you pick the right ones" into "pick one of three behaviors,
+  // see only the fields that apply." Switching modes also clears the other mode's fields so a
+  // half-configured dialog doesn't linger after the operator picked route (and vice versa).
+  function renderRowClickSection(): ReactNode {
+    const currentMode: RowClickMode =
+      value.row_click_route ? 'route'
+      : value.row_click_screen ? 'dialog'
+      : 'none'
+
+    const setMode = (m: RowClickMode) => {
+      const next: Row = { ...value }
+      if (m !== 'dialog') {
+        delete next.row_click_screen
+        delete next.row_click_connector
+        delete next.row_click_binds
+      }
+      if (m !== 'route') delete next.row_click_route
+      // Seed a sensible default for the active mode so the new field set has something to bind to.
+      if (m === 'route' && !next.row_click_route) next.row_click_route = ''
+      onChange(next)
+    }
+
+    return (
+      <>
+        <RowClickHeader>{t('settings.screens.editor.rowClickHeader', 'When a row is clicked')}</RowClickHeader>
+        <Field label={t('settings.screens.editor.rowClickModeLabel', 'Behavior')}>
+          <Select
+            value={currentMode}
+            onChange={(e) => setMode(e.target.value as RowClickMode)}
+          >
+            <option value="none">{t('settings.screens.editor.rowClickModeNone', 'Do nothing (or fall through to the screen\'s own dialog)')}</option>
+            <option value="dialog">{t('settings.screens.editor.rowClickModeDialog', 'Open a sibling Screen as a modal dialog')}</option>
+            <option value="route">{t('settings.screens.editor.rowClickModeRoute', 'Open a page route in a new browser tab')}</option>
+          </Select>
+        </Field>
+
+        {currentMode === 'dialog' && (
+          <>
+            {siblingScreenIds.length > 0 && (
+              <Field label={t('settings.screens.editor.rowClickScreenLabel', 'Target screen')}>
+                <SearchSelect
+                  value={(value.row_click_screen as string | undefined) ?? ''}
+                  options={siblingScreenIds.map((sid) => ({ value: sid, label: sid, mono: sid }))}
+                  onChange={(v) => setProp('row_click_screen', v || null)}
+                  placeholder={t('settings.screens.editor.rowClickScreenPlaceholder', 'Pick a sibling screen…')}
+                />
+              </Field>
+            )}
+            <SchemaForm
+              schema={rowClickDialogSchema}
+              defs={defs}
+              value={value}
+              onChange={(v) => {
+                const next: Row = { ...value }
+                for (const k of ROW_CLICK_DIALOG_KEYS) {
+                  const val = v[k]
+                  if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
+                  else next[k] = val
+                }
+                onChange(next)
+              }}
+            />
+          </>
+        )}
+
+        {currentMode === 'route' && (
+          <Field label={t('settings.screens.editor.rowClickRouteLabel', 'Page route')}>
+            <SearchSelect
+              value={(value.row_click_route as string | undefined) ?? ''}
+              options={ROW_CLICK_ROUTE_OPTIONS}
+              onChange={(v) => setProp('row_click_route', v || '')}
+              allowCustom
+              placeholder={t('settings.screens.editor.rowClickRoutePlaceholder', 'Pick a destination route…')}
+            />
+          </Field>
+        )}
+      </>
+    )
+  }
 
   // The four CRUD query pickers — each a SearchSelect over the effective connector's queries.
   // read_query is required (validator on the backend); the others are optional and clearing

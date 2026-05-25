@@ -11,6 +11,7 @@ import { useTabs } from '../tabs/TabsContext'
 const TableView = lazy(() => import('../pages/TableView'))
 const HttpRunner = lazy(() => import('../pages/HttpRunner'))
 const DashboardView = lazy(() => import('../pages/DashboardView'))
+const NomaflowRunDetail = lazy(() => import('../pages/Nomaflow/RunDetail'))
 
 export default function TabHost({ hidden }: { hidden: boolean }) {
   const { tabs, activeId } = useTabs()
@@ -27,6 +28,8 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
               <HttpRunner connector={tab.connector} endpoint={tab.target} />
             ) : tab.kind === 'dashboard' ? (
               <DashboardView dashboardId={tab.target} />
+            ) : tab.kind === 'nomaflow_run' ? (
+              <NomaflowRunDetail runId={tab.target} />
             ) : (
               <TableView connector={tab.connector} query={tab.target} />
             )}

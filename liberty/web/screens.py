@@ -375,6 +375,11 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "row_click_screen": screen.row_click_screen,
         "row_click_connector": screen.row_click_connector,
         "row_click_binds": [b.model_dump(mode="json", exclude_none=True) for b in screen.row_click_binds],
+        # SPA-route drill-through (the escape hatch for screens whose detail view is a hand-written
+        # React page, not a sibling Screen dialog — see Screen.row_click_route in screens/config.py).
+        # Surfaced on the list view alongside row_click_screen so the TableView can decide which
+        # path to take without fetching the full body.
+        "row_click_route": screen.row_click_route,
     }
 
 

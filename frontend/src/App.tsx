@@ -16,7 +16,8 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
 const NomaflowSchedule = lazy(() => import("./pages/Nomaflow/Schedule"));
-const NomaflowRunDetail = lazy(() => import("./pages/Nomaflow/RunDetail"));
+// NomaflowRunDetail is mounted by TabHost (workspace tab kind 'nomaflow_run'), not directly
+// by a Route here — the `/nomaflow/runs/:runId` route uses TabRoute to add/activate the tab.
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
@@ -28,17 +29,22 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 // A `/sql/:connector/:target` or `/http/:connector/:target` route — just opens/activates the
 // tab for it; the TabHost (in Layout) does the actual rendering. Dashboards live at
-// `/dashboard/:target` (no connector segment in the URL); we open them as dashboard-kind tabs.
+// `/dashboard/:target` (no connector segment in the URL); nomaflow run detail lives at
+// `/nomaflow/runs/:runId` and uses the route param as the tab target. All non-SQL/HTTP kinds
+// reuse the same TabRoute marker pattern — the only divergence is which URL param feeds
+// ``target``.
 function TabRoute({ kind }: { kind: TabKind }) {
-  const { connector = "", target = "" } = useParams();
+  const { connector = "", target = "", runId = "" } = useParams();
   const { openOrActivate } = useTabs();
   useEffect(() => {
-    if (kind === "dashboard" && target) {
+    if (kind === "nomaflow_run" && runId) {
+      openOrActivate({ kind, connector: "", target: runId });
+    } else if (kind === "dashboard" && target) {
       openOrActivate({ kind, connector: "", target });
     } else if (connector && target) {
       openOrActivate({ kind, connector, target });
     }
-  }, [kind, connector, target, openOrActivate]);
+  }, [kind, connector, target, runId, openOrActivate]);
   return null;
 }
 
@@ -66,7 +72,10 @@ export default function App() {
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
         <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
         <Route path="nomaflow/schedule" element={<NomaflowSchedule />} />
-        <Route path="nomaflow/runs/:runId" element={<NomaflowRunDetail />} />
+        {/* nomaflow run detail is hosted by TabHost as a `nomaflow_run` workspace tab — the
+            TabRoute marker just opens/activates the tab; the actual rendering happens in
+            TabHost so the run-detail page sits in the tab strip alongside Job Runs / Users / … */}
+        <Route path="nomaflow/runs/:runId" element={<TabRoute kind="nomaflow_run" />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

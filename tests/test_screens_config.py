@@ -66,6 +66,40 @@ def test_screen_field_shape() -> None:
     assert legacy.model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
 
 
+def test_screen_row_click_route_validates_placeholders() -> None:
+    """``row_click_route`` template placeholders (``{name}``) must reference real
+    columns on the screen. Catching this at config-load time turns a silent
+    misclick (empty URL segment, then a bewildered 404) into a startup-time
+    config error with a clear message."""
+    from liberty.connectors.config import ColumnHint
+    # OK: every placeholder names a real column hint.
+    Screen(
+        id="runs", read_query="list_runs",
+        columns=[ColumnHint(name="id"), ColumnHint(name="job_id")],
+        row_click_route="/nomaflow/runs/{id}",
+    )
+    # Multiple placeholders on the same route — all must resolve.
+    Screen(
+        id="composite", read_query="q",
+        columns=[ColumnHint(name="a"), ColumnHint(name="b")],
+        row_click_route="/x/{a}/y/{b}",
+    )
+    # Typo: ``{ix}`` doesn't match column ``id`` — surfaces at validation time.
+    with pytest.raises(Exception) as exc:
+        Screen(
+            id="runs", read_query="list_runs",
+            columns=[ColumnHint(name="id")],
+            row_click_route="/nomaflow/runs/{ix}",
+        )
+    assert "ix" in str(exc.value)
+    # No placeholders at all — a literal route is fine (no column constraint).
+    Screen(
+        id="literal", read_query="q",
+        columns=[ColumnHint(name="id")],
+        row_click_route="/static/path",
+    )
+
+
 def test_screen_dialog_and_tab() -> None:
     """A dialog owns its tabs, each tab owns its fields. Duplicate tab ids in the same
     dialog are caught at the Screen level (the dialog's parent)."""

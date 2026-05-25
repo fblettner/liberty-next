@@ -880,6 +880,25 @@ class Screen(BaseModel):
             "row-menu binds."
         ),
     )
+    # Row-click → SPA route. The escape hatch for screens that drill into a hand-written React
+    # page rather than another Screen dialog — needed when the destination shows things SQL can't
+    # easily render (live-streamed logs, custom charts, multi-source merges). The template uses
+    # ``{column_name}`` placeholders that resolve against the clicked row; values are URL-encoded
+    # so columns with ``/`` or ``?`` don't break the route. Wins over ``row_click_screen`` when
+    # both are set, since the operator opting into a route is the more specific intent.
+    #
+    # The first concrete use is ``screens.nomaflow.runs`` → ``/nomaflow/runs/{id}`` (React
+    # ``RunDetail.tsx``), which polls live log lines from the in-memory ring buffer — something
+    # a SQL-backed Logs screen can't do (``nomaflow_run_logs`` is one TEXT blob written once at
+    # run finalize, so live tailing only works through the API, not via a query).
+    row_click_route: str | None = Field(
+        default=None,
+        description=(
+            "SPA route opened on row click instead of a sibling-screen dialog. Use "
+            "``{column_name}`` placeholders to interpolate the clicked row's columns "
+            "(URL-encoded). Example: ``/nomaflow/runs/{id}``. Wins over ``row_click_screen``."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check(self) -> Screen:
@@ -890,6 +909,19 @@ class Screen(BaseModel):
                 if tab.id in seen:
                     raise ValueError(f"screen {self.id!r}: duplicate dialog tab id {tab.id!r}")
                 seen.add(tab.id)
+        # row_click_route placeholders must reference real columns on this screen — catch the
+        # typo at config-load time instead of at the user's first click (silent no-op route).
+        if self.row_click_route:
+            import re
+            placeholders = set(re.findall(r"\{([^{}]+)\}", self.row_click_route))
+            if placeholders:
+                known = {c.name for c in self.columns}
+                missing = placeholders - known
+                if missing:
+                    raise ValueError(
+                        f"screen {self.id!r}: row_click_route references unknown column(s) "
+                        f"{sorted(missing)!r} — known: {sorted(known)!r}"
+                    )
         return self
 
     def effective_key_columns(self) -> list[str]:

@@ -164,13 +164,16 @@ export default function Layout() {
     setLang(l)
   }
 
-  // a `/sql/...`, `/http/...`, or `/dashboard/...` route → show the tab host (and the matching
-  // tab is active); a framework route → show its page through <Outlet/>, with the tab host hidden
-  // underneath. (all useMatch calls must run unconditionally — Rules of Hooks)
+  // a `/sql/...`, `/http/...`, `/dashboard/...`, or `/nomaflow/runs/:id` route → show the tab
+  // host (and the matching tab is active); a framework route → show its page through <Outlet/>,
+  // with the tab host hidden underneath. (all useMatch calls must run unconditionally — Rules
+  // of Hooks). nomaflow run detail is hosted as a workspace tab so a row-click from list_runs
+  // adds a tab next to "Job Runs" instead of replacing the workspace view.
   const sqlMatch = useMatch('/sql/:connector/:target')
   const httpMatch = useMatch('/http/:connector/:target')
   const dashboardMatch = useMatch('/dashboard/:target')
-  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch)
+  const nomaflowRunMatch = useMatch('/nomaflow/runs/:runId')
+  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch || nomaflowRunMatch)
 
   return (
     <Shell>

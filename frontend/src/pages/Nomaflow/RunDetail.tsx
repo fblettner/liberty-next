@@ -65,10 +65,17 @@ function fmt(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '—'
 }
 
-export default function RunDetail() {
+/**
+ * @param runIdProp When provided, the component reads its run id from props instead of
+ * react-router's ``useParams`` — lets the TabHost render this page inside a workspace tab
+ * (the row_click_route on Job Runs opens a ``nomaflow_run`` tab whose id is the run id).
+ * Falls back to the route param so the standalone ``/nomaflow/runs/:runId`` route still works.
+ */
+export default function RunDetail({ runId: runIdProp }: { runId?: string } = {}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { runId = '' } = useParams()
+  const params = useParams()
+  const runId = runIdProp ?? params.runId ?? ''
   const [data, setData] = useState<RunDetailResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const logRef = useRef<HTMLPreElement | null>(null)
