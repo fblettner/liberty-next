@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -75,8 +77,38 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
     )
 
 
+def _ensure_plugins_on_sys_path() -> None:
+    """Make ``${LIBERTY_APPS_DIR}/../plugins/`` importable as a Python source root —
+    so a ``python`` step's ``callable = "nomasx1.security:j_x"`` resolves to
+    ``<apps-repo>/plugins/nomasx1/security.py`` without the operator wiring sys.path
+    by hand (PHASE13 §5.3).
+
+    Customer-specific code (proprietary SQL templates, business orchestration) lives
+    in the apps repo, never in the open framework. The framework only provides the
+    import hook and the generic primitives (see :mod:`liberty.etl`); the apps repo
+    composes them with its private logic.
+
+    Resolution: ``LIBERTY_APPS_DIR`` is the apps repo's ``config/`` subdir by
+    convention, so ``plugins/`` is its sibling. When the env var isn't set we fall
+    back to ``./plugins/`` relative to cwd (dev shell). The directory is only
+    prepended when it exists; idempotent on repeat calls (re-imports / test
+    rebuilds of the app)."""
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    plugins = Path(apps).parent / "plugins" if apps else Path("plugins")
+    if not plugins.is_dir():
+        return
+    resolved = str(plugins.resolve())
+    if resolved in sys.path:
+        return
+    # Insert at index 0 so the apps repo's plugin packages win over any same-named
+    # site-packages module (an audit trail for "why did my callable resolve to X?").
+    sys.path.insert(0, resolved)
+    _log.info("liberty.plugins importable from %s", resolved)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
+    _ensure_plugins_on_sys_path()
 
     # ── Socket.IO ───────────────────────────────────────────────────────────
     # The Socket.IO server is created up-front (outside the lifespan) so we can
