@@ -132,6 +132,14 @@ class Step(BaseModel):
     type_coercion: str | None = None  # "jde" | "none" — free string today; enum if it grows
     decimal_mode: DecimalMode | None = None
     batch_size: int = Field(10_000, ge=1)
+    # Per-table list of column names whose values get full ``strip()`` (both ends) instead of
+    # the default rstrip when the source pool's ``trim_strings`` is on. Use for JDE-style
+    # right-justified codes left-padded with spaces — F0005's ``DRKY`` / ``DRMCU`` / the like.
+    # **Per-table on purpose**: JDE column names embed a 2-letter table prefix, so the same
+    # data-dictionary item (``KY``) appears as ``DRKY`` in F0005 and ``ABKY`` in F0101 — a
+    # pool-wide list would have the wrong granularity. Matched case-insensitively against
+    # the introspected source column name; ignored when ``trim_strings`` is off.
+    strip_both_columns: list[str] = Field(default_factory=list)
 
     # python
     callable: str | None = None  # ``module:function`` — see PHASE13.md §5.3

@@ -136,8 +136,9 @@ def _ctx() -> RunContext:
 def _copy_step(*, name="copy-it", mode="overwrite", batch_size=2,
                type_coercion="jde", decimal_mode="truncate",
                source_conn="src", source_schema=None, source_table="F0901",
-               target_conn="tgt", target_schema=None, target_table="f0901") -> Step:
-    return Step.model_validate({
+               target_conn="tgt", target_schema=None, target_table="f0901",
+               strip_both_columns: list[str] | None = None) -> Step:
+    body: dict = {
         "type": StepType.SQL_COPY.value,
         "name": name,
         "mode": mode,
@@ -146,7 +147,10 @@ def _copy_step(*, name="copy-it", mode="overwrite", batch_size=2,
         "decimal_mode": decimal_mode,
         "source": {"connector": source_conn, "schema": source_schema, "table": source_table},
         "target": {"connector": target_conn, "schema": target_schema, "table": target_table},
-    })
+    }
+    if strip_both_columns is not None:
+        body["strip_both_columns"] = strip_both_columns
+    return Step.model_validate(body)
 
 
 # --------------------------------------------------------------------------- #
@@ -229,6 +233,29 @@ async def test_overwrite_honors_pool_string_settings(registry_strings) -> None:
     assert rows[0] == (1, "padded", 10)
     # row 2: NULL name → " ", NULL amount → 0 (target pool's coalesce_nulls)
     assert rows[1] == (2, " ", 0)
+
+
+@pytest.mark.asyncio
+async def test_overwrite_strip_both_columns_handles_left_padding(registry_strings) -> None:
+    """JDE right-justifies a handful of codes (DRKY, DRMCU…). The step lists NAME
+    as the stand-in; a leading-padded value comes through fully stripped, while
+    a row with only trailing padding still ends up rstripped (NAME is in the
+    step's strip_both_columns → full strip both ends).
+
+    Per-step (not per-pool) on purpose: JDE column names embed a 2-letter table
+    prefix (F0005's right-justified code is ``DRKY``, F0101's is ``ABKY``) so
+    the right list is per-table."""
+    await _seed_source_rows(registry_strings, [
+        (1, "       1.4480", "10.0"),    # JDE-style left-padded code → both-end strip
+        (2, "ordinary    ", "20.0"),     # also full-strip — same column rule applies
+    ])
+    executor = SqlCopyExecutor(registry_strings)
+    await executor.execute(
+        _copy_step(batch_size=10, strip_both_columns=["NAME"]), _ctx(),
+    )
+    rows = await _read_target_rows(registry_strings, "f0901")
+    assert rows[0] == (1, "1.4480", 10)
+    assert rows[1] == (2, "ordinary", 20)
 
 
 # --------------------------------------------------------------------------- #

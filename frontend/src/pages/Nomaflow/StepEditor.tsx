@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
-import { Input, Select, Button, Tag } from '../../common'
+import { Input, Select, Button, Tag, StringListEditor } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
 import type { StepConfig, StepType } from './types'
@@ -202,6 +202,23 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
             type="number" min={1}
             value={String(f.batch_size ?? 10000)}
             onChange={(e) => patch({ batch_size: Number(e.target.value) || 10000 } as Partial<StepConfig>)}
+          />
+        </Field>
+        {/* Per-step, per-table list of column names that get full strip() (both ends) instead
+            of the default rstrip when the source pool's trim_strings is on. Use for JDE-style
+            right-justified codes left-padded with spaces (F0005 = DRKY/DRMCU; F0101 = ABKY).
+            Matching is case-insensitive against the introspected column name.
+
+            NB: we pass StringListEditor's emit straight through (no filter). An earlier version
+            stripped empty strings here, which silently removed the blank row "Add" just created
+            — the operator saw the button do nothing. Empty rows survive in state; the empty
+            strings get dropped at save time below (where we strip the field entirely when the
+            list is empty) and never reach the runner. */}
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.stripBothColumns', 'Full-strip columns (left + right padding)')}</FieldLabel>
+          <StringListEditor
+            value={Array.isArray(f.strip_both_columns) ? (f.strip_both_columns as string[]) : []}
+            onChange={(v) => patch({ strip_both_columns: v } as Partial<StepConfig>)}
           />
         </Field>
       </Grid>

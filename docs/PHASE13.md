@@ -435,7 +435,15 @@ Default is `"truncate"` so existing nomajde tables stay byte-equivalent across t
 
 **String handling is governed by the connector *pools*, not the step.** v1 trimmed `NCHAR`/`CHAR` padding during the copy; nomaflow keeps that, but the decision lives where it belongs — the pool. `sql_copy` reads two `[pools.*]` flags directly (the raw stream→insert path bypasses the `SQLConnector` query machinery that applies them on ordinary queries):
 
-- **`trim_strings`** — read off the **source** pool. When true, every string cell has trailing whitespace stripped (`rstrip()`) as it's read. This is the Oracle `CHAR`/`NCHAR` space-padding cleanup: a JDE source pads a `CHAR(10)` to width, and the Postgres `varchar` target shouldn't carry the padding. Leading whitespace is left intact — JDE string values are left-aligned. Set `trim_strings = true` on `[pools.jdedwards]` for the daily sync.
+- **`trim_strings`** — read off the **source** pool. When true, every string cell has trailing whitespace stripped (`rstrip()`) as it's read. This is the Oracle `CHAR`/`NCHAR` space-padding cleanup: a JDE source pads a `CHAR(10)` to width, and the Postgres `varchar` target shouldn't carry the padding. Leading whitespace is left intact by default — JDE string values are mostly left-aligned, and a blanket `strip()` would silently eat any genuinely-meaningful leading space (description fields, free-text notes). Set `trim_strings = true` on `[pools.jdedwards]` for the daily sync.
+- **`strip_both_columns`** — lives on the **`sql_copy` step**, not the pool. A list of source column names whose values get a full `strip()` (both ends) instead of the default `rstrip()` when the source pool's `trim_strings` is on. JDE right-justifies a handful of codes (the canonical cases are the data-dictionary items `KY` / business unit `MCU`), so they're left-padded with spaces and rstrip alone leaves the leading padding. **Per-step / per-table on purpose**: JDE column names embed a 2-letter table prefix — the same DD item appears as `DRKY` in F0005 and `ABKY` in F0101 — so a pool-wide list would over-match. Matching is case-insensitive against the introspected column name. Example in `jobs.toml`:
+  ```toml
+  [[jobs.steps]]
+  type = "sql_copy"
+  name = "F0005"
+  type_coercion = "jde"
+  strip_both_columns = ["DRKY", "DRDL01"]   # F0005's right-justified columns
+  ```
 - **`coalesce_nulls`** — read off the **target** pool. When true, an empty value written to the target is replaced with a type-appropriate default: `" "` for a string column (covers `None` *and* `""` — Oracle treats `''` as `NULL`, so a NOT-NULL `CHAR` needs a space), `0` for a numeric column. This is the Postgres→JDE write direction: padding + null management for an Oracle-style target.
 
 Both default to `false`, so a copy between two plain Postgres pools is untouched. The §11 regression suite covers the trim/coalesce wiring end-to-end.

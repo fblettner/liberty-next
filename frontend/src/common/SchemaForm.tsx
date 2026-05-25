@@ -265,7 +265,7 @@ function StringMapEditor({ value, onChange, keyEnum }: {
   )
 }
 
-function StringListEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+export function StringListEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   return (
     <div>
       {value.map((v, i) => (

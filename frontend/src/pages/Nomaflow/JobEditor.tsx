@@ -83,11 +83,25 @@ export default function JobEditor() {
     if (!jid) { setError(t('nomaflow.editor.idRequired')); return }
     setBusy(true); setError(null); setStatus(null)
     try {
+      // Sanitise list-of-strings fields: drop empty/whitespace-only rows the operator may have
+      // added but not filled in (StringListEditor keeps the blank row alive so they can type
+      // into it — the cleanup only happens here, at save). Strip the field entirely when the
+      // list is empty so the TOML stays free of empty arrays.
+      const cleaned = job.steps.map((s) => {
+        const sbc = (s as Record<string, unknown>).strip_both_columns
+        if (!Array.isArray(sbc)) return s
+        const kept = (sbc as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean)
+        const next = { ...s } as Record<string, unknown>
+        if (kept.length === 0) delete next.strip_both_columns
+        else next.strip_both_columns = kept
+        return next as typeof s
+      })
+      const cleanedJob = { ...job, steps: cleaned }
       // Merge the working copy into the full list: replace in place when editing,
       // append when new. `id` is immutable in edit mode (the field is read-only).
       const merged = isNew
-        ? [...allJobs, job]
-        : allJobs.map((j) => (j.id === id ? job : j))
+        ? [...allJobs, cleanedJob]
+        : allJobs.map((j) => (j.id === id ? cleanedJob : j))
       await api.put('/admin/config/jobs/parsed', { jobs: merged })
       await api.post('/admin/reload')
       navigate('/nomaflow')

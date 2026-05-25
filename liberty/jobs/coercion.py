@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import AbstractSet, Any, Sequence
 
 from sqlalchemy.types import (
     BigInteger,
@@ -208,6 +208,7 @@ def coerce_row(
     decimal_mode: DecimalMode = DecimalMode.TRUNCATE,
     trim_strings: bool = False,
     coalesce_nulls: bool = False,
+    strip_both_columns: AbstractSet[str] = frozenset(),
 ) -> dict[str, Any]:
     """Transform one source-row mapping into a target-row mapping for a copy.
 
@@ -217,7 +218,10 @@ def coerce_row(
        ``trim_strings`` setting), trailing whitespace is stripped from every
        string cell. This is the Oracle CHAR/NCHAR space-padding cleanup: a
        JDE source pads ``CHAR(10)`` to width, the target (Postgres ``varchar``)
-       shouldn't carry the padding.
+       shouldn't carry the padding. Columns whose lowercased name appears in
+       *strip_both_columns* get a full ``strip()`` instead — JDE right-justifies
+       certain codes (``KY``, ``MCU``…) so they're left-padded too, and rstrip
+       alone leaves the leading padding.
     2. **JDE coercion** — when ``type_coercion == "jde"``: column names →
        lowercase; ``\\x00`` stripped from strings (JDE data hygiene; Postgres
        text can't hold a null byte anyway); ``Decimal(p, s>0)`` truncated to
@@ -249,9 +253,14 @@ def coerce_row(
             val = None
         target_key = col.name.lower() if jde else col.name
 
-        # 1. source read — trim Oracle CHAR/NCHAR padding
+        # 1. source read — trim Oracle CHAR/NCHAR padding. Full strip for the
+        # operator-listed JDE-right-justified columns (KY, MCU…); rstrip for
+        # the rest, preserving any genuinely-meaningful leading whitespace.
         if trim_strings and isinstance(val, str):
-            val = val.rstrip()
+            if col.name.lower() in strip_both_columns:
+                val = val.strip()
+            else:
+                val = val.rstrip()
 
         # 2. JDE coercion
         if jde and val is not None:

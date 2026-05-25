@@ -173,6 +173,62 @@ def test_coerce_row_trims_trailing_whitespace_when_enabled() -> None:
     ) == {"name": "  hello"}
 
 
+def test_coerce_row_strip_both_columns_strips_leading_padding() -> None:
+    """JDE right-justifies a handful of codes (KY, MCU…) — they're left-padded
+    with spaces by the JDE convention, and rstrip alone leaves the leading
+    padding. The pool's ``strip_both_columns`` list (matched case-insensitively
+    against the source column name) routes those to a full ``strip()`` instead.
+
+    Only kicks in when ``trim_strings`` is on (it's the *which-flavor-of-trim*
+    knob, not an independent one)."""
+    cols = _cols(
+        ("MCU", String(12)),      # JDE business unit — left-padded
+        ("DESCR", String(40)),    # ordinary description — leading space is data
+    )
+    row = {"MCU": "       1.4480", "DESCR": "  user note   "}
+    out = coerce_row(
+        row, cols,
+        type_coercion=JDE_COERCION,
+        trim_strings=True,
+        strip_both_columns=frozenset({"mcu"}),
+    )
+    # MCU: full strip — leading + trailing
+    assert out["mcu"] == "1.4480"
+    # DESCR: rstrip only — leading whitespace preserved (could be intentional)
+    assert out["descr"] == "  user note"
+
+
+def test_coerce_row_strip_both_columns_ignored_without_trim_strings() -> None:
+    """``strip_both_columns`` is the *flavor* of trim — it's a no-op when
+    ``trim_strings`` is off. Otherwise toggling it would surprise an operator
+    who'd disabled trimming pool-wide."""
+    cols = _cols(("MCU", String(12)))
+    row = {"MCU": "    1.4480    "}
+    out = coerce_row(
+        row, cols,
+        type_coercion=JDE_COERCION,
+        trim_strings=False,
+        strip_both_columns=frozenset({"mcu"}),
+    )
+    assert out["mcu"] == "    1.4480    "
+
+
+def test_coerce_row_strip_both_columns_matches_case_insensitively() -> None:
+    """Column names from introspection can arrive uppercase (Oracle) or
+    lowercased (after the dialect's identifier normalisation) — the membership
+    check normalises both sides to lowercase so the operator can list "MCU"
+    in connectors.toml regardless of how the driver returns it."""
+    cols = _cols(("Mcu", String(12)))
+    row = {"Mcu": "       1.4480"}
+    out = coerce_row(
+        row, cols,
+        type_coercion=JDE_COERCION,
+        trim_strings=True,
+        strip_both_columns=frozenset({"mcu"}),  # already lowercased by the registry
+    )
+    assert out["mcu"] == "1.4480"
+
+
 def test_coerce_row_coalesce_nulls_pads_strings_and_zeros_numerics() -> None:
     """``coalesce_nulls`` (the **target** pool setting) replaces empties for an
     Oracle-style target: ``" "`` for a string column, ``0`` for a numeric one.

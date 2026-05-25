@@ -81,6 +81,7 @@ class PoolRegistry:
         cfg = self._configs.get(name)
         return bool(cfg.coalesce_nulls) if cfg is not None else False
 
+
     def _resolved_url(self, name: str, cfg: PoolConfig):
         """The pool's URL with its password resolved: a separate ``password`` (or an ``ENC:``
         password embedded in the URL) is decrypted via the crypto master key and re-set on the URL

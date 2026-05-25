@@ -104,6 +104,10 @@ class PoolConfig(BaseModel):
         "CHAR-family columns, 0 for numerics). Enable for Oracle pools with NOT-NULL string "
         "columns (Oracle treats ``''`` as NULL)."
     ))
+    # NB: an earlier iteration carried ``strip_both_columns`` on the pool — moved to the
+    # sql_copy step (Step.strip_both_columns) because JDE column names embed a 2-letter
+    # table prefix (F0005's right-justified code is ``DRKY``, not ``KY``), so the right
+    # column-name list is per-table. The step is where that distinction lives.
 
 
 # --------------------------------------------------------------------------- #

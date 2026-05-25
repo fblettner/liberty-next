@@ -28,7 +28,7 @@ This is the Spark replacement (see ``docs/PHASE13.md`` §5.1). What it does:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import AbstractSet, Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -79,14 +79,21 @@ class SqlCopyExecutor:
         # sql_copy reads the pool flags itself.
         src_trim = self._connectors.pools.trim_strings(src_conn.pool_name)
         tgt_coalesce = self._connectors.pools.coalesce_nulls(tgt_conn.pool_name)
+        # JDE right-justifies a handful of codes (DRKY, DRMCU…) — rstrip alone leaves the
+        # leading padding, so those columns get a full strip(). Read off the **step**, not
+        # the pool: JDE column names embed a 2-letter table prefix, so the right list is
+        # per-table (a pool-wide list would over- or under-match across tables). Lowercased
+        # frozenset, matched case-insensitively against introspected column names.
+        src_strip_both = frozenset(c.lower() for c in step.strip_both_columns)
 
         _log.info(
             "nomaflow.sql_copy start run=%s step=%r %s.%s.%s → %s.%s.%s "
-            "mode=%s coercion=%s decimal=%s src_trim=%s tgt_coalesce=%s",
+            "mode=%s coercion=%s decimal=%s src_trim=%s tgt_coalesce=%s strip_both=%s",
             ctx.run_id, step.name,
             src_conn.name, step.source.schema_, step.source.table,  # type: ignore[union-attr]
             tgt_conn.name, step.target.schema_, step.target.table,  # type: ignore[union-attr]
-            mode.value, type_coercion, decimal_mode.value, src_trim, tgt_coalesce,
+            mode.value, type_coercion, decimal_mode.value,
+            src_trim, tgt_coalesce, sorted(src_strip_both) or None,
         )
 
         # Step 1 — introspect source columns (one short connection use). Logged
@@ -118,12 +125,14 @@ class SqlCopyExecutor:
                 src_engine, tgt_engine, step, columns,
                 type_coercion=type_coercion, decimal_mode=decimal_mode,
                 batch_size=batch_size, trim_strings=src_trim, coalesce_nulls=tgt_coalesce,
+                strip_both_columns=src_strip_both,
             )
         elif mode is CopyMode.APPEND:
             rows_written = await self._do_append(
                 src_engine, tgt_engine, step, columns,
                 type_coercion=type_coercion, decimal_mode=decimal_mode,
                 batch_size=batch_size, trim_strings=src_trim, coalesce_nulls=tgt_coalesce,
+                strip_both_columns=src_strip_both,
             )
         elif mode is CopyMode.UPSERT:
             # Per PHASE13 §11 #5: no clean cross-dialect implementation in
@@ -210,6 +219,7 @@ class SqlCopyExecutor:
         batch_size: int,
         trim_strings: bool,
         coalesce_nulls: bool,
+        strip_both_columns: AbstractSet[str],
     ) -> int:
         """Overwrite a target table without ever leaving production empty.
 
@@ -261,6 +271,7 @@ class SqlCopyExecutor:
                 type_coercion=type_coercion, decimal_mode=decimal_mode,
                 batch_size=batch_size,
                 trim_strings=trim_strings, coalesce_nulls=coalesce_nulls,
+                strip_both_columns=strip_both_columns,
             )
 
             # The swap. Each rename is its own statement; rollback semantics
@@ -307,6 +318,7 @@ class SqlCopyExecutor:
         batch_size: int,
         trim_strings: bool,
         coalesce_nulls: bool,
+        strip_both_columns: AbstractSet[str],
     ) -> int:
         assert step.target is not None and step.target.table is not None  # validated
         target_names = target_column_names(columns, type_coercion=type_coercion)
@@ -318,6 +330,7 @@ class SqlCopyExecutor:
                 type_coercion=type_coercion, decimal_mode=decimal_mode,
                 batch_size=batch_size,
                 trim_strings=trim_strings, coalesce_nulls=coalesce_nulls,
+                strip_both_columns=strip_both_columns,
             )
 
     # -- shared streaming path ------------------------------------------ #
@@ -337,6 +350,7 @@ class SqlCopyExecutor:
         batch_size: int,
         trim_strings: bool,
         coalesce_nulls: bool,
+        strip_both_columns: AbstractSet[str],
     ) -> int:
         assert step.source is not None and step.source.table is not None
         insert_sql = text(_insert_sql(target_schema, target_table, target_names))
@@ -353,6 +367,7 @@ class SqlCopyExecutor:
                         dict(row._mapping), columns,
                         type_coercion=type_coercion, decimal_mode=decimal_mode,
                         trim_strings=trim_strings, coalesce_nulls=coalesce_nulls,
+                        strip_both_columns=strip_both_columns,
                     )
                     for row in batch
                 ]
