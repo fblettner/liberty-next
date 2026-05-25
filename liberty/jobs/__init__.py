@@ -31,6 +31,7 @@ from liberty.jobs.schema import (
     StepType,
 )
 from liberty.jobs.steps import (
+    PythonStepExecutor,
     RunContext,
     SqlCopyExecutor,
     SqlQueryExecutor,
@@ -58,6 +59,7 @@ __all__ = [
     "JobsFile",
     "RunLog",
     "ManualTrigger",
+    "PythonStepExecutor",
     "RunContext",
     "RunState",
     "ScheduledTrigger",

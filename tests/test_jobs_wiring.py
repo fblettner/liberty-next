@@ -69,11 +69,12 @@ def _settings(jobs_toml: Path) -> Settings:
 
 
 def test_build_executors_covers_implemented_step_types(connectors) -> None:
-    """Chunk 2a/b ship sql_query + sql_copy; chunk 2c adds none more. Map should
-    have exactly these two so a regression (e.g. a future refactor that drops
-    one) fails this test."""
+    """sql_query + sql_copy (chunks 2a/b) and python (added to unblock the
+    nomasx1 v1→v2 port — its agent modules run as named callables). ldap_sync
+    and http are still pending. A future refactor that drops one of these
+    fails this test."""
     execs = build_executors(connectors)
-    assert set(execs.keys()) == {StepType.SQL_QUERY, StepType.SQL_COPY}
+    assert set(execs.keys()) == {StepType.SQL_QUERY, StepType.SQL_COPY, StepType.PYTHON}
 
 
 # --------------------------------------------------------------------------- #

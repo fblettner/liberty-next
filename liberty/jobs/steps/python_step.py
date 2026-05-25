@@ -1,0 +1,172 @@
+"""``python`` step executor — invokes an operator-named callable.
+
+The contract:
+
+* ``step.callable`` is ``"module.path:function_name"`` (validated by Step's
+  schema validator at parse time).
+* ``step.op_kwargs`` is a free-form dict of kwargs forwarded to the function.
+* The executor also injects two standard kwargs **when the function declares
+  them by name** (via :func:`inspect.signature`): ``connectors`` (the
+  :class:`ConnectorRegistry`) and ``ctx`` (the per-run :class:`RunContext`).
+  A function that doesn't want either omits the param; one that swallows
+  arbitrary kwargs (``**_``) gets them whether it asked or not — same shape
+  Airflow's ``op_kwargs`` had, with the connector registry available because
+  v1 used the global Airflow connection store and we don't.
+
+Return-value normalisation (so step bodies aren't forced to import
+:class:`StepResult`):
+
+* :class:`StepResult` — used verbatim.
+* ``int`` — wrapped as ``StepResult(rows_affected=<int>)``.
+* ``dict`` — wrapped as ``StepResult(extras=<dict>)``.
+* ``None`` (or no return) — empty ``StepResult()``.
+
+Sync callables are run in :func:`asyncio.to_thread` so they don't block the
+event loop; async callables are awaited directly. The function-vs-coroutine
+detection uses :func:`inspect.iscoroutinefunction`.
+
+Exceptions out of the callable propagate as :class:`StepFailed` (the runner
+counts them against the retry policy) — *except* :class:`StepCancelled` and
+:class:`asyncio.CancelledError`, which propagate untouched.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import importlib
+import inspect
+import logging
+from typing import Any, Callable
+
+from liberty.connectors import ConnectorRegistry
+from liberty.jobs.schema import Step, StepType
+from liberty.jobs.steps.base import RunContext, StepCancelled, StepFailed, StepResult
+
+_log = logging.getLogger(__name__)
+
+
+class PythonStepExecutor:
+    """Executes one ``python`` step. Stateless — same instance can run any
+    number of steps concurrently; each resolves its own callable."""
+
+    def __init__(self, connectors: ConnectorRegistry) -> None:
+        self._connectors = connectors
+
+    async def execute(self, step: Step, ctx: RunContext) -> StepResult:
+        if step.type is not StepType.PYTHON:
+            raise StepFailed(
+                f"PythonStepExecutor received a step of type {step.type.value!r}"
+            )
+        if not step.callable:
+            # The Step validator catches this at parse time, but a hand-built Step
+            # from a test could slip through.
+            raise StepFailed(
+                f"python step {step.name!r}: `callable` is required (format 'module:function')"
+            )
+
+        target = self._resolve(step)
+        kwargs = self._build_kwargs(step, ctx, target)
+
+        _log.info(
+            "nomaflow.python start run=%s step=%r callable=%s kwargs=%s",
+            ctx.run_id, step.name, step.callable, sorted(kwargs) or None,
+        )
+
+        try:
+            if inspect.iscoroutinefunction(target):
+                raw = await target(**kwargs)
+            else:
+                # Sync callable: hop to a worker thread so a slow blocking call doesn't
+                # stall the scheduler loop. The runner's per-step timeout still applies
+                # — asyncio.wait_for cancels the await, which the to_thread wrapper
+                # surfaces as CancelledError back here.
+                raw = await asyncio.to_thread(_call_sync, target, kwargs)
+        except (StepCancelled, asyncio.CancelledError):
+            raise
+        except StepFailed:
+            raise
+        except Exception as exc:
+            _log.exception(
+                "nomaflow.python run=%s step=%r callable=%s raised",
+                ctx.run_id, step.name, step.callable,
+            )
+            raise StepFailed(f"python step {step.name!r}: {exc}") from exc
+
+        result = self._normalise(raw, step)
+        _log.info(
+            "nomaflow.python done run=%s step=%r rows=%s",
+            ctx.run_id, step.name, result.rows_affected,
+        )
+        return result
+
+    # -- internals ------------------------------------------------------- #
+
+    def _resolve(self, step: Step) -> Callable[..., Any]:
+        """Import the module + look up the function. Wraps the two failure
+        modes (ImportError + AttributeError) in :class:`StepFailed` with the
+        operator-friendly callable string in the message, since the raw
+        exceptions name the module/function in a less-obvious way."""
+        assert step.callable is not None
+        module_path, _, function_name = step.callable.partition(":")
+        try:
+            module = importlib.import_module(module_path)
+        except ImportError as exc:
+            raise StepFailed(
+                f"python step {step.name!r}: cannot import module {module_path!r} "
+                f"from callable {step.callable!r} — {exc}"
+            ) from exc
+        try:
+            return getattr(module, function_name)
+        except AttributeError as exc:
+            raise StepFailed(
+                f"python step {step.name!r}: module {module_path!r} has no attribute "
+                f"{function_name!r} (from callable {step.callable!r})"
+            ) from exc
+
+    def _build_kwargs(self, step: Step, ctx: RunContext, target: Callable[..., Any]) -> dict[str, Any]:
+        """Merge ``op_kwargs`` with the standard-name injections (connectors / ctx).
+        Inject only when the callable declares the name — otherwise the unknown
+        kwarg would TypeError at call time."""
+        kwargs: dict[str, Any] = dict(step.op_kwargs)
+        try:
+            sig = inspect.signature(target)
+        except (TypeError, ValueError):  # pragma: no cover — builtins without signature
+            return kwargs
+        params = sig.parameters
+        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        for name, value in (("connectors", self._connectors), ("ctx", ctx)):
+            if accepts_kwargs or name in params:
+                # Operator-provided op_kwargs win — they may want to override (e.g. a test
+                # injects a stub registry). Only fill in the default when absent.
+                kwargs.setdefault(name, value)
+        return kwargs
+
+    def _normalise(self, raw: Any, step: Step) -> StepResult:
+        """Turn what the callable returned into a :class:`StepResult`. Accepts
+        the four shapes documented in the module docstring; anything else is a
+        :class:`StepFailed` so a typo doesn't silently land as an empty result."""
+        if raw is None:
+            return StepResult()
+        if isinstance(raw, StepResult):
+            return raw
+        if isinstance(raw, bool):
+            # Catch this before the int branch — `True` would otherwise become
+            # rows_affected=1, which is not what an "ok" boolean means.
+            raise StepFailed(
+                f"python step {step.name!r}: callable returned a bool — expected "
+                f"None, int, dict, or StepResult"
+            )
+        if isinstance(raw, int):
+            return StepResult(rows_affected=raw)
+        if isinstance(raw, dict):
+            return StepResult(extras=dict(raw))
+        raise StepFailed(
+            f"python step {step.name!r}: callable returned unsupported type "
+            f"{type(raw).__name__} (expected None, int, dict, or StepResult)"
+        )
+
+
+def _call_sync(fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
+    """Tiny adapter so ``asyncio.to_thread(_call_sync, fn, kwargs)`` works (to_thread's
+    signature passes args positionally; this lets us forward a kwargs dict)."""
+    return fn(**kwargs)

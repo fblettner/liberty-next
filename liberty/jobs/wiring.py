@@ -25,7 +25,7 @@ from liberty.jobs.registry import JobRegistry, load_jobs
 from liberty.jobs.runner import Broadcaster, JobRunner
 from liberty.jobs.scheduler import JobScheduler
 from liberty.jobs.schema import StepType
-from liberty.jobs.steps import SqlCopyExecutor, SqlQueryExecutor, StepExecutor
+from liberty.jobs.steps import PythonStepExecutor, SqlCopyExecutor, SqlQueryExecutor, StepExecutor
 
 _log = logging.getLogger(__name__)
 
@@ -80,13 +80,16 @@ class NomaflowComponents:
 def build_executors(connectors: ConnectorRegistry) -> dict[StepType, StepExecutor]:
     """The default executor wiring — one per implemented :class:`StepType`.
 
-    Chunk 2a/b ships ``sql_query`` and ``sql_copy``. The remaining types
-    (``python``, ``ldap_sync``, ``http``) get added here when their executors
-    land; until then, jobs that reference them parse fine but fail at run time
-    with a clear "no executor registered" message from ``JobRunner``."""
+    Chunk 2a/b ships ``sql_query`` and ``sql_copy``; ``python`` was added to
+    unblock the nomasx1 v1→v2 port (its agent modules need to run as named
+    callables, the same way Airflow's PythonOperator did). ``ldap_sync`` and
+    ``http`` are still pending — jobs that reference them parse fine but fail
+    at run time with a clear "no executor registered" message from ``JobRunner``.
+    """
     return {
         StepType.SQL_QUERY: SqlQueryExecutor(connectors),
         StepType.SQL_COPY: SqlCopyExecutor(connectors),
+        StepType.PYTHON: PythonStepExecutor(connectors),
     }
 
 

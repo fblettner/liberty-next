@@ -481,7 +481,22 @@ callable = "my.module:fn"                  # entrypoint-style; resolved with imp
 op_kwargs = { foo = "bar", run_id = "${run.id}" }
 ```
 
-The function signature: `def fn(**kwargs) -> dict | None`. The return dict's `rows_affected` (if present) populates `${prev.rows_affected}` for the next step. Sync or async — the runner detects via `inspect.iscoroutinefunction`.
+The function signature accepts arbitrary kwargs from `op_kwargs`, plus two standard injections the executor fills in *only when the function declares them by name* (or accepts `**kwargs`):
+
+- **`connectors: ConnectorRegistry`** — the registry the job server was built with, so the callable can `connectors.get("nomasx1")` and run queries / open pool engines without re-bootstrapping anything. v1 callables read from Airflow's global connection store; in v2 the dependency is explicit.
+- **`ctx: RunContext`** — the per-run context (`run_id`, `job_id`, `trigger`, `prev_rows_affected`). Useful for log tagging and conditional step behavior.
+
+Return-value normalisation:
+
+| Return | Becomes |
+|---|---|
+| `None` (or no return) | `StepResult()` |
+| `int` | `StepResult(rows_affected=<int>)` |
+| `dict` | `StepResult(extras=<dict>)` |
+| `StepResult` | used verbatim |
+| anything else | `StepFailed` — explicit failure so a typo doesn't silently land an empty result |
+
+Sync callables run via `asyncio.to_thread` so a slow blocking call (legacy code, JDBC driver, etc.) doesn't stall the scheduler loop. Async callables are awaited directly. Exceptions become `StepFailed` (counted against the retry policy); `StepCancelled` / `asyncio.CancelledError` propagate untouched so cancellation works the way Python expects.
 
 **Where the callable lives.** When `LIBERTY_APPS_DIR` is set, liberty-next prepends `${LIBERTY_APPS_DIR}/plugins/` to `sys.path` at startup. That makes every subdirectory of `plugins/` (each with an `__init__.py`) an importable top-level package. So `liberty-apps/plugins/nomaflow/nomasx1/collect.py` resolves as `nomaflow.nomasx1.collect`. No registration step, no central allowlist — the package layout *is* the contract. (Option (b), an explicit `[nomaflow.callables]` allowlist in `app.toml`, was considered and rejected for v1: the plugins repo is private and trusted, and an allowlist would force every new job author to touch app.toml. Re-evaluate if/when third-party job authors appear.)
 
