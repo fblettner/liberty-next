@@ -28,7 +28,7 @@ from datetime import datetime
 from datetime import timezone as dt_timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
@@ -170,7 +170,12 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
 
 
 @router.post("/{job_id}/run")
-async def run_job_now(job_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+async def run_job_now(
+    job_id: str,
+    request: Request,
+    principal: Superuser,
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
     """Fire *job_id* manually as a :class:`ManualTrigger`. **Fire-and-return** —
     allocates the run row, schedules execution as a background task, returns
     immediately with the new run id.
@@ -182,7 +187,14 @@ async def run_job_now(job_id: str, request: Request, principal: Superuser) -> di
     flip straight to SUCCEEDED). The new contract lets the UI poll
     ``GET /admin/jobs`` to watch the state transition live, like the scheduled
     fire path. ``GET /admin/jobs/runs/<run_id>`` returns the streaming log
-    while the run is in flight."""
+    while the run is in flight.
+
+    **Per-fire kwargs override** (the "Run with parameters" UI flow): an
+    optional body ``{"op_kwargs": {step_name: {key: value}}}`` ephemerally
+    overrides the matching step's saved ``op_kwargs`` for this fire only.
+    Useful for the nomasx1-init-db job (change ``target_connector`` per fire
+    without editing jobs.toml). The saved config is untouched.
+    """
     comps = _components(request)
     registry: JobRegistry = comps.registry
     scheduler: JobScheduler = comps.scheduler
@@ -192,15 +204,37 @@ async def run_job_now(job_id: str, request: Request, principal: Superuser) -> di
     except UnknownJobError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
+    # Parse the optional overrides. Reject anything that isn't shaped like
+    # ``{step_name: {str: value}}`` early — silently dropping malformed data
+    # would make a typo'd payload look successful (operator wonders why their
+    # parameter didn't apply).
+    overrides: dict[str, dict[str, Any]] | None = None
+    if body is not None and "op_kwargs" in body:
+        raw = body.get("op_kwargs")
+        if not isinstance(raw, dict):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="`op_kwargs` must be an object of `{step_name: {key: value}}`",
+            )
+        for step_name, kw in raw.items():
+            if not isinstance(kw, dict):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"`op_kwargs[{step_name!r}]` must be an object of `{{key: value}}`",
+                )
+        overrides = {str(s): dict(kw) for s, kw in raw.items()}
+
     _log.info(
-        "nomaflow.admin manual fire job=%s triggered_by=%s",
-        job_id, principal.username,
+        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s",
+        job_id, principal.username, sorted(overrides) if overrides else None,
     )
     # fire_now_async creates the JobRun row synchronously (so we have its id to
     # return) then spawns execute_run as a background task. The runner persists
     # every state transition to the DB; if this process dies the row stays
     # RUNNING and is swept on the next startup via mark_orphan_runs_failed.
-    run_id = await scheduler.fire_now_async(job, triggered_by=principal.username)
+    run_id = await scheduler.fire_now_async(
+        job, triggered_by=principal.username, op_kwargs_overrides=overrides,
+    )
     return {
         "job_id": job_id,
         "run_id": run_id,

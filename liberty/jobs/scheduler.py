@@ -157,7 +157,13 @@ class JobScheduler:
         terminates (or raises if it does)."""
         await self._runner.run(job, ManualTrigger(triggered_by=triggered_by))
 
-    async def fire_now_async(self, job: Job, *, triggered_by: str) -> str:
+    async def fire_now_async(
+        self,
+        job: Job,
+        *,
+        triggered_by: str,
+        op_kwargs_overrides: dict | None = None,
+    ) -> str:
         """Manually trigger *job* — fire-and-return shape of :meth:`fire_now`.
 
         Allocates the :class:`JobRun` row synchronously (so the caller learns
@@ -166,6 +172,11 @@ class JobScheduler:
         shouldn't tie up an admin HTTP request — the UI polls /admin/jobs to
         watch the run's state, the request returns at once with the new id.
 
+        ``op_kwargs_overrides`` is the per-fire kwargs merge from the admin
+        endpoint's "Run with parameters" UI — ``{step_name: {key: value}}``,
+        threaded through to :meth:`JobRunner.execute_run`. ``None`` (the
+        scheduled-fire default) leaves saved kwargs intact.
+
         Returns the new run's id. The background task is intentionally orphaned
         — the runner persists every state transition to the DB, so the row is
         recoverable from any client (cancel, requeue, etc.) without needing a
@@ -173,7 +184,9 @@ class JobScheduler:
         """
         trigger = ManualTrigger(triggered_by=triggered_by)
         run = await self._runner.create_run(job, trigger)
-        task = asyncio.create_task(self._runner.execute_run(job, trigger, run))
+        task = asyncio.create_task(
+            self._runner.execute_run(job, trigger, run, op_kwargs_overrides=op_kwargs_overrides),
+        )
         # Belt-and-suspenders: if the task raises, the runner already persisted
         # FAILED on the row, but we still log so it's visible in the server's
         # own stdout (not just in the per-run log buffer).

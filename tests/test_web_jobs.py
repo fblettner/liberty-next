@@ -93,7 +93,34 @@ type = "sql_query"
 name = "answer"
 connector = "db"
 query = "answer"
+
+# Used by the op_kwargs-override tests — a python step that records what it was
+# called with, so the tests can assert overrides flow through.
+[[jobs]]
+id = "echo-kwargs"
+description = "Records its op_kwargs to a module global; used by the run-with-parameters tests."
+
+[[jobs.steps]]
+type = "python"
+name = "echo"
+callable = "tests.test_web_jobs:_record_kwargs"
+op_kwargs = { target_connector = "default", apps_id = 10 }
 """
+
+
+# Captures the kwargs the most-recent ``echo`` python step was invoked with. The
+# python-step test cases assert against this; reset before each call.
+RECORDED_KWARGS: dict[str, object] = {}
+
+
+def _record_kwargs(**kw) -> int:
+    """Callable target for the ``echo`` python step in the test jobs.toml.
+    Stores ``op_kwargs`` (minus the injected ``connectors`` + ``ctx``) into
+    the module global so the test can assert what the executor passed.
+    Returns 0 — int return → StepResult(rows_affected=0)."""
+    RECORDED_KWARGS.clear()
+    RECORDED_KWARGS.update({k: v for k, v in kw.items() if k not in ("connectors", "ctx")})
+    return 0
 
 
 def _seed_db(db_url: str) -> None:
@@ -161,11 +188,12 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
         assert r.status_code == 200
         body = r.json()
         ids = {j["id"]: j for j in body["jobs"]}
-        assert set(ids) == {"ping", "manual-only", "disabled"}
+        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs"}
         # Only the enabled+scheduled job is registered with the scheduler
         assert ids["ping"]["registered_with_scheduler"] is True
         assert ids["manual-only"]["registered_with_scheduler"] is False
         assert ids["disabled"]["registered_with_scheduler"] is False
+        assert ids["echo-kwargs"]["registered_with_scheduler"] is False  # no schedule
         # None are in flight at this point
         assert all(j["in_flight"] is False for j in body["jobs"])
         assert body["active_run_ids"] == []
@@ -300,7 +328,7 @@ def test_get_jobs_parsed_returns_catalogue(env) -> None:
         body = r.json()
         assert body["path"].endswith("jobs.toml")
         ids = {j["id"] for j in body["jobs"]}
-        assert ids == {"ping", "manual-only", "disabled"}
+        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs"}
 
 
 def test_get_jobs_parsed_requires_superuser(env) -> None:
@@ -454,6 +482,83 @@ def test_run_now_requires_superuser(env) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# POST /admin/jobs/<id>/run — op_kwargs overrides ("Run with parameters")
+# --------------------------------------------------------------------------- #
+
+
+def test_run_now_uses_saved_op_kwargs_by_default(env) -> None:
+    """No body / empty body → the step's saved op_kwargs reach the callable
+    verbatim. Baseline before the override tests below."""
+    app, _ = env
+    RECORDED_KWARGS.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/jobs/echo-kwargs/run", headers=h)
+        assert r.status_code == 200
+        _wait_for_terminal(app, r.json()["run_id"])
+    # The saved op_kwargs from jobs.toml: target_connector="default", apps_id=10.
+    assert RECORDED_KWARGS == {"target_connector": "default", "apps_id": 10}
+
+
+def test_run_now_applies_op_kwargs_override(env) -> None:
+    """Per-fire override merges INTO the saved op_kwargs — operator-typed values
+    win over defaults; un-overridden keys keep their saved values. The on-disk
+    jobs.toml is NOT modified (regression coverage for that comes via
+    test_run_now_uses_saved_op_kwargs_by_default — running the override test
+    after it would fail if it leaked)."""
+    app, _ = env
+    RECORDED_KWARGS.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"op_kwargs": {"echo": {"target_connector": "nomasx1b"}}},  # override one key
+            headers=h,
+        )
+        assert r.status_code == 200
+        _wait_for_terminal(app, r.json()["run_id"])
+    # target_connector overridden; apps_id kept its saved value.
+    assert RECORDED_KWARGS == {"target_connector": "nomasx1b", "apps_id": 10}
+
+
+def test_run_now_override_for_unknown_step_is_no_op(env) -> None:
+    """Override keyed by a step name that doesn't exist in the job is a silent
+    no-op — same shape as ignoring an unknown kwarg. (Failing loudly would be
+    just as defensible; the choice here is to keep the modal forgiving.)"""
+    app, _ = env
+    RECORDED_KWARGS.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"op_kwargs": {"no-such-step": {"x": 1}}},
+            headers=h,
+        )
+        assert r.status_code == 200
+        _wait_for_terminal(app, r.json()["run_id"])
+    # Saved kwargs reached the callable unmodified.
+    assert RECORDED_KWARGS == {"target_connector": "default", "apps_id": 10}
+
+
+def test_run_now_rejects_malformed_op_kwargs(env) -> None:
+    """The body's ``op_kwargs`` must be a ``{step_name: {key: value}}`` map.
+    Anything else is 422 — silent-dropping malformed payloads would have
+    operators wondering why their override didn't apply."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # not a dict at all
+        assert client.post(
+            "/admin/jobs/echo-kwargs/run", json={"op_kwargs": "broken"}, headers=h,
+        ).status_code == 422
+        # outer is a dict but inner value is not
+        assert client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"op_kwargs": {"echo": "also-broken"}}, headers=h,
+        ).status_code == 422
+
+
+# --------------------------------------------------------------------------- #
 # POST /admin/jobs/runs/<id>/cancel
 # --------------------------------------------------------------------------- #
 
@@ -486,7 +591,7 @@ def test_admin_reload_includes_nomaflow_state(env) -> None:
         assert "nomaflow" in body
         nf = body["nomaflow"]
         assert nf["enabled"] is True
-        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled"}
+        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs"}
         assert nf["scheduled_jobs"] == ["ping"]
 
 

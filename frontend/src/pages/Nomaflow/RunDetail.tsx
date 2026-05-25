@@ -45,6 +45,19 @@ const StepRow = styled.div`
 const StepCell = styled.span`
   color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 `
+// The error column — collapsed by default (one line, ellipsis) so the table reads compactly;
+// click toggles to a wrapped pre-block that shows the full message. Hover hint communicates
+// that it's clickable. Long stack traces stay readable via the scrollable max-height.
+const ErrorCell = styled.span<{ $expanded?: boolean }>`
+  color: ${({ $expanded }) => ($expanded ? colors.text.primary : colors.text.secondary)};
+  cursor: pointer; user-select: text;
+  ${({ $expanded }) => $expanded
+    ? `white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto;
+       background: ${colors.bg.input}; padding: 6px 8px; border-radius: ${radius.sm};
+       font-family: ${fonts.mono}; font-size: ${fontSize.sm};`
+    : `overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`}
+  &:hover { color: ${colors.text.primary}; }
+`
 const LogBox = styled.pre`
   margin: 0; padding: 12px; max-height: 460px; overflow: auto;
   background: ${colors.bg.input}; border: 1px solid ${colors.border}; border-radius: ${radius.md};
@@ -79,6 +92,17 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
   const [data, setData] = useState<RunDetailResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const logRef = useRef<HTMLPreElement | null>(null)
+  // Step rows whose error cell the operator has expanded. The cell starts truncated to keep
+  // the table dense; click toggles to a wrapped scroll-block. Keyed by ``${step_index}.${attempt}``
+  // (one row per retry attempt) so a retried step's per-attempt errors expand independently.
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
+  const toggleError = useCallback((key: string) => {
+    setExpandedErrors((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }, [])
 
   const load = useCallback(() => {
     api.get<RunDetailResponse>(`/admin/jobs/runs/${encodeURIComponent(runId)}`)
@@ -171,16 +195,30 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 <span>{t('nomaflow.run.colState')}</span>
                 <span>{t('nomaflow.run.colError')}</span>
               </StepHeaderRow>
-              {data.steps.map((s) => (
-                <StepRow key={`${s.step_index}.${s.attempt}`}>
-                  <StepCell>{s.step_index}</StepCell>
-                  <StepCell><Mono>{s.step_name}</Mono></StepCell>
-                  <StepCell>{s.step_type}</StepCell>
-                  <StepCell>{s.attempt}</StepCell>
-                  <StepCell><Tag $tone={STATE_TONE[s.state]}>{s.state}</Tag></StepCell>
-                  <StepCell title={s.error_message ?? ''}>{s.error_message ?? ''}</StepCell>
-                </StepRow>
-              ))}
+              {data.steps.map((s) => {
+                const key = `${s.step_index}.${s.attempt}`
+                const expanded = expandedErrors.has(key)
+                const err = s.error_message ?? ''
+                return (
+                  <StepRow key={key}>
+                    <StepCell>{s.step_index}</StepCell>
+                    <StepCell><Mono>{s.step_name}</Mono></StepCell>
+                    <StepCell>{s.step_type}</StepCell>
+                    <StepCell>{s.attempt}</StepCell>
+                    <StepCell><Tag $tone={STATE_TONE[s.state]}>{s.state}</Tag></StepCell>
+                    {/* Errors are long (psycopg messages, stack traces) so the cell starts
+                        truncated and clicks toggle a wrapped scroll-block. Empty errors aren't
+                        clickable — there's nothing to expand. */}
+                    <ErrorCell
+                      $expanded={expanded && err.length > 0}
+                      onClick={err ? () => toggleError(key) : undefined}
+                      title={!expanded && err ? t('nomaflow.run.clickToExpand', 'Click to expand') : undefined}
+                    >
+                      {err}
+                    </ErrorCell>
+                  </StepRow>
+                )
+              })}
             </div>
           </Section>
 

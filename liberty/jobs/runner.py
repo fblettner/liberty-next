@@ -24,7 +24,7 @@ import asyncio
 import logging
 import random
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Mapping, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Mapping, Protocol, runtime_checkable
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -144,12 +144,27 @@ class JobRunner:
         """
         return await self._open_or_resume(job, trigger)
 
-    async def execute_run(self, job: Job, trigger: Trigger, run: JobRun) -> JobRun:
+    async def execute_run(
+        self,
+        job: Job,
+        trigger: Trigger,
+        run: JobRun,
+        *,
+        op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
+    ) -> JobRun:
         """Execute an allocated *run* — the long-lived part of the lifecycle.
 
         Must be paired with a prior :meth:`create_run` call (this method assumes
         the JobRun row already exists). Transitions to RUNNING, processes steps,
         finalizes the row, returns it in its terminal state.
+
+        ``op_kwargs_overrides`` is the ephemeral per-fire merge — a mapping of
+        ``step.name → {key: value}`` that wins over the saved ``step.op_kwargs``
+        for THIS run only (the jobs.toml is untouched). Used by the "Run with
+        parameters" admin flow: an operator triggers a job, edits the params
+        once, the modified values flow into the step's callable without
+        persisting back to disk. ``None`` (the scheduled-fire default) leaves
+        every step's saved kwargs intact.
         """
         if run.state in (RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELED.value):
             # Resumed a run that already terminated — return it as-is. Happens
@@ -184,7 +199,17 @@ class JobRunner:
         try:
             for idx, step in enumerate(job.steps):
                 executed_step_count = idx + 1
-                step_result = await self._run_step_with_retry(run, idx, step, job.retry, ctx)
+                # Per-fire op_kwargs override — applied via model_copy so the in-memory
+                # ``job`` registry is never mutated (a subsequent scheduled fire of the
+                # same job still uses the saved kwargs). The override merges INTO the
+                # step's saved kwargs (operator-typed values win over defaults; unset
+                # keys keep their defaults).
+                override = (op_kwargs_overrides or {}).get(step.name)
+                effective_step = (
+                    step.model_copy(update={"op_kwargs": {**step.op_kwargs, **override}})
+                    if override else step
+                )
+                step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx)
                 if step_result is None:
                     # Step failed after all retries — mark remaining steps SKIPPED.
                     terminal = RunState.FAILED
@@ -220,13 +245,19 @@ class JobRunner:
         )
         return await self._reload(run.id)
 
-    async def run(self, job: Job, trigger: Trigger) -> JobRun:
+    async def run(
+        self,
+        job: Job,
+        trigger: Trigger,
+        *,
+        op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
+    ) -> JobRun:
         """Allocate + execute *job* under *trigger* — the blocking shape, kept
         for callers (the scheduled-fire path, tests) that legitimately need to
         wait for the terminal state. Equivalent to
-        ``await execute_run(job, trigger, await create_run(job, trigger))``."""
+        ``await execute_run(job, trigger, await create_run(job, trigger), op_kwargs_overrides=…)``."""
         run = await self.create_run(job, trigger)
-        return await self.execute_run(job, trigger, run)
+        return await self.execute_run(job, trigger, run, op_kwargs_overrides=op_kwargs_overrides)
 
     def cancel(self, run_id: str) -> bool:
         """Cancel an in-flight run by id. Returns True if a task was found and

@@ -11,9 +11,9 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing } from '../../common'
+import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import type { JobSummary, JobsListResponse, JobsParsedResponse } from './types'
+import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative } from './util'
 
 const Toolbar = styled.div`
@@ -34,6 +34,23 @@ const Actions = styled.div`display: flex; align-items: center; gap: 6px; flex-wr
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 28px 4px; text-align: center;`
 // The last-run state badge, clickable → that run's detail page (its log).
 const RunLink = styled.span`display: inline-flex; cursor: pointer; &:hover { opacity: 0.8; }`
+// Run-with-parameters modal — one section per python step, each kwarg as a typed input.
+const ParamSection = styled.div`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; padding: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+`
+const ParamSectionTitle = styled.div`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary};
+  display: flex; align-items: baseline; gap: 8px;
+`
+const ParamSectionType = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.sm};`
+const ParamRow = styled.label`
+  display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 10px;
+  font-size: ${fontSize.sm};
+`
+const ParamKey = styled.span`font-family: ${fonts.mono}; color: ${colors.text.secondary};`
+const ParamHint = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; margin-top: -4px;`
+
 // A real toggle styled as a pill — clearly clickable, clearly stateful.
 const Toggle = styled.button<{ $on: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
@@ -77,18 +94,48 @@ export default function JobsList() {
     return () => window.clearInterval(id)
   }, [anyInFlight, load])
 
-  const runNow = useCallback(async (job: JobSummary) => {
-    setBusyId(job.id); setError(null)
+  // "Run with parameters" modal state. When a job has python steps carrying op_kwargs the
+  // operator gets a chance to override values per-fire (target_connector, apps_id, …) before
+  // the run is queued. Jobs without overridable kwargs skip the modal entirely.
+  const [paramModalJob, setParamModalJob] = useState<{ job: JobSummary; steps: StepConfig[] } | null>(null)
+
+  const _postRun = useCallback(async (jobId: string, overrides?: Record<string, Record<string, unknown>>) => {
+    setBusyId(jobId); setError(null)
     try {
       // Fire-and-return: the endpoint creates the run row + spawns execution
       // as a background task, returns immediately. Refresh once to pick up
       // the new RUNNING badge — the in_flight poll then takes over from there.
-      await api.post(`/admin/jobs/${encodeURIComponent(job.id)}/run`)
+      const body = overrides && Object.keys(overrides).length > 0 ? { op_kwargs: overrides } : undefined
+      await api.post(`/admin/jobs/${encodeURIComponent(jobId)}/run`, body)
       load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally { setBusyId(null) }
   }, [load])
+
+  const runNow = useCallback(async (job: JobSummary) => {
+    // If the job has any python step with non-empty op_kwargs, open the modal so the
+    // operator can edit values per fire. Otherwise fire immediately — the modal would
+    // be an empty form and a useless extra click.
+    setError(null); setBusyId(job.id)
+    try {
+      const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
+      const def = parsed.jobs.find((j) => j.id === job.id)
+      const pythonSteps = (def?.steps ?? []).filter((s) =>
+        s.type === 'python' && s.op_kwargs && typeof s.op_kwargs === 'object' && Object.keys(s.op_kwargs as object).length > 0,
+      )
+      if (pythonSteps.length === 0) {
+        setBusyId(null)
+        await _postRun(job.id)
+        return
+      }
+      setBusyId(null)
+      setParamModalJob({ job, steps: pythonSteps })
+    } catch (e) {
+      setBusyId(null)
+      setError(e instanceof ApiError ? e.message : String(e))
+    }
+  }, [_postRun])
 
   const cancelRun = useCallback(async (job: JobSummary) => {
     if (!job.last_run) return
@@ -225,5 +272,131 @@ export default function JobsList() {
       )}
     </PageLayout>
   )
-  return header
+  return (
+    <>
+      {header}
+      {paramModalJob && (
+        <RunWithParamsModal
+          job={paramModalJob.job}
+          pythonSteps={paramModalJob.steps}
+          onCancel={() => setParamModalJob(null)}
+          onSubmit={async (overrides) => {
+            setParamModalJob(null)
+            await _postRun(paramModalJob.job.id, overrides)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+
+// "Run with parameters" — modal that lets the operator override op_kwargs for one fire of
+// a job without editing jobs.toml. One section per python step; one typed input per kwarg.
+// Submit POSTs as the `op_kwargs` body the runner merges into the saved values.
+function RunWithParamsModal({
+  job, pythonSteps, onCancel, onSubmit,
+}: {
+  job: JobSummary
+  pythonSteps: StepConfig[]
+  onCancel: () => void
+  onSubmit: (overrides: Record<string, Record<string, unknown>>) => Promise<void> | void
+}) {
+  const { t } = useTranslation()
+  // Working copy of each step's kwargs, keyed by step name. We seed from the saved values
+  // and let the operator edit; on Submit we diff against the saved values and only send
+  // the changed keys (smaller payload, clearer server log).
+  const initial = useMemo(() => {
+    const out: Record<string, Record<string, unknown>> = {}
+    for (const s of pythonSteps) {
+      out[s.name] = { ...((s.op_kwargs as Record<string, unknown>) ?? {}) }
+    }
+    return out
+  }, [pythonSteps])
+  const [values, setValues] = useState<Record<string, Record<string, unknown>>>(initial)
+  const [busy, setBusy] = useState(false)
+
+  const setKey = (stepName: string, key: string, v: unknown) => {
+    setValues((prev) => ({ ...prev, [stepName]: { ...prev[stepName], [key]: v } }))
+  }
+
+  const submit = async () => {
+    // Build overrides as the diff vs. initial — keep the payload minimal and the server
+    // log easy to read (operator sees exactly what they changed).
+    const overrides: Record<string, Record<string, unknown>> = {}
+    for (const s of pythonSteps) {
+      const before = initial[s.name] ?? {}
+      const after = values[s.name] ?? {}
+      const diff: Record<string, unknown> = {}
+      for (const k of Object.keys(after)) {
+        if (!Object.is(after[k], before[k])) diff[k] = after[k]
+      }
+      if (Object.keys(diff).length > 0) overrides[s.name] = diff
+    }
+    setBusy(true)
+    try {
+      await onSubmit(overrides)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Overlay onClick={onCancel}>
+      <Modal style={{ width: 'min(640px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+        <ModalHeader>
+          {t('nomaflow.runParams.title', 'Run with parameters')} ·{' '}
+          <Mono style={{ color: colors.text.muted, fontWeight: 400 }}>{job.id}</Mono>
+        </ModalHeader>
+        <ModalBody>
+          <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
+            {t('nomaflow.runParams.hint',
+              'Values apply to this fire only — jobs.toml stays unchanged. Leave a field as-is to use its saved value.')}
+          </div>
+          {pythonSteps.map((s) => (
+            <ParamSection key={s.name}>
+              <ParamSectionTitle>
+                <span>{s.name}</span>
+                <ParamSectionType>· {String((s as { callable?: unknown }).callable ?? '')}</ParamSectionType>
+              </ParamSectionTitle>
+              {Object.entries(values[s.name] ?? {}).map(([k, v]) => (
+                <ParamRow key={k}>
+                  <ParamKey>{k}</ParamKey>
+                  {typeof v === 'boolean' ? (
+                    <Checkbox checked={v} onChange={(checked) => setKey(s.name, k, checked)} />
+                  ) : typeof v === 'number' ? (
+                    <Input
+                      type="number"
+                      value={Number.isFinite(v as number) ? String(v) : ''}
+                      onChange={(e) => {
+                        const n = e.target.value === '' ? null : Number(e.target.value)
+                        setKey(s.name, k, n)
+                      }}
+                    />
+                  ) : (
+                    <Input
+                      value={v == null ? '' : String(v)}
+                      onChange={(e) => setKey(s.name, k, e.target.value)}
+                    />
+                  )}
+                </ParamRow>
+              ))}
+              {Object.keys(values[s.name] ?? {}).length === 0 && (
+                <ParamHint>{t('nomaflow.runParams.noKwargs', '(no parameters on this step)')}</ParamHint>
+              )}
+            </ParamSection>
+          ))}
+        </ModalBody>
+        <ModalFooter>
+          <Button $variant="ghost" onClick={onCancel} disabled={busy}>
+            {t('common.cancel', 'Cancel')}
+          </Button>
+          <Button $variant="primary" onClick={submit} disabled={busy}>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <Play size={13} />}{' '}
+            {t('nomaflow.runParams.run', 'Run')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+    </Overlay>
+  )
 }
