@@ -61,10 +61,28 @@ export default function JobsList() {
   }, [t])
   useEffect(load, [load])
 
+  // Auto-refresh while any job is in flight. POST /admin/jobs/{id}/run is
+  // fire-and-return now (PHASE13/runner: create_run + execute_run), so without
+  // polling the list would freeze on the QUEUED → RUNNING → terminal transitions
+  // — which is exactly what the operator wants to watch. RunDetail polls on the
+  // same 2s cadence; we stop when nothing is in flight to keep the page quiet.
+  const POLL_MS = 2000
+  const anyInFlight = useMemo(
+    () => jobs ? jobs.some((j) => j.in_flight) : false,
+    [jobs],
+  )
+  useEffect(() => {
+    if (!anyInFlight) return
+    const id = window.setInterval(load, POLL_MS)
+    return () => window.clearInterval(id)
+  }, [anyInFlight, load])
+
   const runNow = useCallback(async (job: JobSummary) => {
     setBusyId(job.id); setError(null)
     try {
-      // Synchronous endpoint — resolves when the run reaches a terminal state.
+      // Fire-and-return: the endpoint creates the run row + spawns execution
+      // as a background task, returns immediately. Refresh once to pick up
+      // the new RUNNING badge — the in_flight poll then takes over from there.
       await api.post(`/admin/jobs/${encodeURIComponent(job.id)}/run`)
       load()
     } catch (e) {

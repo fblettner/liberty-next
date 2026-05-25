@@ -49,6 +49,21 @@ _log = logging.getLogger(__name__)
 Hook = Callable[[str, dict], Awaitable[None]]
 
 
+def _log_orphan_task_exception(task: asyncio.Task) -> None:
+    """Surface an exception from an orphan background run task to the server log.
+    The runner persists FAILED to the DB itself, so this is purely operator
+    visibility — the run's row is correct regardless."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _log.error(
+            "nomaflow.scheduler orphan run task raised %r — DB row already finalized by runner",
+            exc,
+            exc_info=exc,
+        )
+
+
 class JobScheduler:
     """In-process scheduler wrapping APScheduler 3.x AsyncIOScheduler.
 
@@ -141,6 +156,29 @@ class JobScheduler:
         ``POST /admin/jobs/<id>/run`` through here. Returns when the run
         terminates (or raises if it does)."""
         await self._runner.run(job, ManualTrigger(triggered_by=triggered_by))
+
+    async def fire_now_async(self, job: Job, *, triggered_by: str) -> str:
+        """Manually trigger *job* — fire-and-return shape of :meth:`fire_now`.
+
+        Allocates the :class:`JobRun` row synchronously (so the caller learns
+        the run id immediately), then schedules the execution as a background
+        task. Used by ``POST /admin/jobs/<id>/run``: a multi-minute JDE sync
+        shouldn't tie up an admin HTTP request — the UI polls /admin/jobs to
+        watch the run's state, the request returns at once with the new id.
+
+        Returns the new run's id. The background task is intentionally orphaned
+        — the runner persists every state transition to the DB, so the row is
+        recoverable from any client (cancel, requeue, etc.) without needing a
+        handle to the asyncio Task.
+        """
+        trigger = ManualTrigger(triggered_by=triggered_by)
+        run = await self._runner.create_run(job, trigger)
+        task = asyncio.create_task(self._runner.execute_run(job, trigger, run))
+        # Belt-and-suspenders: if the task raises, the runner already persisted
+        # FAILED on the row, but we still log so it's visible in the server's
+        # own stdout (not just in the per-run log buffer).
+        task.add_done_callback(_log_orphan_task_exception)
+        return run.id
 
     # -- internals ------------------------------------------------------ #
 

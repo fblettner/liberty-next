@@ -131,23 +131,26 @@ class JobRunner:
 
     # -- public ----------------------------------------------------------- #
 
-    async def run(self, job: Job, trigger: Trigger) -> JobRun:
-        """Execute *job* under *trigger*, persisting state along the way.
+    async def create_run(self, job: Job, trigger: Trigger) -> JobRun:
+        """Allocate (or load) the :class:`JobRun` row for *job*+*trigger* and
+        return immediately, before any step executes.
 
-        For scheduled triggers, a concurrent duplicate fire (same job_id +
-        scheduled_at) is detected at INSERT time by the ``UNIQUE`` constraint;
-        the runner catches the resulting :class:`IntegrityError`, loads the
-        existing run, and returns it unchanged — the second caller sees the
-        same outcome the first one is producing.
-
-        For manual triggers (``scheduled_at = NULL``), the UNIQUE check is
-        vacuous and every call starts a fresh run — operators can click
-        "Run now" repeatedly and each click is its own row.
-
-        Returns the (possibly already-running) :class:`JobRun` row in its
-        terminal state.
+        Splits the runner's lifecycle in two so a caller that needs the run id
+        without waiting for the run to finish (the "Run now" admin endpoint —
+        manual fire of a multi-minute sync) can:
+        ``run = await create_run(...); asyncio.create_task(execute_run(..., run))``.
+        Same UNIQUE-constraint dedup as :meth:`run` — a duplicate scheduled fire
+        returns the existing in-flight row instead of starting a parallel one.
         """
-        run = await self._open_or_resume(job, trigger)
+        return await self._open_or_resume(job, trigger)
+
+    async def execute_run(self, job: Job, trigger: Trigger, run: JobRun) -> JobRun:
+        """Execute an allocated *run* — the long-lived part of the lifecycle.
+
+        Must be paired with a prior :meth:`create_run` call (this method assumes
+        the JobRun row already exists). Transitions to RUNNING, processes steps,
+        finalizes the row, returns it in its terminal state.
+        """
         if run.state in (RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELED.value):
             # Resumed a run that already terminated — return it as-is. Happens
             # when a duplicate scheduled fire arrives after the first run finished.
@@ -216,6 +219,14 @@ class JobRunner:
             job.id, run.id, executed_step_count, terminal.value,
         )
         return await self._reload(run.id)
+
+    async def run(self, job: Job, trigger: Trigger) -> JobRun:
+        """Allocate + execute *job* under *trigger* — the blocking shape, kept
+        for callers (the scheduled-fire path, tests) that legitimately need to
+        wait for the terminal state. Equivalent to
+        ``await execute_run(job, trigger, await create_run(job, trigger))``."""
+        run = await self.create_run(job, trigger)
+        return await self.execute_run(job, trigger, run)
 
     def cancel(self, run_id: str) -> bool:
         """Cancel an in-flight run by id. Returns True if a task was found and

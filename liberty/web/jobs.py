@@ -171,13 +171,18 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
 
 @router.post("/{job_id}/run")
 async def run_job_now(job_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
-    """Fire *job_id* manually as a :class:`ManualTrigger`. Blocks until the run
-    reaches a terminal state.
+    """Fire *job_id* manually as a :class:`ManualTrigger`. **Fire-and-return** —
+    allocates the run row, schedules execution as a background task, returns
+    immediately with the new run id.
 
-    For long-running jobs an operator should normally use the scheduler;
-    this endpoint exists for ad-hoc kicks ("Run now" button) and small jobs.
-    A 30+ minute JDE sync invoked through here will tie up an admin request
-    for that long — that's the operator's choice."""
+    The previous shape blocked until the run reached a terminal state; a 30-min
+    JDE sync invoked through here would tie up an admin HTTP request for the
+    whole duration, and the UI couldn't show "running" until the request
+    returned (you'd see nothing change for half an hour, then the row would
+    flip straight to SUCCEEDED). The new contract lets the UI poll
+    ``GET /admin/jobs`` to watch the state transition live, like the scheduled
+    fire path. ``GET /admin/jobs/runs/<run_id>`` returns the streaming log
+    while the run is in flight."""
     comps = _components(request)
     registry: JobRegistry = comps.registry
     scheduler: JobScheduler = comps.scheduler
@@ -191,11 +196,17 @@ async def run_job_now(job_id: str, request: Request, principal: Superuser) -> di
         "nomaflow.admin manual fire job=%s triggered_by=%s",
         job_id, principal.username,
     )
-    # Going through JobScheduler.fire_now (not JobRunner.run directly) keeps a
-    # single notion of "all manual fires came from this entry point" for any
-    # future broadcast / observability work.
-    await scheduler.fire_now(job, triggered_by=principal.username)
-    return {"job_id": job_id, "triggered_by": principal.username, "status": "completed"}
+    # fire_now_async creates the JobRun row synchronously (so we have its id to
+    # return) then spawns execute_run as a background task. The runner persists
+    # every state transition to the DB; if this process dies the row stays
+    # RUNNING and is swept on the next startup via mark_orphan_runs_failed.
+    run_id = await scheduler.fire_now_async(job, triggered_by=principal.username)
+    return {
+        "job_id": job_id,
+        "run_id": run_id,
+        "triggered_by": principal.username,
+        "status": "queued",
+    }
 
 
 @router.post("/runs/{run_id}/cancel")

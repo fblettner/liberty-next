@@ -176,26 +176,51 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_run_now_executes_job_synchronously(env) -> None:
-    """Fire ping manually; the response blocks until the run terminates, and
-    a JobRun row has landed in the DB (recorded as triggered_by the admin)."""
+_TERMINAL_STATES = (
+    RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELED.value,
+)
+
+
+def _wait_for_terminal(app, run_id: str, *, timeout_s: float = 5.0) -> JobRun:
+    """Poll the JobRun row until it reaches a terminal state. The /run endpoint
+    is fire-and-return now; tests that want to assert on the finished state
+    need to wait for the background task to finalize."""
+    import time
+    deadline = time.monotonic() + timeout_s
+    async def fetch():
+        async with app.state.jobs.db.session() as s:
+            return (await s.execute(select(JobRun).where(JobRun.id == run_id))).scalar_one_or_none()
+    while time.monotonic() < deadline:
+        row = asyncio.run(fetch())
+        if row is not None and row.state in _TERMINAL_STATES:
+            return row
+        time.sleep(0.05)
+    raise AssertionError(f"run {run_id!r} did not reach a terminal state within {timeout_s}s")
+
+
+def test_run_now_fires_and_returns_run_id(env) -> None:
+    """The /run endpoint is fire-and-return: it allocates the JobRun row,
+    spawns execute_run as a background task, returns the new run id with
+    status=queued. The row reaches SUCCEEDED on its own time — operators
+    watch via /admin/jobs polling, not by waiting on the POST response."""
     app, _ = env
     with TestClient(app) as client:
         h = _h(client, "admin")
         r = client.post("/admin/jobs/ping/run", headers=h)
         assert r.status_code == 200
         body = r.json()
-        assert body == {"job_id": "ping", "triggered_by": "admin", "status": "completed"}
+        assert body["job_id"] == "ping"
+        assert body["triggered_by"] == "admin"
+        assert body["status"] == "queued"
+        run_id = body["run_id"]
+        assert run_id  # a real id, not None
 
-        # Verify a JobRun landed and reached SUCCEEDED
-        jobs = app.state.jobs
-        async def fetch():
-            async with jobs.db.session() as s:
-                return (await s.execute(select(JobRun).where(JobRun.job_id == "ping"))).scalars().all()
-        runs = asyncio.run(fetch())
-        assert len(runs) == 1
-        assert runs[0].state == RunState.SUCCEEDED.value
-        assert runs[0].triggered_by == "admin"
+        # The background task finishes shortly after — verify the row reaches
+        # SUCCEEDED and the trigger metadata is preserved.
+        row = _wait_for_terminal(app, run_id)
+        assert row.job_id == "ping"
+        assert row.state == RunState.SUCCEEDED.value
+        assert row.triggered_by == "admin"
 
 
 def test_run_now_for_unknown_job_returns_404(env) -> None:
@@ -225,13 +250,16 @@ def test_list_jobs_carries_last_run_and_next_run(env) -> None:
         assert before["manual-only"]["next_run"] is None
         assert before["disabled"]["next_run"] is None
 
-        # Fire ping, then last_run reflects it
-        client.post("/admin/jobs/ping/run", headers=h)
+        # Fire ping (fire-and-return), then wait for the background task to
+        # finalize, then last_run reflects it.
+        run_id = client.post("/admin/jobs/ping/run", headers=h).json()["run_id"]
+        _wait_for_terminal(app, run_id)
         after = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
         lr = after["ping"]["last_run"]
         assert lr is not None
         assert lr["state"] == "SUCCEEDED"
-        assert lr["run_id"] and lr["started_at"] and lr["finished_at"]
+        assert lr["run_id"] == run_id
+        assert lr["started_at"] and lr["finished_at"]
 
 
 def test_list_jobs_reports_in_flight_for_a_running_manual_run(env) -> None:
@@ -376,9 +404,8 @@ def test_get_run_detail_returns_run_steps_and_log(env) -> None:
     app, _ = env
     with TestClient(app) as client:
         h = _h(client, "admin")
-        client.post("/admin/jobs/ping/run", headers=h)
-        jobs = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
-        run_id = jobs["ping"]["last_run"]["run_id"]
+        run_id = client.post("/admin/jobs/ping/run", headers=h).json()["run_id"]
+        _wait_for_terminal(app, run_id)
 
         r = client.get(f"/admin/jobs/runs/{run_id}", headers=h)
         assert r.status_code == 200
@@ -406,12 +433,17 @@ def test_get_run_detail_requires_superuser(env) -> None:
 
 def test_run_now_for_manual_only_job_works(env) -> None:
     """``manual-only`` has no cron schedule; it's not registered with APScheduler
-    but the manual fire endpoint still triggers it (that's the whole point)."""
+    but the manual fire endpoint still triggers it (that's the whole point).
+    Same fire-and-return contract as the scheduled case."""
     app, _ = env
     with TestClient(app) as client:
         r = client.post("/admin/jobs/manual-only/run", headers=_h(client, "admin"))
         assert r.status_code == 200
-        assert r.json()["status"] == "completed"
+        body = r.json()
+        assert body["status"] == "queued"
+        row = _wait_for_terminal(app, body["run_id"])
+        assert row.job_id == "manual-only"
+        assert row.state == RunState.SUCCEEDED.value
 
 
 def test_run_now_requires_superuser(env) -> None:
