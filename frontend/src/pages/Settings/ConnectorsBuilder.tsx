@@ -11,10 +11,10 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, X } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, X, Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import ApiConnectorEditor, { type ApiConnector as ApiConnectorEditorValue } from './ApiConnectorEditor'
 import { validateRename } from '../../services/keyRename'
@@ -119,6 +119,17 @@ export default function ConnectorsBuilder() {
   const [dictOriginal, setDictOriginal] = useState('')
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
+  // "Clone app" modal — duplicates the source app's config (connector, dictionary
+  // overlay, menus, screens) under a new name pointing at a new pool. The on-disk
+  // edit is atomic: the backend POST /admin/config/clone-app validates every
+  // rewritten doc through Pydantic before writing any file.
+  const [cloneModalOpen, setCloneModalOpen] = useState(false)
+  const [cloneSource, setCloneSource] = useState('')
+  const [cloneNewApp, setCloneNewApp] = useState('')
+  const [cloneNewPool, setCloneNewPool] = useState('')
+  const [cloneBusy, setCloneBusy] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
+  const [pools, setPools] = useState<string[]>([])  // for the new-pool dropdown
   // Tables / Sequences / Lookups view — the connector list is the same underneath, the mode
   // just filters which queries you see and which editor they open. Tables = CRUD-grouped
   // queries (the canonical case). Sequences = queries referenced by ``[sequences.*]`` in
@@ -152,11 +163,16 @@ export default function ConnectorsBuilder() {
       api.get<ConfigSchemas>('/admin/config/schema'),
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
       api.get<DictionaryDoc>('/admin/config/dictionary/parsed'),
+      // Pool names feed the Clone-app modal's "new pool" picker (drop a pool the
+      // operator already created via Settings → Pools). A separate fetch keeps
+      // this builder decoupled from the pools builder's full payload.
+      api.get<{ pools: Record<string, unknown> }>('/admin/config/pools'),
     ])
-      .then(([s, d, dd]) => {
+      .then(([s, d, dd, p]) => {
         setSchemas(s); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
         setDictionary(dd.dictionary); setDictOriginal(JSON.stringify(dd.dictionary))
         setSel((cur) => (cur && d.connectors[cur] ? cur : Object.keys(d.connectors)[0] ?? null))
+        setPools(Object.keys(p.pools ?? {}))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
@@ -234,6 +250,71 @@ export default function ConnectorsBuilder() {
     if (!ok) return
     setConns((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
     setSel((s) => (s === name ? null : s)); setStatus(null)
+  }
+
+  // Open the Clone-app modal, pre-filled with the currently-selected connector as the
+  // source (most common case: operator clicks a connector then "Clone app").
+  const openCloneApp = () => {
+    setCloneSource(sel ?? '')
+    setCloneNewApp('')
+    setCloneNewPool('')
+    setCloneError(null)
+    setCloneModalOpen(true)
+  }
+  // Cross-file delete — symmetric to clone-app. A single confirmation guards against
+  // accidentally nuking a real app; the user must type the app name to confirm (operator
+  // expectation: deleting a whole app is a big deal and shouldn't be a one-click action).
+  const deleteApp = async (appName: string) => {
+    const ok = await modals.confirm({
+      title: t('settings.connectors.deleteApp', 'Delete app…'),
+      message: t(
+        'settings.connectors.confirmDeleteApp',
+        'Delete the entire {{name}} app — its connector, dictionary overlay, menu, and every screen — from connectors.toml / dictionary.toml / menus.toml / screens.toml? The pool [pools.{{name}}] (if present) is NOT deleted; remove it separately via Settings → Pools.',
+        { name: appName },
+      ),
+      variant: 'danger',
+      confirmLabel: t('common.delete', 'Delete'),
+    })
+    if (!ok) return
+    setBusy(true); setStatus(null); setError(null)
+    try {
+      const result = await api.post<{ total_sections: number }>(
+        '/admin/config/delete-app', { app: appName },
+      )
+      await api.post('/admin/reload')
+      load()
+      setStatus(t(
+        'settings.connectors.deleteAppSuccess',
+        'Deleted app {{name}} ({{n}} sections; reload applied)',
+        { name: appName, n: result.total_sections },
+      ))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitCloneApp = async () => {
+    setCloneBusy(true); setCloneError(null)
+    try {
+      const body = { source_app: cloneSource, new_app: cloneNewApp, new_pool: cloneNewPool }
+      const result = await api.post<{ total_entries: number; warnings: string[] }>('/admin/config/clone-app', body)
+      // Reload the framework so the new app's routes/menus/screens are picked up live,
+      // then refresh the page state so the operator sees the new connector in the list.
+      await api.post('/admin/reload')
+      load()
+      setCloneModalOpen(false)
+      setStatus(t(
+        'settings.connectors.cloneSuccess',
+        'Cloned {{src}} → {{dst}} ({{n}} entries; reload applied)',
+        { src: cloneSource, dst: cloneNewApp, n: result.total_entries },
+      ))
+    } catch (e) {
+      setCloneError(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setCloneBusy(false)
+    }
   }
   // Rename the selected connector — and every cross-file reference. Goes through the
   // ``POST /admin/config/rename`` endpoint so the connectors.toml top-level key change rides
@@ -508,9 +589,25 @@ export default function ConnectorsBuilder() {
           <Button $variant="ghost" $size="sm" onClick={() => addConnector('api')} disabled={busy}>
             <Plus size={13} /> {t('settings.connectors.addApi')}
           </Button>
+          {/* Whole-app actions live on the top toolbar (above the connector list);
+              per-connector actions (Rename, Delete connector) live in the right panel
+              where they target the selected item. Two truly cross-file ops here:
+              Clone app duplicates a namespace across connectors / dictionary / menus /
+              screens; Delete app is the inverse. */}
+          <Button
+            $variant="ghost" $size="sm" onClick={openCloneApp}
+            disabled={busy || dirty}
+            title={dirty ? t('settings.connectors.cloneRequiresSave', 'Save current edits first') : t('settings.connectors.cloneApp', 'Clone app…')}
+          >
+            <Layers size={13} /> {t('settings.connectors.cloneApp', 'Clone app…')}
+          </Button>
           {sel && conns[sel] && (
-            <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy} title={t('settings.connectors.delete')}>
-              <Trash2 size={13} /> {t('settings.connectors.delete')}
+            <Button
+              $variant="danger" $size="sm" onClick={() => sel && deleteApp(sel)}
+              disabled={busy || dirty}
+              title={dirty ? t('settings.connectors.deleteRequiresSave', 'Save current edits first') : t('settings.connectors.deleteApp', 'Delete app…')}
+            >
+              <Trash2 size={13} /> {t('settings.connectors.deleteApp', 'Delete app…')}
             </Button>
           )}
           <ToolbarDivider />
@@ -883,6 +980,63 @@ export default function ConnectorsBuilder() {
           }}
           onCancel={() => setCrudWizardOpen(false)}
         />
+      )}
+      {cloneModalOpen && (
+        <Overlay onClick={() => !cloneBusy && setCloneModalOpen(false)}>
+          <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>{t('settings.connectors.cloneApp', 'Clone app…')}</ModalHeader>
+            <ModalBody>
+              <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
+                {t(
+                  'settings.connectors.cloneHint',
+                  'Duplicates the source app\'s connector, dictionary overlay, menus, and screens under a new name. The new connector points at the new pool — create that pool first via Settings → Pools (and the underlying database via CREATE DATABASE on Postgres).',
+                )}
+              </div>
+              <Row style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneSource', 'Source app')}</span>
+                  <SearchSelect
+                    value={cloneSource}
+                    options={Object.keys(conns ?? {}).map((n) => ({ value: n, label: n, mono: n }))}
+                    onChange={(v) => setCloneSource(v)}
+                    placeholder={t('settings.connectors.cloneSourcePlaceholder', 'Pick an existing connector…')}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewApp', 'New app name')}</span>
+                  <Input
+                    value={cloneNewApp}
+                    onChange={(e) => setCloneNewApp(e.target.value)}
+                    placeholder="nomasx1b"
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewPool', 'Target pool')}</span>
+                  <SearchSelect
+                    value={cloneNewPool}
+                    options={pools.map((n) => ({ value: n, label: n, mono: n }))}
+                    onChange={(v) => setCloneNewPool(v)}
+                    placeholder={t('settings.connectors.cloneNewPoolPlaceholder', 'Pick the pool the clone should point at…')}
+                  />
+                </label>
+              </Row>
+              {cloneError && <Banner $tone="error">{cloneError}</Banner>}
+            </ModalBody>
+            <ModalFooter>
+              <Button $variant="ghost" onClick={() => setCloneModalOpen(false)} disabled={cloneBusy}>
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                $variant="primary"
+                onClick={submitCloneApp}
+                disabled={cloneBusy || !cloneSource || !cloneNewApp || !cloneNewPool}
+              >
+                {cloneBusy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}{' '}
+                {t('settings.connectors.cloneAppRun', 'Clone')}
+              </Button>
+            </ModalFooter>
+          </Modal>
+        </Overlay>
       )}
     </Shell>
     </FrameworkEnumsContext.Provider>

@@ -38,6 +38,7 @@ import inspect
 import logging
 from typing import Any, Callable
 
+from liberty.config import Settings
 from liberty.connectors import ConnectorRegistry
 from liberty.jobs.schema import Step, StepType
 from liberty.jobs.steps.base import RunContext, StepCancelled, StepFailed, StepResult
@@ -49,8 +50,14 @@ class PythonStepExecutor:
     """Executes one ``python`` step. Stateless — same instance can run any
     number of steps concurrently; each resolves its own callable."""
 
-    def __init__(self, connectors: ConnectorRegistry) -> None:
+    def __init__(self, connectors: ConnectorRegistry, *, settings: Settings | None = None) -> None:
         self._connectors = connectors
+        # *settings* is optional so existing tests (which built the executor with just a
+        # registry) keep working; when present, callables that declare a ``settings``
+        # kwarg get the live Settings object injected — needed by python steps that
+        # operate on config files (clone-app, future config-management steps) and need
+        # to know paths like settings.connectors.config_path.
+        self._settings = settings
 
     async def execute(self, step: Step, ctx: RunContext) -> StepResult:
         if step.type is not StepType.PYTHON:
@@ -134,7 +141,17 @@ class PythonStepExecutor:
             return kwargs
         params = sig.parameters
         accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
-        for name, value in (("connectors", self._connectors), ("ctx", ctx)):
+        injections: list[tuple[str, Any]] = [
+            ("connectors", self._connectors),
+            ("ctx", ctx),
+        ]
+        # ``settings`` only when the executor was constructed with one (the wiring in
+        # build_executors passes it; tests that build the executor with just a registry
+        # leave it as None — and we don't inject ``None`` because that'd silently break
+        # a callable that expected a real Settings).
+        if self._settings is not None:
+            injections.append(("settings", self._settings))
+        for name, value in injections:
             if accepts_kwargs or name in params:
                 # Operator-provided op_kwargs win — they may want to override (e.g. a test
                 # injects a stub registry). Only fill in the default when absent.

@@ -115,11 +115,14 @@ RECORDED_KWARGS: dict[str, object] = {}
 
 def _record_kwargs(**kw) -> int:
     """Callable target for the ``echo`` python step in the test jobs.toml.
-    Stores ``op_kwargs`` (minus the injected ``connectors`` + ``ctx``) into
-    the module global so the test can assert what the executor passed.
-    Returns 0 — int return → StepResult(rows_affected=0)."""
+    Stores ``op_kwargs`` (minus the executor's standard injections —
+    ``connectors`` / ``ctx`` / ``settings``) into the module global so the
+    test can assert what the operator-supplied kwargs were. Returns 0 — int
+    return → StepResult(rows_affected=0)."""
     RECORDED_KWARGS.clear()
-    RECORDED_KWARGS.update({k: v for k, v in kw.items() if k not in ("connectors", "ctx")})
+    RECORDED_KWARGS.update(
+        {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings")},
+    )
     return 0
 
 

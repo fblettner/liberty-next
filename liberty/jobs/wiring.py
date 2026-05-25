@@ -77,7 +77,11 @@ class NomaflowComponents:
     db: JobDatabase
 
 
-def build_executors(connectors: ConnectorRegistry) -> dict[StepType, StepExecutor]:
+def build_executors(
+    connectors: ConnectorRegistry,
+    *,
+    settings: Settings | None = None,
+) -> dict[StepType, StepExecutor]:
     """The default executor wiring — one per implemented :class:`StepType`.
 
     Chunk 2a/b ships ``sql_query`` and ``sql_copy``; ``python`` was added to
@@ -85,11 +89,16 @@ def build_executors(connectors: ConnectorRegistry) -> dict[StepType, StepExecuto
     callables, the same way Airflow's PythonOperator did). ``ldap_sync`` and
     ``http`` are still pending — jobs that reference them parse fine but fail
     at run time with a clear "no executor registered" message from ``JobRunner``.
+
+    *settings* is optional so existing test wirings keep working with just a
+    registry; when given, the python step executor injects it into callables
+    that declare a ``settings`` kwarg (needed by config-management steps like
+    clone-app that operate on the file paths under ``settings.<section>``).
     """
     return {
         StepType.SQL_QUERY: SqlQueryExecutor(connectors),
         StepType.SQL_COPY: SqlCopyExecutor(connectors),
-        StepType.PYTHON: PythonStepExecutor(connectors),
+        StepType.PYTHON: PythonStepExecutor(connectors, settings=settings),
     }
 
 
@@ -173,7 +182,7 @@ async def build_nomaflow(
 
     runner = JobRunner(
         db,
-        build_executors(connectors),
+        build_executors(connectors, settings=settings),
         broadcaster=broadcaster,
     )
     scheduler = JobScheduler(

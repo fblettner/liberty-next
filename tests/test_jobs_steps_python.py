@@ -114,6 +114,12 @@ def raises_keyerror():
     raise KeyError("simulated failure")
 
 
+def needs_settings(*, settings, label: str):
+    """Used by the settings-injection tests below — only callable when the executor
+    was constructed with a real Settings object."""
+    return {"label": label, "got_settings": settings is not None}
+
+
 # --------------------------------------------------------------------------- #
 # resolve + dispatch
 # --------------------------------------------------------------------------- #
@@ -283,6 +289,39 @@ async def test_callable_exception_becomes_step_failed(registry) -> None:
             _step(callable=f"{_MOD}:raises_keyerror"), _ctx(),
         )
     assert "simulated failure" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_settings_injected_when_executor_built_with_one(registry, tmp_path) -> None:
+    """A callable that declares ``settings`` gets the live Settings object — used by
+    config-management steps like clone-app that operate on TOML paths under
+    settings.<section>. Build the executor with settings=<...> and verify."""
+    from liberty.config import AppSettings, AuthSettings, Settings
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        auth=AuthSettings(backend="db", jwt_secret="x", pool="default"),
+    )
+    executor = PythonStepExecutor(registry, settings=settings)
+    res = await executor.execute(
+        _step(callable=f"{_MOD}:needs_settings", op_kwargs={"label": "hi"}),
+        _ctx(),
+    )
+    assert res.extras == {"label": "hi", "got_settings": True}
+
+
+@pytest.mark.asyncio
+async def test_settings_not_injected_when_executor_built_without_one(registry) -> None:
+    """The default executor wiring (no settings passed) still works — a callable that
+    declares ``settings`` gets a clear TypeError, NOT a silent None (because injecting
+    None would mask config-management steps that legitimately need a real Settings)."""
+    # executor.settings is None by default; needs_settings expects a real one, so it
+    # fails because the kwarg isn't provided — that surfaces as StepFailed from the
+    # executor's exception wrapper.
+    with pytest.raises(StepFailed):
+        await PythonStepExecutor(registry).execute(
+            _step(callable=f"{_MOD}:needs_settings", op_kwargs={"label": "hi"}),
+            _ctx(),
+        )
 
 
 @pytest.mark.asyncio
