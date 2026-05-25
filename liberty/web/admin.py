@@ -34,6 +34,7 @@ from liberty.auth.authstore import build_auth_backend
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.connectors import load_connectors
+from liberty.crypto import CryptoError, encrypt, is_encrypted
 from liberty.connectors.config import (
     ApiConnectorConfig,
     ConnectorsFile,
@@ -234,18 +235,59 @@ class PoolsBody(BaseModel):
     pools: dict[str, dict[str, Any]]
 
 
+# Password-shaped fields on each config kind that must be encrypted before they land on disk
+# (the UI fetches the ENC: value, edits whatever, sends back; the user typing a new plaintext
+# password is the case that matters). ``encrypt`` is idempotent so re-encrypting an already
+# ENC: value is a no-op — safe to apply on every save.
+_POOL_PASSWORD_FIELDS = ("password",)
+_API_CONNECTOR_PASSWORD_FIELDS = ("auth_password", "auth_token")
+
+
+def _encrypt_secret_fields(
+    data: dict[str, Any], fields: tuple[str, ...], master_key: str, *, context: str,
+) -> dict[str, Any]:
+    """Wrap any non-empty, non-ENC: value at ``fields[*]`` with :func:`encrypt`.
+
+    Raises HTTPException(422) if a plaintext is present but no master key is configured —
+    silently storing plaintext would be the *exact* bug this helper exists to prevent.
+    ``context`` flows into the error message so the operator knows which entry tripped it.
+    """
+    out = dict(data)
+    for f in fields:
+        v = out.get(f)
+        if not isinstance(v, str) or not v or is_encrypted(v):
+            continue
+        try:
+            out[f] = encrypt(v, master_key)
+        except CryptoError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"{context}: cannot encrypt {f!r} — {exc}",
+            ) from exc
+    return out
+
+
 @router.put("/config/pools")
 async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate each pool against :class:`PoolConfig`, then rewrite *only* the ``[pools.*]`` tables
     of ``connectors.toml`` (everything else — comments, the ``[connectors.*]`` tables, formatting —
-    is left byte-for-byte intact via ``tomlkit``). Does not reload — call ``POST /admin/reload``."""
+    is left byte-for-byte intact via ``tomlkit``). Does not reload — call ``POST /admin/reload``.
+
+    Pool passwords are encrypted with the configured master key before write — a UI edit that
+    typed a plaintext password lands on disk as ``ENC:…``. Already-ENC: values pass through
+    unchanged (the operator probably didn't touch the field; ``encrypt`` is idempotent)."""
+    settings = request.app.state.settings
+    master_key = settings.crypto.master_key
     # validate + normalise (drop default-valued keys so the file stays terse)
     new_pools: dict[str, dict[str, Any]] = {}
     for name, raw in body.pools.items():
         try:
-            new_pools[name] = PoolConfig.model_validate(raw).model_dump(exclude_defaults=True)
+            normalised = PoolConfig.model_validate(raw).model_dump(exclude_defaults=True)
         except ValidationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"pool {name!r}: {exc}") from exc
+        new_pools[name] = _encrypt_secret_fields(
+            normalised, _POOL_PASSWORD_FIELDS, master_key, context=f"pool {name!r}",
+        )
 
     path = Path(request.app.state.settings.connectors.config_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -289,12 +331,22 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     ``[connectors.*]`` tables of ``connectors.toml`` via ``tomlkit`` — the ``[pools.*]`` tables, the
     comments and the file's overall structure are preserved (a *changed* connector's own subtree is
     re-rendered though, so its inline `columns = [{…}]` arrays may become `[[…]]` tables — functionally
-    identical; review in git). Re-validates the whole resulting file before writing. Does not reload."""
+    identical; review in git). Re-validates the whole resulting file before writing. Does not reload.
+
+    API connector secrets (``auth_password``, ``auth_token``) are encrypted before write — same
+    contract as pools (idempotent on already-ENC: values; raises 422 if a plaintext secret was
+    typed but no master key is configured, since silently storing plaintext is the worst outcome)."""
+    master_key = request.app.state.settings.crypto.master_key
     for name, raw in body.connectors.items():
         try:
             ConnectorsFile.model_validate({"connectors": {name: raw}})
         except ValidationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"connector {name!r}: {exc}") from exc
+        if raw.get("type") == "api":
+            # Mutate in place so the tomlkit write below picks up the encrypted values.
+            body.connectors[name] = _encrypt_secret_fields(
+                raw, _API_CONNECTOR_PASSWORD_FIELDS, master_key, context=f"connector {name!r}",
+            )
 
     path = Path(request.app.state.settings.connectors.config_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""

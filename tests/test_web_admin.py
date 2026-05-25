@@ -15,11 +15,13 @@ from liberty.config import (
     AuthSettings,
     ChartSettings,
     ConnectorSettings,
+    CryptoSettings,
     DashboardSettings,
     MenuSettings,
     ScreenSettings,
     Settings,
 )
+from liberty.crypto import decrypt
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -87,6 +89,9 @@ def env(tmp_path):
         dashboards=DashboardSettings(config_path=tmp_path / "dashboards.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
+        # Configured master key so the password-encryption tests have something to use; a
+        # missing key is its own test below (verifies the 422 guard works).
+        crypto=CryptoSettings(master_key="test-master-key-for-config-saves"),
     )
     return create_app(settings), conn_toml, db_url
 
@@ -168,6 +173,117 @@ def test_config_pools_put(env) -> None:
         after = client.get("/admin/config/pools", headers=h).json()["pools"]
         assert set(after) == {"default", "cache"} and after["default"]["pool_size"] == 12
         assert set(client.post("/admin/reload", headers=h).json()["pools"]) == {"default", "cache"}
+
+
+def test_config_pools_put_encrypts_plaintext_password(env) -> None:
+    """Save a pool with a plaintext password through PUT /admin/config/pools.
+    The bytes that land on disk must be ``ENC:`` — silently storing plaintext
+    is the bug this test exists to catch (operators couldn't connect because
+    the runtime expected to decrypt and the value wasn't encrypted)."""
+    app, conn_toml, db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {"pools": {"default": {"url": db_url, "password": "supersecret"}}}
+        assert client.put("/admin/config/pools", json=body, headers=h).json()["saved"] is True
+        # On-disk: the password is ENC:, NOT the original plaintext.
+        txt = conn_toml.read_text()
+        assert 'password = "ENC:' in txt
+        assert "supersecret" not in txt
+        # And the encrypted value round-trips via the same master key.
+        for line in txt.splitlines():
+            line = line.strip()
+            if line.startswith('password = "ENC:'):
+                enc = line.split('=', 1)[1].strip().strip('"')
+                assert decrypt(enc, "test-master-key-for-config-saves") == "supersecret"
+                break
+        else:
+            raise AssertionError("no ENC: password line found in connectors.toml")
+
+
+def test_config_pools_put_passes_through_already_encrypted_password(env) -> None:
+    """An ENC: value (the typical "user didn't touch the password field" case —
+    the UI fetched ENC: and sent it back unchanged) must NOT be re-encrypted;
+    it'd land as a different ENC: blob that still decrypts to the SAME plaintext,
+    but the on-disk diff would be noisy. encrypt() is idempotent — assert that
+    behaviour holds at the PUT boundary."""
+    app, conn_toml, db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Seed with a known ENC: value (we manufacture one via the same encrypt path
+        # the helper uses on save).
+        from liberty.crypto import encrypt
+        enc = encrypt("first-password", "test-master-key-for-config-saves")
+        client.put("/admin/config/pools", json={"pools": {"default": {"url": db_url, "password": enc}}}, headers=h)
+        first_text = conn_toml.read_text()
+        # Save again with the SAME ENC: value — file content must be byte-identical.
+        client.put("/admin/config/pools", json={"pools": {"default": {"url": db_url, "password": enc}}}, headers=h)
+        assert conn_toml.read_text() == first_text
+
+
+def test_config_pools_put_refuses_plaintext_when_no_master_key(tmp_path) -> None:
+    """If the operator types a plaintext password but the server has no master
+    key configured, refuse with 422 — silently storing plaintext would be the
+    worst outcome (looks saved, then connection fails)."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    conn_toml = tmp_path / "connectors.toml"
+    conn_toml.write_text(_toml(db_url))
+    _seed(db_url)
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(conn_toml)),
+        menus=MenuSettings(config_path=tmp_path / "menus.toml"),
+        screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
+        charts=ChartSettings(config_path=tmp_path / "charts.toml"),
+        dashboards=DashboardSettings(config_path=tmp_path / "dashboards.toml"),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+        # Deliberately NO crypto.master_key — that's the scenario under test.
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {"pools": {"default": {"url": db_url, "password": "plaintext"}}}
+        r = client.put("/admin/config/pools", json=body, headers=h)
+        assert r.status_code == 422
+        assert "master key" in r.json()["detail"].lower()
+        # On-disk: nothing changed (the existing pool's password isn't even present).
+        assert "plaintext" not in conn_toml.read_text()
+
+
+def test_config_connectors_parsed_put_encrypts_api_auth_secrets(env) -> None:
+    """API connectors carry ``auth_password`` (basic/oauth2) + ``auth_token`` (bearer/api_key)
+    — same encrypt-on-save contract as pool passwords. A plaintext typed in the UI must
+    land on disk as ENC:."""
+    app, conn_toml, db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "connectors": {
+                "db": {                                       # existing sql connector — preserved as-is
+                    "type": "sql", "pool": "default",
+                    "queries": [{"name": "answer", "sql": "SELECT 42 AS answer"}],
+                },
+                "remote": {                                   # new api connector — secrets must be encrypted
+                    "type": "api", "base_url": "https://api.example.com",
+                    "auth_type": "bearer", "auth_token": "raw-bearer-token",
+                },
+                "remote_basic": {
+                    "type": "api", "base_url": "https://api.example.com",
+                    "auth_type": "basic", "auth_username": "alice", "auth_password": "raw-basic-pw",
+                },
+            },
+        }
+        r = client.put("/admin/config/connectors/parsed", json=body, headers=h)
+        assert r.json().get("saved") is True
+        txt = conn_toml.read_text()
+        # Plaintexts must be gone; the ENC: ciphertexts present.
+        assert "raw-bearer-token" not in txt
+        assert "raw-basic-pw" not in txt
+        assert 'auth_token = "ENC:' in txt
+        assert 'auth_password = "ENC:' in txt
+        # And the sql connector's body wasn't accidentally encrypted (its SQL doesn't have any
+        # password-shaped field — guard against an over-eager helper).
+        assert 'sql = "SELECT 42 AS answer"' in txt
 
 
 def test_config_connectors_parsed_get_and_put(env) -> None:
