@@ -17,7 +17,7 @@ import {
 } from '../../common'
 import { colors, fontSize } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import StepEditor from './StepEditor'
+import StepEditor, { KeyValueEditor } from './StepEditor'
 import ScheduleField from './ScheduleField'
 import type { JobConfig, JobsParsedResponse } from './types'
 
@@ -279,6 +279,25 @@ export default function JobEditor() {
                 </FieldWrap>
               </Grid>
             )}
+          </Section>
+
+          {/* ── job-level params ────────────────────────────────────────────
+              Kwargs merged UNDER every python step's op_kwargs (step wins on
+              conflict). The "set once, inherit everywhere" knob — used by agent
+              jobs (nomasx1-security, nomasx1-database, ...) that fire N module
+              callables all sharing apps_id / source_connector / target_connector. */}
+          <Section>
+            <SectionTitle>{t('nomaflow.editor.paramsSection', 'Shared params')}</SectionTitle>
+            <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginBottom: 4 }}>
+              {t(
+                'nomaflow.editor.paramsHint',
+                'Merged under every python step\'s op_kwargs (step wins on conflict). Use for values shared across all steps — apps_id, source_connector, target_connector, etc.',
+              )}
+            </div>
+            <KeyValueEditor
+              value={(job.params ?? {}) as Record<string, unknown>}
+              onChange={(v) => patch({ params: v })}
+            />
           </Section>
 
           {/* ── step pipeline ──────────────────────────────────────────────── */}

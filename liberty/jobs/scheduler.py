@@ -163,6 +163,7 @@ class JobScheduler:
         *,
         triggered_by: str,
         op_kwargs_overrides: dict | None = None,
+        params_override: dict | None = None,
     ) -> str:
         """Manually trigger *job* — fire-and-return shape of :meth:`fire_now`.
 
@@ -185,7 +186,11 @@ class JobScheduler:
         trigger = ManualTrigger(triggered_by=triggered_by)
         run = await self._runner.create_run(job, trigger)
         task = asyncio.create_task(
-            self._runner.execute_run(job, trigger, run, op_kwargs_overrides=op_kwargs_overrides),
+            self._runner.execute_run(
+                job, trigger, run,
+                op_kwargs_overrides=op_kwargs_overrides,
+                params_override=params_override,
+            ),
         )
         # Belt-and-suspenders: if the task raises, the runner already persisted
         # FAILED on the row, but we still log so it's visible in the server's

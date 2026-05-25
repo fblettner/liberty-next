@@ -11,7 +11,8 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input } from '../../common'
+import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, SearchSelect, type SearchSelectOption } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative } from './util'
@@ -94,19 +95,27 @@ export default function JobsList() {
     return () => window.clearInterval(id)
   }, [anyInFlight, load])
 
-  // "Run with parameters" modal state. When a job has python steps carrying op_kwargs the
-  // operator gets a chance to override values per-fire (target_connector, apps_id, …) before
-  // the run is queued. Jobs without overridable kwargs skip the modal entirely.
-  const [paramModalJob, setParamModalJob] = useState<{ job: JobSummary; steps: StepConfig[] } | null>(null)
+  // "Run with parameters" modal state. The modal carries both the job-level params
+  // (shared across all steps) AND each python step's op_kwargs. Submit sends a
+  // {params, op_kwargs} body the runner merges with the saved config.
+  const [paramModalJob, setParamModalJob] = useState<
+    { job: JobSummary; jobParams: Record<string, unknown>; steps: StepConfig[] } | null
+  >(null)
 
-  const _postRun = useCallback(async (jobId: string, overrides?: Record<string, Record<string, unknown>>) => {
+  const _postRun = useCallback(async (
+    jobId: string,
+    body?: { params?: Record<string, unknown>; op_kwargs?: Record<string, Record<string, unknown>> },
+  ) => {
     setBusyId(jobId); setError(null)
     try {
       // Fire-and-return: the endpoint creates the run row + spawns execution
       // as a background task, returns immediately. Refresh once to pick up
       // the new RUNNING badge — the in_flight poll then takes over from there.
-      const body = overrides && Object.keys(overrides).length > 0 ? { op_kwargs: overrides } : undefined
-      await api.post(`/admin/jobs/${encodeURIComponent(jobId)}/run`, body)
+      const has = body && (
+        (body.params && Object.keys(body.params).length > 0) ||
+        (body.op_kwargs && Object.keys(body.op_kwargs).length > 0)
+      )
+      await api.post(`/admin/jobs/${encodeURIComponent(jobId)}/run`, has ? body : undefined)
       load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -114,23 +123,24 @@ export default function JobsList() {
   }, [load])
 
   const runNow = useCallback(async (job: JobSummary) => {
-    // If the job has any python step with non-empty op_kwargs, open the modal so the
-    // operator can edit values per fire. Otherwise fire immediately — the modal would
-    // be an empty form and a useless extra click.
+    // Open the modal when the job carries job-level params OR any python step with
+    // non-empty op_kwargs. Otherwise fire immediately — the modal would be empty.
     setError(null); setBusyId(job.id)
     try {
       const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
       const def = parsed.jobs.find((j) => j.id === job.id)
+      const jobParams = (def?.params ?? {}) as Record<string, unknown>
       const pythonSteps = (def?.steps ?? []).filter((s) =>
         s.type === 'python' && s.op_kwargs && typeof s.op_kwargs === 'object' && Object.keys(s.op_kwargs as object).length > 0,
       )
-      if (pythonSteps.length === 0) {
+      const hasAnything = Object.keys(jobParams).length > 0 || pythonSteps.length > 0
+      if (!hasAnything) {
         setBusyId(null)
         await _postRun(job.id)
         return
       }
       setBusyId(null)
-      setParamModalJob({ job, steps: pythonSteps })
+      setParamModalJob({ job, jobParams, steps: pythonSteps })
     } catch (e) {
       setBusyId(null)
       setError(e instanceof ApiError ? e.message : String(e))
@@ -278,11 +288,12 @@ export default function JobsList() {
       {paramModalJob && (
         <RunWithParamsModal
           job={paramModalJob.job}
+          jobParams={paramModalJob.jobParams}
           pythonSteps={paramModalJob.steps}
           onCancel={() => setParamModalJob(null)}
-          onSubmit={async (overrides) => {
+          onSubmit={async (body) => {
             setParamModalJob(null)
-            await _postRun(paramModalJob.job.id, overrides)
+            await _postRun(paramModalJob.job.id, body)
           }}
         />
       )}
@@ -292,53 +303,113 @@ export default function JobsList() {
 
 
 // "Run with parameters" — modal that lets the operator override op_kwargs for one fire of
-// a job without editing jobs.toml. One section per python step; one typed input per kwarg.
-// Submit POSTs as the `op_kwargs` body the runner merges into the saved values.
+// a job without editing jobs.toml. Two sections:
+//   * Shared params (the job-level kwargs merged under every step)
+//   * One section per python step with its own op_kwargs
+// On submit, sends only the diff vs. saved as a `{params, op_kwargs}` body — the runner
+// merges with the saved config (layer order: job.params → step.op_kwargs → params override
+// → per-step op_kwargs override, each layer winning over the previous).
+//
+// Inputs are type-aware: boolean → Checkbox; number → number input; string → text input;
+// and a key ending in `_connector` (or named exactly `connector`) → SearchSelect of the
+// available connectors loaded from the workspace. Saves typos vs free-text.
 function RunWithParamsModal({
-  job, pythonSteps, onCancel, onSubmit,
+  job, jobParams, pythonSteps, onCancel, onSubmit,
 }: {
   job: JobSummary
+  jobParams: Record<string, unknown>
   pythonSteps: StepConfig[]
   onCancel: () => void
-  onSubmit: (overrides: Record<string, Record<string, unknown>>) => Promise<void> | void
+  onSubmit: (body: {
+    params?: Record<string, unknown>
+    op_kwargs?: Record<string, Record<string, unknown>>
+  }) => Promise<void> | void
 }) {
   const { t } = useTranslation()
-  // Working copy of each step's kwargs, keyed by step name. We seed from the saved values
-  // and let the operator edit; on Submit we diff against the saved values and only send
-  // the changed keys (smaller payload, clearer server log).
-  const initial = useMemo(() => {
+  const { connectors } = useWorkspace()
+  const connectorOptions = useMemo<SearchSelectOption[]>(
+    () => (connectors ?? []).map((c) => ({ value: c.name, label: c.name, mono: c.name })),
+    [connectors],
+  )
+
+  // Working copies — seed from saved values, diff on submit so we only send what changed.
+  const initialStepKwargs = useMemo(() => {
     const out: Record<string, Record<string, unknown>> = {}
     for (const s of pythonSteps) {
       out[s.name] = { ...((s.op_kwargs as Record<string, unknown>) ?? {}) }
     }
     return out
   }, [pythonSteps])
-  const [values, setValues] = useState<Record<string, Record<string, unknown>>>(initial)
+  const [stepValues, setStepValues] = useState<Record<string, Record<string, unknown>>>(initialStepKwargs)
+  const [paramValues, setParamValues] = useState<Record<string, unknown>>({ ...jobParams })
   const [busy, setBusy] = useState(false)
 
-  const setKey = (stepName: string, key: string, v: unknown) => {
-    setValues((prev) => ({ ...prev, [stepName]: { ...prev[stepName], [key]: v } }))
+  const setStepKey = (stepName: string, key: string, v: unknown) => {
+    setStepValues((prev) => ({ ...prev, [stepName]: { ...prev[stepName], [key]: v } }))
+  }
+  const setParamKey = (key: string, v: unknown) => {
+    setParamValues((prev) => ({ ...prev, [key]: v }))
   }
 
   const submit = async () => {
-    // Build overrides as the diff vs. initial — keep the payload minimal and the server
-    // log easy to read (operator sees exactly what they changed).
-    const overrides: Record<string, Record<string, unknown>> = {}
+    // Per-step diff: only the kwargs that changed end up in the payload.
+    const stepOverrides: Record<string, Record<string, unknown>> = {}
     for (const s of pythonSteps) {
-      const before = initial[s.name] ?? {}
-      const after = values[s.name] ?? {}
+      const before = initialStepKwargs[s.name] ?? {}
+      const after = stepValues[s.name] ?? {}
       const diff: Record<string, unknown> = {}
       for (const k of Object.keys(after)) {
         if (!Object.is(after[k], before[k])) diff[k] = after[k]
       }
-      if (Object.keys(diff).length > 0) overrides[s.name] = diff
+      if (Object.keys(diff).length > 0) stepOverrides[s.name] = diff
     }
+    // Job-level params diff.
+    const paramsDiff: Record<string, unknown> = {}
+    for (const k of Object.keys(paramValues)) {
+      if (!Object.is(paramValues[k], jobParams[k])) paramsDiff[k] = paramValues[k]
+    }
+    const body: { params?: Record<string, unknown>; op_kwargs?: Record<string, Record<string, unknown>> } = {}
+    if (Object.keys(paramsDiff).length > 0) body.params = paramsDiff
+    if (Object.keys(stepOverrides).length > 0) body.op_kwargs = stepOverrides
     setBusy(true)
     try {
-      await onSubmit(overrides)
+      await onSubmit(body)
     } finally {
       setBusy(false)
     }
+  }
+
+  // Render one row per kwarg, typed input based on value + key. Extracted so both the
+  // job-level params section and each step's section share the rendering logic.
+  const renderKwargRow = (key: string, v: unknown, setter: (v: unknown) => void) => {
+    // _connector / connector → connector picker (saves typos vs free text).
+    const isConnectorKey = key === 'connector' || key.endsWith('_connector')
+    return (
+      <ParamRow key={key}>
+        <ParamKey>{key}</ParamKey>
+        {isConnectorKey ? (
+          <SearchSelect
+            value={v == null ? '' : String(v)}
+            options={connectorOptions}
+            onChange={setter}
+            placeholder={t('nomaflow.runParams.pickConnector', 'Pick a connector…')}
+          />
+        ) : typeof v === 'boolean' ? (
+          <Checkbox checked={v} onChange={(checked) => setter(checked)} />
+        ) : typeof v === 'number' ? (
+          <Input
+            type="number"
+            value={Number.isFinite(v as number) ? String(v) : ''}
+            onChange={(e) => setter(e.target.value === '' ? null : Number(e.target.value))}
+          />
+        ) : (
+          <Input
+            value={v == null ? '' : String(v)}
+            onChange={(e) => setter(e.target.value)}
+          />
+        )}
+      </ParamRow>
+    )
   }
 
   return (
@@ -353,35 +424,28 @@ function RunWithParamsModal({
             {t('nomaflow.runParams.hint',
               'Values apply to this fire only — jobs.toml stays unchanged. Leave a field as-is to use its saved value.')}
           </div>
+          {/* Job-level params (shared across all steps). Rendered when the job carries
+              any — operators that don't use job.params just won't see the section. */}
+          {Object.keys(paramValues).length > 0 && (
+            <ParamSection>
+              <ParamSectionTitle>
+                <span>{t('nomaflow.runParams.jobParams', 'Shared params (apply to every step)')}</span>
+              </ParamSectionTitle>
+              {Object.entries(paramValues).map(([k, v]) =>
+                renderKwargRow(k, v, (nv) => setParamKey(k, nv)),
+              )}
+            </ParamSection>
+          )}
           {pythonSteps.map((s) => (
             <ParamSection key={s.name}>
               <ParamSectionTitle>
                 <span>{s.name}</span>
                 <ParamSectionType>· {String((s as { callable?: unknown }).callable ?? '')}</ParamSectionType>
               </ParamSectionTitle>
-              {Object.entries(values[s.name] ?? {}).map(([k, v]) => (
-                <ParamRow key={k}>
-                  <ParamKey>{k}</ParamKey>
-                  {typeof v === 'boolean' ? (
-                    <Checkbox checked={v} onChange={(checked) => setKey(s.name, k, checked)} />
-                  ) : typeof v === 'number' ? (
-                    <Input
-                      type="number"
-                      value={Number.isFinite(v as number) ? String(v) : ''}
-                      onChange={(e) => {
-                        const n = e.target.value === '' ? null : Number(e.target.value)
-                        setKey(s.name, k, n)
-                      }}
-                    />
-                  ) : (
-                    <Input
-                      value={v == null ? '' : String(v)}
-                      onChange={(e) => setKey(s.name, k, e.target.value)}
-                    />
-                  )}
-                </ParamRow>
-              ))}
-              {Object.keys(values[s.name] ?? {}).length === 0 && (
+              {Object.entries(stepValues[s.name] ?? {}).map(([k, v]) =>
+                renderKwargRow(k, v, (nv) => setStepKey(s.name, k, nv)),
+              )}
+              {Object.keys(stepValues[s.name] ?? {}).length === 0 && (
                 <ParamHint>{t('nomaflow.runParams.noKwargs', '(no parameters on this step)')}</ParamHint>
               )}
             </ParamSection>

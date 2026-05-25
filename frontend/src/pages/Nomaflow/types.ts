@@ -71,6 +71,13 @@ export interface JobConfig {
   alerts?: JobAlerts | null
   steps: StepConfig[]
   timeout_seconds?: number
+  /** Job-level kwargs merged UNDER every python step's op_kwargs (step wins on
+   *  conflict, run-time override wins over both). For agent jobs (nomasx1-security,
+   *  nomasx1-database) that fire N module callables sharing the same apps_id /
+   *  source_connector / target_connector, set those once here instead of duplicating
+   *  on every step. Defaults to `{}` — irrelevant for jobs whose steps are all
+   *  sql_copy / sql_query (those executors don't consume op_kwargs). */
+  params?: Record<string, unknown>
 }
 
 export interface JobsParsedResponse {

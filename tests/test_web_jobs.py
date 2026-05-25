@@ -105,6 +105,27 @@ type = "python"
 name = "echo"
 callable = "tests.test_web_jobs:_record_kwargs"
 op_kwargs = { target_connector = "default", apps_id = 10 }
+
+# Job-level params (set once, inherited by every step) — used by the
+# test_job_level_params_* tests. Two steps to verify the merge applies to each
+# independently and that step.op_kwargs win on conflict.
+[[jobs]]
+id = "shared-params"
+description = "Job-level params merged under every step's op_kwargs (step wins on conflict)."
+params = { apps_id = 99, source_connector = "src_default" }
+
+[[jobs.steps]]
+type = "python"
+name = "first"
+callable = "tests.test_web_jobs:_record_kwargs"
+# No op_kwargs — should inherit BOTH job params verbatim.
+
+[[jobs.steps]]
+type = "python"
+name = "second"
+callable = "tests.test_web_jobs:_record_kwargs"
+# Overrides source_connector + adds a step-only key; apps_id inherits from job.
+op_kwargs = { source_connector = "src_step", local = "yes" }
 """
 
 
@@ -118,12 +139,25 @@ def _record_kwargs(**kw) -> int:
     Stores ``op_kwargs`` (minus the executor's standard injections —
     ``connectors`` / ``ctx`` / ``settings``) into the module global so the
     test can assert what the operator-supplied kwargs were. Returns 0 — int
-    return → StepResult(rows_affected=0)."""
+    return → StepResult(rows_affected=0).
+
+    Two record stores: the single-snapshot dict (legacy, used by the single-step
+    echo-kwargs tests) AND a per-step dict keyed by ``ctx.run_id + step name``
+    (filled when ``ctx`` is injected) — multi-step jobs use this one so each
+    step's kwargs are captured separately."""
+    ctx = kw.get("ctx")
+    filtered = {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings")}
     RECORDED_KWARGS.clear()
-    RECORDED_KWARGS.update(
-        {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings")},
-    )
+    RECORDED_KWARGS.update(filtered)
+    if ctx is not None:
+        # The runner doesn't pass step.name into the callable, so we tag by a counter
+        # — tests reset the list before firing and assert in step order.
+        RECORDED_PER_STEP.append(filtered)
     return 0
+
+
+# Per-step capture used by the multi-step job tests (shared-params).
+RECORDED_PER_STEP: list[dict[str, object]] = []
 
 
 def _seed_db(db_url: str) -> None:
@@ -191,7 +225,7 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
         assert r.status_code == 200
         body = r.json()
         ids = {j["id"]: j for j in body["jobs"]}
-        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs"}
+        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "shared-params"}
         # Only the enabled+scheduled job is registered with the scheduler
         assert ids["ping"]["registered_with_scheduler"] is True
         assert ids["manual-only"]["registered_with_scheduler"] is False
@@ -331,7 +365,7 @@ def test_get_jobs_parsed_returns_catalogue(env) -> None:
         body = r.json()
         assert body["path"].endswith("jobs.toml")
         ids = {j["id"] for j in body["jobs"]}
-        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs"}
+        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "shared-params"}
 
 
 def test_get_jobs_parsed_requires_superuser(env) -> None:
@@ -543,6 +577,94 @@ def test_run_now_override_for_unknown_step_is_no_op(env) -> None:
     assert RECORDED_KWARGS == {"target_connector": "default", "apps_id": 10}
 
 
+def test_job_level_params_inherited_by_every_step(env) -> None:
+    """job.params provide defaults; a step with no op_kwargs inherits them verbatim.
+    First step in shared-params declares NO op_kwargs → both job params appear in
+    its call."""
+    app, _ = env
+    RECORDED_PER_STEP.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/jobs/shared-params/run", headers=h)
+        assert r.status_code == 200
+        _wait_for_terminal(app, r.json()["run_id"])
+    # Two steps fired; first got pure inherited params.
+    assert len(RECORDED_PER_STEP) == 2
+    assert RECORDED_PER_STEP[0] == {"apps_id": 99, "source_connector": "src_default"}
+
+
+def test_job_level_params_overridden_by_step(env) -> None:
+    """The shared-params job's second step sets source_connector + local; apps_id
+    inherits from the job. Verifies step.op_kwargs wins on conflict + step-only
+    keys land alongside inherited ones."""
+    app, _ = env
+    RECORDED_PER_STEP.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/jobs/shared-params/run", headers=h)
+        _wait_for_terminal(app, r.json()["run_id"])
+    # The second step's recorded kwargs: source_connector overridden, apps_id
+    # inherited, local added.
+    assert len(RECORDED_PER_STEP) == 2
+    assert RECORDED_PER_STEP[1] == {
+        "apps_id": 99,                    # inherited from job
+        "source_connector": "src_step",   # overridden by step
+        "local": "yes",                   # step-only
+    }
+
+
+def test_per_fire_params_override_wins_over_job_params(env) -> None:
+    """The body's ``params`` field overrides job.params for the run — applies to
+    every step (no step name required). Per-step ``op_kwargs[step]`` still wins
+    over ``params`` though; this test isolates the params-vs-job-params layer."""
+    app, _ = env
+    RECORDED_PER_STEP.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/jobs/shared-params/run",
+            json={"params": {"apps_id": 42, "source_connector": "src_run"}},
+            headers=h,
+        )
+        _wait_for_terminal(app, r.json()["run_id"])
+    # First step: had no op_kwargs → params_override wins entirely.
+    assert RECORDED_PER_STEP[0] == {"apps_id": 42, "source_connector": "src_run"}
+    # Second step: step.op_kwargs has source_connector=src_step + local=yes.
+    # params_override (apps_id=42, source_connector=src_run) merges UNDER step.
+    # So source_connector=src_step (step wins) but apps_id=42 (params_override
+    # wins over job.params).
+    # Wait — let me reread the order: job.params → step.op_kwargs → params_override
+    # → op_kwargs_overrides[step]. So params_override WINS over step.op_kwargs.
+    # That's intentional: "I want to run this whole job with apps_id=X" should
+    # apply everywhere even if some step accidentally has apps_id baked in.
+    assert RECORDED_PER_STEP[1] == {
+        "apps_id": 42,                    # params_override wins over job.params
+        "source_connector": "src_run",    # params_override wins over step.op_kwargs
+        "local": "yes",                   # step-only, kept
+    }
+
+
+def test_job_level_params_overridden_by_run_time_override(env) -> None:
+    """The full layer order is: job.params → step.op_kwargs → run-time override.
+    Override apps_id at run time on the first step and assert it wins over both."""
+    app, _ = env
+    RECORDED_PER_STEP.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/jobs/shared-params/run",
+            json={"op_kwargs": {"first": {"apps_id": 12345}}},
+            headers=h,
+        )
+        _wait_for_terminal(app, r.json()["run_id"])
+    # First step: apps_id overridden to 12345; source_connector kept from job.
+    assert RECORDED_PER_STEP[0] == {"apps_id": 12345, "source_connector": "src_default"}
+    # Second step: unaffected by the per-step override (it targeted "first" only).
+    assert RECORDED_PER_STEP[1] == {
+        "apps_id": 99, "source_connector": "src_step", "local": "yes",
+    }
+
+
 def test_run_now_rejects_malformed_op_kwargs(env) -> None:
     """The body's ``op_kwargs`` must be a ``{step_name: {key: value}}`` map.
     Anything else is 422 — silent-dropping malformed payloads would have
@@ -594,7 +716,7 @@ def test_admin_reload_includes_nomaflow_state(env) -> None:
         assert "nomaflow" in body
         nf = body["nomaflow"]
         assert nf["enabled"] is True
-        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs"}
+        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "shared-params"}
         assert nf["scheduled_jobs"] == ["ping"]
 
 

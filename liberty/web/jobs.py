@@ -204,10 +204,12 @@ async def run_job_now(
     except UnknownJobError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
-    # Parse the optional overrides. Reject anything that isn't shaped like
-    # ``{step_name: {str: value}}`` early — silently dropping malformed data
-    # would make a typo'd payload look successful (operator wonders why their
-    # parameter didn't apply).
+    # Parse the optional overrides. Two fields, both optional:
+    #   * `params` — override of job.params (shared kwargs that apply to every step).
+    #   * `op_kwargs` — per-step override (wins over both job.params and request.params
+    #     for the matching step).
+    # Reject malformed payloads early — silently dropping them would have the operator
+    # wonder why their parameter didn't apply.
     overrides: dict[str, dict[str, Any]] | None = None
     if body is not None and "op_kwargs" in body:
         raw = body.get("op_kwargs")
@@ -224,16 +226,30 @@ async def run_job_now(
                 )
         overrides = {str(s): dict(kw) for s, kw in raw.items()}
 
+    params_override: dict[str, Any] | None = None
+    if body is not None and "params" in body:
+        raw_p = body.get("params")
+        if not isinstance(raw_p, dict):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="`params` must be an object of `{key: value}`",
+            )
+        params_override = dict(raw_p)
+
     _log.info(
-        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s",
-        job_id, principal.username, sorted(overrides) if overrides else None,
+        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s params=%s",
+        job_id, principal.username,
+        sorted(overrides) if overrides else None,
+        sorted(params_override) if params_override else None,
     )
     # fire_now_async creates the JobRun row synchronously (so we have its id to
     # return) then spawns execute_run as a background task. The runner persists
     # every state transition to the DB; if this process dies the row stays
     # RUNNING and is swept on the next startup via mark_orphan_runs_failed.
     run_id = await scheduler.fire_now_async(
-        job, triggered_by=principal.username, op_kwargs_overrides=overrides,
+        job, triggered_by=principal.username,
+        op_kwargs_overrides=overrides,
+        params_override=params_override,
     )
     return {
         "job_id": job_id,

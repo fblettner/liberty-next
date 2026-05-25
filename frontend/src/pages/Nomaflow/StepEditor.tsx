@@ -93,7 +93,7 @@ function stepSummary(s: StepConfig): string {
 }
 
 // ── small key/value editor (sql_query params, etc.) ────────────────────────────────
-function KeyValueEditor({ value, onChange }: {
+export function KeyValueEditor({ value, onChange }: {
   value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void
 }) {
   const { t } = useTranslation()

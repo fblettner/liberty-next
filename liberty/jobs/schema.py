@@ -220,6 +220,15 @@ class Job(BaseModel):
     alerts: JobAlerts | None = None
     steps: list[Step] = Field(..., min_length=1)
     timeout_seconds: int = Field(14_400, ge=1)
+    # Job-level kwargs merged UNDER every python step's ``op_kwargs`` (step wins on
+    # conflict). The point: most agent jobs (nomasx1-security, nomasx1-database, …)
+    # call N module-specific callables that all need the same ``apps_id`` /
+    # ``source_connector`` / ``target_connector``. Setting those once at the job level
+    # avoids duplicating them on every step + keeps "change the target for this run"
+    # to one edit in the Run-with-parameters modal. Defaults to ``{}``; only python
+    # steps consume these (sql_copy / sql_query ignore them — the merge still happens,
+    # but those executors look at typed fields, not op_kwargs).
+    params: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("timezone")
     @classmethod

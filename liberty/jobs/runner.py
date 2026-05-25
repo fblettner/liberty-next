@@ -151,6 +151,7 @@ class JobRunner:
         run: JobRun,
         *,
         op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
+        params_override: dict[str, Any] | None = None,
     ) -> JobRun:
         """Execute an allocated *run* — the long-lived part of the lifecycle.
 
@@ -199,16 +200,27 @@ class JobRunner:
         try:
             for idx, step in enumerate(job.steps):
                 executed_step_count = idx + 1
-                # Per-fire op_kwargs override — applied via model_copy so the in-memory
-                # ``job`` registry is never mutated (a subsequent scheduled fire of the
-                # same job still uses the saved kwargs). The override merges INTO the
-                # step's saved kwargs (operator-typed values win over defaults; unset
-                # keys keep their defaults).
+                # Per-fire op_kwargs override + job-level defaults — merged via
+                # model_copy so the in-memory ``job`` registry is never mutated (a
+                # subsequent scheduled fire of the same job still uses the saved
+                # kwargs). Layer order, each later wins over earlier:
+                #   1. job.params              (saved job-level defaults)
+                #   2. step.op_kwargs          (step-specific saved kwargs)
+                #   3. params_override         (per-fire override of job-level)
+                #   4. op_kwargs_overrides[step.name]  (per-fire override of step-level)
+                # Skip the whole rebuild for the common no-override case.
                 override = (op_kwargs_overrides or {}).get(step.name)
-                effective_step = (
-                    step.model_copy(update={"op_kwargs": {**step.op_kwargs, **override}})
-                    if override else step
-                )
+                if job.params or override or params_override:
+                    effective_step = step.model_copy(update={
+                        "op_kwargs": {
+                            **job.params,
+                            **step.op_kwargs,
+                            **(params_override or {}),
+                            **(override or {}),
+                        },
+                    })
+                else:
+                    effective_step = step
                 step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx)
                 if step_result is None:
                     # Step failed after all retries — mark remaining steps SKIPPED.
@@ -251,13 +263,18 @@ class JobRunner:
         trigger: Trigger,
         *,
         op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
+        params_override: dict[str, Any] | None = None,
     ) -> JobRun:
         """Allocate + execute *job* under *trigger* — the blocking shape, kept
         for callers (the scheduled-fire path, tests) that legitimately need to
         wait for the terminal state. Equivalent to
-        ``await execute_run(job, trigger, await create_run(job, trigger), op_kwargs_overrides=…)``."""
+        ``await execute_run(job, trigger, await create_run(job, trigger), …)``."""
         run = await self.create_run(job, trigger)
-        return await self.execute_run(job, trigger, run, op_kwargs_overrides=op_kwargs_overrides)
+        return await self.execute_run(
+            job, trigger, run,
+            op_kwargs_overrides=op_kwargs_overrides,
+            params_override=params_override,
+        )
 
     def cancel(self, run_id: str) -> bool:
         """Cancel an in-flight run by id. Returns True if a task was found and
