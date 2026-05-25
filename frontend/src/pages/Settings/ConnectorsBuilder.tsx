@@ -111,7 +111,6 @@ export default function ConnectorsBuilder() {
   // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
   // the DD_ENTRIES dropdown that drives `ColumnHint.dd` and `FilterDep.source/column`.
   const [dictionary, setDictionary] = useState<DictionaryDoc['dictionary'] | null>(null)
-  const [path, setPath] = useState('')
   const [conns, setConns] = useState<Connectors | null>(null)
   const [original, setOriginal] = useState('')
   // Dictionary edits — only the scaffold flow writes here (adding a sequence/lookup creates
@@ -155,7 +154,7 @@ export default function ConnectorsBuilder() {
       api.get<DictionaryDoc>('/admin/config/dictionary/parsed'),
     ])
       .then(([s, d, dd]) => {
-        setSchemas(s); setPath(d.path); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
+        setSchemas(s); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
         setDictionary(dd.dictionary); setDictOriginal(JSON.stringify(dd.dictionary))
         setSel((cur) => (cur && d.connectors[cur] ? cur : Object.keys(d.connectors)[0] ?? null))
       })
@@ -498,7 +497,6 @@ export default function ConnectorsBuilder() {
           and Delete actions live on the connector list / detail panes since they're per-row. */}
       <Toolbar>
         <ToolbarLeft>
-          <Mono>{path}</Mono>
           {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
           {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
           {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}

@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -140,7 +140,6 @@ export default function DictionaryBuilder() {
   const modals = useModals()
   const { refresh: refreshWorkspace } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
-  const [path, setPath] = useState('')
   const [dict, setDict] = useState<DictionaryData | null>(null)
   // Read-only — the *Lookups* form's query / value / label dropdowns read from here. We need to know
   // each connector's read queries (LOOKUP_QUERIES) and dictionary fields (LOOKUP_DD_FIELDS).
@@ -162,7 +161,7 @@ export default function DictionaryBuilder() {
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
     ])
       .then(([s, d, c]) => {
-        setSchemas(s); setPath(d.path); setDict(d.dictionary); setOriginal(JSON.stringify(d.dictionary))
+        setSchemas(s); setDict(d.dictionary); setOriginal(JSON.stringify(d.dictionary))
         setConnectors(c.connectors)
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -499,7 +498,6 @@ export default function DictionaryBuilder() {
           Reload on the right. Replaces the old "header at top + bottom Save Row" split — the
           operator never has to scroll past a long entries list to reach Save / Reload. */}
       <ScopeBar style={{ flexShrink: 0 }}>
-        <Mono>{path}</Mono>
         {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
         {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
         {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}

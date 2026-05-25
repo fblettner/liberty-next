@@ -15,7 +15,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, SearchSelect, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { groupQueriesByTable } from './connectorTables'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -211,7 +211,6 @@ export default function MenusBuilder() {
   // Read-only — the inspector's CONNECTOR / TARGET dropdowns pull from here. Loaded alongside
   // the menus + schema so the framework-enum augmentation can offer real query / endpoint names.
   const [connectors, setConnectors] = useState<Record<string, Record<string, unknown>> | null>(null)
-  const [path, setPath] = useState('')
   const [apps, setApps] = useState<AppsMap | null>(null)
   const [original, setOriginal] = useState('')
   const [selApp, setSelApp] = useState<string | null>(null)
@@ -231,7 +230,7 @@ export default function MenusBuilder() {
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
     ])
       .then(([s, d, c]) => {
-        setSchemas(s); setPath(d.path); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
+        setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
         setConnectors(c.connectors)
         setSelApp((cur) => (cur && d.menus[cur] ? cur : Object.keys(d.menus)[0] ?? null))
       })
@@ -536,7 +535,6 @@ export default function MenusBuilder() {
           long tree to reach Save / Reload. The optional search box appears next to the chips when
           there are more than ~6 apps. */}
       <ScopeBar>
-        <Mono>{path}</Mono>
         {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
         {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
         {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}

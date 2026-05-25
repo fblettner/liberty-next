@@ -8,7 +8,7 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -55,7 +55,6 @@ export default function PoolsBuilder() {
   const modals = useModals()
   const [schema, setSchema] = useState<JsonSchema | null>(null)
   const [enums, setEnums] = useState<FrameworkEnums | null>(null)
-  const [path, setPath] = useState('')
   const [pools, setPools] = useState<Pools | null>(null)
   const [original, setOriginal] = useState<string>('')   // JSON of the last-loaded pools, for the dirty check
   const [sel, setSel] = useState<string | null>(null)
@@ -67,7 +66,7 @@ export default function PoolsBuilder() {
     setError(null); setStatus(null)
     Promise.all([api.get<ConfigSchemas>('/admin/config/schema'), api.get<PoolsDoc>('/admin/config/pools')])
       .then(([s, d]) => {
-        setSchema(s.pool); setEnums(s.framework_enums); setPath(d.path); setPools(d.pools); setOriginal(JSON.stringify(d.pools))
+        setSchema(s.pool); setEnums(s.framework_enums); setPools(d.pools); setOriginal(JSON.stringify(d.pools))
         setSel((cur) => (cur && d.pools[cur] ? cur : Object.keys(d.pools)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -155,7 +154,6 @@ export default function PoolsBuilder() {
           scroll, so the toolbar stays pinned at the top no matter how tall the form gets. */}
       <Toolbar>
         <ToolbarLeft>
-          <Mono>{path}</Mono>
           {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
           {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
           {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}

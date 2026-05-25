@@ -19,7 +19,6 @@ import {
   Card,
   Centered,
   FrameworkEnumsContext,
-  Mono,
   Row,
   SchemaNavigator,
   SpinnerRing,
@@ -79,7 +78,6 @@ export default function DashboardsBuilder() {
   // empty catalog produces an empty dropdown — operator must save a chart first (via the
   // TableView's chart-toggle Save modal) before referencing it here.
   const [charts, setCharts] = useState<Record<string, Record<string, unknown>>>({})
-  const [path, setPath] = useState('')
   const [doc, setDoc] = useState<Dashboards | null>(null)
   const [original, setOriginal] = useState('')
   const [sel, setSel] = useState<string | null>(null)
@@ -103,7 +101,7 @@ export default function DashboardsBuilder() {
         setDashboardSchema({ ...dashboard, $defs: defs })
         setEnums(s.framework_enums)
         setCharts(c.charts)
-        setPath(d.path); setDoc(d.dashboards); setOriginal(JSON.stringify(d.dashboards))
+        setDoc(d.dashboards); setOriginal(JSON.stringify(d.dashboards))
         setSel((cur) => (cur && d.dashboards[cur] ? cur : Object.keys(d.dashboards)[0] ?? null))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -192,7 +190,6 @@ export default function DashboardsBuilder() {
             operator never has to scroll past a long dashboards list to reach Save / Reload. */}
         <Toolbar>
           <ToolbarLeft>
-            <Mono>{path}</Mono>
             {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
             {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
             {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
