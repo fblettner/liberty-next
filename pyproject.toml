@@ -27,6 +27,7 @@ dependencies = [
     "watchfiles>=0.21",       # filesystem watcher behind ``[app] hot_reload = true`` — picks up TOML edits without an explicit /admin/reload
     "alembic>=1.13",          # nomaflow plugins ship versioned schema migrations (plugins/<name>/db/alembic/) — the upgrade path
     "psycopg2-binary>=2.9",   # sync Postgres driver — Alembic's online runner is sync (the async asyncpg pool is unused there)
+    "ldap3>=2.9",             # LDAP / Active Directory client — used by the nomasx1.ldap plugin (sync client, called via asyncio.to_thread). Pure Python, no native deps.
 ]
 
 [project.optional-dependencies]
