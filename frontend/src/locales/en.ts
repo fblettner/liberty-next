@@ -375,6 +375,10 @@ const en = {
       colError: 'Error',
       log: 'Log',
       noLog: 'No log captured for this run.',
+      followOn: 'Following — new lines scroll into view',
+      followOff: 'Paused — scroll to the bottom to resume',
+      followResume: 'Follow',
+      followPause: 'Pause',
     },
   },
   settings: {

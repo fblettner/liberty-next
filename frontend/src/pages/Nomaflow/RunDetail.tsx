@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, RefreshCw, ScrollText, Workflow } from 'lucide-react'
+import { ArrowLeft, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -73,6 +73,11 @@ const LiveDot = styled.span`
   @keyframes nfpulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
 `
 const EmptyLog = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 8px 2px;`
+// Right-aligned controls inside the log SectionTitle row (follow toggle + status hint).
+const LogControls = styled.div`
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  font-size: ${fontSize.sm}; color: ${colors.text.muted};
+`
 
 function fmt(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '—'
@@ -92,6 +97,12 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
   const [data, setData] = useState<RunDetailResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const logRef = useRef<HTMLPreElement | null>(null)
+  // Follow mode (auto-scroll the log to the bottom as new lines arrive).
+  // Default: ON while the run is live. Toggled OFF when the operator scrolls
+  // up (smart auto-pause — matches Datadog / Grafana / kubectl follow UX) or
+  // clicks the Pause button. Resumes automatically when the operator scrolls
+  // back to within 8px of the bottom, OR explicitly via the Follow button.
+  const [follow, setFollow] = useState(true)
   // Step rows whose error cell the operator has expanded. The cell starts truncated to keep
   // the table dense; click toggles to a wrapped scroll-block. Keyed by ``${step_index}.${attempt}``
   // (one row per retry attempt) so a retried step's per-attempt errors expand independently.
@@ -122,13 +133,26 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
     return () => clearInterval(h)
   }, [active, load])
 
-  // Keep the log scrolled to the tail while the run is live (new lines arrive
-  // at the bottom). useLayoutEffect so the scroll happens before paint.
+  // Keep the log scrolled to the tail while follow is on AND the run is live —
+  // useLayoutEffect so the scroll happens before paint (no visible jump).
+  // When follow is off the position is left alone so the operator can read
+  // earlier lines without the 2-second poll snapping them back to the bottom.
   useLayoutEffect(() => {
-    if (active && logRef.current) {
+    if (active && follow && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight
     }
-  }, [data, active])
+  }, [data, active, follow])
+
+  // Smart auto-pause: as soon as the operator scrolls up from the bottom, drop
+  // follow. As soon as they scroll back to the bottom (within 8px tolerance —
+  // any tighter and a 1px rounding glitch breaks resume), re-enable it. The
+  // explicit toggle button still works either way.
+  const onLogScroll = useCallback(() => {
+    const el = logRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 8
+    setFollow((prev) => (prev === atBottom ? prev : atBottom))
+  }, [])
 
   return (
     <PageLayout
@@ -223,9 +247,24 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
           </Section>
 
           <Section>
-            <SectionTitle><ScrollText size={15} /> {t('nomaflow.run.log')}</SectionTitle>
+            <SectionTitle>
+              <ScrollText size={15} /> {t('nomaflow.run.log')}
+              {/* Follow toggle only matters while the run is still streaming new
+                  lines — once it's terminal the log is static and the button would
+                  be a no-op, so hide it. */}
+              {active && (
+                <LogControls>
+                  <span>{follow ? t('nomaflow.run.followOn') : t('nomaflow.run.followOff')}</span>
+                  <Button $variant="ghost" $size="sm" onClick={() => setFollow((v) => !v)}>
+                    {follow
+                      ? <><Pause size={14} /> {t('nomaflow.run.followPause')}</>
+                      : <><Play size={14} /> {t('nomaflow.run.followResume')}</>}
+                  </Button>
+                </LogControls>
+              )}
+            </SectionTitle>
             {data.logs
-              ? <LogBox ref={logRef}>{data.logs}</LogBox>
+              ? <LogBox ref={logRef} onScroll={onLogScroll}>{data.logs}</LogBox>
               : <EmptyLog>{t('nomaflow.run.noLog')}</EmptyLog>}
           </Section>
         </>

@@ -377,6 +377,10 @@ const fr: Resources = {
       colError: 'Erreur',
       log: 'Journal',
       noLog: 'Aucun journal capturé pour cette exécution.',
+      followOn: 'Suivi actif — les nouvelles lignes s\'affichent automatiquement',
+      followOff: 'En pause — descendez en bas pour reprendre',
+      followResume: 'Suivre',
+      followPause: 'Pause',
     },
   },
   settings: {
