@@ -47,9 +47,19 @@ async def registry(tmp_path):
                 usr_apps_id INTEGER, usr_ukid INTEGER, usr_login TEXT
             )
         """))
+        # collect_audit — new shape (replaces v1's per-module SECURITY_AUDIT /
+        # DB_AUDIT / … and the earlier nomasx1b consolidated security_audit).
+        # cla_audit_id is a surrogate PK; cla_module + cla_target identify what
+        # was refreshed; cla_run_id links back to the nomaflow job_runs row.
         await conn.execute(text("""
-            CREATE TABLE security_audit (
-                aud_apps_id INTEGER, aud_table TEXT, aud_action TEXT, aud_date DATE
+            CREATE TABLE collect_audit (
+                cla_audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cla_apps_id  INTEGER NOT NULL,
+                cla_module   TEXT NOT NULL,
+                cla_target   TEXT NOT NULL,
+                cla_action   TEXT NOT NULL,
+                cla_refresh  TIMESTAMP NOT NULL,
+                cla_run_id   TEXT
             )
         """))
     yield reg
@@ -156,28 +166,69 @@ async def test_truncate_table_falls_back_to_delete_on_sqlite(registry) -> None:
 async def test_insert_audit_record(registry) -> None:
     await insert_audit_record(
         connectors=registry, target_connector="target",
-        audit_table="security_audit", target_schema=None,
-        target_table="SECURITY_USERS", apps_id=10,
+        target_schema=None, audit_table="collect_audit",
+        target_table="SECURITY_USERS", apps_id=10, module="SECURITY",
     )
-    rows = await _read(registry, "security_audit")
+    rows = await _read(registry, "collect_audit")
     assert len(rows) == 1
-    # (apps_id, target_table, action, date)
-    assert rows[0][0] == 10
-    assert rows[0][1] == "SECURITY_USERS"
-    assert rows[0][2] == "ETL"
-    # date column — non-null is enough; format varies by driver.
-    assert rows[0][3] is not None
+    # (cla_audit_id, cla_apps_id, cla_module, cla_target, cla_action, cla_refresh, cla_run_id)
+    _, apps_id, module, target, action, refresh, run_id = rows[0]
+    assert apps_id == 10
+    assert module == "SECURITY"
+    assert target == "SECURITY_USERS"
+    assert action == "ETL"
+    assert refresh is not None  # CURRENT_TIMESTAMP; format varies by driver
+    assert run_id is None       # no active nomaflow run in this test
 
 
 @pytest.mark.asyncio
 async def test_insert_audit_record_custom_action(registry) -> None:
     await insert_audit_record(
         connectors=registry, target_connector="target",
-        audit_table="security_audit", target_schema=None,
-        target_table="SECURITY_USERS", apps_id=10, action="REFRESH",
+        target_schema=None, audit_table="collect_audit",
+        target_table="SECURITY_USERS", apps_id=10, module="SECURITY",
+        action="REFRESH",
     )
-    rows = await _read(registry, "security_audit")
-    assert rows[0][2] == "REFRESH"
+    rows = await _read(registry, "collect_audit")
+    assert rows[0][4] == "REFRESH"
+
+
+@pytest.mark.asyncio
+async def test_insert_audit_record_auto_resolves_run_id(registry) -> None:
+    """When the caller doesn't pass ``run_id``, the helper pulls the active
+    nomaflow run id from :func:`liberty.jobs.runlog.current_run_id` (the
+    ContextVar set by the runner around each python step). Mock the
+    ContextVar to verify the wiring."""
+    from liberty.jobs.runlog import set_run_context, reset_run_context
+    token = set_run_context("test-run-123")
+    try:
+        await insert_audit_record(
+            connectors=registry, target_connector="target",
+            target_schema=None, audit_table="collect_audit",
+            target_table="SECURITY_USERS", apps_id=10, module="SECURITY",
+        )
+    finally:
+        reset_run_context(token)
+    rows = await _read(registry, "collect_audit")
+    assert rows[0][6] == "test-run-123"  # cla_run_id
+
+
+@pytest.mark.asyncio
+async def test_insert_audit_record_explicit_run_id_wins(registry) -> None:
+    """Caller-supplied ``run_id`` overrides whatever the ContextVar holds."""
+    from liberty.jobs.runlog import set_run_context, reset_run_context
+    token = set_run_context("ctx-id")
+    try:
+        await insert_audit_record(
+            connectors=registry, target_connector="target",
+            target_schema=None, audit_table="collect_audit",
+            target_table="SECURITY_USERS", apps_id=10, module="SECURITY",
+            run_id="explicit-id",
+        )
+    finally:
+        reset_run_context(token)
+    rows = await _read(registry, "collect_audit")
+    assert rows[0][6] == "explicit-id"
 
 
 # --------------------------------------------------------------------------- #

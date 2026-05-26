@@ -132,28 +132,67 @@ async def insert_audit_record(
     *,
     connectors: ConnectorRegistry,
     target_connector: str,
-    audit_table: str,
     target_schema: str | None,
     target_table: str,
     apps_id: int | str,
+    module: str,
     action: str = "ETL",
+    audit_table: str = "collect_audit",
+    run_id: str | None = None,
 ) -> None:
-    """Write a standard audit row — ``(apps_id, target_table, action, CURRENT_DATE)``.
+    """Write one ``collect_audit`` row — the standard ETL audit log entry.
 
-    Matches v1's ``j_insert_audit`` shape (every ETL step writes one of these
-    to its module-specific audit table — ``SECURITY_AUDIT``, ``DB_AUDIT``, …).
-    Schema-qualified when *target_schema* is given.
+    Schema: ``(cla_apps_id, cla_module, cla_target, cla_action, cla_refresh,
+    cla_run_id)``. Replaces v1's per-module audit tables (``SECURITY_AUDIT``,
+    ``DB_AUDIT``, …) AND the earlier nomasx1b consolidated ``security_audit``
+    (which lost the module categorization). One row per refresh event;
+    cla_audit_id is a BIGSERIAL surrogate so the table is append-only.
+
+    Arguments:
+      * ``module`` — REQUIRED. Logical module ('SECURITY' | 'LICENSE' |
+        'EMPLOYEES' | 'OUT' | 'SOD' | 'XREF' | 'DATABASE' | 'ACTIVITY_LOG'
+        | 'AUDIT_TRAIL' | 'LDAP'). Restores v1's grouping — the dashboard
+        widget answers 'when was LICENSE last refreshed?' from this column
+        instead of having to infer from target names.
+      * ``run_id`` — defaults to the active nomaflow run id pulled from
+        :func:`liberty.jobs.runlog.current_run_id`. Passed-in value wins
+        (e.g. ad-hoc backfill scripts that want to label their writes).
+        Stored as ``cla_run_id``; nullable in the schema so writes outside
+        a run context still succeed.
+      * ``audit_table`` — table name, defaults to ``collect_audit``. Override
+        only when an out-of-tree plugin wants its own audit log in the same
+        schema (rare).
+      * ``target_schema`` — when set, the table is schema-qualified
+        (``<schema>.<audit_table>``).
     """
+    # Auto-resolve the run id from the runlog ContextVar when the caller
+    # didn't pass one. Imported lazily to keep liberty.etl independent of
+    # liberty.jobs at import time (etl is the lower layer; jobs imports etl,
+    # not the other way around — only this one helper bridges back).
+    if run_id is None:
+        from liberty.jobs.runlog import current_run_id
+        run_id = current_run_id()
     engine = connectors.pools.engine(target_connector)
     qualified = f"{target_schema}.{audit_table}" if target_schema else audit_table
     sql = text(
-        f"INSERT INTO {qualified} VALUES (:apps_id, :target_table, :action, CURRENT_DATE)"
+        f"INSERT INTO {qualified} "
+        f"(cla_apps_id, cla_module, cla_target, cla_action, cla_refresh, cla_run_id) "
+        f"VALUES (:apps_id, :module, :target_table, :action, CURRENT_TIMESTAMP, :run_id)"
     )
     async with engine.begin() as conn:
-        await conn.execute(sql, {"apps_id": apps_id, "target_table": target_table, "action": action})
+        await conn.execute(
+            sql,
+            {
+                "apps_id": apps_id,
+                "module": module,
+                "target_table": target_table,
+                "action": action,
+                "run_id": run_id,
+            },
+        )
     _log.info(
-        "liberty.etl audit %s.%s ← (%s, %s, %s, CURRENT_DATE)",
-        target_connector, qualified, apps_id, target_table, action,
+        "liberty.etl audit %s.%s ← (apps_id=%s, module=%s, target=%s, action=%s, run_id=%s)",
+        target_connector, qualified, apps_id, module, target_table, action, run_id,
     )
 
 
