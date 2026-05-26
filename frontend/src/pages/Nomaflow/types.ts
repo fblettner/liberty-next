@@ -56,6 +56,12 @@ export type StepType = 'sql_copy' | 'sql_query' | 'python' | 'ldap_sync' | 'http
 export interface StepConfig {
   type: StepType
   name: string
+  /** Step-level enable switch. Defaults to true. When false the runner skips
+   *  the step (CANCELED with "skipped: disabled") and continues with the next
+   *  one — doesn't fail the run. Operators set this in jobs.toml for
+   *  conditionally-relevant steps, OR per-fire via the Run-with-parameters
+   *  modal's toggle. */
+  enabled?: boolean
   [field: string]: unknown
 }
 

@@ -164,6 +164,7 @@ class JobScheduler:
         triggered_by: str,
         op_kwargs_overrides: dict | None = None,
         params_override: dict | None = None,
+        step_enabled_overrides: dict[str, bool] | None = None,
         log_level: str | None = None,
     ) -> str:
         """Manually trigger *job* — fire-and-return shape of :meth:`fire_now`.
@@ -179,6 +180,11 @@ class JobScheduler:
         threaded through to :meth:`JobRunner.execute_run`. ``None`` (the
         scheduled-fire default) leaves saved kwargs intact.
 
+        ``step_enabled_overrides`` is the per-fire enable/disable toggle from
+        the same UI — ``{step_name: bool}``. A resolved ``False`` makes the
+        runner skip that step (CANCELED with "skipped: disabled", not a
+        failure). ``None`` defers to each step's saved ``enabled`` value.
+
         Returns the new run's id. The background task is intentionally orphaned
         — the runner persists every state transition to the DB, so the row is
         recoverable from any client (cancel, requeue, etc.) without needing a
@@ -191,6 +197,7 @@ class JobScheduler:
                 job, trigger, run,
                 op_kwargs_overrides=op_kwargs_overrides,
                 params_override=params_override,
+                step_enabled_overrides=step_enabled_overrides,
                 log_level=log_level,
             ),
         )

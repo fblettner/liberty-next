@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock } from 'lucide-react'
+import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -44,13 +44,11 @@ const ParamSectionTitle = styled.div`
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary};
   display: flex; align-items: baseline; gap: 8px;
 `
-const ParamSectionType = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.sm};`
 const ParamRow = styled.label`
   display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 10px;
   font-size: ${fontSize.sm};
 `
 const ParamKey = styled.span`font-family: ${fonts.mono}; color: ${colors.text.secondary};`
-const ParamHint = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; margin-top: -4px;`
 
 // A real toggle styled as a pill — clearly clickable, clearly stateful.
 const Toggle = styled.button<{ $on: boolean }>`
@@ -60,6 +58,60 @@ const Toggle = styled.button<{ $on: boolean }>`
   background: ${({ $on }) => ($on ? colors.green.bg : 'transparent')};
   color: ${({ $on }) => ($on ? colors.green.main : colors.text.muted)};
   &:disabled { opacity: 0.5; cursor: default; }
+`
+
+// Compact step list — one row per step (vs the heavier ParamSection treatment
+// used for job-level params). Designed for jobs with 10+ steps: the list
+// dominates the modal so single-line rows + a bulk select header keep "I just
+// want to run one step" to a 2-click operation instead of N un-ticks.
+const StepsListHeader = styled.div`
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 4px 2px;
+`
+const StepsListTitle = styled.div`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary};
+  display: flex; align-items: baseline; gap: 8px;
+`
+const StepsListCounter = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.sm};`
+const StepsListActions = styled.div`display: flex; align-items: center; gap: 6px;`
+const StepsList = styled.div`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  display: flex; flex-direction: column;
+`
+const StepRow = styled.div<{ $expanded?: boolean }>`
+  display: grid; grid-template-columns: 24px 1fr auto auto; align-items: center;
+  gap: 10px; padding: 8px 10px; min-height: 36px;
+  border-bottom: 1px solid ${colors.border};
+  &:last-child { border-bottom: none; }
+  background: ${({ $expanded }) => ($expanded ? colors.bg.card : 'transparent')};
+`
+const StepRowName = styled.span<{ $disabled?: boolean }>`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  color: ${({ $disabled }) => ($disabled ? colors.text.muted : colors.text.primary)};
+`
+const StepRowCallable = styled.span<{ $disabled?: boolean }>`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  color: ${colors.text.muted};
+  opacity: ${({ $disabled }) => ($disabled ? 0.6 : 1)};
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+`
+const StepRowExpander = styled.button`
+  background: transparent; border: none; cursor: pointer; padding: 2px;
+  color: ${colors.text.muted}; display: inline-flex; align-items: center;
+  &:hover { color: ${colors.text.primary}; }
+  &:disabled { visibility: hidden; }
+`
+const StepKwargsPanel = styled.div`
+  padding: 8px 10px 12px 44px;  /* indent under the step row's name column */
+  border-bottom: 1px solid ${colors.border};
+  background: ${colors.bg.card};
+  display: flex; flex-direction: column; gap: 6px;
+  &:last-child { border-bottom: none; }
+`
+const LinkLikeButton = styled.button`
+  background: transparent; border: none; padding: 2px 6px; cursor: pointer;
+  font-size: ${fontSize.sm}; color: ${colors.text.muted};
+  &:hover { color: ${colors.text.primary}; }
 `
 
 export default function JobsList() {
@@ -95,9 +147,11 @@ export default function JobsList() {
     return () => window.clearInterval(id)
   }, [anyInFlight, load])
 
-  // "Run with parameters" modal state. The modal carries both the job-level params
-  // (shared across all steps) AND each python step's op_kwargs. Submit sends a
-  // {params, op_kwargs} body the runner merges with the saved config.
+  // "Run with parameters" modal state. The modal carries the job-level params
+  // (shared across all steps), the per-step config (so the per-step enable
+  // toggle has a row per step + python steps render their op_kwargs), and the
+  // job's saved log level. Submit sends a {params, op_kwargs, step_enabled,
+  // log_level} body the runner merges with the saved config.
   const [paramModalJob, setParamModalJob] = useState<
     { job: JobSummary; jobParams: Record<string, unknown>; steps: StepConfig[]; logLevel: 'INFO' | 'DEBUG' } | null
   >(null)
@@ -107,6 +161,7 @@ export default function JobsList() {
     body?: {
       params?: Record<string, unknown>
       op_kwargs?: Record<string, Record<string, unknown>>
+      step_enabled?: Record<string, boolean>
       log_level?: 'INFO' | 'DEBUG'
     },
   ) => {
@@ -118,6 +173,7 @@ export default function JobsList() {
       const has = body && (
         (body.params && Object.keys(body.params).length > 0) ||
         (body.op_kwargs && Object.keys(body.op_kwargs).length > 0) ||
+        (body.step_enabled && Object.keys(body.step_enabled).length > 0) ||
         body.log_level !== undefined
       )
       await api.post(`/admin/jobs/${encodeURIComponent(jobId)}/run`, has ? body : undefined)
@@ -128,29 +184,33 @@ export default function JobsList() {
   }, [load])
 
   const runNow = useCallback(async (job: JobSummary) => {
-    // Open the modal when the job carries job-level params OR any python step with
-    // non-empty op_kwargs. Otherwise fire immediately — the modal would be empty.
+    // Open the modal when the job carries job-level params, any python step
+    // with non-empty op_kwargs, OR more than one step (so operators can pick
+    // which steps to run via the enable toggles). Single-step no-kwargs jobs
+    // still fire immediately — the modal would offer nothing actionable.
     setError(null); setBusyId(job.id)
     try {
       const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
       const def = parsed.jobs.find((j) => j.id === job.id)
       const jobParams = (def?.params ?? {}) as Record<string, unknown>
-      const pythonSteps = (def?.steps ?? []).filter((s) =>
-        s.type === 'python' && s.op_kwargs && typeof s.op_kwargs === 'object' && Object.keys(s.op_kwargs as object).length > 0,
+      const allSteps = (def?.steps ?? [])
+      const hasParams = Object.keys(jobParams).length > 0
+      const hasPythonKwargs = allSteps.some((s) =>
+        s.type === 'python' && s.op_kwargs && typeof s.op_kwargs === 'object'
+          && Object.keys(s.op_kwargs as object).length > 0,
       )
+      const hasMultipleSteps = allSteps.length > 1
       const jobLogLevel: 'INFO' | 'DEBUG' = (def?.log_level === 'DEBUG') ? 'DEBUG' : 'INFO'
-      const hasAnything = Object.keys(jobParams).length > 0 || pythonSteps.length > 0
-      if (!hasAnything) {
-        // No params + no per-step kwargs — quick-fire at the job's saved
-        // log_level. Operators who need to flip to DEBUG on a no-params job
-        // can edit jobs.toml ``log_level = "DEBUG"`` (saved default) until we
-        // add a separate "Run with options" entry for the no-params case.
+      if (!hasParams && !hasPythonKwargs && !hasMultipleSteps) {
+        // No params + single no-kwargs step — quick-fire at the job's saved
+        // log_level. Nothing the modal could usefully show (no kwargs to
+        // edit, no step to selectively disable).
         setBusyId(null)
         await _postRun(job.id)
         return
       }
       setBusyId(null)
-      setParamModalJob({ job, jobParams, steps: pythonSteps, logLevel: jobLogLevel })
+      setParamModalJob({ job, jobParams, steps: allSteps, logLevel: jobLogLevel })
     } catch (e) {
       setBusyId(null)
       setError(e instanceof ApiError ? e.message : String(e))
@@ -299,7 +359,7 @@ export default function JobsList() {
         <RunWithParamsModal
           job={paramModalJob.job}
           jobParams={paramModalJob.jobParams}
-          pythonSteps={paramModalJob.steps}
+          steps={paramModalJob.steps}
           jobLogLevel={paramModalJob.logLevel}
           onCancel={() => setParamModalJob(null)}
           onSubmit={async (body) => {
@@ -314,22 +374,29 @@ export default function JobsList() {
 
 
 // "Run with parameters" — modal that lets the operator override op_kwargs for one fire of
-// a job without editing jobs.toml. Two sections:
+// a job without editing jobs.toml. Sections:
+//   * Log level (per-fire override of jobs.toml log_level)
 //   * Shared params (the job-level kwargs merged under every step)
-//   * One section per python step with its own op_kwargs
-// On submit, sends only the diff vs. saved as a `{params, op_kwargs}` body — the runner
-// merges with the saved config (layer order: job.params → step.op_kwargs → params override
-// → per-step op_kwargs override, each layer winning over the previous).
+//   * One section per step with its enable toggle + (for python steps) its op_kwargs
+// On submit, sends only the diff vs. saved as a `{params, op_kwargs, step_enabled,
+// log_level}` body — the runner merges with the saved config (layer order:
+// job.params → step.op_kwargs → params override → per-step op_kwargs override,
+// each layer winning over the previous; step_enabled override wins over
+// step.enabled in jobs.toml).
 //
 // Inputs are type-aware: boolean → Checkbox; number → number input; string → text input;
 // and a key ending in `_connector` (or named exactly `connector`) → SearchSelect of the
 // available connectors loaded from the workspace. Saves typos vs free-text.
 function RunWithParamsModal({
-  job, jobParams, pythonSteps, jobLogLevel, onCancel, onSubmit,
+  job, jobParams, steps, jobLogLevel, onCancel, onSubmit,
 }: {
   job: JobSummary
   jobParams: Record<string, unknown>
-  pythonSteps: StepConfig[]
+  /** Every step of the job — python steps render their op_kwargs in addition
+   *  to the enable toggle; sql_copy / sql_query / ldap_sync / http steps show
+   *  only the toggle (their typed fields are configured from the job editor,
+   *  not per-fire). */
+  steps: StepConfig[]
   /** The job's saved log_level from jobs.toml (defaults to 'INFO'). The dropdown
    *  is seeded from this; on submit we only send log_level when the operator
    *  picked a value DIFFERENT from this saved default. */
@@ -338,6 +405,7 @@ function RunWithParamsModal({
   onSubmit: (body: {
     params?: Record<string, unknown>
     op_kwargs?: Record<string, Record<string, unknown>>
+    step_enabled?: Record<string, boolean>
     log_level?: 'INFO' | 'DEBUG'
   }) => Promise<void> | void
 }) {
@@ -351,12 +419,30 @@ function RunWithParamsModal({
   // Working copies — seed from saved values, diff on submit so we only send what changed.
   const initialStepKwargs = useMemo(() => {
     const out: Record<string, Record<string, unknown>> = {}
-    for (const s of pythonSteps) {
+    for (const s of steps) {
       out[s.name] = { ...((s.op_kwargs as Record<string, unknown>) ?? {}) }
     }
     return out
-  }, [pythonSteps])
+  }, [steps])
+  // step.enabled defaults to true in the schema; we treat undefined the same
+  // way so a missing field doesn't surprise the operator into a disabled step.
+  const initialStepEnabled = useMemo(() => {
+    const out: Record<string, boolean> = {}
+    for (const s of steps) out[s.name] = s.enabled !== false
+    return out
+  }, [steps])
   const [stepValues, setStepValues] = useState<Record<string, Record<string, unknown>>>(initialStepKwargs)
+  const [stepEnabled, setStepEnabled] = useState<Record<string, boolean>>(initialStepEnabled)
+  // Which steps are expanded to show their kwargs panel. Default: collapsed
+  // (the kwargs are second-order — the toggle is the primary action). The
+  // first python step with non-empty kwargs auto-expands so an operator who
+  // came here specifically to edit kwargs sees something immediately.
+  const firstExpandable = steps.find((s) =>
+    s.type === 'python' && Object.keys(initialStepKwargs[s.name] ?? {}).length > 0,
+  )?.name
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>(
+    firstExpandable ? { [firstExpandable]: true } : {},
+  )
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({ ...jobParams })
   const [logLevel, setLogLevel] = useState<'INFO' | 'DEBUG'>(jobLogLevel)
   const [busy, setBusy] = useState(false)
@@ -367,11 +453,27 @@ function RunWithParamsModal({
   const setParamKey = (key: string, v: unknown) => {
     setParamValues((prev) => ({ ...prev, [key]: v }))
   }
+  const setStepEnable = (stepName: string, v: boolean) => {
+    setStepEnabled((prev) => ({ ...prev, [stepName]: v }))
+  }
+  const toggleStepExpanded = (stepName: string) => {
+    setExpandedSteps((prev) => ({ ...prev, [stepName]: !prev[stepName] }))
+  }
+  // Bulk select / clear — fixes the "I want to run just USERS" UX where the
+  // operator would otherwise tick-untick N-1 boxes. "All" sets every step
+  // enabled; "None" turns them all off (operator then ticks the one they want).
+  const enabledCount = Object.values(stepEnabled).filter(Boolean).length
+  const selectAllSteps = () => {
+    setStepEnabled(Object.fromEntries(steps.map((s) => [s.name, true])))
+  }
+  const selectNoneSteps = () => {
+    setStepEnabled(Object.fromEntries(steps.map((s) => [s.name, false])))
+  }
 
   const submit = async () => {
-    // Per-step diff: only the kwargs that changed end up in the payload.
+    // Per-step kwargs diff: only the kwargs that changed end up in the payload.
     const stepOverrides: Record<string, Record<string, unknown>> = {}
-    for (const s of pythonSteps) {
+    for (const s of steps) {
       const before = initialStepKwargs[s.name] ?? {}
       const after = stepValues[s.name] ?? {}
       const diff: Record<string, unknown> = {}
@@ -379,6 +481,13 @@ function RunWithParamsModal({
         if (!Object.is(after[k], before[k])) diff[k] = after[k]
       }
       if (Object.keys(diff).length > 0) stepOverrides[s.name] = diff
+    }
+    // Per-step enable diff: only toggles the operator changed.
+    const stepEnabledDiff: Record<string, boolean> = {}
+    for (const s of steps) {
+      if (stepEnabled[s.name] !== initialStepEnabled[s.name]) {
+        stepEnabledDiff[s.name] = stepEnabled[s.name]
+      }
     }
     // Job-level params diff.
     const paramsDiff: Record<string, unknown> = {}
@@ -388,10 +497,12 @@ function RunWithParamsModal({
     const body: {
       params?: Record<string, unknown>
       op_kwargs?: Record<string, Record<string, unknown>>
+      step_enabled?: Record<string, boolean>
       log_level?: 'INFO' | 'DEBUG'
     } = {}
     if (Object.keys(paramsDiff).length > 0) body.params = paramsDiff
     if (Object.keys(stepOverrides).length > 0) body.op_kwargs = stepOverrides
+    if (Object.keys(stepEnabledDiff).length > 0) body.step_enabled = stepEnabledDiff
     // Only send log_level when it differs from the job's saved default — keeps
     // the payload minimal + lets the runner fall back to job.log_level when
     // nothing's specified (matches the operator's intent: "I left the dropdown
@@ -485,20 +596,81 @@ function RunWithParamsModal({
               )}
             </ParamSection>
           )}
-          {pythonSteps.map((s) => (
-            <ParamSection key={s.name}>
-              <ParamSectionTitle>
-                <span>{s.name}</span>
-                <ParamSectionType>· {String((s as { callable?: unknown }).callable ?? '')}</ParamSectionType>
-              </ParamSectionTitle>
-              {Object.entries(stepValues[s.name] ?? {}).map(([k, v]) =>
-                renderKwargRow(k, v, (nv) => setStepKey(s.name, k, nv)),
-              )}
-              {Object.keys(stepValues[s.name] ?? {}).length === 0 && (
-                <ParamHint>{t('nomaflow.runParams.noKwargs', '(no parameters on this step)')}</ParamHint>
-              )}
-            </ParamSection>
-          ))}
+          {/* Steps — compact list. Each row is one line: [checkbox] STEP_NAME
+              callable [chevron]. Bulk select/none header lets the operator
+              flip the whole set at once ("run only USERS" = None + tick one).
+              Steps with kwargs (python with non-empty op_kwargs) expand to
+              show the kwarg editor below the row; non-python steps + python
+              with no kwargs have nothing to expand. */}
+          <div>
+            <StepsListHeader>
+              <StepsListTitle>
+                <span>{t('nomaflow.runParams.steps', 'Steps')}</span>
+                <StepsListCounter>
+                  {t('nomaflow.runParams.stepsCount', '{{enabled}} / {{total}} enabled',
+                    { enabled: enabledCount, total: steps.length })}
+                </StepsListCounter>
+              </StepsListTitle>
+              <StepsListActions>
+                <LinkLikeButton
+                  onClick={selectAllSteps}
+                  disabled={enabledCount === steps.length}
+                >
+                  {t('nomaflow.runParams.selectAll', 'All')}
+                </LinkLikeButton>
+                <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>·</span>
+                <LinkLikeButton
+                  onClick={selectNoneSteps}
+                  disabled={enabledCount === 0}
+                >
+                  {t('nomaflow.runParams.selectNone', 'None')}
+                </LinkLikeButton>
+              </StepsListActions>
+            </StepsListHeader>
+            <StepsList>
+              {steps.map((s) => {
+                const isPython = s.type === 'python'
+                const callable = String((s as { callable?: unknown }).callable ?? '')
+                const subtitle = isPython ? callable : s.type
+                const kwargs = stepValues[s.name] ?? {}
+                const hasKwargs = Object.keys(kwargs).length > 0
+                const expandable = isPython && hasKwargs
+                const isExpanded = !!expandedSteps[s.name]
+                const enabled = stepEnabled[s.name] ?? true
+                return (
+                  <div key={s.name}>
+                    <StepRow $expanded={isExpanded && expandable}>
+                      <Checkbox
+                        checked={enabled}
+                        onChange={(checked) => setStepEnable(s.name, checked)}
+                      />
+                      <StepRowName $disabled={!enabled}>{s.name}</StepRowName>
+                      <StepRowCallable $disabled={!enabled}>{subtitle}</StepRowCallable>
+                      <StepRowExpander
+                        type="button"
+                        onClick={() => toggleStepExpanded(s.name)}
+                        disabled={!expandable}
+                        title={expandable
+                          ? (isExpanded
+                              ? t('nomaflow.runParams.collapseKwargs', 'Collapse parameters')
+                              : t('nomaflow.runParams.expandKwargs', 'Edit parameters'))
+                          : ''}
+                      >
+                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </StepRowExpander>
+                    </StepRow>
+                    {expandable && isExpanded && (
+                      <StepKwargsPanel>
+                        {Object.entries(kwargs).map(([k, v]) =>
+                          renderKwargRow(k, v, (nv) => setStepKey(s.name, k, nv)),
+                        )}
+                      </StepKwargsPanel>
+                    )}
+                  </div>
+                )
+              })}
+            </StepsList>
+          </div>
         </ModalBody>
         <ModalFooter>
           <Button $variant="ghost" onClick={onCancel} disabled={busy}>

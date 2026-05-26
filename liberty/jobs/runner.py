@@ -154,6 +154,7 @@ class JobRunner:
         *,
         op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
         params_override: dict[str, Any] | None = None,
+        step_enabled_overrides: dict[str, bool] | None = None,
         log_level: str | None = None,
     ) -> JobRun:
         """Execute an allocated *run* — the long-lived part of the lifecycle.
@@ -169,6 +170,15 @@ class JobRunner:
         once, the modified values flow into the step's callable without
         persisting back to disk. ``None`` (the scheduled-fire default) leaves
         every step's saved kwargs intact.
+
+        ``step_enabled_overrides`` is the ephemeral per-fire "skip this step"
+        toggle — a mapping of ``step.name → bool`` that wins over the saved
+        ``step.enabled``. When the resolved value is ``False`` the runner
+        records the step as CANCELED with ``"skipped: disabled"`` and
+        continues — DOES NOT short-circuit the run (different shape from a
+        step failure, which marks all downstream steps SKIPPED). Useful from
+        the Run-with-parameters modal when only one phase of a multi-step job
+        needs re-running after a manual fix.
 
         ``log_level`` is the per-fire log verbosity override. ``"DEBUG"`` raises
         every registered logger (``liberty`` + plugin namespaces — see
@@ -226,6 +236,22 @@ class JobRunner:
         try:
             for idx, step in enumerate(job.steps):
                 executed_step_count = idx + 1
+                # Per-step enabled resolution — per-fire override (from the
+                # Run-with-parameters modal) wins over the saved jobs.toml
+                # value. ``False`` short-circuits the step BEFORE the merge +
+                # executor work (cheaper) but still records a StepRun row so
+                # the timeline is complete. Does NOT mark the run as failed —
+                # disabled is operator intent, not an error.
+                resolved_enabled = (step_enabled_overrides or {}).get(step.name, step.enabled)
+                if not resolved_enabled:
+                    _log.info(
+                        "nomaflow.runner step=%s SKIPPED (disabled %s)",
+                        step.name,
+                        "by per-fire override" if (step_enabled_overrides or {}).get(step.name) is False
+                            else "in jobs.toml",
+                    )
+                    await self._record_disabled_step(run, idx, step)
+                    continue
                 # Per-fire op_kwargs override + job-level defaults — merged via
                 # model_copy so the in-memory ``job`` registry is never mutated (a
                 # subsequent scheduled fire of the same job still uses the saved
@@ -579,3 +605,26 @@ class JobRunner:
                     finished_at=now,
                     error_message="skipped: earlier step failed",
                 ))
+
+    async def _record_disabled_step(self, run: JobRun, idx: int, step: Step) -> None:
+        """Insert a single CANCELED StepRun row for a step that was disabled
+        (jobs.toml ``enabled = false`` or a per-fire ``step_enabled`` override).
+
+        Different from :meth:`_record_skipped` (which marks every step from a
+        failure-point downward): a disabled step doesn't fail the run and
+        doesn't cascade — the next step still runs. We share the CANCELED
+        state with skipped/cancelled so the UI's terminal-state filter
+        treats them the same; the ``error_message`` distinguishes the cause."""
+        async with self._db.session() as session:
+            now = _utcnow()
+            session.add(StepRun(
+                run_id=run.id,
+                step_index=idx,
+                step_name=step.name,
+                step_type=step.type.value,
+                attempt=1,
+                state=RunState.CANCELED.value,
+                started_at=now,
+                finished_at=now,
+                error_message="skipped: disabled",
+            ))

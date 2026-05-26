@@ -684,6 +684,74 @@ def test_run_now_rejects_malformed_op_kwargs(env) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# POST /admin/jobs/<id>/run — step_enabled override (per-fire disable toggle)
+# --------------------------------------------------------------------------- #
+
+
+def test_run_now_step_enabled_false_skips_the_step(env) -> None:
+    """Per-fire ``step_enabled = {step_name: false}`` makes the runner skip
+    that step (CANCELED with ``skipped: disabled``). The recorded kwargs are
+    empty because ``echo`` never ran."""
+    app, _ = env
+    RECORDED_KWARGS.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"step_enabled": {"echo": False}},
+            headers=h,
+        )
+        assert r.status_code == 200
+        _wait_for_terminal(app, r.json()["run_id"])
+    # Empty — the step was skipped before _record_kwargs could fire.
+    assert RECORDED_KWARGS == {}
+
+
+def test_run_now_step_enabled_true_is_default_and_still_runs(env) -> None:
+    """``step_enabled = {step_name: true}`` is a no-op when the step is
+    already enabled (sanity check that the toggle doesn't break the happy
+    path)."""
+    app, _ = env
+    RECORDED_KWARGS.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"step_enabled": {"echo": True}},
+            headers=h,
+        )
+        assert r.status_code == 200
+        _wait_for_terminal(app, r.json()["run_id"])
+    assert RECORDED_KWARGS == {"target_connector": "default", "apps_id": 10}
+
+
+def test_run_now_rejects_malformed_step_enabled(env) -> None:
+    """``step_enabled`` must be ``{step_name: bool}``. Reject:
+       (a) non-dict, (b) non-bool value, (c) unknown step name (would silently
+       no-op otherwise → operator wonders why their toggle didn't work)."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # (a) not a dict
+        assert client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"step_enabled": "broken"}, headers=h,
+        ).status_code == 422
+        # (b) non-bool value (string "false" is a footgun — reject explicitly)
+        assert client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"step_enabled": {"echo": "false"}}, headers=h,
+        ).status_code == 422
+        # (c) unknown step name
+        r = client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={"step_enabled": {"no-such-step": False}}, headers=h,
+        )
+        assert r.status_code == 422
+        assert "unknown step" in r.json()["detail"]
+
+
+# --------------------------------------------------------------------------- #
 # POST /admin/jobs/runs/<id>/cancel
 # --------------------------------------------------------------------------- #
 

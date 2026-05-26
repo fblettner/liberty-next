@@ -42,9 +42,13 @@ async def registry(tmp_path):
                 usr_apps_id INTEGER, usr_ukid INTEGER, usr_login TEXT
             )
         """))
+        # PK on the history table mirrors the real nomasx1 schema
+        # (security_users$ has PK (usr_apps_id, usr_id, usr_ukid)) — required
+        # for the if_not_exists snapshot test to exercise the conflict path.
         await conn.execute(text("""
             CREATE TABLE "security_users$" (
-                usr_apps_id INTEGER, usr_ukid INTEGER, usr_login TEXT
+                usr_apps_id INTEGER, usr_ukid INTEGER, usr_login TEXT,
+                PRIMARY KEY (usr_apps_id, usr_ukid)
             )
         """))
         # collect_audit — new shape (replaces v1's per-module SECURITY_AUDIT /
@@ -113,6 +117,79 @@ async def test_snapshot_rows_no_filter_copies_everything(registry) -> None:
     )
     assert n == 2
     assert len(await _read(registry, '"security_users$"')) == 2
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rows_default_mode_raises_on_duplicate_pk(registry) -> None:
+    """Default snapshot path is strict — a second call snapshotting the same
+    rows hits the history$ PK and raises IntegrityError. This is the failure
+    mode that the v1 SECURITY refresher hit after a partially-failed run left
+    history$ populated; ``if_not_exists`` is the operator's escape hatch
+    (covered by the next test)."""
+    await _seed(registry, [(10, 1, "alice"), (10, 2, "bob")])
+    await snapshot_rows(
+        connectors=registry, target_connector="target",
+        source_table="security_users", history_table='"security_users$"',
+    )
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError):
+        await snapshot_rows(
+            connectors=registry, target_connector="target",
+            source_table="security_users", history_table='"security_users$"',
+        )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rows_if_not_exists_silently_skips_duplicates(registry) -> None:
+    """``if_not_exists=True`` makes the snapshot idempotent — a second call
+    re-attempting the same rows succeeds (the duplicates are SKIPPED, not
+    re-inserted). Returns rowcount-of-actually-inserted (0 here, since every
+    row was already in history). The fix for the failed-then-retried SECURITY
+    refresher loop."""
+    await _seed(registry, [(10, 1, "alice"), (10, 2, "bob")])
+    # First call: inserts both rows.
+    n1 = await snapshot_rows(
+        connectors=registry, target_connector="target",
+        source_table="security_users", history_table='"security_users$"',
+        if_not_exists=True,
+    )
+    assert n1 == 2
+    # Second call with the same source rows: 0 inserted (both already in
+    # history), but no exception — the operator can re-run a failed refresh
+    # without first cleaning history$ by hand.
+    n2 = await snapshot_rows(
+        connectors=registry, target_connector="target",
+        source_table="security_users", history_table='"security_users$"',
+        if_not_exists=True,
+    )
+    assert n2 == 0
+    # History still has exactly the 2 original rows (no duplicates).
+    assert len(await _read(registry, '"security_users$"')) == 2
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rows_if_not_exists_inserts_only_new_rows(registry) -> None:
+    """When a partial refresh: history holds (apps_id, ukid)=(10,1); a fresh
+    snapshot with NEW rows + the same old one inserts only the new ones."""
+    # Seed live with the "old" row + reload history with it (simulates a prior
+    # snapshot that succeeded), then add NEW rows to live and re-snapshot.
+    await _seed(registry, [(10, 1, "old-alice")])
+    await snapshot_rows(
+        connectors=registry, target_connector="target",
+        source_table="security_users", history_table='"security_users$"',
+        if_not_exists=True,
+    )
+    # Now live grows — add new rows that should land in history on this snapshot.
+    await _seed(registry, [(10, 2, "bob"), (10, 3, "carol")])
+    n = await snapshot_rows(
+        connectors=registry, target_connector="target",
+        source_table="security_users", history_table='"security_users$"',
+        where="usr_apps_id = :apps_id", params={"apps_id": 10},
+        if_not_exists=True,
+    )
+    # 2 inserted (the new rows); 1 skipped (old-alice was already there).
+    assert n == 2
+    assert len(await _read(registry, '"security_users$"')) == 3
 
 
 # --------------------------------------------------------------------------- #

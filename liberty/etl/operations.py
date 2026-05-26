@@ -35,6 +35,7 @@ async def snapshot_rows(
     history_table: str,
     where: str = "",
     params: Mapping[str, Any] | None = None,
+    if_not_exists: bool = False,
 ) -> int:
     """``INSERT INTO history_table SELECT * FROM source_table [WHERE where]``
     on *target_connector*. Both tables live on the same connector (that's the
@@ -45,18 +46,58 @@ async def snapshot_rows(
     values via ``params`` (the underlying driver handles quoting). Empty
     ``where`` snapshots every row.
 
+    ``if_not_exists`` makes the INSERT idempotent — rows that would violate
+    the history table's primary key are silently skipped instead of raising
+    ``IntegrityError``. Used by the v1 SECURITY refresher chain
+    (``snapshot → next_ukid → delete → copy``): if any step after the snapshot
+    fails the row stays in history with its current ukid, and the next attempt
+    would re-snapshot the same (apps_id, id, ukid) tuple. Without
+    ``if_not_exists`` the operator has to manually clean ``<table>$`` rows
+    before retrying — the kind of papercut that turns a 10-second retry into
+    a 10-minute DBA detour. Dialect-aware: Postgres ``ON CONFLICT DO NOTHING``,
+    SQLite ``INSERT OR IGNORE`` (the test fixture path); other dialects raise
+    ``NotImplementedError`` so the caller doesn't silently get strict-mode
+    behaviour they didn't ask for.
+
     Returns the number of rows inserted (driver-reported ``rowcount``; -1 on
-    drivers that don't report it).
+    drivers that don't report it; with ``if_not_exists``, the count is "rows
+    actually inserted", not "rows attempted" — duplicates aren't included).
     """
     engine = connectors.pools.engine(target_connector)
     where_clause = f" WHERE {where}" if where.strip() else ""
-    sql = text(f"INSERT INTO {history_table} SELECT * FROM {source_table}{where_clause}")
+    if if_not_exists:
+        dialect = engine.dialect.name
+        if dialect == "postgresql":
+            sql_text = (
+                f"INSERT INTO {history_table} SELECT * FROM {source_table}"
+                f"{where_clause} ON CONFLICT DO NOTHING"
+            )
+        elif dialect == "sqlite":
+            # SQLite has no PostgreSQL-style ON CONFLICT after the SELECT — use
+            # the statement-level ``INSERT OR IGNORE`` flavour, same semantic.
+            sql_text = (
+                f"INSERT OR IGNORE INTO {history_table} "
+                f"SELECT * FROM {source_table}{where_clause}"
+            )
+        else:
+            # Surface unknown dialects loudly — silently dropping ``if_not_exists``
+            # would lock-step the caller back into the IntegrityError bug they
+            # asked us to avoid. The current call sites are Postgres-only;
+            # add an Oracle/MSSQL branch when a port needs one.
+            raise NotImplementedError(
+                f"snapshot_rows(if_not_exists=True) is not implemented for "
+                f"dialect {dialect!r}; supported: 'postgresql', 'sqlite'"
+            )
+    else:
+        sql_text = f"INSERT INTO {history_table} SELECT * FROM {source_table}{where_clause}"
+    sql = text(sql_text)
     async with engine.begin() as conn:
         result = await conn.execute(sql, dict(params or {}))
     rows = result.rowcount or 0
     _log.info(
-        "liberty.etl snapshot %s.%s → %s.%s where=%r rows=%d",
-        target_connector, source_table, target_connector, history_table, where or "(all)", rows,
+        "liberty.etl snapshot %s.%s → %s.%s where=%r rows=%d%s",
+        target_connector, source_table, target_connector, history_table,
+        where or "(all)", rows, " (if_not_exists)" if if_not_exists else "",
     )
     return rows
 

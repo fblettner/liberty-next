@@ -249,11 +249,42 @@ async def run_job_now(
             )
         log_level = raw_l.upper()
 
+    # Optional step_enabled — per-fire enable/disable per step. Maps
+    # ``{step_name: bool}``. ``False`` makes the runner skip the step
+    # (CANCELED with "skipped: disabled"); ``True`` forces it on even when
+    # jobs.toml has ``enabled = false``. Reject unknown step names so the
+    # operator doesn't wonder why their toggle didn't apply — and reject
+    # non-bool values for the same reason (a string "false" is a footgun).
+    step_enabled_overrides: dict[str, bool] | None = None
+    if body is not None and "step_enabled" in body:
+        raw_se = body.get("step_enabled")
+        if not isinstance(raw_se, dict):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="`step_enabled` must be an object of `{step_name: bool}`",
+            )
+        known_step_names = {s.name for s in job.steps}
+        for step_name, enabled in raw_se.items():
+            if not isinstance(enabled, bool):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"`step_enabled[{step_name!r}]` must be a boolean",
+                )
+            if step_name not in known_step_names:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=f"`step_enabled` references unknown step {step_name!r}; "
+                           f"valid: {sorted(known_step_names)!r}",
+                )
+        step_enabled_overrides = {str(s): bool(e) for s, e in raw_se.items()}
+
     _log.info(
-        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s params=%s log_level=%s",
+        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s params=%s "
+        "step_enabled=%s log_level=%s",
         job_id, principal.username,
         sorted(overrides) if overrides else None,
         sorted(params_override) if params_override else None,
+        step_enabled_overrides or None,
         log_level or "(job default)",
     )
     # fire_now_async creates the JobRun row synchronously (so we have its id to
@@ -264,6 +295,7 @@ async def run_job_now(
         job, triggered_by=principal.username,
         op_kwargs_overrides=overrides,
         params_override=params_override,
+        step_enabled_overrides=step_enabled_overrides,
         log_level=log_level,
     )
     return {

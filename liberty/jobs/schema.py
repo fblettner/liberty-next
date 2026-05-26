@@ -118,6 +118,16 @@ class Step(BaseModel):
 
     type: StepType
     name: str
+    # Per-step disable switch. ``False`` makes the runner skip the step (recorded
+    # as CANCELED with "skipped: disabled" in the StepRun row, so the UI still
+    # shows it in the timeline instead of leaving a gap that would confuse the
+    # operator). Defaults to ``True`` (every step runs). Operators set this in
+    # jobs.toml for steps that are conditionally relevant (e.g. an OUT_PURGE
+    # step that should only run weekly while the rest runs daily — disable in
+    # the per-step entry, the scheduler still walks the rest), OR per-fire via
+    # the Run-with-parameters modal (``step_enabled`` override) when only some
+    # phases need re-running after an upstream failure.
+    enabled: bool = True
 
     # sql_copy / sql_query — shared SQL endpoints
     source: SqlEndpoint | None = None

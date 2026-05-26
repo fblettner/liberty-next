@@ -462,3 +462,138 @@ query = "q"
         from liberty.jobs.models import JobRun
         runs = (await s.execute(select(JobRun))).scalars().all()
     assert len(runs) == 1 and runs[0].state == RunState.CANCELED.value
+
+
+# --------------------------------------------------------------------------- #
+# per-step enable (jobs.toml `enabled = false` + per-fire `step_enabled` override)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_disabled_step_in_jobs_toml_is_skipped_and_downstream_steps_run(
+    jobs_db, tmp_path,
+) -> None:
+    """A step with ``enabled = false`` in jobs.toml is recorded as CANCELED
+    (``error_message = 'skipped: disabled'``) — the runner walks past it and
+    keeps executing the next steps. The run as a whole still SUCCEEDS."""
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "with-disabled"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "first"
+connector = "c"
+query = "q1"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "skipped-one"
+connector = "c"
+query = "q2"
+enabled = false
+
+[[jobs.steps]]
+type = "sql_query"
+name = "third"
+connector = "c"
+query = "q3"
+""")
+    executor = RecordingExecutor([
+        StepResult(rows_affected=10),
+        StepResult(rows_affected=30),
+    ])
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep)
+
+    run = await runner.run(job, ManualTrigger(triggered_by="alice"))
+
+    assert run.state == RunState.SUCCEEDED.value
+    # Disabled step was never called — only first + third.
+    assert executor.calls == [("first", 1), ("third", 1)]
+    # Total rows: 10 + 30 — the disabled step contributes nothing.
+    assert run.rows_affected == 40
+
+    async with jobs_db.session() as s:
+        rows = (await s.execute(select(StepRun).order_by(StepRun.step_index))).scalars().all()
+    assert [r.step_name for r in rows] == ["first", "skipped-one", "third"]
+    states = [r.state for r in rows]
+    assert states == [
+        RunState.SUCCEEDED.value,
+        RunState.CANCELED.value,  # disabled
+        RunState.SUCCEEDED.value,
+    ]
+    assert rows[1].error_message == "skipped: disabled"
+
+
+@pytest.mark.asyncio
+async def test_per_fire_step_enabled_override_can_disable_an_enabled_step(
+    jobs_db, tmp_path,
+) -> None:
+    """Per-fire ``step_enabled = {step_name: False}`` wins over the saved
+    ``enabled = true`` — used by the Run-with-parameters modal toggle."""
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "override-off"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "a"
+connector = "c"
+query = "q1"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "b"
+connector = "c"
+query = "q2"
+""")
+    executor = RecordingExecutor([StepResult(rows_affected=1)])
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep)
+
+    trigger = ManualTrigger(triggered_by="alice")
+    run = await runner.create_run(job, trigger)
+    run = await runner.execute_run(
+        job, trigger, run,
+        step_enabled_overrides={"b": False},
+    )
+
+    assert run.state == RunState.SUCCEEDED.value
+    assert executor.calls == [("a", 1)]  # b was disabled per-fire
+
+    async with jobs_db.session() as s:
+        rows = (await s.execute(select(StepRun).order_by(StepRun.step_index))).scalars().all()
+    assert [r.state for r in rows] == [RunState.SUCCEEDED.value, RunState.CANCELED.value]
+    assert rows[1].error_message == "skipped: disabled"
+
+
+@pytest.mark.asyncio
+async def test_per_fire_step_enabled_override_can_re_enable_a_disabled_step(
+    jobs_db, tmp_path,
+) -> None:
+    """The reverse case — jobs.toml has ``enabled = false`` but the per-fire
+    override flips it back on. Lets operators run a normally-off maintenance
+    step ad-hoc without editing the TOML."""
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "override-on"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "normally-off"
+connector = "c"
+query = "q1"
+enabled = false
+""")
+    executor = RecordingExecutor([StepResult(rows_affected=99)])
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep)
+
+    trigger = ManualTrigger(triggered_by="alice")
+    run = await runner.create_run(job, trigger)
+    run = await runner.execute_run(
+        job, trigger, run,
+        step_enabled_overrides={"normally-off": True},
+    )
+
+    assert run.state == RunState.SUCCEEDED.value
+    assert executor.calls == [("normally-off", 1)]
+    assert run.rows_affected == 99
