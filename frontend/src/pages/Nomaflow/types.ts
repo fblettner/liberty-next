@@ -78,6 +78,11 @@ export interface JobConfig {
    *  on every step. Defaults to `{}` — irrelevant for jobs whose steps are all
    *  sql_copy / sql_query (those executors don't consume op_kwargs). */
   params?: Record<string, unknown>
+  /** Per-run logging verbosity. INFO (default) gives row counts + business
+   *  progress markers. DEBUG also emits the full SQL of every run_query.
+   *  The Run-with-parameters modal can override this per-fire without editing
+   *  the TOML; the per-fire value wins. */
+  log_level?: 'INFO' | 'DEBUG'
 }
 
 export interface JobsParsedResponse {

@@ -236,11 +236,25 @@ async def run_job_now(
             )
         params_override = dict(raw_p)
 
+    # Optional log_level — per-fire override of job.log_level (jobs.toml default).
+    # Restricted to INFO / DEBUG; anything else is a 422. None means "use the
+    # job's configured default" (which itself defaults to INFO).
+    log_level: str | None = None
+    if body is not None and "log_level" in body:
+        raw_l = body.get("log_level")
+        if not isinstance(raw_l, str) or raw_l.upper() not in ("INFO", "DEBUG"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="`log_level` must be one of: 'INFO', 'DEBUG'",
+            )
+        log_level = raw_l.upper()
+
     _log.info(
-        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s params=%s",
+        "nomaflow.admin manual fire job=%s triggered_by=%s overrides=%s params=%s log_level=%s",
         job_id, principal.username,
         sorted(overrides) if overrides else None,
         sorted(params_override) if params_override else None,
+        log_level or "(job default)",
     )
     # fire_now_async creates the JobRun row synchronously (so we have its id to
     # return) then spawns execute_run as a background task. The runner persists
@@ -250,6 +264,7 @@ async def run_job_now(
         job, triggered_by=principal.username,
         op_kwargs_overrides=overrides,
         params_override=params_override,
+        log_level=log_level,
     )
     return {
         "job_id": job_id,

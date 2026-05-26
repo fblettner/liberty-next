@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
+import { ArrowLeft, Download, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -154,6 +154,21 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
     setFollow((prev) => (prev === atBottom ? prev : atBottom))
   }, [])
 
+  // Save the current log buffer as a .log file. Reuses the blob+anchor pattern
+  // from common/DataTable.tsx (the codebase's download convention). Uses the
+  // in-view ``data.logs`` rather than re-fetching, so what you download is
+  // exactly what you see on screen at click time.
+  const downloadLog = useCallback(() => {
+    if (!data?.logs) return
+    const blob = new Blob([data.logs], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    Object.assign(document.createElement('a'), {
+      href: url,
+      download: `nomaflow-run-${runId}.log`,
+    }).click()
+    URL.revokeObjectURL(url)
+  }, [data?.logs, runId])
+
   return (
     <PageLayout
       icon={<Workflow size={18} />}
@@ -249,19 +264,26 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
           <Section>
             <SectionTitle>
               <ScrollText size={15} /> {t('nomaflow.run.log')}
-              {/* Follow toggle only matters while the run is still streaming new
-                  lines — once it's terminal the log is static and the button would
-                  be a no-op, so hide it. */}
-              {active && (
-                <LogControls>
-                  <span>{follow ? t('nomaflow.run.followOn') : t('nomaflow.run.followOff')}</span>
-                  <Button $variant="ghost" $size="sm" onClick={() => setFollow((v) => !v)}>
-                    {follow
-                      ? <><Pause size={14} /> {t('nomaflow.run.followPause')}</>
-                      : <><Play size={14} /> {t('nomaflow.run.followResume')}</>}
+              {/* Right-aligned log controls. The Download button is always
+                  available when there's a log to download (live OR terminal);
+                  the Follow toggle only matters while the run is streaming. */}
+              <LogControls>
+                {active && (
+                  <>
+                    <span>{follow ? t('nomaflow.run.followOn') : t('nomaflow.run.followOff')}</span>
+                    <Button $variant="ghost" $size="sm" onClick={() => setFollow((v) => !v)}>
+                      {follow
+                        ? <><Pause size={14} /> {t('nomaflow.run.followPause')}</>
+                        : <><Play size={14} /> {t('nomaflow.run.followResume')}</>}
+                    </Button>
+                  </>
+                )}
+                {data.logs && (
+                  <Button $variant="ghost" $size="sm" onClick={downloadLog}>
+                    <Download size={14} /> {t('nomaflow.run.downloadLog')}
                   </Button>
-                </LogControls>
-              )}
+                )}
+              </LogControls>
             </SectionTitle>
             {data.logs
               ? <LogBox ref={logRef} onScroll={onLogScroll}>{data.logs}</LogBox>

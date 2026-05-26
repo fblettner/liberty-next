@@ -381,6 +381,7 @@ const fr: Resources = {
       followOff: 'En pause — descendez en bas pour reprendre',
       followResume: 'Suivre',
       followPause: 'Pause',
+      downloadLog: 'Télécharger',
     },
   },
   settings: {

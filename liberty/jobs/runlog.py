@@ -43,6 +43,15 @@ _MAX_PERSIST_CHARS = 256 * 1024  # cap the text written to the DB
 _buffers: dict[str, deque[str]] = {}
 _lock = Lock()
 
+# Logger namespaces the RunLogHandler is attached to. ``liberty`` is registered
+# by :func:`install`. Plugins call :func:`register_namespace` at import time to
+# opt their own logger tree in (e.g. ``nomasx1.security`` lives outside the
+# ``liberty.*`` tree, so without registration its log records never reach the
+# run buffer). The handler instance is module-level so a late registration
+# (after :func:`install` ran) can still find it.
+_registered_namespaces: set[str] = set()
+_handler: "RunLogHandler | None" = None
+
 
 def set_run_context(run_id: str) -> Token:
     """Bind *run_id* as the active run for the current async context. Returns a
@@ -95,19 +104,67 @@ def install() -> RunLogHandler:
     a bare ``uvicorn liberty.main:asgi_app``, or the test client) would leave
     the logger at its WARNING-ish default and the run-log buffer would capture
     nothing. It only ever *lowers* the level, never raises it — a DEBUG setting
-    is left alone."""
-    lg = logging.getLogger("liberty")
-    if lg.level == logging.NOTSET or lg.level > logging.INFO:
-        lg.setLevel(logging.INFO)
-    for h in lg.handlers:
-        if isinstance(h, RunLogHandler):
-            return h
-    handler = RunLogHandler()
-    handler.setFormatter(logging.Formatter(
+    is left alone.
+
+    Plugin loggers (e.g. ``nomasx1.security``) live OUTSIDE the ``liberty.*``
+    tree, so without registration their records never reach the run buffer.
+    Use :func:`register_namespace` from plugin import code to attach the
+    handler to additional namespaces."""
+    global _handler
+    if _handler is not None:
+        # Re-running install (e.g. lifespan re-init) — just rebind the
+        # registered namespaces against the existing handler.
+        _attach_to_namespace("liberty")
+        return _handler
+    _handler = RunLogHandler()
+    _handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-7s %(name)s — %(message)s", datefmt="%H:%M:%S",
     ))
-    lg.addHandler(handler)
-    return handler
+    _attach_to_namespace("liberty")
+    return _handler
+
+
+def registered_namespaces() -> tuple[str, ...]:
+    """The current set of registered logger namespaces — used by the runner to
+    raise + restore the right loggers' levels when a per-run DEBUG override is
+    active. Returns a snapshot tuple so callers don't need to lock the set."""
+    return tuple(sorted(_registered_namespaces))
+
+
+def register_namespace(name: str) -> None:
+    """Attach the :class:`RunLogHandler` to the logger *name* so records emitted
+    from that tree are captured into the active run's buffer.
+
+    Idempotent — calling twice with the same name is a no-op. Safe to call
+    before :func:`install` runs (the handler is attached lazily when install
+    happens — registrations made earlier are picked up then).
+
+    Use from plugin import code, e.g. in ``plugins/nomasx1/__init__.py``::
+
+        from liberty.jobs.runlog import register_namespace
+        register_namespace("nomasx1")
+
+    so every ``nomasx1.<submodule>`` logger feeds the run buffer alongside
+    ``liberty.<submodule>`` loggers.
+    """
+    _attach_to_namespace(name)
+
+
+def _attach_to_namespace(name: str) -> None:
+    """Internal — bind the handler to logger *name* and pin its level so a
+    deployment that left the namespace at default WARNING doesn't silently
+    drop INFO records. Handles late registration (install hasn't run yet)
+    by remembering the name; install picks it up when the handler exists."""
+    _registered_namespaces.add(name)
+    lg = logging.getLogger(name)
+    if lg.level == logging.NOTSET or lg.level > logging.INFO:
+        lg.setLevel(logging.INFO)
+    if _handler is None:
+        return  # install() will rebind when it runs
+    # Idempotent attach.
+    if any(isinstance(h, RunLogHandler) for h in lg.handlers):
+        return
+    lg.addHandler(_handler)
 
 
 def run_logs(run_id: str) -> str | None:

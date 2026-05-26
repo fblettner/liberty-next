@@ -18,7 +18,7 @@ when the step actually fires).
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -229,6 +229,12 @@ class Job(BaseModel):
     # steps consume these (sql_copy / sql_query ignore them — the merge still happens,
     # but those executors look at typed fields, not op_kwargs).
     params: dict[str, Any] = Field(default_factory=dict)
+    # Per-run logging verbosity. INFO (default) gives operator-level signal —
+    # row counts + business progress markers. DEBUG also emits the full SQL of
+    # every run_query (useful when troubleshooting a specific job — matches v1's
+    # per-job debug flag). The Run-with-parameters modal can override this
+    # per-fire without editing the TOML; the per-fire value wins.
+    log_level: Literal["INFO", "DEBUG"] = "INFO"
 
     @field_validator("timezone")
     @classmethod

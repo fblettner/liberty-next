@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, SearchSelect, type SearchSelectOption } from '../../common'
+import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
@@ -99,12 +99,16 @@ export default function JobsList() {
   // (shared across all steps) AND each python step's op_kwargs. Submit sends a
   // {params, op_kwargs} body the runner merges with the saved config.
   const [paramModalJob, setParamModalJob] = useState<
-    { job: JobSummary; jobParams: Record<string, unknown>; steps: StepConfig[] } | null
+    { job: JobSummary; jobParams: Record<string, unknown>; steps: StepConfig[]; logLevel: 'INFO' | 'DEBUG' } | null
   >(null)
 
   const _postRun = useCallback(async (
     jobId: string,
-    body?: { params?: Record<string, unknown>; op_kwargs?: Record<string, Record<string, unknown>> },
+    body?: {
+      params?: Record<string, unknown>
+      op_kwargs?: Record<string, Record<string, unknown>>
+      log_level?: 'INFO' | 'DEBUG'
+    },
   ) => {
     setBusyId(jobId); setError(null)
     try {
@@ -113,7 +117,8 @@ export default function JobsList() {
       // the new RUNNING badge — the in_flight poll then takes over from there.
       const has = body && (
         (body.params && Object.keys(body.params).length > 0) ||
-        (body.op_kwargs && Object.keys(body.op_kwargs).length > 0)
+        (body.op_kwargs && Object.keys(body.op_kwargs).length > 0) ||
+        body.log_level !== undefined
       )
       await api.post(`/admin/jobs/${encodeURIComponent(jobId)}/run`, has ? body : undefined)
       load()
@@ -133,14 +138,19 @@ export default function JobsList() {
       const pythonSteps = (def?.steps ?? []).filter((s) =>
         s.type === 'python' && s.op_kwargs && typeof s.op_kwargs === 'object' && Object.keys(s.op_kwargs as object).length > 0,
       )
+      const jobLogLevel: 'INFO' | 'DEBUG' = (def?.log_level === 'DEBUG') ? 'DEBUG' : 'INFO'
       const hasAnything = Object.keys(jobParams).length > 0 || pythonSteps.length > 0
       if (!hasAnything) {
+        // No params + no per-step kwargs — quick-fire at the job's saved
+        // log_level. Operators who need to flip to DEBUG on a no-params job
+        // can edit jobs.toml ``log_level = "DEBUG"`` (saved default) until we
+        // add a separate "Run with options" entry for the no-params case.
         setBusyId(null)
         await _postRun(job.id)
         return
       }
       setBusyId(null)
-      setParamModalJob({ job, jobParams, steps: pythonSteps })
+      setParamModalJob({ job, jobParams, steps: pythonSteps, logLevel: jobLogLevel })
     } catch (e) {
       setBusyId(null)
       setError(e instanceof ApiError ? e.message : String(e))
@@ -290,6 +300,7 @@ export default function JobsList() {
           job={paramModalJob.job}
           jobParams={paramModalJob.jobParams}
           pythonSteps={paramModalJob.steps}
+          jobLogLevel={paramModalJob.logLevel}
           onCancel={() => setParamModalJob(null)}
           onSubmit={async (body) => {
             setParamModalJob(null)
@@ -314,15 +325,20 @@ export default function JobsList() {
 // and a key ending in `_connector` (or named exactly `connector`) → SearchSelect of the
 // available connectors loaded from the workspace. Saves typos vs free-text.
 function RunWithParamsModal({
-  job, jobParams, pythonSteps, onCancel, onSubmit,
+  job, jobParams, pythonSteps, jobLogLevel, onCancel, onSubmit,
 }: {
   job: JobSummary
   jobParams: Record<string, unknown>
   pythonSteps: StepConfig[]
+  /** The job's saved log_level from jobs.toml (defaults to 'INFO'). The dropdown
+   *  is seeded from this; on submit we only send log_level when the operator
+   *  picked a value DIFFERENT from this saved default. */
+  jobLogLevel: 'INFO' | 'DEBUG'
   onCancel: () => void
   onSubmit: (body: {
     params?: Record<string, unknown>
     op_kwargs?: Record<string, Record<string, unknown>>
+    log_level?: 'INFO' | 'DEBUG'
   }) => Promise<void> | void
 }) {
   const { t } = useTranslation()
@@ -342,6 +358,7 @@ function RunWithParamsModal({
   }, [pythonSteps])
   const [stepValues, setStepValues] = useState<Record<string, Record<string, unknown>>>(initialStepKwargs)
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({ ...jobParams })
+  const [logLevel, setLogLevel] = useState<'INFO' | 'DEBUG'>(jobLogLevel)
   const [busy, setBusy] = useState(false)
 
   const setStepKey = (stepName: string, key: string, v: unknown) => {
@@ -368,9 +385,18 @@ function RunWithParamsModal({
     for (const k of Object.keys(paramValues)) {
       if (!Object.is(paramValues[k], jobParams[k])) paramsDiff[k] = paramValues[k]
     }
-    const body: { params?: Record<string, unknown>; op_kwargs?: Record<string, Record<string, unknown>> } = {}
+    const body: {
+      params?: Record<string, unknown>
+      op_kwargs?: Record<string, Record<string, unknown>>
+      log_level?: 'INFO' | 'DEBUG'
+    } = {}
     if (Object.keys(paramsDiff).length > 0) body.params = paramsDiff
     if (Object.keys(stepOverrides).length > 0) body.op_kwargs = stepOverrides
+    // Only send log_level when it differs from the job's saved default — keeps
+    // the payload minimal + lets the runner fall back to job.log_level when
+    // nothing's specified (matches the operator's intent: "I left the dropdown
+    // alone, so use what's in jobs.toml").
+    if (logLevel !== jobLogLevel) body.log_level = logLevel
     setBusy(true)
     try {
       await onSubmit(body)
@@ -424,6 +450,29 @@ function RunWithParamsModal({
             {t('nomaflow.runParams.hint',
               'Values apply to this fire only — jobs.toml stays unchanged. Leave a field as-is to use its saved value.')}
           </div>
+          {/* Log-level override — per-fire-only. Defaults to the job's saved
+              log_level from jobs.toml; submit only includes the field when the
+              operator changed it. DEBUG emits the full SQL of every run_query
+              into the log (useful for troubleshooting a specific run). */}
+          <ParamSection>
+            <ParamSectionTitle>
+              <span>{t('nomaflow.runParams.logLevel', 'Log level')}</span>
+            </ParamSectionTitle>
+            <ParamRow>
+              <ParamKey>log_level</ParamKey>
+              <Select
+                value={logLevel}
+                onChange={(e) => setLogLevel(e.target.value as 'INFO' | 'DEBUG')}
+              >
+                <option value="INFO">
+                  {t('nomaflow.runParams.logLevelInfo', 'INFO — row counts + progress markers')}
+                </option>
+                <option value="DEBUG">
+                  {t('nomaflow.runParams.logLevelDebug', 'DEBUG — full SQL of every query')}
+                </option>
+              </Select>
+            </ParamRow>
+          </ParamSection>
           {/* Job-level params (shared across all steps). Rendered when the job carries
               any — operators that don't use job.params just won't see the section. */}
           {Object.keys(paramValues).length > 0 && (

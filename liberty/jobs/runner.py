@@ -31,7 +31,9 @@ from sqlalchemy.exc import IntegrityError
 
 from liberty.jobs.db import JobDatabase
 from liberty.jobs.models import JobRun, RunLog, RunState, StepRun
-from liberty.jobs.runlog import finish_run, reset_run_context, set_run_context
+from liberty.jobs.runlog import (
+    finish_run, registered_namespaces, reset_run_context, set_run_context,
+)
 from liberty.jobs.schema import BackoffKind, Job, JobRetry, Step, StepType
 from liberty.jobs.steps.base import (
     RunContext,
@@ -152,6 +154,7 @@ class JobRunner:
         *,
         op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
         params_override: dict[str, Any] | None = None,
+        log_level: str | None = None,
     ) -> JobRun:
         """Execute an allocated *run* — the long-lived part of the lifecycle.
 
@@ -166,6 +169,14 @@ class JobRunner:
         once, the modified values flow into the step's callable without
         persisting back to disk. ``None`` (the scheduled-fire default) leaves
         every step's saved kwargs intact.
+
+        ``log_level`` is the per-fire log verbosity override. ``"DEBUG"`` raises
+        every registered logger (``liberty`` + plugin namespaces — see
+        :func:`liberty.jobs.runlog.registered_namespaces`) to DEBUG for this
+        run's duration so the full SQL of every ``run_query`` lands in the log
+        buffer. ``None`` (default) uses ``job.log_level`` from jobs.toml (also
+        defaults to ``"INFO"``). Pre-existing logger levels are restored in
+        the finally block regardless of how the run terminates.
         """
         if run.state in (RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELED.value):
             # Resumed a run that already terminated — return it as-is. Happens
@@ -187,9 +198,24 @@ class JobRunner:
         # run's log buffer (see liberty.jobs.runlog). Reset in the finally.
         log_token = set_run_context(run.id)
 
+        # Apply per-fire log level override (or fall back to job-level setting).
+        # Raises the registered loggers to DEBUG when requested so the full SQL
+        # surfaces in the run log; the previous levels are saved in
+        # ``saved_log_levels`` and restored in the finally — never raises a
+        # logger ABOVE its prior level (otherwise we'd hide log lines a parallel
+        # run is depending on).
+        effective_log_level = (log_level or job.log_level or "INFO").upper()
+        saved_log_levels: dict[str, int] = {}
+        if effective_log_level == "DEBUG":
+            for ns in registered_namespaces():
+                lg = logging.getLogger(ns)
+                saved_log_levels[ns] = lg.level
+                if lg.level == logging.NOTSET or lg.level > logging.DEBUG:
+                    lg.setLevel(logging.DEBUG)
+
         _log.info(
-            "nomaflow.runner started job=%s run=%s trigger=%s steps=%d",
-            job.id, run.id, trigger.kind, len(job.steps),
+            "nomaflow.runner started job=%s run=%s trigger=%s steps=%d log_level=%s",
+            job.id, run.id, trigger.kind, len(job.steps), effective_log_level,
         )
 
         ctx = RunContext(run_id=run.id, job_id=job.id, trigger=trigger)
@@ -249,6 +275,11 @@ class JobRunner:
             # took the run id explicitly — it doesn't need the contextvar).
             self._active_runs.pop(run.id, None)
             reset_run_context(log_token)
+            # Restore the saved logger levels (if we raised any for DEBUG). A
+            # parallel run shouldn't have its DEBUG capture downgraded by us
+            # finishing, so we only restore loggers we explicitly raised.
+            for ns, prev_level in saved_log_levels.items():
+                logging.getLogger(ns).setLevel(prev_level)
 
         await self._finalize(run, terminal, total_rows=total_rows)
         _log.info(
@@ -264,6 +295,7 @@ class JobRunner:
         *,
         op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
         params_override: dict[str, Any] | None = None,
+        log_level: str | None = None,
     ) -> JobRun:
         """Allocate + execute *job* under *trigger* — the blocking shape, kept
         for callers (the scheduled-fire path, tests) that legitimately need to
@@ -274,6 +306,7 @@ class JobRunner:
             job, trigger, run,
             op_kwargs_overrides=op_kwargs_overrides,
             params_override=params_override,
+            log_level=log_level,
         )
 
     def cancel(self, run_id: str) -> bool:

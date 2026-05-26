@@ -111,11 +111,16 @@ async def truncate_table(
     if engine.dialect.name == "sqlite":
         async with engine.begin() as conn:
             await conn.execute(text(f"DELETE FROM {table}"))
-        _log.info("liberty.etl truncate %s.%s (via DELETE; sqlite)", target_connector, table)
+        _log.debug("liberty.etl truncate %s.%s (via DELETE; sqlite)", target_connector, table)
         return
     async with engine.begin() as conn:
         await conn.execute(text(f"TRUNCATE TABLE {table}"))
-    _log.info("liberty.etl truncate %s.%s", target_connector, table)
+    # DEBUG (not INFO): TRUNCATE is purely structural — operators don't need a
+    # log line for every temp-table wipe inside the SECURITY_RIGHTS upsert
+    # patterns. The business-level "what's happening" lives in the calling
+    # nomasx1.security progress markers; this stays available at DEBUG when
+    # someone needs to trace framework-level ops.
+    _log.debug("liberty.etl truncate %s.%s", target_connector, table)
 
 
 # --------------------------------------------------------------------------- #
@@ -175,7 +180,19 @@ async def run_query(
     async with engine.begin() as conn:
         result = await conn.execute(text(sql), dict(params or {}))
     rows = result.rowcount or 0
-    _log.info("liberty.etl run_query %s rows=%d sql=%s", connector, rows, _short(sql))
+    # Two-line split:
+    #   INFO: just rows=N (operator-level signal — "something happened" /
+    #         "nothing happened"). Repeating the SQL on every per-role /
+    #         per-user sub-call drowns the log in copies of the same template;
+    #         the SQL doesn't change, the rowcount does.
+    #   DEBUG: full SQL + rows so a developer / troubleshooter still sees
+    #         exactly which statement ran. Flip via the per-run log_level
+    #         setting (jobs.toml log_level = "DEBUG" or per-fire override).
+    if rows > 0:
+        _log.info("liberty.etl run_query %s rows=%d", connector, rows)
+    else:
+        _log.debug("liberty.etl run_query %s rows=0", connector)
+    _log.debug("liberty.etl run_query %s rows=%d sql=%s", connector, rows, _short(sql))
     return rows
 
 

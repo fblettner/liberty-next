@@ -379,6 +379,7 @@ const en = {
       followOff: 'Paused — scroll to the bottom to resume',
       followResume: 'Follow',
       followPause: 'Pause',
+      downloadLog: 'Download',
     },
   },
   settings: {
