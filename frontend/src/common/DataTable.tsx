@@ -67,6 +67,10 @@ export interface DataTableProps<T extends object> {
   initialPageSize?: number
   /** Columns hidden by default (e.g. from a `hidden` display hint) — a saved choice still wins. */
   initialColumnVisibility?: VisibilityState
+  /** Default tanstack-table grouping — column id(s) the grid groups by on first mount. The
+   *  operator can still ungroup / regroup from the Group control; this only seeds initial
+   *  state. Empty / undefined = no default grouping (flat rows). */
+  initialGrouping?: GroupingState
   /** Per-row CSS class on the `<tr>` — e.g. `dt-row-new` / `dt-row-deleted` to tint edited rows. */
   rowClassName?: (row: T) => string | undefined
   /** When provided, clicking a (non-grouped) row's body fires this. Clicks on interactive cell
@@ -248,7 +252,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, rowClassName, onRowClick, onRowContextMenu,
+  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -261,8 +265,34 @@ export function DataTable<T extends object>({
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
-  const [grouping, setGrouping] = useState<GroupingState>([])
-  const [expanded, setExpanded] = useState<ExpandedState>({})
+  // Seed grouping from the screen-level default (initialGrouping). Subsequent user changes
+  // (via the Group control) replace this list; we don't re-seed on prop change so an operator
+  // who ungrouped a screen and reloaded isn't yanked back to the default.
+  //
+  // Case-insensitive resolution against the actual tanstack column IDs (which come from the
+  // raw query result — lowercase under Postgres, which folds unquoted identifiers). Operators
+  // routinely declare screen column hints in UPPERCASE (``CLA_MODULE``) by convention; the
+  // ``cur()`` cell reader already falls back case-insensitively for that reason. Without this
+  // resolution, ``initial_group_by = ["CLA_MODULE"]`` would silently no-op (tanstack would
+  // look for a column literally named ``CLA_MODULE``, find none, drop the grouping). Unknown
+  // names fall through unchanged — useful if the operator types a column that only appears
+  // after a query change (won't crash; just won't group until the column lands).
+  const resolvedInitialGrouping = useMemo<GroupingState>(() => {
+    if (!initialGrouping?.length) return []
+    const colIds = new Map<string, string>()
+    for (const c of columns) {
+      const id = String((c as { id?: string }).id ?? (c as { accessorKey?: string }).accessorKey ?? '')
+      if (id) colIds.set(id.toLowerCase(), id)
+    }
+    return initialGrouping.map((n) => colIds.get(n.toLowerCase()) ?? n)
+  }, [initialGrouping, columns])
+  const [grouping, setGrouping] = useState<GroupingState>(resolvedInitialGrouping)
+  // Auto-expand all groups when a default grouping is present — operators landed on this
+  // screen *because* they want the grouped view; landing on N collapsed group rows with no
+  // detail is a worse first impression than the rows. true = "expand every group".
+  const [expanded, setExpanded] = useState<ExpandedState>(
+    resolvedInitialGrouping.length > 0 ? true : {},
+  )
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: initialPageSize })
 
   const [colOpen, setColOpen] = useState(false)

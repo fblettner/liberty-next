@@ -361,6 +361,7 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "key_columns": screen.effective_key_columns(),
         "editable": screen.editable,
         "uploadable": screen.uploadable,
+        "initial_group_by": list(screen.initial_group_by),
         "has_dialog": screen.dialog is not None,
         "has_row_menu": bool(screen.row_menu),
         "has_actions": bool(screen.actions),

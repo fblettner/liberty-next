@@ -811,6 +811,18 @@ class Screen(BaseModel):
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
     uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
+    initial_group_by: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Default tanstack-table grouping — column name(s) the grid groups by on first "
+            "open (operators can still ungroup / regroup from the Group control). One name "
+            "groups by that single column; multiple names nest groups in order. Example: "
+            "``[\"CLA_MODULE\"]`` on the last_refresh screen → audit rows fold under their "
+            "module (DATABASE / SECURITY / LICENSE / …) so an operator sees per-module "
+            "refresh status at a glance instead of a flat row dump."
+        ),
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
     export: WorkbookExport | None = Field(
         default=None,
         description=(

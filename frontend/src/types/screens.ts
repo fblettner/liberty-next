@@ -309,6 +309,10 @@ export interface ScreenListItem {
   key_columns?: string[]
   editable: boolean
   uploadable: boolean
+  /** Default tanstack-table grouping for this screen — column name(s) the grid groups by on
+   *  first open. Operators can ungroup / regroup from the Group control; this only seeds the
+   *  initial state. Empty = no default grouping (flat rows). */
+  initial_group_by?: string[]
   has_dialog: boolean
   has_row_menu: boolean
   has_actions: boolean

@@ -395,8 +395,22 @@ export function ResultTable({
     // Replace every ``{name}`` with the row's column value (URL-encoded so columns containing
     // ``/`` / ``?`` / ``#`` don't break the route). An unknown column produces an empty segment
     // — the screen's validator caught that at config-load time, this is the runtime safety net.
+    //
+    // Case-insensitive fallback (matches ``cur`` for cell rendering): the screen's column
+    // hints often declare names in operator-friendly UPPERCASE (``CLA_RUN_ID``) while the actual
+    // row keys returned by the query are lowercase (Postgres folds unquoted identifiers). A
+    // strict exact-key lookup would substitute empty strings here — the placeholder validator
+    // accepted the route because the hint matched, but the runtime would render
+    // ``/nomaflow/runs/`` with an empty id. Match the hint case first, then fall back through
+    // the row's own keys looking for a case-insensitive hit.
     const url = rowClickRoute.replace(/\{([^{}]+)\}/g, (_, name: string) => {
-      const v = row[name]
+      let v = row[name]
+      if (v === undefined) {
+        const lk = name.toLowerCase()
+        for (const k of Object.keys(row)) {
+          if (k.toLowerCase() === lk) { v = row[k]; break }
+        }
+      }
       return v == null ? '' : encodeURIComponent(String(v))
     })
     // Route → workspace-tab mapping. Add another branch here when a new ``row_click_route``
@@ -1161,6 +1175,7 @@ export function ResultTable({
         toolbarAfterSearch={runControl}
         toolbarRight={maxRowsControl}
         initialColumnVisibility={initialVisibility}
+        initialGrouping={screen?.initial_group_by ?? []}
         rowClassName={(row) => (deleted.has(row) ? 'dt-row-deleted' : newRows.includes(row) ? 'dt-row-new' : dirtyRows.has(row) ? 'dt-row-dirty' : undefined)}
         // Row click opens, in priority order: a SPA route (row_click_route — explicit operator
         // opt-in); the screen's own dialog (the v1 "edit a row by clicking it" affordance); a

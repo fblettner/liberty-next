@@ -14,12 +14,13 @@
 // All mutations go through `onChange(nextScreen)` — the parent (ScreensBuilder) owns the dirty
 // flag and the save call. `screenSchema` carries the full `$defs` map so we can pick out
 // `ScreenDialog` / `ScreenTab` / `ScreenField` / `ParamBind` for the per-section sub-schemas.
-import { useMemo, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Edit3, Plus, Trash2 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals, type JsonSchema, type SearchSelectOption,
+  Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
+  type FrameworkEnums, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts } from '../../theme'
@@ -30,7 +31,8 @@ import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
 import ExportEditor from './ExportEditor'
 import type { ActionPath } from './actionPath'
-import type { Column } from '../../types/connectors'
+import type { Column, QueryResult } from '../../types/connectors'
+import { api } from '../../api/client'
 
 type Row = Record<string, unknown>
 
@@ -50,6 +52,10 @@ type Row = Record<string, unknown>
 // screen — "what happens when a row is clicked" — then reveals only the relevant fields.
 const GENERAL_FORM_KEYS = [
   'label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable',
+  // Default tanstack-table grouping — column(s) the grid groups by on first open. Surfaces
+  // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
+  // ``x_enum_ref`` mechanism the Columns tab uses to pick column names.
+  'initial_group_by',
 ] as const
 
 // Sub-schema for the "open dialog" mode — the three fields that go together. We render this
@@ -93,6 +99,25 @@ const RowClickHeader = styled.div`
   margin-top: 18px; padding-top: 14px; border-top: 1px solid ${colors.border};
   font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
   text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+`
+// Column-placeholder chip row under the row_click_route input. Each chip inserts the
+// matching ``{column}`` token into the route at the current cursor position so operators
+// don't have to type it (and don't have to remember the case-sensitive name).
+const PlaceholderChipRow = styled.div`
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: -4px; margin-bottom: 10px;
+  align-items: baseline;
+`
+const PlaceholderHint = styled.span`
+  font-size: ${fontSize.sm}; color: ${colors.text.muted};
+  margin-right: 4px;
+`
+const PlaceholderChip = styled.button`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  height: 24px; padding: 0 8px;
+  border: 1px solid ${colors.border}; border-radius: 6px;
+  background: transparent; color: ${colors.text.secondary}; cursor: pointer;
+  &:hover { background: ${colors.bg.card}; color: ${colors.text.primary}; border-color: ${colors.text.muted}; }
 `
 // (``FieldList`` / ``FieldHeader`` / ``FieldBody`` moved into ``ActionListEditor.tsx`` — the
 // shared editor owns its own row look.)
@@ -155,6 +180,42 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       mono: q.name,
     }))
   }, [selectedConnectorMeta])
+  // Fetch the read query's columns once we know the effective connector + read query —
+  // powers the SCREEN_COLUMNS augmented enum (the column picker for ``initial_group_by``).
+  // Same pattern as the Columns tab in ScreenVisualBuilder: ``_limit=0`` returns the column
+  // metadata without rows. A failure is silent (the dropdown is just empty); the field stays
+  // editable as a free-text array so a hand-typed column name still works.
+  const readQueryName = typeof value.read_query === 'string' ? value.read_query : ''
+  const [screenColumns, setScreenColumns] = useState<Column[] | null>(null)
+  useEffect(() => {
+    setScreenColumns(null)
+    if (!effectiveConnector || !readQueryName) return
+    let cancelled = false
+    api.get<QueryResult>(
+      `/api/sql/${encodeURIComponent(effectiveConnector)}/${encodeURIComponent(readQueryName)}?_limit=0`,
+    )
+      .then((r) => { if (!cancelled) setScreenColumns(r.columns) })
+      .catch(() => { /* silent — leave dropdown empty, free-text fallback handles it */ })
+    return () => { cancelled = true }
+  }, [effectiveConnector, readQueryName])
+
+  // Augment the parent's framework enums with SCREEN_COLUMNS — the read query's column names.
+  // Consumed by Screen fields that declare ``x_enum_ref: "SCREEN_COLUMNS"`` (currently:
+  // ``initial_group_by``). The parent ScreensBuilder provides the global framework_enums via
+  // FrameworkEnumsContext; we LAYER the per-screen SCREEN_COLUMNS on top via a nested Provider
+  // around the General SchemaForm so the dropdown options match the screen's actual columns.
+  const parentEnums = useContext(FrameworkEnumsContext)
+  const augmentedEnums = useMemo<FrameworkEnums>(() => {
+    const base: FrameworkEnums = { ...(parentEnums ?? {}) }
+    const values = (screenColumns ?? []).map((c) => ({
+      value: c.name,
+      label: c.label ?? c.name,
+      mono: c.name,
+    }))
+    base.SCREEN_COLUMNS = { label: `Columns — ${readQueryName || '(no read query)'}`, values }
+    return base
+  }, [parentEnums, screenColumns, readQueryName])
+
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
   // its field-level enums + descriptions kick in.
@@ -221,27 +282,33 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           placeholder={app}
         />
       </Field>
-      <SchemaForm
-        schema={generalSchema}
-        defs={defs}
-        value={value}
-        onChange={(v) => {
-          // Apply every GENERAL_FORM_KEYS field in ONE onChange call — calling ``setProp``
-          // in a loop loses edits because each call reads ``value`` from the closure (stale
-          // within the synchronous event handler), so only the last one wins (and any field
-          // that wasn't the last key in the loop gets clobbered). Build the patched next
-          // value in one go, then call ``onChange`` once with the full result. Untouched
-          // keys outside GENERAL_FORM_KEYS (dialog, actions, row_menu, id, read_query, …)
-          // stay verbatim via the ``{...value}`` spread.
-          const next: Row = { ...value }
-          for (const k of GENERAL_FORM_KEYS) {
-            const val = v[k]
-            if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
-            else next[k] = val
-          }
-          onChange(next)
-        }}
-      />
+      {/* Wrap the General SchemaForm so ``initial_group_by`` (declared with
+          ``x_enum_ref: "SCREEN_COLUMNS"``) resolves against the per-screen column list we
+          fetched above. The parent ScreensBuilder still provides the global framework_enums;
+          ``augmentedEnums`` re-bases on that and layers SCREEN_COLUMNS on top. */}
+      <FrameworkEnumsContext.Provider value={augmentedEnums}>
+        <SchemaForm
+          schema={generalSchema}
+          defs={defs}
+          value={value}
+          onChange={(v) => {
+            // Apply every GENERAL_FORM_KEYS field in ONE onChange call — calling ``setProp``
+            // in a loop loses edits because each call reads ``value`` from the closure (stale
+            // within the synchronous event handler), so only the last one wins (and any field
+            // that wasn't the last key in the loop gets clobbered). Build the patched next
+            // value in one go, then call ``onChange`` once with the full result. Untouched
+            // keys outside GENERAL_FORM_KEYS (dialog, actions, row_menu, id, read_query, …)
+            // stay verbatim via the ``{...value}`` spread.
+            const next: Row = { ...value }
+            for (const k of GENERAL_FORM_KEYS) {
+              const val = v[k]
+              if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
+              else next[k] = val
+            }
+            onChange(next)
+          }}
+        />
+      </FrameworkEnumsContext.Provider>
       {renderRowClickSection()}
     </>
   )
@@ -252,9 +319,17 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // see only the fields that apply." Switching modes also clears the other mode's fields so a
   // half-configured dialog doesn't linger after the operator picked route (and vice versa).
   function renderRowClickSection(): ReactNode {
+    // Detect mode by KEY EXISTENCE, not truthy value. setMode seeds the
+    // newly-picked mode with an empty string so the operator has something to
+    // type into; a truthy check (``value.row_click_route ?``) treats that
+    // empty string as falsy → currentMode snaps back to 'none' before the
+    // dropdown can register the pick. Existence works: setProp wipes the key
+    // when the operator clears the field (the natural "clear to fall back to
+    // none" path), so 'route' mode sticks while the field has any value
+    // including empty, and reverts only when the operator explicitly clears.
     const currentMode: RowClickMode =
-      value.row_click_route ? 'route'
-      : value.row_click_screen ? 'dialog'
+      'row_click_route' in value ? 'route'
+      : 'row_click_screen' in value ? 'dialog'
       : 'none'
 
     const setMode = (m: RowClickMode) => {
@@ -265,8 +340,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         delete next.row_click_binds
       }
       if (m !== 'route') delete next.row_click_route
-      // Seed a sensible default for the active mode so the new field set has something to bind to.
-      if (m === 'route' && !next.row_click_route) next.row_click_route = ''
+      // Seed a sensible default for the active mode so the new field set has
+      // something to bind to AND so the existence check above flips currentMode
+      // to the picked mode immediately (previously only ``route`` was seeded —
+      // ``dialog`` mode never stuck because no key was created for it).
+      if (m === 'route' && !('row_click_route' in next)) next.row_click_route = ''
+      if (m === 'dialog' && !('row_click_screen' in next)) next.row_click_screen = ''
       onChange(next)
     }
 
@@ -313,17 +392,78 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           </>
         )}
 
-        {currentMode === 'route' && (
-          <Field label={t('settings.screens.editor.rowClickRouteLabel', 'Page route')}>
-            <SearchSelect
-              value={(value.row_click_route as string | undefined) ?? ''}
-              options={ROW_CLICK_ROUTE_OPTIONS}
-              onChange={(v) => setProp('row_click_route', v || '')}
-              allowCustom
-              placeholder={t('settings.screens.editor.rowClickRoutePlaceholder', 'Pick a destination route…')}
-            />
-          </Field>
-        )}
+        {currentMode === 'route' && (() => {
+          // Plain Input (was a SearchSelect — its portaled dropdown mispositioned for this
+          // field, and the hardcoded ROW_CLICK_ROUTE_OPTIONS preset with ``{id}`` confused
+          // operators on screens whose column isn't literally named "id"). The route is just
+          // a string with ``{column_name}`` placeholders; the chip row below inserts the
+          // column names at the cursor without operators having to remember the case
+          // (validator wants the same case as the column hints — typically UPPERCASE).
+          const routeValue = (value.row_click_route as string | undefined) ?? ''
+          const insertPlaceholder = (colName: string) => {
+            const token = `{${colName}}`
+            const el = document.getElementById('row-click-route-input') as HTMLInputElement | null
+            if (el) {
+              const start = el.selectionStart ?? routeValue.length
+              const end = el.selectionEnd ?? routeValue.length
+              const next = routeValue.slice(0, start) + token + routeValue.slice(end)
+              setProp('row_click_route', next)
+              // Restore caret AFTER the inserted token on the next tick.
+              queueMicrotask(() => {
+                el.focus()
+                const caret = start + token.length
+                el.setSelectionRange(caret, caret)
+              })
+            } else {
+              setProp('row_click_route', routeValue + token)
+            }
+          }
+          return (
+            <>
+              <Field label={t('settings.screens.editor.rowClickRouteLabel', 'Page route')}>
+                <Input
+                  id="row-click-route-input"
+                  value={routeValue}
+                  onChange={(e) => setProp('row_click_route', e.target.value)}
+                  placeholder="/path/{column_name}"
+                />
+              </Field>
+              {ROW_CLICK_ROUTE_OPTIONS.length > 0 && (
+                <PlaceholderChipRow>
+                  <PlaceholderHint>{t('settings.screens.editor.rowClickRoutePresets', 'Presets:')}</PlaceholderHint>
+                  {ROW_CLICK_ROUTE_OPTIONS.map((preset) => (
+                    <PlaceholderChip
+                      key={preset.value}
+                      type="button"
+                      onClick={() => setProp('row_click_route', preset.value)}
+                      title={preset.label}
+                    >
+                      {preset.value}
+                    </PlaceholderChip>
+                  ))}
+                </PlaceholderChipRow>
+              )}
+              {screenColumns && screenColumns.length > 0 && (
+                <PlaceholderChipRow>
+                  <PlaceholderHint>
+                    {t('settings.screens.editor.rowClickRouteColumnHint',
+                      'Click a column to insert it as a placeholder:')}
+                  </PlaceholderHint>
+                  {screenColumns.map((c) => (
+                    <PlaceholderChip
+                      key={c.name}
+                      type="button"
+                      onClick={() => insertPlaceholder(c.name)}
+                      title={c.label ?? c.name}
+                    >
+                      {`{${c.name}}`}
+                    </PlaceholderChip>
+                  ))}
+                </PlaceholderChipRow>
+              )}
+            </>
+          )
+        })()}
       </>
     )
   }

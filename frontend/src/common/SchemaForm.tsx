@@ -265,12 +265,41 @@ function StringMapEditor({ value, onChange, keyEnum }: {
   )
 }
 
-export function StringListEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+export function StringListEditor(
+  { value, onChange, options, allowCustom = true }: {
+    value: string[]
+    onChange: (v: string[]) => void
+    /** When provided, each row renders as a SearchSelect over these options instead of a
+     *  free-text Input. Used by ``list[str]`` fields with ``x_enum_ref`` (e.g. Screen's
+     *  ``initial_group_by``: a multi-select over the read query's columns). */
+    options?: SearchSelectOption[]
+    /** Only meaningful when ``options`` is set — passes through to SearchSelect.allowCustom
+     *  so the operator can type a value the registry doesn't know (defaults to true; flip
+     *  off for strict Literal-typed enums). */
+    allowCustom?: boolean
+  },
+) {
   return (
     <div>
       {value.map((v, i) => (
         <Row key={i}>
-          <Input value={v} onChange={(e) => onChange(value.map((x, idx) => (idx === i ? e.target.value : x)))} style={{ flex: 1, minWidth: 0 }} />
+          {options ? (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SearchSelect
+                value={v}
+                options={options}
+                onChange={(nv) => onChange(value.map((x, idx) => (idx === i ? nv : x)))}
+                allowCustom={allowCustom}
+                placeholder="(pick…)"
+              />
+            </div>
+          ) : (
+            <Input
+              value={v}
+              onChange={(e) => onChange(value.map((x, idx) => (idx === i ? e.target.value : x)))}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+          )}
           <SmallX type="button" title="remove" onClick={() => onChange(value.filter((_, idx) => idx !== i))}><X size={12} /></SmallX>
         </Row>
       ))}
@@ -560,6 +589,30 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
         const fe = enumFor(ref, enums)
         if (key === 'sql') {
           control = <SqlField value={cur} onChange={(v) => set(key, v)} />
+        } else if (fe && sub.type === 'array') {
+          // ``list[str]`` with ``x_enum_ref`` — multi-select. The previous single-select
+          // branch (below) saved the value as a bare string, which fails Pydantic's
+          // ``list[str]`` validation on the next reload (the operator picks one column from
+          // a screen's SCREEN_COLUMNS dropdown, the save writes ``"cla_module"`` instead of
+          // ``["cla_module"]``, the next /admin/reload rejects the file). Rendering each row
+          // as its own SearchSelect via StringListEditor keeps the shape correct + lets
+          // operators pick more than one (nested grouping: pick app then module → two-level
+          // collapse). Items-level enum constraint (sub.items.enum) wins over the field's
+          // outer Literal, same precedence as the single-select branch below.
+          const itemsBranch = effective(sub.items ?? {}, allDefs)
+          const literalSet = Array.isArray(itemsBranch.enum)
+            ? new Set(itemsBranch.enum.map((e) => String(e)))
+            : null
+          const opts = enumOptions(fe, literalSet)
+          const arr = Array.isArray(cur) ? (cur as unknown[]).map((x) => (x == null ? '' : String(x))) : []
+          control = (
+            <StringListEditor
+              value={arr}
+              onChange={(v) => set(key, v.length ? v : undefined)}
+              options={opts}
+              allowCustom={!literalSet}
+            />
+          )
         } else if (fe) {
           const literalSet = Array.isArray(sub.enum) ? new Set(sub.enum.map((e) => String(e))) : null
           const opts = enumOptions(fe, literalSet)

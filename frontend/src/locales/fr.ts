@@ -961,7 +961,8 @@ const fr: Resources = {
       hint: 'Enregistrer valide chaque tableau de bord + widget, écrit dashboards.toml et recharge. Référencez les tableaux de bord depuis menus.toml avec ``type = "dashboard"`` et ``target = "<id>"``.',
     },
     tables: {
-      tablesView: 'Tables',
+      tablesView: 'Requêtes',
+      looseSectionLabel: 'Autres requêtes',
       addTable: 'Ajouter une table',
       namePrompt: 'Nom de base de la nouvelle table (ex. F0005) :',
       confirmDelete: 'Supprimer la table « {{name}} » et toutes ses requêtes (get/put/post/delete) ?',

@@ -101,7 +101,16 @@ const RowAction = styled.span`
   border-radius: ${radius.sm}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
   &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
 `
-const LooseNote = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 8px 4px 0;`
+// Section header for the loose-queries list under the table groups. Light divider above
+// (so it visually separates from the CRUD-grouped rows) + muted label. We don't render
+// the header when there are no loose queries (the parent guard handles that).
+const LooseSectionHeader = styled.div`
+  color: ${colors.text.muted}; font-size: ${fontSize.sm};
+  padding: 12px 4px 4px;
+  border-top: 1px solid ${colors.border};
+  margin-top: 4px;
+  font-family: ${fonts.mono};
+`
 
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
@@ -786,8 +795,38 @@ export default function ConnectorsBuilder() {
                     </TableList>
                     {/* "Add table" moved to the top toolbar (per-mode Add cluster) — keeps
                         every per-mode creator in one place at the top of the page. */}
+                    {/* Loose queries — anything not classifiable into a CRUD group (queries
+                        whose names don't end in _get/_put/_post/_delete, OR end in those
+                        but their group ended up with only that one slot). Used to live in
+                        a hint pointing operators to the Settings… modal; the Phase 3 rename
+                        (Tables → Queries) means this is the natural place for them: same
+                        tab, same single-query editor open-on-click as the Sequences /
+                        Lookups tabs use. */}
                     {grouped.loose.length > 0 && (
-                      <LooseNote>{t('settings.tables.looseHint', { count: grouped.loose.length })}</LooseNote>
+                      <>
+                        <LooseSectionHeader>
+                          {t('settings.tables.looseSectionLabel', 'Other queries')}
+                        </LooseSectionHeader>
+                        <TableList>
+                          {grouped.loose
+                            .filter((slot) => !tNeedle || slot.name.toLowerCase().includes(tNeedle))
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map((slot) => {
+                              const q = slot.query as Record<string, unknown>
+                              const desc = (typeof q.description === 'string' && q.description)
+                                        || (typeof q.label === 'string' && q.label)
+                                        || null
+                              return (
+                                <TableRow key={slot.name} type="button" onClick={() => setSelQuery(slot.name)}>
+                                  <span className="text">
+                                    <span className="base">{slot.name}</span>
+                                    {desc && <span className="desc">{desc}</span>}
+                                  </span>
+                                </TableRow>
+                              )
+                            })}
+                        </TableList>
+                      </>
                     )}
                   </Stack>
                 )

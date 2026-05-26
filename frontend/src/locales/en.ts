@@ -968,7 +968,8 @@ const en = {
       hint: 'Save validates every dashboard + widget, writes dashboards.toml, and reloads. Reference dashboards from menus.toml with ``type = "dashboard"`` and ``target = "<id>"``.',
     },
     tables: {
-      tablesView: 'Tables',
+      tablesView: 'Queries',
+      looseSectionLabel: 'Other queries',
       addTable: 'Add table',
       namePrompt: 'New table base name (e.g. F0005):',
       confirmDelete: 'Delete table “{{name}}” and all its queries (get/put/post/delete)?',
