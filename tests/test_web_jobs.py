@@ -419,6 +419,78 @@ def test_put_jobs_parsed_requires_superuser(env) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# meta round-trip — the [meta] block (retention policy etc.) must survive
+# GET → edit → PUT → GET. Regression guard for the bug where the RetentionPanel
+# changed days kept to 5, saved, and the value reverted to the schema default
+# because the GET response and JobsBody model both ignored ``meta`` entirely.
+# --------------------------------------------------------------------------- #
+
+
+def test_get_jobs_parsed_includes_meta_with_defaults(env) -> None:
+    """GET returns the effective meta (defaults included) so the RetentionPanel
+    can initialise its inputs to 30 / 100 / 60 instead of empty fields."""
+    app, _ = env
+    with TestClient(app) as client:
+        body = client.get("/admin/config/jobs/parsed", headers=_h(client, "admin")).json()
+        assert "meta" in body
+        assert body["meta"]["version"] == 1
+        # The retention defaults — without this the panel can't tell the operator
+        # what's actually in effect.
+        ret = body["meta"]["retention"]
+        assert ret == {"enabled": True, "days": 30, "keep_last_per_job": 100, "sweep_interval_minutes": 60}
+
+
+def test_put_jobs_parsed_round_trips_meta(env) -> None:
+    """The RetentionPanel save flow: PUT a body with both ``jobs`` and ``meta``,
+    GET it back and the new retention policy is what we sent."""
+    app, jobs_toml = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Mirror the panel's payload — fetched parsed, mutated meta, sent both.
+        parsed = client.get("/admin/config/jobs/parsed", headers=h).json()
+        new_meta = {
+            **parsed["meta"],
+            "retention": {
+                "enabled": True, "days": 5, "keep_last_per_job": 25, "sweep_interval_minutes": 15,
+            },
+        }
+        r = client.put(
+            "/admin/config/jobs/parsed",
+            json={"jobs": parsed["jobs"], "meta": new_meta},
+            headers=h,
+        )
+        assert r.status_code == 200 and r.json()["saved"] is True
+
+        back = client.get("/admin/config/jobs/parsed", headers=h).json()
+        assert back["meta"]["retention"]["days"] == 5
+        assert back["meta"]["retention"]["keep_last_per_job"] == 25
+        assert back["meta"]["retention"]["sweep_interval_minutes"] == 15
+        # The on-disk file actually carries the new values
+        text = jobs_toml.read_text()
+        assert "days = 5" in text
+        assert "keep_last_per_job = 25" in text
+
+
+def test_put_jobs_parsed_without_meta_preserves_existing_block(env) -> None:
+    """JobEditor's save flow PUTs only ``jobs``; the existing [meta] in jobs.toml
+    must survive untouched (otherwise editing a single job would silently reset
+    the retention policy)."""
+    app, jobs_toml = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # First, set a non-default meta so we can tell "preserved" from "default".
+        parsed = client.get("/admin/config/jobs/parsed", headers=h).json()
+        parsed["meta"]["retention"]["days"] = 7
+        client.put("/admin/config/jobs/parsed", json={"jobs": parsed["jobs"], "meta": parsed["meta"]}, headers=h)
+        assert "days = 7" in jobs_toml.read_text()
+
+        # Now a meta-less PUT (JobEditor-style) — the days=7 must STILL be there.
+        client.put("/admin/config/jobs/parsed", json={"jobs": parsed["jobs"]}, headers=h)
+        back = client.get("/admin/config/jobs/parsed", headers=h).json()
+        assert back["meta"]["retention"]["days"] == 7
+
+
+# --------------------------------------------------------------------------- #
 # GET /admin/jobs/cron-preview (increment 6)
 # --------------------------------------------------------------------------- #
 

@@ -16,6 +16,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative } from './util'
+import { RetentionPanel } from './RetentionPanel'
 
 const Toolbar = styled.div`
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
@@ -378,6 +379,11 @@ export default function JobsList() {
           )}
         </TagFilterRow>
       )}
+      {/* Retention panel — collapsible; surfaces the run-history cleanup policy +
+          the last sweep's result + a Clean-now button. `onChanged` re-fetches
+          the job list because a sweep may have deleted the latest run row that
+          a card was displaying as last_run. */}
+      <RetentionPanel onChanged={load} />
       {error && <Banner $tone="error" style={{ marginBottom: 12 }}>{error}</Banner>}
       {sorted == null && !error ? <Centered /> : null}
       {sorted && sorted.length === 0 && (

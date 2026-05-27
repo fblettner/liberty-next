@@ -344,9 +344,66 @@ class Job(BaseModel):
         return v
 
 
+class RetentionPolicy(BaseModel):
+    """How long nomaflow keeps the per-run history (the ``nomaflow_job_runs`` table and its
+    FK-cascading children: ``nomaflow_step_runs`` / ``nomaflow_run_logs`` /
+    ``nomaflow_run_overrides`` / ``nomaflow_step_run_extras``).
+
+    Without retention the run tables grow forever — a daily nomasx1-security job at 5
+    steps + 50 KB of logs per run accumulates ~18 MB / year just from one job, and a busy
+    deployment with a dozen high-frequency cron jobs blows past 1 GB in 18 months. The
+    policy gives operators a knob without needing a separate cron + custom SQL.
+
+    Two axes deliberately, because each one alone has a degenerate case:
+
+    * ``days`` — primary "time-based" axis. Deletes finished runs (SUCCEEDED / FAILED /
+      CANCELED) whose ``finished_at`` is older than ``now - days``. Catches the bulk of
+      old data; reasonable default for compliance windows ("90 days of audit history").
+    * ``keep_last_per_job`` — secondary "count-based" axis. Even within the time window,
+      caps each job's history at N most-recent runs. Protects against a job that fires
+      every 5 minutes burying the run list with 12 × 24 = 288 rows / day of mostly
+      identical SUCCEEDED runs (the operator only ever looks at the last few).
+
+    The two are applied as a union — a run is deleted if EITHER rule says so. Running
+    rows (state in {QUEUED, RUNNING}) are NEVER touched by retention, regardless of
+    age. The cascade FK on the child tables means a single DELETE on
+    ``nomaflow_job_runs`` cleans up the whole tree atomically.
+
+    ``sweep_interval_minutes`` controls how often the scheduler fires the cleanup;
+    60 is a reasonable default (the math: a sweep that takes 1 second running hourly
+    is 0.03% overhead vs. checking every 5 minutes which is 0.4%). ``enabled = false``
+    disables the recurring sweep entirely — operators still get the manual ``POST
+    /admin/jobs/retention/sweep`` button for one-off cleanups.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description="Master toggle. False → no recurring sweep (manual endpoint still works).",
+    )
+    days: int = Field(
+        default=30, ge=1, le=3650,
+        description="Delete finished runs whose finished_at is older than this many days.",
+    )
+    keep_last_per_job: int = Field(
+        default=100, ge=1, le=100_000,
+        description="Cap each job's history at this many most-recent finished runs (even within the day window).",
+    )
+    sweep_interval_minutes: int = Field(
+        default=60, ge=5, le=1440,
+        description="How often the recurring sweep fires (minutes). 60 is a reasonable default.",
+    )
+
+
 class _Meta(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = 1
+    # Retention is per-deployment, not per-job — lives on [meta] so it travels with
+    # jobs.toml (one source of truth for "everything about how this deployment runs
+    # nomaflow"). Defaults to an enabled policy with 30 days / 100 runs / hourly
+    # sweep so a fresh install starts cleaning up immediately without operator action.
+    retention: RetentionPolicy = Field(default_factory=RetentionPolicy)
 
 
 class JobsFile(BaseModel):

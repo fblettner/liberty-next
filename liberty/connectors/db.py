@@ -114,6 +114,24 @@ class PoolRegistry:
             kwargs["pool_size"] = cfg.pool_size
             kwargs["max_overflow"] = cfg.max_overflow
         engine = create_async_engine(url, **kwargs)
+        # SQLite ships with FK enforcement OFF by default — without ``PRAGMA
+        # foreign_keys=ON`` per-connection, ON DELETE CASCADE silently no-ops on
+        # the test fixture + any tiny SQLite deployment, leaving orphan rows in
+        # nomaflow_step_runs / nomaflow_run_logs when the parent JobRun is
+        # deleted (retention sweep, manual cleanup). Postgres + Oracle enforce
+        # FKs by default so the listener is a no-op there. Registered through
+        # SQLAlchemy's ``connect`` event so it fires on every new connection
+        # the pool hands out, not just the first.
+        if url.get_backend_name() == "sqlite":
+            from sqlalchemy import event
+
+            @event.listens_for(engine.sync_engine, "connect")
+            def _enable_sqlite_fk(dbapi_conn, _connection_record):  # type: ignore[no-untyped-def]
+                cursor = dbapi_conn.cursor()
+                try:
+                    cursor.execute("PRAGMA foreign_keys=ON")
+                finally:
+                    cursor.close()
         self._engines[name] = engine
         return engine
 

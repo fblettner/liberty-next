@@ -289,6 +289,13 @@ async def hot_reload_registry(
         else:
             _log.info("nomaflow.reload rescheduled job %r", jid)
 
+    # Re-register the retention sweep against the new policy. ``schedule_retention``
+    # is idempotent — it removes any prior registration and adds the new one (or
+    # leaves the slot empty when the operator flipped enabled=false). Cheap relative
+    # to the per-job reconciliation above + makes "I changed [meta.retention] in
+    # jobs.toml + hit Reload" Just Work without restarting the process.
+    scheduler.schedule_retention(new_registry.config.meta.retention)
+
     # Swap the components' registry reference for callers reading
     # app.state.jobs.registry. NB: NomaflowComponents is a regular dataclass
     # (not frozen) so this assignment is supported.

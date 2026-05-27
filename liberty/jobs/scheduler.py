@@ -34,11 +34,13 @@ from typing import Awaitable, Callable, Mapping
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from liberty.jobs.recovery import mark_orphan_runs_failed
 from liberty.jobs.registry import JobRegistry
+from liberty.jobs.retention import SweepReport, sweep_run_history
 from liberty.jobs.runner import JobRunner
-from liberty.jobs.schema import Job
+from liberty.jobs.schema import Job, RetentionPolicy
 from liberty.jobs.triggers import ManualTrigger, ScheduledTrigger
 
 _log = logging.getLogger(__name__)
@@ -94,6 +96,11 @@ class JobScheduler:
         # has somewhere to check. Set after run start, cleared after finish (in
         # the wrapper coroutine's finally block).
         self._in_flight: set[str] = set()
+        # Last retention sweep — populated by the recurring task + the manual
+        # admin endpoint. None until the first sweep completes; surfaced by
+        # the Nomaflow Retention panel so operators can see "what did the
+        # automatic sweep do" without trawling the server log.
+        self._last_retention: SweepReport | None = None
 
     # -- lifecycle ------------------------------------------------------- #
 
@@ -114,6 +121,11 @@ class JobScheduler:
             await mark_orphan_runs_failed(self._runner._db)  # noqa: SLF001 — same module-family
         for job in self._registry.scheduled_jobs():
             self._add_apscheduler_job(job)
+        # Register the retention sweep before scheduler.start() so the first
+        # tick lines up with the IntervalTrigger's "first fire = now + interval"
+        # behaviour — operators see the first sweep on time without a startup
+        # burst. The policy lives on [meta] in jobs.toml.
+        self.schedule_retention(self._registry.config.meta.retention)
         self._scheduler.start()
         self._started = True
         _log.info(
@@ -207,6 +219,74 @@ class JobScheduler:
         task.add_done_callback(_log_orphan_task_exception)
         return run.id
 
+    # -- retention sweep ------------------------------------------------- #
+
+    # Stable APScheduler job-id for the recurring retention task. The dot makes it
+    # invalid as a nomaflow Job.id (operator ids may only contain alnum + ``-``/``_``,
+    # see Job._validate_id), so this can't collide with a user-defined job's id.
+    _RETENTION_JOB_ID = "__nomaflow.retention.sweep__"
+
+    def schedule_retention(self, policy: RetentionPolicy) -> None:
+        """Register the recurring cleanup task. Idempotent (re-call after a
+        hot-reload to swap the interval / disable the sweep).
+
+        ``policy.enabled = False`` removes any existing task without scheduling
+        a new one. Operators can still hit :meth:`run_retention_now` for one-off
+        cleanups in that mode (the master toggle controls only the AUTO sweep).
+        """
+        # Remove any prior registration so a hot-reload that shortens the
+        # interval doesn't leave the old one firing alongside the new.
+        try:
+            self._scheduler.remove_job(self._RETENTION_JOB_ID)
+        except Exception:
+            pass            # JobLookupError when none was registered — fine
+        if not policy.enabled:
+            _log.info("nomaflow.retention auto-sweep disabled via [meta.retention] enabled=false")
+            return
+        # Snapshot the policy values so the closure binds the CURRENT shape;
+        # a future hot-reload that calls schedule_retention again with a new
+        # policy replaces this APScheduler job entirely (the policy snapshot
+        # in the new closure replaces the old one).
+        days = policy.days
+        cap = policy.keep_last_per_job
+
+        async def _do_sweep() -> None:
+            # Build a fresh policy from the snapshot — the schema's defaults
+            # for the other fields are fine here (we only care about days +
+            # keep_last_per_job, the rest is meta about scheduling).
+            snap = RetentionPolicy(days=days, keep_last_per_job=cap)
+            try:
+                self._last_retention = await sweep_run_history(self._runner._db, snap)  # noqa: SLF001 — same module-family
+            except Exception:
+                _log.exception("nomaflow.retention sweep raised — will retry on next interval")
+
+        self._scheduler.add_job(
+            _do_sweep,
+            trigger=IntervalTrigger(minutes=policy.sweep_interval_minutes),
+            id=self._RETENTION_JOB_ID,
+            replace_existing=True,
+            misfire_grace_time=None,
+            coalesce=True,
+            max_instances=1,
+        )
+        _log.info(
+            "nomaflow.retention auto-sweep registered: every %d min, %d days, cap=%d/job",
+            policy.sweep_interval_minutes, days, cap,
+        )
+
+    async def run_retention_now(self, policy: RetentionPolicy) -> SweepReport:
+        """Fire a one-shot retention sweep + return the report. Used by the
+        ``POST /admin/jobs/retention/sweep`` admin endpoint when an operator
+        wants to clean up immediately after changing the policy."""
+        self._last_retention = await sweep_run_history(self._runner._db, policy)  # noqa: SLF001 — same module-family
+        return self._last_retention
+
+    @property
+    def last_retention(self) -> SweepReport | None:
+        """The most recent sweep result, or None if no sweep has run yet.
+        Surfaced by the Nomaflow Retention panel."""
+        return self._last_retention
+
     # -- internals ------------------------------------------------------ #
 
     def _add_apscheduler_job(self, job: Job) -> None:
@@ -276,8 +356,11 @@ class JobScheduler:
 
     @property
     def scheduled_job_ids(self) -> list[str]:
-        """The ids APScheduler currently has triggers for — order isn't guaranteed."""
-        return [j.id for j in self._scheduler.get_jobs()]
+        """The ids APScheduler currently has triggers for — order isn't guaranteed.
+        Filters out internal nomaflow tasks (retention sweep, etc.) — callers want the
+        operator-defined jobs only; the internal id wouldn't match anything in the
+        registry anyway."""
+        return [j.id for j in self._scheduler.get_jobs() if not j.id.startswith("__nomaflow.")]
 
     @property
     def next_fire_times(self) -> dict[str, datetime]:
@@ -285,11 +368,13 @@ class JobScheduler:
 
         Reads APScheduler's in-memory ``next_run_time`` — cheap, no I/O. A job whose
         ``next_run_time`` is None (paused, or never scheduled) is omitted. Powers the
-        "next run" column of the Jobs list (``GET /admin/jobs``)."""
+        "next run" column of the Jobs list (``GET /admin/jobs``). Internal nomaflow
+        tasks (retention sweep) are filtered out for the same reason as
+        :attr:`scheduled_job_ids`."""
         return {
             j.id: j.next_run_time
             for j in self._scheduler.get_jobs()
-            if j.next_run_time is not None
+            if j.next_run_time is not None and not j.id.startswith("__nomaflow.")
         }
 
     @property

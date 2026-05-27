@@ -730,18 +730,28 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
 
 @router.get("/config/jobs/parsed")
 async def get_jobs_parsed(request: Request, _: Superuser) -> dict[str, Any]:
-    """The current ``jobs.toml`` parsed and normalised — ``{path, jobs: [<Job dict>...]}``.
+    """The current ``jobs.toml`` parsed and normalised — ``{path, meta, jobs: [<Job dict>...]}``.
 
-    A missing file → an empty job list. ``step_defaults`` is merged into each step (the
-    loader does this); default-valued keys are dropped so the wire payload stays terse.
-    ``by_alias=True`` so the ``schema`` field on SQL endpoints round-trips as ``schema``
-    (the model's Python attribute is ``schema_`` — see :class:`liberty.jobs.schema.SqlEndpoint`)."""
+    A missing file → an empty job list (+ default meta). ``step_defaults`` is merged into
+    each step (the loader does this); default-valued keys are dropped so the wire payload
+    stays terse. ``by_alias=True`` so the ``schema`` field on SQL endpoints round-trips as
+    ``schema`` (the model's Python attribute is ``schema_`` — see
+    :class:`liberty.jobs.schema.SqlEndpoint`).
+
+    ``meta`` carries the file-level settings — today the version + the retention policy.
+    Returned with defaults included (``exclude_defaults=False``) so the UI sees the
+    EFFECTIVE policy (30 / 100 / 60) rather than ``{}`` for a meta block that's still
+    using the schema defaults — without this, the RetentionPanel can't initialise its
+    inputs to the values the scheduler is actually using."""
     from liberty.jobs import load_jobs
 
     path = Path(request.app.state.settings.jobs.config_path)
     registry = load_jobs(path)
     return {
         "path": str(path),
+        # Defaults included on purpose — see docstring. Without this the panel inputs
+        # would be blank for a fresh install where the operator hasn't customised meta.
+        "meta": registry.config.meta.model_dump(),
         "jobs": [
             j.model_dump(by_alias=True, exclude_defaults=True, exclude_none=True)
             for j in registry.jobs()
@@ -751,22 +761,33 @@ async def get_jobs_parsed(request: Request, _: Superuser) -> dict[str, Any]:
 
 class JobsBody(BaseModel):
     jobs: list[dict[str, Any]]
+    # Optional so existing callers that only PUT ``jobs`` (the JobEditor save flow)
+    # keep working unchanged — when omitted, the file's existing [meta] block is
+    # preserved. The RetentionPanel always sends meta so its edits land.
+    meta: dict[str, Any] | None = None
 
 
 @router.put("/config/jobs/parsed")
 async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dict[str, object]:
-    """Validate the submitted job list against :class:`liberty.jobs.JobsFile`, then rewrite
-    ``jobs.toml`` via ``tomlkit`` — replacing only the top-level ``[[jobs]]`` array (a
-    ``[meta]`` table and any surrounding comments are preserved). Re-parses the result before
-    writing. Does not reload — call ``POST /admin/reload`` afterwards to apply.
+    """Validate the submitted jobs (+ optional meta) against :class:`liberty.jobs.JobsFile`,
+    then rewrite ``jobs.toml`` via ``tomlkit`` — preserving comments + formatting on
+    untouched sections. Re-parses the result before writing. Does not reload — call
+    ``POST /admin/reload`` afterwards to apply.
 
     The body carries already-expanded steps (no ``step_defaults``); ``Job``'s ``extra="forbid"``
     rejects a stray ``step_defaults`` key. Saving therefore normalises a hand-authored
-    ``step_defaults`` block away — the documented behaviour (NOMAFLOW-UI.md §4)."""
+    ``step_defaults`` block away — the documented behaviour (NOMAFLOW-UI.md §4).
+
+    ``meta`` is optional: when present it REPLACES the file's existing ``[meta]`` block
+    (so retention edits land); when absent the existing block is preserved. The JobEditor
+    flow omits meta + the RetentionPanel sends it — neither steps on the other."""
     from liberty.jobs import JobsFile
 
     try:
-        JobsFile.model_validate({"jobs": body.jobs})
+        validate_payload: dict[str, Any] = {"jobs": body.jobs}
+        if body.meta is not None:
+            validate_payload["meta"] = body.meta
+        JobsFile.model_validate(validate_payload)
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid jobs: {exc}") from exc
 
@@ -777,10 +798,18 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
         doc["jobs"] = body.jobs
     elif "jobs" in doc:
         del doc["jobs"]
+    # Replace the [meta] block when one was submitted. Assigning a plain dict lets
+    # tomlkit lay it out as nested tables (``[meta]`` + ``[meta.retention]``) the
+    # same way a hand-authored file would; the round-trip parse below catches any
+    # malformed shape before it touches disk.
+    if body.meta is not None:
+        doc["meta"] = body.meta
 
     new_text = tomlkit.dumps(doc)
     try:
-        JobsFile.model_validate({"jobs": tomllib.loads(new_text).get("jobs", [])})
+        # Validate the FULL re-parsed document, not just the jobs list — a meta-only
+        # change wouldn't be caught by the jobs-only validate above.
+        JobsFile.model_validate(tomllib.loads(new_text))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting jobs are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)

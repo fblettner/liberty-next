@@ -493,3 +493,38 @@ async def cron_preview(
         prev = nxt
         cursor = nxt
     return {"schedule": schedule, "timezone": timezone or None, "next": fires}
+
+
+# --------------------------------------------------------------------------- #
+# retention — current policy + last sweep + manual one-shot
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/retention")
+async def get_retention_status(request: Request, _: Superuser) -> dict[str, Any]:
+    """Return the current retention policy (read from ``jobs.toml`` [meta.retention])
+    + the last automatic sweep's report (None until the first sweep fires).
+    Surfaced by the Nomaflow Retention panel so operators see "what's the policy
+    + what did the last sweep actually delete" without trawling the server log."""
+    comps = _components(request)
+    policy = comps.registry.config.meta.retention
+    last = comps.scheduler.last_retention
+    return {
+        "policy": policy.model_dump(),
+        "last_sweep": last.to_dict() if last is not None else None,
+    }
+
+
+@router.post("/retention/sweep")
+async def run_retention_sweep(request: Request, _: Superuser) -> dict[str, Any]:
+    """Fire a one-shot retention sweep with the CURRENT policy. Returns the
+    sweep report (deleted counts + cutoff timestamp).
+
+    Useful when an operator has just changed [meta.retention] in jobs.toml + hit
+    Reload, and wants to apply the new policy immediately instead of waiting for
+    the next scheduled interval. Idempotent — running it twice in a row deletes
+    nothing the second time (everything that qualified is gone)."""
+    comps = _components(request)
+    policy = comps.registry.config.meta.retention
+    report = await comps.scheduler.run_retention_now(policy)
+    return report.to_dict()
