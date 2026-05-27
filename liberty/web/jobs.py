@@ -345,7 +345,7 @@ def _run_dict(run: Any) -> dict[str, Any]:
     }
 
 
-def _step_dict(step: Any) -> dict[str, Any]:
+def _step_dict(step: Any, extras: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "step_index": step.step_index,
         "step_name": step.step_name,
@@ -356,6 +356,10 @@ def _step_dict(step: Any) -> dict[str, Any]:
         "finished_at": step.finished_at.isoformat() if step.finished_at else None,
         "rows_affected": step.rows_affected,
         "error_message": step.error_message,
+        # Free-form structured extras from the step's executor (today: just
+        # CallJobExecutor's child run pointer). ``None`` when the executor
+        # didn't write any — keeps the wire payload terse for the common case.
+        "extras": extras,
     }
 
 
@@ -368,8 +372,9 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
     so a poll mid-step (even a *hung* step) sees the latest lines — and from
     the durable ``nomaflow_run_logs`` row once the run has finished. The
     runner flushes buffer → DB at finalize, so exactly one of the two has it."""
+    import json
     from sqlalchemy import select
-    from liberty.jobs.models import JobRun, RunLog, StepRun
+    from liberty.jobs.models import JobRun, RunLog, RunOverrides, StepRun, StepRunExtras
     from liberty.jobs.runlog import run_logs as live_run_logs
 
     comps = _components(request)
@@ -382,8 +387,34 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
             .where(StepRun.run_id == run_id)
             .order_by(StepRun.step_index, StepRun.attempt)
         )).scalars().all()
+        # Pre-fetch step-extras for every step in one query so the per-step
+        # JSON render below doesn't N+1. Most runs have zero extras rows —
+        # CallJobExecutor is the only writer today — so the join would be
+        # almost empty either way; the bulk fetch just keeps the route clean.
+        step_ids = [s.id for s in steps]
+        extras_rows: dict[str, dict[str, Any]] = {}
+        if step_ids:
+            for row in (await session.execute(
+                select(StepRunExtras).where(StepRunExtras.step_run_id.in_(step_ids))
+            )).scalars().all():
+                try:
+                    extras_rows[row.step_run_id] = json.loads(row.extras_json or "{}")
+                except json.JSONDecodeError:
+                    extras_rows[row.step_run_id] = {}
+        # Per-fire overrides — what the operator picked in the Run-with-params
+        # modal (or empty for a scheduled fire / a run from before the
+        # RunOverrides table existed). Decoded in-place; bad JSON falls back
+        # to an empty dict (defensive — never crash the run-detail page).
+        overrides_row = await session.get(RunOverrides, run_id)
         run_payload = _run_dict(run)
-        step_payload = [_step_dict(s) for s in steps]
+        step_payload = [_step_dict(s, extras=extras_rows.get(s.id)) for s in steps]
+
+    overrides: dict[str, Any] = {}
+    if overrides_row is not None and overrides_row.overrides_json:
+        try:
+            overrides = json.loads(overrides_row.overrides_json)
+        except json.JSONDecodeError:
+            overrides = {}
 
     # Live buffer for an active run; the persisted row once it's finished.
     live = live_run_logs(run_id)
@@ -394,7 +425,7 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
             row = await session.get(RunLog, run_id)
         logs = row.logs if row is not None else ""
 
-    return {"run": run_payload, "steps": step_payload, "logs": logs}
+    return {"run": run_payload, "steps": step_payload, "logs": logs, "overrides": overrides}
 
 
 @router.get("/callables")

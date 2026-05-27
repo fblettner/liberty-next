@@ -16,8 +16,8 @@ import { useAuth } from '../../auth/AuthContext'
 import { Button, Field, SearchSelect, type SearchSelectOption } from '../../common'
 import { isNumericColumn } from '../../services/chartData'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { Aggregation, ChartSpec, ChartType } from '../../types/charts'
-import { AGGREGATIONS, CHART_TYPES, defaultChartSpec } from '../../types/charts'
+import type { Aggregation, ChartSpec, ChartType, SavedChartSpec } from '../../types/charts'
+import { AGGREGATIONS, CHART_TYPES, defaultChartSpec, fromSavedSpec } from '../../types/charts'
 import { ChartCanvas } from './ChartCanvas'
 import { SaveChartModal } from './SaveChartModal'
 
@@ -35,16 +35,70 @@ export interface ChartViewProps {
   result: QueryResult
   connector: string
   query: string
+  /** Carrying the screen lets us read ``screen.chart_id`` and pre-fill the
+   *  spec from charts.toml on first render. Null / no screen → fall back to
+   *  the localStorage-seeded default (the pre-Phase-F behaviour). */
+  screen?: { chart_id?: string | null } | null
 }
 
-export function ChartView({ result, connector, query }: ChartViewProps) {
+export function ChartView({ result, connector, query, screen }: ChartViewProps) {
   const { t } = useTranslation()
   const allCols = useMemo(() => result.columns.filter((c) => !c.hidden), [result])
   const numericCols = useMemo(() => allCols.filter(isNumericColumn), [allCols])
 
-  // Persist the spec per `(connector, query)` — same shape `config/charts.toml` will adopt.
+  // Saved-charts catalog — fetched ONCE on mount, refetched after the Save
+  // modal lands a new one (the modal's onSaved callback bumps reloadKey).
+  // Drives two UX surfaces in this component:
+  //   1. The auto-load on ``screen.chart_id`` — when the operator linked a
+  //      default chart in the Screen Designer, its spec pre-fills here.
+  //   2. The Load picker — operator can switch to ANY saved chart matching
+  //      this (connector, query) for ad-hoc exploration; survives Save.
+  // Failure is silent: empty catalog → no auto-load, no picker — same fallback
+  // the rest of the chart UX uses (a no-charts-installed deployment works).
+  const linkedChartId = (screen?.chart_id ?? '') || null
+  type SavedChart = { id?: string; label?: string; description?: string; connector?: string; query?: string; spec?: SavedChartSpec }
+  type ChartsDoc = { charts: Record<string, SavedChart> }
+  const [allSavedCharts, setAllSavedCharts] = useState<Record<string, SavedChart>>({})
+  const [chartsReloadKey, setChartsReloadKey] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    import('../../api/client').then(({ api }) => {
+      api.get<ChartsDoc>('/admin/config/charts/parsed')
+        .then((r) => { if (!cancelled) setAllSavedCharts(r.charts ?? {}) })
+        .catch(() => { /* silent */ })
+    })
+    return () => { cancelled = true }
+  }, [chartsReloadKey])
+  // Auto-load spec from screen.chart_id — runs once per linkedChartId
+  // change AFTER the catalog lands. Operator who manually picks something
+  // else from the Load picker (changes ``spec`` themselves) is respected —
+  // we only seed at first mount.
+  const linkedChartSpec = useMemo<ChartSpec | null>(() => {
+    if (!linkedChartId) return null
+    const entry = allSavedCharts[linkedChartId]
+    return entry?.spec ? fromSavedSpec(entry.spec) : null
+  }, [linkedChartId, allSavedCharts])
+  // Saved charts that target THIS (connector, query) — what the Load picker
+  // shows. Charts saved against other queries are filtered out so the dropdown
+  // stays relevant.
+  const matchingSavedCharts = useMemo(() => {
+    return Object.entries(allSavedCharts)
+      .filter(([, c]) => c.connector === connector && c.query === query)
+      .map(([id, c]) => ({ id, label: c.label || id, spec: c.spec }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [allSavedCharts, connector, query])
+
+  // Persist the spec per `(connector, query)`. The seed order is:
+  //   1. Saved chart spec (when ``screen.chart_id`` resolves) — operator's
+  //      curated default lands every time the screen opens.
+  //   2. localStorage (this session's tweaks) — operator-specific fiddling.
+  //   3. seedSpec from the result columns — last resort, picks something
+  //      plausible so the Chart tab isn't blank.
   const storageKey = `${STORAGE_PREFIX}${connector}/${query}`
-  const initialSpec = useMemo(() => loadSpec(storageKey) ?? seedSpec(allCols, numericCols), [storageKey, allCols, numericCols])
+  const initialSpec = useMemo(
+    () => linkedChartSpec ?? loadSpec(storageKey) ?? seedSpec(allCols, numericCols),
+    [linkedChartSpec, storageKey, allCols, numericCols],
+  )
   // Component state held in localStorage indirectly: a `setSpec` writes through.
   // (A plain `useState(initialSpec)` with `useEffect` to write would also work; this is terser.)
   const [spec, setSpec] = useStoredSpec(storageKey, initialSpec)
@@ -102,11 +156,33 @@ export function ChartView({ result, connector, query }: ChartViewProps) {
             <SearchSelect value={cleanSpec.aggregation} onChange={(v) => setSpec({ ...cleanSpec, aggregation: v as Aggregation })} options={aggOpts} />
           </Field>
         </SpecCell>
+        {/* Load picker — surfaces saved charts that target THIS (connector,
+            query) so operators can switch between curated views without
+            re-typing the spec. Hidden when no saved charts match (empty
+            charts.toml or no matches for this query → nothing to load). */}
+        {matchingSavedCharts.length > 0 && (
+          <SpecCell style={{ marginLeft: 'auto' }}>
+            <Field label={t('chart.load.label', 'Load saved')}>
+              <SearchSelect
+                value=""  /* unselected — the picker is for switching, not state */
+                onChange={(id) => {
+                  if (!id) return
+                  const hit = matchingSavedCharts.find((c) => c.id === id)
+                  if (hit?.spec) setSpec(fromSavedSpec(hit.spec))
+                }}
+                options={matchingSavedCharts.map((c) => ({
+                  value: c.id, label: c.label, mono: c.id,
+                }))}
+                placeholder={t('chart.load.placeholder', 'Apply a saved chart…')}
+              />
+            </Field>
+          </SpecCell>
+        )}
         {canSave && (
-          // Pushed to the right end of the spec bar (`margin-left: auto`) so the four-dropdown
-          // group stays visually grouped at the start. Disabled when there's nothing to save
-          // (no X or no Y column picked yet).
-          <div style={{ marginLeft: 'auto', alignSelf: 'flex-end' }}>
+          // Pushed to the right end of the spec bar — with a Load picker
+          // present, the Save button stays flush right; without one, the
+          // ``margin-left: auto`` keeps the four-dropdown group flushed left.
+          <div style={{ marginLeft: matchingSavedCharts.length > 0 ? undefined : 'auto', alignSelf: 'flex-end' }}>
             <Button $size="sm" $variant="ghost" onClick={() => setSaveOpen(true)} disabled={!canSubmit}
               title={canSubmit ? t('chart.save.buttonTitle') : t('chart.save.buttonDisabled')}>
               <Save size={13} /> {t('chart.save.button')}
@@ -125,7 +201,12 @@ export function ChartView({ result, connector, query }: ChartViewProps) {
         <SaveChartModal
           connector={connector} query={query} spec={cleanSpec}
           defaultLabel={defaultSavedLabel(cleanSpec, allCols, seriesName)}
-          onSaved={() => setSaveOpen(false)}
+          onSaved={() => {
+            setSaveOpen(false)
+            // Refetch the catalog so the just-saved chart appears in the
+            // Load picker without a page reload.
+            setChartsReloadKey((k) => k + 1)
+          }}
           onCancel={() => setSaveOpen(false)}
         />
       )}

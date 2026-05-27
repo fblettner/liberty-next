@@ -175,7 +175,13 @@ export default function JobsList() {
   // job's saved log level. Submit sends a {params, op_kwargs, step_enabled,
   // log_level} body the runner merges with the saved config.
   const [paramModalJob, setParamModalJob] = useState<
-    { job: JobSummary; jobParams: Record<string, unknown>; steps: StepConfig[]; logLevel: 'INFO' | 'DEBUG' } | null
+    {
+      job: JobSummary
+      jobParams: Record<string, unknown>
+      steps: StepConfig[]
+      logLevel: 'INFO' | 'DEBUG'
+      presets: import('./types').JobPreset[]
+    } | null
   >(null)
 
   const _postRun = useCallback(async (
@@ -232,7 +238,10 @@ export default function JobsList() {
         return
       }
       setBusyId(null)
-      setParamModalJob({ job, jobParams, steps: allSteps, logLevel: jobLogLevel })
+      setParamModalJob({
+        job, jobParams, steps: allSteps, logLevel: jobLogLevel,
+        presets: (def?.presets ?? []),
+      })
     } catch (e) {
       setBusyId(null)
       setError(e instanceof ApiError ? e.message : String(e))
@@ -469,10 +478,29 @@ export default function JobsList() {
           jobParams={paramModalJob.jobParams}
           steps={paramModalJob.steps}
           jobLogLevel={paramModalJob.logLevel}
+          presets={paramModalJob.presets}
           onCancel={() => setParamModalJob(null)}
           onSubmit={async (body) => {
             setParamModalJob(null)
             await _postRun(paramModalJob.job.id, body)
+          }}
+          onSavePreset={async (preset) => {
+            // Read jobs.toml fresh, splice the new preset into THIS job's
+            // ``presets`` array (replacing any same-name entry — operators
+            // typing the same name expect to update, not duplicate), write
+            // back, reload. The modal stays open with the updated catalog.
+            const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
+            const updated = parsed.jobs.map((j) => {
+              if (j.id !== paramModalJob.job.id) return j
+              const presets = (j.presets ?? []).filter((p) => p.name !== preset.name)
+              return { ...j, presets: [...presets, preset] }
+            })
+            await api.put('/admin/config/jobs/parsed', { jobs: updated })
+            await api.post('/admin/reload')
+            // Refresh the modal's preset list so the new entry appears in
+            // the dropdown without re-opening the modal.
+            const refreshed = updated.find((j) => j.id === paramModalJob.job.id)
+            setParamModalJob((cur) => cur ? { ...cur, presets: refreshed?.presets ?? [] } : cur)
           }}
         />
       )}
@@ -496,7 +524,7 @@ export default function JobsList() {
 // and a key ending in `_connector` (or named exactly `connector`) → SearchSelect of the
 // available connectors loaded from the workspace. Saves typos vs free-text.
 function RunWithParamsModal({
-  job, jobParams, steps, jobLogLevel, onCancel, onSubmit,
+  job, jobParams, steps, jobLogLevel, presets, onCancel, onSubmit, onSavePreset,
 }: {
   job: JobSummary
   jobParams: Record<string, unknown>
@@ -509,6 +537,10 @@ function RunWithParamsModal({
    *  is seeded from this; on submit we only send log_level when the operator
    *  picked a value DIFFERENT from this saved default. */
   jobLogLevel: 'INFO' | 'DEBUG'
+  /** Named presets saved on the job — surfaced as a dropdown above the form.
+   *  Empty array hides the dropdown. Picking a preset layers its values onto
+   *  the modal state (acts like the operator typed them by hand). */
+  presets: import('./types').JobPreset[]
   onCancel: () => void
   onSubmit: (body: {
     params?: Record<string, unknown>
@@ -516,6 +548,11 @@ function RunWithParamsModal({
     step_enabled?: Record<string, boolean>
     log_level?: 'INFO' | 'DEBUG'
   }) => Promise<void> | void
+  /** "Save current state as a preset" — parent persists into jobs.toml + reloads.
+   *  The current modal state is captured as a JobPreset (log_level + params +
+   *  op_kwargs + step_enabled diff-vs-defaults). Promise resolves when the save
+   *  + reload land; rejects with a string the modal renders as an error. */
+  onSavePreset: (preset: import('./types').JobPreset) => Promise<void>
 }) {
   const { t } = useTranslation()
   const { connectors } = useWorkspace()
@@ -576,6 +613,66 @@ function RunWithParamsModal({
   }
   const selectNoneSteps = () => {
     setStepEnabled(Object.fromEntries(steps.map((s) => [s.name, false])))
+  }
+
+  // ── presets ────────────────────────────────────────────────────────────
+  // Apply a preset by layering its values onto the modal state. The preset
+  // captures the operator's intent at save time; any field it sets (params,
+  // op_kwargs, step_enabled, log_level) overlays the current modal value,
+  // any field it doesn't set is left untouched (so picking a preset that
+  // only flips log_level doesn't clobber the operator's in-progress kwarg
+  // edits). The modal stays editable after — operators can pick a preset
+  // then tweak from there.
+  const [selectedPreset, setSelectedPreset] = useState<string>('')
+  const [savePresetBusy, setSavePresetBusy] = useState(false)
+  const [savePresetError, setSavePresetError] = useState<string | null>(null)
+  const applyPreset = (presetName: string) => {
+    setSelectedPreset(presetName)
+    if (!presetName) return
+    const p = presets.find((pr) => pr.name === presetName)
+    if (!p) return
+    if (p.log_level) setLogLevel(p.log_level)
+    if (p.params && Object.keys(p.params).length > 0) {
+      setParamValues((prev) => ({ ...prev, ...p.params }))
+    }
+    if (p.op_kwargs) {
+      setStepValues((prev) => {
+        const next = { ...prev }
+        for (const [stepName, kw] of Object.entries(p.op_kwargs ?? {})) {
+          next[stepName] = { ...(next[stepName] ?? {}), ...kw }
+        }
+        return next
+      })
+    }
+    if (p.step_enabled) {
+      setStepEnabled((prev) => ({ ...prev, ...p.step_enabled }))
+    }
+  }
+  const handleSavePreset = async () => {
+    const name = window.prompt(t('nomaflow.runParams.savePresetPrompt', 'Preset name:'))?.trim()
+    if (!name) return
+    setSavePresetBusy(true); setSavePresetError(null)
+    try {
+      // Capture EVERYTHING currently in the modal — full snapshot per the
+      // operator's choice ("save everything currently in the modal"). The
+      // diff-vs-defaults logic is for the per-fire payload, not for presets;
+      // an operator saving a preset wants to lock in exactly what they see.
+      const preset: import('./types').JobPreset = {
+        name,
+        log_level: logLevel,
+        params: { ...paramValues },
+        op_kwargs: Object.fromEntries(
+          steps.map((s) => [s.name, { ...(stepValues[s.name] ?? {}) }]).filter(([, kw]) => Object.keys(kw as object).length > 0),
+        ),
+        step_enabled: { ...stepEnabled },
+      }
+      await onSavePreset(preset)
+      setSelectedPreset(name)
+    } catch (e) {
+      setSavePresetError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavePresetBusy(false)
+    }
   }
 
   const submit = async () => {
@@ -669,6 +766,48 @@ function RunWithParamsModal({
             {t('nomaflow.runParams.hint',
               'Values apply to this fire only — jobs.toml stays unchanged. Leave a field as-is to use its saved value.')}
           </div>
+          {/* Presets — named snapshots saved by operators. Always shown (even
+              when the job has none yet) so the "Save as preset…" button is
+              discoverable: an operator who tunes the form three times in a row
+              learns they can lock that combo in. Picking a preset layers its
+              values onto the form (doesn't replace untouched fields). */}
+          <ParamSection>
+              <ParamSectionTitle>
+                <span>{t('nomaflow.runParams.presets', 'Preset')}</span>
+              </ParamSectionTitle>
+              <ParamRow>
+                <ParamKey>{t('nomaflow.runParams.presetPick', 'Apply')}</ParamKey>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Select
+                    value={selectedPreset}
+                    onChange={(e) => applyPreset(e.target.value)}
+                    disabled={presets.length === 0}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">
+                      {presets.length === 0
+                        ? t('nomaflow.runParams.noPresets', '(no saved presets — Save current as preset to add one)')
+                        : t('nomaflow.runParams.pickPreset', '(pick a preset…)')}
+                    </option>
+                    {presets.map((p) => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                  </Select>
+                  <Button
+                    $variant="ghost" $size="sm"
+                    onClick={handleSavePreset}
+                    disabled={savePresetBusy}
+                    title={t('nomaflow.runParams.savePresetTitle', 'Save the current modal state as a named preset on this job (writes to jobs.toml).')}
+                  >
+                    {savePresetBusy ? <SpinnerRing size={12} thickness={2} /> : null}
+                    {t('nomaflow.runParams.savePresetBtn', 'Save as preset…')}
+                  </Button>
+                </div>
+              </ParamRow>
+              {savePresetError && (
+                <Banner $tone="error">{savePresetError}</Banner>
+              )}
+            </ParamSection>
           {/* Log-level override — per-fire-only. Defaults to the job's saved
               log_level from jobs.toml; submit only includes the field when the
               operator changed it. DEBUG emits the full SQL of every run_query

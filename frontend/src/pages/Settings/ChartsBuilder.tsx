@@ -11,6 +11,7 @@
 // move it to a different connector, etc. The save flow validates against ``ChartsFile`` +
 // rewrites the file via ``tomli_w`` (no surgical update — the file is generated content).
 import { useEffect, useMemo, useState } from 'react'
+import type { Column, QueryResult } from '../../types/connectors'
 import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, BarChart3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -109,19 +110,78 @@ export default function ChartsBuilder() {
   }
   useEffect(load, [t])
 
-  // Augment the bundled framework enums with CONNECTOR_NAMES so the schema's
-  // ``connector`` field renders as a SearchSelect of the workspace's configured
-  // connectors. Same pattern MenusBuilder uses to drive its CONNECTOR_NAMES picker.
-  // We filter to SQL connectors since charts can only target a SQL read query.
+  // Read the selected chart's connector + query — drives the dynamic enums
+  // below (queries dropdown filters to the picked connector; columns dropdown
+  // introspects the picked query). Both are strings or empty; the augmented
+  // enums fall back to empty lists when either is missing.
+  const selChart = (sel && doc?.[sel]) as Record<string, unknown> | undefined
+  const selConnector = (typeof selChart?.connector === 'string' ? selChart.connector : '').trim()
+  const selQuery = (typeof selChart?.query === 'string' ? selChart.query : '').trim()
+
+  // Introspect the picked query's columns via /api/sql ?_limit=0 (the same
+  // route ScreenVisualBuilder + ScreenEditor use). Feeds the CHART_COLUMNS
+  // dropdown — spec.x and spec.y pick from this list. Silent on failure so a
+  // mistyped query name doesn't crash the editor (the field stays free-text
+  // via SearchSelect's allowCustom for hand-typed columns).
+  const [chartColumns, setChartColumns] = useState<Column[] | null>(null)
+  useEffect(() => {
+    setChartColumns(null)
+    if (!selConnector || !selQuery) return
+    let cancelled = false
+    api.get<QueryResult>(
+      `/api/sql/${encodeURIComponent(selConnector)}/${encodeURIComponent(selQuery)}?_limit=0`,
+    )
+      .then((r) => { if (!cancelled) setChartColumns(r.columns) })
+      .catch(() => { /* silent — empty CHART_COLUMNS is the right fallback */ })
+    return () => { cancelled = true }
+  }, [selConnector, selQuery])
+
+  // Augment the bundled framework enums with three chart-specific ones:
+  //   * CONNECTOR_NAMES — SQL connectors from the workspace (operator picks
+  //     one for the chart's ``connector`` field).
+  //   * CHART_QUERIES   — queries available on the selected connector;
+  //     filtered to that connector's ``queries`` array. Empty when no
+  //     connector is picked yet.
+  //   * CHART_COLUMNS   — columns of the picked query (introspected via the
+  //     useEffect above). Drives ``spec.x`` + ``spec.y``. Empty when query
+  //     is missing or introspection failed.
   const augmentedEnums: FrameworkEnums = useMemo(() => {
     const base: FrameworkEnums = { ...(enums ?? {}) }
-    const names = (connectors ?? []).filter((c) => c.type === 'sql').map((c) => c.name).sort()
+    const sqlConnectors = (connectors ?? []).filter((c) => c.type === 'sql')
+    const names = sqlConnectors.map((c) => c.name).sort()
     base.CONNECTOR_NAMES = {
       label: 'Connectors',
       values: names.map((n) => ({ value: n, label: n, mono: n })),
     }
+    // Per-connector query list — drawn from the workspace's connector meta
+    // (same source ScreenEditor's query picker uses). Each entry's mono is
+    // the technical name; label is the description / label / fallback to the
+    // name. Operators see "F0005 — Address Book Master" rows, store the name.
+    const sel = sqlConnectors.find((c) => c.name === selConnector)
+    const queryValues = (sel?.queries ?? []).map((q) => ({
+      value: q.name,
+      label: q.description || q.label || q.name,
+      mono: q.name,
+    }))
+    base.CHART_QUERIES = {
+      label: selConnector ? `Queries — ${selConnector}` : 'Pick a connector first',
+      values: queryValues,
+    }
+    // Columns dropdown — populated by the introspection effect. Each entry
+    // value = column name (what we store); label = column's display label
+    // when set, else the name. Stays empty until both connector + query are
+    // picked AND the introspection succeeds.
+    const columnValues = (chartColumns ?? []).map((c) => ({
+      value: c.name,
+      label: c.label ?? c.name,
+      mono: c.name,
+    }))
+    base.CHART_COLUMNS = {
+      label: selQuery ? `Columns — ${selQuery}` : 'Pick a query first',
+      values: columnValues,
+    }
     return base
-  }, [enums, connectors])
+  }, [enums, connectors, selConnector, selQuery, chartColumns])
 
   const dirty = useMemo(() => doc != null && JSON.stringify(doc) !== original, [doc, original])
 

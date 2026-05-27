@@ -232,6 +232,51 @@ class Step(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class JobPreset(BaseModel):
+    """A named snapshot of the Run-with-parameters modal state for one job.
+
+    Operators save common shapes ("DEBUG security users only", "OUT module
+    only") as presets — the modal exposes them as a dropdown above the form
+    so the next operator picking the same combo just clicks the preset
+    instead of re-toggling six steps + flipping the log level.
+
+    All four fields are optional — a preset that only sets ``log_level`` is
+    fine. The modal applies them by layering on top of the job's saved
+    defaults, same merge order as a hand-typed override:
+      1. job's saved defaults
+      2. preset values (when applied)
+      3. operator's modal edits (after the preset is applied)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, description="Display label in the preset dropdown.")
+    log_level: Literal["INFO", "DEBUG"] | None = Field(
+        default=None,
+        description="Log-level override. None → inherit the job's saved log_level.",
+    )
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Shared-param overrides (apply to every step's merge).",
+    )
+    op_kwargs: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-step op_kwargs overrides — same shape as the modal's payload "
+            "(``{step_name: {key: value}}``). Wins over both ``params`` and the "
+            "step's saved op_kwargs."
+        ),
+    )
+    step_enabled: dict[str, bool] = Field(
+        default_factory=dict,
+        description=(
+            "Per-step enable / disable toggle — only steps the operator "
+            "explicitly flipped from the job's saved ``Step.enabled`` are "
+            "captured. Empty means 'run every step at its saved default'."
+        ),
+    )
+
+
 class Job(BaseModel):
     """One scheduled (or manual-only) unit of work."""
 
@@ -262,6 +307,13 @@ class Job(BaseModel):
     # per-job debug flag). The Run-with-parameters modal can override this
     # per-fire without editing the TOML; the per-fire value wins.
     log_level: Literal["INFO", "DEBUG"] = "INFO"
+    # Named presets of the Run-with-parameters modal state — saved by operators
+    # ("DEBUG security users only", "OUT module only", …) so the next operator
+    # picking the same combo clicks once. Stored inline on the job so the
+    # presets travel with jobs.toml (same load/save flow, no extra table).
+    # Empty by default; the modal hides the dropdown when this list is empty
+    # so jobs without presets stay visually clean.
+    presets: list[JobPreset] = Field(default_factory=list)
 
     @field_validator("timezone")
     @classmethod

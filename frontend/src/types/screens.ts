@@ -318,6 +318,10 @@ export interface ScreenListItem {
    *  column points at another row's ``child`` value, ``label`` is the displayed text. Rows
    *  with an unresolvable parent become roots. */
   treeview?: ScreenTreeview | null
+  /** Saved chart id (charts.toml) — when set, the TableView's Chart tab pre-fills its spec
+   *  from that chart instead of the empty session default. Null = keep the localStorage
+   *  session-seeded behaviour from before Phase F landed. */
+  chart_id?: string | null
 
   has_dialog: boolean
   has_row_menu: boolean

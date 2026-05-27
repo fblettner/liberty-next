@@ -69,3 +69,19 @@ export function toSavedSpec(spec: ChartSpec): SavedChartSpec {
   if (spec.sortByX != null) out.sort_by_x = spec.sortByX
   return out
 }
+
+/** Translate the persisted SavedChartSpec back into the runtime ChartSpec — inverse of
+ *  ``toSavedSpec``. Used by ChartView when ``screen.chart_id`` points at a saved chart and
+ *  the TableView pre-fills the Chart tab from charts.toml instead of localStorage. */
+export function fromSavedSpec(saved: SavedChartSpec): ChartSpec {
+  return {
+    type: saved.type,
+    x: saved.x,
+    y: saved.y,
+    aggregation: saved.aggregation,
+    stacked: saved.stacked ?? undefined,
+    showLegend: saved.show_legend ?? undefined,
+    showGrid: saved.show_grid ?? undefined,
+    sortByX: saved.sort_by_x ?? undefined,
+  }
+}

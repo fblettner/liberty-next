@@ -900,6 +900,18 @@ class Screen(BaseModel):
             "where the natural shape is a tree, not a flat list. See :class:`ScreenTreeview`."
         ),
     )
+    chart_id: str | None = Field(
+        default=None,
+        description=(
+            "Saved chart that pre-fills the Chart view tab when this screen opens. Operators "
+            "save charts from the TableView's Chart toggle (the floppy icon writes to "
+            "``charts.toml``); pointing a screen at one of those ids means the Chart toggle "
+            "renders with the saved spec instead of the empty default + a localStorage seed. "
+            "Blank = no default (the TableView falls back to its session-local localStorage "
+            "spec, the pre-Phase-F behaviour). Validated to exist at config-load time."
+        ),
+        json_schema_extra={"x_enum_ref": "CHART_IDS"},
+    )
     export: WorkbookExport | None = Field(
         default=None,
         description=(

@@ -49,10 +49,19 @@ class ChartSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: ChartType = Field(default="bar", description="Chart kind. ``bar`` / ``line`` / ``area`` / ``pie``.")
-    x: str = Field(description="Result column for the X axis (slice label on pie).")
+    x: str = Field(
+        description="Result column for the X axis (slice label on pie).",
+        # ChartsBuilder augments CHART_COLUMNS based on the parent chart's
+        # connector + query (live introspection via /api/sql ?_limit=0).
+        # ``allowCustom`` on the SearchSelect still lets operators type a
+        # column the introspection didn't surface (e.g. a column added to the
+        # query AFTER the chart was saved).
+        json_schema_extra={"x_enum_ref": "CHART_COLUMNS"},
+    )
     y: list[str] = Field(
         default_factory=list,
         description="Result column(s) for the Y axis. Empty → nothing to render. Pie collapses to the first entry.",
+        json_schema_extra={"x_enum_ref": "CHART_COLUMNS"},
     )
     aggregation: Aggregation = Field(
         default="sum",
@@ -86,7 +95,15 @@ class ChartConfig(BaseModel):
         # the operator's configured connectors instead of free text.
         json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
     )
-    query: str = Field(description="The read query (the chart pulls its data from this query's result).")
+    query: str = Field(
+        description="The read query (the chart pulls its data from this query's result).",
+        # ChartsBuilder builds CHART_QUERIES from the selected connector's
+        # ``[connectors.<connector>.queries]`` array (same shape MenusBuilder
+        # uses for MENU_TARGETS). Empty when no connector picked or the
+        # connector has no queries; SearchSelect's allowCustom still lets
+        # operators type a name not in the catalog.
+        json_schema_extra={"x_enum_ref": "CHART_QUERIES"},
+    )
     spec: ChartSpec = Field(description="How to render the result.")
 
     @model_validator(mode="after")

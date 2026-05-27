@@ -145,3 +145,70 @@ class RunLog(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return f"RunLog(run_id={self.run_id!r}, chars={len(self.logs)})"
+
+
+class StepRunExtras(Base):
+    """Free-form structured metadata a step's executor wanted to attach to its
+    outcome — see :attr:`liberty.jobs.steps.base.StepResult.extras`.
+
+    Today the only writer is :class:`liberty.jobs.steps.CallJobExecutor` (stores
+    ``{child_run_id, child_job_id}`` so the Run Detail page can render the
+    step row as a link to the spawned child run); future step types can attach
+    anything JSON-serialisable here without touching the schema. Same separate-
+    table reasoning as :class:`RunLog` / :class:`RunOverrides`: a new column
+    on ``nomaflow_step_runs`` would need an ALTER on every existing deployment,
+    and nomaflow has no Alembic yet — a new table adds itself via ``create_all``
+    with no migration step. Rows without extras don't get an entry at all.
+    """
+
+    __tablename__ = "nomaflow_step_run_extras"
+
+    step_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("nomaflow_step_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    extras_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return f"StepRunExtras(step_run_id={self.step_run_id!r})"
+
+
+class RunOverrides(Base):
+    """The per-fire overrides captured when a run was started — what the
+    operator picked in the Run-with-parameters modal (or the empty defaults
+    for a scheduled fire). Surfaced on the Run Detail page so operators can
+    answer "why did THIS run produce different row counts than the scheduled
+    one?" without digging through the log.
+
+    Same separate-table reasoning as :class:`RunLog`: a new column on
+    ``nomaflow_job_runs`` would need an ALTER on every existing deployment,
+    and nomaflow has no Alembic yet — a new table adds itself via
+    ``create_all`` with no migration step. Rows missing from this table
+    (existing runs from before this feature landed) just render as "no
+    overrides" in the UI, the same shape a scheduled fire produces.
+
+    The JSON shape mirrors the request body of POST /admin/jobs/<id>/run:
+    ``{"log_level": str | None, "params": dict | None, "op_kwargs":
+    {step_name: {k: v}}, "step_enabled": {step_name: bool}}``. Empty / None
+    keys are omitted so a no-override run stores ``{}`` rather than four
+    explicit nulls.
+    """
+
+    __tablename__ = "nomaflow_run_overrides"
+
+    run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("nomaflow_job_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # JSON-serialised on write, parsed by the route layer on read. A TEXT
+    # column rather than the Postgres-native JSONB so the SQLite test fixture
+    # works without dialect-specific handling.
+    overrides_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return f"RunOverrides(run_id={self.run_id!r}, len={len(self.overrides_json)})"

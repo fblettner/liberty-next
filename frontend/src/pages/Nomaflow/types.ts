@@ -89,6 +89,20 @@ export interface JobConfig {
    *  The Run-with-parameters modal can override this per-fire without editing
    *  the TOML; the per-fire value wins. */
   log_level?: 'INFO' | 'DEBUG'
+  /** Named snapshots of the Run-with-parameters modal state. The modal
+   *  surfaces them as a "Preset" dropdown above the form; picking one
+   *  layers its log_level / params / op_kwargs / step_enabled onto the
+   *  job's saved defaults. Operators save current state via the modal's
+   *  "Save as preset…" button. Empty array hides the dropdown. */
+  presets?: JobPreset[]
+}
+
+export interface JobPreset {
+  name: string
+  log_level?: 'INFO' | 'DEBUG' | null
+  params?: Record<string, unknown>
+  op_kwargs?: Record<string, Record<string, unknown>>
+  step_enabled?: Record<string, boolean>
 }
 
 export interface JobsParsedResponse {
@@ -121,6 +135,15 @@ export interface StepRunInfo {
   finished_at: string | null
   rows_affected: number | null
   error_message: string | null
+  /** Free-form extras the executor attached to the StepResult — today the
+   *  only writer is CallJobExecutor, which records
+   *  ``{child_run_id, child_job_id}`` so the Run Detail page can render the
+   *  step row as a link to the spawned child run. Null when the step's
+   *  executor didn't write extras. */
+  extras?: {
+    child_run_id?: string
+    child_job_id?: string
+  } | null
 }
 
 export interface RunDetailResponse {
@@ -129,5 +152,17 @@ export interface RunDetailResponse {
   /** The run's log text — live in-memory buffer while it's running, the
    *  durable nomaflow_run_logs row once finished. */
   logs: string
+  /** Per-fire overrides captured at run start — what the operator picked in
+   *  the Run-with-params modal (empty for scheduled fires or runs from
+   *  before the RunOverrides table existed). Shape mirrors POST /admin/jobs/<id>/run:
+   *  ``{log_level, params, op_kwargs: {step: {k: v}}, step_enabled: {step: bool}}``.
+   *  ``parent_chain`` is added by the runner for call_job-spawned children. */
+  overrides?: {
+    log_level?: 'INFO' | 'DEBUG'
+    params?: Record<string, unknown>
+    op_kwargs?: Record<string, Record<string, unknown>>
+    step_enabled?: Record<string, boolean>
+    parent_chain?: Array<[string, string]>
+  }
 }
 

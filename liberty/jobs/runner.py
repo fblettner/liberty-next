@@ -21,6 +21,7 @@ without Socket.IO and without ``asyncio.sleep``-ing through real backoffs.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from liberty.jobs.db import JobDatabase
-from liberty.jobs.models import JobRun, RunLog, RunState, StepRun
+from liberty.jobs.models import JobRun, RunLog, RunOverrides, RunState, StepRun, StepRunExtras
 from liberty.jobs.runlog import (
     finish_run, registered_namespaces, reset_run_context, set_run_context,
 )
@@ -268,6 +269,31 @@ class JobRunner:
             "log_level": effective_log_level if effective_log_level == "DEBUG" else None,
             "params_override": dict(params_override) if params_override else None,
         }
+        # Persist the per-fire override snapshot — what the operator actually
+        # picked when they clicked Run (or empty for a scheduled fire). The
+        # RunDetail page surfaces this so "why did this run produce different
+        # row counts" is one-glance answerable. Stored on its own table
+        # (RunOverrides) so an existing nomaflow_job_runs row doesn't need an
+        # ALTER COLUMN — same migration-light pattern RunLog uses. Captured
+        # ONCE at run start, never updated; not a hot field.
+        wire_overrides: dict[str, Any] = {}
+        if log_level:
+            wire_overrides["log_level"] = log_level
+        if params_override:
+            wire_overrides["params"] = dict(params_override)
+        if op_kwargs_overrides:
+            wire_overrides["op_kwargs"] = {k: dict(v) for k, v in op_kwargs_overrides.items()}
+        if step_enabled_overrides:
+            wire_overrides["step_enabled"] = dict(step_enabled_overrides)
+        if parent_chain:
+            # Operators viewing a child run want to see the parent chain
+            # alongside the per-fire overrides — same "why" answer.
+            wire_overrides["parent_chain"] = [list(p) for p in parent_chain]
+        async with self._db.session() as session:
+            session.add(RunOverrides(
+                run_id=run.id,
+                overrides_json=json.dumps(wire_overrides),
+            ))
 
         ctx = RunContext(
             run_id=run.id, job_id=job.id, trigger=trigger,
@@ -611,6 +637,16 @@ class JobRunner:
             row.finished_at = _utcnow()
             row.rows_affected = result.rows_affected
             row.log_excerpt = _truncate_log(result.log_excerpt)
+            # Persist any structured extras the executor produced — today this
+            # is just CallJobExecutor's {child_run_id, child_job_id}, used by
+            # the Run Detail page to render the step as a link to the spawned
+            # child. Skip when the dict is empty (the common case) so we don't
+            # bloat nomaflow_step_run_extras with no-op rows.
+            if result.extras:
+                session.add(StepRunExtras(
+                    step_run_id=step_run_id,
+                    extras_json=json.dumps(result.extras),
+                ))
         if self._broadcaster is not None:
             await self._broadcaster.broadcast(
                 "step_run.state",

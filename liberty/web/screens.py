@@ -366,6 +366,10 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         # screen is flat-table only. Frontend surfaces a third view toggle
         # ("Tree") on the TableView when this block is present.
         "treeview": screen.treeview.model_dump(mode="json") if screen.treeview else None,
+        # Saved chart id (charts.toml) — when set, the TableView's Chart tab
+        # pre-fills its spec from that chart instead of the empty session
+        # default. Blank → keep the existing localStorage-seeded behaviour.
+        "chart_id": screen.chart_id,
         "has_dialog": screen.dialog is not None,
         "has_row_menu": bool(screen.row_menu),
         "has_actions": bool(screen.actions),

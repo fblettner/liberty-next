@@ -42,6 +42,15 @@ const StepRow = styled.div`
   gap: 10px; padding: 7px 8px; align-items: center;
   border-top: 1px solid ${colors.border}; font-size: ${fontSize.sm};
 `
+// "→ <child_job_id>" link next to a call_job step's name — clickable, takes
+// the operator into the child run's detail page. Renders inline so the row
+// height stays compact.
+const ChildRunLink = styled.button`
+  background: transparent; border: none; padding: 0 2px; cursor: pointer;
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  color: ${colors.blue.main};
+  &:hover { text-decoration: underline; }
+`
 const StepCell = styled.span`
   color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 `
@@ -236,6 +245,13 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
             )}
           </Section>
 
+          {/* Per-fire overrides — shows what the operator picked when they
+              clicked Run (log_level, step_enabled toggles, params, op_kwargs).
+              Empty for scheduled fires + runs from before the RunOverrides
+              table existed; the OverridesSection helper hides itself in that
+              case so the page stays clean. */}
+          <OverridesSection overrides={data.overrides} />
+
           <Section>
             <SectionTitle>{t('nomaflow.run.steps', { count: data.steps.length })}</SectionTitle>
             <div>
@@ -251,10 +267,30 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 const key = `${s.step_index}.${s.attempt}`
                 const expanded = expandedErrors.has(key)
                 const err = s.error_message ?? ''
+                // call_job step that spawned a child run — surface the child
+                // as a clickable Mono next to the step name (parent → child
+                // drill-through, the natural follow-up after a failed parent
+                // step). Falls back to the step name alone for any other step
+                // type or for call_job steps whose child wasn't tracked.
+                const childRunId = s.extras?.child_run_id
+                const childJobId = s.extras?.child_job_id
                 return (
                   <StepRow key={key}>
                     <StepCell>{s.step_index}</StepCell>
-                    <StepCell><Mono>{s.step_name}</Mono></StepCell>
+                    <StepCell>
+                      <Mono>{s.step_name}</Mono>
+                      {childRunId && (
+                        <>
+                          {' '}
+                          <ChildRunLink
+                            onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(childRunId)}`)}
+                            title={t('nomaflow.run.openChildRun', 'Open the child run this step spawned')}
+                          >
+                            → {childJobId ?? 'child'}
+                          </ChildRunLink>
+                        </>
+                      )}
+                    </StepCell>
                     <StepCell>{s.step_type}</StepCell>
                     <StepCell>{s.attempt}</StepCell>
                     <StepCell><Tag $tone={STATE_TONE[s.state]}>{s.state}</Tag></StepCell>
@@ -305,5 +341,99 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
         </>
       )}
     </PageLayout>
+  )
+}
+
+// ── per-fire overrides section ────────────────────────────────────────────────────
+//
+// Renders the snapshot the runner captured when the operator clicked Run —
+// log_level, step toggles, params, op_kwargs. Hides itself entirely when
+// nothing was overridden (scheduled fires + pre-feature runs) so the page
+// stays clean for the common case. Kept inline in this file because it's
+// purely a presentational helper; lifting it to its own module would be
+// premature abstraction.
+const OverridesGrid = styled.div`
+  display: grid; grid-template-columns: 200px 1fr; gap: 8px 14px;
+  align-items: start;
+`
+const OverridesKey = styled.span`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.muted};
+`
+const OverridesValue = styled.span`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary};
+  white-space: pre-wrap; word-break: break-word;
+`
+const OverridesSubHead = styled.div`
+  font-size: ${fontSize.sm}; color: ${colors.text.secondary}; font-weight: 600;
+  margin-top: 6px;
+`
+
+function OverridesSection({ overrides }: { overrides: RunDetailResponse['overrides'] }) {
+  const { t } = useTranslation()
+  if (!overrides) return null
+  const hasLogLevel = !!overrides.log_level
+  const hasParams = !!overrides.params && Object.keys(overrides.params).length > 0
+  const opKwargsEntries = Object.entries(overrides.op_kwargs ?? {})
+  const stepEnabledEntries = Object.entries(overrides.step_enabled ?? {})
+  const parentChain = overrides.parent_chain ?? []
+  const empty = !hasLogLevel && !hasParams && opKwargsEntries.length === 0
+    && stepEnabledEntries.length === 0 && parentChain.length === 0
+  if (empty) return null
+  // Format a value as JSON when it's an object / array so nested values stay
+  // legible (and the mono font keeps them aligned). Primitives render as-is.
+  const fmtVal = (v: unknown): string =>
+    v === null || v === undefined ? '—'
+      : typeof v === 'object' ? JSON.stringify(v)
+      : String(v)
+  return (
+    <Section>
+      <SectionTitle>{t('nomaflow.run.overrides', 'Run with parameters')}</SectionTitle>
+      <OverridesGrid>
+        {hasLogLevel && (
+          <>
+            <OverridesKey>log_level</OverridesKey>
+            <OverridesValue>{overrides.log_level}</OverridesValue>
+          </>
+        )}
+        {hasParams && Object.entries(overrides.params ?? {}).map(([k, v]) => (
+          <>
+            <OverridesKey key={`p-k-${k}`}>params.{k}</OverridesKey>
+            <OverridesValue key={`p-v-${k}`}>{fmtVal(v)}</OverridesValue>
+          </>
+        ))}
+        {stepEnabledEntries.length > 0 && (
+          <>
+            <OverridesKey>step_enabled</OverridesKey>
+            <OverridesValue>
+              {stepEnabledEntries
+                .map(([step, on]) => `${step} = ${on}`)
+                .join('\n')}
+            </OverridesValue>
+          </>
+        )}
+        {opKwargsEntries.length > 0 && (
+          <>
+            <OverridesKey>op_kwargs</OverridesKey>
+            <OverridesValue>
+              {opKwargsEntries
+                .map(([step, kw]) =>
+                  `${step}:\n  ${Object.entries(kw).map(([k, v]) => `${k} = ${fmtVal(v)}`).join('\n  ')}`,
+                )
+                .join('\n')}
+            </OverridesValue>
+          </>
+        )}
+        {parentChain.length > 0 && (
+          <>
+            <OverridesKey>parent_chain</OverridesKey>
+            <OverridesValue>
+              {parentChain.map(([jobId, runId]) => `${jobId} (${runId})`).join(' → ')}
+            </OverridesValue>
+          </>
+        )}
+      </OverridesGrid>
+      <OverridesSubHead>{t('nomaflow.run.overridesHint',
+        'Snapshot of what was picked in the Run-with-parameters modal at fire time.')}</OverridesSubHead>
+    </Section>
   )
 }

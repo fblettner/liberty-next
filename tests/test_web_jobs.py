@@ -752,6 +752,57 @@ def test_run_now_rejects_malformed_step_enabled(env) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# GET /admin/jobs/runs/<id> — overrides snapshot in the run detail payload
+# --------------------------------------------------------------------------- #
+
+
+def test_run_detail_includes_overrides_snapshot(env) -> None:
+    """When a run was fired with per-fire overrides (log_level / op_kwargs /
+    step_enabled / params), the snapshot persists on the new RunOverrides
+    table and surfaces in GET /admin/jobs/runs/<id> so the RunDetail page can
+    show "this run used these overrides". Scheduled fires (and pre-feature
+    runs) just see ``overrides: {}``."""
+    app, _ = env
+    RECORDED_KWARGS.clear()
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Fire with a couple of overrides — the snapshot should capture them.
+        r = client.post(
+            "/admin/jobs/echo-kwargs/run",
+            json={
+                "log_level": "DEBUG",
+                "op_kwargs": {"echo": {"target_connector": "nomasx1b"}},
+            },
+            headers=h,
+        )
+        assert r.status_code == 200
+        run_id = r.json()["run_id"]
+        _wait_for_terminal(app, run_id)
+        # GET the run detail; overrides should reflect what we sent.
+        detail = client.get(f"/admin/jobs/runs/{run_id}", headers=h).json()
+        assert detail["overrides"]["log_level"] == "DEBUG"
+        assert detail["overrides"]["op_kwargs"] == {"echo": {"target_connector": "nomasx1b"}}
+        # No params + no step_enabled in the request → not present in the snapshot
+        # (only the keys the operator actually used land in the snapshot).
+        assert "params" not in detail["overrides"]
+        assert "step_enabled" not in detail["overrides"]
+
+
+def test_run_detail_overrides_empty_for_scheduled_or_no_override_run(env) -> None:
+    """A run fired with no body (the manual-without-overrides path) writes
+    an empty overrides snapshot — and the GET surfaces ``overrides: {}``,
+    which the frontend treats as "no overrides section to render"."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/jobs/echo-kwargs/run", headers=h)
+        run_id = r.json()["run_id"]
+        _wait_for_terminal(app, run_id)
+        detail = client.get(f"/admin/jobs/runs/{run_id}", headers=h).json()
+        assert detail["overrides"] == {}
+
+
+# --------------------------------------------------------------------------- #
 # POST /admin/jobs/runs/<id>/cancel
 # --------------------------------------------------------------------------- #
 

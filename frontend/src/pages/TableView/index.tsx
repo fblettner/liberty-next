@@ -497,7 +497,7 @@ export default function TableView({ connector, query }: { connector: string; que
               // Suspense + lazy: the Recharts chunk only fetches when the operator first
               // toggles to Chart mode. The fallback shows the existing centred spinner.
               <Suspense fallback={<Centered />}>
-                <ChartView result={effectiveResult} connector={connector} query={query} />
+                <ChartView result={effectiveResult} connector={connector} query={query} screen={screen} />
               </Suspense>
             ) : view === 'tree' && screen?.treeview ? (
               // Tree-mode falls back to Table when the screen has no treeview config

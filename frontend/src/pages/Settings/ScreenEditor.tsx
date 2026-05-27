@@ -56,6 +56,10 @@ const GENERAL_FORM_KEYS = [
   // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
   // ``x_enum_ref`` mechanism the Columns tab uses to pick column names.
   'initial_group_by',
+  // Saved chart id (charts.toml) — pre-fills the Chart tab when this screen opens. Bound
+  // to the CHART_IDS framework enum, populated by an effect below that fetches
+  // /admin/config/charts/parsed.
+  'chart_id',
 ] as const
 
 // Sub-schema for the "open dialog" mode — the three fields that go together. We render this
@@ -199,22 +203,48 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     return () => { cancelled = true }
   }, [effectiveConnector, readQueryName])
 
+  // Fetch the saved charts catalog — powers the CHART_IDS augmented enum
+  // (the picker for Screen.chart_id, which pre-fills the TableView's Chart
+  // tab with a saved chart's spec). Best-effort: a missing / empty
+  // charts.toml just yields an empty dropdown — operator saves a chart from
+  // the TableView's Chart-tab Save button first.
+  const [chartsCatalog, setChartsCatalog] = useState<Record<string, { label?: string; description?: string }>>({})
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ charts: Record<string, { label?: string; description?: string }> }>('/admin/config/charts/parsed')
+      .then((r) => { if (!cancelled) setChartsCatalog(r.charts) })
+      .catch(() => { /* silent — empty dropdown is the right fallback */ })
+    return () => { cancelled = true }
+  }, [])
+
   // Augment the parent's framework enums with SCREEN_COLUMNS — the read query's column names.
   // Consumed by Screen fields that declare ``x_enum_ref: "SCREEN_COLUMNS"`` (currently:
-  // ``initial_group_by``). The parent ScreensBuilder provides the global framework_enums via
-  // FrameworkEnumsContext; we LAYER the per-screen SCREEN_COLUMNS on top via a nested Provider
-  // around the General SchemaForm so the dropdown options match the screen's actual columns.
+  // ``initial_group_by``, ``treeview.parent/child/label/order_by``). Also adds CHART_IDS for
+  // the chart_id picker. The parent ScreensBuilder provides the global framework_enums via
+  // FrameworkEnumsContext; we LAYER the per-screen enums on top via a nested Provider around
+  // the General SchemaForm so the dropdown options match the live state.
   const parentEnums = useContext(FrameworkEnumsContext)
   const augmentedEnums = useMemo<FrameworkEnums>(() => {
     const base: FrameworkEnums = { ...(parentEnums ?? {}) }
-    const values = (screenColumns ?? []).map((c) => ({
+    const colValues = (screenColumns ?? []).map((c) => ({
       value: c.name,
       label: c.label ?? c.name,
       mono: c.name,
     }))
-    base.SCREEN_COLUMNS = { label: `Columns — ${readQueryName || '(no read query)'}`, values }
+    base.SCREEN_COLUMNS = { label: `Columns — ${readQueryName || '(no read query)'}`, values: colValues }
+    // CHART_IDS — every entry in charts.toml. Operators pick from a dropdown
+    // of "<label> (id)" rows; the id is what we store. Empty catalog = the
+    // field shows as a search box with no options (operator can still type
+    // an id thanks to allowCustom on the SearchSelect, but the validator
+    // catches it at config-load if the id doesn't exist).
+    const chartValues = Object.entries(chartsCatalog).map(([id, c]) => ({
+      value: id,
+      label: c.label || c.description || id,
+      mono: id,
+    }))
+    base.CHART_IDS = { label: 'Saved charts', values: chartValues }
     return base
-  }, [parentEnums, screenColumns, readQueryName])
+  }, [parentEnums, screenColumns, readQueryName, chartsCatalog])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
