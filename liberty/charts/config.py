@@ -79,7 +79,13 @@ class ChartConfig(BaseModel):
     )
     label: str = Field(description="Display label — the chart's title in lists, dashboards, menus.")
     description: str | None = Field(default=None, description="Optional longer description.")
-    connector: str = Field(description="The SQL connector whose query backs this chart.")
+    connector: str = Field(
+        description="The SQL connector whose query backs this chart.",
+        # CONNECTOR_NAMES is augmented by the ChartsBuilder (same pattern
+        # MenusBuilder uses) — renders the connector field as a dropdown of
+        # the operator's configured connectors instead of free text.
+        json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
+    )
     query: str = Field(description="The read query (the chart pulls its data from this query's result).")
     spec: ChartSpec = Field(description="How to render the result.")
 

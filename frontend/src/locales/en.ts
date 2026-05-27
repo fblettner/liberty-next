@@ -398,7 +398,7 @@ const en = {
       invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', dashboards: 'Dashboards', technical: 'Technical' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', technical: 'Technical' },
     // Test-connection button on API connectors. Sends the in-progress (unsaved) config to
     // POST /admin/config/api/test, which fires the smallest meaningful call against the
     // upstream (OAuth2 → token fetch; other auth → config validation) and returns a
