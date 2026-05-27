@@ -332,6 +332,7 @@ const fr: Resources = {
       queryFreeText: 'Nom de la requête',
       params: 'Paramètres',
       callable: 'Appelable (module:fonction)',
+      callablePlaceholder: 'Choisir un appelable, ou saisir module:fonction…',
       opKwargs: 'Arguments nommés',
       server: 'Serveur LDAP',
       bindDn: 'DN de connexion',

@@ -330,6 +330,7 @@ const en = {
       queryFreeText: 'Query name',
       params: 'Parameters',
       callable: 'Callable (module:function)',
+      callablePlaceholder: 'Pick a callable, or type a module:function…',
       opKwargs: 'Keyword arguments',
       server: 'LDAP server',
       bindDn: 'Bind DN',

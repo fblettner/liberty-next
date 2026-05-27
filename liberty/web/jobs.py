@@ -397,6 +397,36 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
     return {"run": run_payload, "steps": step_payload, "logs": logs}
 
 
+@router.get("/callables")
+async def list_callables(request: Request, _: Superuser) -> dict[str, Any]:
+    """Return the catalog of available python-step callables — every top-level
+    ``async def j_*`` / ``def j_*`` discovered under ``plugins/``. Powers the
+    Job Designer's callable dropdown so operators pick from a list instead of
+    typing the full ``module:function`` string.
+
+    Discovery is AST-only (no plugin code is executed here — see
+    :mod:`liberty.jobs.discover` for why). A plugin with a broken import still
+    has its callables surface in this catalog; the run-time failure happens at
+    fire time with a clear traceback the operator can act on.
+
+    The plugins root is resolved the same way :func:`liberty.main._ensure_plugins_on_sys_path`
+    does — ``${LIBERTY_APPS_DIR}/../plugins/`` when ``LIBERTY_APPS_DIR`` is set,
+    else ``./plugins/`` relative to the process cwd. A missing directory
+    returns an empty list (no plugins installed yet — perfectly valid for a
+    fresh install)."""
+    import os
+    from pathlib import Path
+    from liberty.jobs.discover import discover_callables
+
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    plugins = Path(apps).parent / "plugins" if apps else Path("plugins")
+    catalog = discover_callables(plugins)
+    return {
+        "plugins_root": str(plugins.resolve()) if plugins.is_dir() else None,
+        "callables": [c.to_dict() for c in catalog],
+    }
+
+
 @router.get("/cron-preview")
 async def cron_preview(
     schedule: str,

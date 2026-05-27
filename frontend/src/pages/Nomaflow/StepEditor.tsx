@@ -5,11 +5,12 @@
 // Increment 4 ships the hand-written sql_copy + sql_query forms (they need live
 // connector/query dropdowns). python / ldap_sync / http get a name field + a
 // raw-values fallback until increment 5 brings their SchemaForm.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
-import { Input, Select, Button, Tag, StringListEditor } from '../../common'
+import { Input, Select, Button, Tag, StringListEditor, SearchSelect, type SearchSelectOption } from '../../common'
+import { api } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
 import type { StepConfig, StepType } from './types'
@@ -267,17 +268,60 @@ function SqlQueryForm({ step, patch, sqlConnectors }: FormProps) {
   )
 }
 
+// Module-level cache for the discovered callable catalog. Multiple python
+// steps in the same job (and across job edits in the same session) reuse
+// the same in-memory list — avoids hammering the backend on every step
+// expansion. ``null`` = not yet fetched; ``[]`` = fetched + empty (no
+// plugins installed). The promise field lets concurrent callers await the
+// same in-flight request instead of firing N parallel ones.
+type CallableDef = { callable: string; module: string; name: string; is_async: boolean; docstring: string | null }
+let _callablesCache: CallableDef[] | null = null
+let _callablesPromise: Promise<CallableDef[]> | null = null
+function loadCallables(): Promise<CallableDef[]> {
+  if (_callablesCache) return Promise.resolve(_callablesCache)
+  if (_callablesPromise) return _callablesPromise
+  _callablesPromise = api.get<{ callables: CallableDef[] }>('/admin/jobs/callables')
+    .then((r) => { _callablesCache = r.callables; return r.callables })
+    .finally(() => { _callablesPromise = null })
+  return _callablesPromise
+}
+
 function PythonForm({ step, patch }: FormProps) {
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
+  // Callable catalog — fetched once at mount, kept in module-level cache for
+  // sibling steps. allowCustom stays on so an operator can type a callable
+  // outside the dropdown (e.g. an internal helper that doesn't follow the
+  // ``j_*`` convention; the validator at run time is the real gate).
+  const [catalog, setCatalog] = useState<CallableDef[]>(_callablesCache ?? [])
+  useEffect(() => {
+    if (_callablesCache) return  // already fetched
+    let cancelled = false
+    loadCallables().then((list) => { if (!cancelled) setCatalog(list) }).catch(() => { /* silent */ })
+    return () => { cancelled = true }
+  }, [])
+  const options = useMemo<SearchSelectOption[]>(
+    () => catalog.map((c) => ({
+      value: c.callable,
+      // Mono = the actual callable string the operator stores.
+      // Label = the docstring's first line (helps disambiguate two j_* with
+      // similar names). Falls back to the callable when no docstring exists.
+      mono: c.callable,
+      label: c.docstring || c.callable,
+    })),
+    [catalog],
+  )
   return (
     <Grid>
       <Field $span={3}>
         <FieldLabel>{t('nomaflow.steps.callable')}</FieldLabel>
-        <Input
+        <SearchSelect
           value={String(f.callable ?? '')}
-          onChange={(e) => patch({ callable: e.target.value } as Partial<StepConfig>)}
-          placeholder="nomaflow.nomasx1.collect:run"
+          onChange={(v) => patch({ callable: v } as Partial<StepConfig>)}
+          options={options}
+          allowCustom
+          placeholder={t('nomaflow.steps.callablePlaceholder', 'Pick a callable, or type a module:function…')}
+          loading={catalog.length === 0 && _callablesPromise !== null}
         />
       </Field>
       <Field $span={3}>
