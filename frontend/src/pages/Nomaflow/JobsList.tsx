@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight } from 'lucide-react'
+import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -21,6 +21,28 @@ const Toolbar = styled.div`
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
 `
 const ToolbarSpacer = styled.div`flex: 1;`
+// Tag filter chip row — sits between the action toolbar and the job list. Each chip
+// toggles a tag's membership in the active filter set; the union (any-match) of all
+// active tags is shown. Active chip = blue tone; inactive = muted ghost.
+const TagFilterRow = styled.div`
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+`
+const TagFilterLabel = styled.span`
+  font-size: ${fontSize.sm}; color: ${colors.text.muted}; margin-right: 4px;
+`
+const TagFilterChip = styled.button<{ $active?: boolean }>`
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  height: 24px; padding: 0 10px; cursor: pointer; border-radius: ${radius.sm};
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  &:hover { color: ${colors.text.primary}; }
+`
+const TagFilterClear = styled.button`
+  font-size: ${fontSize.sm}; padding: 0 6px; height: 24px; cursor: pointer;
+  background: transparent; border: none; color: ${colors.text.muted};
+  &:hover { color: ${colors.text.primary}; }
+`
 const List = styled.div`display: flex; flex-direction: column; gap: 10px;`
 const JobCard = styled(Card)`display: flex; flex-direction: column; gap: 8px;`
 const CardTop = styled.div`display: flex; align-items: center; gap: 10px; flex-wrap: wrap;`
@@ -249,10 +271,62 @@ export default function JobsList() {
     navigate('/nomaflow/jobs/new')
   }, [navigate])
 
-  const sorted = useMemo(
-    () => (jobs ? [...jobs].sort((a, b) => a.id.localeCompare(b.id)) : null),
-    [jobs],
-  )
+  // Duplicate a job — read the full source config, generate a fresh id (suffix
+  // ``_copy`` and bump while the id collides), append to the array, save, reload,
+  // and open the editor pointed at the new entry so the operator can rename + tweak.
+  // Disabled-by-default on the clone matches new-job convention: an operator
+  // duplicating a complex job hasn't yet decided when/if it should run.
+  const duplicateJob = useCallback(async (job: JobSummary) => {
+    setBusyId(job.id); setError(null)
+    try {
+      const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
+      const src = parsed.jobs.find((j) => j.id === job.id)
+      if (!src) throw new Error(`Source job ${job.id} not found in jobs.toml`)
+      // Find a non-colliding id: <id>_copy, _copy2, _copy3, ...
+      const existing = new Set(parsed.jobs.map((j) => j.id))
+      let newId = `${job.id}_copy`
+      for (let i = 2; existing.has(newId); i += 1) newId = `${job.id}_copy${i}`
+      // Deep-clone via JSON round-trip — JobConfig is a pure JSON shape (no Dates /
+      // functions / regex), so JSON.parse(JSON.stringify(...)) is safe + cheap. Drop
+      // the schedule (a duplicate fired on the same cron as the original would
+      // double-run the source data) and start disabled.
+      const cloned = { ...JSON.parse(JSON.stringify(src)), id: newId, enabled: false, schedule: undefined }
+      await api.put('/admin/config/jobs/parsed', { jobs: [...parsed.jobs, cloned] })
+      await api.post('/admin/reload')
+      // Open the editor on the new entry so the operator can rename / re-schedule.
+      navigate(`/nomaflow/jobs/${encodeURIComponent(newId)}`)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusyId(null) }
+  }, [navigate])
+
+  // Tag filter — operators pin one or more tag chips from the toolbar; matching jobs
+  // are those whose ``tags`` contain ANY of the selected tags (union, not intersection
+  // — picking ``nomasx1`` + ``security`` shows everything tagged either, matching the
+  // "narrow my view" mental model). Empty selection = show everything.
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
+  const allTags = useMemo<string[]>(() => {
+    if (!jobs) return []
+    const acc = new Set<string>()
+    for (const j of jobs) for (const tg of j.tags) acc.add(tg)
+    return [...acc].sort()
+  }, [jobs])
+  const toggleTagFilter = (tg: string) => {
+    setSelectedTags((prev) => {
+      const next = new Set(prev)
+      if (next.has(tg)) next.delete(tg)
+      else next.add(tg)
+      return next
+    })
+  }
+  const clearTagFilters = () => setSelectedTags(new Set())
+
+  const sorted = useMemo(() => {
+    if (!jobs) return null
+    const base = [...jobs].sort((a, b) => a.id.localeCompare(b.id))
+    if (selectedTags.size === 0) return base
+    return base.filter((j) => j.tags.some((tg) => selectedTags.has(tg)))
+  }, [jobs, selectedTags])
 
   const header = (
     <PageLayout
@@ -272,6 +346,29 @@ export default function JobsList() {
         </Button>
         <ToolbarSpacer />
       </Toolbar>
+      {/* Tag filter row — chip per distinct tag across the job set. Click a chip to
+          narrow the list; click again to deselect; "Clear" appears once a filter is
+          active. Hidden when no tags are declared anywhere (no value to add). */}
+      {allTags.length > 0 && (
+        <TagFilterRow>
+          <TagFilterLabel>{t('nomaflow.jobs.filterByTags', 'Filter:')}</TagFilterLabel>
+          {allTags.map((tg) => (
+            <TagFilterChip
+              key={tg}
+              type="button"
+              $active={selectedTags.has(tg)}
+              onClick={() => toggleTagFilter(tg)}
+            >
+              {tg}
+            </TagFilterChip>
+          ))}
+          {selectedTags.size > 0 && (
+            <TagFilterClear type="button" onClick={clearTagFilters}>
+              {t('nomaflow.jobs.clearFilters', 'Clear')}
+            </TagFilterClear>
+          )}
+        </TagFilterRow>
+      )}
       {error && <Banner $tone="error" style={{ marginBottom: 12 }}>{error}</Banner>}
       {sorted == null && !error ? <Centered /> : null}
       {sorted && sorted.length === 0 && (
@@ -343,6 +440,17 @@ export default function JobsList() {
                     onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)}
                   >
                     <Pencil size={13} /> {t('common.edit')}
+                  </Button>
+                  {/* Duplicate — clones the job under ``<id>_copy``, disabled by
+                      default with no schedule (avoid double-running the source's
+                      cron). Lands the operator on the new entry's editor. */}
+                  <Button
+                    $variant="ghost" $size="sm" disabled={busy}
+                    onClick={() => duplicateJob(job)}
+                    title={t('nomaflow.jobs.duplicate', 'Duplicate this job (clones config to a new id; disabled + unscheduled).')}
+                  >
+                    {busy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}
+                    {t('nomaflow.jobs.duplicateBtn', 'Duplicate')}
                   </Button>
                 </Actions>
               </JobCard>

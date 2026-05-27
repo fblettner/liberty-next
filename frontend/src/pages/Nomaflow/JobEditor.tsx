@@ -5,17 +5,18 @@
 // The whole jobs.toml is rewritten on save (PUT /admin/config/jobs/parsed replaces the
 // [[jobs]] array), so the editor loads the full job list, edits one entry, and writes
 // the merged list back — then POST /admin/reload to apply.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Save, Workflow, Layers } from 'lucide-react'
+import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   PageLayout, Button, Banner, Centered, Card, Input, Select, Checkbox,
   SpinnerRing, Stack,
 } from '../../common'
-import { colors, fontSize } from '../../theme'
+import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor, { KeyValueEditor } from './StepEditor'
 import ScheduleField from './ScheduleField'
@@ -41,6 +42,243 @@ const StatusText = styled.span<{ $tone: 'muted' | 'ok' }>`
   font-size: ${fontSize.sm};
   color: ${({ $tone }) => ($tone === 'ok' ? colors.green.main : colors.text.muted)};
 `
+
+// ── chip-based tag editor ────────────────────────────────────────────────────────
+// Comma-separated text input was a usability problem: operators typo'd tags
+// (``securty`` instead of ``security`` → ghost tag in the JobsList filter), and
+// duplicating jobs accumulated tag noise nobody could clean up without TOML edits.
+// This editor lists current tags as removable chips + autocompletes new entries
+// from every tag already in use across jobs.toml, so the operator picks an
+// existing one (no typo) or types a new one knowingly.
+const TagsBox = styled.div`
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  min-height: 32px; padding: 4px 6px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.sm};
+  background: ${colors.bg.input};
+  position: relative;
+`
+const TagPill = styled.span`
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 4px 0 8px;
+  border: 1px solid ${colors.blue.border}; border-radius: ${radius.sm};
+  background: ${colors.blue.bg}; color: ${colors.blue.main};
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+`
+const TagPillX = styled.button`
+  background: transparent; border: none; padding: 2px; cursor: pointer;
+  display: inline-flex; align-items: center; color: ${colors.blue.main};
+  &:hover { color: ${colors.text.primary}; }
+`
+const TagInputBare = styled.input`
+  flex: 1; min-width: 100px; border: none; background: transparent; outline: none;
+  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  &::placeholder { color: ${colors.text.muted}; }
+`
+// Portal-rendered to ``document.body`` with ``position: fixed`` so it escapes the
+// JobEditor's ``<Card>`` stacking context (otherwise the next form Section painted
+// over it). Chrome matches SearchSelect's Panel — same radius, shadow, scroll
+// behaviour — so the dropdown reads as the same control type the operator sees
+// everywhere else in Liberty (the standard Pick-A-Thing dropdown).
+const SuggestionList = styled.div`
+  position: fixed; z-index: 1000;
+  display: flex; flex-direction: column;
+  background: ${colors.bg.dropdown}; border: 1px solid ${colors.border};
+  border-radius: ${radius.lg}; box-shadow: ${shadow.lg};
+  overflow: hidden;
+  max-height: 280px;
+`
+const SuggestionScroll = styled.div`
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0;
+`
+// Active state = the keyboard-highlighted row (arrow keys); the hover state is
+// distinct and uses the framework's hover-subtle var (matches SearchSelect Item).
+const SuggestionItem = styled.button<{ $highlighted?: boolean }>`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px;
+  border: none; text-align: left; cursor: pointer;
+  background: ${({ $highlighted }) => ($highlighted ? colors.blue.bg : 'transparent')};
+  color: ${({ $highlighted }) => ($highlighted ? colors.blue.main : colors.text.secondary)};
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  & .check { color: ${colors.blue.main}; flex-shrink: 0; opacity: 0; }
+  &[data-highlighted="true"] .check { opacity: 1; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
+// "Create new tag" row pinned to the bottom of the dropdown when the typed value
+// doesn't match any existing tag. Same shape as SearchSelect.CreateRow — makes
+// the "I'm adding a NEW tag" path discoverable instead of operators having to
+// guess that Enter commits a typed value.
+const SuggestionCreateRow = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px;
+  border: none; border-top: 1px solid ${colors.border};
+  background: transparent; cursor: pointer; text-align: left;
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & .mono { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
+const SuggestionEmpty = styled.div`
+  padding: 10px 12px; color: ${colors.text.muted};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+`
+
+function TagsField(
+  { value, allTags, onChange, placeholder }: {
+    value: string[]
+    allTags: string[]
+    onChange: (next: string[]) => void
+    placeholder?: string
+  },
+) {
+  const { t } = useTranslation()
+  const [typed, setTyped] = useState('')
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  // Anchor + computed coords for the portaled SuggestionList. ``boxRef`` is on the
+  // TagsBox (the visible trigger surface); the panel renders at ``position: fixed``
+  // anchored under it, recomputed on scroll/resize so it follows the trigger as
+  // the operator scrolls the long JobEditor form.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  useEffect(() => {
+    if (!open) { setPanelPos(null); return }
+    const compute = () => {
+      const r = boxRef.current?.getBoundingClientRect()
+      if (!r) return
+      // Open below the box with a 4px gap. The box-shadow + max-height (220px in
+      // the styled component) keep it visible even near the viewport edge.
+      setPanelPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+    compute()
+    window.addEventListener('resize', compute)
+    // capture:true catches scroll on every ancestor (the JobEditor form is inside
+    // a scrolling container) — bubbling scroll skips non-Window scrollers.
+    window.addEventListener('scroll', compute, true)
+    return () => {
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
+  }, [open])
+
+  // Suggestions = all tags NOT already on this job, filtered by what the operator
+  // is typing (case-insensitive substring). Sorted alphabetically. Empty input +
+  // empty allTags = no dropdown shown.
+  const suggestions = useMemo(() => {
+    const used = new Set(value.map((t) => t.toLowerCase()))
+    const needle = typed.trim().toLowerCase()
+    return allTags
+      .filter((tg) => !used.has(tg.toLowerCase()))
+      .filter((tg) => !needle || tg.toLowerCase().includes(needle))
+      .sort((a, b) => a.localeCompare(b))
+  }, [value, allTags, typed])
+
+  const addTag = (raw: string) => {
+    const tg = raw.trim()
+    if (!tg) return
+    if (value.some((t) => t.toLowerCase() === tg.toLowerCase())) return  // de-dup
+    onChange([...value, tg])
+    setTyped('')
+    setHighlight(0)
+  }
+  const removeTag = (tg: string) => onChange(value.filter((t) => t !== tg))
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      // Picking a suggestion while the dropdown is open beats committing what's
+      // typed — operator likely arrowed-down to a match.
+      if (open && suggestions[highlight]) addTag(suggestions[highlight])
+      else addTag(typed)
+    } else if (e.key === 'Backspace' && typed === '' && value.length > 0) {
+      // Empty input + Backspace = pop the last chip (familiar tag-editor pattern).
+      removeTag(value[value.length - 1])
+    } else if (e.key === 'ArrowDown' && open) {
+      e.preventDefault()
+      setHighlight((h) => Math.min(h + 1, suggestions.length - 1))
+    } else if (e.key === 'ArrowUp' && open) {
+      e.preventDefault()
+      setHighlight((h) => Math.max(h - 1, 0))
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
+  return (
+    <TagsBox
+      ref={boxRef}
+      onClick={(e) => {
+        // Click anywhere in the box (not on a chip's X) focuses the input — feels
+        // like one continuous field, matching macOS Mail / GitHub label inputs.
+        if (e.target === e.currentTarget) inputRef.current?.focus()
+      }}
+    >
+      {value.map((tg) => (
+        <TagPill key={tg}>
+          {tg}
+          <TagPillX type="button" onClick={() => removeTag(tg)} aria-label={`Remove ${tg}`}>
+            <X size={11} />
+          </TagPillX>
+        </TagPill>
+      ))}
+      <TagInputBare
+        ref={inputRef}
+        value={typed}
+        onChange={(e) => { setTyped(e.target.value); setOpen(true); setHighlight(0) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          // Slight delay so a click on a suggestion fires before we hide the list.
+          setTimeout(() => setOpen(false), 120)
+        }}
+        onKeyDown={onKeyDown}
+        placeholder={value.length === 0 ? placeholder : ''}
+      />
+      {open && panelPos && (() => {
+        // Build the panel content: suggestions (if any), then a "create new tag"
+        // row when the typed value isn't already in the suggestions or the
+        // already-applied tags. Don't show the panel at all when there's nothing
+        // useful to display (no suggestions + no typed value).
+        const typedTrimmed = typed.trim()
+        const alreadyApplied = value.some((t) => t.toLowerCase() === typedTrimmed.toLowerCase())
+        const exactMatch = suggestions.some((tg) => tg.toLowerCase() === typedTrimmed.toLowerCase())
+        const showCreate = !!typedTrimmed && !alreadyApplied && !exactMatch
+        if (suggestions.length === 0 && !showCreate && !typedTrimmed) return null
+        return createPortal(
+          <SuggestionList
+            style={{ top: panelPos.top, left: panelPos.left, minWidth: panelPos.width }}
+          >
+            <SuggestionScroll>
+              {suggestions.length > 0 ? (
+                suggestions.map((tg, i) => (
+                  <SuggestionItem
+                    key={tg}
+                    type="button"
+                    $highlighted={i === highlight}
+                    data-highlighted={i === highlight}
+                    onMouseDown={(e) => { e.preventDefault(); addTag(tg) }}
+                    onMouseEnter={() => setHighlight(i)}
+                  >
+                    <Check size={12} className="check" />
+                    <span>{tg}</span>
+                  </SuggestionItem>
+                ))
+              ) : !showCreate ? (
+                <SuggestionEmpty>{t('nomaflow.editor.tagsNoMatch', 'No matching tags.')}</SuggestionEmpty>
+              ) : null}
+            </SuggestionScroll>
+            {showCreate && (
+              <SuggestionCreateRow
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); addTag(typedTrimmed) }}
+              >
+                <Plus size={13} />
+                {t('nomaflow.editor.tagsCreate', 'Add')}
+                <span className="mono">{typedTrimmed}</span>
+              </SuggestionCreateRow>
+            )}
+          </SuggestionList>,
+          document.body,
+        )
+      })()}
+    </TagsBox>
+  )
+}
 
 const blankJob = (): JobConfig => ({ id: '', description: '', schedule: '', enabled: true, tags: [], steps: [] })
 
@@ -76,6 +314,16 @@ export default function JobEditor() {
 
   const dirty = useMemo(() => job != null && JSON.stringify(job) !== original, [job, original])
   const patch = useCallback((p: Partial<JobConfig>) => setJob((j) => (j ? { ...j, ...p } : j)), [])
+
+  // Tag catalog — every distinct tag in use across jobs.toml, drives the
+  // autocomplete in the TagsField below. Recomputed when allJobs changes
+  // (after a save / external edit).
+  const allTagsCatalog = useMemo<string[]>(() => {
+    if (!allJobs) return []
+    const acc = new Set<string>()
+    for (const j of allJobs) for (const tg of (j.tags ?? [])) acc.add(tg)
+    return [...acc].sort((a, b) => a.localeCompare(b))
+  }, [allJobs])
 
   const save = useCallback(async () => {
     if (!job || !allJobs) return
@@ -172,12 +420,11 @@ export default function JobEditor() {
               </FieldWrap>
               <FieldWrap>
                 <FieldLabel>{t('nomaflow.editor.fieldTags')}</FieldLabel>
-                <Input
-                  value={(job.tags ?? []).join(', ')}
-                  onChange={(e) => patch({
-                    tags: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                  })}
-                  placeholder="nomajde, etl"
+                <TagsField
+                  value={job.tags ?? []}
+                  allTags={allTagsCatalog}
+                  onChange={(next) => patch({ tags: next })}
+                  placeholder={t('nomaflow.editor.tagsPlaceholder', 'Type to add a tag, or pick from existing…')}
                 />
               </FieldWrap>
               <FieldWrap>

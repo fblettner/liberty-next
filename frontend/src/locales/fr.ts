@@ -274,6 +274,10 @@ const fr: Resources = {
       stepCount_other: '{{count}} étapes',
       scheduleView: 'Planning',
       viewRun: 'Voir cette exécution',
+      duplicate: 'Dupliquer cette tâche (copie sous un nouvel id ; désactivée + sans planning).',
+      duplicateBtn: 'Dupliquer',
+      filterByTags: 'Filtre :',
+      clearFilters: 'Effacer',
     },
     editor: {
       newTitle: 'Nouvelle tâche',
@@ -289,6 +293,9 @@ const fr: Resources = {
       fieldDescription: 'Description',
       fieldTimezone: 'Fuseau horaire',
       fieldTags: 'Étiquettes',
+      tagsPlaceholder: 'Saisir une étiquette ou choisir une existante…',
+      tagsNoMatch: 'Aucune étiquette correspondante.',
+      tagsCreate: 'Ajouter',
       fieldEnabled: 'Activée',
       idImmutable: 'L\'identifiant est figé une fois la tâche créée — il indexe l\'historique des exécutions.',
       scheduleHint: 'Une expression cron à 5 champs. Laisser vide pour une tâche manuelle.',
@@ -364,6 +371,7 @@ const fr: Resources = {
     run: {
       title: 'Détail de l\'exécution',
       live: 'en direct',
+      backToRuns: 'Exécutions',
       summary: 'Résumé',
       job: 'Tâche',
       trigger: 'Déclencheur',

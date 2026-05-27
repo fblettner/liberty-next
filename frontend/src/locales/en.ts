@@ -272,6 +272,10 @@ const en = {
       stepCount_other: '{{count}} steps',
       scheduleView: 'Schedule',
       viewRun: 'View this run',
+      duplicate: 'Duplicate this job (clones config to a new id; disabled + unscheduled).',
+      duplicateBtn: 'Duplicate',
+      filterByTags: 'Filter:',
+      clearFilters: 'Clear',
     },
     editor: {
       newTitle: 'New job',
@@ -287,6 +291,9 @@ const en = {
       fieldDescription: 'Description',
       fieldTimezone: 'Timezone',
       fieldTags: 'Tags',
+      tagsPlaceholder: 'Type to add a tag, or pick from existing…',
+      tagsNoMatch: 'No matching tags.',
+      tagsCreate: 'Add',
       fieldEnabled: 'Enabled',
       idImmutable: 'The id is fixed once a job exists — it keys the run history.',
       scheduleHint: 'A 5-field cron expression. Leave blank for a manual-only job.',
@@ -362,6 +369,7 @@ const en = {
     run: {
       title: 'Run detail',
       live: 'live',
+      backToRuns: 'Job Runs',
       summary: 'Summary',
       job: 'Job',
       trigger: 'Trigger',
