@@ -313,6 +313,12 @@ export interface ScreenListItem {
    *  first open. Operators can ungroup / regroup from the Group control; this only seeds the
    *  initial state. Empty = no default grouping (flat rows). */
   initial_group_by?: string[]
+  /** Parent / child hierarchy config — when present, the TableView gains a third view toggle
+   *  (Tree) alongside Table / Chart. Walked at render time: each row is a node, ``parent``
+   *  column points at another row's ``child`` value, ``label`` is the displayed text. Rows
+   *  with an unresolvable parent become roots. */
+  treeview?: ScreenTreeview | null
+
   has_dialog: boolean
   has_row_menu: boolean
   has_actions: boolean
@@ -359,6 +365,17 @@ export interface SheetSpec {
 /** Multi-file / multi-sheet xlsx export config — v2's port of v1's ``tbl_workbook`` /
  *  ``tbl_sheet``. Triggered from the TableView's "Export workbooks" button when set; the
  *  backend ``POST /api/screens/{app}/{id}/export`` streams a single .xlsx or a .zip. */
+/** Parent / child hierarchy config for the TableView's Tree mode. Walked at render time:
+ *  each row is a node, ``parent`` column value points at another row's ``child`` value,
+ *  ``label`` is the displayed text. Rows with unresolvable parents become roots. */
+export interface ScreenTreeview {
+  parent: string
+  child: string
+  label: string
+  /** Sibling sort order — column name(s), priority order. Empty = alphabetic on ``label``. */
+  order_by?: string[]
+}
+
 export interface WorkbookExport {
   /** Column on the screen's read query whose distinct values produce one xlsx per group.
    *  Blank → a single xlsx file. */

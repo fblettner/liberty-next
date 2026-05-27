@@ -362,6 +362,10 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "editable": screen.editable,
         "uploadable": screen.uploadable,
         "initial_group_by": list(screen.initial_group_by),
+        # Tree view config (parent/child/label column names) — None when this
+        # screen is flat-table only. Frontend surfaces a third view toggle
+        # ("Tree") on the TableView when this block is present.
+        "treeview": screen.treeview.model_dump(mode="json") if screen.treeview else None,
         "has_dialog": screen.dialog is not None,
         "has_row_menu": bool(screen.row_menu),
         "has_actions": bool(screen.actions),

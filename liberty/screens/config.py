@@ -753,6 +753,73 @@ class ScreenDialog(BaseModel):
     )
 
 
+class ScreenTreeview(BaseModel):
+    """Parent / child hierarchy config — declares a screen's read query as a tree.
+    When set, the TableView surfaces a third view toggle (Tree) alongside Table /
+    Chart; rows are folded into a recursive node tree where each node's children
+    are the rows whose ``parent`` column value equals this row's ``child`` column
+    value. Rows with an unresolvable parent (null / empty / not present in the
+    result set) become tree roots — robust for filtered / narrowed queries that
+    return a partial tree.
+
+    v1 port of ``ly_tbl_treeview`` (tbl_tree_type='hierarchy'); v1's other tree
+    type — group-by — is covered by v2's :attr:`Screen.initial_group_by`, no
+    separate config needed for that one.
+
+    Example for ``security_menus`` (one node per (root, parent, child) edge):
+
+        [screens.nomasx1.security_menus.treeview]
+        parent = "menu_parent_id"
+        child  = "menu_child_id"
+        label  = "menu_id"
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    parent: str = Field(
+        description=(
+            "Column carrying each row's PARENT id. The tree walker links a "
+            "row UP by matching this against another row's ``child`` value. "
+            "An empty / null / unresolvable value makes the row a root."
+        ),
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    child: str = Field(
+        description=(
+            "Column carrying each row's OWN id — what other rows' ``parent`` "
+            "values match against. Must be unique enough that two rows don't "
+            "collapse into the same tree node (typically the same column the "
+            "table's primary key uses)."
+        ),
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    label: str = Field(
+        description=(
+            "Display text for each node. **Two forms**:\n"
+            "* a bare column name — ``menu_id`` renders the row's ``menu_id`` value;\n"
+            "* a template with ``{column}`` placeholders — "
+            "  ``{menu_label} ({menu_object})`` substitutes each column's value and "
+            "  renders the surrounding literal text verbatim. Useful for menu trees "
+            "  where the operator wants the human label *and* the JDE object id on "
+            "  the same line. Empty placeholders render as empty strings; unknown "
+            "  column names render as the literal ``{...}`` so the operator notices."
+        ),
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    order_by: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sibling sort order — column name(s) the tree sorts children by, "
+            "in priority order. Empty (default) falls back to alphabetic on "
+            "``label``. Example for ``security_menus``: ``[\"MENU_SEQ_UKID\"]`` "
+            "preserves JDE's authoring sequence (menu items render in the order "
+            "the JDE developer placed them, not alphabetically). Numeric values "
+            "sort numerically, strings lexicographically (per-column auto-detect)."
+        ),
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+
+
 class Screen(BaseModel):
     """A screen — list + dialog. Keyed by ``id`` within the app's screens map."""
 
@@ -822,6 +889,16 @@ class Screen(BaseModel):
             "refresh status at a glance instead of a flat row dump."
         ),
         json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    treeview: ScreenTreeview | None = Field(
+        default=None,
+        description=(
+            "Parent / child hierarchy — when set, the TableView gains a Tree view toggle "
+            "alongside Table / Chart. The runtime walks rows via ``parent`` → ``child`` "
+            "edges to build a recursive node tree; rows with an unresolvable parent become "
+            "roots. Use for screens like ``security_menus`` (menu_parent_id → menu_child_id) "
+            "where the natural shape is a tree, not a flat list. See :class:`ScreenTreeview`."
+        ),
     )
     export: WorkbookExport | None = Field(
         default=None,

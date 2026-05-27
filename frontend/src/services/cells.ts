@@ -2,10 +2,13 @@
 
 import type { Column, DisplayRule } from '../types/connectors'
 
-/** Format an arbitrary SQL value for a table cell — `null`/`undefined` → "null"
- *  (flagged via `isNull` so the caller can style it), objects → JSON, else String. */
+/** Format an arbitrary SQL value for a table cell — `null`/`undefined` → "" (blank,
+ *  with `isNull: true` so the caller can still style the cell distinctly if it
+ *  wants), objects → JSON, else String. The blank-instead-of-"null" choice matches
+ *  operator expectations: a missing value reads as absence, not as the literal
+ *  four-letter SQL keyword (which dominated mostly-empty columns visually). */
 export function cellText(v: unknown): { text: string; isNull: boolean } {
-  if (v === null || v === undefined) return { text: 'null', isNull: true }
+  if (v === null || v === undefined) return { text: '', isNull: true }
   if (typeof v === 'object') return { text: JSON.stringify(v), isNull: false }
   return { text: String(v), isNull: false }
 }
@@ -26,7 +29,7 @@ export function ruleCell(
   enumMaps?: Map<string, string>,
   lookupMap?: Map<string, string>,
 ): { text: string; isNull: boolean; kind: 'null' | 'plain' | 'boolean-true' | 'boolean-false' | 'enum' | 'lookup' | 'lookup-pending' } {
-  if (value === null || value === undefined) return { text: 'null', isNull: true, kind: 'null' }
+  if (value === null || value === undefined) return { text: '', isNull: true, kind: 'null' }
   const raw = typeof value === 'object' ? JSON.stringify(value) : String(value)
   const rule = column.rule
   if (!rule) return { text: raw, isNull: false, kind: 'plain' }

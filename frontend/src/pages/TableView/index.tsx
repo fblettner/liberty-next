@@ -6,7 +6,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { Table as TableIcon, Play, BarChart3 } from 'lucide-react'
+import { Table as TableIcon, Play, BarChart3, Network } from 'lucide-react'
 import { api, ApiError, streamNDJSON } from '../../api/client'
 import type { Column, ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
 import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing, useModals } from '../../common'
@@ -20,6 +20,10 @@ import { FilterPanel, type ServerFilter } from './FilterPanel'
 // ChartView pulls in Recharts (~75 kB gz) — split into its own chunk so the table view's
 // initial load stays tight. The chunk only fetches when the operator toggles to Chart mode.
 const ChartView = lazy(() => import('./ChartView').then((m) => ({ default: m.ChartView })))
+// TreeView is much smaller (no third-party tree lib — recursive React) but follows the same
+// lazy pattern for consistency. Only loads when the operator toggles to Tree mode AND only
+// surfaces as a toggle when the screen carries a ``treeview`` config.
+const TreeView = lazy(() => import('./TreeView').then((m) => ({ default: m.TreeView })))
 
 // Run / Max-rows controls — sized to sit inline with the grid's 28px-tall toolbar buttons
 // (Run goes just right of the search box, Max-rows at the far right before the Filters button).
@@ -81,10 +85,12 @@ export default function TableView({ connector, query }: { connector: string; que
   // query). Carries the dialog body the ScreenDialog renders; null means no screen / no dialog,
   // and ResultTable falls back to its inline grid editor.
   const [screen, setScreen] = useState<ScreenDetail | null>(null)
-  // Table / Chart toggle (Phase 8 slice 1). The Chart side is lazy-imported (Recharts) so the
-  // chunk only loads when the operator toggles it. The toggle resets to 'table' each remount —
-  // chart-mode-as-default would surprise an operator opening a fresh tab.
-  const [view, setView] = useState<'table' | 'chart'>('table')
+  // Table / Chart / Tree toggle. Chart pulls in Recharts (~75 kB gz) and Tree is a tiny
+  // recursive React component — both lazy-imported. The Tree button only surfaces when the
+  // current screen carries a ``treeview`` config (gate below); on screens without one the
+  // toggle reads Table / Chart as before. Resets to 'table' on remount — opening a fresh
+  // tab in chart or tree mode would surprise the operator.
+  const [view, setView] = useState<'table' | 'chart' | 'tree'>('table')
 
   useEffect(() => {
     setMeta(null)
@@ -474,6 +480,14 @@ export default function TableView({ connector, query }: { connector: string; que
                   <button type="button" aria-pressed={view === 'chart'} onClick={() => setView('chart')} title={t('table.viewChart')}>
                     <BarChart3 size={12} /> {t('table.viewChart')}
                   </button>
+                  {/* Tree button gated on the screen carrying a ``treeview`` config — surfaces
+                      on hierarchy-shaped screens (security_menus, sod_processes, …) and stays
+                      hidden on flat tables. */}
+                  {screen?.treeview && (
+                    <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')} title={t('table.viewTree', 'Tree')}>
+                      <Network size={12} /> {t('table.viewTree', 'Tree')}
+                    </button>
+                  )}
                 </ViewToggle>
               )}
             </Row>
@@ -484,6 +498,13 @@ export default function TableView({ connector, query }: { connector: string; que
               // toggles to Chart mode. The fallback shows the existing centred spinner.
               <Suspense fallback={<Centered />}>
                 <ChartView result={effectiveResult} connector={connector} query={query} />
+              </Suspense>
+            ) : view === 'tree' && screen?.treeview ? (
+              // Tree-mode falls back to Table when the screen has no treeview config
+              // (defensive — the toggle button is gated above, but a stale ``view='tree'``
+              // could persist across a screen swap). Same Suspense + lazy pattern as Chart.
+              <Suspense fallback={<Centered />}>
+                <TreeView result={effectiveResult} screen={screen} />
               </Suspense>
             ) : (
               <ResultTable
