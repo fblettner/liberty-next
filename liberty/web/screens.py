@@ -331,6 +331,17 @@ def _label_for(screen: Screen, *, language: str | None) -> str:
     return screen.label or screen.description or screen.id
 
 
+def _build_dd_map(screen: Screen) -> dict[str, str]:
+    """``dd → column_name`` for the dashboard filter binding (one entry per ColumnHint with a
+    non-empty ``dd``). First-seen wins on duplicates so reordering columns in the editor can
+    never silently swap which column a dashboard's filter points at."""
+    out: dict[str, str] = {}
+    for h in screen.columns:
+        if h.dd and h.dd not in out:
+            out[h.dd] = h.name
+    return out
+
+
 def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, Any]:
     """The compact descriptor returned by ``GET /api/screens`` — no dialog / actions / row_menu
     body, just enough for the frontend to (a) render the screen list and (b) decide whether to
@@ -378,6 +389,15 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         # the ``has_*`` flags is true; flagging this lets it pull the body even on screens with
         # no dialog / row_menu / actions, purely to pick up the screen-level column hints.
         "has_columns": bool(screen.columns),
+        # ``dd_map`` — { dictionary_key: column_name } shipped on the list view so the dashboard
+        # filter binding can resolve a filter's ``dictionary_key`` to *this* screen's matching
+        # column name without fetching the full body. (Phase 3 follow-up: ColumnHint's ``dd``
+        # used to ride on the connector's describe()'s per-query meta; dropping that left the
+        # dashboard filters as a no-op until this map landed.) Empty when the screen lists no
+        # columns or none of them have a ``dd`` — those screens just can't be filtered, same as
+        # before. A column with the same ``dd`` listed twice is a config bug; we keep the first
+        # so reordering Columns in the editor doesn't silently swap which one a dashboard binds.
+        "dd_map": _build_dd_map(screen),
         # Row-click → sibling-screen dialog (the v1 "Display Properties" promotion). Carried on
         # the list view too so the frontend's TableView can wire row clicks without fetching the
         # full screen body (the property is only set on screens that need it; absent for most).

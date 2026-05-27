@@ -52,11 +52,13 @@ export function KpiWidget({ widget, filters, filterValues }: KpiWidgetProps) {
   const { t } = useTranslation()
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { connectors } = useWorkspace()
+  const { findScreen } = useWorkspace()
 
+  // Resolve dashboard filters → URL params via the screen's dd_map (Phase 3 — column dd hints
+  // live on the Screen layer now, not the connector describe()).
   const filterParams = useMemo(
-    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, connectors),
-    [widget.connector, widget.query, filters, filterValues, connectors],
+    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
+    [widget.connector, widget.query, filters, filterValues, findScreen],
   )
   const filterParamsKey = JSON.stringify(filterParams)
 

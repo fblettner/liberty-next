@@ -330,6 +330,11 @@ export interface ScreenListItem {
    *  whenever any ``has_*`` flag is true; this one lets it pull the body purely for the column
    *  hints on screens that have no dialog / row_menu / actions. */
   has_columns?: boolean
+  /** ``dictionary_key → column_name`` map built from the screen's column hints — surfaced on the
+   *  list view so dashboard filters can resolve a filter's ``dictionary_key`` to this screen's
+   *  matching column name without fetching the full body. Empty / missing when the screen lists
+   *  no columns or none carry a ``dd`` — those screens can't be filtered, same as before. */
+  dd_map?: Record<string, string>
   /** Promoted-from-ctx-menu row-click target. When this screen has no own ``dialog`` and the
    *  user clicks a row, the frontend opens *the named screen's* dialog as a modal — the
    *  ``row_click_binds`` map this row's columns to the target read_query's params, the

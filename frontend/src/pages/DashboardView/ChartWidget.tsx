@@ -44,13 +44,15 @@ export interface ChartWidgetProps {
 export function ChartWidget({ widget, filters, filterValues }: ChartWidgetProps) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { connectors } = useWorkspace()
+  const { findScreen } = useWorkspace()
 
   // Resolve dashboard filters → URL params for this widget's specific query. Memoized so we
-  // don't refetch on every render — only when the actual bound params change.
+  // don't refetch on every render — only when the actual bound params change. The screen
+  // lookup walks an indexed Map; cheap enough to ignore the identity of `findScreen` (it
+  // stabilises on `screens` only via WorkspaceContext's useCallback).
   const filterParams = useMemo(
-    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, connectors),
-    [widget.connector, widget.query, filters, filterValues, connectors],
+    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
+    [widget.connector, widget.query, filters, filterValues, findScreen],
   )
   // Stable key for the useEffect deps — JSON-stringify the params so object identity changes
   // don't trigger a refetch unless the actual values changed.
