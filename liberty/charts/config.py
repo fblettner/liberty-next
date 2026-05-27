@@ -61,13 +61,16 @@ class ChartSpec(BaseModel):
         # connector + query (live introspection via /api/sql ?_limit=0).
         # ``allowCustom`` on the SearchSelect still lets operators type a
         # column the introspection didn't surface (e.g. a column added to the
-        # query AFTER the chart was saved).
-        json_schema_extra={"x_enum_ref": "CHART_COLUMNS"},
+        # query AFTER the chart was saved). ``x_case = upper`` normalises any
+        # typed-custom value to UPPERCASE on save (the v1 column-name convention
+        # the rest of the editors follow). Options from the dropdown are
+        # already correctly cased.
+        json_schema_extra={"x_enum_ref": "CHART_COLUMNS", "x_case": "upper"},
     )
     y: list[str] = Field(
         default_factory=list,
         description="Result column(s) for the Y axis. Empty → nothing to render. Pie collapses to the first entry.",
-        json_schema_extra={"x_enum_ref": "CHART_COLUMNS"},
+        json_schema_extra={"x_enum_ref": "CHART_COLUMNS", "x_case": "upper"},
     )
     aggregation: Aggregation = Field(
         default="sum",

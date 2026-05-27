@@ -91,7 +91,14 @@ class ScreenField(BaseModel):
     # ``liberty-migrate screen`` to move legacy per-field metadata onto Screen.columns.
     model_config = ConfigDict(extra="ignore")
 
-    name: str = Field(description="The screen column to render here (matches Screen.columns[].name).")
+    name: str = Field(
+        description="The screen column to render here (matches Screen.columns[].name).",
+        # ScreenField.name references a Screen.columns[].name entry. Normalise to
+        # UPPERCASE on save so the dialog field list stays consistent with the
+        # column list (the column-name match is case-insensitive at runtime, but
+        # mixed casing in the saved TOML is operator-confusing).
+        json_schema_extra={"x_case": "upper"},
+    )
     hidden: bool | None = Field(
         default=None,
         description="Hide this field on this dialog. Leave blank to inherit from the column.",

@@ -172,11 +172,17 @@ class ParamBind(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    param: str = Field(description="Target parameter name (the ``:placeholder`` on the destination query).")
+    param: str = Field(
+        description="Target parameter name (the ``:placeholder`` on the destination query).",
+        # Param + source are column-name references. Normalise to UPPERCASE on save
+        # so action chains / nested_table tabs / lookup binds all use one convention.
+        json_schema_extra={"x_case": "upper"},
+    )
     value: str | None = Field(default=None, description="Literal value to bind.")
     source: str | None = Field(
         default=None,
         description="Read the value at call time from a column / form field / chain context path.",
+        json_schema_extra={"x_case": "upper"},
     )
     default: str | None = Field(
         default=None,
@@ -198,11 +204,17 @@ class ColumnHint(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="Result column this entry applies to (case-insensitive match).")
+    name: str = Field(
+        description="Result column this entry applies to (case-insensitive match).",
+        # Column names by v1 convention are UPPERCASE (USR_ID / APPS_ID style).
+        # Runtime match is case-insensitive, but normalising on save keeps the
+        # saved screens.toml / connectors.toml consistent.
+        json_schema_extra={"x_case": "upper"},
+    )
     dd: str | None = Field(
         default=None,
         description="Inherit label / format / rule from this dictionary entry. Blank uses the column ``name`` as the key; set to ``\"\"`` to opt out.",
-        json_schema_extra={"x_enum_ref": "DD_ENTRIES"},
+        json_schema_extra={"x_enum_ref": "DD_ENTRIES", "x_case": "upper"},
     )
     label: str | None = Field(default=None, description="Display title in the grid header and the dialog field.")
     hidden: bool = Field(default=False, description="Hide this column by default. The operator can un-hide it via the grid's Columns menu.")

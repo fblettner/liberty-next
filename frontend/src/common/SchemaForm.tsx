@@ -66,6 +66,21 @@ export interface JsonSchema {
    *  (any match). Hidden fields are not rendered at all; their stored value (if any) stays in
    *  the model — switching the gate back surfaces it again. */
   x_visible_when?: { field: string; value: string | string[] }
+  /** Case-normalise the string value on save. Operator can type anything; the saved TOML
+   *  carries the normalised form. ``"upper"`` matches the v1 convention for column names
+   *  (USR_ID / APPS_ID style) + lines up with how the SQL connector's filter-wrap compares
+   *  hint names. Applies to plain string Inputs, SearchSelect ``allowCustom`` writes, and
+   *  every entry of a ``list[str]`` StringListEditor. */
+  x_case?: 'upper' | 'lower'
+}
+
+
+/** Normalise a string value according to ``x_case``. Whitespace is left intact so an
+ *  operator's intentional pad (rare but possible) isn't silently stripped. */
+function applyCase(v: string, sub: JsonSchema): string {
+  if (sub.x_case === 'upper') return v.toUpperCase()
+  if (sub.x_case === 'lower') return v.toLowerCase()
+  return v
 }
 
 /** One entry in the framework-enum registry (server-rendered, fetched via /admin/config/schema).
@@ -608,7 +623,10 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           control = (
             <StringListEditor
               value={arr}
-              onChange={(v) => set(key, v.length ? v : undefined)}
+              // Case-normalise each entry on save (same x_case hint as scalar string
+              // fields). Operator can type lowercase column names; the saved list stays
+              // in the configured convention.
+              onChange={(v) => set(key, v.length ? v.map((x) => applyCase(x, sub)) : undefined)}
               options={opts}
               allowCustom={!literalSet}
             />
@@ -617,7 +635,8 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
           const literalSet = Array.isArray(sub.enum) ? new Set(sub.enum.map((e) => String(e))) : null
           const opts = enumOptions(fe, literalSet)
           control = (
-            <SearchSelect value={cur == null ? '' : String(cur)} onChange={(v) => set(key, v === '' ? undefined : v)}
+            <SearchSelect value={cur == null ? '' : String(cur)}
+              onChange={(v) => set(key, v === '' ? undefined : applyCase(v, sub))}
               options={opts} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" allowCustom={!literalSet} />
           )
         } else if (Array.isArray(sub.enum)) {
@@ -645,7 +664,8 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
                   onNavigate={(index, summary) => onNavigate({ kind: 'item', key, index, label: `${labelPlain}: ${summary}` })} />
               : <ObjectListEditor itemSchema={items} defs={allDefs} value={objs} onChange={setArr} />
           } else {
-            control = <StringListEditor value={arr.map((x) => (x == null ? '' : String(x)))} onChange={(v) => set(key, v.length ? v : undefined)} />
+            control = <StringListEditor value={arr.map((x) => (x == null ? '' : String(x)))}
+              onChange={(v) => set(key, v.length ? v.map((x) => applyCase(x, sub)) : undefined)} />
           }
         } else if (isStringMap(sub)) {
           const map = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
@@ -683,7 +703,10 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
               onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
           ) : (
             <Input type="text" value={cur == null ? '' : String(cur)} placeholder={placeholder}
-              onChange={(e) => set(key, e.target.value === '' ? undefined : e.target.value)} />
+              onChange={(e) => {
+                const raw = e.target.value
+                set(key, raw === '' ? undefined : applyCase(raw, sub))
+              }} />
           )
         } else {
           control = <Complex>complex value — edit it in the raw editor</Complex>

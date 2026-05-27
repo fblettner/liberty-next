@@ -120,7 +120,7 @@ function readDark(): boolean {
 export default function Layout() {
   const { t, i18n } = useTranslation()
   const { user, logout } = useAuth()
-  const { license } = useWorkspace()
+  const { license, refresh: refreshWorkspace } = useWorkspace()
   // a configured-but-broken key (expired / bad signature) is worth flagging; "no key" isn't (the open framework)
   const licenseBanner = license.mode === 'restricted' && license.error && !/no license key/i.test(license.error)
     ? license.error : null
@@ -168,6 +168,17 @@ export default function Layout() {
       /* ignore */
     }
     setLang(l)
+    // i18next's languageChanged event re-renders every useTranslation() consumer
+    // for free, but server-rendered text (menu labels from /api/menus, column
+    // labels + cell display rules baked into query results by the dictionary
+    // layer) was fetched under the OLD Accept-Language. Without a refresh the
+    // sidebar tree, tab titles, table headers, and lookup-resolved cells all
+    // stay in the previous language until a full page reload — which is what
+    // the operator was working around. Re-fetching the workspace state pulls
+    // the menus/screens/dashboards under the new language; the TabHost listens
+    // to the same i18next event + remounts its tabs so each TableView refetches
+    // its query result with the new header too.
+    refreshWorkspace()
   }
 
   // a `/sql/...`, `/http/...`, `/dashboard/...`, or `/nomaflow/runs/:id` route → show the tab

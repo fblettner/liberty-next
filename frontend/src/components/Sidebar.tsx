@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
+import { SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -98,23 +98,6 @@ const Item = styled(NavLink)<{ $collapsed: boolean }>`
   }
 `
 
-const ExtItem = styled.a<{ $collapsed: boolean }>`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-radius: ${radius.md};
-  border: 1px solid transparent;
-  font-size: ${fontSize.base};
-  font-family: ${fonts.sans};
-  color: ${colors.text.muted};
-  padding: ${({ $collapsed }) => ($collapsed ? '8px 0' : '8px 10px')};
-  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
-  white-space: nowrap;
-  overflow: hidden;
-  transition: color 0.15s, border-color 0.15s;
-  &:hover { color: ${colors.text.secondary}; border-color: ${colors.border}; text-decoration: none; }
-`
-
 const GroupLabel = styled.div`
   font-size: ${fontSize.micro};
   font-weight: 700;
@@ -174,26 +157,18 @@ function FrameworkLinks({
 }) {
   return (
     <>
-      {/* Connectors page + AI Assistant moved off the sidebar — Connectors is admin-only
-          context (operators use the per-screen menus instead) and the assistant lives in
-          a top-toolbar-toggled right-side drawer now (see TopBar's AI button). Settings
-          stays here for superusers; the rest is in the per-app menu trees from /api/menus. */}
+      {/* Connectors page + AI Assistant + API Docs moved off the sidebar — Connectors
+          is admin-only context (operators use the per-screen menus instead), the
+          assistant lives in a top-toolbar-toggled right-side drawer (TopBar's AI
+          button), and API Docs is a developer-only link served by FastAPI at /docs
+          (operators don't need it surfaced in the navigation). Settings stays here
+          for superusers; the rest is in the per-app menu trees from /api/menus. */}
       {superuser && (
         <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
           <SlidersHorizontal size={iconSize} />
           {!collapsed && t('nav.settings')}
         </Item>
       )}
-      <ExtItem
-        href="/docs"
-        target="_blank"
-        rel="noreferrer"
-        $collapsed={collapsed}
-        title={collapsed ? t('nav.apiDocs') : undefined}
-      >
-        <BookOpen size={iconSize} />
-        {!collapsed && t('nav.apiDocs')}
-      </ExtItem>
     </>
   )
 }
