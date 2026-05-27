@@ -11,7 +11,8 @@ import { useTabs, type TabKind } from "./tabs/TabsContext";
 // Framework pages are code-split; the SQL/HTTP screens aren't routed directly — they live as
 // tabs (see components/TabHost), and these route components just open/activate the matching tab.
 const Connectors = lazy(() => import("./pages/Connectors"));
-const Chat = lazy(() => import("./pages/Chat"));
+// AI assistant is no longer a routed page — it lives in a right-side drawer toggled
+// from the utility bar (see components/AiDrawer). The /chat URL is gone.
 const Settings = lazy(() => import("./pages/Settings"));
 const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
@@ -65,7 +66,6 @@ export default function App() {
         <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
-        <Route path="chat" element={<Chat />} />
         <Route path="settings" element={<Settings />} />
         {/* nomaflow feature area — Jobs list + Job editor + Schedule (NOMAFLOW-UI.md) */}
         <Route path="nomaflow" element={<Nomaflow />} />

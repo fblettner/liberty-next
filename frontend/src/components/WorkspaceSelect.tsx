@@ -1,11 +1,15 @@
 // The "current app" picker in the top utility pill. Lists the *apps* you can access (connectors
-// that have a menu — not the data-source pools they hang off); picking one filters the Connectors
-// page / nav to it ("(all apps)" = no filter). Rendered only when there's more than one app — with
-// one, "all" and that app show the same thing, so there's nothing to pick. Reuses the standard
-// `SearchSelect` so it stays consistent with the rest of the dropdowns (themed popover, search,
-// keyboard-friendly) instead of a bare <select>.
+// that have a menu — not the data-source pools they hang off); picking one switches the sidebar
+// + workspace tabs to that app. Rendered only when there's more than one app — with one, there's
+// nothing to pick. Reuses the standard `SearchSelect` so it stays consistent with the rest of
+// the dropdowns (themed popover, search, keyboard-friendly) instead of a bare <select>.
+//
+// The "(all apps)" entry was dropped per operator feedback — it served nothing in practice (the
+// sidebar already shows every app's tree when no app is picked, just stacked; the picker should
+// be a hard switch, not a soft filter). When currentApp is null (legacy localStorage), the
+// picker auto-initialises to the first app so the displayed value always matches state.
+import { useEffect } from 'react'
 import styled from '@emotion/styled'
-import { useTranslation } from 'react-i18next'
 import { SearchSelect } from '../common'
 import { colors } from '../theme'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -25,8 +29,14 @@ const Sep = styled.div`
 `
 
 export default function WorkspaceSelect() {
-  const { t } = useTranslation()
   const { apps, currentApp, setCurrentApp } = useWorkspace()
+  // Auto-init when apps loaded but no app picked yet — drops the "(all apps)" middle state
+  // so the picker always reflects a real app (the operator picks across apps, never "none").
+  useEffect(() => {
+    if (apps && apps.length > 0 && !currentApp) {
+      setCurrentApp(apps[0].name)
+    }
+  }, [apps, currentApp, setCurrentApp])
   if (!apps || apps.length < 2) return null
   const options = apps.map((c) => ({ value: c.name, label: c.name }))
   return (
@@ -34,10 +44,10 @@ export default function WorkspaceSelect() {
       <Wrap>
         <SearchSelect
           value={currentApp ?? ''}
-          onChange={(v) => setCurrentApp(v || null)}
+          // Always switch to a real app — there's no "no selection" option anymore,
+          // so v is always a valid app name (never empty string).
+          onChange={(v) => { if (v) setCurrentApp(v) }}
           options={options}
-          anyLabel={t('workspace.allApps')}
-          placeholder={t('workspace.allApps')}
         />
       </Wrap>
       <Sep />

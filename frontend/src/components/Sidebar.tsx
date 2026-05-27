@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { LayoutGrid, Sparkles, SlidersHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
+import { SlidersHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -174,14 +174,10 @@ function FrameworkLinks({
 }) {
   return (
     <>
-      <Item to="/" end $collapsed={collapsed} title={collapsed ? t('nav.connectors') : undefined}>
-        <LayoutGrid size={iconSize} />
-        {!collapsed && t('nav.connectors')}
-      </Item>
-      <Item to="/chat" $collapsed={collapsed} title={collapsed ? t('nav.assistant') : undefined}>
-        <Sparkles size={iconSize} />
-        {!collapsed && t('nav.assistant')}
-      </Item>
+      {/* Connectors page + AI Assistant moved off the sidebar — Connectors is admin-only
+          context (operators use the per-screen menus instead) and the assistant lives in
+          a top-toolbar-toggled right-side drawer now (see TopBar's AI button). Settings
+          stays here for superusers; the rest is in the per-app menu trees from /api/menus. */}
       {superuser && (
         <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
           <SlidersHorizontal size={iconSize} />

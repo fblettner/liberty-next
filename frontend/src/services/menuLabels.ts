@@ -38,3 +38,19 @@ export function findMenuLabel(menus: MenusByApp | null | undefined, key: ScreenK
   }
   return undefined
 }
+
+/** Sibling to :func:`findMenuLabel` that also returns the owning app's label —
+ *  used by TabStrip to render two-line tabs (app name on top, screen label below)
+ *  so duplicates like "Users" under nomasx1 + ldap stay distinguishable. Returns
+ *  ``undefined`` when no matching menu leaf exists. ``appLabel`` falls back to the
+ *  app's key when the AppMenu didn't declare a ``label``. */
+export function findMenuLabelWithApp(
+  menus: MenusByApp | null | undefined, key: ScreenKey,
+): { label: string; app: string; appLabel: string } | undefined {
+  if (!menus) return undefined
+  for (const app of Object.values(menus)) {
+    const found = walk(app.items, app.app, key)
+    if (found !== undefined) return { label: found, app: app.app, appLabel: app.label || app.app }
+  }
+  return undefined
+}

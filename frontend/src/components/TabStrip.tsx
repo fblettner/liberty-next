@@ -10,7 +10,7 @@ import { Table as TableIcon, Globe, Workflow, X } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
-import { findMenuLabel } from '../services/menuLabels'
+import { findMenuLabelWithApp } from '../services/menuLabels'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
@@ -23,7 +23,11 @@ const TitleBlock = styled.div`
   & .sub { font-size: ${fontSize.base}; color: ${colors.text.muted}; }
 `
 const TabBtn = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 30px; padding: 0 6px 0 10px;
+  /* Two-line layout: app name on top (small/muted), screen label below.
+     Single-line fallback when no app context is known (e.g. nomaflow run tabs
+     whose target isn't in any menu tree). Slight height bump from 30px → 42px
+     to fit both lines without crowding. */
+  display: inline-flex; align-items: center; gap: 6px; max-width: 240px; min-height: 42px; padding: 4px 6px 4px 10px;
   border: 1px solid ${({ $active }) => ($active ? colors.border : 'transparent')};
   border-bottom: 1px solid ${({ $active }) => ($active ? colors.bg.card : 'transparent')};
   border-radius: ${radius.md} ${radius.md} 0 0; margin-bottom: -1px;
@@ -32,7 +36,9 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer; white-space: nowrap; flex-shrink: 0;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
   &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.bg.card : 'var(--hover-subtle)')}; }
-  & .label { overflow: hidden; text-overflow: ellipsis; }
+  & .text { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+  & .app { font-size: ${fontSize.micro}; color: ${colors.text.muted}; line-height: 1; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  & .label { line-height: 1.15; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
   & svg.tic { flex-shrink: 0; opacity: 0.65; }
 `
 const CloseX = styled.span`
@@ -79,16 +85,26 @@ export default function TabStrip() {
           tab.kind === 'http' ? Globe :
           tab.kind === 'nomaflow_run' ? Workflow :
           TableIcon
-        // Nomaflow run tabs aren't menu-tree entries; label them "Run <short-id>". The full
-        // run_id stays in the title attribute for hover. Other kinds keep the menu lookup,
-        // which needs the narrower ScreenKey shape (sql/http/dashboard only).
-        const label = tab.kind === 'nomaflow_run'
-          ? t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
-          : findMenuLabel(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string }) ?? tab.target
+        // Resolve label + owning app via the menu tree so duplicates like "Users" under
+        // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
+        // Nomaflow run tabs aren't menu-tree entries — label them "Run <short-id>" with
+        // no app top-line (they're cross-app diagnostics anyway).
+        let label: string
+        let appLabel: string | undefined
+        if (tab.kind === 'nomaflow_run') {
+          label = t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
+        } else {
+          const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
+          label = hit?.label ?? tab.target
+          appLabel = hit?.appLabel
+        }
         return (
           <TabBtn key={tab.id} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${label} — ${tab.connector}.${tab.target}`}>
             <Icon className="tic" size={13} />
-            <span className="label">{label}</span>
+            <span className="text">
+              {appLabel && <span className="app">{appLabel}</span>}
+              <span className="label">{label}</span>
+            </span>
             <CloseX onClick={(e) => onClose(e, tab)} title={t('tabs.close')}><X size={12} /></CloseX>
           </TabBtn>
         )

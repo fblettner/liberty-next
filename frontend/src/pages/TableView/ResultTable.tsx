@@ -13,7 +13,7 @@
 // filter kind so DataTable's per-column filter row shows the right control.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
@@ -344,9 +344,11 @@ export function ResultTable({
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
   // which keeps the workspace's tab manager in charge (no full page reload).
   const navigate = useNavigate()
-  // openOrActivate is the workspace-tab counterpart of ``navigate`` — used by the row_click_route
-  // path to add the destination as a tab in the strip (instead of replacing the current view).
-  const { openOrActivate } = useTabs()
+  // Drill-source bookkeeping — when the operator follows a row_click_route, we pass the
+  // active tab's id + the source path through location.state so the destination's
+  // BackButton can close the drill tab + return in one click ("same tab" feel, see UI 3).
+  const location = useLocation()
+  const { activeId } = useTabs()
   const canEdit = !!(updateQuery || insertQuery)
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -413,15 +415,13 @@ export function ResultTable({
       }
       return v == null ? '' : encodeURIComponent(String(v))
     })
-    // Route → workspace-tab mapping. Add another branch here when a new ``row_click_route``
-    // destination needs tab hosting (and add its kind to TabsContext + TabHost in the same
-    // change). Falls through to plain navigation for un-tabbed routes.
-    const nomaflowRun = url.match(/^\/nomaflow\/runs\/([^/?#]+)/)
-    if (nomaflowRun) {
-      openOrActivate({ kind: 'nomaflow_run', connector: '', target: decodeURIComponent(nomaflowRun[1]) })
-    }
-    navigate(url)
-  }, [rowClickRoute, navigate, openOrActivate])
+    // Plain SPA navigation — the destination URL's TabRoute marker (App.tsx) auto-creates
+    // the workspace tab if needed (no need to pre-create here). We thread the source
+    // pathname + active tab id through location.state so the destination's BackButton can
+    // (a) navigate back and (b) close the drill tab in one click — that's the "same tab"
+    // feel the operator wants without re-architecting URL↔tab coupling.
+    navigate(url, { state: { from: location.pathname, fromTabId: activeId } })
+  }, [rowClickRoute, navigate, location.pathname, activeId])
   const openProxyForRow = useCallback(async (row: Record<string, unknown>) => {
     if (!screen?.row_click_screen) return
     setProxyOpen(true); setProxyLoading(true); setProxyError(null)

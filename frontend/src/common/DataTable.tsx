@@ -508,6 +508,15 @@ export function DataTable<T extends object>({
               {groupOpen && (
                 <ColMenu>
                   <MenuTitle>{t('table.groupBy')}</MenuTitle>
+                  {/* "None" — clears every grouping in one click. Renders only when at least
+                      one grouping is active; collapsing each grouped column individually was
+                      the only way to ungroup before this entry landed. */}
+                  {grouping.length > 0 && (
+                    <ColRow onClick={() => setGrouping([])} style={{ cursor: 'pointer' }}>
+                      <CheckBox $on={false} />
+                      <ColLabel>{t('table.groupNone', '(None — ungroup all)')}</ColLabel>
+                    </ColRow>
+                  )}
                   {effectiveOrder.map((colId) => {
                     const col = table.getColumn(colId)
                     if (!col || !col.getCanGroup()) return null

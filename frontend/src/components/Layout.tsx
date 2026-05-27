@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { Outlet, useMatch } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut, User } from 'lucide-react'
+import { Sun, Moon, LogOut, User, Sparkles } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
@@ -16,7 +16,9 @@ import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import WorkspaceSelect from './WorkspaceSelect'
 import TabStrip from './TabStrip'
+import BackButton from './BackButton'
 import TabHost from './TabHost'
+import AiDrawer from './AiDrawer'
 
 const THEME_KEY = 'liberty.theme'
 
@@ -125,6 +127,10 @@ export default function Layout() {
   const [dark, setDark] = useState(readDark)
   const [lang, setLang] = useState<Language>(i18n.language === 'fr' ? 'fr' : 'en')
   const [profileOpen, setProfileOpen] = useState(false)
+  // AI assistant drawer — open/close state for the right-side slide-in (replaces the
+  // removed /chat full-page route + the sidebar entry). Toggled by the Sparkles button
+  // in the utility bar below.
+  const [aiOpen, setAiOpen] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', !dark)
@@ -180,6 +186,10 @@ export default function Layout() {
       <Sidebar />
       <MainArea>
         <TabStrip />
+        {/* Back-affordance for drill-down navigation (row_click_route) — only renders when
+            the operator got here via a row click that threaded ``location.state.from``.
+            Clicking it closes the drill tab + navigates back to the source. */}
+        <BackButton />
         <ContentArea>
           {licenseBanner && (
             <Banner $tone="error" style={{ margin: '12px 16px 0' }}>{t('license.banner', { error: licenseBanner })}</Banner>
@@ -200,6 +210,11 @@ export default function Layout() {
         </UtilBtn>
         <UtilBtn $active={lang === 'fr'} onClick={() => switchLang('fr')} title="Français">
           FR
+        </UtilBtn>
+        <Sep />
+        {/* AI assistant — toggles the right-side drawer (replaces /chat full-page route). */}
+        <UtilBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant', 'AI Assistant')}>
+          <Sparkles size={14} />
         </UtilBtn>
         <Sep />
         <UtilBtn onClick={toggleTheme} title={dark ? t('common.lightMode') : t('common.darkMode')}>
@@ -223,6 +238,7 @@ export default function Layout() {
       </UtilityBar>
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
+      <AiDrawer open={aiOpen} onClose={() => setAiOpen(false)} />
     </Shell>
   )
 }

@@ -32,6 +32,9 @@ const APP_KEY = 'liberty.app'
 // connector is an app (so opening a screen on a data-source connector via an app's menu doesn't
 // yank the workspace over to it).
 const CONNECTOR_ROUTE = /^\/(?:sql|http)\/([^/]+)\//
+// Dashboard routes carry no connector segment (just /dashboard/<id>) — the implicit-follow
+// effect below looks the id up in every app's menu tree to figure out which app to switch to.
+const DASHBOARD_ROUTE = /^\/dashboard\/([^/?#]+)/
 
 interface WorkspaceState {
   connectors: ConnectorMeta[] | null // every accessible connector (null while loading / signed out)
@@ -166,6 +169,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setCurrentAppState((cur) => (cur === name ? cur : name))
     writeApp(name)
   }, [pathname, isApp])
+
+  // Same implicit-follow for dashboard routes (/dashboard/<id>) — the URL has no connector
+  // segment, so we resolve the owning app by walking every app's menu tree for a dashboard
+  // leaf whose target matches the id. The first app whose menu lists this dashboard wins;
+  // a dashboard not referenced by any menu (rare — only reachable via a typed URL) leaves
+  // the picked app alone, same fallthrough as the connector-route effect above.
+  useEffect(() => {
+    if (!menus) return
+    const m = DASHBOARD_ROUTE.exec(pathname)
+    if (!m) return
+    const dashboardId = decodeURIComponent(m[1])
+    const findInTree = (nodes: Array<{ type?: string; target?: string; items?: typeof nodes }>): boolean => {
+      for (const n of nodes) {
+        if (n.type === 'dashboard' && n.target === dashboardId) return true
+        if (n.items && findInTree(n.items)) return true
+      }
+      return false
+    }
+    for (const [appName, appMenu] of Object.entries(menus)) {
+      if (findInTree(appMenu.items)) {
+        if (!isApp(appName)) return
+        setCurrentAppState((cur) => (cur === appName ? cur : appName))
+        writeApp(appName)
+        return
+      }
+    }
+  }, [pathname, menus, isApp])
 
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)
