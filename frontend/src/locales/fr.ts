@@ -333,6 +333,8 @@ const fr: Resources = {
       params: 'Paramètres',
       callable: 'Appelable (module:fonction)',
       callablePlaceholder: 'Choisir un appelable, ou saisir module:fonction…',
+      targetJobId: 'Tâche cible',
+      targetJobIdPlaceholder: 'Choisir la tâche que cette étape appelle…',
       opKwargs: 'Arguments nommés',
       server: 'Serveur LDAP',
       bindDn: 'DN de connexion',

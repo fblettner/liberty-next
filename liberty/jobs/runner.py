@@ -130,6 +130,28 @@ class JobRunner:
         # endpoint looks up the task and calls .cancel() on it, which raises
         # CancelledError inside the run loop → terminal state CANCELED.
         self._active_runs: dict[str, asyncio.Task] = {}
+        # run_id → effective overrides (log_level + params_override) for that
+        # in-flight run. Populated when execute_run starts; consumed by the
+        # :class:`CallJobExecutor` via :meth:`read_parent_overrides` so a
+        # child run inherits its parent's DEBUG flag + per-fire params. Cleared
+        # in execute_run's finally block (same shape as ``_active_runs``).
+        self._effective_overrides: dict[str, dict[str, Any]] = {}
+
+    def add_executor(self, step_type: StepType, executor: StepExecutor) -> None:
+        """Register an executor AFTER construction. Used by the wiring layer for
+        the :class:`CallJobExecutor`, which needs a back-reference to this
+        runner — the chicken-and-egg ordering means we can't include it in the
+        constructor's executor map. Idempotent on the step_type key (a second
+        call overwrites the first; used by tests + hot-reload)."""
+        self._executors[step_type] = executor
+
+    def read_parent_overrides(self, run_id: str) -> dict[str, Any]:
+        """Return the effective overrides for an in-flight run — used by
+        :class:`CallJobExecutor` to inherit ``log_level`` + ``params_override``
+        into the child run. Returns an empty dict for unknown runs (defensive:
+        if the run isn't tracked, the child gets clean defaults — which is the
+        safe behaviour for an unexpected lookup)."""
+        return self._effective_overrides.get(run_id, {})
 
     # -- public ----------------------------------------------------------- #
 
@@ -156,6 +178,7 @@ class JobRunner:
         params_override: dict[str, Any] | None = None,
         step_enabled_overrides: dict[str, bool] | None = None,
         log_level: str | None = None,
+        parent_chain: list[tuple[str, str]] | None = None,
     ) -> JobRun:
         """Execute an allocated *run* — the long-lived part of the lifecycle.
 
@@ -187,6 +210,15 @@ class JobRunner:
         buffer. ``None`` (default) uses ``job.log_level`` from jobs.toml (also
         defaults to ``"INFO"``). Pre-existing logger levels are restored in
         the finally block regardless of how the run terminates.
+
+        ``parent_chain`` is the call_job ancestry — every (job_id, run_id) of
+        a parent run when this execution was spawned by a ``call_job`` step.
+        Top-level fires (scheduled / manual / API) pass ``None``. The chain is
+        threaded onto :attr:`RunContext.parent_chain` so the
+        :class:`CallJobExecutor` can detect cycles before spawning further
+        children. The chain is also used to mark this run's overrides cache so
+        :meth:`read_parent_overrides` can return the parent's settings for
+        inheritance (DEBUG cascades, ``params_override`` cascades).
         """
         if run.state in (RunState.SUCCEEDED.value, RunState.FAILED.value, RunState.CANCELED.value):
             # Resumed a run that already terminated — return it as-is. Happens
@@ -228,10 +260,25 @@ class JobRunner:
             job.id, run.id, trigger.kind, len(job.steps), effective_log_level,
         )
 
-        ctx = RunContext(run_id=run.id, job_id=job.id, trigger=trigger)
+        # Stash the effective overrides so a call_job step in this run can
+        # query them via :meth:`read_parent_overrides` and pass them on to the
+        # child run. Cleared in the finally block (memory leak otherwise — the
+        # in-flight runs map keeps cleanup honest already, this is its sibling).
+        self._effective_overrides[run.id] = {
+            "log_level": effective_log_level if effective_log_level == "DEBUG" else None,
+            "params_override": dict(params_override) if params_override else None,
+        }
+
+        ctx = RunContext(
+            run_id=run.id, job_id=job.id, trigger=trigger,
+            parent_chain=list(parent_chain or []),
+        )
         terminal = RunState.SUCCEEDED  # optimistic; flipped on first failure
         total_rows = 0
         executed_step_count = 0
+        # When a step fails, the last error string lands here for _finalize to
+        # write to JobRun.error_message. Empty string stays empty for success.
+        failed_step_error: str | None = None
 
         try:
             for idx, step in enumerate(job.steps):
@@ -274,9 +321,11 @@ class JobRunner:
                 else:
                     effective_step = step
                 step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx)
-                if step_result is None:
-                    # Step failed after all retries — mark remaining steps SKIPPED.
+                if isinstance(step_result, str):
+                    # Step failed after all retries (string is the last error).
+                    # Stash on the run + mark remaining steps SKIPPED.
                     terminal = RunState.FAILED
+                    failed_step_error = step_result
                     await self._record_skipped(run, job, start_index=idx + 1)
                     break
                 if step_result.rows_affected is not None:
@@ -300,6 +349,10 @@ class JobRunner:
             # too (the run's buffer is flushed to the DB by _finalize, which
             # took the run id explicitly — it doesn't need the contextvar).
             self._active_runs.pop(run.id, None)
+            # Drop the overrides cache entry — a call_job child run could query
+            # this for parent inheritance, but once the parent terminates the
+            # entry is dead weight. Same lifecycle as ``_active_runs``.
+            self._effective_overrides.pop(run.id, None)
             reset_run_context(log_token)
             # Restore the saved logger levels (if we raised any for DEBUG). A
             # parallel run shouldn't have its DEBUG capture downgraded by us
@@ -307,7 +360,7 @@ class JobRunner:
             for ns, prev_level in saved_log_levels.items():
                 logging.getLogger(ns).setLevel(prev_level)
 
-        await self._finalize(run, terminal, total_rows=total_rows)
+        await self._finalize(run, terminal, total_rows=total_rows, error=failed_step_error)
         _log.info(
             "nomaflow.runner job=%s run=%s steps=%d state=%s",
             job.id, run.id, executed_step_count, terminal.value,
@@ -459,10 +512,15 @@ class JobRunner:
         step: Step,
         policy: JobRetry | None,
         ctx: RunContext,
-    ) -> StepResult | None:
+    ) -> "StepResult | str":
         """Run *step* with retries per *policy*; return the StepResult on success,
-        None when all retries are exhausted (caller marks remaining steps SKIPPED)."""
+        an error STRING (the last failed attempt's message) when all retries are
+        exhausted. The caller writes this string onto the JobRun.error_message
+        so operators see WHICH step failed without drilling into per-step
+        records, and so a call_job parent can re-raise it as the cause of its
+        own failure."""
         attempts = policy.attempts if policy is not None else 1
+        last_error = f"step {step.name!r} failed after {attempts} attempt(s)"
         for attempt in range(1, attempts + 1):
             delay = compute_backoff_delay(policy, attempt)
             if delay > 0:
@@ -475,11 +533,9 @@ class JobRunner:
             )
             executor = self._executors.get(step.type)
             if executor is None:
-                await self._record_step_failure(
-                    step_run.id,
-                    error=f"no executor registered for step type {step.type.value!r}",
-                )
-                return None
+                err = f"no executor registered for step type {step.type.value!r}"
+                await self._record_step_failure(step_run.id, error=err)
+                return err
 
             try:
                 result = await asyncio.wait_for(
@@ -487,12 +543,10 @@ class JobRunner:
                     timeout=step.timeout_seconds,
                 )
             except asyncio.TimeoutError:
-                await self._record_step_failure(
-                    step_run.id,
-                    error=f"step timed out after {step.timeout_seconds}s",
-                )
+                last_error = f"step timed out after {step.timeout_seconds}s"
+                await self._record_step_failure(step_run.id, error=last_error)
                 if attempt >= attempts:
-                    return None
+                    return last_error
                 continue
             except asyncio.CancelledError:
                 await self._record_step_state(step_run.id, RunState.CANCELED, error="cancelled")
@@ -501,11 +555,12 @@ class JobRunner:
                 # Executor signalled an intentional cancel (e.g. operator pressed
                 # Cancel mid-execution); record it and stop — do *not* retry.
                 await self._record_step_state(step_run.id, RunState.CANCELED, error=str(exc))
-                return None
+                return f"step {step.name!r} cancelled: {exc}"
             except StepFailed as exc:
-                await self._record_step_failure(step_run.id, error=str(exc))
+                last_error = str(exc)
+                await self._record_step_failure(step_run.id, error=last_error)
                 if attempt >= attempts:
-                    return None
+                    return last_error
                 continue
             except Exception as exc:
                 # Unexpected — still counts as a failed attempt for retry, but log
@@ -514,12 +569,10 @@ class JobRunner:
                     "nomaflow.runner unexpected exception in step %r (run=%s, attempt=%d)",
                     step.name, run.id, attempt,
                 )
-                await self._record_step_failure(
-                    step_run.id,
-                    error=f"unexpected: {type(exc).__name__}: {exc}",
-                )
+                last_error = f"unexpected: {type(exc).__name__}: {exc}"
+                await self._record_step_failure(step_run.id, error=last_error)
                 if attempt >= attempts:
-                    return None
+                    return last_error
                 continue
 
             await self._record_step_success(step_run.id, result)

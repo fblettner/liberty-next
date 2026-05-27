@@ -35,6 +35,13 @@ class StepType(str, Enum):
     PYTHON = "python"
     LDAP_SYNC = "ldap_sync"
     HTTP = "http"
+    # call_job — fires another job inline within the calling step (waits for the
+    # child to terminate before continuing). The child gets its own JobRun row
+    # so the run history stays uniform; cycle detection is in-memory via the
+    # parent chain on RunContext (see :class:`CallJobExecutor`). Inherits the
+    # parent's log_level (so DEBUG traces the whole chain) and any per-fire
+    # params_override (so an operator's "run with apps_id=42" cascades).
+    CALL_JOB = "call_job"
 
 
 class CopyMode(str, Enum):
@@ -172,6 +179,14 @@ class Step(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     body: Any = None
 
+    # call_job — fires another job (by id) inline within this step. The child
+    # runs to terminal-state before this step returns; the child's outcome
+    # decides this step's result (FAILED→fail, CANCELED→cancel, SUCCEEDED→ok
+    # with the child's total rows_affected). Cycle detection is in-memory via
+    # ``RunContext.parent_chain`` — calling a job already in the chain fails
+    # the step at fire time with "cycle detected: A → B → A".
+    target_job_id: str | None = None
+
     # universal
     timeout_seconds: int = Field(3600, ge=1)
 
@@ -199,6 +214,8 @@ class Step(BaseModel):
             self._require("server", "bind_dn", "search_base", "target_connector", "target_query")
         elif self.type is StepType.HTTP:
             self._require("url")
+        elif self.type is StepType.CALL_JOB:
+            self._require("target_job_id")
         return self
 
     def _require(self, *fields: str) -> None:

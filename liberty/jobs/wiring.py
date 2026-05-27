@@ -25,7 +25,7 @@ from liberty.jobs.registry import JobRegistry, load_jobs
 from liberty.jobs.runner import Broadcaster, JobRunner
 from liberty.jobs.scheduler import JobScheduler
 from liberty.jobs.schema import StepType
-from liberty.jobs.steps import PythonStepExecutor, SqlCopyExecutor, SqlQueryExecutor, StepExecutor
+from liberty.jobs.steps import CallJobExecutor, PythonStepExecutor, SqlCopyExecutor, SqlQueryExecutor, StepExecutor
 
 _log = logging.getLogger(__name__)
 
@@ -81,25 +81,40 @@ def build_executors(
     connectors: ConnectorRegistry,
     *,
     settings: Settings | None = None,
+    registry: Any | None = None,
 ) -> dict[StepType, StepExecutor]:
     """The default executor wiring — one per implemented :class:`StepType`.
 
     Chunk 2a/b ships ``sql_query`` and ``sql_copy``; ``python`` was added to
     unblock the nomasx1 v1→v2 port (its agent modules need to run as named
-    callables, the same way Airflow's PythonOperator did). ``ldap_sync`` and
-    ``http`` are still pending — jobs that reference them parse fine but fail
-    at run time with a clear "no executor registered" message from ``JobRunner``.
+    callables, the same way Airflow's PythonOperator did). Phase C added
+    ``call_job`` for inter-job composition. ``ldap_sync`` and ``http`` are
+    still pending — jobs that reference them parse fine but fail at run time
+    with a clear "no executor registered" message from ``JobRunner``.
 
     *settings* is optional so existing test wirings keep working with just a
     registry; when given, the python step executor injects it into callables
     that declare a ``settings`` kwarg (needed by config-management steps like
     clone-app that operate on the file paths under ``settings.<section>``).
+
+    *registry* is optional and only needed when ``call_job`` is in use —
+    :class:`CallJobExecutor` looks up the target job by id. When not provided
+    the call_job slot is omitted; jobs referencing call_job will get the same
+    "no executor registered" failure ``ldap_sync`` / ``http`` already produce
+    (suitable default for tests that don't touch call_job).
     """
-    return {
+    out: dict[StepType, StepExecutor] = {
         StepType.SQL_QUERY: SqlQueryExecutor(connectors),
         StepType.SQL_COPY: SqlCopyExecutor(connectors),
         StepType.PYTHON: PythonStepExecutor(connectors, settings=settings),
     }
+    if registry is not None:
+        # The runner reference is back-filled by build_nomaflow after the
+        # JobRunner is constructed (see attach_runner there) — registry alone
+        # is enough at construction time so build_executors can stay
+        # synchronous + not need the runner pre-existing.
+        out[StepType.CALL_JOB] = CallJobExecutor(registry)
+    return out
 
 
 async def build_nomaflow(
@@ -180,11 +195,16 @@ async def build_nomaflow(
     if sio_layer is not None:
         broadcaster = SioJobBroadcaster(sio_layer)
 
-    runner = JobRunner(
-        db,
-        build_executors(connectors, settings=settings),
-        broadcaster=broadcaster,
-    )
+    # Build the executor map WITH the registry so CallJobExecutor is included;
+    # then back-fill the runner reference once the JobRunner is constructed.
+    # Order matters — the runner needs the executor map at __init__ time, but
+    # the call_job executor needs the runner to spawn children. The
+    # post-construction attach_runner is the bridge.
+    executors = build_executors(connectors, settings=settings, registry=registry)
+    runner = JobRunner(db, executors, broadcaster=broadcaster)
+    call_job_exec = executors.get(StepType.CALL_JOB)
+    if isinstance(call_job_exec, CallJobExecutor):
+        call_job_exec.attach_runner(runner)
     scheduler = JobScheduler(
         registry,
         runner,

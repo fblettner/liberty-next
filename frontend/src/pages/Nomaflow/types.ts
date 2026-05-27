@@ -49,7 +49,7 @@ export interface JobAlerts {
   recipients: string[]
 }
 
-export type StepType = 'sql_copy' | 'sql_query' | 'python' | 'ldap_sync' | 'http'
+export type StepType = 'sql_copy' | 'sql_query' | 'python' | 'ldap_sync' | 'http' | 'call_job'
 
 /** One step. Typed loosely — the per-type forms (increment 4–5) narrow it; the
  *  list view only needs `type` + `name`. */

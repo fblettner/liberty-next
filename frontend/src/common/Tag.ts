@@ -1,7 +1,7 @@
 import styled from '@emotion/styled'
 import { colors, radius, fontSize, fonts } from '../theme'
 
-export type Tone = 'neutral' | 'blue' | 'green' | 'red' | 'orange' | 'purple'
+export type Tone = 'neutral' | 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'yellow'
 
 function tonePalette(tone: Tone) {
   switch (tone) {
@@ -10,6 +10,7 @@ function tonePalette(tone: Tone) {
     case 'red': return colors.red
     case 'orange': return colors.orange
     case 'purple': return colors.purple
+    case 'yellow': return colors.yellow
     default: return null
   }
 }

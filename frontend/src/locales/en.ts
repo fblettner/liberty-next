@@ -332,6 +332,8 @@ const en = {
       callable: 'Callable (module:function)',
       callablePlaceholder: 'Pick a callable, or type a module:function…',
       opKwargs: 'Keyword arguments',
+      targetJobId: 'Target job',
+      targetJobIdPlaceholder: 'Pick the job this step calls…',
       server: 'LDAP server',
       bindDn: 'Bind DN',
       bindPassword: 'Bind password',

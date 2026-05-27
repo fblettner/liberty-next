@@ -52,6 +52,14 @@ class RunContext:
     # runner before each step.execute() call. ``${prev.rows_affected}`` in the
     # spec resolves through this field at template-time (not implemented in 2a).
     prev_rows_affected: int | None = None
+    # call_job parent chain — every (job_id, run_id) ancestor of this run, oldest
+    # first. Empty for top-level runs; one entry per call_job hop down the chain.
+    # The CallJobExecutor checks for cycles by looking up its target_job_id in
+    # this list before spawning the child run (fail-fast: A → B → A raises at
+    # design time, not after the child boots and burns a transaction). Propagated
+    # automatically by the runner when execute_run is invoked with the parent's
+    # context (see :meth:`JobRunner.execute_run`'s ``parent_chain`` kwarg).
+    parent_chain: list[tuple[str, str]] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

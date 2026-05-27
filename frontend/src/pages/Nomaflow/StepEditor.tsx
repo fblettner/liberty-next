@@ -56,10 +56,10 @@ const TextArea = styled.textarea`
   &:focus { border-color: ${colors.blue.main}; }
 `
 
-const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral'> = {
-  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral',
+const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral' | 'yellow'> = {
+  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow',
 }
-const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http']
+const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job']
 
 /** A fresh blank step of *type* — the "+ Add" buttons append one of these. */
 function blankStep(type: StepType): StepConfig {
@@ -74,6 +74,8 @@ function blankStep(type: StepType): StepConfig {
       return { type, name: '', server: '', bind_dn: '', search_base: '', target_connector: '', target_query: '' }
     case 'http':
       return { type, name: '', url: '', method: 'GET' }
+    case 'call_job':
+      return { type, name: '', target_job_id: '' }
   }
 }
 
@@ -89,6 +91,7 @@ function stepSummary(s: StepConfig): string {
     case 'python': return String(f.callable ?? '')
     case 'ldap_sync': return String(f.server ?? '')
     case 'http': return `${f.method ?? 'GET'} ${f.url ?? ''}`
+    case 'call_job': return `→ ${f.target_job_id ?? '?'}`
     default: return ''
   }
 }
@@ -426,6 +429,60 @@ function HttpForm({ step, patch }: FormProps) {
   )
 }
 
+// ── call_job: pick another job from the catalog ───────────────────────────────────
+//
+// Reuses the same module-level cache pattern as the PythonForm callable
+// catalog — one fetch per browser session, shared across all call_job steps.
+// allowCustom stays on (an operator might be drafting a target job that
+// doesn't exist yet — let them type the id; the validator at fire time
+// surfaces the typo as a clear "target not found" error).
+type JobBrief = { id: string; description?: string | null; tags?: string[] }
+let _jobIdsCache: JobBrief[] | null = null
+let _jobIdsPromise: Promise<JobBrief[]> | null = null
+function loadJobIds(): Promise<JobBrief[]> {
+  if (_jobIdsCache) return Promise.resolve(_jobIdsCache)
+  if (_jobIdsPromise) return _jobIdsPromise
+  _jobIdsPromise = api.get<{ jobs: JobBrief[] }>('/admin/jobs')
+    .then((r) => { _jobIdsCache = r.jobs; return r.jobs })
+    .finally(() => { _jobIdsPromise = null })
+  return _jobIdsPromise
+}
+
+function CallJobForm({ step, patch }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  const [catalog, setCatalog] = useState<JobBrief[]>(_jobIdsCache ?? [])
+  useEffect(() => {
+    if (_jobIdsCache) return
+    let cancelled = false
+    loadJobIds().then((list) => { if (!cancelled) setCatalog(list) }).catch(() => { /* silent */ })
+    return () => { cancelled = true }
+  }, [])
+  const options = useMemo<SearchSelectOption[]>(
+    () => catalog.map((j) => ({
+      value: j.id,
+      mono: j.id,
+      label: j.description || j.id,
+    })),
+    [catalog],
+  )
+  return (
+    <Grid>
+      <Field $span={3}>
+        <FieldLabel>{t('nomaflow.steps.targetJobId', 'Target job')}</FieldLabel>
+        <SearchSelect
+          value={String(f.target_job_id ?? '')}
+          onChange={(v) => patch({ target_job_id: v } as Partial<StepConfig>)}
+          options={options}
+          allowCustom
+          placeholder={t('nomaflow.steps.targetJobIdPlaceholder', 'Pick the job this step calls…')}
+          loading={catalog.length === 0 && _jobIdsPromise !== null}
+        />
+      </Field>
+    </Grid>
+  )
+}
+
 // ── one step card ──────────────────────────────────────────────────────────────────
 function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplicate, onDelete }: {
   step: StepConfig
@@ -467,6 +524,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
           {step.type === 'python' && <PythonForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'ldap_sync' && <LdapSyncForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'http' && <HttpForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'call_job' && <CallJobForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
         </Body>
       )}
     </Card>
