@@ -540,18 +540,26 @@ export function ScreenDialog({
       return
     }
     // Collect every value that's on a *currently visible* field on a non-hidden tab. Fields
-    // hidden by `visible_when` (or `hidden = true`) are dropped from the body so a now-irrelevant
+    // hidden by `visible_when` (or `hidden = true`) are dropped on UPDATE so a now-irrelevant
     // column keeps its current DB value (same behaviour as v1 — a hidden field on save isn't
-    // written). Password fields with empty values are also dropped so we don't overwrite the
-    // stored hash / ENC: ciphertext with NULL or "".
+    // written). On INSERT we INCLUDE hidden fields when they carry a value in formValues —
+    // there's no current DB value to preserve, and seeded binds (e.g. a nested_table tab's
+    // parent-PK bind into the FK column) MUST land or the backend's sequence-auto-fill /
+    // default-substitution machinery fires for an empty bind and the row gets the wrong PK.
+    // Password fields with empty values are still dropped on both modes so we don't overwrite
+    // the stored hash / ENC: ciphertext with NULL or "".
     const sent: Row = {}
     // The parent's save only collects its own form tabs' fields. Nested-form tabs write through
     // their own update/insert queries (slice 2 — coordinated via a register-on-parent-save hook).
     for (const tab of tabs.filter(isFormTab)) {
       for (const f of tab.fields ?? []) {
-        if (!fieldStateOf(f).visible) continue
+        if (!fieldStateOf(f).visible && mode !== 'add') continue
         if (!(f.name in formValues)) continue
         const v = formValues[f.name]
+        // On add, also skip empty hidden fields — there's no point binding NULL to a hidden
+        // column the operator never saw; let the backend's defaults take over. Only hidden
+        // fields WITH a value (from seed / bind / explicit default) flow through.
+        if (mode === 'add' && !fieldStateOf(f).visible && (v == null || v === '')) continue
         const col = colByName.get(f.name.toLowerCase()) ?? null
         if (isPassword(col) && (v == null || v === '')) continue
         sent[f.name] = v

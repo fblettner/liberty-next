@@ -387,6 +387,16 @@ export function NestedTableView({
         onRowClick={canEdit ? handleRowClick : undefined}
       />
       {subDialog && nestedScreen && (
+        // ``keyColumns`` is the missing prop that made nested-table inserts fail with an FK
+        // violation: without it, every field on the sub-dialog renders any inherited LOOKUP
+        // rule (e.g. settings_jde_tv.TV_APPS_ID's ``dd = "APPS_ID"`` inherits the LOOKUP from
+        // the dictionary), and the SearchSelect's async options arriving AFTER the seed lands
+        // clobbers the bound parent-PK value (`{ TV_APPS_ID: "10" }`) — the form ended up
+        // POSTing whatever the SearchSelect picked as fallback, which was usually not the
+        // parent's PK and almost always a FK violation. Passing the nested screen's
+        // key_columns lets ScreenDialog short-circuit the LOOKUP on add (via suppressLookup)
+        // and render the FK column as a plain disabled Input showing the seeded value, which
+        // the form then POSTs unchanged — same pattern v1 used.
         <ScreenDialog
           open
           nested
@@ -395,6 +405,7 @@ export function NestedTableView({
           columns={result.columns}
           row={subDialog.row}
           connector={nestedConnector}
+          keyColumns={nestedScreen.key_columns}
           onClose={() => setSubDialog(null)}
           onSaved={() => { setSubDialog(null); setRefreshTick((n) => n + 1) }}
         />
