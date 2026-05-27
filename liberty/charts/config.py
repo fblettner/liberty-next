@@ -39,6 +39,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ChartType = Literal["bar", "line", "area", "pie"]
 Aggregation = Literal["sum", "avg", "count", "min", "max", "none"]
+# Which side of the cartesian plot a Y series binds to. The default ("left") is what
+# every chart used until this iteration; "right" opts a series into a second Y axis,
+# the v1 dual-scale pattern (e.g. revenue $M on the left, unit count on the right).
+# The frontend only emits the second YAxis when at least one series asks for it, so
+# single-axis charts stay visually identical to their pre-multi-axis selves.
+YAxisSide = Literal["left", "right"]
 
 
 class ChartSpec(BaseModel):
@@ -74,6 +80,27 @@ class ChartSpec(BaseModel):
     show_legend: bool | None = Field(default=None, description="Show the legend (default: only when there's more than one series).")
     show_grid: bool | None = Field(default=None, description="Show the cartesian grid (default on; pie ignores).")
     sort_by_x: bool | None = Field(default=None, description="Sort categories alphabetically by X (default: input order).")
+    # Per-series colour overrides — parallel to ``y`` and indexed positionally. An empty
+    # string (or a missing trailing entry) means "fall back to the built-in palette" for
+    # that series. Operators reorder ``y`` and ``colors`` together; the validator below
+    # enforces that ``len(colors) <= len(y)`` so an off-by-one never silently colours the
+    # wrong series. Stored as CSS-friendly strings (``"#3b82f6"`` / ``"rgb(...)"``) so the
+    # frontend can pass them straight to Recharts without parsing.
+    colors: list[str] = Field(
+        default_factory=list,
+        description="Optional per-series colour overrides (CSS strings, parallel to `y`). Empty → use the palette.",
+    )
+    # Per-series axis assignment — same parallel-list pattern as ``colors``. Use "right"
+    # to opt a series onto the right-hand Y axis (the v1 dual-Y pattern); "left" is the
+    # default. Missing trailing entries default to "left". Pie ignores (no cartesian axes).
+    y_axis: list[YAxisSide] = Field(
+        default_factory=list,
+        description=(
+            "Per-series Y-axis assignment (`left` / `right`), parallel to `y`. Empty or all "
+            "`left` → single-axis chart (current default behaviour). Any `right` entry switches "
+            "the chart to dual-axis."
+        ),
+    )
 
 
 class ChartConfig(BaseModel):
@@ -112,6 +139,20 @@ class ChartConfig(BaseModel):
             raise ValueError(f"chart {self.id!r}: spec.x (the X axis column) is required.")
         if not self.spec.y:
             raise ValueError(f"chart {self.id!r}: spec.y (the Y axis column list) must have at least one entry.")
+        # Parallel-array sanity check — a longer ``colors`` / ``y_axis`` than ``y`` means
+        # the operator deleted a Y series without trimming the corresponding tail entry,
+        # which would silently colour the wrong series next time they add one back.
+        # Trailing entries shorter than ``y`` are fine (default to palette / "left").
+        if len(self.spec.colors) > len(self.spec.y):
+            raise ValueError(
+                f"chart {self.id!r}: spec.colors ({len(self.spec.colors)}) has more entries than "
+                f"spec.y ({len(self.spec.y)}); colours are positional, trim the trailing entries."
+            )
+        if len(self.spec.y_axis) > len(self.spec.y):
+            raise ValueError(
+                f"chart {self.id!r}: spec.y_axis ({len(self.spec.y_axis)}) has more entries than "
+                f"spec.y ({len(self.spec.y)}); axis assignments are positional, trim the trailing entries."
+            )
         return self
 
 

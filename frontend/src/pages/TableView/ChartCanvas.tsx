@@ -57,11 +57,18 @@ const TooltipSwatch = styled.span<{ $color: string }>`
 const TooltipLabel = styled.span`color: ${colors.text.secondary}; flex: 1;`
 const TooltipValue = styled.span`color: ${colors.text.primary}; font-variant-numeric: tabular-nums; font-family: ${fonts.mono};`
 
-// Series palette — cycled when there are more Y columns than themed colours.
-const SERIES_COLORS = [
+// Series palette — cycled when there are more Y columns than themed colours. Used as the
+// default when ``spec.colors[i]`` is unset / empty for that series. Exported so the
+// ChartView's series editor can use the same colour as the swatch placeholder + the
+// initial value of a colour picker (operators see what they'd be overriding).
+export const SERIES_COLORS = [
   colors.blue.main, colors.green.main, colors.orange.main, colors.purple.main,
   colors.red.main, colors.yellow.main,
 ]
+export const seriesColorAt = (index: number, spec?: { colors?: string[] }): string => {
+  const override = spec?.colors?.[index]
+  return override && override.trim() ? override : SERIES_COLORS[index % SERIES_COLORS.length]
+}
 const ANIMATION_MS = 350
 
 export interface ChartCanvasProps {
@@ -190,7 +197,13 @@ function GradientDefs({ count, gradId, seriesColor }: { count: number; gradId: s
 export function renderChart(
   spec: ChartSpec, data: ReturnType<typeof buildChartData>, allCols: Column[], opts: RenderOpts,
 ): React.ReactElement {
-  const seriesColor = (i: number) => SERIES_COLORS[i % SERIES_COLORS.length]
+  const seriesColor = (i: number) => seriesColorAt(i, spec)
+  // Resolve each series' axis side (parallel to spec.y, defaulting to "left"). We compute
+  // ``hasRight`` upfront so the cartesian charts only emit the second YAxis (and the per-
+  // series ``yAxisId`` props) when at least one series actually opts in — keeping single-
+  // axis charts visually identical to their pre-dual-axis selves.
+  const yAxisSide = (i: number): 'left' | 'right' => spec.yAxis?.[i] === 'right' ? 'right' : 'left'
+  const hasRight = (spec.yAxis ?? []).some((s) => s === 'right')
   const grid = spec.showGrid !== false
   const yLabels = spec.y.map((y) => {
     const col = allCols.find((c) => c.name === y)
@@ -203,12 +216,26 @@ export function renderChart(
     />
   )
   // Horizontal-only dashed grid — feels lighter, lets the bars own the vertical rhythm.
+  // In dual-axis mode the grid binds to the left axis; we anchor it explicitly so Recharts
+  // doesn't double-draw against both YAxes.
   const cartesianGrid = grid && (
-    <CartesianGrid strokeDasharray="3 6" stroke={colors.border} vertical={false} strokeOpacity={0.6} />
+    <CartesianGrid strokeDasharray="3 6" stroke={colors.border} vertical={false} strokeOpacity={0.6}
+      {...(hasRight ? { yAxisId: 'left' as const } : {})} />
   )
   const legend = opts.showLegend && (
     <Legend verticalAlign="bottom" iconType="circle" iconSize={8}
       wrapperStyle={{ fontSize: 11, color: colors.text.muted, paddingTop: 6 }} />
+  )
+  // YAxis blocks — emit the right-hand axis only when at least one series opted in so the
+  // single-axis charts (the vast majority) keep their existing visual rhythm. The yAxisId
+  // values match Recharts' conventional "left" / "right" string ids.
+  const yAxes = hasRight ? (
+    <>
+      <YAxis yAxisId="left"  tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} orientation="left" />
+      <YAxis yAxisId="right" tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} orientation="right" />
+    </>
+  ) : (
+    <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
   )
 
   if (spec.type === 'pie') {
@@ -236,16 +263,21 @@ export function renderChart(
       </PieChart>
     )
   }
+  // ``axisProps(i)`` produces an empty object on single-axis charts (Recharts uses its default
+  // axis) and ``{ yAxisId: 'left' | 'right' }`` on dual-axis charts. Spreading is the cleanest
+  // way to opt a series in conditionally without forking the JSX between the two modes.
+  const axisProps = (i: number) => hasRight ? { yAxisId: yAxisSide(i) } : {}
   if (spec.type === 'line') {
     return (
       <LineChart data={data} margin={CHART_MARGIN}>
         {cartesianGrid}
         <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
-        <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
+        {yAxes}
         {tooltip}
         {legend}
         {spec.y.map((y, i) => (
           <Line key={y} dataKey={y} name={yLabels[i]} stroke={seriesColor(i)} strokeWidth={2}
+            {...axisProps(i)}
             dot={data.length <= 50 ? { r: 3, strokeWidth: 0, fill: seriesColor(i) } : false}
             activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--bg-base)', fill: seriesColor(i) }}
             animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200} />
@@ -259,11 +291,12 @@ export function renderChart(
         <GradientDefs count={spec.y.length} gradId={opts.gradId} seriesColor={seriesColor} />
         {cartesianGrid}
         <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
-        <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
+        {yAxes}
         {tooltip}
         {legend}
         {spec.y.map((y, i) => (
           <Area key={y} dataKey={y} name={yLabels[i]} type="monotone"
+            {...axisProps(i)}
             stroke={seriesColor(i)} strokeWidth={2}
             fill={`url(#${opts.gradId}-${i})`}
             stackId={spec.stacked ? 'stack' : undefined}
@@ -277,11 +310,12 @@ export function renderChart(
       <GradientDefs count={spec.y.length} gradId={opts.gradId} seriesColor={seriesColor} />
       {cartesianGrid}
       <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
-      <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
+      {yAxes}
       {tooltip}
       {legend}
       {spec.y.map((y, i) => (
         <Bar key={y} dataKey={y} name={yLabels[i]} fill={`url(#${opts.gradId}-${i})`}
+          {...axisProps(i)}
           radius={[6, 6, 0, 0]}                 // rounded top corners — modern bar look
           stackId={spec.stacked ? 'stack' : undefined}
           animationDuration={ANIMATION_MS} isAnimationActive={data.length <= 200} />

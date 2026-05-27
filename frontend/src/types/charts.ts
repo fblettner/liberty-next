@@ -8,6 +8,10 @@ export type ChartType = 'bar' | 'line' | 'pie' | 'area'
  *  render every row — useful when the X axis is already unique like a timestamp). */
 export type Aggregation = 'sum' | 'avg' | 'count' | 'min' | 'max' | 'none'
 
+/** Which side of the cartesian plot a series binds to. Mirrors backend's YAxisSide; the
+ *  default is "left", "right" opts the series onto a second Y axis (the v1 dual-scale pattern). */
+export type YAxisSide = 'left' | 'right'
+
 export interface ChartSpec {
   type: ChartType
   /** Column name to group/categorise by — the x-axis (or slice label for pie). */
@@ -23,6 +27,14 @@ export interface ChartSpec {
   showGrid?: boolean
   /** Sort categories alphabetically by x (default false → input order). */
   sortByX?: boolean
+  /** Per-series colour overrides, parallel to `y` and indexed positionally. Missing /
+   *  empty-string entries fall back to the built-in palette (see SERIES_COLORS in
+   *  ChartCanvas). Stored as CSS strings ("#3b82f6" / "rgb(...)" ) so they pass straight
+   *  to Recharts. */
+  colors?: string[]
+  /** Per-series Y-axis assignment, parallel to `y`. Missing entries default to "left";
+   *  the chart renders the right-hand YAxis only when at least one entry is "right". */
+  yAxis?: YAxisSide[]
 }
 
 export const CHART_TYPES: ChartType[] = ['bar', 'line', 'area', 'pie']
@@ -57,6 +69,10 @@ export interface SavedChartSpec {
   show_legend?: boolean | null
   show_grid?: boolean | null
   sort_by_x?: boolean | null
+  /** Per-series colour overrides — parallel to `y`. Empty / omitted entries → palette. */
+  colors?: string[]
+  /** Per-series Y-axis assignment — parallel to `y`. Backend's `y_axis` field. */
+  y_axis?: YAxisSide[]
 }
 
 /** Translate the runtime ChartSpec (camelCase, with seeded defaults) into the persisted form
@@ -67,6 +83,13 @@ export function toSavedSpec(spec: ChartSpec): SavedChartSpec {
   if (spec.showLegend != null) out.show_legend = spec.showLegend
   if (spec.showGrid != null) out.show_grid = spec.showGrid
   if (spec.sortByX != null) out.sort_by_x = spec.sortByX
+  // Trim trailing empty / default entries before saving so a chart that only colours
+  // the first of three series doesn't carry two redundant '' entries in TOML. Same for
+  // y_axis — an all-"left" tail collapses to nothing, keeping the file diff-friendly.
+  const colors = trimTrailing(spec.colors ?? [], (c) => !c)
+  if (colors.length) out.colors = colors
+  const yAxis = trimTrailing(spec.yAxis ?? [], (s) => s === 'left')
+  if (yAxis.length) out.y_axis = yAxis
   return out
 }
 
@@ -83,5 +106,14 @@ export function fromSavedSpec(saved: SavedChartSpec): ChartSpec {
     showLegend: saved.show_legend ?? undefined,
     showGrid: saved.show_grid ?? undefined,
     sortByX: saved.sort_by_x ?? undefined,
+    colors: saved.colors ?? undefined,
+    yAxis: saved.y_axis ?? undefined,
   }
+}
+
+/** Drop trailing entries that match a predicate (treated as "default" — not worth saving). */
+function trimTrailing<T>(arr: T[], isDefault: (v: T) => boolean): T[] {
+  let end = arr.length
+  while (end > 0 && isDefault(arr[end - 1])) end -= 1
+  return arr.slice(0, end)
 }
