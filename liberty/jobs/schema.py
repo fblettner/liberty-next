@@ -162,7 +162,9 @@ class Step(BaseModel):
     callable: str | None = None  # ``module:function`` — see PHASE13.md §5.3
     op_kwargs: dict[str, Any] = Field(default_factory=dict)
 
-    # ldap_sync (Phase 13a parses these but doesn't execute; runner lands later)
+    # ldap_sync — paged search on the bind/base/filter, every entry pushed through
+    # ``target_query`` on ``target_connector`` with params built from ``mapping``
+    # (LDAP attr → param name). See :class:`LdapSyncExecutor`.
     server: str | None = None
     bind_dn: str | None = None
     bind_password: str | None = None
@@ -173,7 +175,10 @@ class Step(BaseModel):
     target_query: str | None = None
     mapping: dict[str, str] = Field(default_factory=dict)
 
-    # http (placeholder; full shape comes when the executor does)
+    # http — single request, success on 2xx. ``body`` accepts None / str / bytes /
+    # dict / list (dict and list are JSON-encoded; the executor seeds
+    # ``Content-Type: application/json`` when no header was set). See
+    # :class:`HttpStepExecutor`.
     url: str | None = None
     method: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)

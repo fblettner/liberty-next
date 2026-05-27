@@ -31,6 +31,8 @@ from liberty.jobs.schema import (
     StepType,
 )
 from liberty.jobs.steps import (
+    HttpStepExecutor,
+    LdapSyncExecutor,
     PythonStepExecutor,
     RunContext,
     SqlCopyExecutor,
@@ -59,6 +61,8 @@ __all__ = [
     "JobsFile",
     "RunLog",
     "ManualTrigger",
+    "HttpStepExecutor",
+    "LdapSyncExecutor",
     "PythonStepExecutor",
     "RunContext",
     "RunState",

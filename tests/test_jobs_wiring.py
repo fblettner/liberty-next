@@ -69,12 +69,19 @@ def _settings(jobs_toml: Path) -> Settings:
 
 
 def test_build_executors_covers_implemented_step_types(connectors) -> None:
-    """sql_query + sql_copy (chunks 2a/b) and python (added to unblock the
-    nomasx1 v1→v2 port — its agent modules run as named callables). ldap_sync
-    and http are still pending. A future refactor that drops one of these
-    fails this test."""
+    """All non-``call_job`` step types are wired by default: sql_query + sql_copy
+    (chunks 2a/b), python (nomasx1 v1→v2 port), ldap_sync + http (last two
+    stubs lit up). ``call_job`` is opt-in (needs the registry passed in) so it's
+    NOT in the default map. A future refactor that drops one of these fails
+    this test."""
     execs = build_executors(connectors)
-    assert set(execs.keys()) == {StepType.SQL_QUERY, StepType.SQL_COPY, StepType.PYTHON}
+    assert set(execs.keys()) == {
+        StepType.SQL_QUERY,
+        StepType.SQL_COPY,
+        StepType.PYTHON,
+        StepType.LDAP_SYNC,
+        StepType.HTTP,
+    }
 
 
 # --------------------------------------------------------------------------- #

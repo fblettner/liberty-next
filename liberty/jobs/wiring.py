@@ -25,7 +25,15 @@ from liberty.jobs.registry import JobRegistry, load_jobs
 from liberty.jobs.runner import Broadcaster, JobRunner
 from liberty.jobs.scheduler import JobScheduler
 from liberty.jobs.schema import StepType
-from liberty.jobs.steps import CallJobExecutor, PythonStepExecutor, SqlCopyExecutor, SqlQueryExecutor, StepExecutor
+from liberty.jobs.steps import (
+    CallJobExecutor,
+    HttpStepExecutor,
+    LdapSyncExecutor,
+    PythonStepExecutor,
+    SqlCopyExecutor,
+    SqlQueryExecutor,
+    StepExecutor,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -85,12 +93,11 @@ def build_executors(
 ) -> dict[StepType, StepExecutor]:
     """The default executor wiring — one per implemented :class:`StepType`.
 
-    Chunk 2a/b ships ``sql_query`` and ``sql_copy``; ``python`` was added to
-    unblock the nomasx1 v1→v2 port (its agent modules need to run as named
-    callables, the same way Airflow's PythonOperator did). Phase C added
-    ``call_job`` for inter-job composition. ``ldap_sync`` and ``http`` are
-    still pending — jobs that reference them parse fine but fail at run time
-    with a clear "no executor registered" message from ``JobRunner``.
+    Coverage today: ``sql_query`` + ``sql_copy`` (chunks 2a/b), ``python``
+    (nomasx1 v1→v2 port), ``call_job`` (Phase C inter-job composition), and
+    ``ldap_sync`` + ``http`` (last two stubs lit up). The full
+    :class:`StepType` set is now executable; a job referencing an unknown
+    type would only be reachable by hand-bypassing the schema enum.
 
     *settings* is optional so existing test wirings keep working with just a
     registry; when given, the python step executor injects it into callables
@@ -99,14 +106,16 @@ def build_executors(
 
     *registry* is optional and only needed when ``call_job`` is in use —
     :class:`CallJobExecutor` looks up the target job by id. When not provided
-    the call_job slot is omitted; jobs referencing call_job will get the same
-    "no executor registered" failure ``ldap_sync`` / ``http`` already produce
-    (suitable default for tests that don't touch call_job).
+    the call_job slot is omitted; jobs referencing call_job get the runner's
+    "no executor registered" failure (suitable default for tests that don't
+    touch call_job).
     """
     out: dict[StepType, StepExecutor] = {
         StepType.SQL_QUERY: SqlQueryExecutor(connectors),
         StepType.SQL_COPY: SqlCopyExecutor(connectors),
         StepType.PYTHON: PythonStepExecutor(connectors, settings=settings),
+        StepType.LDAP_SYNC: LdapSyncExecutor(connectors),
+        StepType.HTTP: HttpStepExecutor(),
     }
     if registry is not None:
         # The runner reference is back-filled by build_nomaflow after the
