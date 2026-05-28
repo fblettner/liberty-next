@@ -5,12 +5,12 @@
 //     chosen query. Pick columns by dropdown, watch the chart take shape.
 // Cancel discards; Save validates + hands the record back to ChartsBuilder (which persists it).
 // Same shape as the screen visual dialog — a focused modal, not an inline form.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { X, SlidersHorizontal, BarChart3 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, SearchSelect, SpinnerRing, type SearchSelectOption } from '../../common'
+import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
 import { ChartCanvas } from '../TableView/ChartCanvas'
@@ -67,6 +67,7 @@ export function ChartEditorModal({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const modals = useModals()
   const { connectors } = useWorkspace()
   const isNew = initial == null
 
@@ -78,6 +79,13 @@ export function ChartEditorModal({
   const [query, setQuery] = useState(initial?.query ?? '')
   const [spec, setSpec] = useState<ChartSpec>(initial?.spec ? fromSavedSpec(initial.spec) : defaultChartSpec())
   const [error, setError] = useState<string | null>(null)
+
+  // Unsaved-changes guard — same Save / Discard / Keep-editing dialog the screen visual dialog
+  // uses. Snapshot the editable state on first render; compare to it on every close attempt.
+  const draftKey = JSON.stringify({ id, label, description, connector, query, spec })
+  const initialKey = useRef<string | null>(null)
+  if (initialKey.current === null) initialKey.current = draftKey
+  const dirty = draftKey !== initialKey.current
 
   // Sample for the builder + preview — refetched when connector/query change.
   const [sample, setSample] = useState<QueryResult | null>(null)
@@ -117,13 +125,31 @@ export function ChartEditorModal({
     onSave(cid, record)
   }
 
+  // Guarded close — discard / save / keep editing when there are unsaved edits.
+  const requestClose = async () => {
+    if (!dirty) { onClose(); return }
+    const choice = await modals.choose<'discard' | 'save' | 'keep'>({
+      title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
+      message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes. Save them, discard them, or keep editing?'),
+      options: [
+        { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+        { value: 'save', label: t('common.save'), variant: 'primary' },
+        { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+      ],
+      cancelValue: 'keep',
+    })
+    if (choice === 'save') save()        // save() validates; on invalid it shows an error + stays open
+    else if (choice === 'discard') onClose()
+    // keep / null → stay
+  }
+
   return (
-    <Overlay onClick={onClose}>
+    <Overlay onClick={() => void requestClose()}>
       <Box onClick={(e) => e.stopPropagation()}>
         <Header>
           <BarChart3 size={17} color={colors.blue.main} />
           <span className="title">{isNew ? t('settings.charts.add', 'Add chart') : `[charts.${initial?.id}]`}</span>
-          <CloseBtn onClick={onClose} title={t('common.close')}><X size={16} /></CloseBtn>
+          <CloseBtn onClick={() => void requestClose()} title={t('common.close')}><X size={16} /></CloseBtn>
         </Header>
         <Tabs>
           <TabBtn $active={tab === 'general'} onClick={() => setTab('general')}><SlidersHorizontal size={14} /> {t('settings.charts.tabGeneral', 'General')}</TabBtn>
@@ -176,7 +202,7 @@ export function ChartEditorModal({
           )}
         </ModalBody>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={() => void requestClose()}>{t('common.cancel', 'Cancel')}</Button>
           <Button $size="sm" $variant="primary" onClick={save}>{t('common.save')}</Button>
         </ModalFooter>
       </Box>
