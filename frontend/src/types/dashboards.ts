@@ -30,7 +30,20 @@ export interface KpiWidgetWire {
   format?: string
 }
 
-export type DashboardWidget = ChartWidgetWire | KpiWidgetWire
+export interface TableWidgetWire {
+  type: 'table'
+  label?: string | null
+  col_span: number
+  row_span: number
+  connector: string
+  query: string
+  /** Optional subset/order of result columns to show (by name). Empty → every non-hidden column. */
+  columns: string[]
+  /** Client-side row cap. Absent → show whatever the query returned. */
+  max_rows?: number
+}
+
+export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire
 
 export interface DashboardFilterOptionsWire {
   connector: string

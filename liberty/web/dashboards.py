@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.charts import ChartConfig, ChartsFile
-from liberty.dashboards import ChartWidget, Dashboard, DashboardsFile, KpiWidget
+from liberty.dashboards import ChartWidget, Dashboard, DashboardsFile, KpiWidget, TableWidget
 
 _log = logging.getLogger(__name__)
 
@@ -93,6 +93,21 @@ def _resolve_kpi_widget(w: KpiWidget) -> dict[str, Any]:
     }
 
 
+def _resolve_table_widget(w: TableWidget) -> dict[str, Any]:
+    """A table widget's wire shape — connector/query the frontend fetches, plus the optional
+    column subset + row cap. Permission gates on (connector, query) like the others."""
+    return {
+        "type": "table",
+        "label": w.label,
+        "col_span": w.col_span,
+        "row_span": w.row_span,
+        "connector": w.connector,
+        "query": w.query,
+        "columns": list(w.columns),
+        **({"max_rows": w.max_rows} if w.max_rows else {}),
+    }
+
+
 def _widget_query(widget_dict: dict[str, Any]) -> tuple[str, str] | None:
     """Pull (connector, query) out of a resolved widget dict — what the permission gate keys on.
     All current widget kinds back onto exactly one query; returns ``None`` if the dict somehow
@@ -144,6 +159,8 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
             wd = _resolve_chart_widget(w, charts)
         elif isinstance(w, KpiWidget):
             wd = _resolve_kpi_widget(w)
+        elif isinstance(w, TableWidget):
+            wd = _resolve_table_widget(w)
         else:  # pragma: no cover - guarded by the discriminated union
             continue
         if wd is None:

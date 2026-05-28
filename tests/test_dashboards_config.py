@@ -13,9 +13,43 @@ from liberty.dashboards import (
     ChartWidget,
     DashboardsFile,
     KpiWidget,
+    TableWidget,
     load_dashboards,
     parse_dashboards,
 )
+
+
+def test_parse_table_widget() -> None:
+    data = {
+        "dashboards": {
+            "ops": {
+                "label": "Ops",
+                "widgets": [
+                    {"type": "table", "label": "Recent failures", "connector": "nomaflow",
+                     "query": "recent_failures", "columns": ["job_id", "state"], "max_rows": 20,
+                     "col_span": 12, "row_span": 3},
+                ],
+            },
+        },
+    }
+    w = parse_dashboards(data).dashboards["ops"].widgets[0]
+    assert isinstance(w, TableWidget)
+    assert w.connector == "nomaflow" and w.query == "recent_failures"
+    assert w.columns == ["job_id", "state"] and w.max_rows == 20
+    assert w.col_span == 12 and w.row_span == 3
+
+
+def test_table_widget_defaults_columns_and_cap() -> None:
+    w = parse_dashboards(
+        {"dashboards": {"x": {"label": "X", "widgets": [
+            {"type": "table", "connector": "c", "query": "q"}]}}}
+    ).dashboards["x"].widgets[0]
+    assert isinstance(w, TableWidget) and w.columns == [] and w.max_rows is None
+
+
+def test_table_widget_requires_connector_query() -> None:
+    with pytest.raises(Exception):
+        parse_dashboards({"dashboards": {"x": {"label": "X", "widgets": [{"type": "table", "connector": "c"}]}}})
 
 
 def test_parse_minimal_dashboard() -> None:

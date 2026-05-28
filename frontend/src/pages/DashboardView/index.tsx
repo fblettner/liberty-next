@@ -15,6 +15,7 @@ import type { Dashboard, DashboardFilterWire, DashboardWidget } from '../../type
 import { ChartWidget } from './ChartWidget'
 import { FilterBar } from './FilterBar'
 import { KpiWidget } from './KpiWidget'
+import { TableWidget } from './TableWidget'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 // CSS-grid layout: 12 cols on desktop, collapse to 6 on tablet, 1 on mobile so dashboards stay
@@ -126,6 +127,8 @@ function WidgetCell({
       {widget.label && <WidgetTitle>{widget.label}</WidgetTitle>}
       {widget.type === 'chart'
         ? <ChartWidget widget={widget} filters={filters} filterValues={filterValues} />
+        : widget.type === 'table'
+        ? <TableWidget widget={widget} filters={filters} filterValues={filterValues} />
         : <KpiWidget widget={widget} filters={filters} filterValues={filterValues} />}
     </WidgetFrame>
   )

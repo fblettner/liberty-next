@@ -114,6 +114,27 @@ def _dashboards_toml() -> str:
           type = "chart"
           chart = "ghost"
           col_span = 12
+
+        # Table widgets — one on a readable query, one on `secret_get` (pruned for `user`).
+        [dashboards.ops]
+        label = "Ops"
+
+          [[dashboards.ops.widgets]]
+          type = "table"
+          label = "Users"
+          connector = "app1"
+          query = "users_get"
+          columns = ["USR_ID", "USR_NAME"]
+          max_rows = 25
+          col_span = 12
+          row_span = 3
+
+          [[dashboards.ops.widgets]]
+          type = "table"
+          label = "Secret rows"
+          connector = "app1"
+          query = "secret_get"
+          col_span = 12
         """
     )
 
@@ -201,6 +222,25 @@ def test_list_dashboards_filters_unreadable_widgets(app) -> None:
         assert sec["widgets"] == []
 
 
+def test_table_widget_admin_sees_full_shape(app) -> None:
+    with TestClient(app) as client:
+        ops = client.get("/api/dashboards/ops", headers=_h(client, "admin")).json()
+        assert [w["type"] for w in ops["widgets"]] == ["table", "table"]
+        t = ops["widgets"][0]
+        assert t["connector"] == "app1" and t["query"] == "users_get"
+        assert t["columns"] == ["USR_ID", "USR_NAME"] and t["max_rows"] == 25
+        assert t["col_span"] == 12 and t["row_span"] == 3
+
+
+def test_table_widget_pruned_by_permission(app) -> None:
+    """`user` can read `users_get` but not `secret_get` → only the first table survives."""
+    with TestClient(app) as client:
+        ops = client.get("/api/dashboards/ops", headers=_h(client, "user")).json()
+        assert [w["label"] for w in ops["widgets"]] == ["Users"]
+        ops = client.get("/api/dashboards/ops", headers=_h(client, "nobody")).json()
+        assert ops["widgets"] == []
+
+
 def test_get_one_dashboard_404_on_unknown(app) -> None:
     with TestClient(app) as client:
         h = _h(client, "admin")
@@ -218,7 +258,8 @@ def test_dashboards_require_auth(app) -> None:
 def test_info_reports_dashboards(app) -> None:
     with TestClient(app) as client:
         info = client.get("/info").json()
-        assert info["dashboards"] == {"total": 2}
+        # security_overview + orphan + ops
+        assert info["dashboards"] == {"total": 3}
 
 
 def test_reload_rereads_dashboards(app, tmp_path) -> None:

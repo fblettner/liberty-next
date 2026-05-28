@@ -122,7 +122,27 @@ class KpiWidget(WidgetBase):
     )
 
 
-Widget = Annotated[Union[ChartWidget, KpiWidget], Field(discriminator="type")]
+class TableWidget(WidgetBase):
+    """A table widget — runs a read query and shows its rows in a compact grid. Suitable for
+    "recent failures" / "top N" lists sitting next to the charts. Gates on the query's
+    permission like every other widget; the dashboard filter bar binds it the same way charts
+    and KPIs are bound (a column whose ``dd`` matches a filter's ``dictionary_key``)."""
+
+    type: Literal["table"] = "table"
+    connector: str = Field(description="SQL connector for the query.")
+    query: str = Field(description="Read query whose rows are listed.")
+    columns: list[str] = Field(
+        default_factory=list,
+        description="Optional subset / order of result columns to show (by name). Empty → every non-hidden column.",
+    )
+    max_rows: int | None = Field(
+        default=None,
+        ge=1,
+        description="Cap the rows shown in the widget (client-side trim). Blank → whatever the query / screen returns.",
+    )
+
+
+Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget], Field(discriminator="type")]
 
 
 class DashboardFilterOptions(BaseModel):
