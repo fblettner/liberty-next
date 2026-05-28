@@ -5,7 +5,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { Table as TableIcon, Play, BarChart3, Network } from 'lucide-react'
 import { api, ApiError, streamNDJSON } from '../../api/client'
 import type { Column, ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
@@ -13,6 +13,7 @@ import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Spin
 import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
+import { tabPath } from '../../tabs/TabsContext'
 import type { ScreenDetail } from '../../types/screens'
 import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
@@ -73,6 +74,16 @@ export default function TableView({ connector, query }: { connector: string; que
   // user edits to the param form are not reflected back into the URL (the form is the source
   // of truth after that point).
   const [searchParams] = useSearchParams()
+  const location = useLocation()
+  // Drill-down binds (bugfix): a row-menu ``navigate`` pushes ``/sql/<c>/<q>?<binds>`` to filter the
+  // destination by the clicked row. ``drillKey`` is the URL query string; ``lastDrillKey`` is the
+  // binds we've already applied to the filter/param state. The ``applyDrill`` effect (below
+  // ``autoLoad``) reconciles them reactively — so the binds land regardless of the connector-vs-
+  // screen fetch order, and re-applying on a re-navigation to an already-open tab (tabs are keyed
+  // by (connector, query) only and stay mounted, so they don't remount on re-navigation). Without
+  // this the operator sees ALL rows instead of the selected row's.
+  const drillKey = searchParams.toString()
+  const lastDrillKey = useRef<string | null>(null)
   const [meta, setMeta] = useState<SqlQueryMeta | null>(null)
   const [metaErr, setMetaErr] = useState<string | null>(null)
   const [params, setParams] = useState<Record<string, string>>({})
@@ -109,23 +120,15 @@ export default function TableView({ connector, query }: { connector: string; que
         // the FilterPanel below — keyed by column name on the result, set both maps so whichever
         // gate the destination uses picks the value up.
         const init: Record<string, string> = {}
-        const filterInit: Record<string, ServerFilter> = {}
         for (const p of q.params) if (p.default != null) init[p.name] = p.default
         const declared = new Set([...q.params.map((p) => p.name), ...q.bind_params])
-        // Phase 3 — ``q.columns`` is gone from the connector describe(); the filter columns
-        // live on the matching Screen, fetched separately. The initial-seed-from-URL flow for
-        // FilterPanel pre-fill triggers later when the screen loads (see the second
-        // setFilters call below).
-        const filterCols = new Set((q.columns ?? []).filter((c) => c.filter).map((c) => c.name))
-        searchParams.forEach((v, k) => {
-          if (declared.has(k)) init[k] = v
-          // The FilterPanel uses `equals` as the natural op for choice-like (ENUM/LOOKUP) columns
-          // and the migrated SQL wrap accepts it; that matches NavigateAction's "filter by this value"
-          // intent. Operators wiring a fancier op via URL params would need a separate convention.
-          if (filterCols.has(k)) filterInit[k] = { val: v, op: 'equals' }
-        })
+        // Only declared params are seeded here. Filter-column seeding (the drill-down vehicle —
+        // Phase 3 moved filter columns to the Screen) is owned by the ``applyDrill`` effect below:
+        // it waits for the screen so it knows which columns are filter-flagged, and it's reactive
+        // (keyed on the URL binds), so it survives the connector-meta-vs-screen fetch race AND a
+        // re-navigation to an already-open tab — both of which the old mount-time seed missed.
+        searchParams.forEach((v, k) => { if (declared.has(k)) init[k] = v })
         setParams(init)
-        setFilters(filterInit)
       })
       .catch((e) => setMetaErr(e instanceof ApiError ? e.message : String(e)))
     // searchParams intentionally NOT in deps — we capture its value at load time (effect re-runs
@@ -138,34 +141,30 @@ export default function TableView({ connector, query }: { connector: string; que
   // catalog *and* carries at least one of the renderable bits (dialog / row_menu / toolbar
   // actions). A 404 (e.g. the catalog raced ahead of a delete) silently degrades to "no screen"
   // → inline editor; this is best-effort UX, not a security gate.
+  // ``screenReady`` flips true once the screen-body fetch *settles* (loaded, 404'd, or no stub) —
+  // applyDrill waits on this rather than on ``screen`` being non-null, so a screen whose body fails
+  // to load doesn't hang the drill seed (and the auto-run it gates) forever.
+  const [screenReady, setScreenReady] = useState(false)
   useEffect(() => {
     const stub = findScreen(connector, query)
+    setScreenReady(false)
     // Phase 3 — every Screen drives per-query behaviour now (columns / auto_load / audit / max_rows
     // / update_query / etc.), so always fetch the full body when a Screen exists for this
     // (connector, query). Falls back to inline editor only when no screen is configured.
-    if (!stub) { setScreen(null); return }
+    if (!stub) { setScreen(null); setScreenReady(true); return }
     let cancelled = false
     api
       .get<ScreenDetail>(`/api/screens/${encodeURIComponent(stub.app)}/${encodeURIComponent(stub.id)}`)
       .then((s) => {
         if (cancelled) return
         setScreen(s)
-        // Re-seed FilterPanel from URL search params now that we know which columns are
-        // filter-flagged on this screen — at initial mount we didn't have the screen yet.
-        const filterCols = new Set((s.columns ?? []).filter((c) => c.filter).map((c) => c.name))
-        if (filterCols.size === 0) return
-        const next: Record<string, ServerFilter> = {}
-        searchParams.forEach((v, k) => {
-          if (filterCols.has(k)) next[k] = { val: v, op: 'equals' }
-        })
-        if (Object.keys(next).length > 0) {
-          setFilters((cur) => ({ ...next, ...cur }))   // existing manual edits win
-        }
+        // Drill-down filter seeding moved to the ``applyDrill`` effect below — it reads the screen
+        // + URL reactively so it doesn't depend on this fetch winning a race or being captured at
+        // the right moment.
       })
       .catch(() => { if (!cancelled) setScreen(null) })
+      .finally(() => { if (!cancelled) setScreenReady(true) })
     return () => { cancelled = true }
-    // searchParams intentionally NOT in deps — we capture it at mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findScreen, connector, query])
 
   // Server-filter fields: columns flagged `filter` in the *screen*'s ``columns`` if present,
@@ -320,6 +319,12 @@ export default function TableView({ connector, query }: { connector: string; que
   // on Oracle can leak cursors at the pool level until they're recycled.
   useEffect(() => () => { streamAbortRef.current?.abort() }, [])
 
+  // True when *this* tab's TableView is the active route. Every tab stays mounted (TabHost) and
+  // they all share one ``useSearchParams`` / ``useLocation``, so the URL binds belong to whichever
+  // tab the path points at — gate the drill logic on this so an inactive tab never reacts to
+  // another tab's drill URL.
+  const onThisTab = location.pathname === tabPath({ kind: 'sql', connector, target: query })
+
   // Auto-load: run a SELECT immediately when the screen opens, once, if the screen asks for it.
   // Phase 3 — ``auto_load`` is a screen-level flag now; fall back to the (deprecated) meta-level
   // bool for back-compat with connectors-only setups.
@@ -327,11 +332,46 @@ export default function TableView({ connector, query }: { connector: string; que
   const autoRan = useRef(false)
   useEffect(() => { autoRan.current = false }, [connector, query])
   useEffect(() => {
-    if (autoLoad && meta?.statement_type === 'SELECT' && !autoRan.current && !result && !busy) {
-      autoRan.current = true
-      run()
+    if (!autoLoad || meta?.statement_type !== 'SELECT' || autoRan.current || result || busy) return
+    // Hold the first auto-run until any drill-down binds in the URL have been *applied* to the
+    // filter/param state (``applyDrill`` below marks them once meta + screen are ready). Without
+    // this the auto-run could fire before the binds land → the row-menu "Display Roles" shows ALL
+    // rows. ``lastDrillKey`` tracks the applied binds; while they differ we wait.
+    if (onThisTab && drillKey && drillKey !== lastDrillKey.current) return
+    autoRan.current = true
+    run()
+  }, [autoLoad, meta, result, busy, run, onThisTab, drillKey])
+
+  // applyDrill — seed the param form + filter panel from the URL drill binds, *reactively*. Fires
+  // whenever this tab is the active route and the URL binds differ from what's been applied, so it
+  // covers all the cases the old mount-time seed missed: the connector-meta-vs-screen fetch race,
+  // a re-navigation to an already-open tab, and a reactivated tab. Waits for ``meta`` (declared
+  // param names) and — when a screen exists — the screen body (so the filter-flagged columns are
+  // known) before marking the binds applied, so it never seeds with half the picture.
+  useEffect(() => {
+    if (!onThisTab || drillKey === lastDrillKey.current) return
+    if (drillKey === '') { lastDrillKey.current = drillKey; return }  // no binds → nothing to seed
+    if (!meta || !screenReady) return                                // wait for declared params + screen filter cols
+    const declared = new Set([...meta.params.map((p) => p.name), ...meta.bind_params])
+    const filterCols = new Set((screen?.columns ?? []).filter((c) => c.filter).map((c) => c.name))
+    const nextParams: Record<string, string> = {}
+    const nextFilters: Record<string, ServerFilter> = {}
+    searchParams.forEach((v, k) => {
+      if (declared.has(k)) nextParams[k] = v
+      if (filterCols.has(k)) nextFilters[k] = { val: v, op: 'equals' }   // SQL wrap expects `equals`
+    })
+    lastDrillKey.current = drillKey                                  // applied (meta + screen ready)
+    if (Object.keys(nextParams).length === 0 && Object.keys(nextFilters).length === 0) return
+    setParams((cur) => ({ ...cur, ...nextParams }))
+    setFilters((cur) => ({ ...cur, ...nextFilters }))
+    // Re-arm auto_load so it runs with the freshly-applied binds (covers a re-navigation where the
+    // grid already shows a previous result). Only blank when the screen auto-loads — a manual-run
+    // screen keeps its rows and picks up the binds on the next Run rather than going blank.
+    if (autoLoad) {
+      autoRan.current = false
+      setResult(null)
     }
-  }, [autoLoad, meta, result, busy, run])
+  }, [onThisTab, drillKey, meta, screen, screenReady, searchParams, autoLoad])
 
   // Phase 1 — overlay the screen's ``columns`` (when set) on top of the SQL result's discovered
   // columns. The screen ships the resolved label/format/hidden/filter/filter_from/visible_when/
