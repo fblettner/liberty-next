@@ -1,0 +1,34 @@
+# Liberty Next — the open framework, standalone.
+#
+# Runs the public image with its default SQLite framework DB (no external database). This
+# is the "try the open framework" / dev-demo layout; the licensed full stack (Postgres +
+# nomasx1/nomajde) lives in liberty-apps/docker-compose.yml.
+#
+#   docker compose up --build           # → http://localhost:8000
+#
+# First boot prints a generated admin password in the logs (or set LIBERTY_ADMIN_PASSWORD).
+services:
+  liberty:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: liberty-next:local
+    ports:
+      - "8000:8000"
+    environment:
+      # Stable JWT secret so tokens survive restarts (change me for anything real).
+      LIBERTY_JWT_SECRET: "${LIBERTY_JWT_SECRET:-dev-not-a-secret}"
+      # Deterministic bootstrap admin (omit to get a random one printed once in the logs).
+      LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-admin}"
+      # SQLite framework DB on the persisted volume (default URL points at /app; we move it
+      # onto the volume so auth + nomaflow run history survive `docker compose down`).
+      LIBERTY_DB_URL: "sqlite+aiosqlite:////data/liberty.db"
+    volumes:
+      # auth.toml (Argon2 hashes) + the SQLite DB persist here across restarts.
+      - liberty-data:/data
+      - liberty-config:/app/config
+    restart: unless-stopped
+
+volumes:
+  liberty-data:
+  liberty-config:
