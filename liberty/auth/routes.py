@@ -41,6 +41,20 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    # 8-char floor matches the usual minimum; the Argon2 hash doesn't care about length, this is
+    # just a sanity gate so a fat-fingered single char doesn't become someone's password.
+    new_password: str = Field(min_length=8)
+
+
+class ProfileUpdate(BaseModel):
+    # Self-service display name + email. Blank → cleared (normalised to None below). max_length
+    # keeps a pathological paste from bloating the store.
+    full_name: str | None = Field(default=None, max_length=200)
+    email: str | None = Field(default=None, max_length=320)
+
+
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str
@@ -118,6 +132,75 @@ async def refresh(
 @router.get("/me")
 async def me(principal: CurrentPrincipal) -> dict:
     return principal.to_dict()
+
+
+@router.get("/profile")
+async def get_profile(
+    principal: CurrentPrincipal,
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
+) -> dict:
+    """The current user's *live* record (full_name / email / roles / settings-access) — read from
+    the store, not the access-token claims, so the Profile panel shows the latest values even
+    right after an edit (the JWT's email/name are only refreshed on the next login)."""
+    user = await backend.get_by_id(principal.id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    d = user.public_dict()
+    # ``settings_access`` — does this user reach the superuser-only Settings area? (Mirrors the
+    # require_superuser gate.) Surfaced so the Profile panel can show it without the frontend
+    # re-deriving the rule.
+    d["settings_access"] = bool(user.is_superuser)
+    d["provider"] = principal.provider
+    return d
+
+
+@router.patch("/profile")
+async def update_profile(
+    body: ProfileUpdate,
+    principal: CurrentPrincipal,
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
+) -> dict:
+    """Update the current user's display name + email. Local accounts only — an OIDC user's
+    profile is owned by the identity provider (and would be overwritten on their next login), so
+    we reject those rather than let an edit silently disappear."""
+    if principal.provider != "local":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Your profile is managed by your identity provider; change it there.",
+        )
+    full_name = (body.full_name or "").strip() or None
+    email = (body.email or "").strip() or None
+    user = await backend.update_profile(principal.username, full_name=full_name, email=email)
+    d = user.public_dict()
+    d["settings_access"] = bool(user.is_superuser)
+    d["provider"] = principal.provider
+    return d
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    principal: CurrentPrincipal,
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
+) -> dict:
+    """Self-service password change for the *current* user. Verifies the current password before
+    setting the new one (so a stolen, still-valid access token can't silently re-key the account).
+
+    Only for local (password-backed) accounts — OIDC users authenticate at the IdP and have no
+    local password to change here; we reject those with a clear 400 rather than create one."""
+    if principal.provider != "local":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Password is managed by your identity provider; change it there.",
+        )
+    # Re-authenticate with the supplied current password (also confirms the account is still active).
+    user = await backend.authenticate(principal.username, body.current_password)
+    if user is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if body.new_password == body.current_password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="New password must differ from the current one")
+    await backend.set_password(user.username, body.new_password)
+    return {"ok": True}
 
 
 # -- OIDC ------------------------------------------------------------------- #

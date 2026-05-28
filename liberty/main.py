@@ -38,6 +38,7 @@ from liberty.web import (
     license_router,
     menus_router,
     screens_router,
+    theme_router,
 )
 
 _log = logging.getLogger("liberty")
@@ -215,6 +216,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(charts_router)
     app.include_router(dashboards_router)
     app.include_router(license_router)
+    app.include_router(theme_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
     app.include_router(jobs_router)

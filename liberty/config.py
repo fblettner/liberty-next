@@ -142,6 +142,13 @@ class DashboardSettings(BaseModel):
     config_path: Path = Field(default_factory=lambda: _default_config_path("dashboards"))
 
 
+class ThemeSettings(BaseModel):
+    """Per-deployment branding — the operator's colours + app name (see :mod:`liberty.theme`).
+    A missing file is fine (the built-in Liberty default)."""
+
+    config_path: Path = Field(default_factory=lambda: _default_config_path("theme"))
+
+
 class AuthSettings(BaseModel):
     """Internal-user auth: where users/roles live (a TOML file or the DB), JWT signing."""
 
@@ -243,6 +250,7 @@ class Settings(BaseModel):
     screens: ScreenSettings = Field(default_factory=ScreenSettings)
     charts: ChartSettings = Field(default_factory=ChartSettings)
     dashboards: DashboardSettings = Field(default_factory=DashboardSettings)
+    theme: ThemeSettings = Field(default_factory=ThemeSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     ai: AISettings = Field(default_factory=AISettings)

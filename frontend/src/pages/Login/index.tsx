@@ -4,6 +4,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../auth/AuthContext'
+import { useBranding } from '../../branding/BrandingContext'
 import { ApiError } from '../../api/client'
 import { Button, Field, Input, Banner, SpinnerRing, Stack } from '../../common'
 import { colors, fontSize, fonts, radius, glass } from '../../theme'
@@ -47,6 +48,7 @@ const Hint = styled.div`
 
 export default function Login() {
   const { t } = useTranslation()
+  const { appName } = useBranding()
   const { user, ready, login, oidcLogin } = useAuth()
   const location = useLocation()
   const from = (location.state as { from?: string } | null)?.from ?? '/'
@@ -74,7 +76,7 @@ export default function Login() {
     <Center>
       <Panel onSubmit={submit}>
         <Brand>
-          <Accent>{t('app.title')}</Accent>
+          <Accent>{appName || t('app.title')}</Accent>
         </Brand>
         <Tagline>{t('app.subtitle')}</Tagline>
         <Stack gap={14}>

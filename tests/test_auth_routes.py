@@ -163,6 +163,111 @@ def test_role_guard(app) -> None:
         assert r.status_code == 403
 
 
+def _auth(client: TestClient, username: str, password: str) -> dict:
+    token = _login(client, username, password).json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_get_profile_requires_token(app) -> None:
+    with TestClient(app) as client:
+        assert client.get("/auth/profile").status_code == 401
+
+
+def test_get_profile_returns_live_record(app) -> None:
+    with TestClient(app) as client:
+        r = client.get("/auth/profile", headers=_auth(client, "alice", "alicepw"))
+        assert r.status_code == 200
+        body = r.json()
+        assert body["username"] == "alice"
+        assert body["roles"] == ["reader"]
+        assert body["settings_access"] is False     # alice isn't a superuser
+        assert body["provider"] == "local"
+
+
+def test_get_profile_settings_access_for_superuser(app) -> None:
+    with TestClient(app) as client:
+        body = client.get("/auth/profile", headers=_auth(client, "admin", "adminpw")).json()
+        assert body["settings_access"] is True
+
+
+def test_patch_profile_updates_name_and_email(app) -> None:
+    with TestClient(app) as client:
+        h = _auth(client, "alice", "alicepw")
+        r = client.patch("/auth/profile", json={"full_name": "Alice Doe", "email": "alice@acme.test"}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["full_name"] == "Alice Doe" and r.json()["email"] == "alice@acme.test"
+        # persisted — a fresh GET reflects it
+        body = client.get("/auth/profile", headers=h).json()
+        assert body["full_name"] == "Alice Doe" and body["email"] == "alice@acme.test"
+
+
+def test_patch_profile_blank_clears(app) -> None:
+    with TestClient(app) as client:
+        h = _auth(client, "alice", "alicepw")
+        client.patch("/auth/profile", json={"full_name": "X", "email": "x@y.z"}, headers=h)
+        r = client.patch("/auth/profile", json={"full_name": "  ", "email": ""}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["full_name"] is None and r.json()["email"] is None
+
+
+def test_change_password_requires_token(app) -> None:
+    with TestClient(app) as client:
+        r = client.post("/auth/change-password", json={"current_password": "alicepw", "new_password": "alicepw2"})
+        assert r.status_code == 401
+
+
+def test_change_password_success_then_login_with_new(app) -> None:
+    with TestClient(app) as client:
+        r = client.post(
+            "/auth/change-password",
+            json={"current_password": "alicepw", "new_password": "alice-new-pw"},
+            headers=_auth(client, "alice", "alicepw"),
+        )
+        assert r.status_code == 200 and r.json()["ok"] is True
+        # old password no longer works, new one does
+        assert _login(client, "alice", "alicepw").status_code == 401
+        assert _login(client, "alice", "alice-new-pw").status_code == 200
+
+
+def test_change_password_wrong_current(app) -> None:
+    with TestClient(app) as client:
+        r = client.post(
+            "/auth/change-password",
+            json={"current_password": "WRONG", "new_password": "alice-new-pw"},
+            headers=_auth(client, "alice", "alicepw"),
+        )
+        assert r.status_code == 400
+        # password unchanged — original still logs in
+        assert _login(client, "alice", "alicepw").status_code == 200
+
+
+def test_change_password_too_short_rejected(app) -> None:
+    with TestClient(app) as client:
+        r = client.post(
+            "/auth/change-password",
+            json={"current_password": "alicepw", "new_password": "short"},
+            headers=_auth(client, "alice", "alicepw"),
+        )
+        assert r.status_code == 422  # pydantic min_length on new_password
+
+
+def test_change_password_same_as_current_rejected(app) -> None:
+    with TestClient(app) as client:
+        # Set a known 8+ char password first (the seed's "alicepw" is below the min_length floor,
+        # so we can't test same-as-current with it without tripping the 422 length gate first).
+        assert client.post(
+            "/auth/change-password",
+            json={"current_password": "alicepw", "new_password": "alice-pw-1"},
+            headers=_auth(client, "alice", "alicepw"),
+        ).status_code == 200
+        r = client.post(
+            "/auth/change-password",
+            json={"current_password": "alice-pw-1", "new_password": "alice-pw-1"},
+            headers=_auth(client, "alice", "alice-pw-1"),
+        )
+        assert r.status_code == 400
+
+
 def test_oidc_routes_404_when_disabled(app) -> None:
     with TestClient(app) as client:
         assert client.get("/auth/oidc/login", follow_redirects=False).status_code == 404

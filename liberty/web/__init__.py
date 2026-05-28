@@ -9,6 +9,7 @@ from liberty.web.jobs import router as jobs_router
 from liberty.web.license import router as license_router
 from liberty.web.menus import router as menus_router
 from liberty.web.screens import router as screens_router
+from liberty.web.theme import router as theme_router
 
 __all__ = [
     "admin_router",
@@ -20,4 +21,5 @@ __all__ = [
     "license_router",
     "menus_router",
     "screens_router",
+    "theme_router",
 ]

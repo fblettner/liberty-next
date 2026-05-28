@@ -10,6 +10,7 @@ import { Table as TableIcon, Globe, Workflow, X } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
+import { useBranding } from '../branding/BrandingContext'
 import { findMenuLabelWithApp } from '../services/menuLabels'
 
 const Bar = styled.div`
@@ -51,13 +52,14 @@ export default function TabStrip() {
   const { t } = useTranslation()
   const { tabs, activeId, setActive, close } = useTabs()
   const { menus } = useWorkspace()
+  const { appName } = useBranding()
   const navigate = useNavigate()
 
   if (tabs.length === 0) {
     return (
       <Bar>
         <TitleBlock>
-          <span className="name">{t('app.title')}</span>
+          <span className="name">{appName || t('app.title')}</span>
           <span className="sub">{t('app.subtitle')}</span>
         </TitleBlock>
       </Bar>

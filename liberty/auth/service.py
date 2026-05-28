@@ -107,6 +107,13 @@ class AuthService:
         user.is_active = active
         await self.session.flush()
 
+    async def update_profile(self, user: User, *, full_name: str | None, email: str | None) -> None:
+        """Self-service profile edit — display name + email. ``None`` clears the field (an empty
+        string from the form is normalised to ``None`` by the caller)."""
+        user.full_name = full_name
+        user.email = email
+        await self.session.flush()
+
     async def assign_roles(self, user: User, role_names: list[str], *, replace: bool = False) -> None:
         roles = await self._resolve_roles(role_names)
         if replace:

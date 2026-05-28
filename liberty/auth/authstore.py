@@ -154,6 +154,9 @@ class AuthBackend(Protocol):
     ) -> UserRecord: ...
     async def set_password(self, username: str, password: str) -> UserRecord: ...
     async def set_active(self, username: str, active: bool) -> UserRecord: ...
+    async def update_profile(
+        self, username: str, *, full_name: str | None, email: str | None,
+    ) -> UserRecord: ...
     async def assign_roles(self, username: str, roles: list[str], *, replace: bool = False) -> UserRecord: ...
     async def get_or_create_role(
         self, name: str, *, permissions: list[str] | None = None, description: str | None = None,
@@ -287,6 +290,14 @@ class TomlAuthBackend:
         save_auth(self.path, f)
         return self._record(f, username, u)
 
+    async def update_profile(self, username: str, *, full_name: str | None, email: str | None) -> UserRecord:
+        f = load_auth(self.path)
+        u = self._get(f, username)
+        u.full_name = full_name
+        u.email = email
+        save_auth(self.path, f)
+        return self._record(f, username, u)
+
     async def assign_roles(self, username: str, roles: list[str], *, replace: bool = False) -> UserRecord:
         f = load_auth(self.path)
         u = self._get(f, username)
@@ -405,6 +416,15 @@ class DbAuthBackend:
             if u is None:
                 raise AuthError(f"unknown user {username!r}")
             await svc.set_active(u, active)
+            return self._record(u)
+
+    async def update_profile(self, username: str, *, full_name: str | None, email: str | None) -> UserRecord:
+        async with self.db.session() as s:
+            svc = AuthService(s)
+            u = await svc.get_user_by_username(username)
+            if u is None:
+                raise AuthError(f"unknown user {username!r}")
+            await svc.update_profile(u, full_name=full_name, email=email)
             return self._record(u)
 
     async def assign_roles(self, username: str, roles: list[str], *, replace: bool = False) -> UserRecord:

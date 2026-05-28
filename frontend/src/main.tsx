@@ -6,6 +6,7 @@ import { WorkspaceProvider } from "./workspace/WorkspaceContext";
 import { TabsProvider } from "./tabs/TabsContext";
 import { ModalsProvider } from "./common/Modals";
 import { SioProvider } from "./sio/SioContext";
+import { BrandingProvider } from "./branding/BrandingContext";
 import App from "./App";
 import "./i18n";
 import "./index.css";
@@ -13,17 +14,19 @@ import "./index.css";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <ModalsProvider>
-        <AuthProvider>
-          <SioProvider>
-            <WorkspaceProvider>
-              <TabsProvider>
-                <App />
-              </TabsProvider>
-            </WorkspaceProvider>
-          </SioProvider>
-        </AuthProvider>
-      </ModalsProvider>
+      <BrandingProvider>
+        <ModalsProvider>
+          <AuthProvider>
+            <SioProvider>
+              <WorkspaceProvider>
+                <TabsProvider>
+                  <App />
+                </TabsProvider>
+              </WorkspaceProvider>
+            </SioProvider>
+          </AuthProvider>
+        </ModalsProvider>
+      </BrandingProvider>
     </BrowserRouter>
   </StrictMode>,
 );
