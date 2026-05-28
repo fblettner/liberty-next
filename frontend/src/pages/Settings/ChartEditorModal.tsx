@@ -1,0 +1,187 @@
+// Visual chart editor — a modal with two tabs, opened from the Charts settings list:
+//   • General — id / label / description / connector / query (the chart's metadata).
+//   • Chart   — the SAME visual builder the TableView Chart tab uses (ChartSpecEditor: type /
+//     X / series / aggregate) with a live ChartCanvas underneath, driven by a sample of the
+//     chosen query. Pick columns by dropdown, watch the chart take shape.
+// Cancel discards; Save validates + hands the record back to ChartsBuilder (which persists it).
+// Same shape as the screen visual dialog — a focused modal, not an inline form.
+import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import styled from '@emotion/styled'
+import { X, SlidersHorizontal, BarChart3 } from 'lucide-react'
+import { api, ApiError } from '../../api/client'
+import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, SearchSelect, SpinnerRing, type SearchSelectOption } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
+import { ChartCanvas } from '../TableView/ChartCanvas'
+import type { QueryResult } from '../../types/connectors'
+import type { ChartSpec, SavedChartSpec } from '../../types/charts'
+import { defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
+import { colors, fontSize, fonts, radius } from '../../theme'
+
+const PREVIEW_LIMIT = 1000
+
+export interface ChartRecord {
+  id: string
+  label?: string
+  description?: string | null
+  connector?: string
+  query?: string
+  spec?: SavedChartSpec
+}
+
+const Box = styled(Modal)`width: min(960px, 96vw); height: min(680px, 92vh);`
+const Header = styled.div`
+  display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
+  & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; font-family: ${fonts.mono}; }
+`
+const CloseBtn = styled.button`
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border-radius: ${radius.md}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
+const Tabs = styled.div`display: flex; gap: 16px; padding: 0 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
+const TabBtn = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 7px; padding: 11px 4px; margin-bottom: -1px;
+  border: none; background: transparent; cursor: pointer; font-size: ${fontSize.md}; font-weight: 600; font-family: ${fonts.sans};
+  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  border-bottom: 2px solid ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
+  &:hover { color: ${colors.text.primary}; }
+`
+const Grid2 = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px;`
+const PreviewBox = styled.div`
+  flex: 1; min-height: 240px; display: flex; flex-direction: column; margin-top: 4px;
+`
+const Msg = styled.div`
+  flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px;
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+`
+const slug = (s: string) => s.trim()
+
+export function ChartEditorModal({
+  initial, takenIds, onSave, onClose,
+}: {
+  initial: ChartRecord | null
+  takenIds: string[]            // ids already used by OTHER charts (uniqueness check)
+  onSave: (id: string, record: Record<string, unknown>) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const { connectors } = useWorkspace()
+  const isNew = initial == null
+
+  const [tab, setTab] = useState<'general' | 'chart'>('general')
+  const [id, setId] = useState(initial?.id ?? '')
+  const [label, setLabel] = useState(initial?.label ?? '')
+  const [description, setDescription] = useState(initial?.description ?? '')
+  const [connector, setConnector] = useState(initial?.connector ?? '')
+  const [query, setQuery] = useState(initial?.query ?? '')
+  const [spec, setSpec] = useState<ChartSpec>(initial?.spec ? fromSavedSpec(initial.spec) : defaultChartSpec())
+  const [error, setError] = useState<string | null>(null)
+
+  // Sample for the builder + preview — refetched when connector/query change.
+  const [sample, setSample] = useState<QueryResult | null>(null)
+  const [sampleErr, setSampleErr] = useState<string | null>(null)
+  useEffect(() => {
+    setSample(null); setSampleErr(null)
+    if (!connector || !query) return
+    let cancelled = false
+    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?_limit=${PREVIEW_LIMIT}`)
+      .then((r) => { if (!cancelled) setSample(r) })
+      .catch((e) => { if (!cancelled) setSampleErr(e instanceof ApiError ? e.message : String(e)) })
+    return () => { cancelled = true }
+  }, [connector, query])
+
+  const sqlConnectors = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql'), [connectors])
+  const connectorOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+  const queryOpts: SearchSelectOption[] = useMemo(() => {
+    const c = sqlConnectors.find((x) => x.name === connector)
+    return (c?.queries ?? []).map((q) => ({ value: q.name, label: q.description || q.label || q.name, mono: q.name }))
+  }, [sqlConnectors, connector])
+
+  const save = () => {
+    const cid = slug(id)
+    if (!cid) { setError(t('settings.charts.errId', 'An id is required.')); setTab('general'); return }
+    if (!/^[A-Za-z0-9_-]+$/.test(cid)) { setError(t('settings.charts.errIdShape', 'Id: letters, digits, underscore, hyphen only.')); setTab('general'); return }
+    if (takenIds.includes(cid)) { setError(t('settings.charts.errIdTaken', 'That id is already used by another chart.')); setTab('general'); return }
+    if (!connector || !query) { setError(t('settings.charts.errConnQuery', 'Pick a connector and a query.')); setTab('general'); return }
+    if (!spec.x || spec.y.length === 0) { setError(t('settings.charts.errXY', 'Set the X column and at least one Y series.')); setTab('chart'); return }
+    const record: Record<string, unknown> = {
+      id: cid,
+      label: label.trim() || cid,
+      connector,
+      query,
+      spec: toSavedSpec(spec),
+    }
+    if (description.trim()) record.description = description.trim()
+    onSave(cid, record)
+  }
+
+  return (
+    <Overlay onClick={onClose}>
+      <Box onClick={(e) => e.stopPropagation()}>
+        <Header>
+          <BarChart3 size={17} color={colors.blue.main} />
+          <span className="title">{isNew ? t('settings.charts.add', 'Add chart') : `[charts.${initial?.id}]`}</span>
+          <CloseBtn onClick={onClose} title={t('common.close')}><X size={16} /></CloseBtn>
+        </Header>
+        <Tabs>
+          <TabBtn $active={tab === 'general'} onClick={() => setTab('general')}><SlidersHorizontal size={14} /> {t('settings.charts.tabGeneral', 'General')}</TabBtn>
+          <TabBtn $active={tab === 'chart'} onClick={() => setTab('chart')}><BarChart3 size={14} /> {t('settings.charts.tabChart', 'Chart')}</TabBtn>
+        </Tabs>
+        <ModalBody>
+          {error && <Banner $tone="error">{error}</Banner>}
+          {tab === 'general' ? (
+            <>
+              <Grid2>
+                <Field label={t('settings.charts.id', 'Id')}>
+                  <Input value={id} onChange={(e) => { setId(e.target.value); setError(null) }} placeholder="users_per_app" />
+                </Field>
+                <Field label={t('settings.charts.label', 'Label')}>
+                  <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.charts.label', 'Label')} />
+                </Field>
+              </Grid2>
+              <Field label={t('settings.charts.description', 'Description')}>
+                <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+              </Field>
+              <Grid2>
+                <Field label={t('settings.charts.connector', 'Connector')}>
+                  <SearchSelect value={connector} onChange={(v) => { setConnector(v); setQuery(''); setError(null) }}
+                    options={connectorOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
+                </Field>
+                <Field label={t('settings.charts.query', 'Query')}>
+                  <SearchSelect value={query} onChange={(v) => { setQuery(v); setError(null) }}
+                    options={queryOpts} placeholder={connector ? t('chart.spec.pick', 'Pick…') : t('settings.charts.pickConnFirst', 'Pick a connector first')} allowCustom />
+                </Field>
+              </Grid2>
+            </>
+          ) : (
+            <PreviewBox>
+              {!connector || !query ? (
+                <Msg>{t('settings.charts.previewNeedQuery', 'Set a connector + query on the General tab first.')}</Msg>
+              ) : sampleErr ? (
+                <Msg style={{ color: colors.red.main }}>{sampleErr}</Msg>
+              ) : !sample ? (
+                <Msg><SpinnerRing size={20} thickness={2} /></Msg>
+              ) : (
+                <>
+                  <ChartSpecEditor result={sample} spec={spec} onChange={setSpec} />
+                  <div style={{ flex: 1, minHeight: 220, marginTop: 10, display: 'flex' }}>
+                    <ChartCanvas result={sample} spec={spec} connector={connector}
+                      emptyMessage={t('settings.charts.previewSetXY', 'Set the X column + at least one Y series to preview.')} />
+                  </div>
+                </>
+              )}
+            </PreviewBox>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="primary" onClick={save}>{t('common.save')}</Button>
+        </ModalFooter>
+      </Box>
+    </Overlay>
+  )
+}
+
+export default ChartEditorModal
