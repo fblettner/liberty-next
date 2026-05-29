@@ -1,11 +1,15 @@
 // Settings page = a tab switcher over the config editors: one structured builder per config
 // section (Pools, Connectors, Dictionary, Menus, Screens, Dashboards). The raw TOML escape
 // hatch was removed — too easy to write invalid configs that don't validate against the
-// schema, and every section has a structured editor now. The active tab + the per-tab
-// selection (app/screen) ride on the URL search params so a deep link like
-// `/settings?tab=screens&app=nomasx1&screen=security_users` opens straight to the right
-// place — used by the Connectors → Screens cross-link.
-import { lazy, Suspense } from 'react'
+// schema, and every section has a structured editor now.
+//
+// Settings is itself a workspace tab (kept mounted in TabHost), so the active sub-tab lives in
+// internal state — it survives switching to another tab and back. It's seeded once from a `?tab=`
+// deep link (e.g. the Connectors → Screens cross-link opens
+// `/settings?tab=screens&app=nomasx1&screen=security_users`; the per-tab `app`/`screen` selectors
+// are still consumed from the URL by ScreensBuilder on its first mount). We don't write the
+// sub-tab back to the URL — switching workspace tabs changes the URL, which would clobber it.
+import { lazy, Suspense, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
@@ -40,19 +44,13 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 
 export default function Settings() {
   const { t } = useTranslation()
-  // Tab + per-tab selection live in the URL search params. Switching tab clears the per-tab
-  // selection (it's tab-scoped) — the builders read the params on mount to pre-select. A wholly
-  // missing `tab` param defaults to `pools`. Anything else (invalid value) is silently coerced.
-  const [params, setParams] = useSearchParams()
-  const rawTab = params.get('tab')
-  const tab: Tab = isTab(rawTab) ? rawTab : 'pools'
-  const setTab = (next: Tab) => {
-    const np = new URLSearchParams(params)
-    np.set('tab', next)
-    // Drop the tab-scoped selectors when switching — they belong to the previous tab.
-    for (const k of ['app', 'screen']) np.delete(k)
-    setParams(np, { replace: true })
-  }
+  // Active sub-tab is internal state (seeded once from a `?tab=` deep link) so it survives
+  // workspace-tab switches; a missing/invalid `tab` param defaults to `pools`.
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => {
+    const raw = params.get('tab')
+    return isTab(raw) ? raw : 'pools'
+  })
   return (
     <PageLayout icon={<SlidersHorizontal size={18} />} title={t('settings.title')}>
       <Tabs>

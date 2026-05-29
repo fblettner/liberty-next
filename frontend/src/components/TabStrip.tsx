@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -151,22 +151,26 @@ export default function TabStrip() {
           const Icon =
             tab.kind === 'http' ? Globe :
             tab.kind === 'nomaflow_run' ? Workflow :
+            tab.kind === 'settings' ? SlidersHorizontal :
             TableIcon
           // Resolve label + owning app via the menu tree so duplicates like "Users" under
           // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
-          // Nomaflow run tabs aren't menu-tree entries — label them "Run <short-id>" with
-          // no app top-line (they're cross-app diagnostics anyway).
+          // Nomaflow run + Settings tabs aren't menu-tree entries — label them directly with
+          // no app top-line.
           let label: string
           let appLabel: string | undefined
           if (tab.kind === 'nomaflow_run') {
             label = t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
+          } else if (tab.kind === 'settings') {
+            label = t('nav.settings', 'Settings')
           } else {
             const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
             label = hit?.label ?? tab.target
             appLabel = hit?.appLabel
           }
+          const tip = tab.connector || tab.target ? `${label} — ${tab.connector}.${tab.target}` : label
           return (
-            <TabBtn key={tab.id} data-active={tab.id === activeId} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${label} — ${tab.connector}.${tab.target}`}>
+            <TabBtn key={tab.id} data-active={tab.id === activeId} $active={tab.id === activeId} onClick={() => goTo(tab)} title={tip}>
               <Icon className="tic" size={13} />
               <span className="text">
                 {appLabel && <span className="app">{appLabel}</span>}

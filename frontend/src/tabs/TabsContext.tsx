@@ -12,19 +12,22 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 // is the first non-SQL/HTTP page wrapped as a tab — opened from row_click_route on the Job Runs
 // screen so the run detail lives alongside Job Runs / Users / etc. in the tab strip instead of
 // hijacking the workspace or popping a browser tab.
-export type TabKind = 'sql' | 'http' | 'dashboard' | 'nomaflow_run'
+export type TabKind = 'sql' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind
-  /** Empty for dashboard / nomaflow_run tabs (the target alone identifies them). */
+  /** Empty for dashboard / nomaflow_run / settings tabs (the target alone identifies them). */
   connector: string
-  /** The query name (sql), endpoint name (http), dashboard id (dashboard), or run_id (nomaflow_run). */
+  /** The query name (sql), endpoint name (http), dashboard id (dashboard), run_id (nomaflow_run);
+   *  empty for the single settings tab. */
   target: string
 }
 export function tabId(kind: TabKind, connector: string, target: string): string {
   return `${kind}:${connector}:${target}`
 }
 export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
+  // Settings is a singleton framework tab with no connector/target segment.
+  if (t.kind === 'settings') return '/settings'
   // Dashboards / nomaflow_run have no connector segment in the URL — just /<base>/<id>.
   if (t.kind === 'dashboard') return `/dashboard/${encodeURIComponent(t.target)}`
   if (t.kind === 'nomaflow_run') return `/nomaflow/runs/${encodeURIComponent(t.target)}`

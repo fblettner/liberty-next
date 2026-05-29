@@ -11,9 +11,9 @@ import { useWorkspace } from "./workspace/WorkspaceContext";
 
 // Framework pages are code-split; the SQL/HTTP screens aren't routed directly — they live as
 // tabs (see components/TabHost), and these route components just open/activate the matching tab.
-// AI assistant is no longer a routed page — it lives in a right-side drawer toggled
-// from the utility bar (see components/AiDrawer). The /chat URL is gone.
-const Settings = lazy(() => import("./pages/Settings"));
+// Settings is also a tab now (its <Settings> lazy-loads inside TabHost); /settings is a TabRoute
+// marker like the screen routes. AI assistant is no longer a routed page — it lives in a
+// right-side drawer toggled from the utility bar (see components/AiDrawer). The /chat URL is gone.
 const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
 const NomaflowSchedule = lazy(() => import("./pages/Nomaflow/Schedule"));
@@ -38,7 +38,9 @@ function TabRoute({ kind }: { kind: TabKind }) {
   const { connector = "", target = "", runId = "" } = useParams();
   const { openOrActivate } = useTabs();
   useEffect(() => {
-    if (kind === "nomaflow_run" && runId) {
+    if (kind === "settings") {
+      openOrActivate({ kind, connector: "", target: "" });
+    } else if (kind === "nomaflow_run" && runId) {
       openOrActivate({ kind, connector: "", target: runId });
     } else if (kind === "dashboard" && target) {
       openOrActivate({ kind, connector: "", target });
@@ -80,7 +82,7 @@ export default function App() {
         <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
-        <Route path="settings" element={<Settings />} />
+        <Route path="settings" element={<TabRoute kind="settings" />} />
         {/* nomaflow feature area — Jobs list + Job editor + Schedule (NOMAFLOW-UI.md) */}
         <Route path="nomaflow" element={<Nomaflow />} />
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
