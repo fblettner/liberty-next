@@ -61,10 +61,8 @@ class PoolConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str = Field(description=(
-        "SQLAlchemy *async* URL — e.g. postgresql+asyncpg://user@host:5432/db, "
-        "oracle+oracledb://user@host:1521/?service_name=ORCL, sqlite+aiosqlite:///./file.db. "
-        "Supports ${ENV} / ${ENV:-default} refs. A URL-special password (@ / : / …) belongs in the "
-        "separate `password` field, not here."
+        "SQLAlchemy *async* URL. Pick a **Dialect** to seed a template, then fill in user / host / db. "
+        "A special-character password (@ / : / …) goes in the separate `password` field; supports ${ENV} refs."
     ))
     password: str | None = Field(
         default=None,

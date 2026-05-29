@@ -32,6 +32,7 @@ const en = {
     cancel: 'Cancel',
     confirm: 'Confirm',
     delete: 'Delete',
+    discard: 'Discard',
     edit: 'Edit',
     undo: 'Undo',
     back: 'back',

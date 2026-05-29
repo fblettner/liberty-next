@@ -402,6 +402,8 @@ export default function ScreensBuilder() {
       setBusy(false)
     }
   }
+  // Deleting an app (all its screens) persists immediately (write screens.toml + reload), not as a
+  // pending edit a reload would silently drop — same fix as the other editors.
   const removeApp = async (name: string) => {
     const ok = await modals.confirm({
       title: t('settings.screens.deleteApp'),
@@ -410,8 +412,8 @@ export default function ScreensBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    setDoc((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
-    setSelApp((s) => (s === name ? null : s)); setStatus(null)
+    const next = { ...(doc ?? {}) }; delete next[name]
+    await persistScreens(next, () => setSelApp((s) => (s === name ? null : s)))
   }
   const addScreen = async (app: string) => {
     const id = (await modals.prompt({
@@ -428,6 +430,8 @@ export default function ScreensBuilder() {
     })
     setSelId(id); setStatus(null)
   }
+  // Deleting a screen persists immediately — a screen is a top-level record, so its delete
+  // shouldn't sit as a pending edit a reload would silently drop.
   const removeScreen = async (app: string, id: string) => {
     const ok = await modals.confirm({
       title: t('settings.screens.delete'),
@@ -436,27 +440,31 @@ export default function ScreensBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    setDoc((p) => {
-      const cur = p ?? {}
-      const appCur = { ...(cur[app] ?? {}) }
-      delete appCur[id]
-      return { ...cur, [app]: appCur }
-    })
-    setSelId((s) => (s === id ? null : s)); setStatus(null)
+    const cur = doc ?? {}
+    const appCur = { ...(cur[app] ?? {}) }
+    delete appCur[id]
+    await persistScreens({ ...cur, [app]: appCur }, () => setSelId((s) => (s === id ? null : s)))
   }
 
-  async function save() {
-    if (!doc) return
+  // Write the whole screens.toml + reload (the shared persist path for Save + the immediate
+  // deletes). ``after`` runs on success (clear the relevant selection) before re-loading.
+  async function persistScreens(next: AppScreens, after?: () => void) {
     setBusy(true); setError(null); setStatus(null)
     try {
-      await api.put<{ saved: boolean }>('/admin/config/screens/parsed', { screens: doc })
+      await api.put<{ saved: boolean }>('/admin/config/screens/parsed', { screens: next })
       const r = await api.post<{ screen_apps: string[] }>('/admin/reload')
+      after?.()
       const list = (r.screen_apps ?? []).join(', ') || `(${t('common.none')})`
       setStatus(t('settings.screens.saved', { apps: list }))
       load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally { setBusy(false) }
+  }
+
+  async function save() {
+    if (!doc) return
+    await persistScreens(doc)
   }
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>

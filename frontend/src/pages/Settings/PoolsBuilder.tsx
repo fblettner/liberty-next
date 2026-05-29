@@ -5,7 +5,7 @@
 // Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Edit3 } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -14,6 +14,19 @@ import { renameKey, validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Pools = Record<string, Record<string, unknown>>
+
+// Per-dialect starter URLs — picking a Dialect in the form seeds the URL field with the matching
+// template (only when the URL is empty or still a template, so a real one the operator typed is
+// kept). Dialect ids match the DATASOURCE_TYPE enum (liberty/framework_enums.py).
+const URL_TEMPLATES: Record<string, string> = {
+  postgresql: 'postgresql+asyncpg://user:password@host:5432/dbname',
+  oracle: 'oracle+oracledb://user@host:1521/?service_name=ORCL',
+  mysql: 'mysql+aiomysql://user:password@host:3306/dbname',
+  mariadb: 'mariadb+asyncmy://user:password@host:3306/dbname',
+  mssql: 'mssql+aioodbc://user:password@host:1433/dbname?driver=ODBC+Driver+18+for+SQL+Server',
+  sqlite: 'sqlite+aiosqlite:///./database.db',
+}
+const TEMPLATE_SET = new Set(Object.values(URL_TEMPLATES))
 
 // Layout: outer Stack flex-fills the page, the toolbar is fixed at top, the Split fills the
 // remaining vertical space, and only the inner panels scroll. No page-level scroll — the
@@ -76,6 +89,18 @@ export default function PoolsBuilder() {
   const dirty = useMemo(() => pools != null && JSON.stringify(pools) !== original, [pools, original])
 
   const update = (name: string, v: Record<string, unknown>) => setPools((p) => ({ ...(p ?? {}), [name]: v }))
+  // When the operator changes the Dialect, seed the URL with that dialect's template — unless they've
+  // already typed a real URL (we only overwrite an empty field or a still-untouched template).
+  const onFormChange = (name: string, v: Record<string, unknown>) => {
+    const prevDialect = typeof pools?.[name]?.dialect === 'string' ? (pools[name].dialect as string) : ''
+    const nextDialect = typeof v.dialect === 'string' ? v.dialect : ''
+    const url = typeof v.url === 'string' ? v.url.trim() : ''
+    if (nextDialect && nextDialect !== prevDialect && URL_TEMPLATES[nextDialect] && (!url || TEMPLATE_SET.has(url))) {
+      update(name, { ...v, url: URL_TEMPLATES[nextDialect] })
+      return
+    }
+    update(name, v)
+  }
   const addPool = async () => {
     const name = (await modals.prompt({
       title: t('settings.pools.add'),
@@ -87,6 +112,9 @@ export default function PoolsBuilder() {
     setPools((p) => ({ ...(p ?? {}), [name]: { url: '' } }))
     setSel(name); setStatus(null)
   }
+  // Delete persists immediately (write + reload), not as a pending edit a discard/reload would
+  // silently drop — same fix as the dictionary delete. Commits the current doc minus the pool;
+  // a failure surfaces inline instead of the pool quietly reappearing.
   const removePool = async (name: string) => {
     const ok = await modals.confirm({
       title: t('settings.pools.delete'),
@@ -95,8 +123,25 @@ export default function PoolsBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    setPools((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
-    setSel((s) => (s === name ? null : s)); setStatus(null)
+    const next = { ...(pools ?? {}) }; delete next[name]
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      await api.put<{ saved: boolean }>('/admin/config/pools', { pools: next })
+      const r = await api.post<{ pools: string[] }>('/admin/reload')
+      setSel((s) => (s === name ? null : s))
+      setStatus(t('settings.pools.saved', { pools: r.pools.join(', ') || `(${t('common.none')})` }))
+      load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+  // Discard local edits — revert to the last-loaded state (client-side, no network).
+  const discard = () => {
+    if (!original) return
+    const orig = JSON.parse(original) as Pools
+    setPools(orig)
+    setSel((s) => (s && orig[s] ? s : Object.keys(orig)[0] ?? null))
+    setStatus(null); setError(null)
   }
   // Rename the selected pool's dict key. Order-preserving (the renamed item stays in place in the
   // left nav). Validation: non-empty, not colliding with another existing pool — handled by the
@@ -147,11 +192,9 @@ export default function PoolsBuilder() {
   return (
     <FrameworkEnumsContext.Provider value={enums}>
     <Shell>
-      {/* One consolidated top toolbar — config path + status on the left, every action
-          (Add / Delete / Save / Reload) on the right. Previously Save / Reload sat in a
-          separate row at the bottom of the page and the operator had to scroll past a long
-          pool list to find them. The Shell below flex-fills the page; only the inner panels
-          scroll, so the toolbar stays pinned at the top no matter how tall the form gets. */}
+      {/* Top toolbar — status on the left; doc-level actions (Add / Save / Discard) on the right.
+          Per-pool actions (Rename / Reload from disk / Delete) live in the selected pool's pane, not
+          here — they're contextual to the pool, not the whole document. */}
       <Toolbar>
         <ToolbarLeft>
           {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
@@ -162,17 +205,12 @@ export default function PoolsBuilder() {
           <Button $variant="ghost" $size="sm" onClick={addPool} disabled={busy}>
             <Plus size={13} /> {t('settings.pools.add')}
           </Button>
-          {sel && pools[sel] && (
-            <Button $variant="danger" $size="sm" onClick={() => removePool(sel)} disabled={busy} title={t('settings.pools.deleteOne', { name: sel })}>
-              <Trash2 size={13} /> {t('settings.pools.deleteOne', { name: sel })}
-            </Button>
-          )}
           <ToolbarDivider />
           <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
           </Button>
-          <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-            {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty} title={t('common.discard')}>
+            <Undo2 size={13} /> {t('common.discard')}
           </Button>
         </ToolbarRight>
       </Toolbar>
@@ -187,13 +225,23 @@ export default function PoolsBuilder() {
         <FormCol>
           {sel && pools[sel] ? (
             <Stack gap={12}>
+              {/* Per-pool actions live here, in the selected pool's pane — Rename / Reload from
+                  disk / Delete all act on this pool (Delete persists immediately). */}
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>[pools.{sel}]</strong>
-                <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
-                  <Edit3 size={13} /> {t('settings.rename.button')}
-                </Button>
+                <Row gap={6} style={{ alignItems: 'center' }}>
+                  <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
+                    <Edit3 size={13} /> {t('settings.rename.button')}
+                  </Button>
+                  <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
+                    {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
+                  </Button>
+                  <Button $variant="danger" $size="sm" onClick={() => removePool(sel)} disabled={busy} title={t('settings.pools.deleteOne', { name: sel })}>
+                    <Trash2 size={13} /> {t('common.delete')}
+                  </Button>
+                </Row>
               </Row>
-              <SchemaForm schema={schema} value={pools[sel]} onChange={(v) => update(sel, v)} />
+              <SchemaForm schema={schema} value={pools[sel]} onChange={(v) => onFormChange(sel, v)} />
             </Stack>
           ) : (
             <Empty>{names.length ? t('settings.pools.pickOne') : t('settings.pools.empty')}</Empty>

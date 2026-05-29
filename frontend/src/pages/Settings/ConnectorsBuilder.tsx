@@ -258,6 +258,8 @@ export default function ConnectorsBuilder() {
   // its placeholder values, and sees the result in-place. Backed by the same
   // ``POST /admin/config/api/test`` endpoint; that endpoint accepts ``test_endpoint`` +
   // ``params`` so it can fire any named endpoint without saving first.
+  // Delete persists immediately (write connectors.toml + reload), not as a pending edit a
+  // reload/Discard would silently drop — same fix as Pools / the dictionary delete.
   const removeConnector = async (name: string) => {
     const ok = await modals.confirm({
       title: t('settings.connectors.delete'),
@@ -266,8 +268,18 @@ export default function ConnectorsBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    setConns((p) => { const next = { ...(p ?? {}) }; delete next[name]; return next })
-    setSel((s) => (s === name ? null : s)); setStatus(null)
+    const next = { ...(conns ?? {}) }; delete next[name]
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: next })
+      const r = await api.post<{ connectors: string[] }>('/admin/reload')
+      refreshWorkspace()
+      setSel((s) => (s === name ? null : s))
+      setStatus(t('settings.connectors.saved', { connectors: r.connectors.join(', ') || `(${t('common.none')})` }))
+      load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
   }
 
   // Open the Clone-app modal, pre-filled with the currently-selected connector as the

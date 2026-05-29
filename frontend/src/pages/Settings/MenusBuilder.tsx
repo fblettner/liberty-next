@@ -386,6 +386,9 @@ export default function MenusBuilder() {
     setApps((p) => ({ ...(p ?? {}), [name]: { items: [] } }))
     setSelApp(name); setStatus(null)
   }
+  // Deleting a whole app's menu persists immediately (write menus.toml + reload), not as a pending
+  // edit a reload would silently drop. (Individual menu *items* stay local — they're a structural
+  // tree edit committed on Save, like move / indent / add.)
   const removeApp = async (name: string) => {
     const ok = await modals.confirm({
       title: t('settings.menus.app.delete'),
@@ -394,8 +397,17 @@ export default function MenusBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    setApps((p) => { const n = { ...(p ?? {}) }; delete n[name]; return n })
-    setSelApp((s) => (s === name ? null : s)); setStatus(null)
+    const next = { ...(apps ?? {}) }; delete next[name]
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      await api.put<{ saved: boolean }>('/admin/config/menus/parsed', { menus: next })
+      await api.post<{ menu_apps: string[] }>('/admin/reload')
+      setSelApp((s) => (s === name ? null : s))
+      setStatus(t('settings.menus.saved'))
+      load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
   }
   const renameItem = async (oldId: string, newId: string) => {
     if (!newId || newId === oldId) return

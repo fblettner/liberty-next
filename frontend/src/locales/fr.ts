@@ -34,6 +34,7 @@ const fr: Resources = {
     cancel: 'Annuler',
     confirm: 'Confirmer',
     delete: 'Supprimer',
+    discard: 'Abandonner',
     edit: 'Modifier',
     undo: 'Annuler la suppression',
     back: 'retour',
