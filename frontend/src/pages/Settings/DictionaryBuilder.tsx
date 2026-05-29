@@ -8,13 +8,15 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, Globe, Layers, Edit3, BookText } from 'lucide-react'
+import { Save, Plus, Trash2, Search, Edit3, BookText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { AddScopeModal } from './AddScopeModal'
+import { ScopeBar as ScopeRow } from './ScopeBar'
 import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { groupQueriesByTable } from './connectorTables'
@@ -36,7 +38,7 @@ const LangBox = styled.label`
   display: inline-flex; align-items: center; gap: 6px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
   & input { width: 60px; }
 `
-const SubTabs = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
+const SubTabs = styled.div`display: flex; align-items: center; gap: 4px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
 const SubTab = styled.button<{ $active?: boolean }>`
   height: 30px; padding: 0 14px; border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
@@ -44,16 +46,8 @@ const SubTab = styled.button<{ $active?: boolean }>`
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
   &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; }
 `
-const ScopeBar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
-const Chip = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
-  &:hover { color: ${colors.text.primary}; }
-`
+// Generic flex row used by the top toolbar (status / language / scan / save).
+const Toolbar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
 const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // The left nav has its own scroll container so a long list (think 347 dictionary entries) doesn't
 // drag the whole page along when you wheel through it. The search row and the "+ Add" button stay
@@ -79,7 +73,6 @@ const NavItem = styled.button<{ $active?: boolean }>`
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
-const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
 const KIND_TO_DEF: Record<DictionaryKind, string> = {
   entries: 'DictionaryEntry',
@@ -154,6 +147,7 @@ export default function DictionaryBuilder() {
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
+  const [addScopeOpen, setAddScopeOpen] = useState(false)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -480,18 +474,11 @@ export default function DictionaryBuilder() {
         : t('settings.dictionary.renamed', { from: oldKey, to: next }),
     )
   }
-  const addScope = async () => {
-    const name = (await modals.prompt({
-      title: t('settings.dictionary.scope.add'),
-      message: t('settings.dictionary.scope.addPrompt'),
-    }))?.trim()
-    if (!name) return
-    if (scopes.includes(name)) { setScope(name); return }
-    // We just switch — the scope materialises in `dict.connectors` as soon as a record is added
-    // (the section-cleanup in setSection won't drop it then). If the user adds nothing and saves,
-    // the empty scope naturally disappears on the next round-trip.
-    setScope(name)
-  }
+  // "Add scope" = start a per-connector dictionary overlay. Offer the connectors that don't already
+  // have an overlay (a scope materialises in `dict.connectors` as soon as a record is added; an
+  // empty one naturally disappears on the next round-trip). Picking one just switches to it.
+  const addScopeCandidates = Object.keys(connectors ?? {}).filter((c) => !scopes.includes(c)).sort()
+  const onPickScope = (name: string) => { setScope(name); setStatus(null) }
   const setLang = (lang: string) => {
     const trimmed = lang.trim()
     const next: DictionaryData = { ...dict }
@@ -521,7 +508,7 @@ export default function DictionaryBuilder() {
       {/* One consolidated top toolbar — config path + status + language input on the left, Save +
           Reload on the right. Replaces the old "header at top + bottom Save Row" split — the
           operator never has to scroll past a long entries list to reach Save / Reload. */}
-      <ScopeBar style={{ flexShrink: 0 }}>
+      <Toolbar style={{ flexShrink: 0 }}>
         {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
         {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
         {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
@@ -536,41 +523,30 @@ export default function DictionaryBuilder() {
         <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
           {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
         </Button>
-      </ScopeBar>
+      </Toolbar>
+      {/* Scope (= connector) at the TOP — the SAME shared scope row every other per-connector editor
+          uses. The dictionary-specific *kind* tabs (entries / enums / …) come below it. Framework
+          enums are shared-only, so when that kind is active we show only the shared scope + disable
+          "Add scope". */}
+      <ScopeRow
+        scopes={SHARED_ONLY.has(kind)
+          ? [{ value: SCOPE_SHARED, label: scopeLabel(SCOPE_SHARED) }]
+          : scopes.map((s) => ({ value: s, label: scopeLabel(s) }))}
+        value={scope}
+        onChange={setScope}
+        onAddScope={() => setAddScopeOpen(true)}
+        addScopeDisabled={SHARED_ONLY.has(kind)}
+        addScopeTitle={SHARED_ONLY.has(kind) ? t('settings.dictionary.framework_enums.scopeNote') : t('settings.dictionary.scope.addPrompt')}
+      />
       <SubTabs>
         {KIND_ORDER.map((k) => (
           <SubTab key={k} $active={kind === k} type="button" onClick={() => { setKind(k); if (SHARED_ONLY.has(k)) setScope(SCOPE_SHARED) }}>{t(`settings.dictionary.${k}.tab`)}</SubTab>
         ))}
+        <div style={{ flex: 1 }} />
+        <Button $variant="ghost" $size="sm" onClick={addRecord} title={t(`settings.dictionary.${kind}.add`)}>
+          <Plus size={13} /> {t(`settings.dictionary.${kind}.add`)}
+        </Button>
       </SubTabs>
-      {SHARED_ONLY.has(kind) ? (
-        // Framework enums live only in the shared scope; show a hint instead of the chip strip,
-        // but still surface "Add <kind>" on the right so every kind has a discoverable add action
-        // at the top (entries / enums / lookups / sequences / framework all follow the same UX).
-        <ScopeBar>
-          <Hint style={{ flex: 1, margin: 0 }}>{t('settings.dictionary.framework_enums.scopeNote')}</Hint>
-          <Chip type="button" onClick={addRecord} title={t(`settings.dictionary.${kind}.add`)}>
-            <Plus size={12} /> {t(`settings.dictionary.${kind}.add`)}
-          </Chip>
-        </ScopeBar>
-      ) : (
-        // Scope chips on the left, scope-level actions on the right. "Add <kind>" was at the
-        // bottom of the record list before — promoting it here keeps every scope-level action
-        // (add scope · add record) visible without scrolling past a long list.
-        <ScopeBar>
-          <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.dictionary.scope.label')}</span>
-          {scopes.map((s) => (
-            <Chip key={s || '_shared'} $active={scope === s} type="button" onClick={() => setScope(s)}>
-              {s ? <Globe size={12} /> : <Layers size={12} />}{scopeLabel(s)}
-            </Chip>
-          ))}
-          <Chip type="button" onClick={addScope} title={t('settings.dictionary.scope.addPrompt')}>
-            <Plus size={12} /> {t('settings.dictionary.scope.add')}
-          </Chip>
-          <Chip type="button" onClick={addRecord} title={t(`settings.dictionary.${kind}.add`)} style={{ marginLeft: 'auto' }}>
-            <Plus size={12} /> {t(`settings.dictionary.${kind}.add`)}
-          </Chip>
-        </ScopeBar>
-      )}
       <Split>
         <NavCol>
           {keys.length > 6 && (
@@ -636,6 +612,15 @@ export default function DictionaryBuilder() {
         </FormCol>
       </Split>
       {scanOpen && <DictionaryScan onClose={() => setScanOpen(false)} onSaved={load} />}
+      {addScopeOpen && (
+        <AddScopeModal
+          candidates={addScopeCandidates}
+          title={t('settings.dictionary.scope.add', 'Add a connector scope')}
+          emptyHint={t('settings.dictionary.scope.addEmpty', 'Every connector already has a dictionary overlay.')}
+          onPick={onPickScope}
+          onClose={() => setAddScopeOpen(false)}
+        />
+      )}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

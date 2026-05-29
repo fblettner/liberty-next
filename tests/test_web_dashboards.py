@@ -51,12 +51,11 @@ def _charts_toml() -> str:
     readable query, so its widget surfaces to the `user` role."""
     return textwrap.dedent(
         """
-        [charts.users_per_app]
+        [charts.app1.users_per_app]
         label = "Users per app"
-        connector = "app1"
         query = "users_get"
 
-          [charts.users_per_app.spec]
+          [charts.app1.users_per_app.spec]
           type = "bar"
           x = "APPS_ID"
           y = ["USR_ID"]
@@ -72,31 +71,33 @@ def _dashboards_toml() -> str:
     - A KPI widget against the `secret_get` query — the `user` role can't read it, so the
       widget drops out of the catalog (the dashboard still surfaces with two widgets).
     """
+    # All dashboards live in scope `app1`; the `chart = "users_per_app"` reference resolves within
+    # that scope (charts are now [charts.<scope>.<id>]). Public ids are the qualified `app1.<id>`.
     return textwrap.dedent(
         """
-        [dashboards.security_overview]
+        [dashboards.app1.security_overview]
         label = "Security Overview"
         description = "Users + assignments at a glance"
 
-          [[dashboards.security_overview.widgets]]
+          [[dashboards.app1.security_overview.widgets]]
           type = "chart"
           chart = "users_per_app"
           col_span = 6
 
-          [[dashboards.security_overview.widgets]]
+          [[dashboards.app1.security_overview.widgets]]
           type = "chart"
           label = "Users by status"
           connector = "app1"
           query = "users_get"
           col_span = 6
 
-            [dashboards.security_overview.widgets.spec]
+            [dashboards.app1.security_overview.widgets.spec]
             type = "pie"
             x = "USR_STATUS"
             y = ["USR_ID"]
             aggregation = "count"
 
-          [[dashboards.security_overview.widgets]]
+          [[dashboards.app1.security_overview.widgets]]
           type = "kpi"
           label = "Hidden users"
           connector = "app1"
@@ -107,19 +108,19 @@ def _dashboards_toml() -> str:
 
         # A second dashboard that references a chart that DOESN'T exist — should drop the widget
         # with a warning and surface the dashboard with empty widgets.
-        [dashboards.orphan]
+        [dashboards.app1.orphan]
         label = "Orphan"
 
-          [[dashboards.orphan.widgets]]
+          [[dashboards.app1.orphan.widgets]]
           type = "chart"
           chart = "ghost"
           col_span = 12
 
         # Table widgets — one on a readable query, one on `secret_get` (pruned for `user`).
-        [dashboards.ops]
+        [dashboards.app1.ops]
         label = "Ops"
 
-          [[dashboards.ops.widgets]]
+          [[dashboards.app1.ops.widgets]]
           type = "table"
           label = "Users"
           connector = "app1"
@@ -129,7 +130,7 @@ def _dashboards_toml() -> str:
           col_span = 12
           row_span = 3
 
-          [[dashboards.ops.widgets]]
+          [[dashboards.app1.ops.widgets]]
           type = "table"
           label = "Secret rows"
           connector = "app1"
@@ -187,7 +188,7 @@ def test_list_dashboards_admin_resolves_chart_refs(app) -> None:
         assert r.status_code == 200
         dashboards = r.json()["dashboards"]
         # `security_overview` has 3 widgets; `orphan`'s sole widget references a missing chart → dropped
-        sec = next(d for d in dashboards if d["id"] == "security_overview")
+        sec = next(d for d in dashboards if d["id"] == "app1.security_overview")
         assert sec["label"] == "Security Overview" and sec["description"] == "Users + assignments at a glance"
         assert len(sec["widgets"]) == 3
         # The reference widget has the saved chart's bits inlined + the saved chart's label
@@ -204,7 +205,7 @@ def test_list_dashboards_admin_resolves_chart_refs(app) -> None:
         kpi = sec["widgets"][2]
         assert kpi["type"] == "kpi" and kpi["aggregation"] == "count" and kpi["column"] == "USR_ID"
         # `orphan` has the unresolved reference dropped — the dashboard surfaces with no widgets
-        orphan = next(d for d in dashboards if d["id"] == "orphan")
+        orphan = next(d for d in dashboards if d["id"] == "app1.orphan")
         assert orphan["widgets"] == []
 
 
@@ -213,18 +214,18 @@ def test_list_dashboards_filters_unreadable_widgets(app) -> None:
     dashboard surfaces with the remaining two chart widgets."""
     with TestClient(app) as client:
         dashboards = client.get("/api/dashboards", headers=_h(client, "user")).json()["dashboards"]
-        sec = next(d for d in dashboards if d["id"] == "security_overview")
+        sec = next(d for d in dashboards if d["id"] == "app1.security_overview")
         # 3 widgets in TOML → 2 here (KPI on secret_get pruned)
         assert [w["type"] for w in sec["widgets"]] == ["chart", "chart"]
         # `nobody` has no perms → both chart widgets drop too
         ds = client.get("/api/dashboards", headers=_h(client, "nobody")).json()["dashboards"]
-        sec = next(d for d in ds if d["id"] == "security_overview")
+        sec = next(d for d in ds if d["id"] == "app1.security_overview")
         assert sec["widgets"] == []
 
 
 def test_table_widget_admin_sees_full_shape(app) -> None:
     with TestClient(app) as client:
-        ops = client.get("/api/dashboards/ops", headers=_h(client, "admin")).json()
+        ops = client.get("/api/dashboards/app1.ops", headers=_h(client, "admin")).json()
         assert [w["type"] for w in ops["widgets"]] == ["table", "table"]
         t = ops["widgets"][0]
         assert t["connector"] == "app1" and t["query"] == "users_get"
@@ -235,24 +236,24 @@ def test_table_widget_admin_sees_full_shape(app) -> None:
 def test_table_widget_pruned_by_permission(app) -> None:
     """`user` can read `users_get` but not `secret_get` → only the first table survives."""
     with TestClient(app) as client:
-        ops = client.get("/api/dashboards/ops", headers=_h(client, "user")).json()
+        ops = client.get("/api/dashboards/app1.ops", headers=_h(client, "user")).json()
         assert [w["label"] for w in ops["widgets"]] == ["Users"]
-        ops = client.get("/api/dashboards/ops", headers=_h(client, "nobody")).json()
+        ops = client.get("/api/dashboards/app1.ops", headers=_h(client, "nobody")).json()
         assert ops["widgets"] == []
 
 
 def test_get_one_dashboard_404_on_unknown(app) -> None:
     with TestClient(app) as client:
         h = _h(client, "admin")
-        r = client.get("/api/dashboards/security_overview", headers=h)
-        assert r.status_code == 200 and r.json()["id"] == "security_overview"
-        assert client.get("/api/dashboards/ghost", headers=h).status_code == 404
+        r = client.get("/api/dashboards/app1.security_overview", headers=h)
+        assert r.status_code == 200 and r.json()["id"] == "app1.security_overview"
+        assert client.get("/api/dashboards/app1.ghost", headers=h).status_code == 404
 
 
 def test_dashboards_require_auth(app) -> None:
     with TestClient(app) as client:
         assert client.get("/api/dashboards").status_code == 401
-        assert client.get("/api/dashboards/security_overview").status_code == 401
+        assert client.get("/api/dashboards/app1.security_overview").status_code == 401
 
 
 def test_info_reports_dashboards(app) -> None:
@@ -283,21 +284,21 @@ def test_filter_surfaced_when_caller_can_read_options(tmp_path) -> None:
     (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
     (tmp_path / "charts.toml").write_text("")  # no charts; filter is inline
     (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
-        [dashboards.ov]
+        [dashboards.app1.ov]
         label = "Overview"
 
-          [[dashboards.ov.filters]]
+          [[dashboards.app1.ov.filters]]
           id = "app"
           label = "Application"
           dictionary_key = "APPS_ID"
 
-            [dashboards.ov.filters.options]
+            [dashboards.app1.ov.filters.options]
             connector = "app1"
             query = "users_get"
             value_column = "APPS_ID"
             label_column = "APPS_NAME"
 
-          [[dashboards.ov.widgets]]
+          [[dashboards.app1.ov.widgets]]
           type = "kpi"
           label = "Users"
           connector = "app1"
@@ -331,14 +332,14 @@ def test_filter_surfaced_when_caller_can_read_options(tmp_path) -> None:
     app = create_app(settings)
     with TestClient(app) as client:
         # Admin: filter surfaces with full options block
-        d = client.get("/api/dashboards/ov", headers=_h(client, "admin")).json()
+        d = client.get("/api/dashboards/app1.ov", headers=_h(client, "admin")).json()
         assert "filters" in d and len(d["filters"]) == 1
         f = d["filters"][0]
         assert f["id"] == "app" and f["dictionary_key"] == "APPS_ID"
         assert f["options"]["value_column"] == "APPS_ID" and f["options"]["label_column"] == "APPS_NAME"
         # user: can read users_get → both widget AND filter (filter's options query == widget's query)
-        d = client.get("/api/dashboards/ov", headers=_h(client, "user")).json()
+        d = client.get("/api/dashboards/app1.ov", headers=_h(client, "user")).json()
         assert len(d["filters"]) == 1 and len(d["widgets"]) == 1
         # nobody: neither → no filter (key omitted), no widgets
-        d = client.get("/api/dashboards/ov", headers=_h(client, "nobody")).json()
+        d = client.get("/api/dashboards/app1.ov", headers=_h(client, "nobody")).json()
         assert "filters" not in d and d["widgets"] == []

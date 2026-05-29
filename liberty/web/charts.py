@@ -34,29 +34,35 @@ def get_charts(request: Request) -> ChartsFile:
 Charts = Annotated[ChartsFile, Depends(get_charts)]
 
 
-def _can_read(principal: Principal, chart: ChartConfig) -> bool:
-    return principal.has_permission(f"sql:{chart.connector}:{chart.query}")
+def _can_read(principal: Principal, scope: str, chart: ChartConfig) -> bool:
+    return principal.has_permission(f"sql:{scope}:{chart.query}")
 
 
-def _public_view(chart: ChartConfig) -> dict[str, Any]:
-    """Wire shape of one chart — same as ``model_dump(mode="json", exclude_none=True)``, kept in
-    a helper so the field-set is centralised when we add more (display ACLs, sharing, …)."""
-    return chart.model_dump(mode="json", exclude_none=True)
+def _public_view(scope: str, chart: ChartConfig) -> dict[str, Any]:
+    """Wire shape of one chart. The public ``id`` is the *qualified* ``<scope>.<id>`` (charts are
+    now scoped to a connector — ``[charts.<scope>.<id>]`` — and the inner id is only unique within
+    its scope), and ``connector`` is the scope key."""
+    out = chart.model_dump(mode="json", exclude_none=True)
+    out["id"] = f"{scope}.{chart.id}"
+    out["connector"] = scope
+    return out
 
 
 @router.get("/charts")
 async def list_charts(principal: CurrentPrincipal, charts: Charts) -> dict[str, Any]:
     """List every chart the caller may open. Permission gate matches the underlying query's —
-    a caller without ``sql:{connector}:{query}`` doesn't see the chart at all."""
-    out = [_public_view(c) for c in charts.charts.values() if _can_read(principal, c)]
+    a caller without ``sql:{scope}:{query}`` doesn't see the chart at all."""
+    out = [_public_view(s, c) for s, _, c in charts.iter_charts() if _can_read(principal, s, c)]
     return {"charts": out}
 
 
 @router.get("/charts/{chart_id}")
 async def get_chart(chart_id: str, principal: CurrentPrincipal, charts: Charts) -> dict[str, Any]:
-    chart = charts.charts.get(chart_id)
-    if chart is None or not _can_read(principal, chart):
+    # ``chart_id`` is the qualified ``<scope>.<id>`` (e.g. ``nomasx1.users_per_app``).
+    scope, _, cid = chart_id.partition(".")
+    chart = charts.get_chart(scope, cid) if cid else None
+    if chart is None or not _can_read(principal, scope, chart):
         # 404 (not 403) for the unreadable case — don't leak the chart's existence to a caller
         # who can't run its query. Same convention the connectors / screens routes use.
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown chart {chart_id!r}")
-    return _public_view(chart)
+    return _public_view(scope, chart)

@@ -6,18 +6,19 @@ TableView (spec persisted to ``localStorage`` per ``(connector, query)``); slice
 the same shape into ``charts.toml`` so an operator can save a useful chart, share it with
 the team, and reference it by id from a menu or dashboard.
 
-One ``[charts.<id>]`` per chart — the id is a stable per-deployment key (e.g.
-``users_per_app``, ``invoices_by_status``). The chart owns its rendering spec inline.
+Charts are scoped to the connector they read from — ``[charts.<scope>.<id>]`` where ``<scope>``
+is the connector name and ``<id>`` is a stable per-scope key (e.g. ``users_per_app``). This
+mirrors ``screens.<scope>.<id>``: the connector is the table key (not a body field), and the
+read query stays an ordinary field. The id only has to be unique *within its scope*.
 
 Example::
 
-    [charts.users_per_app]
+    [charts.nomasx1.users_per_app]
     label = "Users per application"
     description = "Active user count grouped by application"
-    connector = "nomasx1"
     query = "security_users_get"
 
-      [charts.users_per_app.spec]
+      [charts.nomasx1.users_per_app.spec]
       type = "bar"
       x = "APPS_ID"
       y = ["USR_ID"]
@@ -31,6 +32,7 @@ chart-specific ACLs if a use case appears.)
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Literal
 
@@ -107,23 +109,24 @@ class ChartSpec(BaseModel):
 
 
 class ChartConfig(BaseModel):
-    """One ``[charts.<id>]`` entry — a named, version-controlled chart."""
+    """One ``[charts.<scope>.<id>]`` entry — a named, version-controlled chart. Both ``id`` (the
+    inner key) and ``connector`` (the outer *scope* key) are injected from the TOML path by
+    :func:`parse_charts`, the same way screens/menus derive their scope — so the body only needs
+    ``label`` / ``query`` / ``spec``."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(
         default="",
-        description="Stable id (matches the TOML key; the validator below forces them to agree).",
+        description="Stable id (matches the inner TOML key; the validator below forces them to agree).",
         json_schema_extra={"x_group": "Advanced"},
     )
     label: str = Field(description="Display label — the chart's title in lists, dashboards, menus.")
     description: str | None = Field(default=None, description="Optional longer description.")
     connector: str = Field(
-        description="The SQL connector whose query backs this chart.",
-        # CONNECTOR_NAMES is augmented by the ChartsBuilder (same pattern
-        # MenusBuilder uses) — renders the connector field as a dropdown of
-        # the operator's configured connectors instead of free text.
-        json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
+        default="",
+        description="The SQL connector whose query backs this chart — the ``<scope>`` path key; injected from it.",
+        json_schema_extra={"x_group": "Advanced"},
     )
     query: str = Field(
         description="The read query (the chart pulls its data from this query's result).",
@@ -160,30 +163,55 @@ class ChartConfig(BaseModel):
 
 
 class ChartsFile(BaseModel):
-    """Top-level ``charts.toml`` shape — a flat ``[charts]`` dict keyed by id. Matches the
-    layout pattern of ``menus.toml`` / ``dictionary.toml`` / ``screens.toml``."""
+    """Top-level ``charts.toml`` shape — ``[charts.<scope>.<id>]``: a dict of *scope* (connector)
+    → dict of *id* → chart. Mirrors ``screens.toml`` (``screens.<app>.<id>``)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    charts: dict[str, ChartConfig] = Field(default_factory=dict)
+    # scope (connector) -> chart id -> chart
+    charts: dict[str, dict[str, ChartConfig]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_ids(self) -> ChartsFile:
-        for cid, chart in self.charts.items():
-            if chart.id and chart.id != cid:
-                raise ValueError(f"chart {cid!r}: ``id`` field is {chart.id!r}, must match its key")
+        for scope, by_id in self.charts.items():
+            for cid, chart in by_id.items():
+                if chart.id and chart.id != cid:
+                    raise ValueError(f"chart {scope}.{cid!r}: ``id`` field is {chart.id!r}, must match its key")
+                if chart.connector and chart.connector != scope:
+                    raise ValueError(
+                        f"chart {scope}.{cid!r}: ``connector`` field is {chart.connector!r}, "
+                        f"must match its scope key {scope!r}"
+                    )
         return self
+
+    def iter_charts(self) -> Iterator[tuple[str, str, ChartConfig]]:
+        """Walk every chart as ``(scope, id, chart)`` — the flat view the runtime/API need."""
+        for scope, by_id in self.charts.items():
+            for cid, chart in by_id.items():
+                yield scope, cid, chart
+
+    def get_chart(self, scope: str, chart_id: str) -> ChartConfig | None:
+        """Resolve a chart by ``(scope, id)``; ``None`` when absent."""
+        return self.charts.get(scope, {}).get(chart_id)
 
 
 def parse_charts(data: dict[str, Any]) -> ChartsFile:
-    """Validate a raw TOML dict into a :class:`ChartsFile`. Injects each entry's ``id`` from
-    its dict key when omitted (so hand-edited files don't repeat the key in the body).
+    """Validate a raw TOML dict into a :class:`ChartsFile`. Injects each entry's ``id`` (inner
+    key) and ``connector`` (outer scope key) when omitted — so hand-edited files only carry
+    ``label`` / ``query`` / ``spec`` in the body.
     """
     charts = data.get("charts") or {}
     if isinstance(charts, dict):
-        for cid, chart in charts.items():
-            if isinstance(chart, dict) and not chart.get("id"):
-                chart["id"] = cid
+        for scope, by_id in charts.items():
+            if not isinstance(by_id, dict):
+                continue
+            for cid, chart in by_id.items():
+                if not isinstance(chart, dict):
+                    continue
+                if not chart.get("id"):
+                    chart["id"] = cid
+                if not chart.get("connector"):
+                    chart["connector"] = scope
     return ChartsFile.model_validate(data)
 
 

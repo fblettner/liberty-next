@@ -59,10 +59,13 @@ const Msg = styled.div`
 const slug = (s: string) => s.trim()
 
 export function ChartEditorModal({
-  initial, takenIds, onSave, onClose,
+  initial, scope, takenIds, onSave, onClose,
 }: {
   initial: ChartRecord | null
-  takenIds: string[]            // ids already used by OTHER charts (uniqueness check)
+  /** The connector scope this chart belongs to — charts are stored at `[charts.<scope>.<id>]`,
+   *  so the connector is fixed by the scope (not editable here). */
+  scope: string
+  takenIds: string[]            // ids already used by OTHER charts in this scope (uniqueness check)
   onSave: (id: string, record: Record<string, unknown>) => void
   onClose: () => void
 }) {
@@ -70,19 +73,19 @@ export function ChartEditorModal({
   const modals = useModals()
   const { connectors } = useWorkspace()
   const isNew = initial == null
+  const connector = scope                 // the chart's connector IS its scope
 
   const [tab, setTab] = useState<'general' | 'chart'>('general')
   const [id, setId] = useState(initial?.id ?? '')
   const [label, setLabel] = useState(initial?.label ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
-  const [connector, setConnector] = useState(initial?.connector ?? '')
   const [query, setQuery] = useState(initial?.query ?? '')
   const [spec, setSpec] = useState<ChartSpec>(initial?.spec ? fromSavedSpec(initial.spec) : defaultChartSpec())
   const [error, setError] = useState<string | null>(null)
 
   // Unsaved-changes guard — same Save / Discard / Keep-editing dialog the screen visual dialog
   // uses. Snapshot the editable state on first render; compare to it on every close attempt.
-  const draftKey = JSON.stringify({ id, label, description, connector, query, spec })
+  const draftKey = JSON.stringify({ id, label, description, query, spec })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -101,7 +104,6 @@ export function ChartEditorModal({
   }, [connector, query])
 
   const sqlConnectors = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql'), [connectors])
-  const connectorOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
   const queryOpts: SearchSelectOption[] = useMemo(() => {
     const c = sqlConnectors.find((x) => x.name === connector)
     return (c?.queries ?? []).map((q) => ({ value: q.name, label: q.description || q.label || q.name, mono: q.name }))
@@ -112,12 +114,13 @@ export function ChartEditorModal({
     if (!cid) { setError(t('settings.charts.errId', 'An id is required.')); setTab('general'); return }
     if (!/^[A-Za-z0-9_-]+$/.test(cid)) { setError(t('settings.charts.errIdShape', 'Id: letters, digits, underscore, hyphen only.')); setTab('general'); return }
     if (takenIds.includes(cid)) { setError(t('settings.charts.errIdTaken', 'That id is already used by another chart.')); setTab('general'); return }
-    if (!connector || !query) { setError(t('settings.charts.errConnQuery', 'Pick a connector and a query.')); setTab('general'); return }
+    if (!query) { setError(t('settings.charts.errQuery', 'Pick a query.')); setTab('general'); return }
     if (!spec.x || spec.y.length === 0) { setError(t('settings.charts.errXY', 'Set the X column and at least one Y series.')); setTab('chart'); return }
+    // `connector` is the scope (the dict path key) — the builder places the record under it, so we
+    // don't write it into the body.
     const record: Record<string, unknown> = {
       id: cid,
       label: label.trim() || cid,
-      connector,
       query,
       spec: toSavedSpec(spec),
     }
@@ -148,7 +151,7 @@ export function ChartEditorModal({
       <Box onClick={(e) => e.stopPropagation()}>
         <Header>
           <BarChart3 size={17} color={colors.blue.main} />
-          <span className="title">{isNew ? t('settings.charts.add', 'Add chart') : `[charts.${initial?.id}]`}</span>
+          <span className="title">{isNew ? t('settings.charts.add', 'Add chart') : `[charts.${scope}.${initial?.id}]`}</span>
           <CloseBtn onClick={() => void requestClose()} title={t('common.close')}><X size={16} /></CloseBtn>
         </Header>
         <Tabs>
@@ -172,12 +175,13 @@ export function ChartEditorModal({
               </Field>
               <Grid2>
                 <Field label={t('settings.charts.connector', 'Connector')}>
-                  <SearchSelect value={connector} onChange={(v) => { setConnector(v); setQuery(''); setError(null) }}
-                    options={connectorOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
+                  {/* The connector is the chart's scope — fixed here. Move a chart between
+                      connectors by deleting + re-adding it under the other scope. */}
+                  <Input value={scope} readOnly disabled style={{ fontFamily: fonts.mono }} />
                 </Field>
                 <Field label={t('settings.charts.query', 'Query')}>
                   <SearchSelect value={query} onChange={(v) => { setQuery(v); setError(null) }}
-                    options={queryOpts} placeholder={connector ? t('chart.spec.pick', 'Pick…') : t('settings.charts.pickConnFirst', 'Pick a connector first')} allowCustom />
+                    options={queryOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
                 </Field>
               </Grid2>
             </>

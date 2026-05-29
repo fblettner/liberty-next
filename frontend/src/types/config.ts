@@ -216,17 +216,19 @@ export interface ScreensDoc {
   screens: Record<string, Record<string, Screen>>
 }
 
-/** GET /admin/config/charts/parsed — `[charts.<id>]` map (default-valued keys dropped). The
- *  shape mirrors `liberty/charts/config.py::ChartConfig` + nested `ChartSpec` (`type`/`x`/`y`/…). */
+/** GET /admin/config/charts/parsed — nested `[charts.<scope>.<id>]`: `scope → id → chart`. Charts
+ *  are scoped to their connector (the `<scope>` path key); the body mirrors
+ *  `liberty/charts/config.py::ChartConfig` minus the path-derived `id`/`connector`. */
 export interface ChartsDoc {
   path: string
-  charts: Record<string, Record<string, unknown>>
+  charts: Record<string, Record<string, Record<string, unknown>>>
 }
 
-/** GET /admin/config/dashboards/parsed — `[dashboards.<id>]` map. Each entry is a
- *  `liberty/dashboards/config.py::Dashboard` shape (id injected from the key by the parser;
- *  default-valued keys dropped). */
+/** GET /admin/config/dashboards/parsed — nested `[dashboards.<scope>.<id>]`: `scope → id →
+ *  dashboard`. The owning connector is the `<scope>` path key; the body is a
+ *  `liberty/dashboards/config.py::Dashboard` minus the path-derived `id`/`connector`. The public
+ *  id (menus / URL / permissions) is the qualified `<scope>.<id>`. */
 export interface DashboardsDoc {
   path: string
-  dashboards: Record<string, Record<string, unknown>>
+  dashboards: Record<string, Record<string, Record<string, unknown>>>
 }

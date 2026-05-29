@@ -169,33 +169,35 @@ def cfg_tree(tmp_path: Path) -> dict[str, Path]:
         value = "id"
         label = "name"
     """)
+    # Dashboard owned by app scope `app` (not `foo`) but whose widgets read from connector `foo`
+    # — exercises the widget-connector rewrite without touching the dashboard's own scope key.
     _write(paths["dashboards"], """
-        [dashboards.overview]
+        [dashboards.app.overview]
         label = "Overview"
 
-        [[dashboards.overview.widgets]]
+        [[dashboards.app.overview.widgets]]
         type = "chart"
         connector = "foo"           # ChartWidget inline mode
         query = "users_get"
 
-        [dashboards.overview.widgets.spec]
+        [dashboards.app.overview.widgets.spec]
         type = "bar"
         x = "id"
         y = ["id"]
 
-        [[dashboards.overview.widgets]]
+        [[dashboards.app.overview.widgets]]
         type = "kpi"
         connector = "foo"           # KpiWidget — required field
         query = "users_get"
         column = "id"
     """)
+    # Charts are scoped to their connector — [charts.<scope>.<id>]; the scope key IS the connector.
     _write(paths["charts"], """
-        [charts.users_per_day]
+        [charts.foo.users_per_day]
         label = "Users per day"
-        connector = "foo"           # ChartDef.connector — required
         query = "users_get"
 
-        [charts.users_per_day.spec]
+        [charts.foo.users_per_day.spec]
         type = "bar"
         x = "id"
         y = ["id"]
@@ -223,8 +225,8 @@ def test_rename_connector_updates_every_cross_file_reference(cfg_tree: dict[str,
     #             + 2 in menus (two MenuItem.connector)
     #             + 3 in dictionary (1 [connectors.foo] scope + 1 lookups.colors.connector
     #               + 1 connectors.bar.lookups.user_names.connector cross-ref)
-    #             + 2 in dashboards (2 widget connectors)
-    #             + 1 in charts (the only ChartDef)
+    #             + 2 in dashboards (2 widget connectors; the dashboard's own scope is `app`, untouched)
+    #             + 1 in charts (the [charts.foo] scope key renamed)
     assert result.files[str(cfg_tree["connectors"])] == 1
     assert result.files[str(cfg_tree["screens"])] == 6      # users(1) + 3 row_menu/on_save + parent(1) + row_click(1)
     assert result.files[str(cfg_tree["menus"])] == 2
@@ -257,14 +259,15 @@ def test_rename_connector_updates_every_cross_file_reference(cfg_tree: dict[str,
     assert d["lookups"]["colors"]["connector"] == "foo2"
     assert d["connectors"]["bar"]["lookups"]["user_names"]["connector"] == "foo2"
 
-    # dashboards.toml — both widgets updated.
+    # dashboards.toml — both widgets updated; the dashboard's own scope key (`app`) is untouched.
     d = tomllib.loads(cfg_tree["dashboards"].read_text())
-    widgets = d["dashboards"]["overview"]["widgets"]
+    widgets = d["dashboards"]["app"]["overview"]["widgets"]
     assert all(w["connector"] == "foo2" for w in widgets)
 
-    # charts.toml — the saved chart's connector updated.
+    # charts.toml — the [charts.foo] scope key renamed to [charts.foo2].
     d = tomllib.loads(cfg_tree["charts"].read_text())
-    assert d["charts"]["users_per_day"]["connector"] == "foo2"
+    assert "foo" not in d["charts"] and "foo2" in d["charts"]
+    assert "users_per_day" in d["charts"]["foo2"]
 
 
 def test_rename_connector_warns_when_matching_menu_app_key_exists(cfg_tree: dict[str, Path]) -> None:
@@ -938,9 +941,9 @@ def test_rename_query_updates_every_reference(cfg_tree: dict[str, Path]) -> None
     assert d["lookups"]["colors"]["query"] == "users_list"                       # shared lookup → foo
     assert d["connectors"]["bar"]["lookups"]["user_names"]["query"] == "users_list"  # scoped, connector=foo
 
-    dash = tomllib.loads(cfg_tree["dashboards"].read_text())["dashboards"]["overview"]["widgets"]
+    dash = tomllib.loads(cfg_tree["dashboards"].read_text())["dashboards"]["app"]["overview"]["widgets"]
     assert all(w["query"] == "users_list" for w in dash)
-    assert tomllib.loads(cfg_tree["charts"].read_text())["charts"]["users_per_day"]["query"] == "users_list"
+    assert tomllib.loads(cfg_tree["charts"].read_text())["charts"]["foo"]["users_per_day"]["query"] == "users_list"
 
 
 def test_rename_table_renames_all_slots_and_bindings(cfg_tree: dict[str, Path]) -> None:

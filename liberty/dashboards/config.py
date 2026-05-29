@@ -44,6 +44,7 @@ clicks (a bar click → /sql/<connector>/<query>?...).
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
@@ -186,13 +187,23 @@ class DashboardFilter(BaseModel):
 
 
 class Dashboard(BaseModel):
-    """One ``[dashboards.<id>]`` — title + description + the widget list + optional filters."""
+    """One ``[dashboards.<scope>.<id>]`` — title + description + the widget list + optional filters.
+    Both ``id`` (the inner key) and ``connector`` (the outer *scope* key — the owning app) are
+    injected from the TOML path by :func:`parse_dashboards`, mirroring screens/charts. A widget may
+    still read from *any* connector; the scope is just which app the dashboard belongs to. The
+    dashboard's public id (menus / URL / permissions) is the qualified ``<scope>.<id>`` —
+    :attr:`qualified_id`."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(default="", description="Stable id (matches the TOML key).", json_schema_extra={"x_group": "Advanced"})
+    id: str = Field(default="", description="Stable id (matches the inner TOML key).", json_schema_extra={"x_group": "Advanced"})
     label: str = Field(description="Display label — the dashboard's title in lists and menus.")
     description: str | None = Field(default=None, description="Optional longer description.")
+    connector: str = Field(
+        default="",
+        description="Owning app/connector — the ``<scope>`` path key; injected from it. Widgets may read any connector.",
+        json_schema_extra={"x_group": "Advanced"},
+    )
     filters: list[DashboardFilter] = Field(
         default_factory=list,
         description=(
@@ -202,30 +213,67 @@ class Dashboard(BaseModel):
     )
     widgets: list[Widget] = Field(default_factory=list, description="Widgets, in display order.")
 
+    @property
+    def qualified_id(self) -> str:
+        """The public id — ``<scope>.<id>`` (e.g. ``nomasx1.overview``). Used by menus
+        (``target``), the ``/dashboard/<id>`` route, and ``dashboard:<id>`` permissions."""
+        return f"{self.connector}.{self.id}" if self.connector else self.id
+
 
 class DashboardsFile(BaseModel):
-    """Top-level ``dashboards.toml`` shape — one flat dict keyed by id (matches charts/menus/screens)."""
+    """Top-level ``dashboards.toml`` shape — ``[dashboards.<scope>.<id>]``: a dict of *scope* (the
+    owning connector/app) → dict of *id* → dashboard. Mirrors ``screens.toml`` / ``charts.toml``."""
 
     model_config = ConfigDict(extra="forbid")
 
-    dashboards: dict[str, Dashboard] = Field(default_factory=dict)
+    # scope (connector) -> dashboard id -> dashboard
+    dashboards: dict[str, dict[str, Dashboard]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_ids(self) -> DashboardsFile:
-        for did, d in self.dashboards.items():
-            if d.id and d.id != did:
-                raise ValueError(f"dashboard {did!r}: ``id`` field is {d.id!r}, must match its key")
+        for scope, by_id in self.dashboards.items():
+            for did, d in by_id.items():
+                if d.id and d.id != did:
+                    raise ValueError(f"dashboard {scope}.{did!r}: ``id`` field is {d.id!r}, must match its key")
+                if d.connector and d.connector != scope:
+                    raise ValueError(
+                        f"dashboard {scope}.{did!r}: ``connector`` field is {d.connector!r}, "
+                        f"must match its scope key {scope!r}"
+                    )
         return self
+
+    def iter_dashboards(self) -> Iterator[tuple[str, str, Dashboard]]:
+        """Walk every dashboard as ``(scope, id, dashboard)``."""
+        for scope, by_id in self.dashboards.items():
+            for did, d in by_id.items():
+                yield scope, did, d
+
+    def get(self, scope: str, dashboard_id: str) -> Dashboard | None:
+        """Resolve a dashboard by ``(scope, id)``; ``None`` when absent."""
+        return self.dashboards.get(scope, {}).get(dashboard_id)
+
+    def find(self, qualified_id: str) -> Dashboard | None:
+        """Resolve a dashboard by its qualified ``<scope>.<id>`` public id; ``None`` when absent."""
+        scope, _, did = qualified_id.partition(".")
+        return self.get(scope, did) if did else None
 
 
 def parse_dashboards(data: dict[str, Any]) -> DashboardsFile:
-    """Validate a raw TOML dict into a :class:`DashboardsFile`. Each entry's ``id`` is injected
-    from its key when omitted (same convention as charts/screens/menus)."""
+    """Validate a raw TOML dict into a :class:`DashboardsFile`. Each entry's ``id`` (inner key) and
+    ``connector`` (outer scope key) are injected from the path when omitted (same convention as
+    charts/screens)."""
     ds = data.get("dashboards") or {}
     if isinstance(ds, dict):
-        for did, d in ds.items():
-            if isinstance(d, dict) and not d.get("id"):
-                d["id"] = did
+        for scope, by_id in ds.items():
+            if not isinstance(by_id, dict):
+                continue
+            for did, d in by_id.items():
+                if not isinstance(d, dict):
+                    continue
+                if not d.get("id"):
+                    d["id"] = did
+                if not d.get("connector"):
+                    d["connector"] = scope
     return DashboardsFile.model_validate(data)
 
 

@@ -46,14 +46,18 @@ Dashboards = Annotated[DashboardsFile, Depends(get_dashboards)]
 Charts = Annotated[ChartsFile, Depends(_charts)]
 
 
-def _resolve_chart_widget(w: ChartWidget, charts: ChartsFile) -> dict[str, Any] | None:
+def _resolve_chart_widget(w: ChartWidget, charts: ChartsFile, scope: str) -> dict[str, Any] | None:
     """Turn a chart widget into a uniform wire shape — always inline connector/query/spec.
+    A ``chart`` reference is resolved *within the dashboard's own scope* (charts are now scoped:
+    ``[charts.<scope>.<id>]``); a cross-connector chart should use an inline widget instead.
     Returns ``None`` when a referenced chart id can't be resolved (missing from charts.toml);
     the caller drops the widget."""
     if w.chart:
-        ref: ChartConfig | None = charts.charts.get(w.chart)
+        ref: ChartConfig | None = charts.get_chart(scope, w.chart)
         if ref is None:
-            _log.warning("dashboard widget references unknown chart %r — dropping the widget", w.chart)
+            _log.warning(
+                "dashboard widget references unknown chart %r in scope %r — dropping the widget", w.chart, scope,
+            )
             return None
         return {
             "type": "chart",
@@ -155,12 +159,12 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
     dashboard is explicitly **denied** (``!dashboard:<id>`` — the first-class RBAC overlay, so
     "all access but disable this dashboard" works); otherwise the dashboard is always returned
     (with however many widgets survive the per-widget gate)."""
-    if principal.is_denied(f"dashboard:{dashboard.id}"):
+    if principal.is_denied(f"dashboard:{dashboard.qualified_id}"):
         return None
     resolved: list[dict[str, Any]] = []
     for w in dashboard.widgets:
         if isinstance(w, ChartWidget):
-            wd = _resolve_chart_widget(w, charts)
+            wd = _resolve_chart_widget(w, charts, dashboard.connector)
         elif isinstance(w, KpiWidget):
             wd = _resolve_kpi_widget(w)
         elif isinstance(w, TableWidget):
@@ -172,7 +176,7 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
         if not _can_read(principal, wd):
             continue
         resolved.append(wd)
-    out: dict[str, Any] = {"id": dashboard.id, "label": dashboard.label, "widgets": resolved}
+    out: dict[str, Any] = {"id": dashboard.qualified_id, "label": dashboard.label, "widgets": resolved}
     if dashboard.description:
         out["description"] = dashboard.description
     filters = _resolve_filters(dashboard, principal)
@@ -183,7 +187,7 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
 
 @router.get("/dashboards")
 async def list_dashboards(principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts) -> dict[str, Any]:
-    out = [r for d in dashboards.dashboards.values() if (r := _resolve_dashboard(d, charts, principal)) is not None]
+    out = [r for _, _, d in dashboards.iter_dashboards() if (r := _resolve_dashboard(d, charts, principal)) is not None]
     return {"dashboards": out}
 
 
@@ -191,7 +195,8 @@ async def list_dashboards(principal: CurrentPrincipal, dashboards: Dashboards, c
 async def get_dashboard(
     dashboard_id: str, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts,
 ) -> dict[str, Any]:
-    d = dashboards.dashboards.get(dashboard_id)
+    # ``dashboard_id`` is the qualified ``<scope>.<id>`` (e.g. ``nomasx1.overview``).
+    d = dashboards.find(dashboard_id)
     resolved = _resolve_dashboard(d, charts, principal) if d is not None else None
     if resolved is None:
         # Unknown id OR explicitly denied — same 404 either way (don't leak existence to a

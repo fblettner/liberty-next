@@ -186,7 +186,7 @@ def test_menu_with_dashboard_leaf(tmp_path) -> None:
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
     (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
     (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
-        [dashboards.overview]
+        [dashboards.app1.overview]
         label = "Overview"
         widgets = []
     """))
@@ -203,14 +203,14 @@ def test_menu_with_dashboard_leaf(tmp_path) -> None:
         parent = "dash"
         label = "Overview"
         type = "dashboard"
-        target = "overview"
+        target = "app1.overview"
 
         [[menus.app1.items]]
         id = "dash.missing"
         parent = "dash"
         label = "Missing"
         type = "dashboard"
-        target = "ghost"
+        target = "app1.ghost"
     """))
 
     async def go() -> None:
@@ -239,7 +239,7 @@ def test_menu_with_dashboard_leaf(tmp_path) -> None:
         folder = tree["items"][0]
         # The dashboard leaf shows when the target exists; the orphan leaf with `target = "ghost"` is pruned.
         leaves = [i for i in folder["items"] if i["type"] == "dashboard"]
-        assert [l["target"] for l in leaves] == ["overview"]
+        assert [l["target"] for l in leaves] == ["app1.overview"]
         # `connector` is absent on a dashboard leaf (the catalog is flat, no connector segment).
         assert "connector" not in leaves[0]
         # No ``home`` set on this app → no ``home_path`` on the wire.
@@ -262,7 +262,7 @@ def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
         queries = [{{ name = "users_get", sql = "SELECT 1" }}]
     """))
     (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
-        [dashboards.overview]
+        [dashboards.app1.overview]
         label = "Overview"
     """))
     (tmp_path / "menus.toml").write_text(textwrap.dedent("""
@@ -279,7 +279,7 @@ def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
         parent = "dash"
         label = "Overview"
         type = "dashboard"
-        target = "overview"
+        target = "app1.overview"
     """))
 
     async def go() -> None:
@@ -306,6 +306,6 @@ def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
     with TestClient(app) as client:
         tree = client.get("/api/menus/app1", headers=_h(client, "admin")).json()
         # The dashboard's ``home`` resolves to a frontend ``/dashboard/<id>`` route.
-        assert tree["home_path"] == "/dashboard/overview"
+        assert tree["home_path"] == "/dashboard/app1.overview"
         # Pointing ``home`` at a missing item id fails parse — covered separately by the
         # ``AppMenu._check`` validator (raises ValueError on load_menus / parse_menus).

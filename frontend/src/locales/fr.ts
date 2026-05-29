@@ -425,6 +425,8 @@ const fr: Resources = {
     savedHint: 'Enregistré. Cliquez sur Recharger pour appliquer.',
     reloaded: 'Rechargé. Connecteurs : {{connectors}} · Pools : {{pools}}',
     superuserRequired: 'Superutilisateur requis',
+    scope: 'Connecteur',
+    addScope: 'Ajouter une portée',
     hint: "Enregistrer valide le TOML avant écriture — une configuration invalide est rejetée. Recharger reconstruit le registre des connecteurs ; si la nouvelle configuration échoue, l'ancienne reste active.",
     rename: {
       button: 'Renommer',

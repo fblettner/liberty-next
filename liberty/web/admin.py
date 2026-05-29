@@ -122,8 +122,8 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "dictionary_entries": len(new.dictionary.entries),
         "menu_apps": list(request.app.state.menus.menus),
         "screen_apps": list(request.app.state.screens.screens),
-        "charts": list(request.app.state.charts.charts),
-        "dashboards": list(request.app.state.dashboards.dashboards),
+        "charts": [f"{s}.{c}" for s, c, _ in request.app.state.charts.iter_charts()],
+        "dashboards": [d.qualified_id for _, _, d in request.app.state.dashboards.iter_dashboards()],
         "license_mode": license_result.mode,
         "nomaflow": nomaflow_reloaded,
     }
@@ -642,13 +642,22 @@ async def get_charts_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     chart with all spec defaults round-trips cleanly without empty noise)."""
     path = Path(request.app.state.settings.charts.config_path)
     cfg = load_charts(path)
+    # Nested ``{scope: {id: chart}}``; ``id`` + ``connector`` are the path keys, so they're dropped
+    # from each body (re-injected by parse_charts on the way back in).
     return {
         "path": str(path),
-        "charts": {cid: c.model_dump(exclude_defaults=True, exclude_none=True) for cid, c in cfg.charts.items()},
+        "charts": {
+            scope: {
+                cid: c.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id", "connector"})
+                for cid, c in by_id.items()
+            }
+            for scope, by_id in cfg.charts.items()
+        },
     }
 
 
 class ChartsBody(BaseModel):
+    # Nested ``{scope: {id: chart-dict}}``.
     charts: dict[str, dict[str, Any]]
 
 
@@ -666,6 +675,11 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid charts: {exc}") from exc
 
     normalized = validated.model_dump(exclude_defaults=False, exclude_none=True)
+    # id + connector are the table keys (path-derived) — keep them out of the written body.
+    for by_id in normalized.get("charts", {}).values():
+        for chart in by_id.values():
+            chart.pop("id", None)
+            chart.pop("connector", None)
     import tomli_w
     new_text = tomli_w.dumps(normalized)
     try:
@@ -685,13 +699,21 @@ async def get_dashboards_parsed(request: Request, _: Superuser) -> dict[str, Any
     A missing file → an empty dict. Defaults are dropped so the wire payload stays terse."""
     path = Path(request.app.state.settings.dashboards.config_path)
     cfg = load_dashboards(path)
+    # Nested ``{scope: {id: dashboard}}``; ``id`` + ``connector`` are the path keys, dropped here.
     return {
         "path": str(path),
-        "dashboards": {did: d.model_dump(exclude_defaults=True, exclude_none=True) for did, d in cfg.dashboards.items()},
+        "dashboards": {
+            scope: {
+                did: d.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id", "connector"})
+                for did, d in by_id.items()
+            }
+            for scope, by_id in cfg.dashboards.items()
+        },
     }
 
 
 class DashboardsBody(BaseModel):
+    # Nested ``{scope: {id: dashboard-dict}}``.
     dashboards: dict[str, dict[str, Any]]
 
 
@@ -710,6 +732,11 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dashboards: {exc}") from exc
 
     normalized = validated.model_dump(exclude_defaults=False, exclude_none=True)
+    # id + connector are the table keys (path-derived) — keep them out of the written body.
+    for by_id in normalized.get("dashboards", {}).values():
+        for d in by_id.values():
+            d.pop("id", None)
+            d.pop("connector", None)
     import tomli_w
     new_text = tomli_w.dumps(normalized)
     try:

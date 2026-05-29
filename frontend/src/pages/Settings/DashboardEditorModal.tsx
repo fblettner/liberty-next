@@ -106,9 +106,12 @@ function toWire(w: Raw, charts: ChartsCatalog): DashboardWidget | null {
 const KIND_ICON = { chart: BarChart3, kpi: Hash, table: TableIcon } as const
 
 export function DashboardEditorModal({
-  initial, chartsCatalog, onSave, onClose,
+  initial, scope, chartsCatalog, onSave, onClose,
 }: {
   initial: Raw
+  /** The owning connector scope — dashboards are stored at `[dashboards.<scope>.<id>]`. Fixed by
+   *  the builder (move a dashboard between apps by delete + re-add). Widgets may read any connector. */
+  scope: string
   chartsCatalog: ChartsCatalog
   onSave: (id: string, record: Raw) => void
   onClose: () => void
@@ -152,6 +155,8 @@ export function DashboardEditorModal({
     if (!id) return setError(t('settings.dash.errId', 'Dashboard id missing.'))
     const rec: Raw = { id, label: label.trim() || id, widgets }
     if (description.trim()) rec.description = description.trim()
+    // `connector` (the owning scope) is the dict path key — the builder places the record under
+    // it, so we don't write it into the body.
     const cleanFilters = filters.filter((f) => sstr(f.id) && sstr(f.label))
     if (cleanFilters.length) rec.filters = cleanFilters
     onSave(id, rec)
@@ -187,7 +192,7 @@ export function DashboardEditorModal({
         <Header>
           <LayoutDashboard size={17} color={colors.blue.main} />
           <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.dash.title', 'Dashboard title')} style={{ maxWidth: 320 }} />
-          <span className="id">[dashboards.{id}]</span>
+          <span className="id">[dashboards.{scope}.{id}]</span>
           <div style={{ flex: 1 }} />
           <CloseBtn onClick={() => void requestClose()} title={t('common.close')}><X size={16} /></CloseBtn>
         </Header>

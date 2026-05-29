@@ -850,30 +850,34 @@ def test_config_charts_parsed_get_and_put(env) -> None:
         r = client.get("/admin/config/charts/parsed", headers=h).json()
         assert r["charts"] == {}
         assert r["path"].endswith("charts.toml")
-        # PUT: save one chart
+        # PUT: save one chart, nested under its connector scope [charts.db.users_per_app].
         body = {"charts": {
-            "users_per_app": {
-                "label": "Users per app",
-                "connector": "db",
-                "query": "answer",
-                "spec": {"type": "bar", "x": "X", "y": ["Y"], "aggregation": "count"},
+            "db": {
+                "users_per_app": {
+                    "label": "Users per app",
+                    "query": "answer",
+                    "spec": {"type": "bar", "x": "X", "y": ["Y"], "aggregation": "count"},
+                },
             },
         }}
         s = client.put("/admin/config/charts/parsed", json=body, headers=h)
         assert s.status_code == 200 and s.json()["saved"] is True
-        # GET round-trip: the chart is there. The GET uses `exclude_defaults=True` so default
+        # GET round-trip: nested {scope: {id: chart}}. The GET uses `exclude_defaults=True` so default
         # values (type='bar', aggregation='sum') are stripped — only non-default fields land in
-        # the response (and on disk), which keeps charts.toml diff-friendly.
+        # the response (and on disk), which keeps charts.toml diff-friendly. id + connector are the
+        # path keys, so they're not echoed in the body.
         after = client.get("/admin/config/charts/parsed", headers=h).json()["charts"]
-        assert set(after) == {"users_per_app"}
-        c = after["users_per_app"]
+        assert set(after) == {"db"}
+        assert set(after["db"]) == {"users_per_app"}
+        c = after["db"]["users_per_app"]
         assert c["label"] == "Users per app"
+        assert "connector" not in c and "id" not in c
         assert c["spec"]["x"] == "X" and c["spec"]["y"] == ["Y"] and c["spec"]["aggregation"] == "count"
-        # Reload picks it up — the chart shows up in /admin/reload's reply + /api/charts
+        # Reload picks it up — the chart shows up (qualified) in /admin/reload's reply + /api/charts
         reload_resp = client.post("/admin/reload", headers=h).json()
-        assert reload_resp["charts"] == ["users_per_app"]
+        assert reload_resp["charts"] == ["db.users_per_app"]
         listed = client.get("/api/charts", headers=h).json()["charts"]
-        assert [c["id"] for c in listed] == ["users_per_app"]
+        assert [c["id"] for c in listed] == ["db.users_per_app"]
 
 
 def test_config_charts_parsed_rejects_invalid(env) -> None:
@@ -882,9 +886,11 @@ def test_config_charts_parsed_rejects_invalid(env) -> None:
     with TestClient(app) as client:
         h = _h(client, "admin")
         body = {"charts": {
-            "broken": {
-                "label": "B", "connector": "c", "query": "q",
-                "spec": {"type": "bar", "x": "X", "y": []},  # empty Y
+            "c": {
+                "broken": {
+                    "label": "B", "query": "q",
+                    "spec": {"type": "bar", "x": "X", "y": []},  # empty Y
+                },
             },
         }}
         r = client.put("/admin/config/charts/parsed", json=body, headers=h)
@@ -914,25 +920,27 @@ def test_config_dashboards_parsed_get_and_put(env) -> None:
         h = _h(client, "admin")
         # GET empty
         assert client.get("/admin/config/dashboards/parsed", headers=h).json()["dashboards"] == {}
-        # PUT a dashboard with a chart-reference widget + a KPI
+        # PUT a dashboard (nested under scope `db`) with a chart-reference widget + a KPI
         body = {"dashboards": {
-            "overview": {
-                "label": "Overview",
-                "widgets": [
-                    {"type": "chart", "chart": "saved_chart", "col_span": 12, "row_span": 1},
-                    {"type": "kpi", "label": "Rows", "connector": "db", "query": "answer",
-                     "column": "answer", "aggregation": "count", "col_span": 3},
-                ],
+            "db": {
+                "overview": {
+                    "label": "Overview",
+                    "widgets": [
+                        {"type": "chart", "chart": "saved_chart", "col_span": 12, "row_span": 1},
+                        {"type": "kpi", "label": "Rows", "connector": "db", "query": "answer",
+                         "column": "answer", "aggregation": "count", "col_span": 3},
+                    ],
+                },
             },
         }}
         r = client.put("/admin/config/dashboards/parsed", json=body, headers=h)
         assert r.status_code == 200 and r.json()["saved"] is True
-        # Reload + GET round-trip
+        # Reload + GET round-trip — the public id is the qualified `db.overview`.
         reload_resp = client.post("/admin/reload", headers=h).json()
-        assert reload_resp["dashboards"] == ["overview"]
+        assert reload_resp["dashboards"] == ["db.overview"]
         # /api/dashboards surfaces it (with the orphan chart-ref dropped — `saved_chart` doesn't exist)
         ds = client.get("/api/dashboards", headers=h).json()["dashboards"]
-        assert [d["id"] for d in ds] == ["overview"]
+        assert [d["id"] for d in ds] == ["db.overview"]
         # Two widgets in TOML → one survives (the chart-ref drops because there's no charts.toml)
         assert [w["type"] for w in ds[0]["widgets"]] == ["kpi"]
 
@@ -943,10 +951,12 @@ def test_config_dashboards_parsed_rejects_invalid(env) -> None:
     with TestClient(app) as client:
         h = _h(client, "admin")
         body = {"dashboards": {
-            "x": {"label": "X", "widgets": [{
-                "type": "chart", "chart": "c", "connector": "c", "query": "q",
-                "spec": {"type": "bar", "x": "X", "y": ["Y"], "aggregation": "count"},
-            }]},
+            "s": {
+                "x": {"label": "X", "widgets": [{
+                    "type": "chart", "chart": "c", "connector": "c", "query": "q",
+                    "spec": {"type": "bar", "x": "X", "y": ["Y"], "aggregation": "count"},
+                }]},
+            },
         }}
         r = client.put("/admin/config/dashboards/parsed", json=body, headers=h)
         assert r.status_code == 422 and "either" in r.json()["detail"]

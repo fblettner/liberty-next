@@ -1,8 +1,7 @@
-// Charts settings — the catalog of ``config/charts.toml``. A list of charts on the left; clicking
-// one (or "Add chart") opens the visual ChartEditorModal (General + Chart-builder tabs, live
-// preview) — the same builder the TableView Chart tab uses. Saving a chart in the modal rewrites
-// charts.toml (PUT) + reloads; deleting does the same. No inline form — editing is the modal,
-// matching the screen visual-dialog pattern.
+// Charts settings — the catalog of `config/charts.toml`, organised by scope (the connector each
+// chart reads from): `[charts.<scope>.<id>]`. A scope picker at the top, then the list of that
+// scope's charts. Clicking one (or "Add chart") opens the visual ChartEditorModal (General +
+// Chart-builder tabs, live preview). Saving rewrites charts.toml (PUT) + reloads; deleting too.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Plus, Trash2, BarChart3 } from 'lucide-react'
@@ -11,9 +10,13 @@ import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
 import type { ChartsDoc } from '../../types/config'
 import { ChartEditorModal, type ChartRecord } from './ChartEditorModal'
+import { ScopeBar, type ScopeOption } from './ScopeBar'
+import { AddScopeModal } from './AddScopeModal'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-type Charts = Record<string, Record<string, unknown>>
+// scope (connector) -> chart id -> chart body
+type Charts = Record<string, Record<string, Record<string, unknown>>>
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
@@ -39,26 +42,31 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ChartsBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
+  const { currentApp, connectors } = useWorkspace()
+  const [scope, setScope] = useState<string>('')
   const [doc, setDoc] = useState<Charts | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [addScopeOpen, setAddScopeOpen] = useState(false)
   // editing === undefined → closed; null → new chart; ChartRecord → editing that chart.
   const [editing, setEditing] = useState<ChartRecord | null | undefined>(undefined)
 
   const load = () => {
     setError(null)
     api.get<ChartsDoc>('/admin/config/charts/parsed')
-      .then((d) => setDoc(d.charts))
+      .then((d) => setDoc(d.charts as Charts))
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
   useEffect(load, [t])
 
-  // Persist the whole charts.toml (the one changed chart folded into the current doc) + reload.
+  // Persist the whole charts.toml + reload. Empty scopes (a connector picked via "Add scope" but
+  // never filled) are pruned so they don't write a dangling `[charts.<scope>]` table.
   const persist = async (next: Charts, okMsg: string) => {
     setBusy(true); setError(null); setStatus(null)
+    const pruned = Object.fromEntries(Object.entries(next).filter(([, byId]) => Object.keys(byId).length > 0))
     try {
-      await api.put<{ saved: boolean }>('/admin/config/charts/parsed', { charts: next })
+      await api.put<{ saved: boolean }>('/admin/config/charts/parsed', { charts: pruned })
       await api.post('/admin/reload')
       setDoc(next)
       setStatus(okMsg)
@@ -68,10 +76,11 @@ export default function ChartsBuilder() {
   }
 
   const onModalSave = (id: string, record: Record<string, unknown>) => {
-    const next: Charts = { ...(doc ?? {}) }
+    const byId = { ...(doc?.[scope] ?? {}) }
     // A rename in the modal changes the id → drop the old key so the dict key matches `id`.
-    if (editing && editing.id && editing.id !== id) delete next[editing.id]
-    next[id] = record
+    if (editing && editing.id && editing.id !== id) delete byId[editing.id]
+    byId[id] = record
+    const next: Charts = { ...(doc ?? {}), [scope]: byId }
     setEditing(undefined)
     void persist(next, t('settings.charts.saved', 'Saved "{{id}}".', { id }))
   }
@@ -84,17 +93,41 @@ export default function ChartsBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    const next = { ...(doc ?? {}) }; delete next[id]
+    const byId = { ...(doc?.[scope] ?? {}) }; delete byId[id]
+    const next: Charts = { ...(doc ?? {}), [scope]: byId }
     void persist(next, t('settings.charts.deleted', 'Deleted "{{id}}".', { id }))
   }
 
-  const ids = useMemo(() => Object.keys(doc ?? {}).sort(), [doc])
+  const scopes = useMemo<ScopeOption[]>(
+    () => Object.keys(doc ?? {}).sort().map((v) => ({ value: v, label: v })),
+    [doc],
+  )
+  // Default the scope once charts load — the workspace's selected app if it has charts, else first.
+  useEffect(() => {
+    if (!doc) return
+    setScope((cur) => {
+      if (cur && scopes.some((s) => s.value === cur)) return cur
+      if (currentApp && scopes.some((s) => s.value === currentApp)) return currentApp
+      return scopes[0]?.value ?? ''
+    })
+  }, [doc, scopes, currentApp])
+
+  // Connectors that don't yet have a charts scope — offered by "Add scope".
+  const addCandidates = useMemo(() => {
+    const have = new Set(Object.keys(doc ?? {}))
+    return (connectors ?? []).filter((c) => c.type === 'sql' && !have.has(c.name)).map((c) => c.name).sort()
+  }, [doc, connectors])
+
+  const ids = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
   if (!doc) return <Centered />
 
   return (
     <Shell>
+      <ScopeBar scopes={scopes} value={scope} onChange={setScope}
+        emptyHint={t('settings.charts.noScopes', 'No charts yet — use "Add scope" to start.')}
+        onAddScope={() => setAddScopeOpen(true)} />
       <Toolbar>
         <ToolbarLeft>
           {busy && <SpinnerRing size={14} thickness={2} />}
@@ -102,7 +135,7 @@ export default function ChartsBuilder() {
           {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
         </ToolbarLeft>
         <ToolbarRight>
-          <Button $variant="primary" $size="sm" onClick={() => { setEditing(null); setStatus(null) }} disabled={busy}>
+          <Button $variant="ghost" $size="sm" onClick={() => { setEditing(null); setStatus(null) }} disabled={busy || !scope}>
             <Plus size={13} /> {t('settings.charts.add', 'Add chart')}
           </Button>
         </ToolbarRight>
@@ -110,10 +143,10 @@ export default function ChartsBuilder() {
 
       <List>
         {ids.map((id) => {
-          const c = doc[id] as { label?: string; connector?: string; query?: string }
-          const sub = c.connector && c.query ? `${c.connector} · ${c.query}` : c.label || ''
+          const c = (doc[scope]?.[id] ?? {}) as { label?: string; query?: string }
+          const sub = c.query ? `${scope} · ${c.query}` : c.label || ''
           return (
-            <Item key={id} onClick={() => { setEditing({ ...(doc[id] as unknown as ChartRecord), id }); setStatus(null) }}>
+            <Item key={id} onClick={() => { setEditing({ ...(doc[scope][id] as unknown as ChartRecord), id, connector: scope }); setStatus(null) }}>
               <BarChart3 size={15} />
               <span className="text">
                 <span className="name">{id}</span>
@@ -127,16 +160,28 @@ export default function ChartsBuilder() {
           )
         })}
         {ids.length === 0 && (
-          <Empty>{t('settings.charts.empty', 'No charts yet. Click "Add chart" to build one, or use "Save chart" in the TableView\'s Chart tab.')}</Empty>
+          <Empty>{scope
+            ? t('settings.charts.emptyScope', 'No charts in "{{scope}}" yet. Click "Add chart" to build one.', { scope })
+            : t('settings.charts.empty', 'No charts yet. Use "Add scope" to pick a connector, then "Add chart".')}</Empty>
         )}
       </List>
 
       {editing !== undefined && (
         <ChartEditorModal
           initial={editing}
+          scope={scope}
           takenIds={ids.filter((x) => x !== (editing?.id ?? ''))}
           onSave={onModalSave}
           onClose={() => setEditing(undefined)}
+        />
+      )}
+      {addScopeOpen && (
+        <AddScopeModal
+          candidates={addCandidates}
+          title={t('settings.charts.addScope', 'Add a connector scope')}
+          emptyHint={t('settings.charts.addScopeEmpty', 'Every SQL connector already has a charts scope.')}
+          onPick={(c) => { setDoc((p) => ({ ...(p ?? {}), [c]: p?.[c] ?? {} })); setScope(c); setStatus(null) }}
+          onClose={() => setAddScopeOpen(false)}
         />
       )}
     </Shell>

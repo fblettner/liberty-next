@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FolderOpen, FileText, Edit3, X, Zap, Filter, Layers, Maximize2, Minimize2 } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FileText, Edit3, X, Zap, Filter, Layers, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
@@ -31,7 +31,9 @@ import {
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
-import type { ConfigSchemas, ScreensDoc, Screen } from '../../types/config'
+import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen } from '../../types/config'
+import { AddScopeModal } from './AddScopeModal'
+import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ScreenEditor from './ScreenEditor'
@@ -44,12 +46,6 @@ type AppScreens = Record<string, Record<string, Screen>>
 const Shell = styled.div`
   display: flex; flex-direction: column; gap: 12px;
   flex: 1; min-height: 0; height: 100%;
-`
-// ScreensBuilder reuses ScopeBar (defined below) as the toolbar — its scope chips + Save/Reload
-// cluster share one row. (Other builders that don't already have a ScopeBar use a dedicated
-// Toolbar styled-component — see PoolsBuilder for the canonical pattern.)
-const ToolbarDivider = styled.span`
-  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
 `
 const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // Left = the chosen app's screens list. Scrolls on its own — a deployment with dozens of screens
@@ -70,18 +66,6 @@ const NavSearch = styled.div`
     &::placeholder { color: ${colors.text.muted}; font-size: ${fontSize.sm}; }
   }
   &:focus-within { border-color: ${colors.blue.border}; }
-`
-// Scope row — matches DictionaryBuilder's scope-chip pattern so every builder has a consistent
-// "scope: <chips>" header. Sans-serif label + 26px-high pill chips with subtle borders.
-const ScopeBar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
-const Chip = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
-  &:hover { color: ${colors.text.primary}; }
 `
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 // The screen row stacks id (mono) and label (sans) vertically — long labels were colliding with
@@ -144,6 +128,9 @@ export default function ScreensBuilder() {
   // right level when the user drills in.
   const [screenSchema, setScreenSchema] = useState<JsonSchema | null>(null)
   const [enums, setEnums] = useState<FrameworkEnums | null>(null)
+  // Read-only — only used to offer connectors-without-screens when creating a new screens app
+  // (an app *is* a connector, so we never invent a free-form app name).
+  const [connectors, setConnectors] = useState<Record<string, unknown> | null>(null)
   const [doc, setDoc] = useState<AppScreens | null>(null)
   const [original, setOriginal] = useState<string>('')
   const [selApp, setSelApp] = useState<string | null>(null)
@@ -152,6 +139,7 @@ export default function ScreensBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [addScopeOpen, setAddScopeOpen] = useState(false)
   // The screen designer is a near-fullscreen modal hosting the existing ScreenEditor. The right
   // pane in Settings shows a summary card with a big "Open Screen Designer" button; click →
   // raises this modal. Edits flow through the same ``updateScreen`` callback as before — the
@@ -247,8 +235,10 @@ export default function ScreensBuilder() {
     Promise.all([
       api.get<ConfigSchemas>('/admin/config/schema'),
       api.get<ScreensDoc>('/admin/config/screens/parsed'),
+      api.get<ConnectorsDoc>('/admin/config/connectors/parsed').catch((): ConnectorsDoc => ({ path: '', connectors: {} })),
     ])
-      .then(([s, d]) => {
+      .then(([s, d, c]) => {
+        setConnectors(c.connectors)
         // Build the Screen-level schema by lifting the `Screen` $def to the top while keeping the
         // full $defs map for SchemaNavigator to resolve nested refs (ScreenDialog → ScreenTab → …).
         const defs = (s.screens.$defs ?? {}) as Record<string, JsonSchema>
@@ -336,12 +326,12 @@ export default function ScreensBuilder() {
       return next
     })
 
-  const addApp = async () => {
-    const name = (await modals.prompt({
-      title: t('settings.screens.addApp'),
-      message: t('settings.screens.appNamePrompt'),
-    }))?.trim()
-    if (!name) return
+  // "Add scope" = give an existing connector a screens section. A screens app *is* a connector (the
+  // section key is the connector name, and each screen's connector defaults to it), so the
+  // AddScopeModal offers the connectors that don't have a screens section yet — never a free-form
+  // name (which produced an orphan `[screens.<name>]` with no backing connector).
+  const addScopeCandidates = Object.keys(connectors ?? {}).filter((c) => !(doc ?? {})[c]).sort()
+  const onPickScope = (name: string) => {
     setDoc((p) => ({ ...(p ?? {}), [name]: { ...((p ?? {})[name] ?? {}) } }))
     setSelApp(name); setStatus(null)
   }
@@ -494,37 +484,39 @@ export default function ScreensBuilder() {
           action (Add app · Add screen · Delete app · Save · Reload) inline on the right. Replaces
           the old "scope bar at top + bottom Save Row" split — the operator never has to scroll
           past a long screen list to reach Save / Reload. */}
-      <ScopeBar>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        <span style={{ color: colors.text.muted, fontSize: fontSize.sm, marginLeft: 8 }}>{t('settings.screens.scopeLabel')}</span>
-        {apps.map((a) => (
-          <Chip key={a} $active={a === selApp} type="button" onClick={() => { setSelApp(a); setStatus(null) }}>
-            <FolderOpen size={12} /> {a}
-          </Chip>
-        ))}
-        <Chip type="button" onClick={addApp} title={t('settings.screens.addApp')}>
-          <Plus size={12} /> {t('settings.screens.addApp')}
-        </Chip>
-        {selApp && (
+      <ScopeRow
+        scopes={apps.map((a) => ({ value: a, label: a }))}
+        value={selApp ?? ''}
+        onChange={(a) => { setSelApp(a); setStatus(null) }}
+        onAddScope={() => setAddScopeOpen(true)}
+        leading={(dirty || status || error) ? (
           <>
-            <Chip type="button" onClick={() => addScreen(selApp)} title={t('settings.screens.add')} style={{ marginLeft: 'auto' }}>
-              <Plus size={12} /> {t('settings.screens.add')}
-            </Chip>
-            <Chip type="button" onClick={() => renameApp(selApp)} title={t('settings.screens.renameAppOne', { name: selApp })} disabled={busy}>
-              <Edit3 size={12} /> {t('settings.rename.button')}
-            </Chip>
-            <Chip type="button" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteAppOne', { name: selApp })} style={{ color: colors.red.main, borderColor: colors.red.border }}>
-              <Trash2 size={12} /> {t('settings.screens.deleteAppOne', { name: selApp })}
-            </Chip>
+            {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+            {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+            {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
           </>
-        )}
-        <ToolbarDivider style={{ marginLeft: selApp ? 0 : 'auto' }} />
-        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-        </Button>
-      </ScopeBar>
+        ) : undefined}
+        right={
+          <>
+            {selApp && (
+              <>
+                <Button $variant="ghost" $size="sm" onClick={() => addScreen(selApp)} title={t('settings.screens.add')}>
+                  <Plus size={13} /> {t('settings.screens.add')}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => renameApp(selApp)} title={t('settings.screens.renameAppOne', { name: selApp })} disabled={busy}>
+                  <Edit3 size={13} /> {t('settings.rename.button')}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteAppOne', { name: selApp })} style={{ color: colors.red.main }}>
+                  <Trash2 size={13} /> {t('common.delete')}
+                </Button>
+              </>
+            )}
+            <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+            </Button>
+          </>
+        }
+      />
       <Split>
         <NavCol>
           {selApp && (
@@ -640,6 +632,15 @@ export default function ScreensBuilder() {
           )}
         </FormCol>
       </Split>
+      {addScopeOpen && (
+        <AddScopeModal
+          candidates={addScopeCandidates}
+          title={t('settings.screens.addApp', 'Add screens for a connector')}
+          emptyHint={t('settings.screens.allHaveScreens', 'Every connector already has a screens section. Add a connector in the Connectors tab first.')}
+          onPick={onPickScope}
+          onClose={() => setAddScopeOpen(false)}
+        />
+      )}
     </Shell>
     {/* Screen Designer modal — near-fullscreen (VisualBuilderModal preset) hosting the existing
         ScreenEditor with its 5 internal tabs (General / Queries / Dialog / Actions / Row menu).

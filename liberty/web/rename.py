@@ -276,7 +276,30 @@ def _rewrite_screens_doc(doc: tomlkit.TOMLDocument, *, old: str, new: str) -> in
 
 
 def _rewrite_menus_doc(doc: tomlkit.TOMLDocument, *, old: str, new: str) -> int:
-    return _replace_connector_field_recursive(doc.get("menus"), old=old, new=new)
+    n = _replace_connector_field_recursive(doc.get("menus"), old=old, new=new)
+    # Dashboards are scoped (``[dashboards.<scope>.<id>]``) and their public id — what a
+    # ``type = "dashboard"`` menu item targets — is the qualified ``<scope>.<id>``. Renaming the
+    # connector renames the dashboard's scope, so any menu target ``"<old>.<id>"`` must follow.
+    n += _rewrite_dashboard_targets(doc.get("menus"), old=old, new=new)
+    return n
+
+
+def _rewrite_dashboard_targets(node: Any, *, old: str, new: str) -> int:
+    """Walk menu items and rewrite ``target = "<old>.<id>"`` → ``"<new>.<id>"`` on
+    ``type = "dashboard"`` leaves (the dashboard's qualified id changed with its scope)."""
+    n = 0
+    if isinstance(node, dict):
+        if node.get("type") == "dashboard" and isinstance(node.get("target"), str):
+            scope, sep, rest = node["target"].partition(".")
+            if sep and scope == old:
+                node["target"] = f"{new}.{rest}"
+                n += 1
+        for v in node.values():
+            n += _rewrite_dashboard_targets(v, old=old, new=new)
+    elif isinstance(node, list):
+        for v in node:
+            n += _rewrite_dashboard_targets(v, old=old, new=new)
+    return n
 
 
 def _rewrite_dictionary_doc(doc: tomlkit.TOMLDocument, *, old: str, new: str) -> int:
@@ -307,14 +330,40 @@ def _rewrite_dictionary_doc(doc: tomlkit.TOMLDocument, *, old: str, new: str) ->
 
 
 def _rewrite_dashboards_doc(doc: tomlkit.TOMLDocument, *, old: str, new: str) -> int:
-    """Walk every widget on every dashboard + every DashboardFilterOptions and update
-    ``connector = "<old>"`` field values. Widgets carry it directly; KpiWidget requires it;
-    ChartWidget's is nullable but always set in inline mode."""
-    return _replace_connector_field_recursive(doc.get("dashboards"), old=old, new=new)
+    """Dashboards are scoped (``[dashboards.<scope>.<id>]``). Two operations:
+
+    1. Rename the owning-scope key ``[dashboards.<old>]`` → ``[dashboards.<new>]`` when a
+       dashboard belongs to the renamed connector.
+    2. Walk every widget + DashboardFilterOptions and update ``connector = "<old>"`` (inline
+       chart / KPI / table / filter all carry one) — a widget can read *any* connector, so this
+       is independent of the dashboard's own scope.
+    """
+    dashboards = doc.get("dashboards")
+    n = _rename_scope_key(dashboards, old=old, new=new, label="dashboards.toml")
+    n += _replace_connector_field_recursive(dashboards, old=old, new=new)
+    return n
 
 
 def _rewrite_charts_doc(doc: tomlkit.TOMLDocument, *, old: str, new: str) -> int:
-    return _replace_connector_field_recursive(doc.get("charts"), old=old, new=new)
+    """Charts are scoped (``[charts.<scope>.<id>]``) — the connector *is* the scope key. Rename
+    ``[charts.<old>]`` → ``[charts.<new>]`` (the body has no ``connector`` field anymore)."""
+    charts = doc.get("charts")
+    n = _rename_scope_key(charts, old=old, new=new, label="charts.toml")
+    n += _replace_connector_field_recursive(charts, old=old, new=new)
+    return n
+
+
+def _rename_scope_key(table: Any, *, old: str, new: str, label: str) -> int:
+    """Rename a top-level *scope* key ``table[old]`` → ``table[new]`` (charts / dashboards are keyed
+    by their connector scope). Returns 1 when renamed, 0 when ``old`` isn't present. Raises on a
+    collision with an existing ``new`` key (same guard the connector / dictionary-scope rename use)."""
+    if not isinstance(table, dict) or old not in table:
+        return 0
+    if new in table:
+        raise RenameError(f"{label} already has a [{new}] scope — rename would clash")
+    table[new] = table[old]
+    del table[old]
+    return 1
 
 
 def _replace_connector_field_recursive(node: Any, *, old: str, new: str) -> int:
@@ -699,6 +748,21 @@ def _replace_query_refs(node: Any, *, mapping: dict[str, str], target_conn: str,
     return n
 
 
+def _replace_query_refs_by_scope(scoped: Any, *, mapping: dict[str, str], target_conn: str) -> int:
+    """For scope-keyed tables (``[charts.<scope>.<id>]`` / ``[dashboards.<scope>.<id>]``): walk each
+    scope's subtree with that scope as the *default* connector context, so query refs in bodies that
+    don't carry their own ``connector`` field (charts) are renamed when the scope is ``target_conn``;
+    a widget's explicit ``connector`` still overrides (cross-connector dashboard widgets)."""
+    n = 0
+    if isinstance(scoped, dict):
+        for scope, by_id in scoped.items():
+            n += _replace_query_refs(
+                by_id, mapping=mapping, target_conn=target_conn,
+                default_conn=scope if isinstance(scope, str) else None,
+            )
+    return n
+
+
 def _rewrite_connectors_queries(doc: tomlkit.TOMLDocument, *, connector: str, mapping: dict[str, str]) -> int:
     """Rename matching queries inside ``[connectors.<connector>].queries``. Raises on a collision
     with an existing (non-renamed) query name. Returns the count renamed (0 → caller raises)."""
@@ -781,12 +845,16 @@ def rename_queries(
         for scope, scfg in dconns.items():
             n_dict += _replace_query_refs(scfg, mapping=mapping, target_conn=connector, default_conn=scope)
     result.files[str(dict_path)] = n_dict
+    # charts / dashboards are keyed by their connector *scope* (``[charts.<scope>.<id>]``). Walk
+    # each scope's subtree threading that scope as the default connector context — so a chart body
+    # (no ``connector`` field anymore) inherits its scope, while a dashboard widget's explicit
+    # ``connector`` still overrides (cross-connector widgets).
     if "charts" in docs:
         ch_path, ch_doc = docs["charts"]
-        result.files[str(ch_path)] = _replace_query_refs(ch_doc.get("charts"), mapping=mapping, target_conn=connector, default_conn=None)
+        result.files[str(ch_path)] = _replace_query_refs_by_scope(ch_doc.get("charts"), mapping=mapping, target_conn=connector)
     if "dashboards" in docs:
         da_path, da_doc = docs["dashboards"]
-        result.files[str(da_path)] = _replace_query_refs(da_doc.get("dashboards"), mapping=mapping, target_conn=connector, default_conn=None)
+        result.files[str(da_path)] = _replace_query_refs_by_scope(da_doc.get("dashboards"), mapping=mapping, target_conn=connector)
 
     _validate("connectors", conn_doc, parse_connectors, conn_path)
     for label, parser in (("screens", parse_screens), ("menus", parse_menus), ("dictionary", parse_dictionary), ("charts", parse_charts), ("dashboards", parse_dashboards)):

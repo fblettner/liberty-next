@@ -423,6 +423,8 @@ const en = {
     savedHint: 'Saved. Click Reload to apply.',
     reloaded: 'Reloaded. Connectors: {{connectors}} · Pools: {{pools}}',
     superuserRequired: 'Superuser required',
+    scope: 'Connector',
+    addScope: 'Add scope',
     hint: 'Save validates the TOML before writing — invalid config is rejected. Reload rebuilds the connector registry; if the new config fails to load the previous one stays active.',
     rename: {
       button: 'Rename',

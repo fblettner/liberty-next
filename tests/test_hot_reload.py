@@ -129,28 +129,27 @@ async def test_reload_screens_swaps_state(tmp_path: Path) -> None:
 async def test_reload_charts_swaps_state(tmp_path: Path) -> None:
     charts_path = tmp_path / "charts.toml"
     charts_path.write_text(textwrap.dedent("""
-        [charts.x]
+        [charts.c.x]
         label = "X"
-        connector = "c"
         query = "q"
 
-        [charts.x.spec]
+        [charts.c.x.spec]
         type = "bar"
         x = "a"
         y = ["b"]
     """).lstrip())
     app = _app(tmp_path)
     await _reload_charts(app, charts_path)
-    assert "x" in app.state.charts.charts
+    assert "x" in app.state.charts.charts["c"]
 
 
 @pytest.mark.asyncio
 async def test_reload_dashboards_swaps_state(tmp_path: Path) -> None:
     dashboards_path = tmp_path / "dashboards.toml"
-    dashboards_path.write_text('[dashboards.d]\nlabel = "D"\n')
+    dashboards_path.write_text('[dashboards.app.d]\nlabel = "D"\n')
     app = _app(tmp_path)
     await _reload_dashboards(app, dashboards_path)
-    assert "d" in app.state.dashboards.dashboards
+    assert "d" in app.state.dashboards.dashboards["app"]
 
 
 @pytest.mark.asyncio

@@ -49,27 +49,26 @@ def _connectors_toml(db_url: str) -> str:
 
 
 def _charts_toml() -> str:
+    # Charts are scoped to their connector — [charts.<scope>.<id>]; connector is the path key.
     return textwrap.dedent(
         """
-        [charts.users_per_app]
+        [charts.app1.users_per_app]
         label = "Users per application"
         description = "Active user count grouped by application"
-        connector = "app1"
         query = "users_get"
 
-          [charts.users_per_app.spec]
+          [charts.app1.users_per_app.spec]
           type = "bar"
           x = "APPS_ID"
           y = ["USR_ID"]
           aggregation = "count"
 
         # Locked behind the "secret" query — only roles with sql:app1:secret_get see it.
-        [charts.secret_chart]
+        [charts.app1.secret_chart]
         label = "Secret"
-        connector = "app1"
         query = "secret_get"
 
-          [charts.secret_chart.spec]
+          [charts.app1.secret_chart.spec]
           type = "bar"
           x = "X"
           y = ["Y"]
@@ -122,9 +121,9 @@ def test_list_charts_admin_sees_everything(app) -> None:
         assert r.status_code == 200
         charts = r.json()["charts"]
         ids = sorted(c["id"] for c in charts)
-        assert ids == ["secret_chart", "users_per_app"]
+        assert ids == ["app1.secret_chart", "app1.users_per_app"]
         # Spec + label round-trip
-        u = next(c for c in charts if c["id"] == "users_per_app")
+        u = next(c for c in charts if c["id"] == "app1.users_per_app")
         assert u["label"] == "Users per application"
         assert u["connector"] == "app1" and u["query"] == "users_get"
         assert u["spec"]["type"] == "bar" and u["spec"]["aggregation"] == "count"
@@ -137,27 +136,27 @@ def test_list_charts_pruned_by_permission(app) -> None:
     with TestClient(app) as client:
         # user: sees only the chart on users_get
         charts = client.get("/api/charts", headers=_h(client, "user")).json()["charts"]
-        assert [c["id"] for c in charts] == ["users_per_app"]
+        assert [c["id"] for c in charts] == ["app1.users_per_app"]
         # nobody: sees nothing
         assert client.get("/api/charts", headers=_h(client, "nobody")).json()["charts"] == []
 
 
 def test_get_one_chart_returns_full_body_and_hides_unreadable(app) -> None:
     with TestClient(app) as client:
-        body = client.get("/api/charts/users_per_app", headers=_h(client, "admin")).json()
-        assert body["id"] == "users_per_app" and body["spec"]["x"] == "APPS_ID"
+        body = client.get("/api/charts/app1.users_per_app", headers=_h(client, "admin")).json()
+        assert body["id"] == "app1.users_per_app" and body["spec"]["x"] == "APPS_ID"
         # user can read users_per_app but not secret_chart — the latter is hidden behind a 404
         # (not 403) so we don't leak its existence. Same convention the connector routes use.
-        assert client.get("/api/charts/users_per_app", headers=_h(client, "user")).status_code == 200
-        assert client.get("/api/charts/secret_chart", headers=_h(client, "user")).status_code == 404
+        assert client.get("/api/charts/app1.users_per_app", headers=_h(client, "user")).status_code == 200
+        assert client.get("/api/charts/app1.secret_chart", headers=_h(client, "user")).status_code == 404
         # Unknown chart → 404
-        assert client.get("/api/charts/ghost", headers=_h(client, "admin")).status_code == 404
+        assert client.get("/api/charts/app1.ghost", headers=_h(client, "admin")).status_code == 404
 
 
 def test_charts_route_requires_auth(app) -> None:
     with TestClient(app) as client:
         assert client.get("/api/charts").status_code == 401
-        assert client.get("/api/charts/users_per_app").status_code == 401
+        assert client.get("/api/charts/app1.users_per_app").status_code == 401
 
 
 def test_info_reports_charts(app) -> None:

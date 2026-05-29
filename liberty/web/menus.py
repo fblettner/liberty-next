@@ -67,7 +67,8 @@ def _keeper(principal: Principal, dashboards: DashboardsFile, app: str):
                 return False
             # Existence is the visibility gate for dashboards (per-widget perms gate at render);
             # a menu-allow doesn't fabricate a link to a dashboard that isn't in the catalog.
-            return did in dashboards.dashboards
+            # ``target`` is the qualified ``<scope>.<id>`` id.
+            return dashboards.find(did) is not None
         if item.type == "page":
             # A page leaf points at a frontend route; the route enforces its own auth. Only the
             # roles filter + the menu deny (both above) gate it here.

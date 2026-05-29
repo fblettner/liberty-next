@@ -12,12 +12,14 @@
 // every child's `parent` reference to match.
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Checkbox, Row, Stack, SpinnerRing, SchemaForm, SearchSelect, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { groupQueriesByTable } from './connectorTables'
+import { AddScopeModal } from './AddScopeModal'
+import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -35,9 +37,6 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 const Shell = styled.div`
   display: flex; flex-direction: column; gap: 12px;
   flex: 1; min-height: 0; height: 100%;
-`
-const ToolbarDivider = styled.span`
-  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
 `
 // The split flex-fills the remaining vertical space — expanding/collapsing folders never
 // resizes the column — TreeBox / InspectorInner scroll internally. `align-items: stretch` makes
@@ -101,19 +100,6 @@ const NavSearch = styled.div`
 `
 const AppHeader = styled(Row)`align-items: center; justify-content: space-between; gap: 10px;`
 const AppLabel = styled.strong`font-family: ${fonts.mono}; color: ${colors.text.primary};`
-// Scope row — matches DictionaryBuilder + ScreensBuilder pattern: horizontal chip strip above
-// the split, sans-serif label, 26px-high pill chips. Replaces the old left-column app list so
-// every builder shares the same "config path → scope chips → [list | detail]" layout.
-const ScopeBar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
-const ScopeChip = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
-  &:hover { color: ${colors.text.primary}; }
-`
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const isFolder = (it: MenuItem) => !it.type
@@ -219,11 +205,11 @@ export default function MenusBuilder() {
   const [selApp, setSelApp] = useState<string | null>(null)
   const [selItem, setSelItem] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [appQ, setAppQ] = useState('')
   const [treeQ, setTreeQ] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [addScopeOpen, setAddScopeOpen] = useState(false)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -364,8 +350,6 @@ export default function MenusBuilder() {
   // the up / down / indent / outdent buttons on each row (the byParent groups + renderRow walks
   // keep their authored position).
   const appNames = Object.keys(apps).sort((a, b) => a.localeCompare(b))
-  const appNeedle = appQ.trim().toLowerCase()
-  const shownApps = appNeedle ? appNames.filter((n) => n.toLowerCase().includes(appNeedle)) : appNames
 
   const currentApp: AppMenu | null = selApp ? apps[selApp] ?? null : null
   const items: MenuItem[] = currentApp?.items ?? []
@@ -379,15 +363,14 @@ export default function MenusBuilder() {
   const updateItems = (next: MenuItem[]) =>
     selApp && currentApp && updateApp(selApp, { ...currentApp, items: next })
 
-  const addApp = async () => {
-    const name = (await modals.prompt({
-      title: t('settings.menus.app.add'),
-      message: t('settings.menus.app.namePrompt'),
-    }))?.trim()
-    if (!name) return
-    if (apps[name]) { setSelApp(name); return }
-    setApps((p) => ({ ...(p ?? {}), [name]: { items: [] } }))
-    setSelApp(name); setStatus(null)
+  // "Add scope" = give an existing connector a menu. An app *is* a connector with a
+  // `[menus.<connector>]`, so we never invent a free-form name (that produced an orphan menu with
+  // no backing connector). The AddScopeModal offers the connectors that don't have a menu yet;
+  // picking one adds an empty `[menus.<connector>]`.
+  const addScopeCandidates = Object.keys(connectors ?? {}).filter((c) => !(apps ?? {})[c]).sort()
+  const onPickScope = (pick: string) => {
+    setApps((p) => ({ ...(p ?? {}), [pick]: { items: [] } }))
+    setSelApp(pick); setStatus(null)
   }
   // Deleting a whole app's menu persists immediately (write menus.toml + reload), not as a pending
   // edit a reload would silently drop. (Individual menu *items* stay local — they're a structural
@@ -549,35 +532,32 @@ export default function MenusBuilder() {
           old "scope bar at top + bottom Save Row" split — the operator never has to scroll past a
           long tree to reach Save / Reload. The optional search box appears next to the chips when
           there are more than ~6 apps. */}
-      <ScopeBar>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        <span style={{ color: colors.text.muted, fontSize: fontSize.sm, marginLeft: 8 }}>{t('settings.menus.scopeLabel')}</span>
-        {appNames.length > 6 && (
-          <NavSearch style={{ marginBottom: 0, height: 26 }}>
-            <Search size={12} />
-            <input value={appQ} onChange={(e) => setAppQ(e.target.value)} placeholder={`filter ${appNames.length}…`} />
-          </NavSearch>
-        )}
-        {shownApps.map((n) => (
-          <ScopeChip key={n} $active={n === selApp} type="button" onClick={() => { setSelApp(n); setStatus(null) }}>
-            <FolderTree size={12} /> {n}
-          </ScopeChip>
-        ))}
-        <ScopeChip type="button" onClick={addApp}>
-          <Plus size={12} /> {t('settings.menus.app.add')}
-        </ScopeChip>
-        {selApp && (
-          <ScopeChip type="button" onClick={() => removeApp(selApp)} title={t('settings.menus.app.deleteOne', { name: selApp })} style={{ marginLeft: 'auto', color: colors.red.main, borderColor: colors.red.border }}>
-            <Trash2 size={12} /> {t('settings.menus.app.deleteOne', { name: selApp })}
-          </ScopeChip>
-        )}
-        <ToolbarDivider style={{ marginLeft: selApp ? 0 : 'auto' }} />
-        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-        </Button>
-      </ScopeBar>
+      <ScopeRow
+        scopes={appNames.map((n) => ({ value: n, label: n }))}
+        value={selApp ?? ''}
+        onChange={(v) => { setSelApp(v); setStatus(null) }}
+        onAddScope={() => setAddScopeOpen(true)}
+        leading={(dirty || status || error) ? (
+          <>
+            {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+            {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+            {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+          </>
+        ) : undefined}
+        right={
+          <>
+            {selApp && (
+              <Button $variant="ghost" $size="sm" onClick={() => removeApp(selApp)}
+                title={t('settings.menus.app.deleteOne', { name: selApp })} style={{ color: colors.red.main }}>
+                <Trash2 size={13} /> {t('common.delete')}
+              </Button>
+            )}
+            <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+            </Button>
+          </>
+        }
+      />
       {selApp && currentApp ? (
         <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
           <AppHeader style={{ flexShrink: 0 }}>
@@ -659,6 +639,15 @@ export default function MenusBuilder() {
         </Stack>
       ) : (
         <Empty>{appNames.length ? t('settings.menus.app.pickOne') : t('settings.menus.app.empty')}</Empty>
+      )}
+      {addScopeOpen && (
+        <AddScopeModal
+          candidates={addScopeCandidates}
+          title={t('settings.menus.app.add', 'Add a menu for a connector')}
+          emptyHint={t('settings.menus.app.allHaveMenus', 'Every connector already has a menu. Add a connector in the Connectors tab first.')}
+          onPick={onPickScope}
+          onClose={() => setAddScopeOpen(false)}
+        />
       )}
     </Shell>
     </FrameworkEnumsContext.Provider>

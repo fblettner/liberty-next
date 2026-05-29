@@ -249,8 +249,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "apps": list(app.state.screens.screens),
                 "total": sum(len(scr) for scr in app.state.screens.screens.values()),
             },
-            "charts": {"total": len(app.state.charts.charts)},
-            "dashboards": {"total": len(app.state.dashboards.dashboards)},
+            "charts": {"total": sum(len(by_id) for by_id in app.state.charts.charts.values())},
+            "dashboards": {"total": sum(len(by_id) for by_id in app.state.dashboards.dashboards.values())},
             "auth": {
                 "backend": s.auth.backend,
                 **({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)}),
