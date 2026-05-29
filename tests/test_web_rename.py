@@ -902,3 +902,100 @@ def test_rename_endpoint_passes_scope_through(env, tmp_path: Path) -> None:
         assert "s1" not in d["connectors"]["foo"]["sequences"]
         assert "s1_renamed" in d["connectors"]["foo"]["sequences"]
         assert "s1" in d["sequences"]
+
+
+# ── query / table rename (connector-scoped) ─────────────────────────────────────────────────
+
+def _allpaths(cfg: dict) -> dict:
+    return dict(
+        connectors_path=cfg["connectors"], screens_path=cfg["screens"], menus_path=cfg["menus"],
+        dictionary_path=cfg["dictionary"], charts_path=cfg["charts"], dashboards_path=cfg["dashboards"],
+    )
+
+
+def test_rename_query_updates_every_reference(cfg_tree: dict[str, Path]) -> None:
+    from liberty.web.rename import rename_query
+    result = rename_query("users_get", "users_list", connector="foo", **_allpaths(cfg_tree))
+    assert result.total_refs() > 0
+
+    conns = tomllib.loads(cfg_tree["connectors"].read_text())["connectors"]
+    names = {q["name"] for q in conns["foo"]["queries"]}
+    assert "users_list" in names and "users_get" not in names
+    assert "users_put" in names                      # the other slot is untouched
+
+    scr = tomllib.loads(cfg_tree["screens"].read_text())["screens"]["foo"]
+    assert scr["users"]["read_query"] == "users_list"
+    assert scr["parent"]["read_query"] == "users_list"
+    nav = [a for a in scr["users"]["row_menu"] if a.get("type") == "navigate"][0]
+    assert nav["to"] == "users_list"                 # NavigateAction.to
+    rq = [a for a in scr["users"]["row_menu"] if a.get("type") == "run_query"][0]
+    assert rq["query"] == "users_put"                # run_query on users_put → unchanged
+
+    menus = tomllib.loads(cfg_tree["menus"].read_text())["menus"]["foo"]["items"]
+    assert all(it["target"] == "users_list" for it in menus)
+
+    d = tomllib.loads(cfg_tree["dictionary"].read_text())
+    assert d["lookups"]["colors"]["query"] == "users_list"                       # shared lookup → foo
+    assert d["connectors"]["bar"]["lookups"]["user_names"]["query"] == "users_list"  # scoped, connector=foo
+
+    dash = tomllib.loads(cfg_tree["dashboards"].read_text())["dashboards"]["overview"]["widgets"]
+    assert all(w["query"] == "users_list" for w in dash)
+    assert tomllib.loads(cfg_tree["charts"].read_text())["charts"]["users_per_day"]["query"] == "users_list"
+
+
+def test_rename_table_renames_all_slots_and_bindings(cfg_tree: dict[str, Path]) -> None:
+    from liberty.web.rename import rename_table
+    rename_table("users", "accounts", connector="foo", **_allpaths(cfg_tree))
+    names = {q["name"] for q in tomllib.loads(cfg_tree["connectors"].read_text())["connectors"]["foo"]["queries"]}
+    assert names == {"accounts_get", "accounts_put"}
+    scr = tomllib.loads(cfg_tree["screens"].read_text())["screens"]["foo"]["users"]
+    assert scr["read_query"] == "accounts_get" and scr["update_query"] == "accounts_put"
+    rq = [a for a in scr["row_menu"] if a.get("type") == "run_query"][0]
+    assert rq["query"] == "accounts_put"
+
+
+def test_rename_query_rejects_collision(cfg_tree: dict[str, Path]) -> None:
+    from liberty.web.rename import rename_query, RenameError
+    with pytest.raises(RenameError):
+        rename_query("users_get", "users_put", connector="foo", **_allpaths(cfg_tree))
+
+
+def test_rename_query_is_connector_scoped(tmp_path: Path) -> None:
+    """Two connectors share the query name ``list_get``; renaming foo's must not touch bar's."""
+    from liberty.web.rename import rename_query
+    conn = tmp_path / "connectors.toml"; scr = tmp_path / "screens.toml"
+    _write(conn, """
+        [pools.default]
+        url = "sqlite+aiosqlite:///:memory:"
+        [connectors.foo]
+        type = "sql"
+        pool = "default"
+        [[connectors.foo.queries]]
+        name = "list_get"
+        sql = "SELECT 1 AS id"
+        [connectors.bar]
+        type = "sql"
+        pool = "default"
+        [[connectors.bar.queries]]
+        name = "list_get"
+        sql = "SELECT 2 AS id"
+    """)
+    _write(scr, """
+        [screens.foo.a]
+        connector = "foo"
+        read_query = "list_get"
+        [screens.bar.b]
+        connector = "bar"
+        read_query = "list_get"
+    """)
+    rename_query(
+        "list_get", "list_all", connector="foo",
+        connectors_path=conn, screens_path=scr,
+        menus_path=tmp_path / "menus.toml", dictionary_path=tmp_path / "dictionary.toml",
+    )
+    c = tomllib.loads(conn.read_text())["connectors"]
+    assert {q["name"] for q in c["foo"]["queries"]} == {"list_all"}
+    assert {q["name"] for q in c["bar"]["queries"]} == {"list_get"}     # bar untouched
+    s = tomllib.loads(scr.read_text())["screens"]
+    assert s["foo"]["a"]["read_query"] == "list_all"
+    assert s["bar"]["b"]["read_query"] == "list_get"                    # bar's ref untouched

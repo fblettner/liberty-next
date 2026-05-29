@@ -23,6 +23,10 @@ export interface AppMenuTree {
   app: string
   label: string
   items: MenuNode[]
+  /** Whether this connector appears as a switchable app in the top app switcher (AppMenu
+   *  `show_in_switcher`; default true). Off → the menu/screens still resolve for direct links
+   *  but the app isn't offered in the picker. */
+  show_in_switcher?: boolean
   /** Default landing path for this app (e.g. ``/dashboard/nomasx1_overview``). Set by the
    *  operator via ``AppMenu.home`` in menus.toml; emitted only when the caller can read the
    *  target (so a non-permitted user just falls back to the connector index). Picking this

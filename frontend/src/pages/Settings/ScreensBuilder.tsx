@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, FolderOpen, FileText, Edit3, X, Zap, Filter, Layers, Maximize2, Minimize2 } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FolderOpen, FileText, Edit3, X, Zap, Filter, Layers, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
@@ -131,7 +131,7 @@ const StatChip = styled.span<{ $tone?: 'orange' | 'green' | 'muted' }>`
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { refresh: refreshWorkspace } = useWorkspace()
+  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
@@ -272,8 +272,9 @@ export default function ScreensBuilder() {
           np.delete('app'); np.delete('screen')
           setSearchParams(np, { replace: true })
         } else {
-          // Preserve the picked app/screen when reloading; default to the first available.
-          setSelApp((cur) => (cur && d.screens[cur] ? cur : apps[0] ?? null))
+          // Preserve the picked app/screen when reloading; on first open default to the workspace's
+          // selected app (when it has screens here), else the first available.
+          setSelApp((cur) => (cur && d.screens[cur] ? cur : (currentApp && d.screens[currentApp] ? currentApp : apps[0] ?? null)))
         }
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -522,9 +523,6 @@ export default function ScreensBuilder() {
         <ToolbarDivider style={{ marginLeft: selApp ? 0 : 'auto' }} />
         <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
           {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-        </Button>
-        <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
         </Button>
       </ScopeBar>
       <Split>

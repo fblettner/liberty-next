@@ -13,7 +13,7 @@
 // re-add), matching the rest of the Phase-7 builders.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, Edit3, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
@@ -85,6 +85,9 @@ export interface ConnectorsTableEditorProps {
   onChangeQueries: (next: Record<string, unknown>[]) => void
   onBack: () => void
   onDuplicate?: () => void
+  /** Cross-file rename of the table base (all CRUD slots + screen bindings). Parent wires it to
+   *  the rename endpoint; absent → no Rename button. */
+  onRename?: () => void
   /** When the parent finds a Screen whose `read_query` matches this table's `_get`, it passes
    *  `{app, id}` here so the header shows an "Open in Screens" link that switches the Settings
    *  tab and pre-selects the screen. Absent → no link (no matching screen for this table). */
@@ -92,7 +95,7 @@ export interface ConnectorsTableEditorProps {
 }
 
 export default function ConnectorsTableEditor({
-  base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, screenLink,
+  base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, onRename, screenLink,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -232,6 +235,11 @@ export default function ConnectorsTableEditor({
               title={t('settings.tables.openInScreens')}
             >
               <ExternalLink size={13} /> {t('settings.tables.openInScreens')}
+            </Button>
+          )}
+          {onRename && (
+            <Button $variant="ghost" $size="sm" onClick={onRename}>
+              <Edit3 size={13} /> {t('settings.rename.button')}
             </Button>
           )}
           {onDuplicate && (

@@ -11,7 +11,7 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, X, Layers } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -63,6 +63,10 @@ const NavItem = styled.button<{ $active?: boolean }>`
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
+const NavGroupLabel = styled.div`
+  font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: ${colors.text.muted}; padding: 8px 6px 3px;
+`
 const ModeBar = styled.div`display: inline-flex; gap: 4px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};`
 const ModeBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
@@ -106,7 +110,7 @@ const RowAction = styled.span`
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { findScreen, refresh: refreshWorkspace } = useWorkspace()
+  const { findScreen, currentApp, menus, refresh: refreshWorkspace } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
   // the DD_ENTRIES dropdown that drives `ColumnHint.dd` and `FilterDep.source/column`.
@@ -135,11 +139,7 @@ export default function ConnectorsBuilder() {
   // queries (the canonical case). Sequences = queries referenced by ``[sequences.*]`` in
   // dictionary.toml. Lookups = queries referenced by ``[lookups.*]``. The "loose" queries
   // (none of the three) stay accessible via the Settings… escape hatch.
-  const [mode, setMode] = useState<'tables' | 'custom' | 'sequences' | 'lookups'>('tables')
-  // ``settingsOpen`` raises a small connector-level form (label / pool / licensed / max_rows /
-  // description). Was the old "Form view" toggle — promoted to a modal so the operator only
-  // sees those rare fields when they ask for them.
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [mode, setMode] = useState<'tables' | 'custom' | 'sequences' | 'lookups' | 'settings'>('settings')
   // Scaffold modal — opened from the Sequences / Lookups mode's "Add" button. The modal
   // pulls live pool introspection, the operator picks a table + column(s), and on save we
   // append the generated query to the connector + the matching ``[sequences.<id>]`` /
@@ -173,7 +173,9 @@ export default function ConnectorsBuilder() {
       .then(([s, d, dd, p]) => {
         setSchemas(s); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
         setDictionary(dd.dictionary); setDictOriginal(JSON.stringify(dd.dictionary))
-        setSel((cur) => (cur && d.connectors[cur] ? cur : Object.keys(d.connectors)[0] ?? null))
+        // Keep the current selection across reloads; on first open default to the workspace's
+        // selected app (when it's a connector here), else the first connector.
+        setSel((cur) => (cur && d.connectors[cur] ? cur : (currentApp && d.connectors[currentApp] ? currentApp : Object.keys(d.connectors)[0] ?? null)))
         setPools(Object.keys(p.pools ?? {}))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -181,7 +183,7 @@ export default function ConnectorsBuilder() {
   useEffect(load, [t])
 
   // reset table selection + search when switching connectors
-  useEffect(() => { setSelTable(null); setSelQuery(null); setTq(''); setSettingsOpen(false); setMode('tables') }, [sel])
+  useEffect(() => { setSelTable(null); setSelQuery(null); setTq(''); setMode('settings') }, [sel])
   // reset list selection + search when switching mode (different list, different selection)
   useEffect(() => { setSelTable(null); setSelQuery(null); setTq('') }, [mode])
 
@@ -426,6 +428,66 @@ export default function ConnectorsBuilder() {
       setBusy(false)
     }
   }
+  // Shared prelude for a query / table rename: flush-or-cancel pending edits (the rename rewrites
+  // files on disk + reloads, which would drop unsaved edits), then prompt for the new name with the
+  // same validation the connector rename uses. Returns the new name, or null if cancelled.
+  const promptRename = async (oldName: string, title: string, message: string, existing: string[]): Promise<string | null> => {
+    if (dirty) {
+      const choice = await modals.choose({
+        title, message: t('settings.rename.unsavedFirst'),
+        options: [
+          { value: 'save', label: t('common.save'), variant: 'primary', autoFocus: true },
+          { value: 'cancel', label: t('common.cancel'), variant: 'ghost' },
+        ],
+        cancelValue: 'cancel',
+      })
+      if (choice !== 'save') return null
+      await save()
+      if (dirty) return null
+    }
+    const next = (await modals.prompt({
+      title, message, defaultValue: oldName, submitLabel: t('settings.rename.button'),
+      validate: (v) => {
+        const err = validateRename(oldName, v, existing)
+        if (err === 'unchanged') return null
+        if (err === 'empty') return t('settings.rename.empty')
+        if (err === 'exists') return t('settings.rename.exists', { name: v })
+        if (!/^[a-z][a-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
+        return null
+      },
+    }))?.trim()
+    return next && next !== oldName ? next : null
+  }
+  // Cross-file rename via POST /admin/config/rename (kind = query | table), scoped to the selected
+  // connector; reload + refresh + re-select on success. Mirrors renameConnector.
+  const runCrossRename = async (kind: 'query' | 'table', oldName: string, newName: string, onDone: (n: string) => void) => {
+    setBusy(true)
+    try {
+      const result = await api.post<{ files: Record<string, number>; warnings: string[]; total_refs: number }>(
+        '/admin/config/rename', { kind, old_name: oldName, new_name: newName, scope: sel },
+      )
+      await api.post('/admin/reload')
+      refreshWorkspace()
+      onDone(newName)
+      load()
+      const filesTouched = Object.values(result.files).filter((n) => n > 0).length
+      setStatus(t('settings.connectors.renamedAcross', { from: oldName, to: newName, refs: result.total_refs, files: filesTouched }))
+    } catch (e) {
+      setError(t('settings.connectors.renameFailed', { name: oldName, error: e instanceof ApiError ? e.message : String(e) }))
+    } finally { setBusy(false) }
+  }
+  const renameQuery = async (oldName: string) => {
+    if (!sel) return
+    const existing = queriesArr.map((q) => String(q.name))
+    const next = await promptRename(oldName, t('settings.connectors.renameQuery', 'Rename query'), t('settings.connectors.renameQueryPrompt', { name: oldName }), existing)
+    if (next) await runCrossRename('query', oldName, next, (n) => setSelQuery(n))
+  }
+  const renameTable = async (oldBase: string) => {
+    if (!sel) return
+    const existing = grouped.tables.map((g) => g.base)
+    const next = await promptRename(oldBase, t('settings.connectors.renameTable', 'Rename table'), t('settings.connectors.renameTablePrompt', { name: oldBase }), existing)
+    if (next) await runCrossRename('table', oldBase, next, (n) => setSelTable(n))
+  }
   const addTable = async (connectorName: string) => {
     // Two flows for "+ Add table":
     //   * **Generate from DB**: opens the CRUD wizard — pick a table, mark key columns, get
@@ -554,6 +616,11 @@ export default function ConnectorsBuilder() {
   const names = Object.keys(conns).sort((a, b) => a.localeCompare(b))
   const needle = q.trim().toLowerCase()
   const shownNames = needle ? names.filter((n) => n.toLowerCase().includes(needle)) : names
+  // Group the list: a connector with a menu is an "app"; the rest are plain data sources. Makes
+  // "what's an app vs a backing data source (jdedwards, ais_connection…)" legible at a glance.
+  const appSet = new Set(menus ? Object.keys(menus) : [])
+  const shownAppNames = shownNames.filter((n) => appSet.has(n))
+  const shownDataNames = shownNames.filter((n) => !appSet.has(n))
   const selConn = sel && conns[sel] ? conns[sel] : null
   const selSchema = selConn ? schemaFor(selConn) : null
   const isSql = selConn?.type !== 'api'
@@ -578,29 +645,40 @@ export default function ConnectorsBuilder() {
   const shownTables = tNeedle ? grouped.tables.filter((g) => g.base.toLowerCase().includes(tNeedle)) : grouped.tables
   const queryDefSchema = (selSchema?.$defs?.QueryDef ?? null) as JsonSchema | null
   const allDefs = (selSchema?.$defs ?? {}) as Record<string, JsonSchema>
+  // QueryDef minus `name`: the name is display-only in the editor and renamed via the cross-file
+  // Rename button — editing it inline would silently break every reference (screens / dictionary /
+  // charts / dashboards / menus). (Plain const, not useMemo — we're past the early returns.)
+  const queryEditorSchema: JsonSchema | null = (() => {
+    const props = (queryDefSchema as { properties?: Record<string, unknown> } | null)?.properties
+    if (!queryDefSchema || !props) return queryDefSchema
+    const rest = Object.fromEntries(Object.entries(props).filter(([k]) => k !== 'name'))
+    const required = ((queryDefSchema as { required?: string[] }).required ?? []).filter((r) => r !== 'name')
+    return { ...(queryDefSchema as object), properties: rest, required } as JsonSchema
+  })()
 
-  // Single-query editor (the SchemaForm over QueryDef). Shared by the Sequences / Lookups views
-  // AND the Tables view's "Custom queries" list — a loose query is just a query, so it edits
-  // through the same form. Caller guards on ``queryDefSchema`` being loaded.
+  // Single-query editor (the SchemaForm over QueryDef) — used by the Unclassified / Sequences /
+  // Lookups views. The name is shown read-only with a Rename button (cross-file rename); everything
+  // else edits inline. Caller guards on ``queryDefSchema`` being loaded.
   const renderQueryEditor = (picked: Record<string, unknown>) => (
     <Stack gap={10}>
       <Row gap={8} style={{ alignItems: 'center' }}>
         <Button $variant="ghost" $size="sm" onClick={() => setSelQuery(null)}>
           ← {t('common.back')}
         </Button>
-        <Mono style={{ fontSize: fontSize.sm }}>{String(picked.name)}</Mono>
+        <Mono style={{ fontSize: fontSize.sm, flex: 1 }}>{String(picked.name)}</Mono>
+        <Button $variant="ghost" $size="sm" onClick={() => renameQuery(String(picked.name))} disabled={busy}>
+          <Edit3 size={13} /> {t('settings.rename.button')}
+        </Button>
       </Row>
       <SqlConnectorContext.Provider value={sel ?? undefined}>
         <SchemaForm
-          schema={queryDefSchema as JsonSchema}
+          schema={queryEditorSchema as JsonSchema}
           defs={allDefs}
           value={picked}
           onChange={(v: Record<string, unknown>) => {
-            const next = queriesArr.map((qq) => (qq.name === picked.name ? v : qq))
-            updateQueries(sel!, next)
-            // Track the (possibly renamed) query so the editor stays open on it.
-            const vn = v.name
-            if (typeof vn === 'string' && vn && vn !== picked.name) setSelQuery(vn)
+            // The form omits `name`, so preserve it on the patched query.
+            const merged = { ...v, name: picked.name }
+            updateQueries(sel!, queriesArr.map((qq) => (qq.name === picked.name ? merged : qq)))
           }}
         />
       </SqlConnectorContext.Provider>
@@ -652,9 +730,6 @@ export default function ConnectorsBuilder() {
           <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
           </Button>
-          <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-            {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
-          </Button>
         </ToolbarRight>
       </Toolbar>
       <Split>
@@ -666,7 +741,14 @@ export default function ConnectorsBuilder() {
             </NavSearch>
           )}
           <NavList>
-            {shownNames.map((n) => (
+            {shownAppNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupApps', 'Apps')}</NavGroupLabel>}
+            {shownAppNames.map((n) => (
+              <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
+                {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
+              </NavItem>
+            ))}
+            {shownDataNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupData', 'Data sources')}</NavGroupLabel>}
+            {shownDataNames.map((n) => (
               <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
                 {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
               </NavItem>
@@ -693,6 +775,9 @@ export default function ConnectorsBuilder() {
                       the Settings… modal. */}
                   {isSql && (
                     <ModeBar>
+                      <ModeBtn type="button" $active={mode === 'settings'} onClick={() => setMode('settings')}>
+                        <FileCog size={13} /> {t('settings.connectors.settings', 'Settings')}
+                      </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'tables'} onClick={() => setMode('tables')}>
                         {t('settings.tables.tablesView')}
                       </ModeBtn>
@@ -736,21 +821,19 @@ export default function ConnectorsBuilder() {
                       <Plus size={13} /> {t('settings.connectors.addLookup', 'Add lookup')}
                     </Button>
                   )}
-                  {/* Small connector-level "Settings…" — modal with type / pool / licensed /
-                      max_rows fields. The 3-mode body below handles the per-query editing;
-                      this button is just for the few connector-wide settings + the rare loose
-                      queries. */}
-                  {isSql && (
-                    <Button $variant="ghost" $size="sm" onClick={() => setSettingsOpen(true)} disabled={busy} title={t('settings.connectors.openSettings', 'Connector settings (pool / licensed / max rows)')}>
-                      <FileCog size={13} /> {t('settings.connectors.settings', 'Settings…')}
-                    </Button>
+                  {/* SQL connector-level actions (settings / rename / delete) live in the Settings
+                      tab now — keeps this row to per-mode Add buttons. API connectors have no tab
+                      strip, so their rename / delete stay here. */}
+                  {!isSql && (
+                    <>
+                      <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
+                        <Edit3 size={13} /> {t('settings.rename.button')}
+                      </Button>
+                      <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
+                        <Trash2 size={13} /> {t('settings.connectors.delete')}
+                      </Button>
+                    </>
                   )}
-                  <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
-                    <Edit3 size={13} /> {t('settings.rename.button')}
-                  </Button>
-                  <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
-                    <Trash2 size={13} /> {t('settings.connectors.delete')}
-                  </Button>
                 </Row>
               </Row>
               {!isSql && (
@@ -784,6 +867,7 @@ export default function ConnectorsBuilder() {
                       onChangeQueries={(next) => updateQueries(sel!, next)}
                       onBack={() => setSelTable(null)}
                       onDuplicate={() => sel && duplicateTable(sel, selTable)}
+                      onRename={() => renameTable(selTable)}
                       screenLink={matchedScreen ? { app: matchedScreen.app, id: matchedScreen.id } : null}
                     />
                   )
@@ -891,65 +975,42 @@ export default function ConnectorsBuilder() {
                   </Stack>
                 )
               })()}
+              {/* Settings tab — connector-wide config (type / pool / licensed / max_rows) plus the
+                  Rename + Delete connector actions, grouped here instead of crowding the header. */}
+              {isSql && mode === 'settings' && selConn && selSchema && (() => {
+                const fieldKeys = ['type', 'pool', 'licensed', 'max_rows']
+                const settingsSchema = pickSchemaProperties(selSchema, fieldKeys)
+                return (
+                  <Stack gap={14}>
+                    <SqlConnectorContext.Provider value={sel ?? undefined}>
+                      <SchemaForm
+                        schema={settingsSchema}
+                        defs={allDefs}
+                        value={selConn as Record<string, unknown>}
+                        onChange={(v: Record<string, unknown>) => {
+                          const patch: Record<string, unknown> = {}
+                          for (const k of fieldKeys) patch[k] = v[k]
+                          update(sel!, { ...selConn, ...patch })
+                        }}
+                      />
+                    </SqlConnectorContext.Provider>
+                    <Row gap={8}>
+                      <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
+                        <Edit3 size={13} /> {t('settings.rename.button')}
+                      </Button>
+                      <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
+                        <Trash2 size={13} /> {t('settings.connectors.delete')}
+                      </Button>
+                    </Row>
+                  </Stack>
+                )
+              })()}
             </Stack>
           ) : (
             <Empty>{names.length ? t('settings.connectors.pickOne') : t('settings.connectors.empty')}</Empty>
           )}
         </FormCol>
       </Split>
-      {/* Settings modal — the "rare-case" escape hatch for SQL connectors: edits everything
-          the Tables view doesn't show (label / pool / max_rows / loose non-CRUD queries) via
-          the full SchemaNavigator. Click-outside / Escape / Close all dismiss; edits flow
-          through the same ``update`` callback as the inline editor, so the dirty flag /
-          Save / Reload at the top stay in sync. */}
-      {/* Settings modal — small connector-level form. Picks only the rare-edit fields
-          (``type``, ``pool``, ``licensed``, ``max_rows``) out of the full connector schema;
-          ``queries`` lives in the Tables / Sequences / Lookups views, not here. Click-outside
-          / Escape / Close all dismiss; edits flow through the same ``update`` callback so
-          the dirty flag at the top toolbar stays in sync. */}
-      {settingsOpen && selConn && selSchema && (() => {
-        const fieldKeys = isSql
-          ? ['type', 'pool', 'licensed', 'max_rows'] as const
-          : ['type', 'licensed'] as const
-        const settingsSchema = pickSchemaProperties(selSchema, fieldKeys as unknown as string[])
-        return (
-          <Overlay onClick={() => setSettingsOpen(false)}>
-            <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
-              <ModalHeader>
-                <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                  <span>
-                    {t('settings.connectors.settings', 'Settings…')} ·{' '}
-                    <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
-                      [connectors.{sel}]
-                    </span>
-                  </span>
-                  <Button $variant="ghost" $size="sm" onClick={() => setSettingsOpen(false)}>
-                    <X size={13} /> {t('common.close')}
-                  </Button>
-                </Row>
-              </ModalHeader>
-              <ModalBody>
-                <SchemaForm
-                  schema={settingsSchema}
-                  defs={allDefs}
-                  value={selConn as Record<string, unknown>}
-                  onChange={(v: Record<string, unknown>) => {
-                    // Patch — keep keys we didn't pick (queries, endpoints, base_url, …) untouched.
-                    const patch: Record<string, unknown> = {}
-                    for (const k of fieldKeys) patch[k] = v[k]
-                    update(sel!, { ...selConn, ...patch })
-                  }}
-                />
-              </ModalBody>
-              <ModalFooter>
-                <Button $variant="ghost" $size="sm" onClick={() => setSettingsOpen(false)}>
-                  <X size={13} /> {t('common.close')}
-                </Button>
-              </ModalFooter>
-            </Modal>
-          </Overlay>
-        )
-      })()}
       {/* Scaffold modal — Add sequence / Add lookup. Picks a table + column(s) from the
           connector's live pool introspection, generates the SQL, and on save stages both a
           new query (in this connector) and a matching dictionary entry (under the

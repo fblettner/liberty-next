@@ -9,7 +9,7 @@
 // `/settings?tab=screens&app=nomasx1&screen=security_users`; the per-tab `app`/`screen` selectors
 // are still consumed from the URL by ScreensBuilder on its first mount). We don't write the
 // sub-tab back to the URL — switching workspace tabs changes the URL, which would clobber it.
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
@@ -32,7 +32,12 @@ const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts',
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
-const Tabs = styled.div`display: flex; gap: 4px; margin-bottom: 14px;`
+const Tabs = styled.div`display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 14px;`
+const TabGroupLabel = styled.span`
+  font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: ${colors.text.muted}; padding: 0 6px 0 2px;
+`
+const TabSep = styled.span`width: 1px; height: 18px; background: ${colors.border}; margin: 0 8px;`
 const TabBtn = styled.button<{ $active?: boolean }>`
   height: 30px; padding: 0 12px; border-radius: ${radius.md}; cursor: pointer;
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
@@ -45,22 +50,34 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 export default function Settings() {
   const { t } = useTranslation()
   // Active sub-tab is internal state (seeded once from a `?tab=` deep link) so it survives
-  // workspace-tab switches; a missing/invalid `tab` param defaults to `pools`.
+  // workspace-tab switches; a missing/invalid `tab` param defaults to `connectors` (the most-used).
   const [params] = useSearchParams()
   const [tab, setTab] = useState<Tab>(() => {
     const raw = params.get('tab')
-    return isTab(raw) ? raw : 'pools'
+    return isTab(raw) ? raw : 'connectors'
   })
+  // Deep-link: when a ?tab= arrives (e.g. Connectors' "Open in Screens" link) switch to it even if
+  // Settings is already open. We only act when the param is present — switching workspace tabs drops
+  // it from the URL, and we must NOT reset the sub-tab then (it lives in state to survive switches).
+  useEffect(() => {
+    const raw = params.get('tab')
+    if (isTab(raw)) setTab(raw)
+  }, [params])
   return (
     <PageLayout icon={<SlidersHorizontal size={18} />} title={t('settings.title')}>
       <Tabs>
-        <TabBtn $active={tab === 'pools'} onClick={() => setTab('pools')}>{t('settings.tabs.pools')}</TabBtn>
+        {/* Per-connector editors — each scopes to a connector (an app or a data source). */}
+        <TabGroupLabel>{t('settings.tabGroups.perConnector', 'Per connector')}</TabGroupLabel>
         <TabBtn $active={tab === 'connectors'} onClick={() => setTab('connectors')}>{t('settings.tabs.connectors')}</TabBtn>
         <TabBtn $active={tab === 'dictionary'} onClick={() => setTab('dictionary')}>{t('settings.tabs.dictionary')}</TabBtn>
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts', 'Charts')}</TabBtn>
         <TabBtn $active={tab === 'dashboards'} onClick={() => setTab('dashboards')}>{t('settings.tabs.dashboards')}</TabBtn>
+        <TabSep />
+        {/* Shared — install-wide, not tied to any connector/app. */}
+        <TabGroupLabel>{t('settings.tabGroups.shared', 'Shared')}</TabGroupLabel>
+        <TabBtn $active={tab === 'pools'} onClick={() => setTab('pools')}>{t('settings.tabs.pools')}</TabBtn>
         <TabBtn $active={tab === 'theme'} onClick={() => setTab('theme')}>{t('settings.tabs.theme', 'Theme')}</TabBtn>
         <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
         <TabBtn $active={tab === 'technical'} onClick={() => setTab('technical')}>{t('settings.tabs.technical')}</TabBtn>

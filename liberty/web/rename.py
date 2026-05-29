@@ -659,3 +659,158 @@ def _replace_dd_field_recursive(node: Any, *, old: str, new: str) -> int:
         for v in node:
             n += _replace_dd_field_recursive(v, old=old, new=new)
     return n
+
+
+# ── query rename (connector-scoped) ─────────────────────────────────────────────────────────
+# A query is identified by ``(connector, name)``. Renaming it rewrites the [[connectors.<c>.queries]]
+# entry + every cross-file reference *scoped to that connector*: screens' read/update/insert/
+# delete_query + RunQueryAction.query + NavigateAction.to + ExportSheet.query, dictionary
+# sequence/lookup ``query``, chart ``query``, dashboard-widget ``query``, and sql menu leaves'
+# ``target``. Scoping matters because two connectors may share a query name — we walk the tree
+# tracking the effective connector (a node's own ``connector`` field, else inherited from its
+# parent screen/scope/app) and only rename a ref whose context matches the target connector.
+_QUERY_REF_FIELDS = ("read_query", "update_query", "insert_query", "delete_query", "query", "to")
+
+
+def _replace_query_refs(node: Any, *, mapping: dict[str, str], target_conn: str, default_conn: str | None) -> int:
+    """Walk a tomlkit/dict/list tree, threading the effective connector context, and rename any
+    query-reference field whose value is in ``mapping`` when the context matches ``target_conn``."""
+    n = 0
+    if isinstance(node, dict):
+        own = node.get("connector")
+        ctx = own if isinstance(own, str) and own else default_conn
+        if ctx == target_conn:
+            for f in _QUERY_REF_FIELDS:
+                v = node.get(f)
+                if isinstance(v, str) and v in mapping:
+                    node[f] = mapping[v]
+                    n += 1
+            # A menu leaf's ``target`` is a query name only when it's a SQL ("query") leaf.
+            if node.get("type") == "query":
+                tv = node.get("target")
+                if isinstance(tv, str) and tv in mapping:
+                    node["target"] = mapping[tv]
+                    n += 1
+        for v in node.values():
+            n += _replace_query_refs(v, mapping=mapping, target_conn=target_conn, default_conn=ctx)
+    elif isinstance(node, list):
+        for v in node:
+            n += _replace_query_refs(v, mapping=mapping, target_conn=target_conn, default_conn=default_conn)
+    return n
+
+
+def _rewrite_connectors_queries(doc: tomlkit.TOMLDocument, *, connector: str, mapping: dict[str, str]) -> int:
+    """Rename matching queries inside ``[connectors.<connector>].queries``. Raises on a collision
+    with an existing (non-renamed) query name. Returns the count renamed (0 → caller raises)."""
+    conns = doc.get("connectors")
+    if not isinstance(conns, dict) or connector not in conns:
+        raise RenameError(f"connector {connector!r} not found in connectors.toml")
+    queries = conns[connector].get("queries")
+    if not isinstance(queries, list):
+        return 0
+    existing = {q.get("name") for q in queries if isinstance(q, dict)}
+    for new_name in mapping.values():
+        if new_name in existing and new_name not in mapping:
+            raise RenameError(f"query {new_name!r} already exists in connector {connector!r} — pick another name")
+    n = 0
+    for q in queries:
+        if isinstance(q, dict):
+            name = q.get("name")
+            if isinstance(name, str) and name in mapping:
+                q["name"] = mapping[name]
+                n += 1
+    return n
+
+
+def rename_queries(
+    connector: str,
+    mapping: dict[str, str],
+    *,
+    kind: str,
+    old_name: str,
+    new_name: str,
+    connectors_path: Path,
+    screens_path: Path,
+    menus_path: Path,
+    dictionary_path: Path,
+    charts_path: Path | None = None,
+    dashboards_path: Path | None = None,
+) -> RenameResult:
+    """Rename one or more queries of *connector* (``mapping`` = old→new) + every cross-file
+    reference, atomically. Same two-pass (rewrite → validate → write) strategy as
+    :func:`rename_connector`. ``kind`` / ``old_name`` / ``new_name`` are for the result summary."""
+    if any(o == nw for o, nw in mapping.items()):
+        raise RenameError("old and new query names are identical — nothing to do")
+    for nw in mapping.values():
+        validate_identifier(nw, what="new query name")
+
+    result = RenameResult(kind=kind, old_name=old_name, new_name=new_name)
+    docs: dict[str, tuple[Path, tomlkit.TOMLDocument]] = {}
+    for label, path in (
+        ("connectors", connectors_path), ("screens", screens_path), ("menus", menus_path),
+        ("dictionary", dictionary_path), ("charts", charts_path), ("dashboards", dashboards_path),
+    ):
+        if path is None:
+            continue
+        if path.exists() and path.read_text(encoding="utf-8").strip():
+            docs[label] = (path, tomlkit.parse(path.read_text(encoding="utf-8")))
+        else:
+            docs[label] = (path, tomlkit.document())
+            result.files[str(path)] = 0
+
+    conn_path, conn_doc = docs["connectors"]
+    n = _rewrite_connectors_queries(conn_doc, connector=connector, mapping=mapping)
+    result.files[str(conn_path)] = n
+    if n == 0:
+        raise RenameError(f"no matching query found in connector {connector!r} — nothing to rename")
+
+    scr_path, scr_doc = docs["screens"]
+    result.files[str(scr_path)] = _replace_query_refs(scr_doc.get("screens"), mapping=mapping, target_conn=connector, default_conn=None)
+    menu_path, menu_doc = docs["menus"]
+    n_menu = 0
+    menus = menu_doc.get("menus")
+    if isinstance(menus, dict):
+        for app, acfg in menus.items():
+            n_menu += _replace_query_refs(acfg, mapping=mapping, target_conn=connector, default_conn=app)
+    result.files[str(menu_path)] = n_menu
+    dict_path, dict_doc = docs["dictionary"]
+    n_dict = _replace_query_refs(dict_doc.get("sequences"), mapping=mapping, target_conn=connector, default_conn=None)
+    n_dict += _replace_query_refs(dict_doc.get("lookups"), mapping=mapping, target_conn=connector, default_conn=None)
+    dconns = dict_doc.get("connectors")
+    if isinstance(dconns, dict):
+        for scope, scfg in dconns.items():
+            n_dict += _replace_query_refs(scfg, mapping=mapping, target_conn=connector, default_conn=scope)
+    result.files[str(dict_path)] = n_dict
+    if "charts" in docs:
+        ch_path, ch_doc = docs["charts"]
+        result.files[str(ch_path)] = _replace_query_refs(ch_doc.get("charts"), mapping=mapping, target_conn=connector, default_conn=None)
+    if "dashboards" in docs:
+        da_path, da_doc = docs["dashboards"]
+        result.files[str(da_path)] = _replace_query_refs(da_doc.get("dashboards"), mapping=mapping, target_conn=connector, default_conn=None)
+
+    _validate("connectors", conn_doc, parse_connectors, conn_path)
+    for label, parser in (("screens", parse_screens), ("menus", parse_menus), ("dictionary", parse_dictionary), ("charts", parse_charts), ("dashboards", parse_dashboards)):
+        if label in docs and result.files.get(str(docs[label][0])):
+            _validate(label, docs[label][1], parser, docs[label][0])
+
+    for label, (path, doc) in docs.items():
+        if not result.files.get(str(path), 0):
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return result
+
+
+def rename_query(old: str, new: str, *, connector: str, **paths: Any) -> RenameResult:
+    """Rename a single query (custom / sequence / lookup) + its references, scoped to *connector*."""
+    return rename_queries(connector, {old: new}, kind="query", old_name=old, new_name=new, **paths)
+
+
+def rename_table(old_base: str, new_base: str, *, connector: str, **paths: Any) -> RenameResult:
+    """Rename a CRUD table base — every existing ``<old_base>_<get|put|post|delete>`` slot + the
+    screen bindings that point at them — scoped to *connector*."""
+    if old_base == new_base:
+        raise RenameError(f"old and new base names are identical ({old_base!r}) — nothing to do")
+    validate_identifier(new_base, what="new table name")
+    mapping = {f"{old_base}_{c}": f"{new_base}_{c}" for c in ("get", "put", "post", "delete")}
+    return rename_queries(connector, mapping, kind="table", old_name=old_base, new_name=new_base, **paths)

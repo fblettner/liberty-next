@@ -108,7 +108,7 @@ def _app_tree(
     items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items:
         return None  # nothing the caller can see → no menu for this app
-    out: dict[str, Any] = {"app": app, "label": app_menu.label or app, "items": items}
+    out: dict[str, Any] = {"app": app, "label": app_menu.label or app, "items": items, "show_in_switcher": app_menu.show_in_switcher}
     # Only emit ``home_path`` when set AND the caller can reach it — non-permitted users see
     # the menu without the home pointer (and the workspace picker falls back to the default
     # landing). Keeps the wire payload terse for the common no-home case.

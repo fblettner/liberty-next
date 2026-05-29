@@ -5,7 +5,7 @@
 // reloads. No inline form — the visual editor is the editor.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { RefreshCw, Plus, Trash2, LayoutDashboard } from 'lucide-react'
+import { Plus, Trash2, LayoutDashboard } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -117,9 +117,6 @@ export default function DashboardsBuilder() {
         <ToolbarRight>
           <Button $variant="primary" $size="sm" onClick={addDashboard} disabled={busy}>
             <Plus size={13} /> {t('settings.dashboards.add')}
-          </Button>
-          <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-            <RefreshCw size={13} /> {t('settings.pools.reloadFromDisk')}
           </Button>
         </ToolbarRight>
       </Toolbar>

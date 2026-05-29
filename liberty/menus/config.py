@@ -126,6 +126,13 @@ class AppMenu(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str | None = None  # the app's display name (defaults to the app / connector name)
+    show_in_switcher: bool = Field(
+        default=True,
+        description=(
+            "Show this connector as an app in the top app switcher. Turn off to keep the menu / "
+            "screens reachable via direct links without offering it as a switchable app."
+        ),
+    )
     home: str | None = Field(
         default=None,
         description=(

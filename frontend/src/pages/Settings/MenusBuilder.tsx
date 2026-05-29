@@ -12,12 +12,13 @@
 // every child's `parent` reference to match.
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FolderTree, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, SearchSelect, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Checkbox, Row, Stack, SpinnerRing, SchemaForm, SearchSelect, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { groupQueriesByTable } from './connectorTables'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type AppsMap = Record<string, AppMenu>
@@ -207,6 +208,8 @@ function freshId(items: MenuItem[], seed: string): string {
 export default function MenusBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
+  // Aliased — this component already has a local ``currentApp`` (the selected app's menu tree).
+  const { currentApp: workspaceApp } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // Read-only — the inspector's CONNECTOR / TARGET dropdowns pull from here. Loaded alongside
   // the menus + schema so the framework-enum augmentation can offer real query / endpoint names.
@@ -232,7 +235,7 @@ export default function MenusBuilder() {
       .then(([s, d, c]) => {
         setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
         setConnectors(c.connectors)
-        setSelApp((cur) => (cur && d.menus[cur] ? cur : Object.keys(d.menus)[0] ?? null))
+        setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
@@ -574,9 +577,6 @@ export default function MenusBuilder() {
         <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
           {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
         </Button>
-        <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
-        </Button>
       </ScopeBar>
       {selApp && currentApp ? (
         <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
@@ -587,7 +587,12 @@ export default function MenusBuilder() {
                 navigates straight to the matching path (e.g. ``/dashboard/nomasx1_overview``
                 for nomasx1's overview). Defaults to unset → falls through to the connector
                 index. The list comes from the ``MENU_HOME_ITEMS`` augmented enum above. */}
-            <Row gap={8} style={{ alignItems: 'center' }}>
+            <Row gap={12} style={{ alignItems: 'center' }}>
+              <Checkbox
+                checked={currentApp.show_in_switcher !== false}
+                onChange={(v: boolean) => updateApp(selApp, { ...currentApp, show_in_switcher: v })}
+                label={t('settings.menus.app.showInSwitcher', 'Show in switcher')}
+              />
               <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
                 {t('settings.menus.app.home', 'Home page')}
               </span>

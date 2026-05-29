@@ -65,8 +65,10 @@ from liberty.web.rename import (
     rename_connector,
     rename_dictionary_entry,
     rename_lookup,
+    rename_query,
     rename_screen_app,
     rename_sequence,
+    rename_table,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -976,6 +978,12 @@ class RenameBody(BaseModel):
     * ``"dictionary_entry"`` — ``[entries.<old>]`` in :file:`dictionary.toml` + every
       ``ColumnHint.dd`` / ``PromptField.dd`` in :file:`screens.toml` + ``SequenceDef.dd_id``
       and ``LookupDef.return_params`` references in the same scope. ``scope`` optional.
+    * ``"query"`` — a query name in ``[[connectors.<scope>.queries]]`` + every reference scoped
+      to that connector (screens' read/update/insert/delete_query + run_query/navigate/export,
+      dictionary sequence/lookup ``query``, chart/widget ``query``, sql menu leaves' ``target``).
+      ``scope`` is **required** (the connector).
+    * ``"table"`` — a CRUD base: renames every existing ``<old>_<get|put|post|delete>`` slot +
+      the screen bindings, in one pass. ``scope`` is **required** (the connector).
     """
 
     kind: str
@@ -1035,10 +1043,24 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 screens_path=Path(settings.screens.config_path),
                 scope=body.scope,
             )
+        elif body.kind in ("query", "table"):
+            if not body.scope:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"a {body.kind} rename requires `scope` (the connector name)")
+            fn = rename_query if body.kind == "query" else rename_table
+            result = fn(
+                body.old_name, body.new_name,
+                connector=body.scope,
+                connectors_path=Path(settings.connectors.config_path),
+                screens_path=Path(settings.screens.config_path),
+                menus_path=Path(settings.menus.config_path),
+                dictionary_path=_dictionary_path(settings),
+                charts_path=Path(settings.charts.config_path),
+                dashboards_path=Path(settings.dashboards.config_path),
+            )
         else:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen_app, dictionary_entry",
+                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen_app, dictionary_entry, query, table",
             )
     except RenameError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

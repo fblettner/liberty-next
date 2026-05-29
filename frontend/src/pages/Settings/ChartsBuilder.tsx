@@ -5,7 +5,7 @@
 // matching the screen visual-dialog pattern.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { RefreshCw, Plus, Trash2, BarChart3 } from 'lucide-react'
+import { Plus, Trash2, BarChart3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -104,9 +104,6 @@ export default function ChartsBuilder() {
         <ToolbarRight>
           <Button $variant="primary" $size="sm" onClick={() => { setEditing(null); setStatus(null) }} disabled={busy}>
             <Plus size={13} /> {t('settings.charts.add', 'Add chart')}
-          </Button>
-          <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-            <RefreshCw size={13} /> {t('settings.pools.reloadFromDisk')}
           </Button>
         </ToolbarRight>
       </Toolbar>

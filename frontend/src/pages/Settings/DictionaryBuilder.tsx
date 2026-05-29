@@ -8,7 +8,7 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers, Edit3, BookText } from 'lucide-react'
+import { Save, Plus, Trash2, Search, Globe, Layers, Edit3, BookText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -139,7 +139,7 @@ function setSection(
 export default function DictionaryBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { refresh: refreshWorkspace } = useWorkspace()
+  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [dict, setDict] = useState<DictionaryData | null>(null)
   // Read-only — the *Lookups* form's query / value / label dropdowns read from here. We need to know
@@ -165,6 +165,11 @@ export default function DictionaryBuilder() {
       .then(([s, d, c]) => {
         setSchemas(s); setDict(d.dictionary); setOriginal(JSON.stringify(d.dictionary))
         setConnectors(c.connectors)
+        // On first open, default the scope to the workspace's selected app when it has its own
+        // dictionary overlay (else stay on the shared scope). Only when scope is untouched.
+        if (currentApp && (d.dictionary.connectors ?? {})[currentApp]) {
+          setScope((cur) => (cur === SCOPE_SHARED ? currentApp : cur))
+        }
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
@@ -530,9 +535,6 @@ export default function DictionaryBuilder() {
         </Button>
         <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
           {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-        </Button>
-        <Button $variant="ghost" $size="sm" onClick={load} disabled={busy} title={t('settings.pools.reloadFromDisk')}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <RefreshCw size={13} />} {t('settings.pools.reloadFromDisk')}
         </Button>
       </ScopeBar>
       <SubTabs>

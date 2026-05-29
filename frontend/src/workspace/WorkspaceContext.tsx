@@ -18,7 +18,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
@@ -27,13 +27,6 @@ import { type LicenseInfo, RESTRICTED } from '../types/license'
 import { useAuth } from '../auth/AuthContext'
 
 const APP_KEY = 'liberty.app'
-// Routes that "belong to" a connector — opening one makes the workspace follow it *iff* that
-// connector is an app (so opening a screen on a data-source connector via an app's menu doesn't
-// yank the workspace over to it).
-const CONNECTOR_ROUTE = /^\/(?:sql|http)\/([^/]+)\//
-// Dashboard routes carry no connector segment (just /dashboard/<id>) — the implicit-follow
-// effect below looks the id up in every app's menu tree to figure out which app to switch to.
-const DASHBOARD_ROUTE = /^\/dashboard\/([^/?#]+)/
 
 interface WorkspaceState {
   connectors: ConnectorMeta[] | null // every accessible connector (null while loading / signed out)
@@ -91,7 +84,6 @@ function writeApp(name: string | null): void {
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth()
-  const { pathname } = useLocation()
   const navigate = useNavigate()
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
@@ -141,11 +133,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [ready, user, nonce])
 
-  // "Apps" = connectors that have a menu; with no menus defined, every connector is an app.
+  // "Apps" = connectors whose menu opts into the switcher (AppMenu.show_in_switcher, default true).
+  // With no menus defined at all, every connector is an app (a bare deployment).
   const apps = useMemo<ConnectorMeta[] | null>(() => {
     if (!connectors) return null
-    const appNames = menus ? Object.keys(menus) : []
-    return appNames.length ? connectors.filter((c) => appNames.includes(c.name)) : connectors
+    const appNames = menus ? Object.keys(menus).filter((a) => menus[a].show_in_switcher !== false) : []
+    return appNames.length ? connectors.filter((c) => appNames.includes(c.name)) : (menus && Object.keys(menus).length ? [] : connectors)
   }, [connectors, menus])
   const isApp = useCallback((name: string) => !!apps?.some((a) => a.name === name), [apps])
 
@@ -157,54 +150,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [apps, currentApp, isApp])
 
-  // Deep-linking into a screen (/sql/<c>/<q>, /http/<c>/<e>) makes the workspace follow it — but
-  // only when <c> is an app; opening a data-source connector's screen (e.g. via the nomajde menu
-  // pointing at a jdedwards query) leaves the picked app alone.
-  useEffect(() => {
-    const m = CONNECTOR_ROUTE.exec(pathname)
-    if (!m) return
-    const name = decodeURIComponent(m[1])
-    if (!isApp(name)) return
-    setCurrentAppState((cur) => (cur === name ? cur : name))
-    writeApp(name)
-  }, [pathname, isApp])
-
-  // Same implicit-follow for dashboard routes (/dashboard/<id>) — the URL has no connector
-  // segment, so we resolve the owning app by walking every app's menu tree for a dashboard
-  // leaf whose target matches the id. The first app whose menu lists this dashboard wins;
-  // a dashboard not referenced by any menu (rare — only reachable via a typed URL) leaves
-  // the picked app alone, same fallthrough as the connector-route effect above.
-  useEffect(() => {
-    if (!menus) return
-    const m = DASHBOARD_ROUTE.exec(pathname)
-    if (!m) return
-    const dashboardId = decodeURIComponent(m[1])
-    const findInTree = (nodes: Array<{ type?: string; target?: string; items?: typeof nodes }>): boolean => {
-      for (const n of nodes) {
-        if (n.type === 'dashboard' && n.target === dashboardId) return true
-        if (n.items && findInTree(n.items)) return true
-      }
-      return false
-    }
-    for (const [appName, appMenu] of Object.entries(menus)) {
-      if (findInTree(appMenu.items)) {
-        if (!isApp(appName)) return
-        setCurrentAppState((cur) => (cur === appName ? cur : appName))
-        writeApp(appName)
-        return
-      }
-    }
-  }, [pathname, menus, isApp])
+  // The selected app is sticky: navigating to a screen / dashboard never changes it — only the
+  // explicit app switcher does. (Previously the workspace "followed" the URL's connector, which
+  // meant a menu item pointing at another app — e.g. nomasx1's menu linking a nomaflow query —
+  // silently switched the picker. Operators found that confusing; staying on the chosen app is
+  // clearer, and a borrowed query still opens fine, it just doesn't hijack the switcher.)
 
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)
     writeApp(name)
     // When the operator explicitly picks an app (the workspace picker → this callback) and
     // that app has a configured ``home_path``, navigate straight there. Cancel the redirect
-    // when ``name == null`` (the "all apps" reset) — the operator stays on whatever page
-    // they were on. The pickup-from-URL path (the CONNECTOR_ROUTE effect above) DOESN'T
-    // call this, so deep-linking to /sql/nomasx1/x doesn't yank the page to /dashboard/…
-    // — the implicit-follow stays on the URL the operator opened.
+    // when ``name == null`` (the "all apps" reset) — the operator stays on whatever page they
+    // were on. This is now the *only* way the selected app changes (the URL no longer auto-
+    // switches it), so picking an app is a deliberate jump to its home.
     if (name && menus && menus[name]?.home_path) {
       navigate(menus[name].home_path!)
     }
