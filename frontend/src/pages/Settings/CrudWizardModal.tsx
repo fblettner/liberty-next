@@ -100,6 +100,9 @@ const CRUD_LABELS: Record<CrudKey, string> = {
 export interface CrudWizardResult {
   /** The four (or fewer) queries to append to the connector's ``queries`` list. */
   queries: Array<{ name: string; sql: string; writable?: boolean; label?: string }>
+  /** The reversed table + its schema — so the caller can chain the dictionary-item scan. */
+  table: string
+  schema?: string
 }
 
 export interface CrudWizardModalProps {
@@ -305,7 +308,7 @@ export function CrudWizardModal({
       queries.push(q)
     }
     if (queries.length === 0) return
-    onSave({ queries })
+    onSave({ queries, table: tableName, schema: pickedSchema && pickedSchema !== '__nopicker__' ? pickedSchema : undefined })
   }
 
   const toggleIn = (name: string, on: boolean) => {

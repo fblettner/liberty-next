@@ -24,6 +24,7 @@ import ConnectorsTableEditor from './ConnectorsTableEditor'
 import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
+import { DictionaryScan } from './DictionaryScan'
 
 type Connectors = Record<string, Record<string, unknown>>
 
@@ -158,6 +159,8 @@ export default function ConnectorsBuilder() {
   // CRUD wizard modal — opened from "+ Add table → Generate from DB". Reverse-engineers a table
   // into all four CRUD queries via the live pool introspection.
   const [crudWizardOpen, setCrudWizardOpen] = useState(false)
+  // After the CRUD wizard reverses a table, offer to generate its dictionary items.
+  const [dictScan, setDictScan] = useState<{ connector: string; table: string; schema?: string } | null>(null)
   const [selTable, setSelTable] = useState<string | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
@@ -1016,8 +1019,20 @@ export default function ConnectorsBuilder() {
             const firstName = result.queries[0]?.name ?? ''
             const m = firstName.match(/^(.+)_(get|put|post|delete)$/i)
             if (m) setSelTable(m[1])
+            // Chain the v1 "create the missing dictionary items" step — scans the just-reversed
+            // table's columns + proposes dictionary entries (JDE DD / inferred type).
+            setDictScan({ connector: sel, table: result.table, schema: result.schema })
           }}
           onCancel={() => setCrudWizardOpen(false)}
+        />
+      )}
+      {dictScan && (
+        <DictionaryScan
+          connector={dictScan.connector}
+          table={dictScan.table}
+          schema={dictScan.schema}
+          scope={dictScan.connector}
+          onClose={() => setDictScan(null)}
         />
       )}
       {cloneModalOpen && (

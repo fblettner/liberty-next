@@ -32,6 +32,7 @@ from liberty.web import (
     access_router,
     admin_router,
     charts_router,
+    dictgen_router,
     connectors_router,
     dashboards_router,
     export_router,
@@ -221,6 +222,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ai_router)
     app.include_router(admin_router)
     app.include_router(access_router)
+    app.include_router(dictgen_router)
     app.include_router(jobs_router)
 
     @app.get("/health")

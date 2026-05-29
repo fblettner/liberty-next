@@ -8,13 +8,14 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers, Edit3 } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Search, Globe, Layers, Edit3, BookText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { groupQueriesByTable } from './connectorTables'
 
@@ -152,6 +153,7 @@ export default function DictionaryBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -329,11 +331,15 @@ export default function DictionaryBuilder() {
     setStatus(null)
   }
   const addRecord = async () => {
-    const key = (await modals.prompt({
+    const raw = (await modals.prompt({
       title: t(`settings.dictionary.${kind}.add`),
       message: t(`settings.dictionary.${kind}.namePrompt`),
     }))?.trim()
-    if (!key) return
+    if (!raw) return
+    // Dictionary entry ids are UPPERCASE by convention — screen columns reference them via `dd`
+    // (uppercased by x_case) and `find_entry` is case-sensitive, so a lowercase entry would never
+    // resolve. Normalise here so a hand-typed `cust_id` lands as `CUST_ID`, matching the scanner.
+    const key = kind === 'entries' ? raw.toUpperCase() : raw
     if (key in section) { setSel(key); return }
     setDict(setSection(dict, scope, kind, { ...section, [key]: newRecord(kind) }))
     setSel(key); setStatus(null)
@@ -346,9 +352,22 @@ export default function DictionaryBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
+    // Persist the delete immediately (write + reload), not just locally. A confirmed destructive
+    // action shouldn't sit as a pending edit that a reload silently discards (or a separate Save
+    // step might miss) — that read as "delete doesn't work". Commits the current doc minus the
+    // entry; a failure surfaces inline instead of the entry quietly reappearing on reload.
     const next = { ...section }; delete next[key]
-    setDict(setSection(dict, scope, kind, next))
-    setSel((s) => (s === key ? null : s)); setStatus(null)
+    const nextDict = setSection(dict, scope, kind, next)
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      await api.put<{ saved: boolean }>('/admin/config/dictionary/parsed', { dictionary: nextDict })
+      await api.post<{ connectors: string[] }>('/admin/reload')
+      setSel((s) => (s === key ? null : s))
+      setStatus(t('settings.dictionary.saved'))
+      load()  // re-fetch so dict + original baseline match disk (entry gone)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
   }
   // Rename a record's dict key. Routes through the backend endpoint
   // ``POST /admin/config/rename`` for the three kinds the backend supports — ``entries``
@@ -506,6 +525,9 @@ export default function DictionaryBuilder() {
           <Input type="text" value={dict.default_language ?? ''} placeholder="en" onChange={(e) => setLang(e.target.value)} />
         </LangBox>
         <ToolbarDivider />
+        <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy} title={t('settings.dictscan.title', 'Generate dictionary items')}>
+          <BookText size={13} /> {t('settings.dictscan.scanTable', 'Scan a table')}
+        </Button>
         <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
           {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
         </Button>
@@ -611,6 +633,7 @@ export default function DictionaryBuilder() {
           )}
         </FormCol>
       </Split>
+      {scanOpen && <DictionaryScan onClose={() => setScanOpen(false)} onSaved={load} />}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )
