@@ -107,6 +107,10 @@ class AuthService:
         user.is_active = active
         await self.session.flush()
 
+    async def set_superuser(self, user: User, value: bool) -> None:
+        user.is_superuser = value
+        await self.session.flush()
+
     async def update_profile(self, user: User, *, full_name: str | None, email: str | None) -> None:
         """Self-service profile edit — display name + email. ``None`` clears the field (an empty
         string from the form is normalised to ``None`` by the caller)."""

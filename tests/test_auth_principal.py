@@ -57,6 +57,45 @@ def test_superuser_bypasses_everything() -> None:
     p.require_permission("x:y:z")  # does not raise
 
 
+def test_superuser_ignores_deny() -> None:
+    # A superuser bypasses even an explicit deny (the flag is absolute).
+    p = Principal(id="1", username="root", is_superuser=True, permissions=("!sql:x:y",))
+    assert p.has_permission("sql:x:y") is True
+
+
+@pytest.mark.parametrize(
+    "perms,ask,ok",
+    [
+        # all-access baseline minus a specific deny ("all access but disable X")
+        (["*", "!sql:nomasx1:security_users_get"], "sql:nomasx1:security_users_get", False),
+        (["*", "!sql:nomasx1:security_users_get"], "sql:nomasx1:security_roles_get", True),
+        # deny a whole connector while keeping everything else
+        (["*", "!sql:nomasx1:*"], "sql:nomasx1:anything", False),
+        (["*", "!sql:nomasx1:*"], "sql:nomajde:x", True),
+        # deny wins even when a more specific allow is present
+        (["sql:nomasx1:*", "!sql:nomasx1:security_users_get"], "sql:nomasx1:security_users_get", False),
+        (["sql:nomasx1:*", "!sql:nomasx1:security_users_get"], "sql:nomasx1:other_get", True),
+        # first-class menu / dashboard deny
+        (["*", "!menu:nomasx1:security"], "menu:nomasx1:security", False),
+        (["*", "!dashboard:nomasx1_overview"], "dashboard:nomasx1_overview", False),
+        (["*", "!menu:nomasx1:security"], "menu:nomasx1:license", True),
+    ],
+)
+def test_deny_rules(perms: list[str], ask: str, ok: bool) -> None:
+    p = Principal(id="1", username="u", permissions=tuple(perms))
+    assert p.has_permission(ask) is ok
+
+
+def test_is_denied_distinguishes_from_not_granted() -> None:
+    p = Principal(id="1", username="u", permissions=("*", "!menu:nomasx1:security"))
+    assert p.is_denied("menu:nomasx1:security") is True
+    assert p.is_denied("menu:nomasx1:license") is False   # not denied, even though...
+    # ...a no-grant role: not denied, just not allowed
+    p2 = Principal(id="2", username="u2", permissions=("sql:x:y",))
+    assert p2.is_denied("menu:a:b") is False
+    assert p2.has_permission("menu:a:b") is False
+
+
 def test_require_permission_raises() -> None:
     p = Principal(id="1", username="u", permissions=("sql:liberty:read",))
     with pytest.raises(PermissionError):

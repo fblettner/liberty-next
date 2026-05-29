@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from liberty.web.access import router as access_router
 from liberty.web.admin import router as admin_router
 from liberty.web.charts import router as charts_router
 from liberty.web.connectors import router as connectors_router
@@ -12,6 +13,7 @@ from liberty.web.screens import router as screens_router
 from liberty.web.theme import router as theme_router
 
 __all__ = [
+    "access_router",
     "admin_router",
     "charts_router",
     "connectors_router",

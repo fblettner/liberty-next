@@ -42,23 +42,38 @@ def _get_dashboards(request: Request) -> DashboardsFile:
 Dashboards = Annotated[DashboardsFile, Depends(_get_dashboards)]
 
 
-def _keeper(principal: Principal, dashboards: DashboardsFile):
-    """A ``keep(item, connector)`` predicate. For ``query`` / ``endpoint`` leaves: the caller
-    must run the target. For ``dashboard`` leaves: the dashboard must exist in the catalog
-    (per-widget permission gating runs at render time). A ``roles`` filter on the item is
-    always honoured."""
+def _keeper(principal: Principal, dashboards: DashboardsFile, app: str):
+    """A ``keep(item, connector)`` predicate, with the first-class ``menu:<app>:<id>`` /
+    ``dashboard:<id>`` RBAC overlay on top of the query-derived visibility:
+
+    * An explicit **deny** (``!menu:<app>:<id>`` or ``!dashboard:<id>``) hides the node outright —
+      this is how "all access but disable the Security menu" works (role has ``*`` + the deny).
+    * Otherwise a node is visible when its target is **runnable** (the existing
+      ``sql:``/``api:`` check, or the dashboard exists) **OR** an explicit ``menu:``/``dashboard:``
+      **allow** surfaces it (``*`` satisfies that). So existing query-only roles are unchanged,
+      and a "menu only" role (allow ``menu:<app>:<id>`` + the target query) shows just that menu.
+
+    A ``roles`` filter on the item is still honoured first."""
 
     def keep(item: MenuItem, connector: str) -> bool:
         if item.roles and not any(principal.has_role(r) for r in item.roles):
             return False
+        menu_perm = f"menu:{app}:{item.id}"
+        if principal.is_denied(menu_perm):
+            return False
         if item.type == "dashboard":
-            return (item.target or "") in dashboards.dashboards
+            did = item.target or ""
+            if principal.is_denied(f"dashboard:{did}"):
+                return False
+            # Existence is the visibility gate for dashboards (per-widget perms gate at render);
+            # a menu-allow doesn't fabricate a link to a dashboard that isn't in the catalog.
+            return did in dashboards.dashboards
         if item.type == "page":
-            # A page leaf points at a frontend route; the route enforces its own auth.
-            # Only the roles filter (checked above) gates it here.
+            # A page leaf points at a frontend route; the route enforces its own auth. Only the
+            # roles filter + the menu deny (both above) gate it here.
             return True
         perm = f"{'sql' if item.type == 'query' else 'api'}:{connector}:{item.target}"
-        return principal.has_permission(perm)
+        return principal.has_permission(perm) or principal.has_permission(menu_perm)
 
     return keep
 
@@ -89,7 +104,7 @@ def _home_path(app: str, app_menu: AppMenu, *, keep) -> str | None:
 def _app_tree(
     app: str, app_menu: AppMenu, *, language: str | None, principal: Principal, dashboards: DashboardsFile,
 ) -> dict[str, Any] | None:
-    keep = _keeper(principal, dashboards)
+    keep = _keeper(principal, dashboards, app)
     items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items:
         return None  # nothing the caller can see → no menu for this app

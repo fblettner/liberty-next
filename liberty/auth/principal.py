@@ -73,10 +73,23 @@ class Principal:
     def has_role(self, role: str) -> bool:
         return self.is_superuser or role in self.roles
 
+    def is_denied(self, permission: str) -> bool:
+        """Whether an explicit *deny* rule (a ``"!"``-prefixed pattern) matches *permission*.
+        Deny wins over any allow — see :meth:`has_permission`. Separate from ``not
+        has_permission`` so callers (menu / dashboard pruning) can tell "explicitly denied" apart
+        from "merely not granted" (the latter still allows the query-derived visibility overlay)."""
+        return any(_segment_match(p[1:], permission) for p in self.permissions if p.startswith("!"))
+
     def has_permission(self, permission: str) -> bool:
-        if self.is_superuser or "*" in self.permissions:
+        """RBAC check with allow/deny semantics. Superuser bypasses everything. Otherwise an
+        explicit deny (``"!sql:nomasx1:*"``) wins; else any allow pattern (``"*"`` = everything,
+        or a colon-segment glob) grants it; else default-deny. The allow-only model is the special
+        case where there are no ``"!"`` rules — so existing roles behave exactly as before."""
+        if self.is_superuser:
             return True
-        return any(_segment_match(p, permission) for p in self.permissions)
+        if self.is_denied(permission):
+            return False
+        return any(_segment_match(p, permission) for p in self.permissions if not p.startswith("!"))
 
     def require_permission(self, permission: str) -> None:
         if not self.has_permission(permission):

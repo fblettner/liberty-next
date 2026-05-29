@@ -29,6 +29,7 @@ from liberty.dashboards import load_dashboards
 from liberty.menus import load_menus
 from liberty.screens import load_screens
 from liberty.web import (
+    access_router,
     admin_router,
     charts_router,
     connectors_router,
@@ -219,6 +220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(theme_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
+    app.include_router(access_router)
     app.include_router(jobs_router)
 
     @app.get("/health")

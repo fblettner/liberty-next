@@ -140,6 +140,7 @@ class UserRecord:
 class AuthBackend(Protocol):
     async def authenticate(self, username: str, password: str) -> UserRecord | None: ...
     async def get_by_id(self, subject_id: str) -> UserRecord | None: ...
+    async def get_by_username(self, username: str) -> UserRecord | None: ...
     async def provision_oidc_user(
         self, claims: dict, *, username_claim: str = "preferred_username",
         email_claim: str = "email", name_claim: str = "name", default_roles: list[str] | None = None,
@@ -154,6 +155,7 @@ class AuthBackend(Protocol):
     ) -> UserRecord: ...
     async def set_password(self, username: str, password: str) -> UserRecord: ...
     async def set_active(self, username: str, active: bool) -> UserRecord: ...
+    async def set_superuser(self, username: str, value: bool) -> UserRecord: ...
     async def update_profile(
         self, username: str, *, full_name: str | None, email: str | None,
     ) -> UserRecord: ...
@@ -217,6 +219,13 @@ class TomlAuthBackend:
         f = load_auth(self.path)
         u = f.users.get(subject_id)
         return self._record(f, subject_id, u) if u else None
+
+    async def get_by_username(self, username: str) -> UserRecord | None:
+        # TOML keys users by username, so this mirrors get_by_id — but keep it distinct so callers
+        # don't rely on that coincidence (the DB backend keys by numeric id).
+        f = load_auth(self.path)
+        u = f.users.get(username)
+        return self._record(f, username, u) if u else None
 
     async def provision_oidc_user(
         self, claims: dict, *, username_claim: str = "preferred_username",
@@ -287,6 +296,13 @@ class TomlAuthBackend:
         f = load_auth(self.path)
         u = self._get(f, username)
         u.active = active
+        save_auth(self.path, f)
+        return self._record(f, username, u)
+
+    async def set_superuser(self, username: str, value: bool) -> UserRecord:
+        f = load_auth(self.path)
+        u = self._get(f, username)
+        u.superuser = value
         save_auth(self.path, f)
         return self._record(f, username, u)
 
@@ -362,6 +378,11 @@ class DbAuthBackend:
             u = await AuthService(s).get_user(uid)
             return self._record(u) if u else None
 
+    async def get_by_username(self, username: str) -> UserRecord | None:
+        async with self.db.session() as s:
+            u = await AuthService(s).get_user_by_username(username)
+            return self._record(u) if u else None
+
     async def provision_oidc_user(
         self, claims: dict, *, username_claim: str = "preferred_username",
         email_claim: str = "email", name_claim: str = "name", default_roles: list[str] | None = None,
@@ -416,6 +437,15 @@ class DbAuthBackend:
             if u is None:
                 raise AuthError(f"unknown user {username!r}")
             await svc.set_active(u, active)
+            return self._record(u)
+
+    async def set_superuser(self, username: str, value: bool) -> UserRecord:
+        async with self.db.session() as s:
+            svc = AuthService(s)
+            u = await svc.get_user_by_username(username)
+            if u is None:
+                raise AuthError(f"unknown user {username!r}")
+            await svc.set_superuser(u, value)
             return self._record(u)
 
     async def update_profile(self, username: str, *, full_name: str | None, email: str | None) -> UserRecord:

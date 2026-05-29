@@ -149,10 +149,14 @@ def _resolve_filters(dashboard: Dashboard, principal: Principal) -> list[dict[st
     return out
 
 
-def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Principal) -> dict[str, Any]:
+def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Principal) -> dict[str, Any] | None:
     """Build the wire shape for one dashboard — resolves chart references, applies the
-    per-widget permission gate, drops what the caller can't see. The dashboard itself is
-    always returned (with however many widgets survive)."""
+    per-widget permission gate, drops what the caller can't see. Returns ``None`` when the
+    dashboard is explicitly **denied** (``!dashboard:<id>`` — the first-class RBAC overlay, so
+    "all access but disable this dashboard" works); otherwise the dashboard is always returned
+    (with however many widgets survive the per-widget gate)."""
+    if principal.is_denied(f"dashboard:{dashboard.id}"):
+        return None
     resolved: list[dict[str, Any]] = []
     for w in dashboard.widgets:
         if isinstance(w, ChartWidget):
@@ -179,7 +183,7 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
 
 @router.get("/dashboards")
 async def list_dashboards(principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts) -> dict[str, Any]:
-    out = [_resolve_dashboard(d, charts, principal) for d in dashboards.dashboards.values()]
+    out = [r for d in dashboards.dashboards.values() if (r := _resolve_dashboard(d, charts, principal)) is not None]
     return {"dashboards": out}
 
 
@@ -188,6 +192,9 @@ async def get_dashboard(
     dashboard_id: str, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts,
 ) -> dict[str, Any]:
     d = dashboards.dashboards.get(dashboard_id)
-    if d is None:
+    resolved = _resolve_dashboard(d, charts, principal) if d is not None else None
+    if resolved is None:
+        # Unknown id OR explicitly denied — same 404 either way (don't leak existence to a
+        # caller who's been denied the dashboard).
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown dashboard {dashboard_id!r}")
-    return _resolve_dashboard(d, charts, principal)
+    return resolved
