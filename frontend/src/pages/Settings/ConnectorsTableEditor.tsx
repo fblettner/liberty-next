@@ -64,11 +64,14 @@ const TAB_TO_CRUD: Partial<Record<TabKey, CrudKind>> = { get: 'get', put: 'put',
 // Phase 3 — General edits only the friendly metadata still on QueryDef (label/description).
 // auto_load / audit / max_rows / key_columns / columns moved to Screen — edit them in the
 // Screen Designer's General + Columns tabs.
-const GENERAL_KEYS = ['label', 'description']
+const GENERAL_KEYS = ['type', 'label', 'description']
 // per-query body — `name` is left out (renames break grouping); writable hidden for read.
-const READ_BODY_KEYS = ['sql', 'params']
-// Phase 3 — `audit` is gone from QueryDef; the audit-table name lives on `Screen.audit_table`.
-const WRITE_BODY_KEYS = ['sql', 'params', 'writable']
+// CRUD table queries carry no declared `params`: reads filter via the screen's FilterPanel and
+// writes bind the edited row's columns (+ `:<COL>_ORIGINAL`) — neither uses ParamDefs. So the
+// Params field is omitted on every table slot (it lives only on the Custom / Sequence / Lookup
+// editors, where the caller actually supplies the binds).
+const READ_BODY_KEYS = ['sql']
+const WRITE_BODY_KEYS = ['sql', 'writable']
 
 export interface ConnectorsTableEditorProps {
   base: string

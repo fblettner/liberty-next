@@ -97,6 +97,9 @@ export interface ChooseOptions<V extends string = string> {
    *  When unset (``null``), Escape / overlay click resolves ``null`` — the caller treats it
    *  as "keep editing" / no decision. */
   cancelValue?: V | null
+  /** When set, render an explicit leftmost ghost Cancel button (resolves like Escape →
+   *  ``cancelValue``). Omit for dialogs whose options already include a "stay/keep" choice. */
+  cancelLabel?: string
 }
 
 export interface ModalsContextValue {
@@ -370,6 +373,11 @@ function ChooseModalContent({
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>{opts.message}</ModalBody>
         <ModalFooter>
+          {opts.cancelLabel && (
+            <Button $size="sm" $variant="ghost" onClick={onCancel}>
+              {opts.cancelLabel}
+            </Button>
+          )}
           {opts.options.map((opt) => (
             <Button
               key={opt.value}

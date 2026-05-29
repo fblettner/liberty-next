@@ -59,6 +59,15 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "SYSDATE", "label": "Date Today"},
         ],
     },
+    "QUERY_TYPE": {
+        "label": "Query Type",
+        "values": [
+            {"value": "table", "label": "Table (CRUD)"},
+            {"value": "custom", "label": "Custom query"},
+            {"value": "sequence", "label": "Sequence"},
+            {"value": "lookup", "label": "Lookup"},
+        ],
+    },
     "DATASOURCE_TYPE": {
         "label": "Datasource Type",
         "values": [

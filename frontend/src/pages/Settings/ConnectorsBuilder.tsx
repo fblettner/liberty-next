@@ -21,7 +21,7 @@ import { validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
-import { CRUD_KINDS, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
+import { CRUD_KINDS, classifyQueryName, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
 import { DictionaryScan } from './DictionaryScan'
@@ -102,22 +102,6 @@ const RowAction = styled.span`
   border-radius: ${radius.sm}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
   &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
 `
-// Section header for the loose-queries list under the table groups. Light divider above
-// (so it visually separates from the CRUD-grouped rows) + muted label. We don't render
-// the header when there are no loose queries (the parent guard handles that).
-const LooseSectionHeader = styled.div`
-  color: ${colors.text.muted}; font-size: ${fontSize.sm};
-  padding: 12px 4px 4px;
-  border-top: 1px solid ${colors.border};
-  margin-top: 4px;
-  font-family: ${fonts.mono};
-`
-// One-line explainer under the "Custom queries" header — operators didn't know what the old
-// "Other queries" group meant; this spells out what lands here + that the rows are editable.
-const LooseSectionHint = styled.div`
-  color: ${colors.text.muted}; font-size: ${fontSize.micro};
-  padding: 0 4px 6px; line-height: 1.4;
-`
 
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
@@ -151,7 +135,7 @@ export default function ConnectorsBuilder() {
   // queries (the canonical case). Sequences = queries referenced by ``[sequences.*]`` in
   // dictionary.toml. Lookups = queries referenced by ``[lookups.*]``. The "loose" queries
   // (none of the three) stay accessible via the Settings… escape hatch.
-  const [mode, setMode] = useState<'tables' | 'sequences' | 'lookups'>('tables')
+  const [mode, setMode] = useState<'tables' | 'custom' | 'sequences' | 'lookups'>('tables')
   // ``settingsOpen`` raises a small connector-level form (label / pool / licensed / max_rows /
   // description). Was the old "Form view" toggle — promoted to a modal so the operator only
   // sees those rare fields when they ask for them.
@@ -242,6 +226,20 @@ export default function ConnectorsBuilder() {
       return { ...(p ?? {}), [name]: { ...cur, queries } }
     })
     setStatus(null)
+  }
+  // Add a free-standing custom query (Custom queries tab) — a query not tied to a table's CRUD set.
+  // A CRUD-suffixed name (…_get/_put/_post/_delete) would instead surface under Tables; that's fine,
+  // it's the same name-based classification used everywhere.
+  const addCustomQuery = async () => {
+    if (!sel) return
+    const name = (await modals.prompt({
+      title: t('settings.connectors.addQuery', 'Add query'),
+      message: t('settings.connectors.queryNamePrompt', 'Query name (e.g. post_invoice, customer_balance):'),
+    }))?.trim()
+    if (!name) return
+    if (queriesArr.some((q) => q.name === name)) { setSelQuery(name); return }
+    updateQueries(sel, [...queriesArr, { name, type: 'custom', sql: '' }])
+    setSelQuery(name); setStatus(null)
   }
   const addConnector = async (type: 'sql' | 'api') => {
     const name = (await modals.prompt({
@@ -444,6 +442,7 @@ export default function ConnectorsBuilder() {
         { value: 'empty', label: t('settings.crudWizard.emptyStub', 'Empty stub'), variant: 'ghost' },
       ],
       cancelValue: 'cancel',
+      cancelLabel: t('common.cancel'),
     })
     if (choice === 'cancel' || choice == null) return
     if (choice === 'wizard') { setCrudWizardOpen(true); return }
@@ -503,7 +502,7 @@ export default function ConnectorsBuilder() {
     // 1) append the query to the selected connector's queries list
     const conn = conns[sel] ?? {}
     const existing = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
-    updateQueries(sel, [...existing, { ...result.query }])
+    updateQueries(sel, [...existing, { ...result.query, type: kind === 'sequence' ? 'sequence' : 'lookup' }])
     // 2) write the dict entry under the connector's per-connector scope (creating it when
     //    absent). The kind picks ``sequences`` vs ``lookups``; the dict key is ``result.dictId``.
     const dictKey = kind === 'sequence' ? 'sequences' : 'lookups'
@@ -545,40 +544,8 @@ export default function ConnectorsBuilder() {
     } finally { setBusy(false) }
   }
 
-  // Names of queries referenced by a ``[sequences.*]`` / ``[lookups.*]`` entry pointing at
-  // *this* connector — drives the Sequences / Lookups filter modes. Each def can be defined
-  // at the shared scope (top-level ``[sequences.*]``) or scoped to a connector (under
-  // ``[connectors.<name>.sequences.*]``); the def's own ``connector`` field overrides the
-  // implicit scope, defaulting to the scope's own name. v1's per-app dictionaries map onto
-  // these so two migrated apps can carry separate ``[sequences.7]`` entries safely.
-  // *Hook MUST live above the early returns* — React's rules-of-hooks require a stable hook
-  // call order across every render, and the early returns below would otherwise skip it on
-  // the loading-fallback render and break the next render's hook count (the #310 error).
-  const queryNamesByMode = useMemo<{ sequences: Set<string>; lookups: Set<string> }>(() => {
-    const seqNames = new Set<string>()
-    const lkpNames = new Set<string>()
-    if (!dictionary || !sel) return { sequences: seqNames, lookups: lkpNames }
-    const ingest = (defs: Record<string, Record<string, unknown>> | undefined, target: Set<string>, defaultConn: string) => {
-      if (!defs) return
-      for (const [, def] of Object.entries(defs)) {
-        const conn = typeof def.connector === 'string' && def.connector ? def.connector : defaultConn
-        const query = typeof def.query === 'string' ? def.query : ''
-        if (conn === sel && query) target.add(query)
-      }
-    }
-    // Shared scope — operator must spell out ``connector = "<name>"`` on the def to point at
-    // *this* connector. (No implicit fallback — a shared def with no connector is "any" and
-    // we'd over-include it; surfacing only the explicit ones keeps the list tidy.)
-    ingest((dictionary.sequences ?? {}) as Record<string, Record<string, unknown>>, seqNames, '')
-    ingest((dictionary.lookups ?? {}) as Record<string, Record<string, unknown>>, lkpNames, '')
-    // Per-connector scope — the scope name is the default ``connector``.
-    const perConn = (dictionary.connectors ?? {}) as Record<string, { sequences?: Record<string, Record<string, unknown>>; lookups?: Record<string, Record<string, unknown>> }>
-    for (const [connName, secs] of Object.entries(perConn)) {
-      ingest(secs.sequences, seqNames, connName)
-      ingest(secs.lookups, lkpNames, connName)
-    }
-    return { sequences: seqNames, lookups: lkpNames }
-  }, [dictionary, sel])
+  // (Sequences / Lookups tabs now filter by each query's explicit ``type`` — see ``sequenceQueries``
+  // / ``lookupQueries`` below — so the old dictionary-reference scan that determined them is gone.)
 
   if (error && !conns) return <Banner $tone="error">{error}</Banner>
   if (!conns || !schemas) return <Centered />
@@ -591,9 +558,22 @@ export default function ConnectorsBuilder() {
   const selSchema = selConn ? schemaFor(selConn) : null
   const isSql = selConn?.type !== 'api'
 
-  // --- table grouping (only when SQL + tables mode) --------------------------
+  // --- query classification by explicit ``type`` ----------------------------
+  // Each query carries ``type`` (table / custom / sequence / lookup); the tabs filter on it — no
+  // more inferring from name-suffix + dictionary refs. A query with no ``type`` (shouldn't happen
+  // after the backfill) falls back to a trivial suffix guess so it still lands somewhere sensible.
   const queriesArr = (selConn && Array.isArray(selConn.queries) ? selConn.queries : []) as Record<string, unknown>[]
-  const grouped = isSql ? groupQueriesByTable(queriesArr) : { tables: [], loose: [] }
+  const queryType = (q: Record<string, unknown>): string => {
+    const t = typeof q.type === 'string' ? q.type : ''
+    if (t) return t
+    return classifyQueryName(typeof q.name === 'string' ? q.name : '') ? 'table' : 'custom'
+  }
+  const tableQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'table') : []
+  const customQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'custom') : []
+  const sequenceQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'sequence') : []
+  const lookupQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'lookup') : []
+  // Tables view groups the type=table queries by their CRUD suffix into get/put/post/delete slots.
+  const grouped = isSql ? groupQueriesByTable(tableQueries) : { tables: [], loose: [] }
   const tNeedle = tq.trim().toLowerCase()
   const shownTables = tNeedle ? grouped.tables.filter((g) => g.base.toLowerCase().includes(tNeedle)) : grouped.tables
   const queryDefSchema = (selSchema?.$defs?.QueryDef ?? null) as JsonSchema | null
@@ -716,6 +696,9 @@ export default function ConnectorsBuilder() {
                       <ModeBtn type="button" $active={mode === 'tables'} onClick={() => setMode('tables')}>
                         {t('settings.tables.tablesView')}
                       </ModeBtn>
+                      <ModeBtn type="button" $active={mode === 'custom'} onClick={() => setMode('custom')}>
+                        {t('settings.tables.looseSectionLabel', 'Unclassified')}
+                      </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'sequences'} onClick={() => setMode('sequences')}>
                         {t('settings.connectors.sequencesView', 'Sequences')}
                       </ModeBtn>
@@ -736,6 +719,11 @@ export default function ConnectorsBuilder() {
                   {isSql && mode === 'tables' && !selTable && !selQuery && (
                     <Button $variant="ghost" $size="sm" onClick={() => sel && addTable(sel)} disabled={busy}>
                       <Plus size={13} /> {t('settings.tables.addTable')}
+                    </Button>
+                  )}
+                  {isSql && mode === 'custom' && !selQuery && (
+                    <Button $variant="ghost" $size="sm" onClick={addCustomQuery} disabled={busy}>
+                      <Plus size={13} /> {t('settings.connectors.addQuery', 'Add query')}
                     </Button>
                   )}
                   {isSql && mode === 'sequences' && !selQuery && (
@@ -775,14 +763,9 @@ export default function ConnectorsBuilder() {
                 // connector and vice versa, which made the editor noisy and hard to scan.
                 <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
-              {/* Tables view: a selected Custom query opens the single-query editor (it lives in
-                  this list, not Sequences/Lookups — so the editor has to render here too, else
-                  clicking one did nothing). Otherwise the table editor / the list. */}
-              {isSql && mode === 'tables' && selQuery && queryDefSchema && (() => {
-                const picked = queriesArr.find((qq) => qq.name === selQuery)
-                return picked ? renderQueryEditor(picked as Record<string, unknown>) : null
-              })()}
-              {isSql && mode === 'tables' && !selQuery && (
+              {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
+                  own tab now, so this list isn't mixed with them anymore. */}
+              {isSql && mode === 'tables' && (
                 selTable && queryDefSchema ? (() => {
                   // The corresponding Screen (if any) is keyed by (connector, get-slot name).
                   // The cross-link only shows when both are present + a screen with a dialog is
@@ -849,59 +832,20 @@ export default function ConnectorsBuilder() {
                         )
                       })}
                     </TableList>
-                    {/* "Add table" moved to the top toolbar (per-mode Add cluster) — keeps
-                        every per-mode creator in one place at the top of the page. */}
-                    {/* Loose queries — anything not classifiable into a CRUD group (queries
-                        whose names don't end in _get/_put/_post/_delete, OR end in those
-                        but their group ended up with only that one slot). Used to live in
-                        a hint pointing operators to the Settings… modal; the Phase 3 rename
-                        (Tables → Queries) means this is the natural place for them: same
-                        tab, same single-query editor open-on-click as the Sequences /
-                        Lookups tabs use. */}
-                    {grouped.loose.length > 0 && (
-                      <>
-                        <LooseSectionHeader>
-                          {t('settings.tables.looseSectionLabel', 'Custom queries')}
-                        </LooseSectionHeader>
-                        <LooseSectionHint>
-                          {t('settings.tables.looseSectionHint', 'Queries not part of a table’s get/put/post/delete set — used by actions, charts, AIS calls or referenced by lookups. Click one to edit it.')}
-                        </LooseSectionHint>
-                        <TableList>
-                          {grouped.loose
-                            .filter((slot) => !tNeedle || slot.name.toLowerCase().includes(tNeedle))
-                            .sort((a, b) => a.name.localeCompare(b.name))
-                            .map((slot) => {
-                              const q = slot.query as Record<string, unknown>
-                              const desc = (typeof q.description === 'string' && q.description)
-                                        || (typeof q.label === 'string' && q.label)
-                                        || null
-                              return (
-                                <TableRow key={slot.name} type="button" onClick={() => setSelQuery(slot.name)}>
-                                  <span className="text">
-                                    <span className="base">{slot.name}</span>
-                                    {desc && <span className="desc">{desc}</span>}
-                                  </span>
-                                </TableRow>
-                              )
-                            })}
-                        </TableList>
-                      </>
-                    )}
+                    {/* "Add table" lives in the top toolbar (per-mode Add cluster). Custom queries
+                        moved to their own tab — this view is CRUD tables only now. */}
                   </Stack>
                 )
               )}
-              {/* Sequences / Lookups views — flat list of queries from ``queriesArr`` whose
-                  name is referenced by any ``[sequences.*]`` / ``[lookups.*]`` entry in
-                  dictionary.toml (scoped to this connector — see ``queryNamesByMode`` above).
-                  Click a query → opens a single-query editor (the same per-query SchemaForm
-                  over the QueryDef schema that the Tables view uses inside the CRUD slots).
-                  The dictionary metadata (dd_id / value / label / params / …) stays editable
-                  in DictionaryBuilder — this view edits the SQL + params for the query
-                  itself, the dictionary def is a separate concern. */}
-              {isSql && (mode === 'sequences' || mode === 'lookups') && (() => {
-                const usedNames = mode === 'sequences' ? queryNamesByMode.sequences : queryNamesByMode.lookups
-                const matches = queriesArr.filter((q) => typeof q.name === 'string' && usedNames.has(q.name as string))
-                  .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+              {/* Custom / Sequences / Lookups views — a flat list of single queries, each opening
+                  the same per-query SchemaForm (QueryDef) on click. Each tab shows the queries whose
+                  ``type`` matches it, so a query shows in exactly one tab. The dictionary def itself
+                  (the sequence/lookup → column binding) stays editable in DictionaryBuilder — this
+                  edits the SQL + params for the query. */}
+              {isSql && (mode === 'custom' || mode === 'sequences' || mode === 'lookups') && (() => {
+                const matches: Record<string, unknown>[] = (
+                  mode === 'custom' ? customQueries : mode === 'sequences' ? sequenceQueries : lookupQueries
+                ).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
                 const qNeedle = tq.trim().toLowerCase()
                 const shown = qNeedle ? matches.filter((q) => String(q.name).toLowerCase().includes(qNeedle)) : matches
                 const picked = selQuery ? queriesArr.find((q) => q.name === selQuery) : null
@@ -918,9 +862,11 @@ export default function ConnectorsBuilder() {
                     )}
                     {matches.length === 0 ? (
                       <Empty>
-                        {mode === 'sequences'
-                          ? t('settings.connectors.emptySequences', 'No sequences defined for this connector. Add one in Dictionary → Sequences and point its `query` at a query here.')
-                          : t('settings.connectors.emptyLookups', 'No lookups defined for this connector. Add one in Dictionary → Lookups and point its `query` at a query here.')}
+                        {mode === 'custom'
+                          ? t('settings.connectors.emptyCustom', 'No unclassified queries. These are queries not tied to a table’s get/put/post/delete set and not used as a sequence or lookup — click "Add query" to create one.')
+                          : mode === 'sequences'
+                            ? t('settings.connectors.emptySequences', 'No sequences defined for this connector. Add one in Dictionary → Sequences and point its `query` at a query here.')
+                            : t('settings.connectors.emptyLookups', 'No lookups defined for this connector. Add one in Dictionary → Lookups and point its `query` at a query here.')}
                       </Empty>
                     ) : (
                       <TableList>

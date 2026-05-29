@@ -89,6 +89,11 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
   // Toolbar shown only when this editor is bound to a connector (i.e. only in the config builder).
   // RawEditor / readOnly / no-connector cases keep the bare editor — matches what shipped before.
   const showToolbar = !!connector && !readOnly
+  // Never offer Run on a write statement (INSERT / UPDATE / DELETE / …) — executing it (even a
+  // dry-run) against the live DB is dangerous. Only read queries (SELECT / CTE-SELECT / WITH …)
+  // get the runner. Cheap leading-keyword check on the SQL.
+  const isWriteSql = /^\s*(insert|update|delete|merge|truncate|create|drop|alter|replace|upsert|call)\b/i.test(value)
+  const canRun = !isWriteSql
   return (
     <div>
       {showToolbar && (
@@ -97,10 +102,12 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
             title={schema ? t('settings.sqlEditor.wizardTitle') : t('settings.sqlEditor.wizardLoading')}>
             <Wand2 size={11} /> {t('settings.sqlEditor.wizard')}
           </ToolBtn>
-          <ToolBtn type="button" $active={runnerOpen} onClick={() => setRunnerOpen((v) => !v)}
-            title={t('settings.sqlEditor.runTitle')}>
-            <Play size={11} /> {t('settings.sqlEditor.run')}
-          </ToolBtn>
+          {canRun && (
+            <ToolBtn type="button" $active={runnerOpen} onClick={() => setRunnerOpen((v) => !v)}
+              title={t('settings.sqlEditor.runTitle')}>
+              <Play size={11} /> {t('settings.sqlEditor.run')}
+            </ToolBtn>
+          )}
         </Toolbar>
       )}
       <Frame $h={rows * ROW_PX + CHROME_PX}>
@@ -132,7 +139,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
           }}
         />
       </Frame>
-      {runnerOpen && connector && (
+      {runnerOpen && connector && canRun && (
         <SqlTestRunner connector={connector} sql={value} onClose={() => setRunnerOpen(false)} />
       )}
       {wizardOpen && schema && (

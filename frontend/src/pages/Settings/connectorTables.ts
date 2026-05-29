@@ -83,10 +83,11 @@ export function removeQueryByName(
   return queries.filter((q) => !(typeof q.name === 'string' && q.name === name))
 }
 
-/** Make a brand-new query object for a missing CRUD slot of a table. Writable for non-get. */
+/** Make a brand-new query object for a missing CRUD slot of a table. Writable for non-get.
+ *  Stamped ``type: 'table'`` so it lands in the Tables tab (the editor classifies by ``type``). */
 export function newQueryStub(base: string, crud: CrudKind): Record<string, unknown> {
   const name = `${base}_${crud}`
-  return crud === 'get' ? { name, sql: '' } : { name, sql: '', writable: true }
+  return crud === 'get' ? { name, type: 'table', sql: '' } : { name, type: 'table', sql: '', writable: true }
 }
 
 /** Deep-clone every `<oldBase>_<crud>` query as `<newBase>_<crud>` and append to the array.

@@ -342,6 +342,16 @@ class QueryDef(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     name: str = Field(description="Unique name within the connector. The permission string is ``sql:<connector>:<name>``.")
+    type: str | None = Field(
+        default=None,
+        json_schema_extra={"x_enum_ref": "QUERY_TYPE"},
+        description=(
+            "What this query is, for the editor's tabs: ``table`` (a CRUD slot — get/put/post/delete, "
+            "grouped by name into a table), ``custom`` (a standalone query), ``sequence`` (generates a "
+            "value for a dictionary SEQUENCE rule), or ``lookup`` (value source for a dictionary LOOKUP "
+            "rule). Empty → the editor infers it from the name (``…_get`` etc. → table, else custom)."
+        ),
+    )
     sql: str | dict[str, str] = Field(description="The SQL statement with ``:name`` placeholders. Use a per-dialect map (``{ default = \"…\", oracle = \"…\" }``) to ship variants per database backend; ``default`` is required.")
     writable: bool = Field(default=False, description="Allow non-SELECT statements (INSERT / UPDATE / DELETE). Required for any mutating query.")
     params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters — give each ``:name`` placeholder a form label and a default.")

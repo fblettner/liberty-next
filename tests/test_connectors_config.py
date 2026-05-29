@@ -24,6 +24,18 @@ def test_querydef_plain_sql() -> None:
     assert q.sql_for("oracle") == "SELECT 1" and q.default_sql == "SELECT 1" and q.dialects == ["default"]
 
 
+def test_querydef_type_is_optional_and_round_trips() -> None:
+    # `type` classifies a query for the editor's tabs; absent by default, kept when set.
+    assert QueryDef(name="q", sql="SELECT 1").type is None
+    assert QueryDef(name="q", type="sequence", sql="SELECT 1").type == "sequence"
+
+
+def test_query_type_enum_exposed() -> None:
+    from liberty.framework_enums import FRAMEWORK_ENUMS
+    vals = {v["value"] for v in FRAMEWORK_ENUMS["QUERY_TYPE"]["values"]}
+    assert vals == {"table", "custom", "sequence", "lookup"}
+
+
 def test_querydef_dialect_map() -> None:
     q = QueryDef(name="q", sql={"default": "SELECT 1 LIMIT 10", "oracle": "SELECT 1 FETCH FIRST 10 ROWS ONLY"})
     assert q.dialects == ["default", "oracle"]
