@@ -7,7 +7,8 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard } from 'lucide-react'
-import { Overlay, Modal, Button, Input, Field, Banner, useModals } from '../../common'
+import { Overlay, Modal, Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartWidget } from '../DashboardView/ChartWidget'
 import { KpiWidget } from '../DashboardView/KpiWidget'
 import { TableWidget } from '../DashboardView/TableWidget'
@@ -58,7 +59,7 @@ const Placeholder = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm};
 `
 const FiltersPanel = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; padding: 12px; display: flex; flex-direction: column; gap: 10px;`
-const FilterRow = styled.div`display: grid; grid-template-columns: repeat(7, 1fr) auto; gap: 6px; align-items: center;`
+const FilterRow = styled.div`display: grid; grid-template-columns: repeat(7, 1fr) auto; gap: 8px; align-items: end;`
 const Footer = styled.div`display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid ${colors.border}; flex-shrink: 0;`
 
 const snum = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
@@ -120,6 +121,14 @@ export function DashboardEditorModal({
 }) {
   const { t } = useTranslation()
   const modals = useModals()
+  const { connectors } = useWorkspace()
+  // Connector + query dropdown options for the filter rows (replacing the old free-text inputs).
+  const sqlConnectors = (connectors ?? []).filter((c) => c.type === 'sql')
+  const connectorOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+  const queryOptsFor = (connectorName: string): SearchSelectOption[] => {
+    const c = sqlConnectors.find((x) => x.name === connectorName)
+    return (c?.queries ?? []).map((q) => ({ value: q.name, label: q.description || q.label || q.name, mono: q.name }))
+  }
   const [id] = useState(sstr(initial.id))
   const [label, setLabel] = useState(sstr(initial.label))
   const [description, setDescription] = useState(sstr(initial.description))
@@ -267,13 +276,32 @@ export function DashboardEditorModal({
               const o = (f.options as Raw) ?? {}
               return (
                 <FilterRow key={i}>
-                  <Input placeholder="id" value={sstr(f.id)} onChange={(e) => patchFilter(i, { id: e.target.value })} />
-                  <Input placeholder={t('settings.dash.dLabel', 'Label')} value={sstr(f.label)} onChange={(e) => patchFilter(i, { label: e.target.value })} />
-                  <Input placeholder="dictionary_key" value={sstr(f.dictionary_key)} onChange={(e) => patchFilter(i, { dictionary_key: e.target.value })} />
-                  <Input placeholder="connector" value={sstr(o.connector)} onChange={(e) => patchFilterOpt(i, { connector: e.target.value })} />
-                  <Input placeholder="query" value={sstr(o.query)} onChange={(e) => patchFilterOpt(i, { query: e.target.value })} />
-                  <Input placeholder="value_column" value={sstr(o.value_column)} onChange={(e) => patchFilterOpt(i, { value_column: e.target.value })} />
-                  <Input placeholder="label_column" value={sstr(o.label_column)} onChange={(e) => patchFilterOpt(i, { label_column: e.target.value })} />
+                  <Field label={t('settings.dash.filter.id', 'Id')}>
+                    <Input value={sstr(f.id)} onChange={(e) => patchFilter(i, { id: e.target.value })} placeholder="application" />
+                  </Field>
+                  <Field label={t('settings.dash.filter.label', 'Label')}>
+                    <Input value={sstr(f.label)} onChange={(e) => patchFilter(i, { label: e.target.value })} placeholder={t('settings.dash.dLabel', 'Label')} />
+                  </Field>
+                  <Field label={t('settings.dash.filter.dictKey', 'Dictionary key')}>
+                    <Input value={sstr(f.dictionary_key)} onChange={(e) => patchFilter(i, { dictionary_key: e.target.value })} placeholder="APPS_ID" />
+                  </Field>
+                  <Field label={t('settings.dash.filter.connector', 'Connector')}>
+                    <SearchSelect value={sstr(o.connector)}
+                      onChange={(v) => patchFilterOpt(i, { connector: v, query: '' })}
+                      options={connectorOpts} placeholder={t('common.pick', 'Pick…')} allowCustom />
+                  </Field>
+                  <Field label={t('settings.dash.filter.query', 'Query')}>
+                    <SearchSelect value={sstr(o.query)}
+                      onChange={(v) => patchFilterOpt(i, { query: v })}
+                      options={queryOptsFor(sstr(o.connector))}
+                      placeholder={sstr(o.connector) ? t('common.pick', 'Pick…') : t('settings.charts.pickConnFirst', 'Pick a connector first')} allowCustom />
+                  </Field>
+                  <Field label={t('settings.dash.filter.valueColumn', 'Value column')}>
+                    <Input value={sstr(o.value_column)} onChange={(e) => patchFilterOpt(i, { value_column: e.target.value })} placeholder="APPS_ID" />
+                  </Field>
+                  <Field label={t('settings.dash.filter.labelColumn', 'Label column')}>
+                    <Input value={sstr(o.label_column)} onChange={(e) => patchFilterOpt(i, { label_column: e.target.value })} placeholder="APPS_NAME" />
+                  </Field>
                   <CloseBtn onClick={() => setFilters((fs) => fs.filter((_, j) => j !== i))} title={t('common.delete')}><Trash2 size={14} /></CloseBtn>
                 </FilterRow>
               )

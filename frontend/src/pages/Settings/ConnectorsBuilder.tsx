@@ -21,6 +21,7 @@ import { validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
+import { ScreenDesignerModal } from './ScreenDesignerModal'
 import { CRUD_KINDS, classifyQueryName, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
@@ -157,6 +158,9 @@ export default function ConnectorsBuilder() {
   const [crudWizardOpen, setCrudWizardOpen] = useState(false)
   // After the CRUD wizard reverses a table, offer to generate its dictionary items.
   const [dictScan, setDictScan] = useState<{ connector: string; table: string; schema?: string } | null>(null)
+  // "Open visual builder" from a CRUD table row → the screen designer modal opens in-place, no
+  // Settings tab switch. Self-contained: the modal fetches + saves screens.toml itself.
+  const [screenDesigner, setScreenDesigner] = useState<{ app: string; id: string } | null>(null)
   const [selTable, setSelTable] = useState<string | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
@@ -900,6 +904,7 @@ export default function ConnectorsBuilder() {
                       onDuplicate={() => sel && duplicateTable(sel, selTable)}
                       onRename={() => renameTable(selTable)}
                       screenLink={matchedScreen ? { app: matchedScreen.app, id: matchedScreen.id } : null}
+                      onOpenScreen={(app, id) => setScreenDesigner({ app, id })}
                     />
                   )
                 })() : (
@@ -1083,6 +1088,13 @@ export default function ConnectorsBuilder() {
             setDictScan({ connector: sel, table: result.table, schema: result.schema })
           }}
           onCancel={() => setCrudWizardOpen(false)}
+        />
+      )}
+      {screenDesigner && (
+        <ScreenDesignerModal
+          app={screenDesigner.app}
+          screenId={screenDesigner.id}
+          onClose={() => setScreenDesigner(null)}
         />
       )}
       {dictScan && (

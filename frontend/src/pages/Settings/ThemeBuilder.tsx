@@ -1,18 +1,17 @@
 // Settings → Theme — per-deployment branding (superuser). Pick a built-in preset, set the primary
-// accent colour, and the app name; the change applies to the whole install (it's written to
-// theme.toml on save and served by GET /api/theme to every client on load). Dark/light stays a
-// per-user toggle in the top bar — this only re-skins the accent family + names the app.
+// accent colour, name the app, choose a font + text size. The change applies to the whole install
+// (written to theme.toml on save and served by GET /api/theme to every client on load). Dark/light
+// stays a per-user toggle in the top bar — this only re-skins the accent family + names the app.
 //
-// Live preview: as you change the preset/colour the accent is applied to the running UI via the
-// BrandingContext (client-side derivation that mirrors the server). Save writes theme.toml (the
-// server re-derives authoritatively) then re-pulls /api/theme; leaving without saving discards the
-// preview (the cleanup re-applies the saved theme).
+// Layout: same shape every other editor uses — a top toolbar (Save / Discard), then a clear
+// two-card split underneath (Settings on the left, Live preview on the right). No more "is this
+// the settings or the preview?" confusion.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Palette } from 'lucide-react'
+import { Save, Undo2, Palette } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Card, Field, Input, Button, Banner, Stack, Row, SpinnerRing } from '../../common'
+import { Banner, Button, Card, Field, Input, Row, SpinnerRing, Stack } from '../../common'
 import { useBranding, derivePrimaryVars, type PresetChoice } from '../../branding/BrandingContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -20,8 +19,6 @@ interface ThemeDoc { preset: string; app_name?: string | null; primary_color?: s
 interface FontChoice { id: string; label: string; stack: string }
 interface ThemeParsed { path: string; theme: ThemeDoc; presets: PresetChoice[]; fonts: FontChoice[] }
 
-// Text-size steps offered by the editor — each a global --font-scale multiplier (1.0 = the
-// design defaults). Named so the operator picks an intent, not a raw number.
 const SIZE_STEPS = [
   { id: 'compact', value: 0.9 },
   { id: 'normal', value: 1.0 },
@@ -29,7 +26,21 @@ const SIZE_STEPS = [
   { id: 'large', value: 1.2 },
 ] as const
 
-const Grid = styled.div`display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 18px; align-items: start;`
+const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
+const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
+const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
+const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const Grid = styled.div`display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 14px; align-items: start; flex-shrink: 0;`
+const Panel = styled(Card)`padding: 0; display: flex; flex-direction: column; overflow: hidden;`
+const PanelHeader = styled.div`
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input};
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600;
+  color: ${colors.text.primary};
+  text-transform: uppercase; letter-spacing: 0.06em;
+  & svg { color: ${colors.blue.main}; }
+`
+const PanelBody = styled.div`padding: 14px; display: flex; flex-direction: column; gap: 12px;`
 const Select = styled.select`
   height: 32px; padding: 0 8px; border-radius: ${radius.md}; border: 1px solid ${colors.border};
   background: ${colors.bg.input}; color: ${colors.text.primary}; font-family: ${fonts.sans}; font-size: ${fontSize.base};
@@ -39,8 +50,6 @@ const Swatch = styled.input`
   width: 38px; height: 32px; padding: 0; border: 1px solid ${colors.border}; border-radius: ${radius.md};
   background: transparent; cursor: pointer;
 `
-const Preview = styled(Card)`padding: 16px; display: flex; flex-direction: column; gap: 12px;`
-const PvBtns = styled.div`display: flex; gap: 8px; flex-wrap: wrap; align-items: center;`
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 const Seg = styled.div`display: inline-flex; border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;`
 const SegBtn = styled.button<{ $active?: boolean }>`
@@ -51,17 +60,25 @@ const SegBtn = styled.button<{ $active?: boolean }>`
   & + & { border-left: 1px solid ${colors.border}; }
   &:hover { color: ${colors.text.primary}; }
 `
+const PreviewBlock = styled.div`display: flex; flex-direction: column; gap: 14px;`
+const SwatchTile = styled.div<{ $bg: string; $border?: string }>`
+  height: 32px; border-radius: ${radius.md}; background: ${({ $bg }) => $bg};
+  ${({ $border }) => $border ? `border: 1px solid ${$border};` : ''}
+`
+const PvLink = styled.a`color: ${colors.blue.main}; font-family: ${fonts.sans}; font-size: ${fontSize.base};`
+const AppNamePreview = styled.strong`font-family: ${fonts.sans}; font-size: ${fontSize.lg}; color: ${colors.text.primary};`
 
 export default function ThemeBuilder() {
   const { t } = useTranslation()
   const { applyVars, refresh } = useBranding()
   const [presets, setPresets] = useState<PresetChoice[]>([])
   const [fonts_, setFonts] = useState<FontChoice[]>([])
+  const [original, setOriginal] = useState('')
   const [preset, setPreset] = useState('default')
   const [appName, setAppName] = useState('')
-  const [primary, setPrimary] = useState('')           // explicit override; '' → use the preset's primary
-  const [fontFamily, setFontFamily] = useState('')     // font id; '' → built-in default (DM Sans)
-  const [fontScale, setFontScale] = useState(1)        // global text-size multiplier (1.0 = default)
+  const [primary, setPrimary] = useState('')
+  const [fontFamily, setFontFamily] = useState('')
+  const [fontScale, setFontScale] = useState(1)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,11 +90,16 @@ export default function ThemeBuilder() {
       const r = await api.get<ThemeParsed>('/admin/config/theme/parsed')
       setPresets(r.presets)
       setFonts(r.fonts ?? [])
-      setPreset(r.theme.preset || 'default')
-      setAppName(r.theme.app_name ?? '')
-      setPrimary(r.theme.primary_color ?? '')
-      setFontFamily(r.theme.font_family ?? '')
-      setFontScale(r.theme.font_scale ?? 1)
+      const seed = {
+        preset: r.theme.preset || 'default',
+        appName: r.theme.app_name ?? '',
+        primary: r.theme.primary_color ?? '',
+        fontFamily: r.theme.font_family ?? '',
+        fontScale: r.theme.font_scale ?? 1,
+      }
+      setPreset(seed.preset); setAppName(seed.appName); setPrimary(seed.primary)
+      setFontFamily(seed.fontFamily); setFontScale(seed.fontScale)
+      setOriginal(JSON.stringify(seed))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -87,7 +109,11 @@ export default function ThemeBuilder() {
 
   useEffect(() => { void load() }, [load])
 
-  // The primary actually in effect: explicit override, else the chosen preset's primary.
+  const dirty = useMemo(
+    () => JSON.stringify({ preset, appName, primary, fontFamily, fontScale }) !== original,
+    [preset, appName, primary, fontFamily, fontScale, original],
+  )
+
   const presetPrimary = useMemo(
     () => presets.find((p) => p.id === preset)?.primary ?? '#007AFF',
     [presets, preset],
@@ -95,8 +121,6 @@ export default function ThemeBuilder() {
   const effectivePrimary = (primary || presetPrimary).trim()
   const fontStack = useMemo(() => fonts_.find((f) => f.id === fontFamily)?.stack ?? '', [fonts_, fontFamily])
 
-  // Live preview — apply the derived accent family + font vars together. applyVars clears any var
-  // it isn't given this call, so colour + font must go in one map (else each would wipe the other).
   useEffect(() => {
     if (loading) return
     const vars: Record<string, string> = { ...derivePrimaryVars(effectivePrimary) }
@@ -105,10 +129,19 @@ export default function ThemeBuilder() {
     applyVars(vars)
   }, [loading, effectivePrimary, fontStack, fontScale, applyVars])
 
-  // Discard an unsaved preview on unmount (re-pull + re-apply the saved theme).
   useEffect(() => () => { void refresh() }, [refresh])
 
-  const onPreset = (id: string) => { setPreset(id); setPrimary(''); setStatus(null) }   // preset reset clears the override
+  const onPreset = (id: string) => { setPreset(id); setPrimary(''); setStatus(null) }
+
+  const discard = () => {
+    if (!original) return
+    try {
+      const seed = JSON.parse(original) as { preset: string; appName: string; primary: string; fontFamily: string; fontScale: number }
+      setPreset(seed.preset); setAppName(seed.appName); setPrimary(seed.primary)
+      setFontFamily(seed.fontFamily); setFontScale(seed.fontScale)
+      setStatus(null); setError(null)
+    } catch { /* ignore */ }
+  }
 
   const save = async () => {
     setBusy(true); setError(null); setStatus(null)
@@ -119,83 +152,100 @@ export default function ThemeBuilder() {
     if (Math.abs(fontScale - 1) > 1e-6) theme.font_scale = fontScale
     try {
       await api.put('/admin/config/theme/parsed', { theme })
-      await refresh()                                   // re-pull the authoritative resolved theme
+      await refresh()
       setStatus(t('settings.theme.saved', 'Saved. The new theme is live for everyone.'))
+      setOriginal(JSON.stringify({ preset, appName, primary, fontFamily, fontScale }))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
+    } finally { setBusy(false) }
   }
 
   if (loading) return <SpinnerRing size={16} thickness={2} />
 
   return (
-    <Stack gap={14}>
+    <Shell>
+      <Toolbar>
+        <ToolbarLeft>
+          {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+          {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+          {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+        </ToolbarLeft>
+        <ToolbarRight>
+          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+            <Undo2 size={13} /> {t('common.discard', 'Discard')}
+          </Button>
+          <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy || !dirty}>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+          </Button>
+        </ToolbarRight>
+      </Toolbar>
+
       <Hint>{t('settings.theme.intro', 'Brand the whole install — pick a preset palette, set the primary accent colour, and name the app. Applies to every user; dark/light stays an individual choice.')}</Hint>
       {error && <Banner $tone="error">{error}</Banner>}
-      {status && <Banner $tone="ok">{status}</Banner>}
-      <Grid>
-        <Stack gap={12}>
-          <Field label={t('settings.theme.preset', 'Preset')}>
-            <Select value={preset} onChange={(e) => onPreset(e.target.value)}>
-              {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </Select>
-          </Field>
-          <Field label={t('settings.theme.primary', 'Primary colour')}>
-            <ColorRow>
-              <Swatch type="color" value={/^#[0-9a-fA-F]{6}$/.test(effectivePrimary) ? effectivePrimary : '#007AFF'}
-                onChange={(e) => { setPrimary(e.target.value); setStatus(null) }} />
-              <Input value={primary} placeholder={presetPrimary}
-                onChange={(e) => { setPrimary(e.target.value); setStatus(null) }} style={{ width: 140 }} />
-            </ColorRow>
-            <Hint>{t('settings.theme.primaryHint', "Leave blank to use the preset's colour.")}</Hint>
-          </Field>
-          <Field label={t('settings.theme.appName', 'App name')}>
-            <Input value={appName} placeholder="Liberty" onChange={(e) => { setAppName(e.target.value); setStatus(null) }} />
-          </Field>
-          <Field label={t('settings.theme.font', 'Font family')}>
-            {/* No explicit family saved → show the default (first choice, dm-sans) selected without
-                forcing it into state, so an un-branded install doesn't write a redundant font_family. */}
-            <Select value={fontFamily || (fonts_[0]?.id ?? '')} onChange={(e) => { setFontFamily(e.target.value); setStatus(null) }}>
-              {fonts_.map((f) => <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>{f.label}</option>)}
-            </Select>
-            <Hint>{t('settings.theme.fontHint', 'The UI font for the whole install. Code stays monospace.')}</Hint>
-          </Field>
-          <Field label={t('settings.theme.size', 'Text size')}>
-            <Seg>
-              {SIZE_STEPS.map((s) => (
-                <SegBtn key={s.id} type="button" $active={Math.abs(fontScale - s.value) < 1e-6}
-                  onClick={() => { setFontScale(s.value); setStatus(null) }}>
-                  {t(`settings.theme.size${s.id.charAt(0).toUpperCase()}${s.id.slice(1)}`, s.id)}
-                </SegBtn>
-              ))}
-            </Seg>
-          </Field>
-          <Row gap={8}>
-            <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy}>
-              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-            </Button>
-            <Button $variant="ghost" $size="sm" onClick={() => void load()} disabled={busy}>
-              <RefreshCw size={13} /> {t('settings.theme.reset', 'Reset')}
-            </Button>
-          </Row>
-        </Stack>
 
-        <Preview>
-          <Row gap={8} align="center"><Palette size={15} /> <strong style={{ fontFamily: fonts.sans, color: colors.text.primary }}>{appName || 'Liberty'}</strong></Row>
-          <Hint>{t('settings.theme.previewHint', 'Live preview — buttons, links and active states use the primary accent.')}</Hint>
-          <PvBtns>
-            <Button $variant="primary" $size="sm">{t('common.save')}</Button>
-            <Button $variant="ghost" $size="sm">{t('common.cancel', 'Cancel')}</Button>
-            <a href="#" onClick={(e) => e.preventDefault()} style={{ color: colors.blue.main, fontFamily: fonts.sans, fontSize: fontSize.base }}>
-              {t('settings.theme.sampleLink', 'A sample link')}
-            </a>
-          </PvBtns>
-          <div style={{ height: 6, borderRadius: 3, background: colors.blue.main }} />
-          <div style={{ height: 6, borderRadius: 3, background: colors.blue.bg, border: `1px solid ${colors.blue.border}` }} />
-        </Preview>
+      <Grid>
+        <Panel>
+          <PanelHeader><Palette size={14} /> {t('settings.theme.settings', 'Settings')}</PanelHeader>
+          <PanelBody>
+            <Field label={t('settings.theme.preset', 'Preset')}>
+              <Select value={preset} onChange={(e) => onPreset(e.target.value)}>
+                {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </Select>
+            </Field>
+            <Field label={t('settings.theme.primary', 'Primary colour')}>
+              <ColorRow>
+                <Swatch type="color" value={/^#[0-9a-fA-F]{6}$/.test(effectivePrimary) ? effectivePrimary : '#007AFF'}
+                  onChange={(e) => { setPrimary(e.target.value); setStatus(null) }} />
+                <Input value={primary} placeholder={presetPrimary}
+                  onChange={(e) => { setPrimary(e.target.value); setStatus(null) }} style={{ width: 140 }} />
+              </ColorRow>
+              <Hint>{t('settings.theme.primaryHint', "Leave blank to use the preset's colour.")}</Hint>
+            </Field>
+            <Field label={t('settings.theme.appName', 'App name')}>
+              <Input value={appName} placeholder="Liberty" onChange={(e) => { setAppName(e.target.value); setStatus(null) }} />
+            </Field>
+            <Field label={t('settings.theme.font', 'Font family')}>
+              <Select value={fontFamily || (fonts_[0]?.id ?? '')} onChange={(e) => { setFontFamily(e.target.value); setStatus(null) }}>
+                {fonts_.map((f) => <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>{f.label}</option>)}
+              </Select>
+              <Hint>{t('settings.theme.fontHint', 'The UI font for the whole install. Code stays monospace.')}</Hint>
+            </Field>
+            <Field label={t('settings.theme.size', 'Text size')}>
+              <Seg>
+                {SIZE_STEPS.map((s) => (
+                  <SegBtn key={s.id} type="button" $active={Math.abs(fontScale - s.value) < 1e-6}
+                    onClick={() => { setFontScale(s.value); setStatus(null) }}>
+                    {t(`settings.theme.size${s.id.charAt(0).toUpperCase()}${s.id.slice(1)}`, s.id)}
+                  </SegBtn>
+                ))}
+              </Seg>
+            </Field>
+          </PanelBody>
+        </Panel>
+
+        <Panel>
+          <PanelHeader><Palette size={14} /> {t('settings.theme.preview', 'Preview')}</PanelHeader>
+          <PanelBody>
+            <Row gap={10} align="center">
+              <AppNamePreview>{appName || 'Liberty'}</AppNamePreview>
+            </Row>
+            <Hint>{t('settings.theme.previewHint', 'Live preview — buttons, links and active states use the primary accent.')}</Hint>
+            <PreviewBlock>
+              <Stack gap={10}>
+                <Row gap={8} align="center">
+                  <Button $variant="primary" $size="sm">{t('common.save')}</Button>
+                  <Button $variant="ghost" $size="sm">{t('common.cancel', 'Cancel')}</Button>
+                  <PvLink href="#" onClick={(e) => e.preventDefault()}>
+                    {t('settings.theme.sampleLink', 'A sample link')}
+                  </PvLink>
+                </Row>
+                <SwatchTile $bg={colors.blue.main} />
+                <SwatchTile $bg={colors.blue.bg} $border={colors.blue.border} />
+              </Stack>
+            </PreviewBlock>
+          </PanelBody>
+        </Panel>
       </Grid>
-    </Stack>
+    </Shell>
   )
 }

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Users, Shield, Plus, Pencil, X, Check, Ban } from 'lucide-react'
+import { Users, Shield, Plus, X, Check, Ban } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -39,11 +39,6 @@ const Item = styled.div`
   & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; }
   & .sub { font-size: ${fontSize.micro}; color: ${colors.text.muted}; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-`
-const IconBtn = styled.button`
-  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
-  border-radius: ${radius.sm}; border: 1px solid transparent; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 5px; align-items: center;`
 const PermChip = styled.span<{ $deny?: boolean }>`
@@ -362,7 +357,9 @@ export default function AccessBuilder() {
           <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setUserEdit(null)}><Plus size={13} /> {t('settings.access.addUser', 'Add user')}</Button></Bar>
           <List>
             {users.map((u) => (
-              <Item key={u.username}>
+              <Item key={u.username} onClick={() => setUserEdit(u)} style={{ cursor: 'pointer' }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = colors.blue.border; e.currentTarget.style.background = colors.blue.bg }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.background = colors.bg.input }}>
                 <Users size={15} color={colors.text.muted} />
                 <span className="text">
                   <span className="name">{u.username}{u.full_name ? ` — ${u.full_name}` : ''}</span>
@@ -373,7 +370,6 @@ export default function AccessBuilder() {
                     {u.roles.length === 0 && !u.is_superuser && <span>{t('profile.noRoles')}</span>}
                   </span>
                 </span>
-                <IconBtn onClick={() => setUserEdit(u)} title={t('common.edit', 'Edit')}><Pencil size={14} /></IconBtn>
               </Item>
             ))}
           </List>
@@ -383,7 +379,9 @@ export default function AccessBuilder() {
           <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setRoleEdit(null)}><Plus size={13} /> {t('settings.access.addRole', 'Add role')}</Button></Bar>
           <List>
             {roles.map((r) => (
-              <Item key={r.name}>
+              <Item key={r.name} onClick={() => setRoleEdit(r)} style={{ cursor: 'pointer' }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = colors.blue.border; e.currentTarget.style.background = colors.blue.bg }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.background = colors.bg.input }}>
                 <Shield size={15} color={colors.text.muted} />
                 <span className="text">
                   <span className="name">{r.name}</span>
@@ -393,7 +391,6 @@ export default function AccessBuilder() {
                     {t('settings.access.permCount', '{{n}} rule(s)', { n: r.permissions.filter((p) => p !== '*').length })}
                   </span>
                 </span>
-                <IconBtn onClick={() => setRoleEdit(r)} title={t('common.edit', 'Edit')}><Pencil size={14} /></IconBtn>
               </Item>
             ))}
           </List>

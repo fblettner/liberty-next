@@ -15,7 +15,6 @@ import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { ArrowLeft, Copy, Edit3, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router-dom'
 import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
@@ -89,13 +88,15 @@ export interface ConnectorsTableEditorProps {
    *  the rename endpoint; absent → no Rename button. */
   onRename?: () => void
   /** When the parent finds a Screen whose `read_query` matches this table's `_get`, it passes
-   *  `{app, id}` here so the header shows an "Open in Screens" link that switches the Settings
-   *  tab and pre-selects the screen. Absent → no link (no matching screen for this table). */
+   *  `{app, id}` here so the header shows an "Open visual builder" button. Click → the parent's
+   *  ``onOpenScreen`` opens the screen designer modal in-place (no Settings tab switch). */
   screenLink?: { app: string; id: string } | null
+  /** Open the visual builder for the matched screen in-place. The parent renders the modal. */
+  onOpenScreen?: (app: string, id: string) => void
 }
 
 export default function ConnectorsTableEditor({
-  base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, onRename, screenLink,
+  base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, onRename, screenLink, onOpenScreen,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -224,16 +225,9 @@ export default function ConnectorsTableEditor({
         <BackBtn type="button" onClick={onBack}><ArrowLeft size={13} /> {t('settings.tables.backToTables')}</BackBtn>
         <Title>{base} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
         <Row gap={6}>
-          {screenLink && (
-            // `Link` keeps the SPA navigation in-app (no full reload) and threads the search
-            // params Settings/index.tsx reads to switch tabs + pre-select the screen.
-            <Button
-              as={Link as unknown as React.ElementType}
-              $variant="ghost" $size="sm"
-              // @ts-expect-error -- Button's polymorphic prop forwarding doesn't know `to`.
-              to={`/settings?tab=screens&app=${encodeURIComponent(screenLink.app)}&screen=${encodeURIComponent(screenLink.id)}`}
-              title={t('settings.tables.openInScreens')}
-            >
+          {screenLink && onOpenScreen && (
+            <Button $variant="ghost" $size="sm" onClick={() => onOpenScreen(screenLink.app, screenLink.id)}
+              title={t('settings.tables.openInScreens')}>
               <ExternalLink size={13} /> {t('settings.tables.openInScreens')}
             </Button>
           )}
