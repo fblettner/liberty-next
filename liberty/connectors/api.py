@@ -155,6 +155,7 @@ class APIConnector:
             "type": "api",
             "base_url": self.config.base_url,
             "auth_type": self.config.auth_type,
+            "show_in_switcher": self.config.show_in_switcher,
             "endpoints": [
                 {
                     "name": e.name,

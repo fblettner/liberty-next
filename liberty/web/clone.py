@@ -50,8 +50,10 @@ from typing import Any
 
 import tomli_w
 
+from liberty.charts.config import parse_charts
 from liberty.connectors.config import parse_connectors
 from liberty.connectors.dictionary import parse_dictionary
+from liberty.dashboards.config import parse_dashboards
 from liberty.menus.config import parse_menus
 from liberty.screens.config import parse_screens
 
@@ -139,12 +141,17 @@ def clone_app(
 
     # ── pre-load every affected doc as a plain dict (tomllib is fast even on big files) ──
     docs: dict[str, tuple[Path, dict[str, Any]]] = {}
-    for label, path in (
+    file_paths: list[tuple[str, Path]] = [
         ("connectors", connectors_path),
         ("dictionary", dictionary_path),
         ("menus", menus_path),
         ("screens", screens_path),
-    ):
+    ]
+    if charts_path is not None:
+        file_paths.append(("charts", charts_path))
+    if dashboards_path is not None:
+        file_paths.append(("dashboards", dashboards_path))
+    for label, path in file_paths:
         if path.exists() and path.read_text(encoding="utf-8").strip():
             with path.open("rb") as fh:
                 docs[label] = (path, tomllib.load(fh))
@@ -173,6 +180,10 @@ def clone_app(
         source_locations.append("menus")
     if _has_top(docs["screens"][1], "screens", source_app):
         source_locations.append("screens")
+    if "charts" in docs and _has_top(docs["charts"][1], "charts", source_app):
+        source_locations.append("charts")
+    if "dashboards" in docs and _has_top(docs["dashboards"][1], "dashboards", source_app):
+        source_locations.append("dashboards")
     if not source_locations:
         raise CloneError(
             f"source app {source_app!r} has no entries in any of {sorted(docs)!r} "
@@ -180,8 +191,13 @@ def clone_app(
         )
 
     # ── pre-flight 3: new name must NOT exist anywhere ──
-    for label, top_key in (("connectors", "connectors"), ("dictionary", "connectors"),
-                            ("menus", "menus"), ("screens", "screens")):
+    name_checks = [("connectors", "connectors"), ("dictionary", "connectors"),
+                   ("menus", "menus"), ("screens", "screens")]
+    if "charts" in docs:
+        name_checks.append(("charts", "charts"))
+    if "dashboards" in docs:
+        name_checks.append(("dashboards", "dashboards"))
+    for label, top_key in name_checks:
         _, doc = docs[label]
         if _has_top(doc, top_key, new_app):
             raise CloneError(
@@ -236,12 +252,23 @@ def clone_app(
     else:
         result.files[str(screens_path)] = 0
 
-    if dashboards_path is not None or charts_path is not None:
-        result.warnings.append(
-            "dashboards.toml / charts.toml not auto-cloned — saved charts and dashboards "
-            f"that pinned to {source_app!r} need to be duplicated manually if you want them "
-            "available on the new app too."
-        )
+    if "charts" in source_locations:
+        charts_p, charts_doc = docs["charts"]
+        cloned = copy.deepcopy(charts_doc["charts"][source_app])
+        _replace_connector_field_recursive(cloned, source=source_app, new=new_app)
+        new_subtrees.append(("charts", charts_p, "charts", new_app, cloned))
+        result.files[str(charts_p)] = 1
+    elif "charts" in docs:
+        result.files[str(docs["charts"][0])] = 0
+
+    if "dashboards" in source_locations:
+        dash_p, dash_doc = docs["dashboards"]
+        cloned = copy.deepcopy(dash_doc["dashboards"][source_app])
+        _replace_connector_field_recursive(cloned, source=source_app, new=new_app)
+        new_subtrees.append(("dashboards", dash_p, "dashboards", new_app, cloned))
+        result.files[str(dash_p)] = 1
+    elif "dashboards" in docs:
+        result.files[str(docs["dashboards"][0])] = 0
 
     # ── per-file Pydantic validation against the merged dict ──
     parsers = {
@@ -249,6 +276,8 @@ def clone_app(
         "dictionary": parse_dictionary,
         "menus": parse_menus,
         "screens": parse_screens,
+        "charts": parse_charts,
+        "dashboards": parse_dashboards,
     }
     for label, path, top_key, name, cloned in new_subtrees:
         merged = copy.deepcopy(docs[label][1])
@@ -314,9 +343,14 @@ def delete_app(
     dictionary_path: Path,
     menus_path: Path,
     screens_path: Path,
+    charts_path: Path | None = None,
+    dashboards_path: Path | None = None,
 ) -> DeleteAppResult:
-    """Remove every per-app entry across the 4 config files. The cross-file inverse of
-    :func:`clone_app` — same files touched, same name semantics, opposite direction.
+    """Remove every per-app entry across the config files. The cross-file inverse of
+    :func:`clone_app` — same files touched, same name semantics, opposite direction. Charts and
+    dashboards are scoped to their connector (``[charts.<app>.*]`` / ``[dashboards.<app>.*]``), so
+    when their paths are supplied those scopes are excised too — deleting a connector cascades to
+    everything keyed under it.
 
     **Surgical text-edit strategy** — same reason :func:`clone_app` is append-only: tomlkit
     is O(n²) on big nested files (a 150 kB dictionary.toml takes minutes to round-trip).
@@ -344,12 +378,18 @@ def delete_app(
         ("menus", menus_path, "menus"),                  # [menus.<app>]
         ("screens", screens_path, "screens"),            # [screens.<app>.*]
     ]
+    if charts_path is not None:
+        targets.append(("charts", charts_path, "charts"))            # [charts.<app>.*]
+    if dashboards_path is not None:
+        targets.append(("dashboards", dashboards_path, "dashboards"))  # [dashboards.<app>.*]
 
     parsers = {
         "connectors": parse_connectors,
         "dictionary": parse_dictionary,
         "menus": parse_menus,
         "screens": parse_screens,
+        "charts": parse_charts,
+        "dashboards": parse_dashboards,
     }
 
     pending_writes: list[tuple[Path, str]] = []

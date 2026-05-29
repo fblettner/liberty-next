@@ -17,7 +17,7 @@
 // semantically (Connection / Authentication / Endpoints) so the operator sees only what's
 // useful. The Test tab here mirrors nomaubl's — pick the endpoint, parameters appear
 // automatically with each declared name/label/default, click Run.
-import { useEffect, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Input, Row, SearchSelect, Stack, useModals,
+  Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -53,6 +53,8 @@ type Endpoint = {
 export type ApiConnector = {
   type: 'api'
   licensed?: boolean
+  show_in_switcher?: boolean
+  home?: string | null
   base_url?: string
   timeout?: number                                          // seconds (Pydantic side)
   verify_ssl?: boolean
@@ -252,8 +254,30 @@ function ConnectionTab({
   const [headersText, setHeadersText] = useState(headersToString(value.default_headers))
   // Re-sync the display string when the parent value changes (e.g. switching connectors).
   useEffect(() => { setHeadersText(headersToString(value.default_headers)) }, [value.default_headers])
+  // App-level settings (show_in_switcher / home) — same as SQL connectors. Home options come
+  // from the surrounding FrameworkEnumsContext (ConnectorsBuilder augments MENU_HOME_ITEMS for
+  // the currently-selected connector).
+  const enums = useContext(FrameworkEnumsContext)
+  const homeOpts = ((enums?.MENU_HOME_ITEMS?.values ?? []) as Array<{ value: string; label: string; mono?: string }>)
   return (
     <Stack gap={4}>
+      <SectionHead>{t('settings.api.app.section', 'App')}</SectionHead>
+      <FieldRow>
+        <label>{t('settings.api.app.showInSwitcher', 'Show in switcher')}</label>
+        <Checkbox
+          checked={value.show_in_switcher !== false}
+          onChange={(v: boolean) => patch({ show_in_switcher: v ? undefined : false })}
+        />
+      </FieldRow>
+      <FieldRow>
+        <label>{t('settings.api.app.home', 'Home')}</label>
+        <SearchSelect
+          value={value.home ?? ''}
+          options={homeOpts}
+          onChange={(v) => patch({ home: v || null })}
+          placeholder={t('common.pick', 'Pick…')}
+        />
+      </FieldRow>
       <SectionHead>{t('settings.api.connection.section', 'Connection')}</SectionHead>
       <FieldRow>
         <label>{t('settings.api.connection.baseUrl', 'Base URL')}</label>

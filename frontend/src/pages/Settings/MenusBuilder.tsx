@@ -15,7 +15,7 @@ import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Checkbox, Row, Stack, SpinnerRing, SchemaForm, SearchSelect, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
 import { groupQueriesByTable } from './connectorTables'
 import { AddScopeModal } from './AddScopeModal'
@@ -321,21 +321,6 @@ export default function MenusBuilder() {
       values: targets,
     }
 
-    // MENU_HOME_ITEMS — every leaf item in the current app (any item with a ``type`` +
-    // ``target``). Powers the per-app ``home`` SearchSelect so the operator picks an existing
-    // menu item id rather than typing one. Folders are filtered out (a folder home resolves
-    // to no path on the backend; we hide them here to avoid the confusing pick).
-    const homeValues: { value: string; label: string; mono?: string }[] = appItems
-      .filter((it) => it.type && it.target)
-      .map((it) => ({
-        value: it.id,
-        label: it.label || it.id,
-        mono: it.id,
-      }))
-    base.MENU_HOME_ITEMS = {
-      label: selApp ? `Items in ${selApp}` : 'Pick an app first',
-      values: homeValues,
-    }
     return base
   }, [schemas, connectors, apps, selApp, selItem])
 
@@ -562,30 +547,6 @@ export default function MenusBuilder() {
         <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
           <AppHeader style={{ flexShrink: 0 }}>
             <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
-            {/* Per-app home page — SearchSelect over the app's leaf items (any with a
-                ``type`` + ``target``). When set, picking this app from the workspace picker
-                navigates straight to the matching path (e.g. ``/dashboard/nomasx1_overview``
-                for nomasx1's overview). Defaults to unset → falls through to the connector
-                index. The list comes from the ``MENU_HOME_ITEMS`` augmented enum above. */}
-            <Row gap={12} style={{ alignItems: 'center' }}>
-              <Checkbox
-                checked={currentApp.show_in_switcher !== false}
-                onChange={(v: boolean) => updateApp(selApp, { ...currentApp, show_in_switcher: v })}
-                label={t('settings.menus.app.showInSwitcher', 'Show in switcher')}
-              />
-              <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
-                {t('settings.menus.app.home', 'Home page')}
-              </span>
-              <div style={{ minWidth: 240 }}>
-                <SearchSelect
-                  value={(currentApp.home as string | undefined) ?? ''}
-                  options={(augmentedEnums?.MENU_HOME_ITEMS?.values ?? []) as Array<{ value: string; label: string; mono?: string }>}
-                  onChange={(v: string) => updateApp(selApp, { ...currentApp, home: v || null })}
-                  anyLabel={t('settings.menus.app.homeNone', 'No home page (blank landing)')}
-                  placeholder={t('common.pick')}
-                />
-              </div>
-            </Row>
           </AppHeader>
           <TreeSplit>
                 <TreeCol>

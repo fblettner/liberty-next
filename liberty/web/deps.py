@@ -64,7 +64,8 @@ def public_connector(desc: dict, principal: Principal) -> dict | None:
         ]
         if not queries:
             return None
-        return {"name": name, "type": "sql", "queries": queries}
+        return {"name": name, "type": "sql", "queries": queries,
+                "show_in_switcher": desc.get("show_in_switcher", True)}
     if desc["type"] == "api":
         endpoints = [
             e for e in desc["endpoints"]
@@ -73,5 +74,6 @@ def public_connector(desc: dict, principal: Principal) -> dict | None:
         if not endpoints:
             return None
         return {"name": name, "type": "api", "base_url": desc.get("base_url"),
-                "auth_type": desc.get("auth_type"), "endpoints": endpoints}
+                "auth_type": desc.get("auth_type"), "endpoints": endpoints,
+                "show_in_switcher": desc.get("show_in_switcher", True)}
     return None  # pragma: no cover - guarded by the discriminated union

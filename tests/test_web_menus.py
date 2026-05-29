@@ -259,6 +259,7 @@ def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
         [connectors.app1]
         type = "sql"
         pool = "default"
+        home = "dash.overview"
         queries = [{{ name = "users_get", sql = "SELECT 1" }}]
     """))
     (tmp_path / "dashboards.toml").write_text(textwrap.dedent("""
@@ -268,7 +269,6 @@ def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
     (tmp_path / "menus.toml").write_text(textwrap.dedent("""
         [menus.app1]
         label = "App One"
-        home = "dash.overview"
 
         [[menus.app1.items]]
         id = "dash"

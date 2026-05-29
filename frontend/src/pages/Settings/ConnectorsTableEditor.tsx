@@ -247,8 +247,8 @@ export default function ConnectorsTableEditor({
               <Copy size={13} /> {t('settings.tables.duplicate')}
             </Button>
           )}
-          <Button $variant="danger" $size="sm" onClick={removeWholeTable}>
-            <Trash2 size={13} /> {t('settings.tables.deleteTable')}
+          <Button $variant="ghost" $size="sm" onClick={removeWholeTable} style={{ color: colors.red.main }}>
+            <Trash2 size={13} /> {t('common.delete', 'Delete')}
           </Button>
         </Row>
       </Header>

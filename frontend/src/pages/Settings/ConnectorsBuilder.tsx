@@ -11,7 +11,7 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -134,6 +134,12 @@ export default function ConnectorsBuilder() {
   const [cloneBusy, setCloneBusy] = useState(false)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [pools, setPools] = useState<string[]>([])  // for the new-pool dropdown
+  // "+ Connector" modal — one entry point for both connector kinds; the type (sql / api) is
+  // picked here (it's fixed once created — it's the discriminator) along with the name.
+  const [addConnOpen, setAddConnOpen] = useState(false)
+  const [addConnType, setAddConnType] = useState<'sql' | 'api'>('sql')
+  const [addConnName, setAddConnName] = useState('')
+  const [addConnError, setAddConnError] = useState<string | null>(null)
   // Tables / Sequences / Lookups view — the connector list is the same underneath, the mode
   // just filters which queries you see and which editor they open. Tables = CRUD-grouped
   // queries (the canonical case). Sequences = queries referenced by ``[sequences.*]`` in
@@ -218,8 +224,19 @@ export default function ConnectorsBuilder() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([value, label]) => ({ value, label }))
     base.DD_ENTRIES = { label: 'Dictionary entries (this connector)', values }
+    // MENU_HOME_ITEMS — leaf items in the current connector's menu, used by the Settings tab's
+    // ``home`` SearchSelect. Walks the resolved menu tree (folders are hidden).
+    const homeOptions: { value: string; label: string; mono?: string }[] = []
+    const walk = (items: ReadonlyArray<{ id: string; label: string; type?: string; target?: string; items?: unknown[] }>) => {
+      for (const it of items) {
+        if (it.type && it.target) homeOptions.push({ value: it.id, label: it.label || it.id, mono: it.id })
+        if (Array.isArray(it.items)) walk(it.items as typeof items)
+      }
+    }
+    if (sel && menus && menus[sel]) walk(menus[sel].items)
+    base.MENU_HOME_ITEMS = { label: 'Menu items', values: homeOptions }
     return base
-  }, [schemas, dictionary, sel])
+  }, [schemas, dictionary, sel, menus])
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
   const updateQueries = (name: string, queries: Record<string, unknown>[]) => {
@@ -243,44 +260,66 @@ export default function ConnectorsBuilder() {
     updateQueries(sel, [...queriesArr, { name, type: 'custom', sql: '' }])
     setSelQuery(name); setStatus(null)
   }
-  const addConnector = async (type: 'sql' | 'api') => {
-    const name = (await modals.prompt({
-      title: type === 'api' ? t('settings.connectors.addApi') : t('settings.connectors.addSql'),
-      message: t('settings.connectors.namePrompt'),
+  const openAddConnector = () => { setAddConnType('sql'); setAddConnName(''); setAddConnError(null); setAddConnOpen(true) }
+  const submitAddConnector = () => {
+    const name = addConnName.trim()
+    if (!name) { setAddConnError(t('settings.rename.empty', 'Name can\'t be empty.')); return }
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) { setAddConnError(t('settings.rename.invalidIdentifier', 'Use lowercase letters, digits, underscore; leading letter.')); return }
+    if (conns && name in conns) { setAddConnError(t('settings.rename.exists', { name })); return }
+    setConns((p) => ({ ...(p ?? {}), [name]: addConnType === 'api' ? { type: 'api', base_url: '' } : { type: 'sql', queries: [] } }))
+    setSel(name); setStatus(null); setAddConnOpen(false)
+  }
+  // Discard local edits — revert connectors + dictionary to the last-loaded state (client-side,
+  // no network). Same as Pools' Discard.
+  const discard = () => {
+    if (original) setConns(JSON.parse(original) as Connectors)
+    if (dictOriginal) setDictionary(JSON.parse(dictOriginal) as DictionaryDoc['dictionary'])
+    setStatus(null); setError(null)
+  }
+  // Clone / delete a single query (Unclassified / Sequences / Lookups editor) — the counterparts
+  // of the Tables editor's per-table Clone / Delete, so every query kind has the same Rename /
+  // Clone / Delete trio. Like the table clone, this prompts for the new name (no silent _copy).
+  const duplicateQuery = async (name: string) => {
+    if (!sel) return
+    const src = queriesArr.find((qq) => qq.name === name)
+    if (!src) return
+    const next = (await modals.prompt({
+      title: t('common.clone', 'Clone'),
+      message: t('settings.tables.duplicatePrompt', { name }),
+      defaultValue: `${name}_copy`,
+      submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => {
+        if (!v.trim()) return t('common.nameRequired', 'Name is required.')
+        if (v === name) return t('settings.tables.duplicateSameName', 'Pick a different name.')
+        if (queriesArr.some((qq) => qq.name === v)) return t('common.nameExists', { name: v })
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier', 'Use letters, digits, underscore; leading letter.')
+        return null
+      },
     }))?.trim()
-    if (!name) return
-    if (conns && name in conns) { setSel(name); return }
-    setConns((p) => ({ ...(p ?? {}), [name]: type === 'api' ? { type: 'api', base_url: '' } : { type: 'sql', queries: [] } }))
-    setSel(name); setStatus(null)
+    if (!next) return
+    updateQueries(sel, [...queriesArr, { ...src, name: next }])
+    setSelQuery(next); setStatus(null)
+  }
+  const deleteQuery = async (name: string) => {
+    if (!sel) return
+    const ok = await modals.confirm({
+      title: t('settings.connectors.deleteQuery', 'Delete query'),
+      message: t('settings.connectors.confirmDeleteQuery', 'Delete query {{name}}?', { name }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
+    updateQueries(sel, queriesArr.filter((qq) => qq.name !== name))
+    setSelQuery(null); setStatus(null)
   }
   // Note: API connector testing is no longer a toolbar action — it lives in the editor's
   // Test tab (see ``ApiConnectorEditor``), where the operator picks an endpoint, supplies
   // its placeholder values, and sees the result in-place. Backed by the same
   // ``POST /admin/config/api/test`` endpoint; that endpoint accepts ``test_endpoint`` +
   // ``params`` so it can fire any named endpoint without saving first.
-  // Delete persists immediately (write connectors.toml + reload), not as a pending edit a
-  // reload/Discard would silently drop — same fix as Pools / the dictionary delete.
-  const removeConnector = async (name: string) => {
-    const ok = await modals.confirm({
-      title: t('settings.connectors.delete'),
-      message: t('settings.connectors.confirmDelete', { name }),
-      variant: 'danger',
-      confirmLabel: t('common.delete'),
-    })
-    if (!ok) return
-    const next = { ...(conns ?? {}) }; delete next[name]
-    setBusy(true); setError(null); setStatus(null)
-    try {
-      await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: next })
-      const r = await api.post<{ connectors: string[] }>('/admin/reload')
-      refreshWorkspace()
-      setSel((s) => (s === name ? null : s))
-      setStatus(t('settings.connectors.saved', { connectors: r.connectors.join(', ') || `(${t('common.none')})` }))
-      load()
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
-    } finally { setBusy(false) }
-  }
+  // Connector delete is the cascade (``deleteApp`` below) — it removes the connector *and*
+  // everything scoped under it. A connectors.toml-only delete left orphaned screens / dictionary
+  // overlay / charts / dashboards behind, so it's gone.
 
   // Open the Clone-app modal, pre-filled with the currently-selected connector as the
   // source (most common case: operator clicks a connector then "Clone app").
@@ -291,15 +330,15 @@ export default function ConnectorsBuilder() {
     setCloneError(null)
     setCloneModalOpen(true)
   }
-  // Cross-file delete — symmetric to clone-app. A single confirmation guards against
-  // accidentally nuking a real app; the user must type the app name to confirm (operator
-  // expectation: deleting a whole app is a big deal and shouldn't be a one-click action).
+  // Connector delete = cross-file cascade. Removes the connector AND everything scoped under it:
+  // its dictionary overlay, menu, screens, charts, and dashboards. The pool is left alone (managed
+  // in Settings → Pools, and may be shared). One confirmation — deleting a connector is a big deal.
   const deleteApp = async (appName: string) => {
     const ok = await modals.confirm({
-      title: t('settings.connectors.deleteApp', 'Delete app…'),
+      title: t('settings.connectors.delete', 'Delete'),
       message: t(
         'settings.connectors.confirmDeleteApp',
-        'Delete the entire {{name}} app — its connector, dictionary overlay, menu, and every screen — from connectors.toml / dictionary.toml / menus.toml / screens.toml? The pool [pools.{{name}}] (if present) is NOT deleted; remove it separately via Settings → Pools.',
+        'Delete connector {{name}} and everything that belongs to it?',
         { name: appName },
       ),
       variant: 'danger',
@@ -308,16 +347,12 @@ export default function ConnectorsBuilder() {
     if (!ok) return
     setBusy(true); setStatus(null); setError(null)
     try {
-      const result = await api.post<{ total_sections: number }>(
-        '/admin/config/delete-app', { app: appName },
-      )
+      await api.post('/admin/config/delete-app', { app: appName })
       await api.post('/admin/reload')
+      refreshWorkspace()
+      setSel((s) => (s === appName ? null : s))
       load()
-      setStatus(t(
-        'settings.connectors.deleteAppSuccess',
-        'Deleted app {{name}} ({{n}} sections; reload applied)',
-        { name: appName, n: result.total_sections },
-      ))
+      setStatus(t('settings.connectors.deleteAppSuccess', 'Deleted connector {{name}}.', { name: appName }))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -669,6 +704,12 @@ export default function ConnectorsBuilder() {
         <Button $variant="ghost" $size="sm" onClick={() => renameQuery(String(picked.name))} disabled={busy}>
           <Edit3 size={13} /> {t('settings.rename.button')}
         </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => duplicateQuery(String(picked.name))} disabled={busy}>
+          <Copy size={13} /> {t('settings.tables.duplicate')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => void deleteQuery(String(picked.name))} disabled={busy} style={{ color: colors.red.main }}>
+          <Trash2 size={13} /> {t('common.delete')}
+        </Button>
       </Row>
       <SqlConnectorContext.Provider value={sel ?? undefined}>
         <SchemaForm
@@ -699,34 +740,16 @@ export default function ConnectorsBuilder() {
           {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
         </ToolbarLeft>
         <ToolbarRight>
-          <Button $variant="ghost" $size="sm" onClick={() => addConnector('sql')} disabled={busy}>
-            <Plus size={13} /> {t('settings.connectors.addSql')}
+          {/* One "+ Connector" entry — the kind (sql / api) is chosen in the modal. Per-connector
+              actions (Clone, Rename, Delete) live in the right panel's Settings tab where they
+              target the selected connector. */}
+          <Button $variant="ghost" $size="sm" onClick={openAddConnector} disabled={busy}>
+            <Plus size={13} /> {t('settings.connectors.addConnector', 'Connector')}
           </Button>
-          <Button $variant="ghost" $size="sm" onClick={() => addConnector('api')} disabled={busy}>
-            <Plus size={13} /> {t('settings.connectors.addApi')}
-          </Button>
-          {/* Whole-app actions live on the top toolbar (above the connector list);
-              per-connector actions (Rename, Delete connector) live in the right panel
-              where they target the selected item. Two truly cross-file ops here:
-              Clone app duplicates a namespace across connectors / dictionary / menus /
-              screens; Delete app is the inverse. */}
-          <Button
-            $variant="ghost" $size="sm" onClick={openCloneApp}
-            disabled={busy || dirty}
-            title={dirty ? t('settings.connectors.cloneRequiresSave', 'Save current edits first') : t('settings.connectors.cloneApp', 'Clone app…')}
-          >
-            <Layers size={13} /> {t('settings.connectors.cloneApp', 'Clone app…')}
-          </Button>
-          {sel && conns[sel] && (
-            <Button
-              $variant="danger" $size="sm" onClick={() => sel && deleteApp(sel)}
-              disabled={busy || dirty}
-              title={dirty ? t('settings.connectors.deleteRequiresSave', 'Save current edits first') : t('settings.connectors.deleteApp', 'Delete app…')}
-            >
-              <Trash2 size={13} /> {t('settings.connectors.deleteApp', 'Delete app…')}
-            </Button>
-          )}
           <ToolbarDivider />
+          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty} title={t('common.discard', 'Discard')}>
+            <Undo2 size={13} /> {t('common.discard', 'Discard')}
+          </Button>
           <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
           </Button>
@@ -821,16 +844,24 @@ export default function ConnectorsBuilder() {
                       <Plus size={13} /> {t('settings.connectors.addLookup', 'Add lookup')}
                     </Button>
                   )}
-                  {/* SQL connector-level actions (settings / rename / delete) live in the Settings
-                      tab now — keeps this row to per-mode Add buttons. API connectors have no tab
-                      strip, so their rename / delete stay here. */}
-                  {!isSql && (
+                  {/* Connector-level actions (Clone / Rename / Delete) sit at the top-right of the
+                      right panel — shown on the SQL Settings tab and always for API connectors
+                      (which have no mode strip). Delete cascades: it removes the connector and
+                      everything scoped under it (dictionary overlay, menu, screens, charts,
+                      dashboards). */}
+                  {(!isSql || mode === 'settings') && (
                     <>
+                      <Button $variant="ghost" $size="sm" onClick={openCloneApp} disabled={busy || dirty}
+                        title={dirty ? t('settings.connectors.cloneRequiresSave', 'Save current edits first') : t('settings.connectors.clone', 'Clone')}>
+                        <Layers size={13} /> {t('settings.connectors.clone', 'Clone')}
+                      </Button>
                       <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
                         <Edit3 size={13} /> {t('settings.rename.button')}
                       </Button>
-                      <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
-                        <Trash2 size={13} /> {t('settings.connectors.delete')}
+                      <Button $variant="ghost" $size="sm" onClick={() => sel && deleteApp(sel)} disabled={busy || dirty}
+                        title={dirty ? t('settings.connectors.deleteRequiresSave', 'Save current edits first') : t('settings.connectors.delete', 'Delete')}
+                        style={{ color: colors.red.main }}>
+                        <Trash2 size={13} /> {t('common.delete', 'Delete')}
                       </Button>
                     </>
                   )}
@@ -975,34 +1006,26 @@ export default function ConnectorsBuilder() {
                   </Stack>
                 )
               })()}
-              {/* Settings tab — connector-wide config (type / pool / licensed / max_rows) plus the
-                  Rename + Delete connector actions, grouped here instead of crowding the header. */}
+              {/* Settings tab — connector-wide config (pool / licensed / max_rows). ``type`` is the
+                  discriminator: set at creation, fixed after, and already shown next to the
+                  connector name in the header — so it's not editable here. Clone / Rename / Delete
+                  live at the top-right of this panel. */}
               {isSql && mode === 'settings' && selConn && selSchema && (() => {
-                const fieldKeys = ['type', 'pool', 'licensed', 'max_rows']
+                const fieldKeys = ['pool', 'show_in_switcher', 'home', 'licensed', 'max_rows']
                 const settingsSchema = pickSchemaProperties(selSchema, fieldKeys)
                 return (
-                  <Stack gap={14}>
-                    <SqlConnectorContext.Provider value={sel ?? undefined}>
-                      <SchemaForm
-                        schema={settingsSchema}
-                        defs={allDefs}
-                        value={selConn as Record<string, unknown>}
-                        onChange={(v: Record<string, unknown>) => {
-                          const patch: Record<string, unknown> = {}
-                          for (const k of fieldKeys) patch[k] = v[k]
-                          update(sel!, { ...selConn, ...patch })
-                        }}
-                      />
-                    </SqlConnectorContext.Provider>
-                    <Row gap={8}>
-                      <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
-                        <Edit3 size={13} /> {t('settings.rename.button')}
-                      </Button>
-                      <Button $variant="danger" $size="sm" onClick={() => sel && removeConnector(sel)} disabled={busy}>
-                        <Trash2 size={13} /> {t('settings.connectors.delete')}
-                      </Button>
-                    </Row>
-                  </Stack>
+                  <SqlConnectorContext.Provider value={sel ?? undefined}>
+                    <SchemaForm
+                      schema={settingsSchema}
+                      defs={allDefs}
+                      value={selConn as Record<string, unknown>}
+                      onChange={(v: Record<string, unknown>) => {
+                        const patch: Record<string, unknown> = {}
+                        for (const k of fieldKeys) patch[k] = v[k]
+                        update(sel!, { ...selConn, ...patch })
+                      }}
+                    />
+                  </SqlConnectorContext.Provider>
                 )
               })()}
             </Stack>
@@ -1074,7 +1097,7 @@ export default function ConnectorsBuilder() {
       {cloneModalOpen && (
         <Overlay onClick={() => !cloneBusy && setCloneModalOpen(false)}>
           <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
-            <ModalHeader>{t('settings.connectors.cloneApp', 'Clone app…')}</ModalHeader>
+            <ModalHeader>{t('settings.connectors.clone', 'Clone')}</ModalHeader>
             <ModalBody>
               <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
                 {t(
@@ -1084,16 +1107,16 @@ export default function ConnectorsBuilder() {
               </div>
               <Row style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneSource', 'Source app')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneSource', 'Source connector')}</span>
                   <SearchSelect
                     value={cloneSource}
                     options={Object.keys(conns ?? {}).map((n) => ({ value: n, label: n, mono: n }))}
                     onChange={(v) => setCloneSource(v)}
-                    placeholder={t('settings.connectors.cloneSourcePlaceholder', 'Pick an existing connector…')}
+                    placeholder={t('common.pick', 'Pick…')}
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewApp', 'New app name')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewApp', 'New name')}</span>
                   <Input
                     value={cloneNewApp}
                     onChange={(e) => setCloneNewApp(e.target.value)}
@@ -1101,12 +1124,12 @@ export default function ConnectorsBuilder() {
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewPool', 'Target pool')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewPool', 'Pool')}</span>
                   <SearchSelect
                     value={cloneNewPool}
                     options={pools.map((n) => ({ value: n, label: n, mono: n }))}
                     onChange={(v) => setCloneNewPool(v)}
-                    placeholder={t('settings.connectors.cloneNewPoolPlaceholder', 'Pick the pool the clone should point at…')}
+                    placeholder={t('common.pick', 'Pick…')}
                   />
                 </label>
               </Row>
@@ -1124,6 +1147,41 @@ export default function ConnectorsBuilder() {
                 {cloneBusy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}{' '}
                 {t('settings.connectors.cloneAppRun', 'Clone')}
               </Button>
+            </ModalFooter>
+          </Modal>
+        </Overlay>
+      )}
+      {/* "+ Connector" — type (sql / api) + name. The type is the discriminator: chosen here at
+          creation, fixed afterwards (so it isn't shown/editable in the Settings tab). */}
+      {addConnOpen && (
+        <Overlay onClick={() => setAddConnOpen(false)}>
+          <Modal style={{ width: 'min(440px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>{t('settings.connectors.addConnectorTitle', 'Add a connector')}</ModalHeader>
+            <ModalBody>
+              <Row style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.type', 'Type')}</span>
+                  <SearchSelect
+                    value={addConnType}
+                    options={[
+                      { value: 'sql', label: t('settings.connectors.typeSql', 'SQL') },
+                      { value: 'api', label: t('settings.connectors.typeApi', 'API') },
+                    ]}
+                    onChange={(v) => setAddConnType(v === 'api' ? 'api' : 'sql')}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.name', 'Name')}</span>
+                  <Input value={addConnName} onChange={(e) => { setAddConnName(e.target.value); setAddConnError(null) }}
+                    placeholder="nomasx1" autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitAddConnector() }} />
+                </label>
+              </Row>
+              {addConnError && <Banner $tone="error">{addConnError}</Banner>}
+            </ModalBody>
+            <ModalFooter>
+              <Button $variant="ghost" $size="sm" onClick={() => setAddConnOpen(false)}>{t('common.cancel', 'Cancel')}</Button>
+              <Button $variant="primary" $size="sm" onClick={submitAddConnector}>{t('common.ok', 'OK')}</Button>
             </ModalFooter>
           </Modal>
         </Overlay>

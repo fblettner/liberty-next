@@ -704,6 +704,7 @@ class SQLConnector:
             "name": self.name,
             "type": "sql",
             "pool": self.pool_name,
+            "show_in_switcher": self.config.show_in_switcher,
             "queries": [
                 {
                     "name": q.name,

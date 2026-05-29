@@ -391,6 +391,15 @@ class SqlConnectorConfig(BaseModel):
     pool: str = Field(default="default", description="Which pool this connector's queries run on.")
     licensed: bool = Field(default=False, description="Require a valid [license] key. Without one this connector isn't loaded.")
     max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")
+    show_in_switcher: bool = Field(
+        default=True,
+        description="Show this connector in the top app switcher.",
+    )
+    home: str | None = Field(
+        default=None,
+        description="Landing menu item id when this app is picked.",
+        json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
+    )
     queries: list[QueryDef] = Field(default_factory=list, json_schema_extra={"x_group": "Queries"}, description="The named SQL queries this connector exposes.")
 
 
@@ -429,6 +438,15 @@ class ApiConnectorConfig(BaseModel):
 
     type: Literal["api"]
     licensed: bool = Field(default=False, description="Gate this connector behind a valid [license] key — without one (the open framework) it isn't loaded.")
+    show_in_switcher: bool = Field(
+        default=True,
+        description="Show this connector in the top app switcher.",
+    )
+    home: str | None = Field(
+        default=None,
+        description="Landing menu item id when this app is picked.",
+        json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
+    )
     base_url: str = Field(description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. (Leave blank only if every endpoint uses an absolute path.)")
     auth_type: AuthType = Field(
         default="none",

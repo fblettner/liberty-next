@@ -26,9 +26,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
+from liberty.connectors import ConnectorRegistry, UnknownConnectorError
 from liberty.dashboards import DashboardsFile
 from liberty.menus import AppMenu, MenuItem, MenusFile, build_menu_tree
-from liberty.web.deps import get_menus, request_language
+from liberty.web.deps import get_connectors, get_menus, request_language
 
 router = APIRouter(prefix="/api", tags=["menus"])
 
@@ -40,6 +41,17 @@ def _get_dashboards(request: Request) -> DashboardsFile:
 
 
 Dashboards = Annotated[DashboardsFile, Depends(_get_dashboards)]
+Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
+
+
+def _app_settings(connectors: ConnectorRegistry, app: str) -> tuple[bool, str | None]:
+    """Read the connector's app-level settings — ``(show_in_switcher, home)``. Returns the model
+    defaults when the connector is missing (orphan menu) so the menu still surfaces."""
+    try:
+        cfg = connectors.get(app).config
+    except UnknownConnectorError:
+        return True, None
+    return bool(getattr(cfg, "show_in_switcher", True)), getattr(cfg, "home", None)
 
 
 def _keeper(principal: Principal, dashboards: DashboardsFile, app: str):
@@ -79,15 +91,14 @@ def _keeper(principal: Principal, dashboards: DashboardsFile, app: str):
     return keep
 
 
-def _home_path(app: str, app_menu: AppMenu, *, keep) -> str | None:
-    """Resolve ``AppMenu.home`` (a menu item id) to a frontend route — ``/dashboard/<id>`` for
-    ``type = 'dashboard'``, ``/sql/<connector>/<target>`` for queries, ``/http/<c>/<t>`` for
-    endpoints. ``None`` when no home is set, the target isn't a leaf (e.g. operator pointed it
-    at a folder), or the caller can't see the target (in which case the workspace picker just
-    falls through to the default landing — never leaks the home pointer to non-permitted users)."""
-    if not app_menu.home:
+def _home_path(app: str, app_menu: AppMenu, home: str | None, *, keep) -> str | None:
+    """Resolve the connector's ``home`` (a menu item id) to a frontend route —
+    ``/dashboard/<id>`` for ``type = 'dashboard'``, ``/sql/<connector>/<target>`` for queries,
+    ``/http/<c>/<t>`` for endpoints. ``None`` when no home is set, the target isn't a leaf, or
+    the caller can't see the target."""
+    if not home:
         return None
-    target = next((it for it in app_menu.items if it.id == app_menu.home), None)
+    target = next((it for it in app_menu.items if it.id == home), None)
     if target is None or not target.type or not target.target:
         return None
     # Resolve the effective connector exactly like ``build_menu_tree`` does (item.connector
@@ -103,17 +114,16 @@ def _home_path(app: str, app_menu: AppMenu, *, keep) -> str | None:
 
 
 def _app_tree(
-    app: str, app_menu: AppMenu, *, language: str | None, principal: Principal, dashboards: DashboardsFile,
+    app: str, app_menu: AppMenu, *, language: str | None, principal: Principal,
+    dashboards: DashboardsFile, connectors: ConnectorRegistry,
 ) -> dict[str, Any] | None:
     keep = _keeper(principal, dashboards, app)
     items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items:
         return None  # nothing the caller can see → no menu for this app
-    out: dict[str, Any] = {"app": app, "label": app_menu.label or app, "items": items, "show_in_switcher": app_menu.show_in_switcher}
-    # Only emit ``home_path`` when set AND the caller can reach it — non-permitted users see
-    # the menu without the home pointer (and the workspace picker falls back to the default
-    # landing). Keeps the wire payload terse for the common no-home case.
-    home_path = _home_path(app, app_menu, keep=keep)
+    show_in_switcher, home = _app_settings(connectors, app)
+    out: dict[str, Any] = {"app": app, "label": app_menu.label or app, "items": items, "show_in_switcher": show_in_switcher}
+    home_path = _home_path(app, app_menu, home, keep=keep)
     if home_path:
         out["home_path"] = home_path
     return out
@@ -121,24 +131,25 @@ def _app_tree(
 
 @router.get("/menus")
 async def list_menus(
-    request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards,
+    request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors,
 ) -> dict[str, Any]:
     lang = request_language(request)
     out = {
         app: tree
         for app, app_menu in menus.menus.items()
-        if (tree := _app_tree(app, app_menu, language=lang, principal=principal, dashboards=dashboards)) is not None
+        if (tree := _app_tree(app, app_menu, language=lang, principal=principal, dashboards=dashboards, connectors=connectors)) is not None
     }
     return {"menus": out}
 
 
 @router.get("/menus/{app}")
 async def get_app_menu(
-    app: str, request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards,
+    app: str, request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors,
 ) -> dict[str, Any]:
     app_menu = menus.menus.get(app)
     tree = _app_tree(
-        app, app_menu, language=request_language(request), principal=principal, dashboards=dashboards,
+        app, app_menu, language=request_language(request), principal=principal,
+        dashboards=dashboards, connectors=connectors,
     ) if app_menu else None
     if tree is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No accessible menu for app {app!r}")

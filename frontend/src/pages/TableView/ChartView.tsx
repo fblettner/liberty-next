@@ -54,9 +54,10 @@ export function ChartView({ result, connector, query, screen }: ChartViewProps) 
   // Failure is silent: empty catalog → no auto-load, no picker — same fallback
   // the rest of the chart UX uses (a no-charts-installed deployment works).
   const linkedChartId = (screen?.chart_id ?? '') || null
-  type SavedChart = { id?: string; label?: string; description?: string; connector?: string; query?: string; spec?: SavedChartSpec }
-  type ChartsDoc = { charts: Record<string, SavedChart> }
-  const [allSavedCharts, setAllSavedCharts] = useState<Record<string, SavedChart>>({})
+  type SavedChart = { id?: string; label?: string; description?: string; query?: string; spec?: SavedChartSpec }
+  // Nested shape returned by /admin/config/charts/parsed: scope (connector) → id → chart body.
+  type ChartsDoc = { charts: Record<string, Record<string, SavedChart>> }
+  const [allSavedCharts, setAllSavedCharts] = useState<Record<string, Record<string, SavedChart>>>({})
   const [chartsReloadKey, setChartsReloadKey] = useState(0)
   useEffect(() => {
     let cancelled = false
@@ -67,24 +68,20 @@ export function ChartView({ result, connector, query, screen }: ChartViewProps) 
     })
     return () => { cancelled = true }
   }, [chartsReloadKey])
-  // Auto-load spec from screen.chart_id — runs once per linkedChartId
-  // change AFTER the catalog lands. Operator who manually picks something
-  // else from the Load picker (changes ``spec`` themselves) is respected —
-  // we only seed at first mount.
+  // Charts in THIS query's connector scope — what the linked-chart lookup and the Load picker draw
+  // from. Charts under other connectors are simply out of scope here.
+  const scopeCharts = allSavedCharts[connector] ?? {}
   const linkedChartSpec = useMemo<ChartSpec | null>(() => {
     if (!linkedChartId) return null
-    const entry = allSavedCharts[linkedChartId]
+    const entry = scopeCharts[linkedChartId]
     return entry?.spec ? fromSavedSpec(entry.spec) : null
-  }, [linkedChartId, allSavedCharts])
-  // Saved charts that target THIS (connector, query) — what the Load picker
-  // shows. Charts saved against other queries are filtered out so the dropdown
-  // stays relevant.
+  }, [linkedChartId, scopeCharts])
   const matchingSavedCharts = useMemo(() => {
-    return Object.entries(allSavedCharts)
-      .filter(([, c]) => c.connector === connector && c.query === query)
+    return Object.entries(scopeCharts)
+      .filter(([, c]) => c.query === query)
       .map(([id, c]) => ({ id, label: c.label || id, spec: c.spec }))
       .sort((a, b) => a.label.localeCompare(b.label))
-  }, [allSavedCharts, connector, query])
+  }, [scopeCharts, query])
 
   // Persist the spec per `(connector, query)`. The seed order is:
   //   1. Saved chart spec (when ``screen.chart_id`` resolves) — operator's

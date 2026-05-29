@@ -126,21 +126,6 @@ class AppMenu(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str | None = None  # the app's display name (defaults to the app / connector name)
-    show_in_switcher: bool = Field(
-        default=True,
-        description=(
-            "Show this connector as an app in the top app switcher. Turn off to keep the menu / "
-            "screens reachable via direct links without offering it as a switchable app."
-        ),
-    )
-    home: str | None = Field(
-        default=None,
-        description=(
-            "Landing page when the user picks this app — pick a menu item id (typically an "
-            "overview dashboard). Blank leaves the user on the current page."
-        ),
-        json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
-    )
     items: list[MenuItem] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -160,12 +145,6 @@ class AppMenu(BaseModel):
                     raise ValueError(f"menu item {it.id!r}: parent cycle through {cur.parent!r}")
                 seen.add(cur.id)
                 cur = by_id[cur.parent]
-        # ``home`` (when set) must reference an existing item id. We deliberately don't
-        # require it to be a leaf — a folder home is harmless (the wire payload resolves to
-        # no path and the redirect silently skips), and pinning is on item *id* not on its
-        # *type* so renaming a folder's children doesn't break the pointer.
-        if self.home is not None and self.home not in by_id:
-            raise ValueError(f"app menu home {self.home!r} does not reference any item id")
         return self
 
 

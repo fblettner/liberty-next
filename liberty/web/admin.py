@@ -1146,6 +1146,8 @@ async def delete_app_endpoint(body: DeleteAppBody, request: Request, _: Superuse
             dictionary_path=_dictionary_path(settings),
             menus_path=Path(settings.menus.config_path),
             screens_path=Path(settings.screens.config_path),
+            charts_path=Path(settings.charts.config_path),
+            dashboards_path=Path(settings.dashboards.config_path),
         )
     except CloneError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
@@ -1168,6 +1170,8 @@ async def clone_app_endpoint(body: CloneAppBody, request: Request, _: Superuser)
             dictionary_path=_dictionary_path(settings),
             menus_path=Path(settings.menus.config_path),
             screens_path=Path(settings.screens.config_path),
+            charts_path=Path(settings.charts.config_path),
+            dashboards_path=Path(settings.dashboards.config_path),
         )
     except CloneError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

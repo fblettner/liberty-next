@@ -29,7 +29,8 @@ import { colors, fontSize } from '../../theme'
 const Hint = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};`
 const FieldError = styled.div`color: ${colors.red.main}; font-size: ${fontSize.micro}; margin-top: 4px;`
 
-interface ChartsParsedResponse { path: string; charts: Record<string, Omit<ChartConfig, 'id'>> }
+// Nested shape: scope (connector) → id → chart body (id + connector are path-derived, not in body).
+interface ChartsParsedResponse { path: string; charts: Record<string, Record<string, Omit<ChartConfig, 'id' | 'connector'>>> }
 
 const ID_RE = /^[a-z][a-z0-9_]*$/  // slug-style — same shape the other config sections use
 
@@ -67,9 +68,11 @@ export function SaveChartModal({
     setBusy(true)
     setError(null)
     try {
-      // Load the current file, merge in the new chart so we don't trample anything else.
+      // Load the current file, merge in the new chart under [charts.<connector>.<id>] so we
+      // don't trample anything else.
       const current = await api.get<ChartsParsedResponse>('/admin/config/charts/parsed')
-      if (idTrimmed in current.charts) {
+      const scopeCharts = current.charts[connector] ?? {}
+      if (idTrimmed in scopeCharts) {
         setError(t('chart.save.idExists', { id: idTrimmed }))
         setBusy(false)
         return
@@ -77,12 +80,14 @@ export function SaveChartModal({
       const savedSpec: SavedChartSpec = toSavedSpec(spec)
       const next = {
         ...current.charts,
-        [idTrimmed]: {
-          label: labelTrimmed,
-          ...(description.trim() ? { description: description.trim() } : {}),
-          connector,
-          query,
-          spec: savedSpec,
+        [connector]: {
+          ...scopeCharts,
+          [idTrimmed]: {
+            label: labelTrimmed,
+            ...(description.trim() ? { description: description.trim() } : {}),
+            query,
+            spec: savedSpec,
+          },
         },
       }
       await api.put('/admin/config/charts/parsed', { charts: next })
