@@ -37,6 +37,7 @@ interface TabsState {
   openOrActivate: (t: Omit<Tab, 'id'>) => void
   setActive: (id: string) => void
   close: (id: string) => void
+  closeAll: () => void
 }
 const TabsContext = createContext<TabsState | null>(null)
 
@@ -73,8 +74,9 @@ export function TabsProvider({ children }: { children: ReactNode }) {
       return { tabs: remaining, activeId }
     })
   }, [])
+  const closeAll = useCallback(() => setS((s) => (s.tabs.length === 0 ? s : { tabs: [], activeId: null })), [])
 
-  const value = useMemo<TabsState>(() => ({ tabs, activeId, openOrActivate, setActive, close }), [tabs, activeId, openOrActivate, setActive, close])
+  const value = useMemo<TabsState>(() => ({ tabs, activeId, openOrActivate, setActive, close, closeAll }), [tabs, activeId, openOrActivate, setActive, close, closeAll])
   return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>
 }
 

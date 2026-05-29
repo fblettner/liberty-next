@@ -16,8 +16,18 @@ import { Card, Field, Input, Button, Banner, Stack, Row, SpinnerRing } from '../
 import { useBranding, derivePrimaryVars, type PresetChoice } from '../../branding/BrandingContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-interface ThemeDoc { preset: string; app_name?: string | null; primary_color?: string | null; vars?: Record<string, string> }
-interface ThemeParsed { path: string; theme: ThemeDoc; presets: PresetChoice[] }
+interface ThemeDoc { preset: string; app_name?: string | null; primary_color?: string | null; font_family?: string | null; font_scale?: number | null; vars?: Record<string, string> }
+interface FontChoice { id: string; label: string; stack: string }
+interface ThemeParsed { path: string; theme: ThemeDoc; presets: PresetChoice[]; fonts: FontChoice[] }
+
+// Text-size steps offered by the editor — each a global --font-scale multiplier (1.0 = the
+// design defaults). Named so the operator picks an intent, not a raw number.
+const SIZE_STEPS = [
+  { id: 'compact', value: 0.9 },
+  { id: 'normal', value: 1.0 },
+  { id: 'comfortable', value: 1.1 },
+  { id: 'large', value: 1.2 },
+] as const
 
 const Grid = styled.div`display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 18px; align-items: start;`
 const Select = styled.select`
@@ -32,14 +42,26 @@ const Swatch = styled.input`
 const Preview = styled(Card)`padding: 16px; display: flex; flex-direction: column; gap: 12px;`
 const PvBtns = styled.div`display: flex; gap: 8px; flex-wrap: wrap; align-items: center;`
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
+const Seg = styled.div`display: inline-flex; border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;`
+const SegBtn = styled.button<{ $active?: boolean }>`
+  height: 32px; padding: 0 12px; border: none; cursor: pointer;
+  font-family: ${fonts.sans}; font-size: ${fontSize.base};
+  background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.input)};
+  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  & + & { border-left: 1px solid ${colors.border}; }
+  &:hover { color: ${colors.text.primary}; }
+`
 
 export default function ThemeBuilder() {
   const { t } = useTranslation()
   const { applyVars, refresh } = useBranding()
   const [presets, setPresets] = useState<PresetChoice[]>([])
+  const [fonts_, setFonts] = useState<FontChoice[]>([])
   const [preset, setPreset] = useState('default')
   const [appName, setAppName] = useState('')
   const [primary, setPrimary] = useState('')           // explicit override; '' → use the preset's primary
+  const [fontFamily, setFontFamily] = useState('')     // font id; '' → built-in default (DM Sans)
+  const [fontScale, setFontScale] = useState(1)        // global text-size multiplier (1.0 = default)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,9 +72,12 @@ export default function ThemeBuilder() {
     try {
       const r = await api.get<ThemeParsed>('/admin/config/theme/parsed')
       setPresets(r.presets)
+      setFonts(r.fonts ?? [])
       setPreset(r.theme.preset || 'default')
       setAppName(r.theme.app_name ?? '')
       setPrimary(r.theme.primary_color ?? '')
+      setFontFamily(r.theme.font_family ?? '')
+      setFontScale(r.theme.font_scale ?? 1)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -68,12 +93,17 @@ export default function ThemeBuilder() {
     [presets, preset],
   )
   const effectivePrimary = (primary || presetPrimary).trim()
+  const fontStack = useMemo(() => fonts_.find((f) => f.id === fontFamily)?.stack ?? '', [fonts_, fontFamily])
 
-  // Live preview — apply the derived accent family to the running UI as the form changes.
+  // Live preview — apply the derived accent family + font vars together. applyVars clears any var
+  // it isn't given this call, so colour + font must go in one map (else each would wipe the other).
   useEffect(() => {
     if (loading) return
-    applyVars(derivePrimaryVars(effectivePrimary))
-  }, [loading, effectivePrimary, applyVars])
+    const vars: Record<string, string> = { ...derivePrimaryVars(effectivePrimary) }
+    if (fontStack) vars['font-sans'] = fontStack
+    if (Math.abs(fontScale - 1) > 1e-6) vars['font-scale'] = String(fontScale)
+    applyVars(vars)
+  }, [loading, effectivePrimary, fontStack, fontScale, applyVars])
 
   // Discard an unsaved preview on unmount (re-pull + re-apply the saved theme).
   useEffect(() => () => { void refresh() }, [refresh])
@@ -85,6 +115,8 @@ export default function ThemeBuilder() {
     const theme: ThemeDoc = { preset }
     if (appName.trim()) theme.app_name = appName.trim()
     if (primary.trim()) theme.primary_color = primary.trim()
+    if (fontFamily) theme.font_family = fontFamily
+    if (Math.abs(fontScale - 1) > 1e-6) theme.font_scale = fontScale
     try {
       await api.put('/admin/config/theme/parsed', { theme })
       await refresh()                                   // re-pull the authoritative resolved theme
@@ -121,6 +153,24 @@ export default function ThemeBuilder() {
           </Field>
           <Field label={t('settings.theme.appName', 'App name')}>
             <Input value={appName} placeholder="Liberty" onChange={(e) => { setAppName(e.target.value); setStatus(null) }} />
+          </Field>
+          <Field label={t('settings.theme.font', 'Font family')}>
+            {/* No explicit family saved → show the default (first choice, dm-sans) selected without
+                forcing it into state, so an un-branded install doesn't write a redundant font_family. */}
+            <Select value={fontFamily || (fonts_[0]?.id ?? '')} onChange={(e) => { setFontFamily(e.target.value); setStatus(null) }}>
+              {fonts_.map((f) => <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>{f.label}</option>)}
+            </Select>
+            <Hint>{t('settings.theme.fontHint', 'The UI font for the whole install. Code stays monospace.')}</Hint>
+          </Field>
+          <Field label={t('settings.theme.size', 'Text size')}>
+            <Seg>
+              {SIZE_STEPS.map((s) => (
+                <SegBtn key={s.id} type="button" $active={Math.abs(fontScale - s.value) < 1e-6}
+                  onClick={() => { setFontScale(s.value); setStatus(null) }}>
+                  {t(`settings.theme.size${s.id.charAt(0).toUpperCase()}${s.id.slice(1)}`, s.id)}
+                </SegBtn>
+              ))}
+            </Seg>
           </Field>
           <Row gap={8}>
             <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy}>

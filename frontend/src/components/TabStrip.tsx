@@ -2,11 +2,11 @@
 // (see tabs/TabsContext). When no tabs are open it falls back to the "Liberty" workspace
 // title (so the bar always has something). Clicking a tab activates it + navigates to its
 // route; the × closes it (and navigates to the next tab, or to Connectors if it was the last).
-import type { MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, X } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -15,8 +15,31 @@ import { findMenuLabelWithApp } from '../services/menuLabels'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
-  overflow-x: auto; min-height: 40px; scrollbar-width: thin;
-  border-bottom: 1px solid ${colors.border};
+  min-height: 40px; border-bottom: 1px solid ${colors.border};
+  /* Keep clear of the fixed utility pill floating over the top-right (Layout publishes its width as
+     --utilbar-width). +28px = its 16px right offset + a 12px gap, so the right arrow / close-all and
+     the last tab never slide under it. Falls back to a sane reserve before the first measure. */
+  padding-right: calc(var(--utilbar-width, 320px) + 28px);
+`
+// The tabs scroll inside here (the arrows + close-all stay pinned outside). overflow-x matches the
+// old single-element bar so the active tab's seamless-bottom trick is unchanged.
+const Scroller = styled.div`
+  display: flex; align-items: stretch; gap: 4px; flex: 1; min-width: 0;
+  overflow-x: auto; scrollbar-width: thin;
+`
+// Edge buttons (scroll arrows + close-all) — compact square toolbar controls, vertically centred
+// in the strip and lifted just above its bottom border to line up with the tabs.
+const EdgeBtn = styled.button<{ $danger?: boolean }>`
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 30px; height: 30px; align-self: center; margin-bottom: 6px; padding: 0;
+  border: 1px solid transparent; border-radius: ${radius.md};
+  background: transparent; color: ${colors.text.secondary}; cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  &:hover:not(:disabled) {
+    background: var(--hover-subtle); border-color: ${colors.border};
+    color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.primary)};
+  }
+  &:disabled { opacity: 0.35; cursor: default; }
 `
 const TitleBlock = styled.div`
   display: flex; align-items: baseline; gap: 10px; padding: 4px 6px 12px;
@@ -50,10 +73,43 @@ const CloseX = styled.span`
 
 export default function TabStrip() {
   const { t } = useTranslation()
-  const { tabs, activeId, setActive, close } = useTabs()
+  const { tabs, activeId, setActive, close, closeAll } = useTabs()
   const { menus } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
+
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [scroll, setScroll] = useState({ overflow: false, atStart: true, atEnd: false })
+
+  // Whether the tabs overflow the strip (→ show the arrows) + where the scroll sits (→ enable
+  // /disable each arrow). Recomputed on scroll, on resize, and whenever the tab set changes.
+  const measure = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    setScroll({
+      overflow: el.scrollWidth > el.clientWidth + 1,
+      atStart: el.scrollLeft <= 0,
+      atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1,
+    })
+  }, [])
+  useEffect(() => {
+    measure()
+    const el = scrollerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [measure, tabs.length])
+  // Keep the active tab in view when it changes — horizontal-only so it never nudges the page.
+  useEffect(() => {
+    const el = scrollerRef.current
+    const act = el?.querySelector<HTMLElement>('[data-active="true"]')
+    if (!el || !act) return
+    const l = act.offsetLeft
+    const r = l + act.offsetWidth
+    if (l < el.scrollLeft) el.scrollTo({ left: l - 8, behavior: 'smooth' })
+    else if (r > el.scrollLeft + el.clientWidth) el.scrollTo({ left: r - el.clientWidth + 8, behavior: 'smooth' })
+  }, [activeId, tabs.length])
 
   if (tabs.length === 0) {
     return (
@@ -79,38 +135,59 @@ export default function TabStrip() {
       close(tab.id)
     }
   }
+  const onCloseAll = () => { closeAll(); navigate('/') }
+  const by = (dx: number) => scrollerRef.current?.scrollBy({ left: dx, behavior: 'smooth' })
 
   return (
     <Bar>
-      {tabs.map((tab) => {
-        const Icon =
-          tab.kind === 'http' ? Globe :
-          tab.kind === 'nomaflow_run' ? Workflow :
-          TableIcon
-        // Resolve label + owning app via the menu tree so duplicates like "Users" under
-        // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
-        // Nomaflow run tabs aren't menu-tree entries — label them "Run <short-id>" with
-        // no app top-line (they're cross-app diagnostics anyway).
-        let label: string
-        let appLabel: string | undefined
-        if (tab.kind === 'nomaflow_run') {
-          label = t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
-        } else {
-          const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
-          label = hit?.label ?? tab.target
-          appLabel = hit?.appLabel
-        }
-        return (
-          <TabBtn key={tab.id} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${label} — ${tab.connector}.${tab.target}`}>
-            <Icon className="tic" size={13} />
-            <span className="text">
-              {appLabel && <span className="app">{appLabel}</span>}
-              <span className="label">{label}</span>
-            </span>
-            <CloseX onClick={(e) => onClose(e, tab)} title={t('tabs.close')}><X size={12} /></CloseX>
-          </TabBtn>
-        )
-      })}
+      {scroll.overflow && (
+        <EdgeBtn onClick={() => by(-240)} disabled={scroll.atStart}
+          title={t('tabs.scrollLeft', 'Scroll left')} aria-label={t('tabs.scrollLeft', 'Scroll left')}>
+          <ChevronLeft size={18} strokeWidth={2.25} />
+        </EdgeBtn>
+      )}
+      <Scroller ref={scrollerRef} onScroll={measure}>
+        {tabs.map((tab) => {
+          const Icon =
+            tab.kind === 'http' ? Globe :
+            tab.kind === 'nomaflow_run' ? Workflow :
+            TableIcon
+          // Resolve label + owning app via the menu tree so duplicates like "Users" under
+          // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
+          // Nomaflow run tabs aren't menu-tree entries — label them "Run <short-id>" with
+          // no app top-line (they're cross-app diagnostics anyway).
+          let label: string
+          let appLabel: string | undefined
+          if (tab.kind === 'nomaflow_run') {
+            label = t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
+          } else {
+            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
+            label = hit?.label ?? tab.target
+            appLabel = hit?.appLabel
+          }
+          return (
+            <TabBtn key={tab.id} data-active={tab.id === activeId} $active={tab.id === activeId} onClick={() => goTo(tab)} title={`${label} — ${tab.connector}.${tab.target}`}>
+              <Icon className="tic" size={13} />
+              <span className="text">
+                {appLabel && <span className="app">{appLabel}</span>}
+                <span className="label">{label}</span>
+              </span>
+              <CloseX onClick={(e) => onClose(e, tab)} title={t('tabs.close')}><X size={12} /></CloseX>
+            </TabBtn>
+          )
+        })}
+      </Scroller>
+      {scroll.overflow && (
+        <EdgeBtn onClick={() => by(240)} disabled={scroll.atEnd}
+          title={t('tabs.scrollRight', 'Scroll right')} aria-label={t('tabs.scrollRight', 'Scroll right')}>
+          <ChevronRight size={18} strokeWidth={2.25} />
+        </EdgeBtn>
+      )}
+      {tabs.length >= 2 && (
+        <EdgeBtn $danger onClick={onCloseAll} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
+          <X size={16} strokeWidth={2.25} />
+        </EdgeBtn>
+      )}
     </Bar>
   )
 }

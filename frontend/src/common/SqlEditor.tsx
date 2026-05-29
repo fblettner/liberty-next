@@ -25,7 +25,7 @@ import { findFirstReferencedTable, getPoolSchema, type PoolSchema } from '../ser
 import { attachPoolSchema } from '../services/sqlCompletion'
 import { SqlWizardModal } from './SqlWizardModal'
 import { SqlTestRunner } from './SqlTestRunner'
-import { colors, fontSize, fonts, radius } from '../theme'
+import { colors, fontSize, fonts, radius, EDITOR_FONT_PX } from '../theme'
 
 // `resize: vertical` lets the operator drag-resize the editor; Monaco's `automaticLayout: true`
 // repaints as the box grows / shrinks. The default `$h` is the *initial* height — after the user
@@ -113,7 +113,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
           onChange={handleChange}
           onMount={handleMount}
           options={{
-            fontSize: parseInt(fontSize.base, 10),
+            fontSize: EDITOR_FONT_PX,
             fontFamily: fonts.mono,
             minimap: { enabled: false },
             scrollBeyondLastLine: false,

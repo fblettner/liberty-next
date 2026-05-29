@@ -584,7 +584,7 @@ export default function MenusBuilder() {
                   value={(currentApp.home as string | undefined) ?? ''}
                   options={(augmentedEnums?.MENU_HOME_ITEMS?.values ?? []) as Array<{ value: string; label: string; mono?: string }>}
                   onChange={(v: string) => updateApp(selApp, { ...currentApp, home: v || null })}
-                  anyLabel={t('settings.menus.app.homeNone', 'No home (use default landing)')}
+                  anyLabel={t('settings.menus.app.homeNone', 'No home page (blank landing)')}
                   placeholder={t('common.pick')}
                 />
               </div>

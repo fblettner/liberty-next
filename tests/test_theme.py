@@ -6,8 +6,10 @@ import pytest
 
 from liberty.theme import (
     DEFAULT_PRESET,
+    FONT_CHOICES,
     PRESETS,
     ThemeConfig,
+    font_choices,
     load_theme,
     parse_theme,
     preset_choices,
@@ -81,3 +83,41 @@ def test_load_roundtrip(tmp_path: Path) -> None:
 def test_parse_rejects_unknown_keys() -> None:
     with pytest.raises(Exception):
         parse_theme({"theme": {"preset": "default", "bogus": 1}})
+
+
+# ── fonts ──────────────────────────────────────────────────────────────────────────────────
+
+def test_default_theme_emits_no_font_vars() -> None:
+    # Un-branded → the frontend's built-in font/scale fallbacks apply (nothing emitted).
+    v = resolve_theme(ThemeConfig())["vars"]
+    assert "font-sans" not in v and "font-scale" not in v
+
+
+def test_font_family_emits_resolved_stack() -> None:
+    v = resolve_theme(ThemeConfig(font_family="inter"))["vars"]
+    assert v["font-sans"] == FONT_CHOICES["inter"]["stack"]
+    assert v["font-sans"].startswith("'Inter'")
+
+
+def test_unknown_font_family_is_ignored() -> None:
+    assert "font-sans" not in resolve_theme(ThemeConfig(font_family="nope"))["vars"]
+
+
+def test_font_scale_emitted_only_when_off_default() -> None:
+    assert resolve_theme(ThemeConfig(font_scale=1.1))["vars"]["font-scale"] == "1.1"
+    assert "font-scale" not in resolve_theme(ThemeConfig(font_scale=1.0))["vars"]
+
+
+def test_font_scale_out_of_range_rejected() -> None:
+    with pytest.raises(Exception):
+        ThemeConfig(font_scale=3.0)
+    with pytest.raises(Exception):
+        ThemeConfig(font_scale=0.5)
+
+
+def test_font_choices_carry_stack() -> None:
+    choices = font_choices()
+    ids = {c["id"] for c in choices}
+    assert {"dm-sans", "inter", "system"} <= ids
+    for c in choices:
+        assert c["label"] and c["stack"]

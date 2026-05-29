@@ -60,6 +60,22 @@ def test_get_theme_is_public_and_default(app) -> None:
         assert body["app_name"] is None
         assert body["vars"]["blue-main"] == "#007AFF"
         assert any(p["id"] == "ocean" for p in body["presets"])
+        # font choices are exposed for the editor dropdown; default emits no font override
+        assert any(f["id"] == "dm-sans" for f in body["fonts"])
+        assert "font-sans" not in body["vars"] and "font-scale" not in body["vars"]
+
+
+def test_admin_put_font_then_public_get_reflects_it(app) -> None:
+    with TestClient(app) as client:
+        r = client.put(
+            "/admin/config/theme/parsed",
+            json={"theme": {"preset": "default", "font_family": "inter", "font_scale": 1.1}},
+            headers=_h(client, "admin"),
+        )
+        assert r.status_code == 200 and r.json()["saved"] is True
+        body = client.get("/api/theme").json()
+        assert body["vars"]["font-sans"].startswith("'Inter'")
+        assert body["vars"]["font-scale"] == "1.1"
 
 
 def test_admin_get_requires_superuser(app) -> None:

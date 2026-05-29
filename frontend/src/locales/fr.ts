@@ -18,6 +18,9 @@ const fr: Resources = {
   },
   tabs: {
     close: 'Fermer l’onglet',
+    closeAll: 'Fermer tous les onglets',
+    scrollLeft: 'Défiler à gauche',
+    scrollRight: 'Défiler à droite',
   },
   common: {
     loading: 'Chargement…',
@@ -436,6 +439,13 @@ const fr: Resources = {
       primary: "Couleur principale",
       primaryHint: 'Laissez vide pour utiliser la couleur du préréglage.',
       appName: "Nom de l'application",
+      font: 'Police',
+      fontHint: "La police de toute l'interface. Le code reste en chasse fixe.",
+      size: 'Taille du texte',
+      sizeCompact: 'Compacte',
+      sizeNormal: 'Normale',
+      sizeComfortable: 'Confortable',
+      sizeLarge: 'Grande',
       reset: 'Réinitialiser',
       saved: 'Enregistré. Le nouveau thème est actif pour tout le monde.',
       previewHint: "Aperçu en direct — les boutons, liens et états actifs utilisent l'accent principal.",
@@ -1002,7 +1012,8 @@ const fr: Resources = {
     },
     tables: {
       tablesView: 'Requêtes',
-      looseSectionLabel: 'Autres requêtes',
+      looseSectionLabel: 'Requêtes personnalisées',
+      looseSectionHint: 'Requêtes hors du jeu get/put/post/delete d’une table — utilisées par des actions, graphiques, appels AIS ou référencées par des lookups. Cliquez pour modifier.',
       addTable: 'Ajouter une table',
       namePrompt: 'Nom de base de la nouvelle table (ex. F0005) :',
       confirmDelete: 'Supprimer la table « {{name}} » et toutes ses requêtes (get/put/post/delete) ?',

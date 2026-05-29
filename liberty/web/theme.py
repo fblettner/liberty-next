@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from liberty.theme import load_theme, preset_choices, resolve_theme
+from liberty.theme import font_choices, load_theme, preset_choices, resolve_theme
 
 router = APIRouter(prefix="/api", tags=["theme"])
 
@@ -27,4 +27,5 @@ async def get_theme(request: Request) -> dict[str, Any]:
     cfg = load_theme(_theme_path(request)).theme
     resolved = resolve_theme(cfg)
     resolved["presets"] = preset_choices()
+    resolved["fonts"] = font_choices()
     return resolved

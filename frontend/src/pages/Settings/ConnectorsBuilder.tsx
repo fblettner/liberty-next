@@ -112,6 +112,12 @@ const LooseSectionHeader = styled.div`
   margin-top: 4px;
   font-family: ${fonts.mono};
 `
+// One-line explainer under the "Custom queries" header — operators didn't know what the old
+// "Other queries" group meant; this spells out what lands here + that the rows are editable.
+const LooseSectionHint = styled.div`
+  color: ${colors.text.muted}; font-size: ${fontSize.micro};
+  padding: 0 4px 6px; line-height: 1.4;
+`
 
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
@@ -581,6 +587,34 @@ export default function ConnectorsBuilder() {
   const queryDefSchema = (selSchema?.$defs?.QueryDef ?? null) as JsonSchema | null
   const allDefs = (selSchema?.$defs ?? {}) as Record<string, JsonSchema>
 
+  // Single-query editor (the SchemaForm over QueryDef). Shared by the Sequences / Lookups views
+  // AND the Tables view's "Custom queries" list — a loose query is just a query, so it edits
+  // through the same form. Caller guards on ``queryDefSchema`` being loaded.
+  const renderQueryEditor = (picked: Record<string, unknown>) => (
+    <Stack gap={10}>
+      <Row gap={8} style={{ alignItems: 'center' }}>
+        <Button $variant="ghost" $size="sm" onClick={() => setSelQuery(null)}>
+          ← {t('common.back')}
+        </Button>
+        <Mono style={{ fontSize: fontSize.sm }}>{String(picked.name)}</Mono>
+      </Row>
+      <SqlConnectorContext.Provider value={sel ?? undefined}>
+        <SchemaForm
+          schema={queryDefSchema as JsonSchema}
+          defs={allDefs}
+          value={picked}
+          onChange={(v: Record<string, unknown>) => {
+            const next = queriesArr.map((qq) => (qq.name === picked.name ? v : qq))
+            updateQueries(sel!, next)
+            // Track the (possibly renamed) query so the editor stays open on it.
+            const vn = v.name
+            if (typeof vn === 'string' && vn && vn !== picked.name) setSelQuery(vn)
+          }}
+        />
+      </SqlConnectorContext.Provider>
+    </Stack>
+  )
+
   return (
     <FrameworkEnumsContext.Provider value={augmentedEnums}>
     <Shell>
@@ -687,7 +721,7 @@ export default function ConnectorsBuilder() {
                       writes both the new query AND the matching dictionary entry. Hidden in
                       the single-query editor (selQuery set) so it doesn't collide with the
                       Back-to-list affordance. */}
-                  {isSql && mode === 'tables' && !selTable && (
+                  {isSql && mode === 'tables' && !selTable && !selQuery && (
                     <Button $variant="ghost" $size="sm" onClick={() => sel && addTable(sel)} disabled={busy}>
                       <Plus size={13} /> {t('settings.tables.addTable')}
                     </Button>
@@ -729,7 +763,14 @@ export default function ConnectorsBuilder() {
                 // connector and vice versa, which made the editor noisy and hard to scan.
                 <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
-              {isSql && mode === 'tables' && (
+              {/* Tables view: a selected Custom query opens the single-query editor (it lives in
+                  this list, not Sequences/Lookups — so the editor has to render here too, else
+                  clicking one did nothing). Otherwise the table editor / the list. */}
+              {isSql && mode === 'tables' && selQuery && queryDefSchema && (() => {
+                const picked = queriesArr.find((qq) => qq.name === selQuery)
+                return picked ? renderQueryEditor(picked as Record<string, unknown>) : null
+              })()}
+              {isSql && mode === 'tables' && !selQuery && (
                 selTable && queryDefSchema ? (() => {
                   // The corresponding Screen (if any) is keyed by (connector, get-slot name).
                   // The cross-link only shows when both are present + a screen with a dialog is
@@ -808,8 +849,11 @@ export default function ConnectorsBuilder() {
                     {grouped.loose.length > 0 && (
                       <>
                         <LooseSectionHeader>
-                          {t('settings.tables.looseSectionLabel', 'Other queries')}
+                          {t('settings.tables.looseSectionLabel', 'Custom queries')}
                         </LooseSectionHeader>
+                        <LooseSectionHint>
+                          {t('settings.tables.looseSectionHint', 'Queries not part of a table’s get/put/post/delete set — used by actions, charts, AIS calls or referenced by lookups. Click one to edit it.')}
+                        </LooseSectionHint>
                         <TableList>
                           {grouped.loose
                             .filter((slot) => !tNeedle || slot.name.toLowerCase().includes(tNeedle))
@@ -850,34 +894,7 @@ export default function ConnectorsBuilder() {
                 const shown = qNeedle ? matches.filter((q) => String(q.name).toLowerCase().includes(qNeedle)) : matches
                 const picked = selQuery ? queriesArr.find((q) => q.name === selQuery) : null
                 if (picked && queryDefSchema) {
-                  // Single-query editor — patches the picked query in place via
-                  // updateQueries. ``onBack`` clears the selection to return to the list.
-                  // Back button on the LEFT matches the Tables-mode ConnectorsTableEditor
-                  // header convention (operator's eye is already there from the click).
-                  return (
-                    <Stack gap={10}>
-                      <Row gap={8} style={{ alignItems: 'center' }}>
-                        <Button $variant="ghost" $size="sm" onClick={() => setSelQuery(null)}>
-                          ← {t('common.back')}
-                        </Button>
-                        <Mono style={{ fontSize: fontSize.sm }}>{String(picked.name)}</Mono>
-                      </Row>
-                      <SqlConnectorContext.Provider value={sel ?? undefined}>
-                        <SchemaForm
-                          schema={queryDefSchema}
-                          defs={allDefs}
-                          value={picked as Record<string, unknown>}
-                          onChange={(v: Record<string, unknown>) => {
-                            const next = queriesArr.map((q) => (q.name === picked.name ? v : q))
-                            updateQueries(sel!, next)
-                            // Track the (possibly renamed) query so the editor stays open on it.
-                            const vn = v.name
-                            if (typeof vn === 'string' && vn && vn !== picked.name) setSelQuery(vn)
-                          }}
-                        />
-                      </SqlConnectorContext.Provider>
-                    </Stack>
-                  )
+                  return renderQueryEditor(picked as Record<string, unknown>)
                 }
                 return (
                   <Stack gap={10}>

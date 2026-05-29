@@ -2,8 +2,8 @@
 // mounted but display:none, so each tab keeps its state when you switch away and back). The
 // page chunks (TableView / HttpRunner) are lazy-loaded; a per-tab Suspense means opening a
 // new tab doesn't flash the fallback over the ones already loaded. The whole host is hidden
-// when the current route is a framework page (Connectors / Chat / Settings) — those render
-// through <Outlet/> instead — but the tabs underneath stay mounted.
+// when the current route is the index landing or a framework page (Settings / nomaflow) — those
+// render through <Outlet/> instead — but the tabs underneath stay mounted.
 import { lazy, Suspense, useEffect, useState } from 'react'
 import i18n from 'i18next'
 import { Centered } from '../common'

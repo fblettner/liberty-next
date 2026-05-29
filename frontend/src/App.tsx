@@ -7,10 +7,10 @@ import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import OidcCallback from "./pages/OidcCallback";
 import { useTabs, type TabKind } from "./tabs/TabsContext";
+import { useWorkspace } from "./workspace/WorkspaceContext";
 
 // Framework pages are code-split; the SQL/HTTP screens aren't routed directly — they live as
 // tabs (see components/TabHost), and these route components just open/activate the matching tab.
-const Connectors = lazy(() => import("./pages/Connectors"));
 // AI assistant is no longer a routed page — it lives in a right-side drawer toggled
 // from the utility bar (see components/AiDrawer). The /chat URL is gone.
 const Settings = lazy(() => import("./pages/Settings"));
@@ -49,6 +49,20 @@ function TabRoute({ kind }: { kind: TabKind }) {
   return null;
 }
 
+// Index landing ("/") — the app's resting state when no tab is open. Closing all tabs / the last
+// tab navigates here. If the current app has a configured home page (menus.toml `home` → its
+// resolved `home_path`, e.g. /dashboard/<id>), redirect there; otherwise a blank content area
+// (the sidebar + tab strip's app title still frame it). The Connectors landing page was removed —
+// connectors are managed and queried entirely from Settings now.
+function Home() {
+  const { menus, apps, currentApp } = useWorkspace();
+  if (!menus) return <Centered />; // still loading — don't flash blank, then redirect
+  const app = currentApp ?? (apps?.length === 1 ? apps[0].name : null);
+  const home = app ? menus[app]?.home_path : null;
+  if (home) return <Navigate to={home} replace />;
+  return null; // blank content area
+}
+
 export default function App() {
   return (
     <Routes>
@@ -62,7 +76,7 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<Connectors />} />
+        <Route index element={<Home />} />
         <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />

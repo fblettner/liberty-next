@@ -11,6 +11,7 @@ import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import SidebarMenu from './SidebarMenu'
+import WorkspaceSelect from './WorkspaceSelect'
 
 const COLLAPSE_KEY = 'liberty.sidebar.collapsed'
 
@@ -157,12 +158,10 @@ function FrameworkLinks({
 }) {
   return (
     <>
-      {/* Connectors page + AI Assistant + API Docs moved off the sidebar — Connectors
-          is admin-only context (operators use the per-screen menus instead), the
-          assistant lives in a top-toolbar-toggled right-side drawer (TopBar's AI
-          button), and API Docs is a developer-only link served by FastAPI at /docs
-          (operators don't need it surfaced in the navigation). Settings stays here
-          for superusers; the rest is in the per-app menu trees from /api/menus. */}
+      {/* Only Settings lives here (superusers). The standalone Connectors page was removed
+          (connectors are managed + queried from Settings now); the AI assistant lives in a
+          top-toolbar-toggled right-side drawer; API Docs is a developer-only link at /docs.
+          Everything else is in the per-app menu trees from /api/menus. */}
       {superuser && (
         <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
           <SlidersHorizontal size={iconSize} />
@@ -204,6 +203,10 @@ export default function Sidebar() {
         <BrandMark><img src="/favicon.svg" alt={t('app.title')} /></BrandMark>
         {!collapsed && <BrandName>{t('app.title')}</BrandName>}
       </Brand>
+
+      {/* App switcher — moved here from the top utility pill. Stays mounted even when collapsed
+          (it renders null then) so its auto-init effect keeps resolving the current app. */}
+      <WorkspaceSelect collapsed={collapsed} />
 
       <Items>
         {currentMenu && !collapsed

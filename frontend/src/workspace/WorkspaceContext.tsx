@@ -8,14 +8,13 @@
 // screens); the rest are data sources reached *through* an app's menu, not picked directly. With no
 // menus at all (a bare deployment) every connector counts as an app. Persisted to localStorage; no
 // backend role — permission checks still enforce access. Owns the one `GET /api/connectors` +
-// `GET /api/menus` fetch, shared by the header picker, the Connectors page and the Sidebar.
+// `GET /api/menus` fetch, shared by the app picker and the Sidebar.
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -211,29 +210,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [menus, navigate])
 
-  // **Initial-load redirect** — when ``menus`` first resolves *after sign-in* AND the
-  // operator's URL is the connectors index (``/``), navigate to the current app's
-  // ``home_path`` once. This is what kicks the operator into the dashboard on a fresh visit
-  // — without it, ``setCurrentApp`` only fires on an explicit picker change, and refreshing
-  // while ``localStorage[liberty.app]`` still pointed at the previously-picked app kept the
-  // operator on the connectors index. We fire it exactly once per sign-in (the ref guard);
-  // a later manual click on the Connectors page stays on ``/`` without bouncing.
-  //
-  // ``replace: true`` swaps ``/`` out of history so the back button doesn't trap the
-  // operator on the index page they just got redirected away from.
-  const didInitialRedirect = useRef(false)
-  useEffect(() => { didInitialRedirect.current = false }, [user?.username])
-  useEffect(() => {
-    if (didInitialRedirect.current) return
-    if (!menus) return
-    didInitialRedirect.current = true
-    if (pathname !== '/') return  // operator deep-linked or refreshed on a specific page — respect it
-    const app = currentApp ?? (apps?.length === 1 ? apps[0].name : null)
-    if (!app) return
-    const home = menus[app]?.home_path
-    if (home) navigate(home, { replace: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot per sign-in via the ref guard
-  }, [menus])
+  // Note: the "/" index route (App's <Home>) owns the fresh-visit + return-to-home redirect now —
+  // it reads ``home_path`` for the current app and redirects (or shows a blank content area). So
+  // there's no initial-load redirect effect here; ``setCurrentApp`` below still jumps to the home
+  // when the operator explicitly picks an app from another page.
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 

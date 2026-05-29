@@ -1,7 +1,7 @@
 // App shell — sidebar + workspace title + a floating top-right utility pill
 // (EN/FR, dark/light, profile, sign-out). Page content renders through <Outlet/>
 // inside a <Suspense> boundary (routes are code-split). Adapted from nomaubl.
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { Outlet, useMatch } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -14,7 +14,6 @@ import { useWorkspace } from '../workspace/WorkspaceContext'
 import { Banner, Centered } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
-import WorkspaceSelect from './WorkspaceSelect'
 import TabStrip from './TabStrip'
 import BackButton from './BackButton'
 import TabHost from './TabHost'
@@ -90,23 +89,26 @@ const Sep = styled.div`
   margin: 0 2px;
 `
 
-const UserName = styled.button`
+// AI Assistant — a labeled pill at the end of the bar (nomaubl style). Violet is the assistant's
+// own identity (intentionally off the themeable blue accent, the way AI surfaces read across apps);
+// the rgba tints sit fine over both the dark and light glass.
+const AiBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 30px;
-  padding: 0 8px;
-  border: none;
-  background: transparent;
+  padding: 0 12px;
   border-radius: ${radius.md};
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  background: ${({ $active }) => ($active ? 'rgba(139, 92, 246, 0.26)' : 'rgba(139, 92, 246, 0.13)')};
+  color: #a78bfa;
   font-size: ${fontSize.sm};
   font-family: ${fonts.sans};
-  color: ${colors.text.muted};
-  max-width: 180px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  & > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  transition: background 0.15s, border-color 0.15s;
+  &:hover { background: rgba(139, 92, 246, 0.26); border-color: rgba(139, 92, 246, 0.7); }
 `
 
 function readDark(): boolean {
@@ -131,6 +133,20 @@ export default function Layout() {
   // removed /chat full-page route + the sidebar entry). Toggled by the Sparkles button
   // in the utility bar below.
   const [aiOpen, setAiOpen] = useState(false)
+
+  // The utility pill is position:fixed over the top-right, so it floats above the tab strip. Publish
+  // its live width as --utilbar-width so the strip can reserve that space on its right edge (else its
+  // right scroll-arrow + close-all button hide under the pill). Re-measures on resize / content change.
+  const utilRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = utilRef.current
+    if (!el) return
+    const set = () => document.documentElement.style.setProperty('--utilbar-width', `${el.offsetWidth}px`)
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', !dark)
@@ -206,26 +222,20 @@ export default function Layout() {
             <Banner $tone="error" style={{ margin: '12px 16px 0' }}>{t('license.banner', { error: licenseBanner })}</Banner>
           )}
           <Suspense fallback={<Centered />}>
-            {/* Outlet renders the framework page (Connectors / Chat / Settings); on a tab route it
-                renders the TabRoute marker (null) and TabHost below does the rendering. */}
+            {/* Outlet renders the index home/blank landing or a framework page (Settings / nomaflow);
+                on a tab route it renders the TabRoute marker (null) and TabHost below does the work. */}
             <Outlet />
             <TabHost hidden={!onTabRoute} />
           </Suspense>
         </ContentArea>
       </MainArea>
 
-      <UtilityBar>
-        <WorkspaceSelect />
+      <UtilityBar ref={utilRef}>
         <UtilBtn $active={lang === 'en'} onClick={() => switchLang('en')} title="English">
           EN
         </UtilBtn>
         <UtilBtn $active={lang === 'fr'} onClick={() => switchLang('fr')} title="Français">
           FR
-        </UtilBtn>
-        <Sep />
-        {/* AI assistant — toggles the right-side drawer (replaces /chat full-page route). */}
-        <UtilBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant', 'AI Assistant')}>
-          <Sparkles size={14} />
         </UtilBtn>
         <Sep />
         <UtilBtn onClick={toggleTheme} title={dark ? t('common.lightMode') : t('common.darkMode')}>
@@ -234,18 +244,24 @@ export default function Layout() {
         {user && (
           <>
             <Sep />
-            <UserName onClick={() => setProfileOpen(true)} title={t('profile.title')}>
+            {/* Identity is icon-only now (username + superuser flag moved to the hover title) —
+                keeps the pill compact; the icon still opens the profile modal. */}
+            <UtilBtn
+              onClick={() => setProfileOpen(true)}
+              title={`${user.username}${user.is_superuser ? ' · superuser' : ''} — ${t('profile.title')}`}
+            >
               <User size={14} />
-              <span>
-                {user.username}
-                {user.is_superuser ? ' · superuser' : ''}
-              </span>
-            </UserName>
+            </UtilBtn>
             <UtilBtn onClick={logout} title={t('common.signOut')}>
               <LogOut size={14} />
             </UtilBtn>
           </>
         )}
+        <Sep />
+        {/* AI assistant — labeled pill at the end of the bar; toggles the right-side drawer. */}
+        <AiBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant', 'AI Assistant')}>
+          <Sparkles size={14} /> {t('nav.assistant', 'AI Assistant')}
+        </AiBtn>
       </UtilityBar>
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}

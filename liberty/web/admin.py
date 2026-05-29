@@ -58,7 +58,7 @@ from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
 from liberty.dashboards.config import DashboardsFile, parse_dashboards
-from liberty.theme import load_theme, parse_theme, preset_choices, resolve_theme
+from liberty.theme import font_choices, load_theme, parse_theme, preset_choices, resolve_theme
 from liberty.web.clone import CloneError, clone_app, delete_app
 from liberty.web.rename import (
     RenameError,
@@ -735,6 +735,7 @@ async def get_theme_parsed(request: Request, _: Superuser) -> dict[str, Any]:
         "path": str(path),
         "theme": cfg.model_dump(exclude_none=True),
         "presets": preset_choices(),
+        "fonts": font_choices(),
         "resolved": resolve_theme(cfg),
     }
 

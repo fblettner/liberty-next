@@ -54,21 +54,33 @@ export const colors = {
   },
 }
 
+// The UI sans family reads a CSS var so the per-deployment Theme editor can re-skin it
+// (--font-sans, set from theme.toml's font_family). The literal default is the fallback, so an
+// un-branded install looks exactly as before. Code stays monospace (not operator-themed).
 export const fonts = {
-  sans: "'DM Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+  sans: "var(--font-sans, 'DM Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif)",
   mono: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
 }
 
+// Every size is calc(var(--font-scale, 1) * Npx) so the Theme editor's text-size control scales
+// the whole UI proportionally (--font-scale from theme.toml's font_scale). Default scale 1 → the
+// exact px values below. NOTE: these are CSS strings — use EDITOR_FONT_PX for numeric contexts
+// (e.g. CodeMirror) that can't parse a calc().
+const sz = (px: number) => `calc(var(--font-scale, 1) * ${px}px)`
 export const fontSize = {
-  micro: '10px',
-  sm: '11px',
-  base: '13px',
-  md: '14px',
-  lg: '15px',
-  xl: '16px',
-  '2xl': '18px',
-  '3xl': '20px',
+  micro: sz(10),
+  sm: sz(11),
+  base: sz(13),
+  md: sz(14),
+  lg: sz(15),
+  xl: sz(16),
+  '2xl': sz(18),
+  '3xl': sz(20),
 }
+
+// Numeric base size for contexts that need a number, not a CSS string (CodeMirror's `fontSize`).
+// Doesn't follow --font-scale (the code editor keeps a stable size).
+export const EDITOR_FONT_PX = 13
 
 export const radius = {
   sm: '6px',
