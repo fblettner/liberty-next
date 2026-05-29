@@ -366,24 +366,27 @@ replies), `@monaco-editor/react` (the connector-config editor).
   bits go in `common/`, plain logic/shapes go in `services/`/`types/` (no React), and styled
   components pull every colour/size/radius/shadow from `theme.ts` — no hard-coded hex/rgba.**
 - `src/App.tsx` — `react-router-dom` v7; `/login`, `/oidc/callback`, and a `RequireAuth`
-  `Layout` with children `/` (Connectors), `/chat` (Chat), `/settings` (Settings, superuser-only),
-  and `/sql/:connector/:target` / `/http/:connector/:target` — the latter two are **thin `<TabRoute>`
-  markers** that open/activate the matching tab; the actual screens render inside `<TabHost>` (in `Layout`),
-  which keeps every open tab mounted (only the active one shown) so each keeps its state. The framework
-  pages (`Connectors`/`Chat`/`Settings`) render via `<Outlet/>` (not tabs — AI gets a drawer later, the
-  others a later phase); `TableView`/`HttpRunner` take `connector`/`query`(or `endpoint`) as props. All
-  `React.lazy`-split; `Layout` shows `<TabStrip/>` (the tab bar, or the "Liberty" title when no tabs) and
+  `Layout` whose index `/` is **`Home`** (redirects to the current app's configured home page —
+  `menus.toml` `home` → `home_path`, e.g. `/dashboard/<id>` — else a blank content area; it's the
+  resting state when all tabs close). Other children: `/settings` (superuser-only), the `nomaflow`
+  routes, and `/sql/:connector/:target` / `/http/:connector/:target` / `/dashboard/:target` /
+  `/nomaflow/runs/:runId` — the latter are **thin `<TabRoute>` markers** that open/activate the
+  matching tab; the actual screens render inside `<TabHost>` (in `Layout`), which keeps every open
+  tab mounted (only the active one shown) so each keeps its state. The index `Home` + the framework
+  pages (`Settings`, `nomaflow`) render via `<Outlet/>`; the AI assistant is a right-side drawer
+  (`AiDrawer`), not a route. `TableView`/`HttpRunner` take `connector`/`query`(or `endpoint`) as props.
+  All `React.lazy`-split; `Layout` shows `<TabStrip/>` (the tab bar, or the app title when no tabs) and
   renders `<Outlet/>` + `<TabHost/>` inside a `<Suspense fallback={<Centered/>}>`.
 - The pages: `Layout` (the shell — `Sidebar` + a `<TabStrip/>` bar + a fixed top-right
-  utility pill: app-picker (`WorkspaceSelect` — a themed `SearchSelect` over the *apps* (menu-having connectors), shown when ≥2) · EN/FR · dark/light ·
-  username→profile · sign-out), `Sidebar` (collapsible nav
-  rail — when an app is active it leads with that app's menu tree (`SidebarMenu` — collapsible
-  folders, leaf `NavLink`s to `/sql|/http`, from `GET /api/menus`) above a divider, then the
-  framework links (Connectors / Assistant / Settings) + an external "API docs" link), `ProfileModal`
-  (read-only "who am I" — username/email/provider/roles/permissions from the Principal; no
-  self-service password change yet — the backend has no endpoint for it), `Connectors` (lists
-  the accessible connectors from `useWorkspace()` — scoped to the picked app — drills to queries/endpoints),
-  `TableView` (titled with the query's `description` (v1's `tbl_label`), else `label`, else the menu label —
+  utility pill: EN/FR · dark/light · user-icon→profile · sign-out · an **AI Assistant** pill at the
+  end that toggles the `AiDrawer`. The strip reserves the pill's measured width via `--utilbar-width`
+  so its right-edge controls stay clear). `Sidebar` (collapsible nav rail — the app switcher
+  (`WorkspaceSelect` — a themed `SearchSelect` over the *apps* (menu-having connectors), shown when ≥2)
+  sits under the brand; when an app is active it leads with that app's menu tree (`SidebarMenu` —
+  collapsible folders, leaf `NavLink`s to `/sql|/http`, from `GET /api/menus`) above a divider, then the
+  framework links (just Settings, for superusers) + an external "API docs" link), `ProfileModal`
+  (who-am-I — username/email/provider/roles/permissions from the Principal — plus self-service password
+  change), `TableView` (titled with the query's `description` (v1's `tbl_label`), else `label`, else the menu label —
   `services/menuLabels.findMenuLabel` walks the `GET /api/menus` trees; the technical `connector.query` is the
   mono subtitle; `auto_load` queries run on open. Param form from the query's `params`/`bind_params`, a
   "Max rows" input (blank = the configured cap; else sent as `?_limit=N`, DbVisualizer-style), plus a
@@ -422,8 +425,9 @@ replies), `@monaco-editor/react` (the connector-config editor).
   references) — then refetches; **Cancel** discards. (Modal-form edit
   = the form layer, Phase 6.) A non-SELECT query → `confirm` + `POST` + affected-rows banner),
   `HttpRunner` (`POST /api/http/...` + pretty `ApiResult` + JSON `Pre`),
-  `Chat` (consumes the `/ai/chat` SSE — user bubbles plain, assistant bubbles rendered via
-  `<Markdown>`, + `tool_call`/`tool_result` lines), `Settings` (a tab switcher over the config editors —
+  `AiDrawer` (right-side slide-in toggled from the toolbar's AI Assistant pill — consumes the
+  `/ai/chat` SSE: user bubbles plain, assistant bubbles rendered via `<Markdown>`, + `tool_call`/`tool_result`
+  lines), `Settings` (a tab switcher over the config editors —
   `PoolsBuilder` = the structured `[pools.*]` editor (a left list + a `SchemaForm` over the `PoolConfig`
   schema → `PUT /admin/config/pools` + Reload), `ConnectorsBuilder` = the `[connectors.*]` editor (a left
   list of sql/api connectors; for a SQL connector the right pane has two views — **Tables** (default:
@@ -667,9 +671,8 @@ user's other scripts read those — so v2 reuses **the exact same scheme and key
 - v1's *other* crypto (the Fernet wrapper around `secrets.json` → `secrets.json.enc`) is
   **not** ported — v2 takes the `MASTER_KEY` straight from an env var. Only the field-level
   `ENC:` scheme above is shared.
-- Operator runbook (when you need the key, how to set it, `liberty-crypto` recipes):
-  `docs/crypto.md`. (The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` —
-  unaffected by the master key.)
+- The `admin` user from `liberty-admin init-db` is Argon2id, *not* `ENC:` — unaffected by the
+  master key.
 
 **License (gates the licensed apps).** The open framework is free; connectors marked `licensed = true`
 in `connectors.toml` (nomasx1 / nomajde do — they're sold together, one key) are unlocked by a license
@@ -1336,7 +1339,7 @@ elsewhere, so a deployment doesn't have to know:
   the NCHAR-quirk handled. Operators who explicitly want to *disable* the auto-trim (e.g. a
   table where trailing whitespace is data) can set ``trim_strings = false`` on the pool.
 
-Phase 6 (Form/screen engine) is now feature-complete for the slices outlined in `docs/PLAN.md`.
+Phase 6 (Form/screen engine) is now feature-complete.
 
 **Phase 6 follow-up (Connector ↔ Screen ↔ ScreenField roles consolidation) — Phase 1 of 3 DONE,
 Phase 2 of 3 DONE.** The original design split display metadata across three places (the
@@ -1666,14 +1669,14 @@ none).
 
 542 backend tests pass.
 
-**Roadmap (planned, see `docs/PLAN.md`):** **Phase 5** is effectively complete from a
+**Roadmap — all planned phases are complete.** **Phase 5** (migration tools) is complete from a
 framework standpoint — the NOMAJDE cutover is operator work, and the historic AUD_<table>
 data carry-over is per-customer (handled manually). **Phase 9** WebSocket layer (record
 locks + technical dashboard + log tail) **DONE** via Socket.IO — see the dedicated section
-above. → **Phase 11** repo split (liberty-apps for per-deployment TOML) **DONE** — see
-below. → **Phase 12** import the v1 Airflow plugins into liberty-apps/legacy/ for
-reference. → **Phase 13** **nomaflow** — native ETL + scheduler module on liberty-next
-(declarative `jobs.toml`, APScheduler-driven, replaces the v1 Airflow plugin suite).
+above. **Phase 11** repo split (liberty-apps for per-deployment TOML) **DONE** — see
+below. **Phase 12** v1 Airflow plugins kept under liberty-apps/legacy/ for reference.
+**Phase 13** **nomaflow** — native ETL + scheduler module on liberty-next (declarative
+`jobs.toml`, APScheduler-driven, replaces the v1 Airflow plugin suite) — **DONE**.
 
 **Phase 11 — Repo split (liberty-apps) — DONE.** Customer-specific TOML configuration
 (nomasx1 + nomajde: `connectors.toml`, `dictionary.toml`, `menus.toml`, `screens.toml`,
@@ -1892,12 +1895,10 @@ frontend/       Vite + React 19 + TS (emotion + react-i18next) — src/{App,main
                 built dist/ served by liberty/main.py; gitignored
 start.sh        run/dev helper (serve | dev | api | build | frontend | init-db)
 tests/
-docs/PLAN.md    full phased plan + design decisions + rationale
 ```
 
 ## Reference
 
-- Full plan & decisions: `docs/PLAN.md`
 - nomaubl connector pattern: `../../JavaProjects/nomaubl` — key files:
   `src/custom/ubl/api/ApiConnectorClient.java`, `src/custom/ubl/api/SqlConnectorClient.java`,
   `src/custom/db/DynamicResultMapper.java`, `src/custom/ubl/web/AiAssistant.java`,
