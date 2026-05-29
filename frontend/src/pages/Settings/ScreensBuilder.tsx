@@ -99,6 +99,10 @@ export default function ScreensBuilder() {
   // raises this modal. Edits flow through the same ``updateScreen`` callback as before — the
   // ScreensBuilder's Save bar at the bottom commits to disk. Escape closes the modal.
   const [designerOpen, setDesignerOpen] = useState(false)
+  // Set in the load handler when a ``?app=X&screen=Y`` deep-link resolves so the designer opens
+  // automatically once selApp/selId/doc have all caught up (you can't call ``openDesigner`` inline
+  // because the freshly-fetched ``doc`` isn't yet in state — the snapshot lookup would miss).
+  const [autoOpenDesigner, setAutoOpenDesigner] = useState(false)
   // Snapshot of the screen at modal-open — Cancel reverts to this so edits made inside the
   // designer (e.g. "Create dialog" + a few fields) don't stick when the operator changes their
   // mind. Save clears the snapshot before closing. Stored as a JSON-serialised string so a deep
@@ -187,6 +191,14 @@ export default function ScreensBuilder() {
   // Row clicks set selId + open the designer in one go via ``openDesigner(id)`` — there's no
   // selId-change observer that would otherwise close the modal we just opened.
   useEffect(() => { setDesignerOpen(false); setDesignerSnapshot(null); setDesignerFullscreen(true) }, [selApp])
+  // Honour the deep-link ``autoOpenDesigner`` once selApp/selId/doc are all in sync (the load
+  // handler set it after a ``?app=X&screen=Y`` cross-link from ConnectorsBuilder).
+  useEffect(() => {
+    if (!autoOpenDesigner || !selApp || !selId || !doc) return
+    openDesigner()
+    setAutoOpenDesigner(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- openDesigner is stable from closure
+  }, [autoOpenDesigner, selApp, selId, doc])
 
   const load = () => {
     setError(null); setStatus(null)
@@ -206,16 +218,20 @@ export default function ScreensBuilder() {
         setEnums(s.framework_enums)
         setDoc(d.screens); setOriginal(JSON.stringify(d.screens))
         const apps = Object.keys(d.screens)
-        // Deep-link: `?app=X&screen=Y` (e.g. from ConnectorsBuilder) pre-selects the screen.
-        // Only honoured once per mount and only when the requested screen actually exists; we
-        // then strip the params from the URL so a manual tab-switch doesn't lock the user into
-        // that selection on subsequent visits.
+        // Deep-link: `?app=X&screen=Y` (e.g. from ConnectorsBuilder's "Open visual builder")
+        // pre-selects the screen AND opens the visual designer in one go — the connector editor
+        // no longer drops you on the Screens list to click again. Only honoured once per mount
+        // and only when the requested screen actually exists; we then strip the params from the
+        // URL so a manual tab-switch doesn't lock the user into that selection on subsequent visits.
         const linkApp = !consumed.current ? searchParams.get('app') : null
         const linkScreen = !consumed.current ? searchParams.get('screen') : null
         if (linkApp && d.screens[linkApp]) {
           consumed.current = true
           setSelApp(linkApp)
-          if (linkScreen && d.screens[linkApp][linkScreen]) setSelId(linkScreen)
+          if (linkScreen && d.screens[linkApp][linkScreen]) {
+            setSelId(linkScreen)
+            setAutoOpenDesigner(true)
+          }
           const np = new URLSearchParams(searchParams)
           np.delete('app'); np.delete('screen')
           setSearchParams(np, { replace: true })

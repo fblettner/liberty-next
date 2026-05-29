@@ -644,12 +644,15 @@ async def get_charts_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     path = Path(request.app.state.settings.charts.config_path)
     cfg = load_charts(path)
     # Nested ``{scope: {id: chart}}``; ``id`` + ``connector`` are the path keys, so they're dropped
-    # from each body (re-injected by parse_charts on the way back in).
+    # from each body (re-injected by parse_charts on the way back in). ``exclude_defaults`` is
+    # ``False`` on purpose: the editor preview needs every field present (e.g. ``aggregation``
+    # defaults to ``"sum"`` — stripping it left the canvas with an undefined aggregation and the
+    # chart silently rendered no bars).
     return {
         "path": str(path),
         "charts": {
             scope: {
-                cid: c.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id", "connector"})
+                cid: c.model_dump(exclude_defaults=False, exclude_none=True, exclude={"id", "connector"})
                 for cid, c in by_id.items()
             }
             for scope, by_id in cfg.charts.items()
@@ -701,11 +704,13 @@ async def get_dashboards_parsed(request: Request, _: Superuser) -> dict[str, Any
     path = Path(request.app.state.settings.dashboards.config_path)
     cfg = load_dashboards(path)
     # Nested ``{scope: {id: dashboard}}``; ``id`` + ``connector`` are the path keys, dropped here.
+    # ``exclude_defaults=False`` — see :func:`get_charts_parsed`; the editor's live widget preview
+    # needs every spec field present (e.g. ``aggregation`` default ``"sum"``).
     return {
         "path": str(path),
         "dashboards": {
             scope: {
-                did: d.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id", "connector"})
+                did: d.model_dump(exclude_defaults=False, exclude_none=True, exclude={"id", "connector"})
                 for did, d in by_id.items()
             }
             for scope, by_id in cfg.dashboards.items()

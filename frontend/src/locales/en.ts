@@ -1056,7 +1056,7 @@ const en = {
       duplicateSameName: 'Pick a different name.',
       duplicateExists: 'A table named “{{name}}” already exists.',
       duplicateNoSource: 'Nothing to clone for “{{name}}”.',
-      openInScreens: 'Open in Screens',
+      openInScreens: 'Open visual builder',
       backToTables: 'All tables',
       emptyConnector: 'No tables yet. Add one to scaffold a read query.',
       slot_one: 'slot filled',

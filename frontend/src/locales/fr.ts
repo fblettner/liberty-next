@@ -1049,7 +1049,7 @@ const fr: Resources = {
       duplicateSameName: 'Choisissez un nom différent.',
       duplicateExists: 'Une table « {{name}} » existe déjà.',
       duplicateNoSource: 'Rien à cloner pour « {{name}} ».',
-      openInScreens: 'Ouvrir dans Écrans',
+      openInScreens: 'Ouvrir l’éditeur visuel',
       backToTables: 'Toutes les tables',
       emptyConnector: "Aucune table. Ajoutez-en une pour créer une requête de lecture.",
       slot_one: 'requête présente',
