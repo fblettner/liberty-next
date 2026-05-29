@@ -81,15 +81,17 @@ function widgetType(w: Raw): Kind {
 }
 
 /** Raw config widget → the resolved wire shape the DashboardView renderers expect. Returns null
- *  when it can't render yet (incomplete, or a saved-chart ref that doesn't resolve). */
-function toWire(w: Raw, charts: ChartsCatalog): DashboardWidget | null {
+ *  when it can't render yet (incomplete, or a saved-chart ref that doesn't resolve). Chart-ref
+ *  widgets resolve within the dashboard's *scope* (the catalog is already scoped, but the body no
+ *  longer carries ``connector`` — it's the path key, so we feed it in here). */
+function toWire(w: Raw, charts: ChartsCatalog, scope: string): DashboardWidget | null {
   const common = { label: sstr(w.label) || null, col_span: snum(w.col_span, 6), row_span: snum(w.row_span, 2) }
   const kind = widgetType(w)
   if (kind === 'chart') {
     if (w.chart) {
       const c = charts[sstr(w.chart)]
-      if (!c?.connector || !c?.query || !c?.spec) return null
-      return { type: 'chart', ...common, chart_id: sstr(w.chart), connector: c.connector, query: c.query, spec: c.spec } as ChartWidgetWire
+      if (!c?.query || !c?.spec) return null
+      return { type: 'chart', ...common, chart_id: sstr(w.chart), connector: c.connector ?? scope, query: c.query, spec: c.spec } as ChartWidgetWire
     }
     if (w.connector && w.query && w.spec) return { type: 'chart', ...common, connector: sstr(w.connector), query: sstr(w.query), spec: w.spec as SavedChartSpec } as ChartWidgetWire
     return null
@@ -222,7 +224,7 @@ export function DashboardEditorModal({
               {widgets.map((w, i) => {
                 const kind = widgetType(w)
                 const Icon = KIND_ICON[kind] ?? BarChart3
-                const wire = toWire(w, chartsCatalog)
+                const wire = toWire(w, chartsCatalog, scope)
                 const cs = snum(w.col_span, 6), rs = snum(w.row_span, 2)
                 return (
                   <Cell key={i} $cs={cs} $rs={rs}>

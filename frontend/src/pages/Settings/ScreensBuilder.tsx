@@ -45,8 +45,6 @@ const Shell = styled.div`
   display: flex; flex-direction: column; gap: 12px;
   flex: 1; min-height: 0; height: 100%;
 `
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
-const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto;`
 const FilterBar = styled.div`
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
@@ -116,10 +114,14 @@ export default function ScreensBuilder() {
   // Screens list behind it.
   const [designerFullscreen, setDesignerFullscreen] = useState(true)
   // Open / close helpers — Cancel restores the snapshot, Save just discards it (the in-memory
-  // doc already reflects every edit, the parent's Save button commits to disk).
-  const openDesigner = () => {
-    if (selApp && selId) {
-      const snap = doc?.[selApp]?.[selId]
+  // doc already reflects every edit, the parent's Save button commits to disk). Optional ``id``
+  // lets the caller pick the screen and open the designer in one click — otherwise the
+  // setSelId / openDesigner pair in a click handler hits a stale closure (selId still null).
+  const openDesigner = (id?: string) => {
+    if (id) setSelId(id)
+    const targetId = id ?? selId
+    if (selApp && targetId) {
+      const snap = doc?.[selApp]?.[targetId]
       if (snap !== undefined) setDesignerSnapshot(JSON.stringify(snap))
     }
     setDesignerOpen(true)
@@ -430,6 +432,9 @@ export default function ScreensBuilder() {
         ) : undefined}
         right={
           <>
+            <Button $variant="ghost" $size="sm" onClick={() => selApp && addScreen(selApp)} disabled={busy || !selApp}>
+              <Plus size={13} /> {t('settings.screens.add')}
+            </Button>
             <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
               <Undo2 size={13} /> {t('common.discard', 'Discard')}
             </Button>
@@ -439,13 +444,6 @@ export default function ScreensBuilder() {
           </>
         }
       />
-      <Toolbar>
-        <ToolbarRight>
-          <Button $variant="ghost" $size="sm" onClick={() => selApp && addScreen(selApp)} disabled={busy || !selApp}>
-            <Plus size={13} /> {t('settings.screens.add')}
-          </Button>
-        </ToolbarRight>
-      </Toolbar>
       {selApp && ids.length > 0 && (
         <FilterBar>
           <Search size={14} />
@@ -474,7 +472,7 @@ export default function ScreensBuilder() {
             rowMenuCount > 0 && t('settings.screens.summary.rowMenu', { count: rowMenuCount }),
           ].filter(Boolean).join(' · ')
           return (
-            <Item key={id} onClick={() => { setSelId(id); setStatus(null); openDesigner() }}>
+            <Item key={id} onClick={() => { setStatus(null); openDesigner(id) }}>
               <FileText className="icon" size={18} />
               <span className="text">
                 <span className="name">{id}</span>
