@@ -171,6 +171,7 @@ async def _reload_dictionary(app: FastAPI, _path: Path) -> None:
         dictionary_path=settings.connectors.dictionary_path,
         master_key=settings.crypto.master_key,
         license=license_result,
+        default_language=settings.app.default_language,
     )
     old = app.state.connectors
     app.state.connectors = new
@@ -228,6 +229,7 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
         dictionary_path=settings.connectors.dictionary_path,
         master_key=settings.crypto.master_key,
         license=app.state.license,
+        default_language=settings.app.default_language,
     )
     app.state.connectors = new
     if live_pools == on_disk_sig:

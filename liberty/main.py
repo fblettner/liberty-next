@@ -142,6 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             dictionary_path=settings.connectors.dictionary_path,
             master_key=settings.crypto.master_key,
             license=app.state.license,
+            default_language=settings.app.default_language,
         )
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
@@ -242,7 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "pools": connectors.pools.names(),
             "dictionary": {
                 "entries": len(connectors.dictionary.entries),
-                "default_language": connectors.dictionary.default_language,
+                "default_language": s.app.default_language,
             },
             "menus": {"apps": list(app.state.menus.menus)},
             "screens": {

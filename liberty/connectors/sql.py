@@ -656,6 +656,7 @@ class SQLConnector:
         *,
         dictionary: DictionaryFile | None = None,
         pool_max_rows: int | None = None,
+        default_language: str = "en",
     ) -> None:
         self.name = name
         self.config = config
@@ -666,6 +667,9 @@ class SQLConnector:
         )
         self._pools = pools
         self._dict = dictionary or DictionaryFile()
+        # App-wide fallback language — used when a request supplies no Accept-Language. Lives on
+        # [app] in app.toml; passed through by ConnectorRegistry so it's a single source of truth.
+        self._default_language = default_language
         self._queries: dict[str, QueryDef] = {q.name: q for q in config.queries}
         self._dialect: str | None = None  # lazily resolved from the pool
 
@@ -1124,7 +1128,7 @@ class SQLConnector:
         :class:`StatementNotAllowedError`, :class:`WriteNotAllowedError`, or
         :class:`UnknownPoolError`; database errors propagate as the underlying SQLAlchemy exception.
         """
-        lang = language or self._dict.default_language
+        lang = language or self._default_language
         # For a cross-pool screen (its connector ≠ its app), the dictionary entries live under
         # the *app's* scope in dictionary.toml — not this SQL connector's scope. The route
         # layer threads it in via ``dictionary_scope`` when the query is run through a screen;
@@ -1336,7 +1340,7 @@ class SQLConnector:
         """
         # ── prep — mirrors execute() for SELECT (kept inline for now; refactoring the shared
         # prep into a helper would touch every call site and isn't worth the diff for this slice).
-        lang = language or self._dict.default_language
+        lang = language or self._default_language
         dict_scope = dictionary_scope or self.name
         qdef = self.get_query(query_name)
         cap = self._row_cap(qdef, max_rows, screen_max_rows)

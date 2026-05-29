@@ -96,6 +96,10 @@ class AppSettings(BaseModel):
     # swapping a live SQL engine mid-query is too risky; use the Pools page's manual reload
     # for those. See liberty.web.hot_reload for the per-file dispatch.
     hot_reload: bool = False
+    # Fallback language for dictionary translations when a request doesn't supply Accept-Language.
+    # Each dictionary entry's ``l`` map carries per-language overrides; when none match, the base
+    # ``label`` is used. App-wide setting (one value covers every connector).
+    default_language: str = "en"
 
 
 class ConnectorSettings(BaseModel):

@@ -86,6 +86,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         dictionary_path=settings.connectors.dictionary_path,
         master_key=settings.crypto.master_key,
         license=license_result,
+        default_language=settings.app.default_language,
     )
     request.app.state.license = license_result
     request.app.state.connectors = new

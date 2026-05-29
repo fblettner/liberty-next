@@ -43,6 +43,7 @@ class ConnectorRegistry:
         dictionary: DictionaryFile | None = None,
         http_client: httpx.AsyncClient | None = None,
         master_key: str = "",
+        default_language: str = "en",
     ) -> None:
         self.pools = PoolRegistry(config.pools, master_key=master_key)
         self.dictionary = dictionary or DictionaryFile()
@@ -55,6 +56,7 @@ class ConnectorRegistry:
                 self._connectors[name] = SQLConnector(
                     name, conn_cfg, self.pools, dictionary=self.dictionary,
                     pool_max_rows=pool_cfg.max_rows if pool_cfg else None,
+                    default_language=default_language,
                 )
             elif isinstance(conn_cfg, ApiConnectorConfig):
                 self._connectors[name] = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
@@ -119,6 +121,7 @@ def load_connectors(
     http_client: httpx.AsyncClient | None = None,
     master_key: str = "",
     license: LicenseResult | None = None,
+    default_language: str = "en",
 ) -> ConnectorRegistry:
     """Load ``connectors.toml`` at *path* (and the shared ``dictionary.toml`` — *dictionary_path*,
     or ``dictionary.toml`` next to *path* — a missing file is fine) and build a :class:`ConnectorRegistry`.
@@ -146,4 +149,5 @@ def load_connectors(
         dictionary=load_dictionary(dict_path),
         http_client=http_client,
         master_key=master_key,
+        default_language=default_language,
     )

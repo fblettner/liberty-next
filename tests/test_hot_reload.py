@@ -80,7 +80,7 @@ def test_pool_signature_works_for_raw_dict_too() -> None:
 def _settings(tmp_path: Path) -> SimpleNamespace:
     """A minimal Settings-shaped object — only the path attributes the handlers read."""
     return SimpleNamespace(
-        app=SimpleNamespace(hot_reload=False, log_level="info"),
+        app=SimpleNamespace(hot_reload=False, log_level="info", default_language="en"),
         menus=SimpleNamespace(config_path=tmp_path / "menus.toml"),
         screens=SimpleNamespace(config_path=tmp_path / "screens.toml"),
         charts=SimpleNamespace(config_path=tmp_path / "charts.toml"),

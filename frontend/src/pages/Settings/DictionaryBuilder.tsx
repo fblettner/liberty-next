@@ -8,10 +8,10 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, Edit3, BookText } from 'lucide-react'
+import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, Input, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -31,13 +31,6 @@ const Shell = styled.div`
   display: flex; flex-direction: column; gap: 12px;
   flex: 1; min-height: 0; height: 100%;
 `
-const ToolbarDivider = styled.span`
-  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
-`
-const LangBox = styled.label`
-  display: inline-flex; align-items: center; gap: 6px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & input { width: 60px; }
-`
 const SubTabs = styled.div`display: flex; align-items: center; gap: 4px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
 const SubTab = styled.button<{ $active?: boolean }>`
   height: 30px; padding: 0 14px; border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -46,8 +39,6 @@ const SubTab = styled.button<{ $active?: boolean }>`
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
   &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; }
 `
-// Generic flex row used by the top toolbar (status / language / scan / save).
-const Toolbar = styled.div`display: flex; flex-wrap: wrap; gap: 4px; align-items: center;`
 const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // The left nav has its own scroll container so a long list (think 347 dictionary entries) doesn't
 // drag the whole page along when you wheel through it. The search row and the "+ Add" button stay
@@ -479,12 +470,35 @@ export default function DictionaryBuilder() {
   // empty one naturally disappears on the next round-trip). Picking one just switches to it.
   const addScopeCandidates = Object.keys(connectors ?? {}).filter((c) => !scopes.includes(c)).sort()
   const onPickScope = (name: string) => { setScope(name); setStatus(null) }
-  const setLang = (lang: string) => {
-    const trimmed = lang.trim()
-    const next: DictionaryData = { ...dict }
-    if (!trimmed || trimmed === 'en') delete next.default_language
-    else next.default_language = trimmed
-    setDict(next); setStatus(null)
+  // Revert local edits to the last loaded state — same pattern as Pools / Connectors / Menus.
+  const discard = () => {
+    if (!original) return
+    setDict(JSON.parse(original) as DictionaryData)
+    setStatus(null); setError(null)
+  }
+  // Clone the selected record under a new key — same prompt-and-validate flow as Add.
+  const cloneRecord = async (oldKey: string) => {
+    if (!sel) return
+    const src = section[oldKey]
+    if (!src) return
+    const raw = (await modals.prompt({
+      title: t('common.clone', 'Clone'),
+      message: t(`settings.dictionary.${kind}.namePrompt`),
+      defaultValue: `${oldKey}_copy`,
+      submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => {
+        const key = kind === 'entries' ? v.trim().toUpperCase() : v.trim()
+        if (!key) return t('common.nameRequired', 'Name is required.')
+        if (key === oldKey) return t('settings.tables.duplicateSameName', 'Pick a different name.')
+        if (key in section) return t('common.nameExists', { name: key })
+        return null
+      },
+    }))?.trim()
+    if (!raw) return
+    const key = kind === 'entries' ? raw.toUpperCase() : raw
+    // Deep-copy so the editor doesn't share references between the source and the clone.
+    setDict(setSection(dict, scope, kind, { ...section, [key]: JSON.parse(JSON.stringify(src)) }))
+    setSel(key); setStatus(null)
   }
 
   async function save() {
@@ -508,26 +522,8 @@ export default function DictionaryBuilder() {
       {/* One consolidated top toolbar — config path + status + language input on the left, Save +
           Reload on the right. Replaces the old "header at top + bottom Save Row" split — the
           operator never has to scroll past a long entries list to reach Save / Reload. */}
-      <Toolbar style={{ flexShrink: 0 }}>
-        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        <LangBox title={t('settings.dictionary.langHint')} style={{ marginLeft: 'auto' }}>
-          {t('settings.dictionary.lang')}
-          <Input type="text" value={dict.default_language ?? ''} placeholder="en" onChange={(e) => setLang(e.target.value)} />
-        </LangBox>
-        <ToolbarDivider />
-        <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy} title={t('settings.dictscan.title', 'Generate dictionary items')}>
-          <BookText size={13} /> {t('settings.dictscan.scanTable', 'Scan a table')}
-        </Button>
-        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-        </Button>
-      </Toolbar>
-      {/* Scope (= connector) at the TOP — the SAME shared scope row every other per-connector editor
-          uses. The dictionary-specific *kind* tabs (entries / enums / …) come below it. Framework
-          enums are shared-only, so when that kind is active we show only the shared scope + disable
-          "Add scope". */}
+      {/* Single top row — same shape as the other editors: status on the left, scope chips +
+          Add scope in the middle, Scan / Discard / Save on the far right. */}
       <ScopeRow
         scopes={SHARED_ONLY.has(kind)
           ? [{ value: SCOPE_SHARED, label: scopeLabel(SCOPE_SHARED) }]
@@ -537,6 +533,26 @@ export default function DictionaryBuilder() {
         onAddScope={() => setAddScopeOpen(true)}
         addScopeDisabled={SHARED_ONLY.has(kind)}
         addScopeTitle={SHARED_ONLY.has(kind) ? t('settings.dictionary.framework_enums.scopeNote') : t('settings.dictionary.scope.addPrompt')}
+        leading={(dirty || status || error) ? (
+          <>
+            {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+            {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
+            {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
+          </>
+        ) : undefined}
+        right={
+          <>
+            <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy}>
+              <BookText size={13} /> {t('settings.dictscan.scanTable', 'Scan a table')}
+            </Button>
+            <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+              <Undo2 size={13} /> {t('common.discard', 'Discard')}
+            </Button>
+            <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+            </Button>
+          </>
+        }
       />
       <SubTabs>
         {KIND_ORDER.map((k) => (
@@ -592,8 +608,11 @@ export default function DictionaryBuilder() {
                   <Button $variant="ghost" $size="sm" onClick={() => renameRecord(sel)} disabled={busy}>
                     <Edit3 size={13} /> {t('settings.rename.button')}
                   </Button>
-                  <Button $variant="danger" $size="sm" onClick={() => removeRecord(sel)} disabled={busy}>
-                    <Trash2 size={13} /> {t(`settings.dictionary.${kind}.delete`)}
+                  <Button $variant="ghost" $size="sm" onClick={() => cloneRecord(sel)} disabled={busy}>
+                    <Copy size={13} /> {t('common.clone', 'Clone')}
+                  </Button>
+                  <Button $variant="ghost" $size="sm" onClick={() => removeRecord(sel)} disabled={busy} style={{ color: colors.red.main }}>
+                    <Trash2 size={13} /> {t('common.delete', 'Delete')}
                   </Button>
                 </Row>
               </Row>
