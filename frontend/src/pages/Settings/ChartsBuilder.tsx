@@ -1,10 +1,11 @@
 // Charts settings — the catalog of `config/charts.toml`, organised by scope (the connector each
-// chart reads from): `[charts.<scope>.<id>]`. A scope picker at the top, then the list of that
-// scope's charts. Clicking one (or "Add chart") opens the visual ChartEditorModal (General +
-// Chart-builder tabs, live preview). Saving rewrites charts.toml (PUT) + reloads; deleting too.
+// chart reads from): `[charts.<scope>.<id>]`. A scope picker at the top, then a filtered list of
+// that scope's charts with per-row Rename / Clone / Delete actions. Clicking a row (or "Add chart")
+// opens the visual ChartEditorModal (General + Chart-builder tabs, live preview). Saving rewrites
+// charts.toml (PUT) + reloads.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, BarChart3 } from 'lucide-react'
+import { Plus, Trash2, BarChart3, Search, Edit3, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -17,25 +18,31 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 
 // scope (connector) -> chart id -> chart body
 type Charts = Record<string, Record<string, Record<string, unknown>>>
+type ChartBody = { label?: string; description?: string; query?: string; spec?: { type?: string; x?: string; y?: string[] } }
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const FilterBar = styled.div`
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  flex-shrink: 0;
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+    &::placeholder { color: ${colors.text.muted}; } }
+`
 const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
 const Item = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: ${radius.md};
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: ${radius.md};
   border: 1px solid ${colors.border}; background: ${colors.bg.input}; cursor: pointer; min-width: 0;
-  & > svg { flex-shrink: 0; color: ${colors.blue.main}; }
-  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & > .icon { flex-shrink: 0; color: ${colors.blue.main}; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .sub { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .label { font-family: ${fonts.sans}; font-size: ${fontSize.sm}; color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .meta { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .actions { flex-shrink: 0; display: flex; gap: 4px; }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
-`
-const DelBtn = styled.button`
-  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
-  border-radius: ${radius.sm}; border: 1px solid transparent; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-  &:hover { background: ${colors.red.bg}; color: ${colors.red.main}; border-color: ${colors.red.border}; }
 `
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 
@@ -45,6 +52,7 @@ export default function ChartsBuilder() {
   const { currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState<string>('')
   const [doc, setDoc] = useState<Charts | null>(null)
+  const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -60,8 +68,7 @@ export default function ChartsBuilder() {
   }
   useEffect(load, [t])
 
-  // Persist the whole charts.toml + reload. Empty scopes (a connector picked via "Add scope" but
-  // never filled) are pruned so they don't write a dangling `[charts.<scope>]` table.
+  // Persist + reload. Empty scopes are pruned so they don't write a dangling `[charts.<scope>]`.
   const persist = async (next: Charts, okMsg: string) => {
     setBusy(true); setError(null); setStatus(null)
     const pruned = Object.fromEntries(Object.entries(next).filter(([, byId]) => Object.keys(byId).length > 0))
@@ -77,32 +84,67 @@ export default function ChartsBuilder() {
 
   const onModalSave = (id: string, record: Record<string, unknown>) => {
     const byId = { ...(doc?.[scope] ?? {}) }
-    // A rename in the modal changes the id → drop the old key so the dict key matches `id`.
     if (editing && editing.id && editing.id !== id) delete byId[editing.id]
     byId[id] = record
     const next: Charts = { ...(doc ?? {}), [scope]: byId }
     setEditing(undefined)
-    void persist(next, t('settings.charts.saved', 'Saved "{{id}}".', { id }))
+    void persist(next, t('settings.charts.saved', 'Saved.'))
+  }
+
+  const validateId = (v: string, oldId: string | null): string | null => {
+    if (!v) return t('common.nameRequired', 'Name is required.')
+    if (oldId && v === oldId) return t('settings.tables.duplicateSameName', 'Pick a different name.')
+    if (!/^[A-Za-z0-9_-]+$/.test(v)) return t('settings.charts.errIdShape', 'Id: letters, digits, underscore, hyphen only.')
+    if (v in (doc?.[scope] ?? {})) return t('common.nameExists', { name: v })
+    return null
+  }
+
+  const renameChart = async (oldId: string) => {
+    const next = (await modals.prompt({
+      title: t('settings.rename.button', 'Rename'),
+      message: t('settings.charts.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
+      defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
+      validate: (v) => validateId(v.trim(), oldId),
+    }))?.trim()
+    if (!next || next === oldId) return
+    const byId = { ...(doc?.[scope] ?? {}) }
+    const src = byId[oldId] as Record<string, unknown>
+    delete byId[oldId]
+    byId[next] = { ...src, id: next }
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.renamed', 'Renamed.'))
+  }
+
+  const cloneChart = async (oldId: string) => {
+    const next = (await modals.prompt({
+      title: t('common.clone', 'Clone'),
+      message: t('settings.charts.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
+      defaultValue: `${oldId}_copy`, submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => validateId(v.trim(), oldId),
+    }))?.trim()
+    if (!next) return
+    const byId = { ...(doc?.[scope] ?? {}) }
+    const src = JSON.parse(JSON.stringify(byId[oldId])) as Record<string, unknown>
+    src.id = next
+    byId[next] = src
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.cloned', 'Cloned.'))
   }
 
   const removeChart = async (id: string) => {
     const ok = await modals.confirm({
       title: t('settings.charts.delete', 'Delete chart'),
-      message: t('settings.charts.confirmDelete', 'Delete chart "{{name}}"? Dashboards referencing it by id will show an error until you fix them.', { name: id }),
+      message: t('settings.charts.confirmDelete', 'Delete chart {{name}}?', { name: id }),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
     const byId = { ...(doc?.[scope] ?? {}) }; delete byId[id]
-    const next: Charts = { ...(doc ?? {}), [scope]: byId }
-    void persist(next, t('settings.charts.deleted', 'Deleted "{{id}}".', { id }))
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.deleted', 'Deleted.'))
   }
 
   const scopes = useMemo<ScopeOption[]>(
     () => Object.keys(doc ?? {}).sort().map((v) => ({ value: v, label: v })),
     [doc],
   )
-  // Default the scope once charts load — the workspace's selected app if it has charts, else first.
   useEffect(() => {
     if (!doc) return
     setScope((cur) => {
@@ -112,13 +154,21 @@ export default function ChartsBuilder() {
     })
   }, [doc, scopes, currentApp])
 
-  // Connectors that don't yet have a charts scope — offered by "Add scope".
   const addCandidates = useMemo(() => {
     const have = new Set(Object.keys(doc ?? {}))
     return (connectors ?? []).filter((c) => c.type === 'sql' && !have.has(c.name)).map((c) => c.name).sort()
   }, [doc, connectors])
 
-  const ids = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
+  const allIds = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
+  const needle = filter.trim().toLowerCase()
+  const ids = needle
+    ? allIds.filter((id) => {
+        const c = (doc?.[scope]?.[id] ?? {}) as ChartBody
+        return id.toLowerCase().includes(needle)
+          || (c.label ?? '').toLowerCase().includes(needle)
+          || (c.query ?? '').toLowerCase().includes(needle)
+      })
+    : allIds
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
   if (!doc) return <Centered />
@@ -141,28 +191,49 @@ export default function ChartsBuilder() {
         </ToolbarRight>
       </Toolbar>
 
+      {allIds.length > 0 && (
+        <FilterBar>
+          <Search size={14} />
+          <input value={filter} onChange={(e) => setFilter(e.target.value)}
+            placeholder={t('settings.filterPlaceholder', 'Filter…')} />
+        </FilterBar>
+      )}
+
       <List>
         {ids.map((id) => {
-          const c = (doc[scope]?.[id] ?? {}) as { label?: string; query?: string }
-          const sub = c.query ? `${scope} · ${c.query}` : c.label || ''
+          const c = (doc[scope]?.[id] ?? {}) as ChartBody
+          const type = c.spec?.type
+          const meta = [c.query && `${scope}.${c.query}`, type, c.spec?.x && `x: ${c.spec.x}`].filter(Boolean).join(' · ')
           return (
             <Item key={id} onClick={() => { setEditing({ ...(doc[scope][id] as unknown as ChartRecord), id, connector: scope }); setStatus(null) }}>
-              <BarChart3 size={15} />
+              <BarChart3 className="icon" size={18} />
               <span className="text">
                 <span className="name">{id}</span>
-                {sub && <span className="sub">{sub}</span>}
+                {c.label && <span className="label">{c.label}</span>}
+                {meta && <span className="meta">{meta}</span>}
               </span>
-              <DelBtn onClick={(e) => { e.stopPropagation(); void removeChart(id) }}
-                title={t('settings.charts.deleteOne', 'Delete chart "{{name}}"', { name: id })}>
-                <Trash2 size={14} />
-              </DelBtn>
+              <span className="actions" onClick={(e) => e.stopPropagation()}>
+                <Button $variant="ghost" $size="sm" onClick={() => void renameChart(id)} disabled={busy}>
+                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => void cloneChart(id)} disabled={busy}>
+                  <Copy size={13} /> {t('common.clone', 'Clone')}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => void removeChart(id)} disabled={busy} style={{ color: colors.red.main }}>
+                  <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                </Button>
+              </span>
             </Item>
           )
         })}
         {ids.length === 0 && (
-          <Empty>{scope
-            ? t('settings.charts.emptyScope', 'No charts in "{{scope}}" yet. Click "Add chart" to build one.', { scope })
-            : t('settings.charts.empty', 'No charts yet. Use "Add scope" to pick a connector, then "Add chart".')}</Empty>
+          <Empty>
+            {!scope
+              ? t('settings.charts.empty', 'No charts yet. Use "Add scope" to pick a connector, then "Add chart".')
+              : allIds.length === 0
+                ? t('settings.charts.emptyScope', 'No charts in "{{scope}}" yet.', { scope })
+                : t('common.noMatches', 'No matches')}
+          </Empty>
         )}
       </List>
 
@@ -170,7 +241,7 @@ export default function ChartsBuilder() {
         <ChartEditorModal
           initial={editing}
           scope={scope}
-          takenIds={ids.filter((x) => x !== (editing?.id ?? ''))}
+          takenIds={allIds.filter((x) => x !== (editing?.id ?? ''))}
           onSave={onModalSave}
           onClose={() => setEditing(undefined)}
         />

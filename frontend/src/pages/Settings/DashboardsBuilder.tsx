@@ -1,12 +1,10 @@
 // Dashboards settings — the catalog of `config/dashboards.toml`, organised by scope (the owning
-// connector/app): `[dashboards.<scope>.<id>]`. A scope picker at the top, then that scope's
-// dashboards. Clicking one (or "Add dashboard") opens the visual DashboardEditorModal — a
-// fullscreen canvas of the REAL widget grid (live charts / KPIs / tables). A widget may read from
-// any connector; the scope is just which app the dashboard belongs to. Saving rewrites
-// dashboards.toml (PUT) + reloads.
+// connector): `[dashboards.<scope>.<id>]`. A scope picker at the top, then that scope's dashboards
+// in a filtered list with per-row Rename / Clone / Delete. Clicking a row (or "Add dashboard")
+// opens the visual DashboardEditorModal — a fullscreen canvas of the live widget grid.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, LayoutDashboard } from 'lucide-react'
+import { Plus, Trash2, LayoutDashboard, Search, Edit3, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -19,28 +17,33 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Raw = Record<string, unknown>
-// scope (owning connector) -> dashboard id -> dashboard body
 type Dashboards = Record<string, Record<string, Raw>>
 type ChartsByScope = Record<string, Record<string, Raw>>
+type DashBody = { label?: string; description?: string | null; widgets?: unknown[]; filters?: unknown[] }
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const FilterBar = styled.div`
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  flex-shrink: 0;
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+    &::placeholder { color: ${colors.text.muted}; } }
+`
 const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
 const Item = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: ${radius.md};
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: ${radius.md};
   border: 1px solid ${colors.border}; background: ${colors.bg.input}; cursor: pointer; min-width: 0;
-  & > svg { flex-shrink: 0; color: ${colors.blue.main}; }
-  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & > .icon { flex-shrink: 0; color: ${colors.blue.main}; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .sub { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .label { font-family: ${fonts.sans}; font-size: ${fontSize.sm}; color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .meta { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .actions { flex-shrink: 0; display: flex; gap: 4px; }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
-`
-const DelBtn = styled.button`
-  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
-  border-radius: ${radius.sm}; border: 1px solid transparent; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-  &:hover { background: ${colors.red.bg}; color: ${colors.red.main}; border-color: ${colors.red.border}; }
 `
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 
@@ -53,6 +56,7 @@ export default function DashboardsBuilder() {
   const [scope, setScope] = useState<string>('')
   const [doc, setDoc] = useState<Dashboards | null>(null)
   const [charts, setCharts] = useState<ChartsByScope>({})
+  const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -70,7 +74,6 @@ export default function DashboardsBuilder() {
   }
   useEffect(load, [t])
 
-  // Persist + reload. Empty scopes (picked via "Add scope" but never filled) are pruned.
   const persist = async (next: Dashboards, okMsg: string) => {
     setBusy(true); setError(null); setStatus(null)
     const pruned = Object.fromEntries(Object.entries(next).filter(([, byId]) => Object.keys(byId).length > 0))
@@ -89,9 +92,8 @@ export default function DashboardsBuilder() {
     const byId = { ...(doc?.[scope] ?? {}) }
     if (prevId && prevId !== id) delete byId[prevId]
     byId[id] = record
-    const next: Dashboards = { ...(doc ?? {}), [scope]: byId }
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.saved', 'Saved.'))
     setEditing(undefined)
-    void persist(next, t('settings.dashboards.savedOne', 'Saved "{{id}}".', { id }))
   }
 
   const addDashboard = async () => {
@@ -103,17 +105,53 @@ export default function DashboardsBuilder() {
     setStatus(null)
   }
 
+  const validateId = (v: string, oldId: string | null): string | null => {
+    if (!v) return t('common.nameRequired', 'Name is required.')
+    if (oldId && v === oldId) return t('settings.tables.duplicateSameName', 'Pick a different name.')
+    if (v in (doc?.[scope] ?? {})) return t('common.nameExists', { name: v })
+    return null
+  }
+
+  const renameDashboard = async (oldId: string) => {
+    const next = (await modals.prompt({
+      title: t('settings.rename.button', 'Rename'),
+      message: t('settings.dashboards.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
+      defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
+      validate: (v) => validateId(v.trim(), oldId),
+    }))?.trim()
+    if (!next || next === oldId) return
+    const byId = { ...(doc?.[scope] ?? {}) }
+    const src = byId[oldId]
+    delete byId[oldId]
+    byId[next] = { ...src, id: next }
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.renamed', 'Renamed.'))
+  }
+
+  const cloneDashboard = async (oldId: string) => {
+    const next = (await modals.prompt({
+      title: t('common.clone', 'Clone'),
+      message: t('settings.dashboards.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
+      defaultValue: `${oldId}_copy`, submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => validateId(v.trim(), oldId),
+    }))?.trim()
+    if (!next) return
+    const byId = { ...(doc?.[scope] ?? {}) }
+    const src = JSON.parse(JSON.stringify(byId[oldId])) as Raw
+    src.id = next
+    byId[next] = src
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.cloned', 'Cloned.'))
+  }
+
   const removeDashboard = async (id: string) => {
     const ok = await modals.confirm({
-      title: t('settings.dashboards.delete'),
-      message: t('settings.dashboards.confirmDelete', { name: id }),
+      title: t('settings.dashboards.delete', 'Delete dashboard'),
+      message: t('settings.dashboards.confirmDelete', 'Delete dashboard {{name}}?', { name: id }),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
     const byId = { ...(doc?.[scope] ?? {}) }; delete byId[id]
-    const next: Dashboards = { ...(doc ?? {}), [scope]: byId }
-    void persist(next, t('settings.dashboards.deletedOne', 'Deleted "{{id}}".', { id }))
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.deleted', 'Deleted.'))
   }
 
   const scopes = useMemo<ScopeOption[]>(
@@ -134,9 +172,16 @@ export default function DashboardsBuilder() {
     return (connectors ?? []).filter((c) => !have.has(c.name)).map((c) => c.name).sort()
   }, [doc, connectors])
 
-  const ids = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
-  // Chart-reference widgets resolve within the dashboard's scope, so the chart picker offers this
-  // scope's charts (keyed by bare id).
+  const allIds = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
+  const needle = filter.trim().toLowerCase()
+  const ids = needle
+    ? allIds.filter((id) => {
+        const d = (doc?.[scope]?.[id] ?? {}) as DashBody
+        return id.toLowerCase().includes(needle)
+          || (d.label ?? '').toLowerCase().includes(needle)
+          || (d.description ?? '').toLowerCase().includes(needle)
+      })
+    : allIds
   const chartsCatalog = (charts[scope] ?? {}) as Record<string, { label?: string; connector?: string; query?: string; spec?: SavedChartSpec }>
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
@@ -160,29 +205,54 @@ export default function DashboardsBuilder() {
         </ToolbarRight>
       </Toolbar>
 
+      {allIds.length > 0 && (
+        <FilterBar>
+          <Search size={14} />
+          <input value={filter} onChange={(e) => setFilter(e.target.value)}
+            placeholder={t('settings.filterPlaceholder', 'Filter…')} />
+        </FilterBar>
+      )}
+
       <List>
         {ids.map((id) => {
-          const dash = (doc[scope]?.[id] ?? {}) as { label?: string; description?: string | null; widgets?: unknown[] }
-          const n = Array.isArray(dash.widgets) ? dash.widgets.length : 0
-          const sub = `${dash.label || ''}${dash.label ? ' · ' : ''}${t('settings.dash.widgetCount', '{{n}} widget(s)', { n })}`
+          const dash = (doc[scope]?.[id] ?? {}) as DashBody
+          const widgetsN = Array.isArray(dash.widgets) ? dash.widgets.length : 0
+          const filtersN = Array.isArray(dash.filters) ? dash.filters.length : 0
+          const meta = [
+            t('settings.dash.widgetCount', '{{n}} widget(s)', { n: widgetsN }),
+            filtersN > 0 && t('settings.dash.filterCount', '{{n}} filter(s)', { n: filtersN }),
+            dash.description,
+          ].filter(Boolean).join(' · ')
           return (
             <Item key={id} onClick={() => { setEditing({ ...(doc[scope][id]), id }); setStatus(null) }}>
-              <LayoutDashboard size={15} />
+              <LayoutDashboard className="icon" size={18} />
               <span className="text">
                 <span className="name">{id}</span>
-                <span className="sub">{sub}</span>
+                {dash.label && <span className="label">{dash.label}</span>}
+                {meta && <span className="meta">{meta}</span>}
               </span>
-              <DelBtn onClick={(e) => { e.stopPropagation(); void removeDashboard(id) }}
-                title={t('settings.dashboards.deleteOne', { name: id })}>
-                <Trash2 size={14} />
-              </DelBtn>
+              <span className="actions" onClick={(e) => e.stopPropagation()}>
+                <Button $variant="ghost" $size="sm" onClick={() => void renameDashboard(id)} disabled={busy}>
+                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => void cloneDashboard(id)} disabled={busy}>
+                  <Copy size={13} /> {t('common.clone', 'Clone')}
+                </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => void removeDashboard(id)} disabled={busy} style={{ color: colors.red.main }}>
+                  <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                </Button>
+              </span>
             </Item>
           )
         })}
         {ids.length === 0 && (
-          <Empty>{scope
-            ? t('settings.dashboards.emptyScope', 'No dashboards in "{{scope}}" yet. Click "Add dashboard".', { scope })
-            : t('settings.dashboards.empty')}</Empty>
+          <Empty>
+            {!scope
+              ? t('settings.dashboards.empty')
+              : allIds.length === 0
+                ? t('settings.dashboards.emptyScope', 'No dashboards in "{{scope}}" yet.', { scope })
+                : t('common.noMatches', 'No matches')}
+          </Empty>
         )}
       </List>
 

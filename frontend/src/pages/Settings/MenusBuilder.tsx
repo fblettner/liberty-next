@@ -12,7 +12,7 @@
 // every child's `parent` reference to match.
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Undo2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -357,28 +357,12 @@ export default function MenusBuilder() {
     setApps((p) => ({ ...(p ?? {}), [pick]: { items: [] } }))
     setSelApp(pick); setStatus(null)
   }
-  // Deleting a whole app's menu persists immediately (write menus.toml + reload), not as a pending
-  // edit a reload would silently drop. (Individual menu *items* stay local — they're a structural
-  // tree edit committed on Save, like move / indent / add.)
-  const removeApp = async (name: string) => {
-    const ok = await modals.confirm({
-      title: t('settings.menus.app.delete'),
-      message: t('settings.menus.app.confirmDelete', { name }),
-      variant: 'danger',
-      confirmLabel: t('common.delete'),
-    })
-    if (!ok) return
-    const next = { ...(apps ?? {}) }; delete next[name]
-    setBusy(true); setError(null); setStatus(null)
-    try {
-      await api.put<{ saved: boolean }>('/admin/config/menus/parsed', { menus: next })
-      await api.post<{ menu_apps: string[] }>('/admin/reload')
-      setSelApp((s) => (s === name ? null : s))
-      setStatus(t('settings.menus.saved'))
-      load()
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
-    } finally { setBusy(false) }
+  // Delete app is gone — the connector cascade (Settings → Connectors → Delete) is the single
+  // path that removes a connector and everything keyed under it (menu, screens, charts, …).
+  // Revert pending tree edits to the last loaded state.
+  const discard = () => {
+    if (!original) return
+    try { setApps(JSON.parse(original) as AppsMap); setStatus(null); setError(null) } catch { /* ignore */ }
   }
   const renameItem = async (oldId: string, newId: string) => {
     if (!newId || newId === oldId) return
@@ -417,6 +401,40 @@ export default function MenusBuilder() {
     }
     if (parent) setExpanded((s) => new Set([...s, parent]))
     setSelItem(newId)
+  }
+  // Clone the selected item — folders clone their entire subtree, leaves clone alone. Prompts
+  // for the new id (with the usual validation).
+  const cloneItem = async (oldId: string) => {
+    const src = items.find((it) => it.id === oldId)
+    if (!src) return
+    const next = (await modals.prompt({
+      title: t('common.clone', 'Clone'),
+      message: t('settings.menus.item.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
+      defaultValue: freshId(items, `${oldId}_copy`),
+      submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => {
+        const trimmed = v.trim()
+        if (!trimmed) return t('common.nameRequired', 'Name is required.')
+        if (items.some((it) => it.id === trimmed)) return t('common.nameExists', { name: trimmed })
+        if (!/^[A-Za-z0-9_.-]+$/.test(trimmed)) return t('settings.rename.invalidIdentifier', 'Invalid identifier.')
+        return null
+      },
+    }))?.trim()
+    if (!next) return
+    const subtree = collectSubtree(items, oldId)
+    // Build an id-map for the subtree so internal parent refs follow the rename.
+    const idMap: Record<string, string> = { [oldId]: next }
+    for (const it of subtree) {
+      if (it.id === oldId) continue
+      idMap[it.id] = freshId([...items, ...Object.values(idMap).map((id) => ({ id }) as MenuItem)], `${it.id}_copy`)
+    }
+    const cloned: MenuItem[] = subtree.map((it) => ({
+      ...JSON.parse(JSON.stringify(it)),
+      id: idMap[it.id],
+      parent: it.id === oldId ? src.parent : idMap[it.parent!],
+    }))
+    updateItems([...items, ...cloned])
+    setSelItem(next); setStatus(null)
   }
   const removeItem = async (id: string) => {
     const rec = items.find((it) => it.id === id)
@@ -531,12 +549,9 @@ export default function MenusBuilder() {
         ) : undefined}
         right={
           <>
-            {selApp && (
-              <Button $variant="ghost" $size="sm" onClick={() => removeApp(selApp)}
-                title={t('settings.menus.app.deleteOne', { name: selApp })} style={{ color: colors.red.main }}>
-                <Trash2 size={13} /> {t('common.delete')}
-              </Button>
-            )}
+            <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+              <Undo2 size={13} /> {t('common.discard', 'Discard')}
+            </Button>
             <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
               {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
             </Button>
@@ -547,6 +562,17 @@ export default function MenusBuilder() {
         <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
           <AppHeader style={{ flexShrink: 0 }}>
             <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
+            <Row gap={6}>
+              <Button $variant="ghost" $size="sm" onClick={() => addItem('folder')}>
+                <Plus size={13} /> {t('settings.menus.tree.addFolder')}
+              </Button>
+              <Button $variant="ghost" $size="sm" onClick={() => addItem('leaf')}>
+                <Plus size={13} /> {t('settings.menus.tree.addLeaf')}
+              </Button>
+              <Button $variant="ghost" $size="sm" onClick={() => selItem && cloneItem(selItem)} disabled={!selItem}>
+                <Copy size={13} /> {t('common.clone', 'Clone')}
+              </Button>
+            </Row>
           </AppHeader>
           <TreeSplit>
                 <TreeCol>
@@ -558,14 +584,6 @@ export default function MenusBuilder() {
                     {(byParent.get(null) ?? []).map((it) => renderRow(it, 0))}
                     {items.length === 0 && <Empty>{t('settings.menus.tree.empty')}</Empty>}
                   </TreeBox>
-                  <Row gap={6} style={{ marginTop: 6 }}>
-                    <Button $variant="ghost" $size="sm" onClick={() => addItem('folder')} style={{ flex: 1, justifyContent: 'flex-start' }}>
-                      <Plus size={13} /> {t('settings.menus.tree.addFolder')}
-                    </Button>
-                    <Button $variant="ghost" $size="sm" onClick={() => addItem('leaf')} style={{ flex: 1, justifyContent: 'flex-start' }}>
-                      <Plus size={13} /> {t('settings.menus.tree.addLeaf')}
-                    </Button>
-                  </Row>
                 </TreeCol>
                 <InspectorCol>
                   <InspectorInner>

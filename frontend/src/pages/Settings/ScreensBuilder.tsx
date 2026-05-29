@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FileText, Edit3, X, Zap, Filter, Layers, Maximize2, Minimize2 } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FileText, Edit3, X, Copy, Undo2, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
@@ -23,7 +23,6 @@ import {
   ModalHeader,
   Overlay,
   Row,
-  Stack,
   SpinnerRing,
   FrameworkEnumsContext,
   VisualBuilderModal,
@@ -40,82 +39,39 @@ import ScreenEditor from './ScreenEditor'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
-// Layout: outer Shell flex-fills the page, top toolbar is fixed, the Split fills the remaining
-// vertical space, and only the inner panels scroll. No page-level scroll — the operator sees
-// Save / Reload / Add / Delete without chasing them past a long list.
+// Layout: outer Shell flex-fills the page, top scope row + Add bar are fixed, the flat list scrolls.
+// Clicking a row opens the visual designer modal (the editor itself — no inline editing here).
 const Shell = styled.div`
   display: flex; flex-direction: column; gap: 12px;
   flex: 1; min-height: 0; height: 100%;
 `
-const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
-// Left = the chosen app's screens list. Scrolls on its own — a deployment with dozens of screens
-// for one app shouldn't drag the whole page.
-const NavCol = styled.div`flex: 0 0 240px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
-// Filter / search bar between the app-chip strip and the screen list. Pill-shaped (matches the
-// app chips above), 44px tall with a 16px icon and a larger placeholder — visually a peer of the
-// chunky app chips above and the two-line screen rows below (which now run ~50px). The other
-// builders (Connectors / Menus) keep a tighter 28px bar because their list items are single-line;
-// Screens is the only one with double-height rows so it needed beefing up.
-const NavSearch = styled.div`
-  display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px; margin: 8px 0 6px;
-  border: 1px solid ${colors.border}; border-radius: 999px; background: ${colors.bg.input}; color: ${colors.text.muted};
-  & svg { flex-shrink: 0; }
-  & input {
-    flex: 1; min-width: 0; height: 100%; border: none; background: transparent; outline: none;
-    color: ${colors.text.primary}; font-size: ${fontSize.md}; font-family: ${fonts.sans};
-    &::placeholder { color: ${colors.text.muted}; font-size: ${fontSize.sm}; }
-  }
-  &:focus-within { border-color: ${colors.blue.border}; }
+const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
+const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto;`
+const FilterBar = styled.div`
+  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  flex-shrink: 0;
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+    &::placeholder { color: ${colors.text.muted}; } }
 `
-const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
-// The screen row stacks id (mono) and label (sans) vertically — long labels were colliding with
-// the id when they shared a line. The icon stays centered against the two-line text block; the
-// label clamps to two lines so a "Security - Roles Matrix (combination roles for users)" type
-// description never blows the row's height past three lines.
-const NavItem = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  cursor: pointer;
-  & > svg { flex-shrink: 0; color: ${colors.text.muted}; margin-top: 2px; }
-  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  & .name { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .lbl {
-    font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted};
-    /* clamp the friendly description to two lines so a long label can't blow the row height up
-       — the rest is truncated with an ellipsis. */
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; line-height: 1.3;
-  }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
+const Item = styled.div`
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: ${radius.md};
+  border: 1px solid ${colors.border}; background: ${colors.bg.input}; cursor: pointer; min-width: 0;
+  & > .icon { flex-shrink: 0; color: ${colors.blue.main}; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .label { font-family: ${fonts.sans}; font-size: ${fontSize.sm}; color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .meta { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .actions { flex-shrink: 0; display: flex; gap: 4px; }
+  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
 `
-const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
-const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
-// Summary card shown in the right pane when a screen is selected — gives the operator a quick
-// read of the screen's shape (connector, queries, dialog/actions/hook counts) without opening
-// the designer. The big "Open Screen Designer" button raises the full editing modal.
-const SummaryDescription = styled.p`
-  margin: 0; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.55;
-`
-const SummaryGrid = styled.div`display: grid; grid-template-columns: 140px 1fr; gap: 8px 16px; align-items: baseline;`
-const SummaryLabel = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
-const SummaryValue = styled.span`color: ${colors.text.primary}; font-size: ${fontSize.md}; font-family: ${fonts.mono};`
-const StatChips = styled.div`display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;`
-// Renamed from ``Chip`` to avoid colliding with the app-picker Chip styled-button above —
-// they're different shapes (this one's a span, no hover/click).
-const StatChip = styled.span<{ $tone?: 'orange' | 'green' | 'muted' }>`
-  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
-  border: 1px solid ${({ $tone }) => ($tone === 'orange' ? colors.orange.border : $tone === 'green' ? colors.green.border : colors.border)};
-  background: ${({ $tone }) => ($tone === 'orange' ? colors.orange.bg : $tone === 'green' ? colors.green.bg : 'transparent')};
-  color: ${({ $tone }) => ($tone === 'orange' ? colors.orange.main : $tone === 'green' ? colors.green.main : colors.text.muted)};
-  font-size: ${fontSize.micro}; font-family: ${fonts.sans};
-  & svg { flex-shrink: 0; }
-`
+const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
+  const { currentApp } = useWorkspace()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
@@ -335,81 +291,22 @@ export default function ScreensBuilder() {
     setDoc((p) => ({ ...(p ?? {}), [name]: { ...((p ?? {})[name] ?? {}) } }))
     setSelApp(name); setStatus(null)
   }
-  // Rename a screen app — calls ``POST /admin/config/rename`` with ``kind=screen_app`` so the
-  // ``[screens.<old>]`` top-level key in :file:`screens.toml` AND the matching
-  // ``[menus.<old>]`` in :file:`menus.toml` (if it exists) rename together. Refuses to fire
-  // with unsaved local edits (the disk rewrite + reload would clobber them). After the
-  // endpoint succeeds, runs ``/admin/reload`` + ``refreshWorkspace()`` so the app picker
-  // everywhere picks up the new name.
-  const renameApp = async (oldName: string) => {
-    if (!doc) return
-    if (dirty) {
-      const choice = await modals.choose({
-        title: t('settings.rename.button'),
-        message: t('settings.rename.unsavedFirst'),
-        options: [
-          { value: 'save', label: t('common.save'), variant: 'primary', autoFocus: true },
-          { value: 'cancel', label: t('common.cancel'), variant: 'ghost' },
-        ],
-        cancelValue: 'cancel',
-      })
-      if (choice !== 'save') return
-      await save()
-      if (dirty) return
-    }
-    const existing = Object.keys(doc)
-    const next = (await modals.prompt({
-      title: t('settings.rename.button'),
-      message: t('settings.screens.renameAppPrompt', { name: oldName }),
-      defaultValue: oldName,
-      submitLabel: t('settings.rename.button'),
-      validate: (v) => {
-        if (!v) return t('settings.rename.empty')
-        if (v === oldName) return null
-        if (existing.includes(v)) return t('settings.rename.exists', { name: v })
-        if (!/^[a-z][a-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
-        return null
-      },
-    }))?.trim()
-    if (!next || next === oldName) return
-    setBusy(true)
-    try {
-      const result = await api.post<{ files: Record<string, number>; warnings: string[]; total_refs: number }>(
-        '/admin/config/rename', { kind: 'screen_app', old_name: oldName, new_name: next },
-      )
-      await api.post('/admin/reload')
-      refreshWorkspace()
-      setSelApp(next)
-      load()
-      const filesTouched = Object.values(result.files).filter((n) => n > 0).length
-      const tail = result.warnings.length ? ` · ${result.warnings.join(' · ')}` : ''
-      setStatus(t('settings.screens.appRenamedAcross', {
-        from: oldName, to: next, refs: result.total_refs, files: filesTouched,
-      }) + tail)
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : String(e)
-      setError(t('settings.screens.appRenameFailed', { name: oldName, error: msg }))
-    } finally {
-      setBusy(false)
-    }
-  }
-  // Deleting an app (all its screens) persists immediately (write screens.toml + reload), not as a
-  // pending edit a reload would silently drop — same fix as the other editors.
-  const removeApp = async (name: string) => {
-    const ok = await modals.confirm({
-      title: t('settings.screens.deleteApp'),
-      message: t('settings.screens.confirmAppDelete', { name }),
-      variant: 'danger',
-      confirmLabel: t('common.delete'),
-    })
-    if (!ok) return
-    const next = { ...(doc ?? {}) }; delete next[name]
-    await persistScreens(next, () => setSelApp((s) => (s === name ? null : s)))
+  // App-level rename / delete are handled by the connector cascade (Settings → Connectors →
+  // Clone / Rename / Delete operate across connectors.toml + dictionary.toml + menus.toml +
+  // screens.toml + charts.toml + dashboards.toml). Per-screen Clone / Rename / Delete + Add
+  // screen live here; everything else stays in the Connectors editor.
+  const validateScreenId = (v: string, app: string, oldId: string | null): string | null => {
+    if (!v) return t('common.nameRequired', 'Name is required.')
+    if (oldId && v === oldId) return t('settings.tables.duplicateSameName', 'Pick a different name.')
+    if (v in (doc?.[app] ?? {})) return t('common.nameExists', { name: v })
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier', 'Use letters, digits, underscore; leading letter.')
+    return null
   }
   const addScreen = async (app: string) => {
     const id = (await modals.prompt({
       title: t('settings.screens.add'),
       message: t('settings.screens.namePrompt'),
+      validate: (v) => validateScreenId(v.trim(), app, null),
     }))?.trim()
     if (!id) return
     setDoc((p) => {
@@ -420,6 +317,41 @@ export default function ScreensBuilder() {
       return { ...cur, [app]: appCur }
     })
     setSelId(id); setStatus(null)
+    openDesigner()
+  }
+  const renameScreen = async (app: string, oldId: string) => {
+    const next = (await modals.prompt({
+      title: t('settings.rename.button', 'Rename'),
+      message: t('settings.screens.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
+      defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
+      validate: (v) => validateScreenId(v.trim(), app, oldId),
+    }))?.trim()
+    if (!next || next === oldId) return
+    // Reuse updateScreen's id-rename machinery (also rewrites same-app sibling references to oldId).
+    const src = (doc?.[app]?.[oldId] ?? {}) as Record<string, unknown>
+    updateScreen(app, oldId, { ...src, id: next })
+  }
+  const cloneScreen = async (app: string, oldId: string) => {
+    const next = (await modals.prompt({
+      title: t('common.clone', 'Clone'),
+      message: t('settings.screens.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
+      defaultValue: `${oldId}_copy`, submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => validateScreenId(v.trim(), app, oldId),
+    }))?.trim()
+    if (!next) return
+    setDoc((p) => {
+      const cur = p ?? {}
+      const appCur = { ...(cur[app] ?? {}) }
+      const src = JSON.parse(JSON.stringify(appCur[oldId])) as Record<string, unknown>
+      src.id = next
+      appCur[next] = src as unknown as Screen
+      return { ...cur, [app]: appCur }
+    })
+    setSelId(next); setStatus(null)
+  }
+  const discard = () => {
+    if (!original) return
+    try { setDoc(JSON.parse(original) as AppScreens); setStatus(null); setError(null) } catch { /* ignore */ }
   }
   // Deleting a screen persists immediately — a screen is a top-level record, so its delete
   // shouldn't sit as a pending edit a reload would silently drop.
@@ -498,140 +430,81 @@ export default function ScreensBuilder() {
         ) : undefined}
         right={
           <>
-            {selApp && (
-              <>
-                <Button $variant="ghost" $size="sm" onClick={() => addScreen(selApp)} title={t('settings.screens.add')}>
-                  <Plus size={13} /> {t('settings.screens.add')}
-                </Button>
-                <Button $variant="ghost" $size="sm" onClick={() => renameApp(selApp)} title={t('settings.screens.renameAppOne', { name: selApp })} disabled={busy}>
-                  <Edit3 size={13} /> {t('settings.rename.button')}
-                </Button>
-                <Button $variant="ghost" $size="sm" onClick={() => removeApp(selApp)} title={t('settings.screens.deleteAppOne', { name: selApp })} style={{ color: colors.red.main }}>
-                  <Trash2 size={13} /> {t('common.delete')}
-                </Button>
-              </>
-            )}
+            <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+              <Undo2 size={13} /> {t('common.discard', 'Discard')}
+            </Button>
             <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
               {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
             </Button>
           </>
         }
       />
-      <Split>
-        <NavCol>
-          {selApp && (
-            <>
-              {ids.length > 6 && (
-                <NavSearch>
-                  <Search size={16} />
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${ids.length}…`} />
-                </NavSearch>
-              )}
-              <NavList>
-                {shownIds.map((id) => {
-                  const s = screens[id]
-                  return (
-                    <NavItem key={id} $active={id === selId} onClick={() => { setSelId(id); setStatus(null) }}>
-                      <FileText size={13} />
-                      <span className="text">
-                        <span className="name">{id}</span>
-                        {/* Friendly label / description below the id. Falls back to description
-                            for screens whose label is blank but description is set. Two-line
-                            clamp lives on the CSS so a long label doesn't blow the row's height. */}
-                        {(s.label || s.description) && (
-                          <span className="lbl">{s.label || s.description}</span>
-                        )}
-                      </span>
-                    </NavItem>
-                  )
-                })}
-                {shownIds.length === 0 && (
-                  <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '2px 4px' }}>
-                    {ids.length ? t('common.noMatches') : t('settings.screens.emptyApp')}
-                  </div>
-                )}
-              </NavList>
-              {/* "Add screen" and "Delete <app>" both live in the scope bar at the top — no list
-                  footer needed here. Keeps every per-scope action visible without scrolling past
-                  a long screen list. */}
-            </>
-          )}
-        </NavCol>
-        <FormCol>
-          {selScreen && selId && selApp ? (() => {
-            // Read a few stats off the selected screen so the summary card gives a quick read.
-            // Cast through Record because Screen's TS type doesn't expose every optional field
-            // and we just want counts.
-            const sc = selScreen as unknown as Record<string, unknown>
-            const dlg = sc.dialog as { tabs?: unknown[]; on_load?: unknown[]; on_save?: unknown[]; on_cancel?: unknown[] } | undefined
-            const fieldCount = Array.isArray(dlg?.tabs)
-              ? (dlg!.tabs as { fields?: unknown[] }[]).reduce((acc, t) => acc + (Array.isArray(t.fields) ? t.fields.length : 0), 0)
-              : 0
-            const tabCount = Array.isArray(dlg?.tabs) ? dlg!.tabs.length : 0
-            const onLoadCount = Array.isArray(dlg?.on_load) ? dlg!.on_load.length : 0
-            const onSaveCount = Array.isArray(dlg?.on_save) ? dlg!.on_save.length : 0
-            const onCancelCount = Array.isArray(dlg?.on_cancel) ? dlg!.on_cancel.length : 0
-            const actionsCount = Array.isArray(sc.actions) ? (sc.actions as unknown[]).length : 0
-            const rowMenuCount = Array.isArray(sc.row_menu) ? (sc.row_menu as unknown[]).length : 0
-            const onInsertCount = Array.isArray(sc.on_insert) ? (sc.on_insert as unknown[]).length : 0
-            const onUpdateCount = Array.isArray(sc.on_update) ? (sc.on_update as unknown[]).length : 0
-            const onDeleteCount = Array.isArray(sc.on_delete) ? (sc.on_delete as unknown[]).length : 0
-            return (
-            <Stack gap={16}>
-              <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ fontFamily: fonts.sans, fontSize: fontSize.lg, fontWeight: 600, color: colors.text.primary }}>
-                    {(sc.label as string | undefined) || (sc.description as string | undefined) || selId}
-                  </div>
-                  <div style={{ fontFamily: fonts.mono, fontSize: fontSize.sm, color: colors.text.muted, marginTop: 2 }}>
-                    [screens.{selApp}.{selId}]
-                  </div>
-                </div>
-                <Button $variant="danger" $size="sm" onClick={() => removeScreen(selApp, selId)} disabled={busy}>
-                  <Trash2 size={13} /> {t('settings.screens.delete')}
+      <Toolbar>
+        <ToolbarRight>
+          <Button $variant="ghost" $size="sm" onClick={() => selApp && addScreen(selApp)} disabled={busy || !selApp}>
+            <Plus size={13} /> {t('settings.screens.add')}
+          </Button>
+        </ToolbarRight>
+      </Toolbar>
+      {selApp && ids.length > 0 && (
+        <FilterBar>
+          <Search size={14} />
+          <input value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder={t('settings.filterPlaceholder', 'Filter…')} />
+        </FilterBar>
+      )}
+      <List>
+        {selApp && shownIds.map((id) => {
+          const sc = screens[id] as unknown as Record<string, unknown>
+          const dlg = sc.dialog as { tabs?: unknown[] } | undefined
+          const tabCount = Array.isArray(dlg?.tabs) ? dlg!.tabs.length : 0
+          const fieldCount = Array.isArray(dlg?.tabs)
+            ? (dlg!.tabs as { fields?: unknown[] }[]).reduce((acc, t) => acc + (Array.isArray(t.fields) ? t.fields.length : 0), 0)
+            : 0
+          const actionsCount = Array.isArray(sc.actions) ? (sc.actions as unknown[]).length : 0
+          const rowMenuCount = Array.isArray(sc.row_menu) ? (sc.row_menu as unknown[]).length : 0
+          const connector = (sc.connector as string | undefined) || selApp
+          const readQuery = sc.read_query as string | undefined
+          const label = (sc.label as string | undefined) || (sc.description as string | undefined)
+          const meta = [
+            readQuery && `${connector}.${readQuery}`,
+            t('settings.screens.summary.tabs', { count: tabCount }),
+            t('settings.screens.summary.fields', { count: fieldCount }),
+            actionsCount > 0 && t('settings.screens.summary.actions', { count: actionsCount }),
+            rowMenuCount > 0 && t('settings.screens.summary.rowMenu', { count: rowMenuCount }),
+          ].filter(Boolean).join(' · ')
+          return (
+            <Item key={id} onClick={() => { setSelId(id); setStatus(null); openDesigner() }}>
+              <FileText className="icon" size={18} />
+              <span className="text">
+                <span className="name">{id}</span>
+                {label && <span className="label">{label}</span>}
+                {meta && <span className="meta">{meta}</span>}
+              </span>
+              <span className="actions" onClick={(e) => e.stopPropagation()}>
+                <Button $variant="ghost" $size="sm" onClick={() => void renameScreen(selApp, id)} disabled={busy}>
+                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
                 </Button>
-              </Row>
-              <SummaryDescription>
-                {(sc.description as string | undefined) || t('settings.screens.summary.noDescription')}
-              </SummaryDescription>
-              <SummaryGrid>
-                <SummaryLabel>{t('settings.screens.summary.connector')}</SummaryLabel>
-                <SummaryValue>{(sc.connector as string | undefined) || `${selApp} (${t('settings.screens.summary.implicit')})`}</SummaryValue>
-                <SummaryLabel>{t('settings.screens.summary.readQuery')}</SummaryLabel>
-                <SummaryValue>{(sc.read_query as string | undefined) || <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>{t('settings.screens.summary.notSet')}</span>}</SummaryValue>
-                <SummaryLabel>{t('settings.screens.summary.writeQueries')}</SummaryLabel>
-                <SummaryValue style={{ fontFamily: fonts.mono, fontSize: fontSize.sm, color: colors.text.secondary }}>
-                  {[
-                    sc.update_query && `update: ${sc.update_query}`,
-                    sc.insert_query && `insert: ${sc.insert_query}`,
-                    sc.delete_query && `delete: ${sc.delete_query}`,
-                  ].filter(Boolean).join(' · ') || <span style={{ fontFamily: fonts.sans, color: colors.text.muted }}>—</span>}
-                </SummaryValue>
-              </SummaryGrid>
-              <StatChips>
-                <StatChip><Layers size={11} /> {t('settings.screens.summary.tabs', { count: tabCount })}</StatChip>
-                <StatChip><FileText size={11} /> {t('settings.screens.summary.fields', { count: fieldCount })}</StatChip>
-                {actionsCount > 0 && <StatChip $tone="orange"><Zap size={11} /> {t('settings.screens.summary.actions', { count: actionsCount })}</StatChip>}
-                {rowMenuCount > 0 && <StatChip $tone="orange"><Filter size={11} /> {t('settings.screens.summary.rowMenu', { count: rowMenuCount })}</StatChip>}
-                {(onLoadCount + onSaveCount + onCancelCount) > 0 && <StatChip $tone="green"><Zap size={11} /> {t('settings.screens.summary.dialogHooks', { count: onLoadCount + onSaveCount + onCancelCount })}</StatChip>}
-                {(onInsertCount + onUpdateCount + onDeleteCount) > 0 && <StatChip $tone="green"><Zap size={11} /> {t('settings.screens.summary.rowHooks', { count: onInsertCount + onUpdateCount + onDeleteCount })}</StatChip>}
-              </StatChips>
-              <Row>
-                <Button $variant="primary" onClick={openDesigner}>
-                  <Edit3 size={14} /> {t('settings.screens.openDesigner')}
+                <Button $variant="ghost" $size="sm" onClick={() => void cloneScreen(selApp, id)} disabled={busy}>
+                  <Copy size={13} /> {t('common.clone', 'Clone')}
                 </Button>
-              </Row>
-            </Stack>
-            )
-          })() : (
-            <Empty>
-              {!selApp
-                ? (apps.length ? t('settings.screens.pickApp') : t('settings.screens.empty'))
-                : (ids.length ? t('settings.screens.pickOne') : t('settings.screens.emptyApp'))}
-            </Empty>
-          )}
-        </FormCol>
-      </Split>
+                <Button $variant="ghost" $size="sm" onClick={() => void removeScreen(selApp, id)} disabled={busy} style={{ color: colors.red.main }}>
+                  <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                </Button>
+              </span>
+            </Item>
+          )
+        })}
+        {(!selApp || shownIds.length === 0) && (
+          <Empty>
+            {!selApp
+              ? (apps.length ? t('settings.screens.pickApp') : t('settings.screens.empty'))
+              : ids.length === 0
+                ? t('settings.screens.emptyApp')
+                : t('common.noMatches', 'No matches')}
+          </Empty>
+        )}
+      </List>
       {addScopeOpen && (
         <AddScopeModal
           candidates={addScopeCandidates}
