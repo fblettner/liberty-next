@@ -183,10 +183,10 @@ export default function ScreensBuilder() {
     return () => document.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps  -- cancelDesigner reads stable state
   }, [designerOpen])
-  // Close the designer when the operator picks a different screen — would otherwise show the
-  // wrong screen's data until they reopen. Reset fullscreen too so each open starts windowed.
-  // Don't revert here — the operator switched screens, they didn't ask to undo edits.
-  useEffect(() => { setDesignerOpen(false); setDesignerSnapshot(null); setDesignerFullscreen(true) }, [selApp, selId])
+  // Switching the *app* closes the designer (the previously-selected screen no longer applies).
+  // Row clicks set selId + open the designer in one go via ``openDesigner(id)`` — there's no
+  // selId-change observer that would otherwise close the modal we just opened.
+  useEffect(() => { setDesignerOpen(false); setDesignerSnapshot(null); setDesignerFullscreen(true) }, [selApp])
 
   const load = () => {
     setError(null); setStatus(null)

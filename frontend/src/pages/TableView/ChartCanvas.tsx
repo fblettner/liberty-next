@@ -121,7 +121,10 @@ export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessa
   // React-generated id, unique per ChartCanvas instance — used to scope the SVG `<linearGradient>`
   // defs we emit for the bar / area fills. Multiple charts on the same page would otherwise share
   // the same `#chart-gradient-0` def and the first chart's gradient would leak onto the others.
-  const gradId = useId()
+  // ``useId`` emits ``:r0:``-style ids — colons are technically valid in SVG ids but break the
+  // ``url(#…)`` fragment reference in some browsers, which silently drops the fill (the bars then
+  // render as transparent rectangles). Strip the colons to make the id URL-safe everywhere.
+  const gradId = useId().replace(/:/g, '')
 
   if (!spec.x || spec.y.length === 0) return <Frame><EmptyHint>{emptyMessage ?? 'Pick X and Y columns.'}</EmptyHint></Frame>
   if (data.length === 0) return <Frame><EmptyHint>{noDataMessage ?? 'No data.'}</EmptyHint></Frame>

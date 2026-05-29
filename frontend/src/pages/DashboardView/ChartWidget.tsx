@@ -80,7 +80,9 @@ export function ChartWidget({ widget, filters, filterValues }: ChartWidgetProps)
     <Placeholder $h={chartHeight}><SpinnerRing size={20} thickness={2} /></Placeholder>
   )
   // The wire `spec` uses snake_case (it came from the backend); ChartCanvas reads the runtime
-  // camelCase shape. Map the optional flags through so the canvas's defaults still apply.
+  // camelCase shape. Map every optional field through — missing ``colors`` / ``y_axis`` here is
+  // what made per-series colour overrides disappear in dashboards (the chart fell back to the
+  // default palette even when the saved spec explicitly set bar colours).
   const runtimeSpec: ChartSpec = {
     type: widget.spec.type,
     x: widget.spec.x,
@@ -90,6 +92,8 @@ export function ChartWidget({ widget, filters, filterValues }: ChartWidgetProps)
     ...(widget.spec.show_legend != null ? { showLegend: widget.spec.show_legend } : {}),
     ...(widget.spec.show_grid != null ? { showGrid: widget.spec.show_grid } : {}),
     ...(widget.spec.sort_by_x != null ? { sortByX: widget.spec.sort_by_x } : {}),
+    ...(widget.spec.colors ? { colors: widget.spec.colors } : {}),
+    ...(widget.spec.y_axis ? { yAxis: widget.spec.y_axis } : {}),
   }
   return <ChartCanvas result={result} spec={runtimeSpec} connector={widget.connector} height={chartHeight} />
 }
