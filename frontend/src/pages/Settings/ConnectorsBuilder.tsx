@@ -879,7 +879,7 @@ export default function ConnectorsBuilder() {
                 // (no need to save first). SchemaNavigator was the previous render path; it
                 // surfaced 20+ flat fields including OAuth2 ones that didn't apply to a basic
                 // connector and vice versa, which made the editor noisy and hard to scan.
-                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
+                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
               {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
                   own tab now, so this list isn't mixed with them anymore. */}

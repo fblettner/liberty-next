@@ -30,7 +30,7 @@ import {
   type FrameworkEnums,
   type JsonSchema,
 } from '../../common'
-import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen } from '../../types/config'
+import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen, DictionaryDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -81,7 +81,13 @@ export default function ScreensBuilder() {
   // resolve refs into ScreenDialog / ScreenTab / ScreenField / ParamBind / ScreenAction at the
   // right level when the user drills in.
   const [screenSchema, setScreenSchema] = useState<JsonSchema | null>(null)
-  const [enums, setEnums] = useState<FrameworkEnums | null>(null)
+  // Bundled framework enums (DICTIONARY_TYPE / QUERY_TYPE / …) from the schema endpoint. The
+  // dynamic per-app DD_ENTRIES (the dictionary-entries dropdown that drives ``ColumnHint.dd``)
+  // is computed below and layered on top before we hand the enums down to ScreenEditor.
+  const [bundledEnums, setBundledEnums] = useState<FrameworkEnums | null>(null)
+  // The dictionary document — shared entries + per-connector overlays. Needed to populate
+  // DD_ENTRIES for the currently-selected screens app (= connector).
+  const [dictionary, setDictionary] = useState<DictionaryDoc['dictionary'] | null>(null)
   // Read-only — only used to offer connectors-without-screens when creating a new screens app
   // (an app *is* a connector, so we never invent a free-form app name).
   const [connectors, setConnectors] = useState<Record<string, unknown> | null>(null)
@@ -206,16 +212,20 @@ export default function ScreensBuilder() {
       api.get<ConfigSchemas>('/admin/config/schema'),
       api.get<ScreensDoc>('/admin/config/screens/parsed'),
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed').catch((): ConnectorsDoc => ({ path: '', connectors: {} })),
+      // Dictionary feeds the DD_ENTRIES dropdown on ColumnHint.dd in the Columns tab.
+      // A failure is non-fatal — the dd field would just lose its dropdown suggestions.
+      api.get<DictionaryDoc>('/admin/config/dictionary/parsed').catch((): DictionaryDoc => ({ path: '', dictionary: {} as DictionaryDoc['dictionary'] })),
     ])
-      .then(([s, d, c]) => {
+      .then(([s, d, c, dict]) => {
         setConnectors(c.connectors)
+        setDictionary(dict.dictionary)
         // Build the Screen-level schema by lifting the `Screen` $def to the top while keeping the
         // full $defs map for SchemaNavigator to resolve nested refs (ScreenDialog → ScreenTab → …).
         const defs = (s.screens.$defs ?? {}) as Record<string, JsonSchema>
         const screen = (defs.Screen ?? {}) as JsonSchema
         const merged: JsonSchema = { ...screen, $defs: defs }
         setScreenSchema(merged)
-        setEnums(s.framework_enums)
+        setBundledEnums(s.framework_enums)
         setDoc(d.screens); setOriginal(JSON.stringify(d.screens))
         const apps = Object.keys(d.screens)
         // Deep-link: `?app=X&screen=Y` (e.g. from ConnectorsBuilder's "Open visual builder")
@@ -407,6 +417,38 @@ export default function ScreensBuilder() {
     if (!doc) return
     await persistScreens(doc)
   }
+
+  // Per-app dynamic enum: DD_ENTRIES = the dictionary entries available to ``selApp``'s screens
+  // (the shared scope merged with the connector's own overlay; per-connector wins on collision —
+  // same merge order the runtime applies in ``DictionaryFile.find_entry``). Layered on top of the
+  // bundled framework enums so the ColumnHint.dd / PromptField.dd dropdown surfaces a real list
+  // instead of a plain text input. Recomputed when the app selection changes or the dictionary is
+  // re-fetched.
+  const enums: FrameworkEnums | null = useMemo(() => {
+    if (!bundledEnums) return null
+    const base: FrameworkEnums = { ...bundledEnums }
+    if (!dictionary) {
+      base.DD_ENTRIES = { label: 'Dictionary entries', values: [] }
+      return base
+    }
+    const out = new Map<string, string>()
+    const ingest = (m: Record<string, Record<string, unknown>> | undefined) => {
+      if (!m) return
+      for (const [id, rec] of Object.entries(m)) {
+        const lbl = typeof (rec as Record<string, unknown>)?.label === 'string'
+          ? ((rec as Record<string, unknown>).label as string)
+          : id
+        out.set(id, lbl)
+      }
+    }
+    ingest(dictionary.entries)
+    if (selApp) ingest((dictionary.connectors ?? {})[selApp]?.entries)
+    const values = [...out.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([value, label]) => ({ value, label }))
+    base.DD_ENTRIES = { label: 'Dictionary entries (this app)', values }
+    return base
+  }, [bundledEnums, dictionary, selApp])
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
   if (!doc || !screenSchema) return <Centered />

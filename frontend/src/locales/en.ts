@@ -7,6 +7,7 @@ const en = {
   nav: {
     connectors: 'Connectors',
     assistant: 'Assistant',
+    monitoring: 'Monitoring',
     settings: 'Settings',
     apiDocs: 'API docs',
   },
@@ -435,7 +436,7 @@ const en = {
       invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', technical: 'Technical' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App' },
     theme: {
       intro: 'Brand the whole install — pick a preset palette, set the primary accent colour, choose a font, and name the app. Applies to every user; dark/light stays an individual choice.',
       preset: 'Preset',

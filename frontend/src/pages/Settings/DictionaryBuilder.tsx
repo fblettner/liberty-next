@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -139,6 +139,7 @@ export default function DictionaryBuilder() {
   const [busy, setBusy] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
+  const [frameworkAddOpen, setFrameworkAddOpen] = useState(false)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -321,6 +322,16 @@ export default function DictionaryBuilder() {
     setStatus(null)
   }
   const addRecord = async () => {
+    // Framework enums are a closed set defined in liberty/framework_enums.py — operators can't
+    // invent a new id, they can only override an existing one. So skip the free-text prompt and
+    // open a picker showing the bundled ids that aren't already overridden. The chosen id seeds
+    // the override with the framework's bundled values (the runtime REPLACES the bundled set
+    // when an override exists — see DictionaryFile.framework_enums docstring — so starting from
+    // an empty values list would wipe every built-in choice).
+    if (kind === 'framework_enums') {
+      setFrameworkAddOpen(true)
+      return
+    }
     const raw = (await modals.prompt({
       title: t(`settings.dictionary.${kind}.add`),
       message: t(`settings.dictionary.${kind}.namePrompt`),
@@ -332,6 +343,18 @@ export default function DictionaryBuilder() {
     const key = kind === 'entries' ? raw.toUpperCase() : raw
     if (key in section) { setSel(key); return }
     setDict(setSection(dict, scope, kind, { ...section, [key]: newRecord(kind) }))
+    setSel(key); setStatus(null)
+  }
+  const addFrameworkOverride = (key: string) => {
+    if (!dict) return
+    if (key in section) { setSel(key); return }
+    const bundled = (schemas?.framework_enums ?? {})[key]
+    const seed: Record<string, unknown> = {
+      label: typeof bundled?.label === 'string' ? bundled.label : key,
+      // Clone so subsequent edits don't mutate the bundled defaults the rest of the UI reads.
+      values: Array.isArray(bundled?.values) ? JSON.parse(JSON.stringify(bundled.values)) : [],
+    }
+    setDict(setSection(dict, scope, kind, { ...section, [key]: seed }))
     setSel(key); setStatus(null)
   }
   const removeRecord = async (key: string) => {
@@ -640,7 +663,67 @@ export default function DictionaryBuilder() {
           onClose={() => setAddScopeOpen(false)}
         />
       )}
+      {frameworkAddOpen && (
+        <FrameworkEnumPickerModal
+          schema={schemas?.framework_enums}
+          existing={Object.keys(section)}
+          onPick={addFrameworkOverride}
+          onClose={() => setFrameworkAddOpen(false)}
+        />
+      )}
     </Shell>
     </FrameworkEnumsContext.Provider>
+  )
+}
+
+// Picker for which bundled framework enum to override. The set is closed (defined in
+// liberty/framework_enums.py); only ids the operator hasn't overridden yet are offered. Each
+// option shows the human label ("Dictionary Type") with the underlying id ("DICTIONARY_TYPE")
+// as a secondary mono column — so the operator knows both what they're customising and the
+// stable id the override is keyed by on disk.
+function FrameworkEnumPickerModal({
+  schema, existing, onPick, onClose,
+}: {
+  schema: FrameworkEnums | undefined
+  existing: string[]
+  onPick: (key: string) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const [value, setValue] = useState('')
+  const candidates = Object.entries(schema ?? {})
+    .filter(([k]) => !existing.includes(k))
+    .sort(([, a], [, b]) => (a?.label ?? '').localeCompare(b?.label ?? ''))
+  const opts: SearchSelectOption[] = candidates.map(([k, def]) => ({
+    value: k,
+    label: def?.label ?? k,
+    mono: k,
+  }))
+  const none = opts.length === 0
+  return (
+    <Overlay onClick={onClose}>
+      <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(480px, 94vw)' }}>
+        <ModalHeader>{t('settings.dictionary.framework_enums.add', 'Customize framework enum')}</ModalHeader>
+        <ModalBody>
+          {none ? (
+            <Banner $tone="info">
+              {t('settings.dictionary.framework_enums.allOverridden', 'Every bundled framework enum already has an override here.')}
+            </Banner>
+          ) : (
+            <Field label={t('settings.dictionary.framework_enums.pick', 'Which framework enum to customize')}>
+              <SearchSelect value={value} onChange={setValue} options={opts}
+                placeholder={t('common.pick', 'Pick…')} />
+            </Field>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="primary" disabled={none || !value}
+            onClick={() => { if (value) { onPick(value); onClose() } }}>
+            {t('common.ok', 'OK')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+    </Overlay>
   )
 }

@@ -14,6 +14,7 @@ const HttpRunner = lazy(() => import('../pages/HttpRunner'))
 const DashboardView = lazy(() => import('../pages/DashboardView'))
 const NomaflowRunDetail = lazy(() => import('../pages/Nomaflow/RunDetail'))
 const Settings = lazy(() => import('../pages/Settings'))
+const Monitoring = lazy(() => import('../pages/Monitoring'))
 
 export default function TabHost({ hidden }: { hidden: boolean }) {
   const { tabs, activeId } = useTabs()
@@ -46,6 +47,8 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
               <NomaflowRunDetail runId={tab.target} />
             ) : tab.kind === 'settings' ? (
               <Settings />
+            ) : tab.kind === 'monitoring' ? (
+              <Monitoring />
             ) : (
               <TableView connector={tab.connector} query={tab.target} />
             )}

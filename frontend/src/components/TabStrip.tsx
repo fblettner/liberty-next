@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -33,10 +33,14 @@ const EdgeBtn = styled.button<{ $danger?: boolean }>`
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   width: 30px; height: 30px; align-self: center; margin-bottom: 6px; padding: 0;
   border: 1px solid transparent; border-radius: ${radius.md};
-  background: transparent; color: ${colors.text.secondary}; cursor: pointer;
+  background: transparent;
+  color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.secondary)};
+  cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
+  & svg { display: block; }   /* lift the inline baseline gap that nudged the icon down a pixel */
   &:hover:not(:disabled) {
-    background: var(--hover-subtle); border-color: ${colors.border};
+    background: ${({ $danger }) => ($danger ? colors.red.bg : 'var(--hover-subtle)')};
+    border-color: ${({ $danger }) => ($danger ? colors.red.border : colors.border)};
     color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.primary)};
   }
   &:disabled { opacity: 0.35; cursor: default; }
@@ -152,6 +156,7 @@ export default function TabStrip() {
             tab.kind === 'http' ? Globe :
             tab.kind === 'nomaflow_run' ? Workflow :
             tab.kind === 'settings' ? SlidersHorizontal :
+            tab.kind === 'monitoring' ? Activity :
             TableIcon
           // Resolve label + owning app via the menu tree so duplicates like "Users" under
           // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
@@ -163,6 +168,8 @@ export default function TabStrip() {
             label = t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
           } else if (tab.kind === 'settings') {
             label = t('nav.settings', 'Settings')
+          } else if (tab.kind === 'monitoring') {
+            label = t('nav.monitoring', 'Monitoring')
           } else {
             const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
             label = hit?.label ?? tab.target
@@ -189,7 +196,7 @@ export default function TabStrip() {
       )}
       {tabs.length >= 2 && (
         <EdgeBtn $danger onClick={onCloseAll} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
-          <X size={16} strokeWidth={2.25} />
+          <X size={18} strokeWidth={2.25} />
         </EdgeBtn>
       )}
     </Bar>

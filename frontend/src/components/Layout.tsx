@@ -207,7 +207,8 @@ export default function Layout() {
   const dashboardMatch = useMatch('/dashboard/:target')
   const nomaflowRunMatch = useMatch('/nomaflow/runs/:runId')
   const settingsMatch = useMatch('/settings')
-  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch)
+  const monitoringMatch = useMatch('/monitoring')
+  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch)
 
   return (
     <Shell>

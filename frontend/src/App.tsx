@@ -38,7 +38,7 @@ function TabRoute({ kind }: { kind: TabKind }) {
   const { connector = "", target = "", runId = "" } = useParams();
   const { openOrActivate } = useTabs();
   useEffect(() => {
-    if (kind === "settings") {
+    if (kind === "settings" || kind === "monitoring") {
       openOrActivate({ kind, connector: "", target: "" });
     } else if (kind === "nomaflow_run" && runId) {
       openOrActivate({ kind, connector: "", target: runId });
@@ -83,6 +83,7 @@ export default function App() {
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
         <Route path="settings" element={<TabRoute kind="settings" />} />
+        <Route path="monitoring" element={<TabRoute kind="monitoring" />} />
         {/* nomaflow feature area — Jobs list + Job editor + Schedule (NOMAFLOW-UI.md) */}
         <Route path="nomaflow" element={<Nomaflow />} />
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />

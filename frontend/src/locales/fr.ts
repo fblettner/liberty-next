@@ -9,6 +9,7 @@ const fr: Resources = {
   nav: {
     connectors: 'Connecteurs',
     assistant: 'Assistant',
+    monitoring: 'Surveillance',
     settings: 'Paramètres',
     apiDocs: 'Doc API',
   },
@@ -437,7 +438,7 @@ const fr: Resources = {
       invalidIdentifier: 'Utilisez des lettres minuscules, des chiffres et des underscores ; commencez par une lettre (compatible avec les clés TOML, les permissions et les segments d\'URL).',
       unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', technical: 'Technique' },
+    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App' },
     theme: {
       intro: "Personnalisez l'apparence de toute l'installation — choisissez une palette, définissez la couleur d'accent principale et nommez l'application. S'applique à tous les utilisateurs ; le mode clair/sombre reste un choix individuel.",
       preset: 'Préréglage',

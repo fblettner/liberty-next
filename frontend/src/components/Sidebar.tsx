@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, ChevronLeft, ChevronRight } from 'lucide-react'
+import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -163,10 +163,16 @@ function FrameworkLinks({
           top-toolbar-toggled right-side drawer; API Docs is a developer-only link at /docs.
           Everything else is in the per-app menu trees from /api/menus. */}
       {superuser && (
-        <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
-          <SlidersHorizontal size={iconSize} />
-          {!collapsed && t('nav.settings')}
-        </Item>
+        <>
+          <Item to="/monitoring" $collapsed={collapsed} title={collapsed ? t('nav.monitoring') : undefined}>
+            <Activity size={iconSize} />
+            {!collapsed && t('nav.monitoring')}
+          </Item>
+          <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
+            <SlidersHorizontal size={iconSize} />
+            {!collapsed && t('nav.settings')}
+          </Item>
+        </>
       )}
     </>
   )

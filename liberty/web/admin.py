@@ -903,6 +903,125 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
     return {"saved": True, "path": str(path)}
 
 
+# ── app.toml (master settings — host, port, log level, AI exposure) ─────────────────────────
+# The UI exposes a curated subset of AppSettings + AISettings (see liberty.config). Secrets
+# bound through ``${ENV_VAR}`` references — jwt_secret, master_key, license_key, oidc
+# client_secret, ai.api_key — are NEVER read or written by these endpoints; they stay env-only.
+# Path fields (config_path, static_dir, dictionary_path) are also out of scope (operators don't
+# move them from the UI). Other sections of app.toml — [auth], [oidc], [crypto], [license],
+# [pools.*] root, [connectors] paths, etc. — are preserved verbatim on disk (tomlkit round-trip,
+# so comments + ``${VAR}`` references on untouched keys survive a save). Changes do NOT take
+# effect live: app.toml is loaded once at startup. The PUT returns ``requires_restart: true`` to
+# nudge the UI.
+from liberty.config import DEFAULT_APP_CONFIG, AISettings, AppSettings
+
+
+# Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
+# DB/auth migration stay out. Everything else round-trips through the editor.
+_APP_SAFE_KEYS = {"name", "host", "port", "log_level", "hot_reload", "default_language"}
+_AI_SAFE_KEYS = {
+    "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
+    "effort", "request_timeout", "connector_tools", "api_tool", "allowed_connectors",
+    "web_fetch_domains", "web_fetch_max_uses",
+}
+
+
+def _app_config_path() -> Path:
+    """Where app.toml lives. Mirrors :func:`load_settings`'s default — the running server
+    loads it from cwd-relative ``config/app.toml`` (no env override for this file itself)."""
+    return Path(DEFAULT_APP_CONFIG)
+
+
+def _pick(d: dict[str, Any], keys: set[str]) -> dict[str, Any]:
+    return {k: v for k, v in d.items() if k in keys}
+
+
+@router.get("/config/app/parsed")
+async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The curated ``[app]`` + ``[ai]`` view from app.toml. Includes ALL safe keys with their
+    EFFECTIVE values (defaults applied via the Pydantic model) so the editor inputs initialise
+    correctly for a fresh install where the operator hasn't customised every field. Also returns
+    the choice lists (log levels, effort levels, connector names) the editor uses for selects."""
+    path = _app_config_path()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    raw = tomllib.loads(text) if text.strip() else {}
+    # Apply defaults via the model so the editor sees the values the running server uses,
+    # not blanks. We pass raw-on-disk values (not env-substituted) so ${VAR} references are
+    # preserved — but those keys aren't in _*_SAFE_KEYS anyway (api_key, jwt_secret, …).
+    try:
+        app_model = AppSettings.model_validate(raw.get("app") or {})
+        ai_model = AISettings.model_validate(raw.get("ai") or {})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"existing app.toml is invalid: {exc}") from exc
+    connectors = sorted(request.app.state.connectors.names()) if hasattr(request.app.state, "connectors") else []
+    return {
+        "path": str(path),
+        "app": _pick(app_model.model_dump(), _APP_SAFE_KEYS),
+        "ai": _pick(ai_model.model_dump(), _AI_SAFE_KEYS),
+        "choices": {
+            "log_levels": ["debug", "info", "warning", "error", "critical"],
+            "effort_levels": ["", "low", "medium", "high", "xhigh", "max"],
+            "connectors": connectors,
+        },
+    }
+
+
+class AppConfigBody(BaseModel):
+    app: dict[str, Any]
+    ai: dict[str, Any]
+
+
+@router.put("/config/app/parsed")
+async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted ``[app]`` + ``[ai]`` against AppSettings / AISettings, then
+    surgically rewrite ONLY those keys in app.toml via ``tomlkit`` — comments, formatting,
+    and ``${VAR}`` references on every other section (auth / oidc / crypto / license / pools)
+    stay untouched. Unknown keys in the submitted dicts are rejected by the Pydantic models
+    (both use extra='ignore' implicitly but we filter to the safe set first as a defence in
+    depth — secrets cannot land here even if the UI is compromised). Changes require a server
+    restart to take effect (app.toml is loaded once at boot)."""
+    app_in = _pick(body.app or {}, _APP_SAFE_KEYS)
+    ai_in = _pick(body.ai or {}, _AI_SAFE_KEYS)
+    try:
+        # Validate the submitted SAFE subset on top of the existing values, so partial submissions
+        # (only the fields the editor showed) don't trip required-field validation. Pydantic
+        # treats missing fields as "use default" — fine for these models which have defaults
+        # for everything.
+        AppSettings.model_validate(app_in)
+        AISettings.model_validate(ai_in)
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid app settings: {exc}") from exc
+
+    path = _app_config_path()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    # Update [app] keys, preserving the table (so its leading comment stays). Create the
+    # table on the fly if app.toml didn't declare one yet.
+    if "app" not in doc:
+        doc["app"] = tomlkit.table()
+    for k, v in app_in.items():
+        doc["app"][k] = v
+    if "ai" not in doc:
+        doc["ai"] = tomlkit.table()
+    for k, v in ai_in.items():
+        doc["ai"][k] = v
+
+    new_text = tomlkit.dumps(doc)
+    # Re-parse + re-validate the FULL document — catches any tomlkit serialisation surprise
+    # before it lands on disk. We pull the [app] / [ai] tables back out and revalidate them
+    # against their models.
+    try:
+        reparsed = tomllib.loads(new_text)
+        AppSettings.model_validate(reparsed.get("app") or {})
+        AISettings.model_validate(reparsed.get("ai") or {})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting app.toml is invalid: {exc}") from exc
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path), "requires_restart": True}
+
+
 # ── API connector test ──────────────────────────────────────────────────────────────────────
 
 

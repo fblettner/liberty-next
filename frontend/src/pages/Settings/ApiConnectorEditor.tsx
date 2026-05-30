@@ -76,6 +76,11 @@ export type ApiConnector = {
 interface ApiConnectorEditorProps {
   name: string
   value: ApiConnector
+  /** Does this connector have a menu in menus.toml? An API connector only appears in the app
+   *  switcher when (a) ``show_in_switcher`` isn't false AND (b) it has a menu — without a menu
+   *  the workspace can't render anything when it's picked, so the runtime filters it out. The
+   *  editor uses this to flag the misleading "enabled but invisible" state. */
+  hasMenu?: boolean
   onChange: (next: ApiConnector) => void
 }
 
@@ -196,7 +201,7 @@ const queryFromString = (s: string): Record<string, string> => {
 // ── main component ─────────────────────────────────────────────────────────────────────────
 type TabKey = 'connection' | 'auth' | 'endpoints' | 'webhooks' | 'test'
 
-export default function ApiConnectorEditor({ name, value, onChange }: ApiConnectorEditorProps) {
+export default function ApiConnectorEditor({ name, value, hasMenu, onChange }: ApiConnectorEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('connection')
   // Reset to the Connection tab when the operator switches connectors — otherwise they may
@@ -234,7 +239,7 @@ export default function ApiConnectorEditor({ name, value, onChange }: ApiConnect
           {t('settings.api.tab.test', 'Test')}
         </TabBtn>
       </TabsBar>
-      {tab === 'connection' && <ConnectionTab value={value} patch={patch} />}
+      {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
       {tab === 'auth' && <AuthTab value={value} patch={patch} />}
       {tab === 'endpoints' && <EndpointsTab value={value} patch={patch} />}
       {tab === 'webhooks' && <WebhooksTab />}
@@ -245,8 +250,8 @@ export default function ApiConnectorEditor({ name, value, onChange }: ApiConnect
 
 // ── Connection tab ─────────────────────────────────────────────────────────────────────────
 function ConnectionTab({
-  value, patch,
-}: { value: ApiConnector; patch: (p: Partial<ApiConnector>) => void }) {
+  value, patch, hasMenu,
+}: { value: ApiConnector; patch: (p: Partial<ApiConnector>) => void; hasMenu?: boolean }) {
   const { t } = useTranslation()
   // Timeout displayed in milliseconds (nomaubl convention) — Pydantic stores seconds. Round
   // on display so a fractional second doesn't surprise the operator.
@@ -264,9 +269,18 @@ function ConnectionTab({
       <SectionHead>{t('settings.api.app.section', 'App')}</SectionHead>
       <FieldRow>
         <label>{t('settings.api.app.showInSwitcher', 'Show in switcher')}</label>
+        {/* Effective state, not stored state. A connector only shows in the switcher when it has
+            BOTH show_in_switcher != false AND a menu in menus.toml. Without a menu the runtime
+            filters it out regardless, so the checkbox would lie if it reflected the stored flag
+            alone. When there's no menu we show unchecked + disabled — operator can't toggle a
+            no-op. The stored value is preserved (we never patch on the disabled click). */}
         <Checkbox
-          checked={value.show_in_switcher !== false}
+          checked={value.show_in_switcher !== false && hasMenu !== false}
+          disabled={hasMenu === false}
           onChange={(v: boolean) => patch({ show_in_switcher: v ? undefined : false })}
+          label={hasMenu === false
+            ? 'disabled (no menu)'
+            : value.show_in_switcher !== false ? 'enabled' : 'disabled'}
         />
       </FieldRow>
       <FieldRow>
@@ -502,7 +516,9 @@ function EndpointsTab({
   const modals = useModals()
   const endpoints = value.endpoints ?? []
   const setEndpoints = (next: Endpoint[]) => patch({ endpoints: next.length ? next : undefined })
-  const [openIdx, setOpenIdx] = useState<number | null>(endpoints.length ? 0 : null)
+  // Collapsed by default — large lists are easier to scan when only headers show. The operator
+  // clicks a card to expand it; adding a new endpoint expands that one (see `addEndpoint`).
+  const [openIdx, setOpenIdx] = useState<number | null>(null)
 
   const addEndpoint = async () => {
     const name = (await modals.prompt({
