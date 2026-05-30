@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy } from 'lucide-react'
+import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -466,6 +466,30 @@ export default function JobsList() {
                   >
                     {busy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}
                     {t('nomaflow.jobs.duplicateBtn', 'Duplicate')}
+                  </Button>
+                  {/* Export — minimal ZIP carrying just this job's [[jobs]] entry + a
+                      MANIFEST.md. Referenced queries / connectors are NOT bundled (the
+                      target install must already have them). Use Settings → Package to
+                      ship the underlying config slice separately. */}
+                  <Button
+                    $variant="ghost" $size="sm" disabled={busy}
+                    onClick={async () => {
+                      const res = await fetch('/api/admin/export-job', {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: job.id }),
+                      })
+                      if (!res.ok) return
+                      const blob = await res.blob()
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url; a.download = `nomaflow-job-${job.id}.zip`
+                      document.body.appendChild(a); a.click(); a.remove()
+                      URL.revokeObjectURL(url)
+                    }}
+                    title={t('nomaflow.jobs.export', 'Export this job (ZIP with jobs.toml + MANIFEST.md). Queries / connectors not bundled.')}
+                  >
+                    <Download size={13} /> {t('nomaflow.jobs.exportBtn', 'Export')}
                   </Button>
                 </Actions>
               </JobCard>

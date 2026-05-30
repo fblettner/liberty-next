@@ -12,7 +12,7 @@
 // every child's `parent` reference to match.
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Undo2, GitBranch } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Undo2, GitBranch, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -20,6 +20,7 @@ import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '
 import { groupQueriesByTable } from './connectorTables'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -206,6 +207,7 @@ export default function MenusBuilder() {
   const [selApp, setSelApp] = useState<string | null>(null)
   const [selItem, setSelItem] = useState<string | null>(null)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [treeQ, setTreeQ] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -579,6 +581,11 @@ export default function MenusBuilder() {
               })} disabled={!selItem}>
                 <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
               </Button>
+              <Button $variant="ghost" $size="sm" onClick={() => selItem && selApp && setDepsSeeds([{
+                kind: 'menu_item', name: selItem, scope: selApp, label: `menu item ${selApp}.${selItem}`,
+              }])} disabled={!selItem}>
+                <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+              </Button>
             </Row>
           </AppHeader>
           <TreeSplit>
@@ -636,6 +643,7 @@ export default function MenusBuilder() {
         />
       )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+      {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

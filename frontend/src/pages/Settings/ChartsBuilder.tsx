@@ -5,7 +5,7 @@
 // charts.toml (PUT) + reloads.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, BarChart3, Search, Edit3, Copy, GitBranch } from 'lucide-react'
+import { Plus, Trash2, BarChart3, Search, Edit3, Copy, GitBranch, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -14,6 +14,7 @@ import { ChartEditorModal, type ChartRecord } from './ChartEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -59,6 +60,7 @@ export default function ChartsBuilder() {
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   // editing === undefined → closed; null → new chart; ChartRecord → editing that chart.
   const [editing, setEditing] = useState<ChartRecord | null | undefined>(undefined)
 
@@ -220,6 +222,11 @@ export default function ChartsBuilder() {
                 })} disabled={busy}>
                   <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
                 </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => setDepsSeeds([{
+                  kind: 'chart', name: id, scope, label: `chart ${scope}.${id}`,
+                }])} disabled={busy}>
+                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameChart(id)} disabled={busy}>
                   <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
                 </Button>
@@ -263,6 +270,7 @@ export default function ChartsBuilder() {
         />
       )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+      {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
     </Shell>
   )
 }

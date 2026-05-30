@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FileText, Edit3, X, Copy, Undo2, Maximize2, Minimize2, GitBranch } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FileText, Edit3, X, Copy, Undo2, Maximize2, Minimize2, GitBranch, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
@@ -33,6 +33,7 @@ import {
 import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen, DictionaryDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -102,6 +103,7 @@ export default function ScreensBuilder() {
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   // The screen designer is a near-fullscreen modal hosting the existing ScreenEditor. The right
   // pane in Settings shows a summary card with a big "Open Screen Designer" button; click →
   // raises this modal. Edits flow through the same ``updateScreen`` callback as before — the
@@ -545,6 +547,11 @@ export default function ScreensBuilder() {
                 })} disabled={busy}>
                   <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
                 </Button>
+                <Button $variant="ghost" $size="sm" onClick={() => setDepsSeeds([{
+                  kind: 'screen', name: id, scope: selApp, label: `screen ${selApp}.${id}`,
+                }])} disabled={busy}>
+                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameScreen(selApp, id)} disabled={busy}>
                   <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
                 </Button>
@@ -673,6 +680,7 @@ export default function ScreensBuilder() {
       document.body,
     )}
     {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+    {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
     </FrameworkEnumsContext.Provider>
   )
 }

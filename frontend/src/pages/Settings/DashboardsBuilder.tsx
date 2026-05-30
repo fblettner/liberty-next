@@ -4,7 +4,7 @@
 // opens the visual DashboardEditorModal — a fullscreen canvas of the live widget grid.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, LayoutDashboard, Search, Edit3, Copy } from 'lucide-react'
+import { Plus, Trash2, LayoutDashboard, Search, Edit3, Copy, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -13,6 +13,7 @@ import type { SavedChartSpec } from '../../types/charts'
 import { DashboardEditorModal } from './DashboardEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
+import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -61,6 +62,7 @@ export default function DashboardsBuilder() {
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
+  const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [editing, setEditing] = useState<Raw | undefined>(undefined)
 
   const load = () => {
@@ -232,6 +234,11 @@ export default function DashboardsBuilder() {
                 {meta && <span className="meta">{meta}</span>}
               </span>
               <span className="actions" onClick={(e) => e.stopPropagation()}>
+                <Button $variant="ghost" $size="sm" onClick={() => setDepsSeeds([{
+                  kind: 'dashboard', name: id, label: `dashboard ${id}`,
+                }])} disabled={busy}>
+                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameDashboard(id)} disabled={busy}>
                   <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
                 </Button>
@@ -274,6 +281,7 @@ export default function DashboardsBuilder() {
           onClose={() => setAddScopeOpen(false)}
         />
       )}
+      {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
     </Shell>
   )
 }
