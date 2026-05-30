@@ -17,6 +17,12 @@
 # Without it, install.sh uses 'latest' — which is the most recent release (every
 # merge to main creates a new release, so 'latest' always reflects current main).
 #
+# Fresh-start flag:
+#   --reset                     # docker compose down -v + delete .env first.
+# Use when a previous run left stale named volumes (pg-data with the old password,
+# pgadmin-data with the old admin login, …). Without --reset, install.sh detects
+# stale volumes and asks before reusing them with a fresh .env (which would fail).
+#
 # Re-running:
 #   .env already present + stack up → no-op (use ``docker compose pull && up -d`` to upgrade).
 #   .env already present + stack down → starts the stack with the existing .env.
@@ -46,6 +52,7 @@ docker compose version >/dev/null 2>&1 \
 # ── parse args ────────────────────────────────────────────────────────────────
 LAYOUT=""
 IMAGE_TAG=""             # empty → defaults to 'latest' in the generated .env
+RESET="no"               # --reset → wipe volumes + .env before install
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,10 +62,12 @@ while [ $# -gt 0 ]; do
     --tag)
       [ -z "${2:-}" ] && die "--tag requires a value (e.g. --tag 7.0.2)"
       IMAGE_TAG="$2"; shift 2 ;;
+    --reset)
+      RESET="yes"; shift ;;
     --help|-h)
-      sed -n '4,21p' "$0"; exit 0 ;;
+      sed -n '4,28p' "$0"; exit 0 ;;
     *)
-      die "Unknown argument: $1 (expected: light | full | prepare [--tag <ver>])" ;;
+      die "Unknown argument: $1 (expected: light | full | prepare [--tag <ver>] [--reset])" ;;
   esac
 done
 
@@ -91,9 +100,56 @@ gen_secret() {
   fi
 }
 
-# ── .env generation ───────────────────────────────────────────────────────────
+# ── reset (when requested) ────────────────────────────────────────────────────
+# --reset wipes the named volumes + .env so the next install starts from a clean
+# slate. Important for recovery from previous failed installs (postgres init only
+# runs on a brand-new data dir; reusing an old pg-data with a fresh .env password
+# means the DB still has the OLD password — auth fails forever).
 ENV_FILE=".env"
 
+if [ "$RESET" = "yes" ]; then
+  warn "--reset: tearing down stack + wiping named volumes (pg-data, pgadmin-data, portainer-data, liberty-data, liberty-config)…"
+  for cf in docker-compose.full.yml docker-compose.light.yml; do
+    [ -f "$cf" ] && docker compose -f "$cf" down -v 2>/dev/null || true
+  done
+  # In case the stack was never created with compose (e.g. swarm), drop volumes by name.
+  for v in liberty-config liberty-data pg-data pgadmin-data portainer-data traefik-acme; do
+    docker volume rm "$v" 2>/dev/null || true
+  done
+  rm -f "$ENV_FILE"
+  ok "Reset complete."
+fi
+
+# ── stale-volume detection ────────────────────────────────────────────────────
+# When .env is being regenerated but a previous run's pg-data / pgadmin-data still
+# exist, the fresh random secrets in the new .env WON'T match the credentials baked
+# into those volumes (postgres + pgadmin only init on first start). Catch this BEFORE
+# starting the stack so the user can choose --reset deliberately.
+stale_volumes() {
+  local found=()
+  for v in pg-data pgadmin-data liberty-data; do
+    docker volume inspect "$v" >/dev/null 2>&1 && found+=("$v")
+  done
+  printf '%s\n' "${found[@]}"
+}
+
+if [ ! -f "$ENV_FILE" ]; then
+  STALE=$(stale_volumes | tr '\n' ' ')
+  if [ -n "${STALE// /}" ]; then
+    err "Stale Docker volumes from a previous install exist: ${STALE}"
+    echo "  Generating fresh secrets now would leave postgres / pgadmin with their OLD"
+    echo "  passwords (init scripts only run on brand-new volumes) → auth would fail."
+    echo
+    echo "  Two options:"
+    echo "    1. Wipe + restart clean:    ./install.sh ${LAYOUT} --reset"
+    echo "    2. Keep existing data:      restore the previous .env (it's not in git;"
+    echo "                                 retrieve from backup, scrollback, or wipe the"
+    echo "                                 volumes with option 1 above)."
+    exit 1
+  fi
+fi
+
+# ── .env generation ───────────────────────────────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
   warn ".env already exists — keeping it. Delete it first to regenerate."
   if [ -n "$IMAGE_TAG" ]; then
