@@ -18,6 +18,7 @@ import { validateId, suggestCloneId } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { EditQueryModal } from './EditQueryModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -144,6 +145,10 @@ export default function DictionaryBuilder() {
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [frameworkAddOpen, setFrameworkAddOpen] = useState(false)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  // Edit-query modal target — opened from the in-line edit button next to a
+  // LookupDef.query / SequenceDef.query dropdown (SchemaForm renders the button when
+  // ``onEditQuery`` is wired). null = closed.
+  const [editQueryTarget, setEditQueryTarget] = useState<{ connector: string; queryName: string } | null>(null)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -685,6 +690,15 @@ export default function DictionaryBuilder() {
                   value: section[sel],
                   onChange: (v) => setRecord(sel, v),
                 }}
+                // LookupDef + SequenceDef have a ``connector`` field — SchemaForm
+                // resolves it from siblings; when blank, fall back to the dictionary
+                // scope (per-connector overlay = scope IS the connector). For shared-
+                // scope records the operator must set the connector explicitly.
+                onEditQuery={(conn, queryName) => {
+                  const resolved = conn || (scope || null)
+                  if (!resolved) return
+                  setEditQueryTarget({ connector: resolved, queryName })
+                }}
               />
             </Stack>
           ) : (
@@ -711,6 +725,16 @@ export default function DictionaryBuilder() {
         />
       )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+      {editQueryTarget && (
+        <EditQueryModal
+          connector={editQueryTarget.connector}
+          queryName={editQueryTarget.queryName}
+          onClose={() => setEditQueryTarget(null)}
+          // Reload the dictionary doc after a save so any query rename propagates into
+          // the LookupDef.query / SequenceDef.query references showing in the picker.
+          onSaved={load}
+        />
+      )}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

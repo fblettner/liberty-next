@@ -16,7 +16,7 @@
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronDown, Search } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown, Search, Edit3 } from 'lucide-react'
 import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
@@ -226,6 +226,36 @@ const SmallX = styled.button`
   border-radius: ${radius.sm}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
   &:hover { color: ${colors.red.main}; border-color: ${colors.red.border}; }
 `
+// Edit-query trigger rendered next to query-bearing SearchSelects (LookupDef.query,
+// ChartConfig.query, SequenceDef.query/previous_query). Same look + size as the
+// screen-editor's in-line Edit button — operators see a consistent "edit this query"
+// affordance everywhere a query is picked. Disabled when the connector isn't resolvable
+// (the apply layer needs both connector + query to open the right editor).
+const InlineEditBtn = styled.button`
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  flex-shrink: 0; border-radius: ${radius.sm}; border: 1px solid ${colors.border};
+  background: transparent; color: ${colors.text.muted}; cursor: pointer;
+  &:hover:not(:disabled) { color: ${colors.text.primary}; border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
+  &:disabled { opacity: 0.35; cursor: not-allowed; }
+`
+
+function InlineEditQueryButton({
+  connector, queryName, onClick,
+}: { connector: string | null; queryName: string; onClick: () => void }) {
+  const canEdit = !!connector && !!queryName
+  return (
+    <InlineEditBtn
+      type="button"
+      onClick={onClick}
+      disabled={!canEdit}
+      title={canEdit ? `Edit query ${connector}.${queryName}` : 'Pick a connector first to edit the query'}
+      aria-label="Edit query"
+    >
+      <Edit3 size={13} />
+    </InlineEditBtn>
+  )
+}
+
 const ItemBox = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; margin-bottom: 6px; overflow: hidden;`
 const ItemHead = styled.button<{ $open?: boolean }>`
   display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 9px; text-align: left;
@@ -484,12 +514,28 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  *  top-level schema's `$defs` so `$ref`s in nested models resolve. When `onNavigate` is given,
  *  `list[Model]` / nested-object properties become drill-in rows (used inside `SchemaNavigator`);
  *  without it they render as inline collapsible accordions. */
-export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
+/** The set of ``x_enum_ref`` values whose field picks a CONNECTOR QUERY — these are the
+ *  fields that get an Edit-query button next to the picker when ``onEditQuery`` is set.
+ *  Add new query-bearing enum refs here as they appear in the backend models.
+ *
+ *  ``LOOKUP_QUERIES``  — LookupDef.query, SequenceDef.query/previous_query (dictionary)
+ *  ``CHART_QUERIES``   — ChartConfig.query (charts.toml)
+ */
+const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
+
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
   defs?: Defs
   onNavigate?: (seg: NavSeg) => void
+  /** Optional callback fired by the in-line Edit-query button rendered next to fields
+   *  whose ``x_enum_ref`` is a query-bearing one (LOOKUP_QUERIES, CHART_QUERIES, …).
+   *  The caller is expected to mount an EditQueryModal in response. The connector is
+   *  resolved from a sibling ``connector`` field on the same object, falling back to
+   *  ``defaultConnector`` (the surrounding scope's connector — passed by callers like
+   *  DictionaryBuilder that scope by connector name). */
+  onEditQuery?: (connector: string | null | undefined, queryName: string) => void
 }) {
   const allDefs = { ...(schema.$defs ?? {}), ...(defs ?? {}) }
   // A discriminated union (Pydantic `Widget = ChartWidget | KpiWidget` → `oneOf` + `discriminator`)
@@ -634,11 +680,31 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate }: {
         } else if (fe) {
           const literalSet = Array.isArray(sub.enum) ? new Set(sub.enum.map((e) => String(e))) : null
           const opts = enumOptions(fe, literalSet)
-          control = (
+          const picker = (
             <SearchSelect value={cur == null ? '' : String(cur)}
               onChange={(v) => set(key, v === '' ? undefined : applyCase(v, sub))}
               options={opts} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" allowCustom={!literalSet} />
           )
+          // Append an Edit-query button when the field is one of the query-bearing enum
+          // refs AND the caller wired an ``onEditQuery`` handler. The connector resolves
+          // from a sibling ``connector`` field on the same object (the convention for
+          // LookupDef / SequenceDef / ChartConfig — when blank the caller's onEditQuery
+          // handler is responsible for falling back to the surrounding scope).
+          if (ref && QUERY_ENUM_REFS.has(ref) && onEditQuery && cur) {
+            const sibConn = typeof value.connector === 'string' ? value.connector : null
+            control = (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>{picker}</div>
+                <InlineEditQueryButton
+                  connector={sibConn}
+                  queryName={String(cur)}
+                  onClick={() => onEditQuery(sibConn, String(cur))}
+                />
+              </div>
+            )
+          } else {
+            control = picker
+          }
         } else if (Array.isArray(sub.enum)) {
           control = (
             <SearchSelect value={cur == null ? '' : String(cur)} onChange={(v) => set(key, v === '' ? undefined : v)}

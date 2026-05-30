@@ -53,7 +53,13 @@ const BackBtn = styled.button`
   &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
 `
 
-export function SchemaNavigator({ root }: { root: NavRoot }) {
+export function SchemaNavigator({ root, onEditQuery }: {
+  root: NavRoot
+  /** Forwarded to the underlying SchemaForm — fires when the operator clicks the
+   *  in-line Edit-query button next to a query-bearing dropdown. Caller mounts the
+   *  EditQueryModal in response. */
+  onEditQuery?: (connector: string | null | undefined, queryName: string) => void
+}) {
   const [path, setPath] = useState<NavSeg[]>([])
   useEffect(() => { setPath([]) }, [root.label])   // a different thing selected → back to the top
 
@@ -105,7 +111,7 @@ export function SchemaNavigator({ root }: { root: NavRoot }) {
         ))}
         {path.length > 0 && <BackBtn type="button" onClick={() => go(path.length - 1)}><ArrowLeft size={13} /> back</BackBtn>}
       </Crumbs>
-      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} />
+      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} />
     </div>
   )
 }
