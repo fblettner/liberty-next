@@ -1,0 +1,29 @@
+# Liberty Next — apps overlay.
+#
+# Adds the licensed-customer content (liberty-apps repo: nomasx1 / nomajde / nomaflow /
+# …) on top of any base layout (light / full / swarm). Mounts the apps directory into
+# /apps inside the container and tells the framework to read its per-section TOMLs from
+# there via LIBERTY_APPS_DIR. The license key (LIBERTY_LICENSE_KEY in .env) unlocks the
+# connectors flagged ``licensed = true`` in the apps' connectors.toml.
+#
+# Usage:
+#   docker compose -f docker-compose.full.yml -f docker-compose.apps.yml up -d
+# Or via the helper:
+#   ./install-apps.sh
+#
+# .env must define:
+#   APPS_HOST_PATH      — absolute host path to your liberty-apps clone
+#   LIBERTY_LICENSE_KEY — RS256 JWT license (without it the licensed connectors won't load)
+
+services:
+  liberty-next:
+    volumes:
+      # Bind-mount the host's liberty-apps clone into the container, read-only. Edits
+      # made through Settings → … in the SPA would fail (the mount is :ro) — for the
+      # apps repo, edits should go through git on the host (clone → branch → PR), not
+      # through the UI. Drop ``:ro`` if you want UI edits to be writable into the apps
+      # repo on the host (be aware: the container runs as root, so file ownership shifts).
+      - ${APPS_HOST_PATH:?APPS_HOST_PATH not set — see install-apps.sh or set it in .env}:/apps:ro
+    environment:
+      # Re-route every per-section TOML default to /apps/<file>.toml (see liberty/config.py).
+      LIBERTY_APPS_DIR: /apps/config

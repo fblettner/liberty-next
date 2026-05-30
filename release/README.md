@@ -263,6 +263,84 @@ See `liberty-admin --help` / `liberty-license --help` for the full CLI.
 
 ---
 
+## Adding the licensed apps (liberty-apps)
+
+The liberty-next image ships the **open framework** only. Customer-facing content
+(nomasx1 / nomajde / nomaflow / …) lives in the separate **liberty-apps** repo and
+is unlocked by a license key (`LIBERTY_LICENSE_KEY`).
+
+### TL;DR — three steps
+
+```bash
+# 1. Bring up the base stack (you've done this already if you ran install.sh)
+./install.sh full
+
+# 2. Add the licensed apps on top
+./install-apps.sh --license-key <your-rs256-jwt>
+
+# 3. Refresh the page — the SPA now shows the apps' menus.
+```
+
+That's it. `install-apps.sh`:
+
+1. **Clones `liberty-apps` into `./apps/`** (private repo — needs SSH access or a PAT;
+   the script tells you what to do if the clone fails).
+2. **Updates `.env`** with `APPS_HOST_PATH=<absolute path to the clone>` and
+   `LIBERTY_LICENSE_KEY=<your-jwt>` if you passed `--license-key`.
+3. **Restarts the stack** with [`docker-compose.apps.yml`](docker-compose.apps.yml)
+   layered on top — mounts the apps clone at `/apps` (read-only) and sets
+   `LIBERTY_APPS_DIR=/apps/config` so the framework reads its TOMLs from there.
+
+### Common variations
+
+```bash
+./install-apps.sh                              # clones to ./apps/, no license set (restricted mode)
+./install-apps.sh --path /opt/liberty-apps     # use an existing clone elsewhere
+./install-apps.sh --license-key eyJhbGc…       # set the license key now
+./install-apps.sh --layout light               # layer onto the light stack instead
+./install-apps.sh --repo https://<token>@github.com/fblettner/liberty-apps.git
+                                               # custom git URL (e.g. with a PAT for HTTPS clone)
+```
+
+### Updating the apps later
+
+```bash
+cd ./apps && git pull
+docker compose -f docker-compose.full.yml -f docker-compose.apps.yml restart liberty-next
+```
+
+(The framework reloads the apps' TOMLs on container restart. If `hot_reload = true`
+in `app.toml`, you don't even need the restart — file edits are picked up live.)
+
+### What the override file actually does
+
+[`docker-compose.apps.yml`](docker-compose.apps.yml) is a ~10-line additive override:
+
+```yaml
+services:
+  liberty-next:
+    volumes:
+      - ${APPS_HOST_PATH}:/apps:ro     # bind-mount the apps clone
+    environment:
+      LIBERTY_APPS_DIR: /apps/config   # redirect TOML reads to the mount
+```
+
+You can run it directly without `install-apps.sh` if you've already set
+`APPS_HOST_PATH` in `.env` yourself:
+
+```bash
+docker compose -f docker-compose.full.yml -f docker-compose.apps.yml up -d
+```
+
+### Without a license key
+
+The framework still starts — it just runs in **restricted mode** (connectors flagged
+`licensed = true` in the apps' `connectors.toml` aren't loaded). Useful for testing
+the apps' open parts. Add the key later with `./install-apps.sh --license-key <jwt>`
+(idempotent — only touches the .env line, doesn't re-clone).
+
+---
+
 ## Without Docker
 
 If you don't want containers at all (small install on a single host, or you're locked
