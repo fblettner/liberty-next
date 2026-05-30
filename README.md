@@ -154,65 +154,61 @@ upgrades don't clobber customer forks.
 
 ## Releasing
 
-Two GitHub Actions workflows split the release / build duties cleanly:
+One GitHub Actions workflow, [`release.yml`](.github/workflows/release.yml), publishes
+every release. **It runs automatically on every push to `main`.** No buttons, no tags,
+no manual triggers.
 
-| Workflow | Trigger | Output |
-|---|---|---|
-| [`release.yml`](.github/workflows/release.yml) | **Manual** — "Run workflow" with a version input | Multi-arch Docker image at `ghcr.io/fblettner/liberty-next:<version>` + `:latest`, sdist + wheel on PyPI, annotated git tag `v<version>`, GitHub release. **Atomic, single version for both.** |
-| [`docker.yml`](.github/workflows/docker.yml) | Push to `main` (auto), PR (build-only), manual | Rolling `edge` + `sha-<short>` Docker tags for "current main without chasing the SHA". |
+### The flow
 
-### Why manual, not tag-push
-
-A failed tag-push release burns the version: PyPI version slots are consumed
-permanently the moment they're accepted, even on partial failure. With a manual
-trigger, every pre-publish step (build, validate, Docker push) runs first; if any
-fails, you fix the issue and re-run with the **same version** — nothing is consumed
-until the actual PyPI upload near the end.
-
-### One-time setup
-
-Before the first release works, do these two things in the GitHub repo:
-
-1. **PyPI token** — get a token at <https://pypi.org/manage/account/token/>
-   (account-scoped is fine for the first release; scope to `liberty-next` once it exists).
-   Add it at **Settings → Secrets and variables → Actions → New repository secret**:
-   - Name: `PYPI_API_TOKEN`
-   - Value: `pypi-…`
-
-2. **Docker image visibility** — after the first `docker.yml` run pushes the image,
-   it lands as private. Make it public at
-   <https://github.com/fblettner?tab=packages> → liberty-next → Package settings →
-   Change visibility → Public. (One-time; subsequent pushes inherit the setting.)
-
-The Docker workflow needs no secret — `GITHUB_TOKEN` doubles as the ghcr.io credential.
-
-### Cutting a release
-
-```bash
-# 1. Bump pyproject.toml's version + commit + push
-$EDITOR pyproject.toml          # change version = "..."
-git commit -am "release: v7.0.1"
-git push
+```
+develop branch         →  work happens here, push freely, NOTHING triggers
+                         ↓
+                       PR develop → main, merge
+                         ↓
+main branch push       →  release.yml runs:
+                          1. Reads pyproject.toml's version
+                          2. If that version is already tagged → auto-bump patch (7.0.1 → 7.0.2)
+                             Else use as-is (when you manually bumped for a major/minor)
+                          3. Commits the bumped pyproject.toml back to main ([skip ci])
+                          4. Builds + pushes multi-arch Docker to ghcr.io as <version> + :latest
+                          5. Publishes sdist + wheel to PyPI
+                          6. Tags v<version> + creates GitHub release with auto-notes
 ```
 
-Then in the browser:
+### Version control
 
-1. Go to <https://github.com/fblettner/liberty-next/actions/workflows/release.yml>
-2. Click **Run workflow** (top-right).
-3. **Leave the version field empty** — it auto-reads `pyproject.toml`. (Optionally
-   type it for a typo guard; leading `v` is tolerated.)
-4. Click **Run workflow**.
+- **Bugfix / patch release** (default): just merge to main. Workflow auto-bumps `7.0.1 → 7.0.2`.
+- **Minor release** (`7.0.x → 7.1.0`): bump `version = "7.1.0"` in `pyproject.toml` in any commit before merging. Workflow honours it.
+- **Major release** (`7.x → 8.0.0`): same — bump in pyproject.toml.
 
-The workflow validates the version, builds sdist + wheel, builds + pushes the
-multi-arch Docker image, publishes to PyPI, then creates the `v7.0.1` git tag +
-GitHub release. ~6-10 minutes start to finish.
+### Setting up the repo (one-time)
 
-**If something fails before the PyPI step** (pre-flight, build, Docker push) — fix the
-issue and re-run the workflow with the same version. Nothing is consumed.
+1. **Branch protection on `main`** (recommended):
+   <https://github.com/fblettner/liberty-next/settings/branches> → add a rule for
+   `main` → require pull request before merging. This forces the develop → main flow.
 
-**If the PyPI publish itself fails** (the only non-recoverable step) — bump the
-version in `pyproject.toml` and run again. PyPI doesn't allow re-publishing the same
-version even when the previous attempt failed.
+2. **PyPI token**: <https://pypi.org/manage/account/token/> → create a token
+   (account-scoped first time; scope to `liberty-next` after the first release).
+   Add it as a repo secret:
+   <https://github.com/fblettner/liberty-next/settings/secrets/actions> →
+   Name: `PYPI_API_TOKEN`, Value: `pypi-…`.
+
+3. **Docker image visibility**: after the first push to ghcr.io, the image lands
+   private. Make it public at <https://github.com/fblettner?tab=packages> →
+   liberty-next → Package settings → Change visibility → Public. (One-time.)
+
+### Manual override
+
+The workflow also has a `workflow_dispatch` trigger if you need to re-publish a
+specific version (rebuild after a base-image CVE, etc.). Go to
+<https://github.com/fblettner/liberty-next/actions/workflows/release.yml> →
+Run workflow → optional version input.
+
+### Recovering from a failed publish
+
+- **Pre-publish failure** (build, Docker push) — fix and re-trigger; nothing is consumed.
+- **PyPI publish failure** (the only irreversible step) — the version is burned. Bump
+  `pyproject.toml` to the next version and push again.
 
 ---
 

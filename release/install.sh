@@ -13,10 +13,9 @@
 #   ./install.sh prepare        # generate .env only — don't start anything
 #
 # Image tag selector (any of the layouts above):
-#   --edge                      # pull the rolling main image (updates every push)
 #   --tag <version>             # pin to a specific release (e.g. 7.0.2)
-# Without either, install.sh uses 'latest' (most recent RELEASE — won't pick up
-# fixes between releases). Use --edge when testing main-branch fixes.
+# Without it, install.sh uses 'latest' — which is the most recent release (every
+# merge to main creates a new release, so 'latest' always reflects current main).
 #
 # Re-running:
 #   .env already present + stack up → no-op (use ``docker compose pull && up -d`` to upgrade).
@@ -53,15 +52,13 @@ while [ $# -gt 0 ]; do
     light|full|prepare)
       [ -n "$LAYOUT" ] && die "Layout specified twice: '$LAYOUT' and '$1'"
       LAYOUT="$1"; shift ;;
-    --edge)
-      IMAGE_TAG="edge"; shift ;;
     --tag)
       [ -z "${2:-}" ] && die "--tag requires a value (e.g. --tag 7.0.2)"
       IMAGE_TAG="$2"; shift 2 ;;
     --help|-h)
-      sed -n '4,22p' "$0"; exit 0 ;;
+      sed -n '4,21p' "$0"; exit 0 ;;
     *)
-      die "Unknown argument: $1 (expected: light | full | prepare [--edge | --tag <ver>])" ;;
+      die "Unknown argument: $1 (expected: light | full | prepare [--tag <ver>])" ;;
   esac
 done
 
@@ -100,7 +97,7 @@ ENV_FILE=".env"
 if [ -f "$ENV_FILE" ]; then
   warn ".env already exists — keeping it. Delete it first to regenerate."
   if [ -n "$IMAGE_TAG" ]; then
-    warn "--edge / --tag was passed but .env already exists; edit LIBERTY_IMAGE_TAG=$IMAGE_TAG manually in .env, then re-run."
+    warn "--tag was passed but .env already exists; edit LIBERTY_IMAGE_TAG=$IMAGE_TAG manually in .env, then re-run."
   fi
 else
   info "Generating .env with random secrets…"
@@ -144,9 +141,8 @@ PGADMIN_PASSWORD=${PGADMIN_PASSWORD}
 LIBERTY_ADMIN_PASSWORD=${LIBERTY_ADMIN_PASSWORD}
 
 # Image tag — which ghcr.io/.../liberty-next:<tag> gets pulled:
-#   <version>  — pinned (e.g. 7.0.1). Production. Doesn't auto-update.
-#   latest     — most recent RELEASE. Only changes when release.yml runs.
-#   edge       — rolling tip of main. Updates on every push to main.
+#   <version>  — pinned (e.g. 7.0.1). Explicit version control.
+#   latest     — default. Most recent release. Every merge to main → new release.
 ${LIBERTY_IMAGE_TAG_LINE}
 
 # License key (RS256 JWT) — unlocks licensed connectors (nomasx1 / nomajde / nomaflow
