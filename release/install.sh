@@ -210,16 +210,22 @@ gen_secret() {
 ENV_FILE=".env"
 
 if [ "$RESET" = "yes" ]; then
-  warn "--reset: tearing down stack + wiping named volumes (pg-data, pgadmin-data, portainer-data, liberty-data, liberty-config)…"
+  warn "--reset: tearing down stack + wiping data volumes (pg-data, pgadmin-data, portainer-data, liberty-data, liberty-config)…"
   for cf in docker-compose.full.yml docker-compose.light.yml; do
     [ -f "$cf" ] && docker compose -f "$cf" down -v 2>/dev/null || true
   done
   # In case the stack was never created with compose (e.g. swarm), drop volumes by name.
-  for v in liberty-config liberty-data pg-data pgadmin-data portainer-data traefik-acme; do
+  # NOTE: traefik-acme is INTENTIONALLY excluded. Let's Encrypt has a hard limit of
+  # 5 certs / 7 days / same domain set; repeated --reset cycles during install
+  # iteration would burn through that immediately. The acme.json volume holds the
+  # already-issued cert + private key + renewal state — keeping it across resets
+  # means a fresh install reuses the existing cert (no LE round-trip). To wipe it
+  # too (domain change, key compromise, …): docker volume rm traefik-acme
+  for v in liberty-config liberty-data pg-data pgadmin-data portainer-data; do
     docker volume rm "$v" 2>/dev/null || true
   done
   rm -f "$ENV_FILE"
-  ok "Reset complete."
+  ok "Reset complete (traefik-acme preserved — LE cert survives the reset)."
   # --reset is a destructive one-shot: stop here. The operator then re-runs install.sh
   # with the full set of flags they actually want (SSL mode, --apps wheel, --license-key,
   # etc.). Don't auto-continue with a "default" install — that swallowed flags before
