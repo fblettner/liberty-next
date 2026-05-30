@@ -48,16 +48,37 @@ def _public_view(scope: str, chart: ChartConfig) -> dict[str, Any]:
     return out
 
 
-@router.get("/charts")
+@router.get(
+    "/charts",
+    summary="List charts",
+    responses={401: {"description": "Missing / invalid access token."}},
+)
 async def list_charts(principal: CurrentPrincipal, charts: Charts) -> dict[str, Any]:
     """List every chart the caller may open. Permission gate matches the underlying query's —
-    a caller without ``sql:{scope}:{query}`` doesn't see the chart at all."""
+    a caller without ``sql:{scope}:{query}`` doesn't see the chart at all.
+
+    Returns ``{ "charts": [{ id: "<scope>.<id>", connector, query, spec, ... }, ...] }``
+    — ``spec`` is the chart configuration (axes / series / colours / aggregation)
+    operators saved from the TableView's Chart toggle."""
     out = [_public_view(s, c) for s, _, c in charts.iter_charts() if _can_read(principal, s, c)]
     return {"charts": out}
 
 
-@router.get("/charts/{chart_id}")
+@router.get(
+    "/charts/{chart_id}",
+    summary="Get chart",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "Unknown chart id, OR caller lacks the underlying ``sql:<scope>:<query>``."},
+    },
+)
 async def get_chart(chart_id: str, principal: CurrentPrincipal, charts: Charts) -> dict[str, Any]:
+    """``chart_id`` is the qualified ``<scope>.<id>`` form (e.g. ``nomasx1.users_per_app``).
+    Returns the chart's connector + query + spec; the SPA's chart widget runs the query
+    itself via ``/api/sql/<connector>/<query>`` and renders against the spec.
+
+    Collapses 'caller can't read the underlying query' to 404 — the same pattern the
+    connector + screen routes use."""
     # ``chart_id`` is the qualified ``<scope>.<id>`` (e.g. ``nomasx1.users_per_app``).
     scope, _, cid = chart_id.partition(".")
     chart = charts.get_chart(scope, cid) if cid else None

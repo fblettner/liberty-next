@@ -90,7 +90,7 @@ async def _fetch_jde_dd(registry: Any, conn_name: str, query_name: str) -> dict[
     return out
 
 
-@router.post("/dictionary/scan")
+@router.post("/dictionary/scan", summary="Scan dictionary")
 async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dict[str, Any]:
     registry = request.app.state.connectors
     if bool(body.table) == bool(body.query):

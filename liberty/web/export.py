@@ -288,7 +288,7 @@ def _can_export(p: Principal, screen: Screen, *, app: str) -> bool:
     return True
 
 
-@router.post("/screens/{app}/{screen_id}/export")
+@router.post("/screens/{app}/{screen_id}/export", summary="Export screen to Excel")
 async def export_workbook(
     app: str,
     screen_id: str,

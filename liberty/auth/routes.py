@@ -94,24 +94,53 @@ _BAD_CREDENTIALS = HTTPException(
 # -- internal login --------------------------------------------------------- #
 
 
-@router.post("/login", response_model=TokenPair)
+@router.post(
+    "/login",
+    response_model=TokenPair,
+    summary="Log in",
+    responses={
+        401: {"description": "Invalid username, password, or the account is inactive."},
+    },
+)
 async def login(
     body: LoginRequest,
     backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> TokenPair:
+    """Exchange username + password for a JWT pair. The access token (default 1 h TTL) goes
+    on every subsequent ``Authorization: Bearer <token>`` header; the refresh token (default
+    14 d TTL) extends the session via ``POST /auth/refresh``.
+
+    Routes through whichever auth backend the install configured (``[auth] backend =
+    "toml"`` or ``"db"`` in app.toml). For OIDC-authenticated users, use
+    ``GET /auth/oidc/login`` instead — this endpoint only accepts local (password-backed)
+    accounts."""
     user = await backend.authenticate(body.username, body.password)
     if user is None:
         raise _BAD_CREDENTIALS
     return _issue_pair(tokens, user)
 
 
-@router.post("/refresh", response_model=TokenPair)
+@router.post(
+    "/refresh",
+    response_model=TokenPair,
+    summary="Refresh access token",
+    responses={
+        401: {"description": "Refresh token is missing, malformed, expired, or the account has been deactivated."},
+    },
+)
 async def refresh(
     body: RefreshRequest,
     backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> TokenPair:
+    """Exchange a still-valid refresh token for a fresh access + refresh pair. The old
+    refresh token is NOT invalidated (Liberty doesn't track per-token state for stateless
+    JWTs); the caller should drop it client-side once the new pair lands.
+
+    Call this when the access token's exp claim is close — the SPA does so silently from
+    a setInterval; backend integrations should refresh ~30 s before the access token
+    expires to absorb clock skew."""
     try:
         claims = tokens.decode(body.refresh_token, expected_type=REFRESH)
     except TokenError as exc:
@@ -129,12 +158,29 @@ async def refresh(
     return _issue_pair(tokens, user)
 
 
-@router.get("/me")
+@router.get(
+    "/me",
+    summary="Current user claims",
+    responses={
+        401: {"description": "Missing / invalid / expired access token."},
+    },
+)
 async def me(principal: CurrentPrincipal) -> dict:
+    """Decoded JWT claims for the request's access token — username, roles, provider
+    (``local`` / ``oidc``), and a few derived fields. Useful for the SPA to populate the
+    top-right user pill without parsing the JWT client-side. For the LIVE auth-store
+    record (name / email / etc. as the operator last edited them), use ``GET /auth/profile``."""
     return principal.to_dict()
 
 
-@router.get("/profile")
+@router.get(
+    "/profile",
+    summary="Get profile",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "The token's subject doesn't resolve to a user (account was deleted while the token was still valid)."},
+    },
+)
 async def get_profile(
     principal: CurrentPrincipal,
     backend: Annotated[AuthBackend, Depends(get_auth_backend)],
@@ -154,7 +200,14 @@ async def get_profile(
     return d
 
 
-@router.patch("/profile")
+@router.patch(
+    "/profile",
+    summary="Update profile",
+    responses={
+        400: {"description": "Caller is an OIDC user — profile fields are owned by the identity provider."},
+        401: {"description": "Missing / invalid access token."},
+    },
+)
 async def update_profile(
     body: ProfileUpdate,
     principal: CurrentPrincipal,
@@ -177,7 +230,14 @@ async def update_profile(
     return d
 
 
-@router.post("/change-password")
+@router.post(
+    "/change-password",
+    summary="Change password",
+    responses={
+        400: {"description": "OIDC user (no local password) / wrong current password / new password matches current."},
+        401: {"description": "Missing / invalid access token."},
+    },
+)
 async def change_password(
     body: ChangePasswordRequest,
     principal: CurrentPrincipal,
@@ -206,18 +266,54 @@ async def change_password(
 # -- OIDC ------------------------------------------------------------------- #
 
 
-@router.get("/oidc/login")
+@router.get(
+    "/oidc/login",
+    summary="Start OIDC login",
+    responses={
+        307: {"description": "Redirect to the provider's authorize endpoint with state + PKCE."},
+        404: {"description": "OIDC is not configured (``[oidc] enabled = false`` in app.toml)."},
+    },
+)
 async def oidc_login(request: Request, oidc: Annotated[OIDCClient, Depends(get_oidc)]):
+    """Kick off an OIDC authorization-code flow. The browser is redirected to the configured
+    provider's authorize endpoint with state + nonce + PKCE set; the provider eventually
+    POSTs back to ``/auth/oidc/callback`` which exchanges the code for tokens.
+
+    Configure via ``[oidc]`` in app.toml — ``provider_url``, ``client_id``,
+    ``client_secret``, ``scopes``, and the claim-mapping fields
+    (``username_claim`` / ``email_claim`` / ``name_claim``)."""
     return await oidc.authorize_redirect(request, oidc.redirect_uri(request))
 
 
-@router.get("/oidc/callback", name="oidc_callback", response_model=TokenPair)
+@router.get(
+    "/oidc/callback",
+    name="oidc_callback",
+    response_model=TokenPair,
+    summary="OIDC callback",
+    responses={
+        303: {"description": "When ``[oidc] frontend_redirect`` is set, redirects there with tokens in the URL fragment."},
+        400: {"description": "OAuth error from the provider, or no userinfo claims in the response."},
+        403: {"description": "Account exists locally but is disabled."},
+    },
+)
 async def oidc_callback(
     request: Request,
     oidc: Annotated[OIDCClient, Depends(get_oidc)],
     backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ):
+    """OIDC redirect target. Exchanges the code for tokens, extracts the configured claims,
+    upserts (or creates) a local user with ``provider = "oidc"``, and issues a Liberty
+    access + refresh pair.
+
+    **Two return modes:**
+
+    - **Default** — returns the ``TokenPair`` as JSON. Used when this endpoint is hit by
+      a backend integration that handles redirects itself.
+    - **Frontend redirect** — when ``[oidc] frontend_redirect`` is set, the browser is
+      redirected there with the tokens in the URL fragment (``#access_token=…&refresh_token=…``).
+      The fragment never reaches the server; the SPA's bootstrap reads it on load and
+      drops it into the auth store."""
     try:
         token = await oidc.authorize_access_token(request)
     except OAuthError as exc:

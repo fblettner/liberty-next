@@ -1,0 +1,67 @@
+# Liberty Next — LIGHT layout (single container, SQLite DB).
+#
+# What you get:
+#   - One container running the framework (API + SPA + admin UI) on port 8000.
+#   - SQLite framework DB (auth + nomaflow run history) persisted on a Docker volume.
+#   - Operator config (the *.toml files) persisted on a second volume — edit through
+#     Settings → … in the SPA, no need to bind-mount the host.
+#   - NO Postgres, NO Traefik, NO TLS — just the framework, exposed directly on :8000.
+#
+# Use for:
+#   - Trying the framework locally / on a single VPS.
+#   - Demo + evaluation environments.
+#   - A connector-only install (the licensed apps like nomasx1 / nomajde need Postgres).
+#
+# Quickstart:
+#   cp .env.example .env
+#   $EDITOR .env                       # set LIBERTY_JWT_SECRET + LIBERTY_MASTER_KEY (required)
+#   docker compose -f docker-compose.light.yml up -d
+#   docker compose -f docker-compose.light.yml logs liberty-next | grep -i admin
+#                                      # → first-boot admin password (or set LIBERTY_ADMIN_PASSWORD in .env)
+#   open http://localhost:8000
+#
+# Upgrade:  docker compose -f docker-compose.light.yml pull && docker compose -f … up -d
+# Backup:   the two named volumes (liberty-data, liberty-config) carry all state.
+
+services:
+  liberty-next:
+    image: ghcr.io/fblettner/liberty-next:${LIBERTY_IMAGE_TAG:-latest}
+    container_name: liberty-next
+    restart: unless-stopped
+    ports:
+      - "${LIBERTY_PORT:-8000}:8000"
+    environment:
+      # Token signing key — MUST be set + stable. A rotated key invalidates every
+      # outstanding access token (forces every user to re-log in). Generate one with:
+      #   python -c "import secrets;print(secrets.token_urlsafe(48))"
+      LIBERTY_JWT_SECRET: "${LIBERTY_JWT_SECRET:?LIBERTY_JWT_SECRET is required — see .env.example}"
+      # Field-level encryption key — encrypts secrets (pool passwords / API tokens) at rest
+      # in the TOML files. MUST be the same value across restarts or the encrypted values
+      # become unreadable. Generate with:
+      #   python -c "import secrets;print(secrets.token_urlsafe(32))"
+      LIBERTY_MASTER_KEY: "${LIBERTY_MASTER_KEY:?LIBERTY_MASTER_KEY is required — see .env.example}"
+      # Framework DB — SQLite by default, on the persisted volume.
+      LIBERTY_DB_URL: "${LIBERTY_DB_URL:-sqlite+aiosqlite:////data/liberty.db}"
+      # Optional — bootstrap admin password (else init-db generates + prints one once).
+      LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-}"
+      # Optional — license key for the licensed connectors (nomasx1 / nomajde / nomaflow
+      # premium). Without a key, the framework runs in restricted mode (those connectors
+      # don't load); everything else works.
+      LIBERTY_LICENSE_KEY: "${LIBERTY_LICENSE_KEY:-}"
+      # Optional — Anthropic API key for the AI assistant chat. Leave empty to disable.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    volumes:
+      - liberty-data:/data              # SQLite DB + auth.toml (Argon2 hashes)
+      - liberty-config:/app/config      # connectors / dictionary / menus / screens / charts / dashboards
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/info"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+volumes:
+  liberty-data:
+    name: liberty-data
+  liberty-config:
+    name: liberty-config

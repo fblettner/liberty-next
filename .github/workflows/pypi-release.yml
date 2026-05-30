@@ -1,0 +1,109 @@
+# Publish Liberty Next to PyPI on tag push (vX.Y.Z).
+#
+# Triggers on tags matching ``v*.*.*`` (the SemVer convention). Builds an sdist + wheel
+# via ``python -m build`` and uploads via the PyPI API using a token stored in the repo
+# secret ``PYPI_API_TOKEN``.
+#
+# Setup (one-time):
+#   1. Get a PyPI token from https://pypi.org/manage/account/token/ (scope it to the
+#      ``liberty-next`` project once the first release lands; before that, an account-
+#      scoped token is fine).
+#   2. Add it to the repo at:
+#        Settings → Secrets and variables → Actions → New repository secret
+#        Name:   PYPI_API_TOKEN
+#        Value:  pypi-…
+#
+# To CUT a release:
+#   - Bump ``version`` in pyproject.toml.
+#   - Commit + push to main.
+#   - Tag the commit:  ``git tag v0.1.0 && git push origin v0.1.0``.
+#   - The workflow runs, verifies the tag matches the version, builds, and publishes.
+#
+# Alternative — Trusted Publishing (no token in GitHub at all):
+#   Register a publisher at https://pypi.org/manage/account/publishing/ (workflow
+#   ``pypi-release.yml``, no environment). Then swap the publish step's ``with:`` block
+#   to omit ``password`` and add ``permissions: id-token: write`` to this job.
+
+name: PyPI release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'    # SemVer tags only — skips v-prefixed branch / arbitrary tags
+
+# Concurrency: cancel an in-flight run for the same tag if a second push lands.
+# Two simultaneous publishes to PyPI would race; PyPI also rejects re-uploads of the
+# same version, so the second one would fail anyway — cancel + restart is cleaner.
+concurrency:
+  group: pypi-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    name: Build sdist + wheel, publish to PyPI
+    runs-on: ubuntu-latest
+    # OPTIONAL — uncomment + create the environment under Settings → Environments to gate
+    # publishes behind a manual approver / restrict the secret to this environment. PyPI
+    # Trusted Publishing works fine without it; if you DO enable it, the environment name
+    # here MUST match the one you registered with the PyPI trusted-publisher config.
+    # environment:
+    #   name: pypi
+    #   url: https://pypi.org/p/liberty-next
+    permissions:
+      # Read the repo to check out the tag. We publish with a token (PYPI_API_TOKEN),
+      # not OIDC — no id-token: write needed here.
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify the tag matches pyproject.toml's version
+        run: |
+          # Defence against pushing v0.1.0 with pyproject still at 0.0.9. PyPI would
+          # accept the upload but the package would say 0.0.9; the mismatch makes
+          # debugging "why didn't my fix ship" miserable. Fail fast here.
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag '$GITHUB_REF_NAME' (=> $TAG_VERSION) does not match pyproject.toml version ($PKG_VERSION)"
+            echo "Bump pyproject.toml's version to $TAG_VERSION before tagging, or retag at the right commit."
+            exit 1
+          fi
+          echo "✔ tag $GITHUB_REF_NAME matches pyproject.toml version $PKG_VERSION"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Build sdist + wheel
+        run: |
+          python -m build
+          # twine check enforces long-description renders cleanly on PyPI (so the README
+          # doesn't land as broken markdown). Cheap, catches author mistakes.
+          python -m twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Create GitHub release notes (sketch)
+        # Lightweight release on the same tag — links to PyPI + lets users subscribe to
+        # the Releases feed. Auto-generated body lists the commits since the previous
+        # tag; operators usually edit it after the fact, but having something is better
+        # than empty release pages.
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            Liberty Next ${{ github.ref_name }}
+
+            **PyPI:** https://pypi.org/project/liberty-next/${{ github.ref_name }}/
+            **Docker:** `ghcr.io/fblettner/liberty-next:${{ github.ref_name }}` (built by the docker workflow on the same tag)

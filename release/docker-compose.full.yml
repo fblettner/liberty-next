@@ -1,0 +1,256 @@
+# Liberty Next — FULL layout (5 services behind Traefik).
+#
+# What you get:
+#   - Traefik (reverse proxy) — terminates HTTP on :80 (and :443 if you wire TLS).
+#   - Liberty Next — API + SPA + admin on the framework's :8000, exposed by Traefik
+#     under the root path "/".
+#   - PostgreSQL 16 — framework DB (auth + nomaflow run history) + a place to host
+#     customer pools (nomasx1 / nomajde data, etc).
+#   - pgAdmin — Postgres GUI, exposed under "/pgadmin".
+#   - Portainer — Docker UI, exposed under "/portainer".
+#
+# Routing:
+#   /pgadmin           → pgadmin     (PathPrefix, stripped before forwarding)
+#   /portainer         → portainer   (PathPrefix, stripped before forwarding)
+#   /traefik           → Traefik dashboard (basic-auth — set TRAEFIK_DASHBOARD_USERS in .env)
+#   /                  → liberty-next  (catchall — lowest priority)
+#
+# Use for:
+#   - Production / staging installs.
+#   - Multi-user environments.
+#   - Anywhere you'll be running the licensed connectors (which need Postgres pools).
+#
+# Quickstart:
+#   cp .env.example .env
+#   $EDITOR .env                       # set the REQUIRED values (marked in the file)
+#   docker compose -f docker-compose.full.yml up -d
+#   docker compose -f docker-compose.full.yml logs liberty-next | grep -i admin
+#                                      # → first-boot admin password
+#   open http://localhost                # the SPA
+#
+# TLS (Let's Encrypt):
+#   Set LIBERTY_DOMAIN to a real hostname pointing at this server, uncomment the websecure
+#   entrypoint + certresolver block in traefik/traefik.yml, set ACME_EMAIL in .env. Then:
+#     docker compose -f docker-compose.full.yml up -d
+#   Traefik will request + auto-renew certificates for ${LIBERTY_DOMAIN}.
+
+services:
+  traefik:
+    image: traefik:v3.7
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=liberty-network
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      # Uncomment for TLS / Let's Encrypt:
+      # - --entrypoints.websecure.address=:443
+      # - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL required for TLS}
+      # - --certificatesresolvers.le.acme.storage=/etc/traefik/acme/acme.json
+      # - --certificatesresolvers.le.acme.tlschallenge=true
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      # - "443:443"          # uncomment when TLS is wired
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik:ro       # static file-provider configs (dynamic/)
+      - traefik-acme:/etc/traefik/acme  # ACME certificate storage (when TLS is wired)
+    networks:
+      - liberty-network
+    labels:
+      traefik.enable: "true"
+      # Dashboard at /traefik — basic-auth gated by the ``traefik-auth@file`` middleware
+      # defined in traefik/dynamic/dynamic.yml. Edit that file to change the password
+      # (no restart needed — file.watch=true picks up changes).
+      traefik.http.routers.traefik-dashboard.rule: "PathPrefix(`/traefik`) || PathPrefix(`/api`) && Method(`GET`) && PathRegexp(`^/api/(http|tcp|udp|providers|services|entrypoints|version|overview)`)"
+      traefik.http.routers.traefik-dashboard.entrypoints: "web"
+      traefik.http.routers.traefik-dashboard.service: "api@internal"
+      traefik.http.routers.traefik-dashboard.middlewares: "traefik-strip@docker,traefik-auth@file"
+      traefik.http.routers.traefik-dashboard.priority: "1000"
+      traefik.http.middlewares.traefik-strip.stripprefix.prefixes: "/traefik"
+
+  liberty-next:
+    image: ghcr.io/fblettner/liberty-next:${LIBERTY_IMAGE_TAG:-latest}
+    container_name: liberty-next
+    restart: unless-stopped
+    depends_on:
+      pg:
+        condition: service_healthy
+    environment:
+      LIBERTY_JWT_SECRET: "${LIBERTY_JWT_SECRET:?LIBERTY_JWT_SECRET is required — see .env.example}"
+      LIBERTY_MASTER_KEY: "${LIBERTY_MASTER_KEY:?LIBERTY_MASTER_KEY is required — see .env.example}"
+      # Framework DB on the Postgres service — uses the asyncpg driver.
+      LIBERTY_DB_URL: "postgresql+asyncpg://${POSTGRES_USER:-liberty}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@pg:5432/${POSTGRES_DB:-liberty}"
+      LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-}"
+      LIBERTY_LICENSE_KEY: "${LIBERTY_LICENSE_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Optional — OIDC (set in .env if you have an identity provider):
+      LIBERTY_OIDC_ENABLED: "${LIBERTY_OIDC_ENABLED:-false}"
+      LIBERTY_OIDC_PROVIDER_URL: "${LIBERTY_OIDC_PROVIDER_URL:-}"
+      LIBERTY_OIDC_CLIENT_ID: "${LIBERTY_OIDC_CLIENT_ID:-}"
+      LIBERTY_OIDC_CLIENT_SECRET: "${LIBERTY_OIDC_CLIENT_SECRET:-}"
+    volumes:
+      - liberty-config:/app/config
+    networks:
+      - liberty-network
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/info"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    labels:
+      traefik.enable: "true"
+      # Catchall — everything that doesn't match a more specific router lands here.
+      # PathPrefix(`/`) matches every path; priority=1 keeps it below pgadmin/portainer/traefik.
+      traefik.http.routers.liberty-next.rule: "PathPrefix(`/`)"
+      traefik.http.routers.liberty-next.entrypoints: "web"
+      traefik.http.routers.liberty-next.priority: "1"
+      traefik.http.services.liberty-next.loadbalancer.server.port: "8000"
+      # Sticky session for Socket.IO (live dashboards / chat streams) — keeps a given
+      # client pinned to one liberty-next replica when you scale > 1.
+      traefik.http.services.liberty-next.loadbalancer.sticky.cookie.name: "liberty_sticky"
+
+  pg:
+    image: postgres:16-alpine
+    container_name: liberty-pg
+    restart: unless-stopped
+    # ─── Performance tuning — assumes ~8 GB host RAM dedicated to Postgres ─────
+    # Smaller host (≤4 GB): halve ``shared_buffers`` + ``work_mem``.
+    # Larger host (≥16 GB): bump ``shared_buffers`` to ~25% of RAM, ``work_mem`` to 512 MB.
+    # See https://pgtune.leopard.in.ua/ if you want a calculator.
+    #
+    # Some settings trade durability for throughput — review before production:
+    #   wal_level=minimal + max_wal_senders=0 — disables physical replication / PITR /
+    #     logical decoding. Fine for single-instance + nightly backups; switch to
+    #     ``wal_level=replica`` if you ever want a hot standby.
+    #   synchronous_commit=off — a crash can lose the last few committed transactions
+    #     (typically < 1 s of writes). Acceptable for ETL / analytics; less so for
+    #     financial workloads — flip to ``on`` if you need strict durability.
+    shm_size: 512m
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - work_mem=256MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_wal_size=8GB
+      - -c
+      - wal_level=minimal
+      - -c
+      - max_wal_senders=0
+      - -c
+      - synchronous_commit=off
+      - -c
+      - checkpoint_timeout=20min
+      - -c
+      - track_activity_query_size=1MB
+      - -c
+      - seq_page_cost=1
+      - -c
+      - random_page_cost=4
+      - -c
+      - cpu_tuple_cost=0.03
+      - -c
+      - cpu_index_tuple_cost=0.005
+      - -c
+      - cpu_operator_cost=0.0025
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=stderr
+      - -c
+      - log_directory=/var/log/postgresql
+      - -c
+      - log_rotation_age=1d
+      - -c
+      - log_rotation_size=10MB
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-liberty}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
+      POSTGRES_DB: "${POSTGRES_DB:-liberty}"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - pg-logs:/var/log/postgresql        # rotated log files — see ``logging_collector=on`` above
+    networks:
+      - liberty-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-liberty} -d ${POSTGRES_DB:-liberty}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    # Expose 5432 to the host only when you need to connect from outside Docker
+    # (DBeaver from your laptop, etc.). Comment out otherwise.
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    depends_on:
+      - pg
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@example.com}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:?PGADMIN_PASSWORD required}"
+      PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+      # Tells pgAdmin it's mounted under /pgadmin (so its internal links resolve right).
+      SCRIPT_NAME: "/pgadmin"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - liberty-network
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.pgadmin.rule: "PathPrefix(`/pgadmin`)"
+      traefik.http.routers.pgadmin.entrypoints: "web"
+      traefik.http.routers.pgadmin.priority: "100"
+      traefik.http.services.pgadmin.loadbalancer.server.port: "80"
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    # Reads the Docker socket to manage containers (same way Portainer always works).
+    # If you don't want that surface inside this stack, remove the portainer service.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    networks:
+      - liberty-network
+    labels:
+      traefik.enable: "true"
+      # Portainer needs a stripprefix to strip the /portainer prefix before forwarding.
+      traefik.http.routers.portainer.rule: "PathPrefix(`/portainer`)"
+      traefik.http.routers.portainer.entrypoints: "web"
+      traefik.http.routers.portainer.priority: "100"
+      traefik.http.routers.portainer.middlewares: "portainer-strip"
+      traefik.http.middlewares.portainer-strip.stripprefix.prefixes: "/portainer"
+      traefik.http.services.portainer.loadbalancer.server.port: "9000"
+
+volumes:
+  liberty-config:
+    name: liberty-config
+  pg-data:
+    name: pg-data
+  pg-logs:
+    name: pg-logs
+  pgadmin-data:
+    name: pgadmin-data
+  portainer-data:
+    name: portainer-data
+  traefik-acme:
+    name: traefik-acme
+
+networks:
+  liberty-network:
+    name: liberty-network

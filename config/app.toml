@@ -3,6 +3,8 @@ name = "Liberty Next"
 host = "0.0.0.0"
 port = 8000
 log_level = "info"
+hot_reload = true
+default_language = "en"
 
 [connectors]
 # Default resolves to ${LIBERTY_APPS_DIR}/connectors.toml when the env var is set
@@ -73,13 +75,13 @@ key = "${LIBERTY_LICENSE_KEY}"
 [ai]
 enabled = true
 api_key = "${ANTHROPIC_API_KEY}"
-model = "claude-opus-4-7"
+model = "claude-haiku-4-5-20251001"
 max_tokens = 8192
 max_iterations = 8               # safety cap on tool-use round trips
 system_prompt = ""               # empty → built-in default
 thinking = false                 # enable adaptive thinking
 effort = ""                      # "" | low | medium | high | xhigh | max (sent only when set; ignored for haiku)
-request_timeout = 120.0
+request_timeout = 120
 connector_tools = true           # expose list_connectors + sql_query (read-only queries only)
 api_tool = false                 # expose api_call (off — API endpoints may have side effects)
 allowed_connectors = []          # restrict which connectors the assistant may use; empty = all
@@ -91,6 +93,7 @@ web_fetch_max_uses = 5
 # registers cron triggers. See ../../liberty-apps/docs/NOMAFLOW.md for the
 # operator guide and docs/PHASE13.md for the spec. Missing/unreachable pool →
 # nomaflow logs a warning and skips startup (rest of the app boots normally).
+scaffold_tools = true
 [jobs]
 # LIBERTY_APPS_DIR points at the apps repo's `config/` subdir by convention; plugins/
 # is the sibling dir, so the default resolves to

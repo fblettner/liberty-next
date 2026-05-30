@@ -1,0 +1,327 @@
+# Liberty Next — Docker Swarm layout (full stack).
+#
+# Same five services as docker-compose.full.yml, adapted for Swarm:
+#   - container_name dropped (Swarm names services <stack>_<service>.<replica>).
+#   - restart: unless-stopped → deploy.restart_policy.
+#   - depends_on: condition: service_healthy dropped (Swarm doesn't support it; the
+#     entrypoint's wait_for_db handles startup ordering).
+#   - networks switched to overlay (works on single-node AND multi-node swarms).
+#   - Traefik uses --providers.swarm instead of --providers.docker.
+#   - Stateful services pinned to a single manager via placement constraints + a
+#     single replica (the bundled pg / pgadmin / portainer don't share state).
+#   - liberty-next defaults to replicas: 1; bump it after wiring Redis or another
+#     Socket.IO shared state (the in-process state doesn't survive multi-replica).
+#
+# Env vars: docker stack deploy does NOT auto-load .env (no --env-file flag exists for
+# stack deploy). Use the helper:
+#   ./deploy-swarm.sh
+# which does ``set -a; source .env; set +a`` then ``docker stack deploy``.
+#
+# Initialise the swarm first (one-time, on the manager):
+#   docker swarm init                                    # single-node
+#   docker swarm init --advertise-addr <manager-ip>      # multi-node
+#
+# Manual deploy (without the helper):
+#   set -a; source .env; set +a
+#   docker stack deploy -c docker-compose.swarm.yml liberty
+#
+# Update one service to a new image tag:
+#   docker service update --image ghcr.io/fblettner/liberty-next:0.2.0 liberty_liberty-next
+#
+# Roll back:
+#   docker service rollback liberty_liberty-next
+
+# Compose v3.9 is the last spec with Swarm parity. Swarm only honours the v3.x grammar.
+version: "3.9"
+
+services:
+  traefik:
+    image: traefik:v3.7
+    command:
+      - --api.dashboard=true
+      - --providers.swarm=true                          # swarm provider (not docker)
+      - --providers.swarm.exposedByDefault=false
+      - --providers.swarm.network=liberty-network
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      # Uncomment for TLS / Let's Encrypt:
+      # - --entrypoints.websecure.address=:443
+      # - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL required for TLS}
+      # - --certificatesresolvers.le.acme.storage=/etc/traefik/acme/acme.json
+      # - --certificatesresolvers.le.acme.tlschallenge=true
+    ports:
+      - target: 80
+        published: ${TRAEFIK_HTTP_PORT:-80}
+        mode: host                  # host mode keeps the real client IP (vs ingress mode)
+      # - target: 443
+      #   published: 443
+      #   mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro    # MUST be on a manager node
+      - ./traefik:/etc/traefik:ro
+      - traefik-acme:/etc/traefik/acme
+    networks:
+      - liberty-network
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        # The Swarm provider reads the API on the Docker socket — only managers have it.
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 5s
+      update_config:
+        parallelism: 1
+        order: start-first
+      labels:                                            # SWARM-mode router labels live in deploy.labels
+        - traefik.enable=true
+        # Dashboard at /traefik — basic-auth gated via traefik-auth@file (defined in
+        # traefik/dynamic/dynamic.yml). Edit there to change the password — no restart needed.
+        - traefik.http.routers.traefik-dashboard.rule=PathPrefix(`/traefik`) || PathPrefix(`/api`) && Method(`GET`) && PathRegexp(`^/api/(http|tcp|udp|providers|services|entrypoints|version|overview)`)
+        - traefik.http.routers.traefik-dashboard.entrypoints=web
+        - traefik.http.routers.traefik-dashboard.service=api@internal
+        - traefik.http.routers.traefik-dashboard.middlewares=traefik-strip@swarm,traefik-auth@file
+        - traefik.http.routers.traefik-dashboard.priority=1000
+        - traefik.http.middlewares.traefik-strip.stripprefix.prefixes=/traefik
+        # Swarm provider requires a stub service definition on a router-only stack — pin
+        # to a loopback so Traefik's health check passes (the dashboard goes through
+        # api@internal, not this).
+        - traefik.http.services.traefik.loadbalancer.server.port=8080
+
+  liberty-next:
+    image: ghcr.io/fblettner/liberty-next:${LIBERTY_IMAGE_TAG:-latest}
+    environment:
+      LIBERTY_JWT_SECRET: "${LIBERTY_JWT_SECRET:?LIBERTY_JWT_SECRET is required}"
+      LIBERTY_MASTER_KEY: "${LIBERTY_MASTER_KEY:?LIBERTY_MASTER_KEY is required}"
+      LIBERTY_DB_URL: "postgresql+asyncpg://${POSTGRES_USER:-liberty}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@pg:5432/${POSTGRES_DB:-liberty}"
+      LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-}"
+      LIBERTY_LICENSE_KEY: "${LIBERTY_LICENSE_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      LIBERTY_OIDC_ENABLED: "${LIBERTY_OIDC_ENABLED:-false}"
+      LIBERTY_OIDC_PROVIDER_URL: "${LIBERTY_OIDC_PROVIDER_URL:-}"
+      LIBERTY_OIDC_CLIENT_ID: "${LIBERTY_OIDC_CLIENT_ID:-}"
+      LIBERTY_OIDC_CLIENT_SECRET: "${LIBERTY_OIDC_CLIENT_SECRET:-}"
+    volumes:
+      - liberty-config:/app/config
+    networks:
+      - liberty-network
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/info"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    deploy:
+      mode: replicated
+      # IMPORTANT: keep at 1 until Socket.IO has shared state (Redis adapter). The
+      # in-process pub/sub doesn't survive multi-replica; sticky cookies help but
+      # broadcast events (live dashboards) get lost across replicas.
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      placement:
+        constraints:
+          # Pin to managers by default — change to ``node.role == worker`` if you have
+          # dedicated worker nodes for app workloads.
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        # Catchall — everything not matched by a higher-priority router lands here.
+        - traefik.http.routers.liberty-next.rule=PathPrefix(`/`)
+        - traefik.http.routers.liberty-next.entrypoints=web
+        - traefik.http.routers.liberty-next.priority=1
+        - traefik.http.services.liberty-next.loadbalancer.server.port=8000
+        # Sticky session for Socket.IO — when you bump replicas, this pins each client to
+        # one liberty-next replica per request.
+        - traefik.http.services.liberty-next.loadbalancer.sticky.cookie.name=liberty_sticky
+
+  pg:
+    image: postgres:16-alpine
+    # ─── Performance tuning — see docker-compose.full.yml for sizing notes ─────
+    # Assumes ~8 GB host RAM; scale ``shared_buffers`` / ``work_mem`` proportionally.
+    # ``wal_level=minimal`` + ``synchronous_commit=off`` trade durability for throughput.
+    shm_size: 512m
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - work_mem=256MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_wal_size=8GB
+      - -c
+      - wal_level=minimal
+      - -c
+      - max_wal_senders=0
+      - -c
+      - synchronous_commit=off
+      - -c
+      - checkpoint_timeout=20min
+      - -c
+      - track_activity_query_size=1MB
+      - -c
+      - seq_page_cost=1
+      - -c
+      - random_page_cost=4
+      - -c
+      - cpu_tuple_cost=0.03
+      - -c
+      - cpu_index_tuple_cost=0.005
+      - -c
+      - cpu_operator_cost=0.0025
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=stderr
+      - -c
+      - log_directory=/var/log/postgresql
+      - -c
+      - log_rotation_age=1d
+      - -c
+      - log_rotation_size=10MB
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-liberty}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
+      POSTGRES_DB: "${POSTGRES_DB:-liberty}"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - pg-logs:/var/log/postgresql
+    networks:
+      - liberty-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-liberty} -d ${POSTGRES_DB:-liberty}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      mode: replicated
+      replicas: 1                              # stateful — never > 1 (no built-in replication)
+      restart_policy:
+        condition: any
+        delay: 5s
+      update_config:
+        parallelism: 1
+        order: stop-first                      # stateful — stop the old before starting the new
+      placement:
+        constraints:
+          # IMPORTANT: pin Postgres to a SPECIFIC node so its volume always reattaches
+          # in place. With more than one manager, add ``node.hostname == <your-pg-node>``
+          # so Swarm doesn't reschedule pg onto a node where the volume is empty.
+          - node.role == manager
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@example.com}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:?PGADMIN_PASSWORD required}"
+      PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+      SCRIPT_NAME: "/pgadmin"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - liberty-network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.pgadmin.rule=PathPrefix(`/pgadmin`)
+        - traefik.http.routers.pgadmin.entrypoints=web
+        - traefik.http.routers.pgadmin.priority=100
+        - traefik.http.services.pgadmin.loadbalancer.server.port=80
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock        # MUST be on a manager
+      - portainer-data:/data
+    networks:
+      - liberty-network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.portainer.rule=PathPrefix(`/portainer`)
+        - traefik.http.routers.portainer.entrypoints=web
+        - traefik.http.routers.portainer.priority=100
+        - traefik.http.routers.portainer.middlewares=portainer-strip
+        - traefik.http.middlewares.portainer-strip.stripprefix.prefixes=/portainer
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+
+volumes:
+  liberty-config:
+    name: liberty-config
+  pg-data:
+    name: pg-data
+  pg-logs:
+    name: pg-logs
+  pgadmin-data:
+    name: pgadmin-data
+  portainer-data:
+    name: portainer-data
+  traefik-acme:
+    name: traefik-acme
+
+networks:
+  liberty-network:
+    name: liberty-network
+    driver: overlay                                       # overlay = works across nodes
+    attachable: true                                      # lets one-off ``docker run --network`` attach for debug
+
+# ──────────────────────────────────────────────────────────────────────────────────────
+# OPTIONAL — Docker Secrets upgrade path
+#
+# For sensitive values, prefer Docker Secrets over env vars (they're encrypted at rest
+# in the swarm raft store and only mounted as files in the target container; ``docker
+# service inspect`` doesn't reveal them). To switch:
+#
+# 1. Create the secrets (one-time, on the manager):
+#      printf '%s' "$LIBERTY_JWT_SECRET" | docker secret create liberty_jwt_secret -
+#      printf '%s' "$LIBERTY_MASTER_KEY" | docker secret create liberty_master_key -
+#      printf '%s' "$POSTGRES_PASSWORD"   | docker secret create postgres_password -
+#
+# 2. Add a top-level ``secrets:`` block + attach to each service:
+#
+#      secrets:
+#        liberty_jwt_secret: { external: true }
+#        liberty_master_key: { external: true }
+#        postgres_password:  { external: true }
+#
+#      services:
+#        liberty-next:
+#          secrets: [liberty_jwt_secret, liberty_master_key, postgres_password]
+#          environment:
+#            # Liberty Next does NOT yet support the ``*_FILE`` convention out of the
+#            # box — wrap the entrypoint to export the values from the mounted files:
+#            #   LIBERTY_JWT_SECRET="$(cat /run/secrets/liberty_jwt_secret)"
+#            #   LIBERTY_MASTER_KEY="$(cat /run/secrets/liberty_master_key)"
+#            # and pass them to uvicorn.
+#
+# This is more involved than env vars — only worth it for production / regulated installs.
+# ──────────────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,58 @@
+# Traefik dynamic config — middlewares + TLS options that don't fit cleanly on container
+# labels (basic-auth password hashes contain ``$`` which would be eaten by docker-compose
+# variable substitution; security headers are reusable across routers).
+#
+# This file is mounted read-only and watched (file.watch=true in the static config) —
+# edit it on the host and Traefik reloads in seconds, no restart needed.
+
+http:
+  middlewares:
+    # ─── Basic-auth for the Traefik dashboard ─────────────────────────────────────
+    # Default users: admin / admin.
+    # CHANGE THE PASSWORD for anything real:
+    #   1. Generate a new hash (bcrypt; works without escaping anywhere):
+    #        docker run --rm httpd:alpine htpasswd -nbB admin "<your-password>"
+    #   2. Replace the entry below with that one line of output.
+    # Multiple users? Add one per line:
+    #   users:
+    #     - "admin:$2y$05$…"
+    #     - "ops:$2y$05$…"
+    traefik-auth:
+      basicAuth:
+        users:
+          - "admin:$2y$05$LQILPh4NZXEx.ck6BhYbaec/ra38THfFtQ5Rlq2Tw4bMpyEzpGFJq"
+          # admin / admin — REGENERATE before exposing to the internet.
+
+    # ─── Sensible default security headers ────────────────────────────────────────
+    # Attach with:  traefik.http.routers.<name>.middlewares: "security-headers@file"
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "no-referrer-when-downgrade"
+        # Uncomment when serving over HTTPS:
+        # stsSeconds: 31536000
+        # stsIncludeSubdomains: true
+        # forceSTSHeader: true
+
+    # ─── Redirect HTTP → HTTPS (when TLS is wired) ────────────────────────────────
+    # Attach to every HTTP router once the websecure entrypoint is enabled:
+    #   traefik.http.routers.<name>.middlewares: "https-redirect@file"
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+# TLS options — only consumed when the websecure entrypoint is enabled in the static config.
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305

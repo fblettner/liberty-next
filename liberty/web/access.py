@@ -63,12 +63,12 @@ def _role_dict(t: tuple[str, list[str], str | None]) -> dict[str, Any]:
 
 
 # ── users ─────────────────────────────────────────────────────────────────────────────────
-@router.get("/users")
+@router.get("/users", summary="List users")
 async def list_users(_: Superuser, backend: Backend) -> dict[str, Any]:
     return {"users": [u.public_dict() for u in await backend.list_users()]}
 
 
-@router.post("/users", status_code=status.HTTP_201_CREATED)
+@router.post("/users", status_code=status.HTTP_201_CREATED, summary="Create user")
 async def create_user(body: UserCreate, _: Superuser, backend: Backend) -> dict[str, Any]:
     try:
         u = await backend.create_user(
@@ -80,7 +80,7 @@ async def create_user(body: UserCreate, _: Superuser, backend: Backend) -> dict[
     return u.public_dict()
 
 
-@router.patch("/users/{username}")
+@router.patch("/users/{username}", summary="Update user")
 async def update_user(username: str, body: UserUpdate, principal: CurrentPrincipal, _: Superuser, backend: Backend) -> dict[str, Any]:
     # Self-lockout guard — don't let a superuser strip its own access in a way that could leave
     # the install unmanageable (deactivate self / drop own superuser).
@@ -110,7 +110,7 @@ async def update_user(username: str, body: UserUpdate, principal: CurrentPrincip
     return u.public_dict()
 
 
-@router.post("/users/{username}/password")
+@router.post("/users/{username}/password", summary="Set user password")
 async def set_user_password(username: str, body: PasswordSet, _: Superuser, backend: Backend) -> dict[str, Any]:
     try:
         await backend.set_password(username, body.password)
@@ -120,12 +120,12 @@ async def set_user_password(username: str, body: PasswordSet, _: Superuser, back
 
 
 # ── roles ─────────────────────────────────────────────────────────────────────────────────
-@router.get("/roles")
+@router.get("/roles", summary="List roles")
 async def list_roles(_: Superuser, backend: Backend) -> dict[str, Any]:
     return {"roles": [_role_dict(r) for r in await backend.list_roles()]}
 
 
-@router.put("/roles/{name}")
+@router.put("/roles/{name}", summary="Upsert role")
 async def upsert_role(name: str, body: RoleUpsert, _: Superuser, backend: Backend) -> dict[str, Any]:
     # get_or_create_role is an upsert — creates the role or replaces its permissions / description.
     t = await backend.get_or_create_role(name, permissions=body.permissions, description=body.description)

@@ -43,11 +43,29 @@ def _assistant(request: Request) -> AiAssistant:
     return assistant
 
 
-@router.get("/tools")
+@router.get(
+    "/tools",
+    summary="List AI tools",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        403: {"description": "Caller lacks ``ai:chat`` permission."},
+        404: {"description": "AI assistant is disabled (``[ai] enabled = false`` in app.toml)."},
+    },
+)
 async def tools(
     request: Request,
     _: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
 ) -> dict[str, Any]:
+    """Diagnostic surface for the AI assistant. Returns:
+
+    - ``available`` — whether the assistant has a working Anthropic API key.
+    - ``model`` — the model id currently in use (e.g. ``claude-sonnet-4-6``).
+    - ``tools`` — full tool catalogue: connector-tools (``list_connectors`` /
+      ``sql_query`` / optionally ``api_call``) and scaffold-tools
+      (``introspect_table`` / ``scaffold_*``) when ``[ai] scaffold_tools = true``.
+
+    Useful when wiring the assistant for the first time or after toggling a flag —
+    operators can hit this to confirm the runtime saw the change."""
     assistant = _assistant(request)
     return {
         "available": assistant.available,
@@ -56,12 +74,54 @@ async def tools(
     }
 
 
-@router.post("/chat")
+@router.post(
+    "/chat",
+    summary="Chat (streaming)",
+    responses={
+        200: {
+            "description": (
+                "Server-Sent-Events stream. Each ``data:`` line is one JSON ChatEvent. "
+                "Types: ``token`` (text delta) · ``thinking`` (adaptive-thinking delta) · "
+                "``tool_call`` (assistant invoked ``name(input)``) · ``tool_result`` "
+                "(tool returned) · ``proposal`` (scaffold-tool returned a Proposal envelope "
+                "ready for Apply) · ``error`` (terminal) · ``done`` (clean stop with usage)."
+            ),
+            "content": {"text/event-stream": {}},
+        },
+        400: {"description": "First message must have ``role = \"user\"``."},
+        401: {"description": "Missing / invalid access token."},
+        403: {"description": "Caller lacks ``ai:chat`` permission."},
+        404: {"description": "AI assistant is disabled."},
+    },
+)
 async def chat(
     body: ChatRequest,
     request: Request,
     _: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
 ) -> StreamingResponse:
+    """Stream a chat completion as Server-Sent Events.
+
+    **Request body:**
+
+    ```json
+    {
+      "messages": [
+        {"role": "user", "content": "list connectors then show me 5 rows from security_users"}
+      ],
+      "model": "claude-sonnet-4-6"  // optional override; defaults to [ai] model
+    }
+    ```
+
+    **Wire format:** standard ``text/event-stream`` — newline-delimited ``data:`` lines.
+    Each frame is a JSON object (one ``ChatEvent``); the stream ends with a literal
+    ``data: [DONE]`` sentinel after the final ``done`` event so clients have an explicit
+    stop marker. The browser SSE consumer in the SPA is
+    ``frontend/src/ai/useChat.ts`` — pair against that for the canonical client shape.
+
+    **Tool loop:** the assistant runs up to ``[ai] max_tool_rounds`` rounds of
+    tool-use → tool-result before forcing a final assistant message. Each tool call
+    fires one ``tool_call`` event and (after the tool returns) one ``tool_result``
+    event so the UI can render a pending → completed status pill per call."""
     assistant = _assistant(request)
     if body.messages[0].role != "user":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The first message must have role 'user'")

@@ -185,16 +185,35 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
     return out
 
 
-@router.get("/dashboards")
+@router.get(
+    "/dashboards",
+    summary="List dashboards",
+    responses={401: {"description": "Missing / invalid access token."}},
+)
 async def list_dashboards(principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts) -> dict[str, Any]:
+    """Returns the resolved dashboards — widget lists already filtered to only the
+    widgets the caller can populate (each widget gates on the underlying connector +
+    query's permission). A dashboard with zero readable widgets is dropped entirely."""
     out = [r for _, _, d in dashboards.iter_dashboards() if (r := _resolve_dashboard(d, charts, principal)) is not None]
     return {"dashboards": out}
 
 
-@router.get("/dashboards/{dashboard_id}")
+@router.get(
+    "/dashboards/{dashboard_id}",
+    summary="Get dashboard",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "Unknown dashboard, OR caller has no readable widgets in it."},
+    },
+)
 async def get_dashboard(
     dashboard_id: str, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts,
 ) -> dict[str, Any]:
+    """``dashboard_id`` is the qualified ``<scope>.<id>`` form (e.g. ``nomasx1.overview``).
+    Returns the dashboard with each widget resolved (chart-refs flattened to inline
+    chart specs, KPI widgets carrying their aggregation column, table widgets carrying
+    their column subset) AND the shared ``filters`` block — picker definitions whose
+    chosen value rebinds each applicable widget's query."""
     # ``dashboard_id`` is the qualified ``<scope>.<id>`` (e.g. ``nomasx1.overview``).
     d = dashboards.find(dashboard_id)
     resolved = _resolve_dashboard(d, charts, principal) if d is not None else None

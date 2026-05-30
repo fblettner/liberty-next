@@ -129,10 +129,20 @@ def _app_tree(
     return out
 
 
-@router.get("/menus")
+@router.get(
+    "/menus",
+    summary="List menus",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+    },
+)
 async def list_menus(
     request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors,
 ) -> dict[str, Any]:
+    """Returns ``{ "menus": { "<app>": <menu-tree>, ... } }``. Each tree carries:
+    ``label``, ``items`` (the visible tree), ``show_in_switcher`` (whether the app
+    appears in the workspace switcher), and ``home_path`` (the default landing route
+    for the app — first visible leaf item). Apps with no visible items are dropped."""
     lang = request_language(request)
     out = {
         app: tree
@@ -142,10 +152,20 @@ async def list_menus(
     return {"menus": out}
 
 
-@router.get("/menus/{app}")
+@router.get(
+    "/menus/{app}",
+    summary="Get app menu",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "App not found, or every item in its menu is permission-filtered out."},
+    },
+)
 async def get_app_menu(
     app: str, request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors,
 ) -> dict[str, Any]:
+    """Same shape as one element of the ``GET /api/menus`` map, narrowed to a single
+    app. Returns 404 when the caller can see nothing in the menu — keeps parity with
+    ``/api/screens/{app}``."""
     app_menu = menus.menus.get(app)
     tree = _app_tree(
         app, app_menu, language=request_language(request), principal=principal,

@@ -140,7 +140,7 @@ async def _latest_runs_by_job(db) -> dict[str, dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 
 
-@router.get("")
+@router.get("", summary="List jobs")
 async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
     """Return every job in the registry + operational state: scheduler-registered /
     in-flight flags, the last run's status (badge), and the next scheduled fire.
@@ -169,7 +169,7 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
     }
 
 
-@router.post("/{job_id}/run")
+@router.post("/{job_id}/run", summary="Run job now")
 async def run_job_now(
     job_id: str,
     request: Request,
@@ -306,7 +306,7 @@ async def run_job_now(
     }
 
 
-@router.post("/runs/{run_id}/cancel")
+@router.post("/runs/{run_id}/cancel", summary="Cancel job run")
 async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
     """Request cancellation of an in-flight run.
 
@@ -363,7 +363,7 @@ def _step_dict(step: Any, extras: dict[str, Any] | None = None) -> dict[str, Any
     }
 
 
-@router.get("/runs/{run_id}")
+@router.get("/runs/{run_id}", summary="Get run detail")
 async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[str, Any]:
     """One run — its summary, its step rows, and its **log** (NOMAFLOW-UI.md
     live-logs increment). Powers the Run detail page.
@@ -428,7 +428,7 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
     return {"run": run_payload, "steps": step_payload, "logs": logs, "overrides": overrides}
 
 
-@router.get("/callables")
+@router.get("/callables", summary="List python callables")
 async def list_callables(request: Request, _: Superuser) -> dict[str, Any]:
     """Return the catalog of available python-step callables — every top-level
     ``async def j_*`` / ``def j_*`` discovered under ``plugins/``. Powers the
@@ -458,7 +458,7 @@ async def list_callables(request: Request, _: Superuser) -> dict[str, Any]:
     }
 
 
-@router.get("/cron-preview")
+@router.get("/cron-preview", summary="Preview cron schedule")
 async def cron_preview(
     schedule: str,
     _: Superuser,
@@ -500,7 +500,7 @@ async def cron_preview(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/retention")
+@router.get("/retention", summary="Get retention status")
 async def get_retention_status(request: Request, _: Superuser) -> dict[str, Any]:
     """Return the current retention policy (read from ``jobs.toml`` [meta.retention])
     + the last automatic sweep's report (None until the first sweep fires).
@@ -515,7 +515,7 @@ async def get_retention_status(request: Request, _: Superuser) -> dict[str, Any]
     }
 
 
-@router.post("/retention/sweep")
+@router.post("/retention/sweep", summary="Run retention sweep")
 async def run_retention_sweep(request: Request, _: Superuser) -> dict[str, Any]:
     """Fire a one-shot retention sweep with the CURRENT policy. Returns the
     sweep report (deleted counts + cutoff timestamp).

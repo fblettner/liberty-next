@@ -1,0 +1,108 @@
+# Build + publish the Liberty Next Docker image to GitHub Container Registry (ghcr.io).
+#
+# Triggers:
+#   - Push to ``main``       → builds + pushes the ``main`` and ``edge`` tags. Use the
+#                              ``edge`` tag in compose files when you want "latest commit
+#                              on main" without chasing the SHA.
+#   - Push of a v* tag        → builds + pushes ``X.Y.Z``, ``X.Y``, ``X``, and ``latest``.
+#                              Standard SemVer-aware tag matrix from docker/metadata-action.
+#   - Manual dispatch         → on-demand rebuild (e.g. after a base-image security fix).
+#
+# Image: ``ghcr.io/fblettner/liberty-next:<tag>``. Public by default once the repo is
+# public; private until then. To make the image public after the first push:
+#   1. Go to https://github.com/fblettner?tab=packages
+#   2. Click liberty-next → Package settings → Change visibility → Public
+#   3. (Optional) Link the package to this repository so pulls show alongside the code
+#
+# To USE the image:
+#   docker pull ghcr.io/fblettner/liberty-next:latest
+#   docker run --rm -p 8000:8000 ghcr.io/fblettner/liberty-next:latest    # → :8000
+
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    # Build (don't push) on PRs so the Dockerfile failing-to-build catches in CI before
+    # the merge instead of after.
+    branches: [main]
+  workflow_dispatch:    # manual run
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build + push (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Pull from + push to ghcr.io for this repository's package — the workflow's
+      # GITHUB_TOKEN doubles as the registry credential.
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Buildx + QEMU enable multi-arch builds (linux/amd64 + linux/arm64). The
+      # licensed Apple Silicon dev machines pull arm64; servers usually pull amd64. The
+      # cost is a slightly slower build (no native arm64 runner today on GitHub-hosted
+      # Linux runners) but the convenience is worth it.
+      - name: Set up QEMU (cross-arch emulation)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        # Skipped on PRs from forks — they don't have a writable GITHUB_TOKEN.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # docker/metadata-action computes a sensible tag set from the trigger event:
+      # - branch push:     "main", "edge" (manual alias for "main"), "sha-XXXXXXX"
+      # - SemVer tag:      "1.2.3", "1.2", "1", "latest"
+      # - PR (no push):    "pr-N" — locally tagged only.
+      - name: Compute tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/liberty-next
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=edge,branch=main
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+          # Labels appear on the image — searchable + show in the Packages UI.
+          labels: |
+            org.opencontainers.image.title=Liberty Next
+            org.opencontainers.image.description=Connector-driven low-code framework (open framework image — no licensed connectors)
+            org.opencontainers.image.vendor=Liberty
+            org.opencontainers.image.licenses=See repository
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          # Push on branch / tag / dispatch — DON'T push on PR (image would land in a
+          # public registry for a not-yet-merged change). PRs still build for CI.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GitHub-hosted cache — re-use layers across builds. ``mode=max`` pushes every
+          # intermediate layer; the next build hits the cache for the npm install +
+          # python pip install steps even when frontend source changes.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

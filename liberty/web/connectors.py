@@ -47,14 +47,39 @@ Screens = Annotated[ScreensFile, Depends(get_screens)]
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/connectors")
+@router.get(
+    "/connectors",
+    summary="List connectors",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+    },
+)
 async def list_connectors(principal: CurrentPrincipal, connectors: Connectors) -> dict[str, Any]:
+    """Returns the public view of every loaded connector — kind (``sql`` / ``api``),
+    available queries / endpoints (filtered to those the caller can use), description,
+    and labels. **Never** returns SQL text, credentials, or connection strings.
+
+    Filtering: a connector is included only if the caller can use at least one of its
+    queries / endpoints. Within each connector, queries / endpoints the caller can't use
+    are dropped. The result is the same shape the AI assistant's ``list_connectors``
+    tool returns."""
     out = [c for c in (public_connector(d, principal) for d in connectors.describe()) if c is not None]
     return {"connectors": out}
 
 
-@router.get("/connectors/{connector}")
+@router.get(
+    "/connectors/{connector}",
+    summary="Describe connector",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "Connector doesn't exist, or the caller can't use any of its queries / endpoints."},
+    },
+)
 async def describe_connector(connector: str, principal: CurrentPrincipal, connectors: Connectors) -> dict[str, Any]:
+    """One connector's public view — same shape as a list-element from
+    ``GET /api/connectors`` but narrowed to a single id. Returns 404 when the caller has
+    no usable queries / endpoints (rather than 403) so probing for connector names
+    yields no information about what exists vs. what's forbidden."""
     try:
         conn = connectors.get(connector)
     except ConnectorError as exc:
@@ -262,7 +287,10 @@ def _stream_sql_ndjson(
     )
 
 
-@router.get("/sql/{connector}/_schemas")
+@router.get(
+    "/sql/{connector}/_schemas",
+    summary="List pool schemas",
+)
 async def sql_pool_schemas(
     connector: str, principal: CurrentPrincipal, connectors: Connectors,
 ) -> dict[str, Any]:
@@ -287,7 +315,10 @@ async def sql_pool_schemas(
         ) from exc
 
 
-@router.get("/sql/{connector}/_schema")
+@router.get(
+    "/sql/{connector}/_schema",
+    summary="Introspect pool schema",
+)
 async def sql_pool_schema(
     connector: str, request: Request, principal: CurrentPrincipal, connectors: Connectors,
 ) -> dict[str, Any]:
@@ -338,11 +369,37 @@ def _streaming_requested(qp: dict[str, Any]) -> bool:
     return str(raw).lower() in {"1", "true", "yes", "y", "on"}
 
 
-@router.get("/sql/{connector}/{query}")
+@router.get(
+    "/sql/{connector}/{query}",
+    summary="Run query (GET)",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        403: {"description": "Caller lacks ``sql:<connector>:<query>``."},
+        404: {"description": "Unknown connector or query."},
+        405: {"description": "Query isn't a SELECT — non-SELECT queries must be POSTed."},
+        502: {"description": "Upstream DB error (network / syntax / timeout); see ``detail``."},
+    },
+)
 async def sql_query_get(
     connector: str, query: str, request: Request, principal: CurrentPrincipal,
     connectors: Connectors, screens: Screens,
 ):
+    """Run *connector*'s named *query*. Query-string params bind ``:name`` placeholders
+    in the SQL; reserved params shape the runtime:
+
+    | Param | Effect |
+    |---|---|
+    | ``_limit`` | Row cap. Falls back to the screen / connector / pool default (1000). |
+    | ``_stream`` | Truthy → response is ``application/x-ndjson``: one ``{kind: meta\\|rows\\|done\\|error}`` line per chunk. Suited to large datasets / SSE-style UIs. |
+    | ``_chunk_size`` | NDJSON rows-per-chunk (default 100). |
+    | ``_sort`` / ``_dir`` | Server-side sort by a result column. ``_dir`` ∈ {``asc``, ``desc``}. |
+    | ``_count`` | Returns ``{total: N}`` only, not the data. |
+    | ``_filter`` | JSON-encoded filter tree applied server-side. |
+
+    When the query is the ``read_query`` of a Screen, that screen's column hints +
+    ``max_rows`` + audit table + dictionary scope (the screen's app) are applied
+    automatically — that's how the same query has Settings-rich behaviour from the
+    screen runtime and stays a bare SQL runner when called by the AI assistant."""
     require_permission(principal, f"sql:{connector}:{query}")
     # GET must not mutate — only SELECTs are allowed here; everything else uses POST.
     try:
@@ -370,12 +427,38 @@ async def sql_query_get(
     )
 
 
-@router.post("/sql/{connector}/{query}")
+@router.post(
+    "/sql/{connector}/{query}",
+    summary="Run query (POST)",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        403: {"description": "Caller lacks ``sql:<connector>:<query>``."},
+        404: {"description": "Unknown connector or query."},
+        502: {"description": "Upstream DB error (constraint violation, network, timeout, etc.)."},
+    },
+)
 async def sql_query_post(
     connector: str, query: str, request: Request, principal: CurrentPrincipal,
     connectors: Connectors, screens: Screens,
     body: dict[str, Any] | None = None,
 ):
+    """Run *connector*'s named *query* with params from the body. Use this for any
+    non-SELECT (INSERT / UPDATE / DELETE / MERGE / DDL) — the GET variant rejects those
+    with 405.
+
+    **Body shape (two accepted forms):**
+
+    ```json
+    { "params": { "USR_ID": "alice", "USR_PASSWORD": "secret" }, "max_rows": 50 }
+    ```
+    or — flat (any key that isn't ``params`` / ``max_rows`` is treated as a bind):
+    ```json
+    { "USR_ID": "alice", "USR_PASSWORD": "secret" }
+    ```
+
+    Reserved query-string params (``_stream`` / ``_chunk_size``) work the same as GET.
+    Streaming POST is supported but rare in practice — the SPA streams via GET to keep
+    the SSE consumer simple."""
     require_permission(principal, f"sql:{connector}:{query}")
     qp = dict(request.query_params)
     stream = _streaming_requested(qp)
@@ -400,10 +483,29 @@ async def sql_query_post(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/http/{connector}/{endpoint}")
+@router.post(
+    "/http/{connector}/{endpoint}",
+    summary="Call API endpoint",
+    responses={
+        200: {"description": "Always — upstream failure is encoded in the ``success`` / ``status_code`` fields of the structured ``ApiResult`` body."},
+        401: {"description": "Missing / invalid access token."},
+        403: {"description": "Caller lacks ``api:<connector>:<endpoint>``."},
+        404: {"description": "Unknown connector or endpoint."},
+    },
+)
 async def http_call(
     connector: str, endpoint: str, principal: CurrentPrincipal, connectors: Connectors, body: dict[str, Any] | None = None
 ) -> dict[str, Any]:
+    """Forward a call to one of *connector*'s configured HTTP endpoints. The connector
+    applies its base URL + auth + retry policy + per-endpoint method / path; the body
+    here carries the call's params (mapped to query string / body / path placeholders
+    depending on the endpoint config).
+
+    **Upstream failures never raise**: an unreachable / non-2xx upstream comes back as a
+    structured ``ApiResult`` with ``success: false`` and the captured ``status_code`` +
+    ``error`` so the SPA can render the failure inline without distinguishing transport
+    errors from application errors. Liberty-level errors (unknown connector, unknown
+    endpoint, missing permission) DO raise as 4xx so an integrator sees them clearly."""
     require_permission(principal, f"api:{connector}:{endpoint}")
     try:
         conn = connectors.api(connector)  # UnknownConnectorError if missing / wrong type

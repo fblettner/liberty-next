@@ -76,7 +76,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 Superuser = Annotated[Principal, Depends(require_superuser)]
 
 
-@router.post("/reload")
+@router.post("/reload", summary="Reload config")
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
     old = request.app.state.connectors
@@ -151,7 +151,7 @@ class TestSqlBody(BaseModel):
     dry_run: bool = True
 
 
-@router.post("/config/connectors/{connector}/test-sql")
+@router.post("/config/connectors/{connector}/test-sql", summary="Test SQL query")
 async def test_sql(connector: str, body: TestSqlBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Run a free-form SQL string against *connector*'s pool — powers the SQL editor's Run
     button in the config builder. **Superuser only** (already gated by the ``Superuser`` dep);
@@ -188,7 +188,7 @@ async def test_sql(connector: str, body: TestSqlBody, request: Request, _: Super
 
 
 # ── structured config: the Phase-7 builders ───────────────────────────────────────────────
-@router.get("/config/schema")
+@router.get("/config/schema", summary="Get config JSON Schemas")
 async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
     """JSON Schema of the structured-config models — the builder UI renders forms from it.
     Each carries its own ``$defs`` (QueryDef / ColumnHint / ParamDef / …) for the UI to resolve.
@@ -228,7 +228,7 @@ def _dictionary_path(settings: Any) -> Path:
     return Path(settings.connectors.config_path).with_name("dictionary.toml")
 
 
-@router.get("/config/pools")
+@router.get("/config/pools", summary="Get pools")
 async def get_pools_config(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``[pools.*]`` as ``{name: PoolConfig dict}`` (a missing file → no pools)."""
     path = Path(request.app.state.settings.connectors.config_path)
@@ -272,7 +272,7 @@ def _encrypt_secret_fields(
     return out
 
 
-@router.put("/config/pools")
+@router.put("/config/pools", summary="Update pools")
 async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate each pool against :class:`PoolConfig`, then rewrite *only* the ``[pools.*]`` tables
     of ``connectors.toml`` (everything else — comments, the ``[connectors.*]`` tables, formatting —
@@ -318,7 +318,7 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/config/connectors/parsed")
+@router.get("/config/connectors/parsed", summary="Get connectors")
 async def get_connectors_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``[connectors.*]`` as ``{name: connector dict}`` (default-valued keys dropped)."""
     path = Path(request.app.state.settings.connectors.config_path)
@@ -330,7 +330,7 @@ class ConnectorsParsedBody(BaseModel):
     connectors: dict[str, dict[str, Any]]
 
 
-@router.put("/config/connectors/parsed")
+@router.put("/config/connectors/parsed", summary="Update connectors")
 async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate each connector against the (discriminated) connector schema, then rewrite *only* the
     ``[connectors.*]`` tables of ``connectors.toml`` via ``tomlkit`` — the ``[pools.*]`` tables, the
@@ -392,7 +392,7 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/config/dictionary/parsed")
+@router.get("/config/dictionary/parsed", summary="Get dictionary")
 async def get_dictionary_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``dictionary.toml`` parsed and normalised — ``{path, dictionary: {default_language,
     entries, enums, lookups, connectors: {<name>: {entries, enums, lookups}}}}``. A missing file →
@@ -406,7 +406,7 @@ class DictionaryBody(BaseModel):
     dictionary: dict[str, Any]
 
 
-@router.put("/config/dictionary/parsed")
+@router.put("/config/dictionary/parsed", summary="Update dictionary")
 async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted dict against :class:`DictionaryFile`, then rewrite
     ``dictionary.toml`` from scratch via ``tomli-w``.
@@ -446,7 +446,7 @@ async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Super
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/config/menus/parsed")
+@router.get("/config/menus/parsed", summary="Get menus")
 async def get_menus_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``menus.toml`` parsed and normalised — ``{path, menus: {<app>: AppMenu dict}}``.
     A missing file → an empty menu set. Default-valued keys are dropped."""
@@ -459,7 +459,7 @@ class MenusBody(BaseModel):
     menus: dict[str, dict[str, Any]]
 
 
-@router.put("/config/menus/parsed")
+@router.put("/config/menus/parsed", summary="Update menus")
 async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate each app against :class:`AppMenu` (which enforces the v1-style invariants —
     unique ids, parents exist, no cycles, folder-vs-leaf shape), then rewrite ``menus.toml``
@@ -489,7 +489,7 @@ async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> d
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/config/screens/parsed")
+@router.get("/config/screens/parsed", summary="Get screens config")
 async def get_screens_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``screens.toml`` parsed and normalised — ``{path, screens: {<app>: {<screen_id>:
     Screen dict}}}``. A missing file → an empty screen set. Default-valued keys are dropped (terser
@@ -580,7 +580,7 @@ class ScreensBody(BaseModel):
     screens: dict[str, dict[str, dict[str, Any]]]
 
 
-@router.put("/config/screens/parsed")
+@router.put("/config/screens/parsed", summary="Update screens config")
 async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted dict against :class:`ScreensFile` (every screen's ``id`` injected from
     its dict key, dialog/tabs/fields/param-binds round-trip cleanly), then rewrite ``screens.toml``
@@ -636,7 +636,7 @@ async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) 
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/config/charts/parsed")
+@router.get("/config/charts/parsed", summary="Get charts config")
 async def get_charts_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``charts.toml`` parsed and normalised — ``{path, charts: {<id>: ChartConfig
     dict}}``. A missing file → an empty chart set. Default-valued keys are dropped (so a saved
@@ -665,7 +665,7 @@ class ChartsBody(BaseModel):
     charts: dict[str, dict[str, Any]]
 
 
-@router.put("/config/charts/parsed")
+@router.put("/config/charts/parsed", summary="Update charts config")
 async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted dict against :class:`ChartsFile`, then rewrite ``charts.toml`` via
     ``tomli-w`` (same perf pattern as :func:`put_screens_parsed`). Charts is currently small so
@@ -697,7 +697,7 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
     return {"saved": True, "path": str(path)}
 
 
-@router.get("/config/dashboards/parsed")
+@router.get("/config/dashboards/parsed", summary="Get dashboards config")
 async def get_dashboards_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``dashboards.toml`` parsed and normalised — ``{path, dashboards: {<id>: dict}}``.
     A missing file → an empty dict. Defaults are dropped so the wire payload stays terse."""
@@ -723,7 +723,7 @@ class DashboardsBody(BaseModel):
     dashboards: dict[str, dict[str, Any]]
 
 
-@router.put("/config/dashboards/parsed")
+@router.put("/config/dashboards/parsed", summary="Update dashboards config")
 async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate against :class:`DashboardsFile` (each dashboard's ``id`` injected from its key,
     each widget's discriminator + grid bounds enforced), then rewrite ``dashboards.toml`` via
@@ -759,7 +759,7 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
 # ── theme.toml (per-deployment branding — see liberty/theme.py) ───────────────────────────────
 
 
-@router.get("/config/theme/parsed")
+@router.get("/config/theme/parsed", summary="Get theme config")
 async def get_theme_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``theme.toml`` ``[theme]`` table + the built-in preset choices + the resolved
     CSS vars (so the editor can show a live preview without re-deriving the palette client-side).
@@ -779,7 +779,7 @@ class ThemeBody(BaseModel):
     theme: dict[str, Any]
 
 
-@router.put("/config/theme/parsed")
+@router.put("/config/theme/parsed", summary="Update theme config")
 async def put_theme_parsed(body: ThemeBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted ``[theme]`` table against :class:`ThemeFile`, then rewrite
     ``theme.toml`` via ``tomli-w``. No reload needed — the frontend re-fetches ``GET /api/theme``
@@ -814,7 +814,7 @@ async def put_theme_parsed(body: ThemeBody, request: Request, _: Superuser) -> d
 # see NOMAFLOW-UI.md §4.
 
 
-@router.get("/config/jobs/parsed")
+@router.get("/config/jobs/parsed", summary="Get jobs config")
 async def get_jobs_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``jobs.toml`` parsed and normalised — ``{path, meta, jobs: [<Job dict>...]}``.
 
@@ -853,7 +853,7 @@ class JobsBody(BaseModel):
     meta: dict[str, Any] | None = None
 
 
-@router.put("/config/jobs/parsed")
+@router.put("/config/jobs/parsed", summary="Update jobs config")
 async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted jobs (+ optional meta) against :class:`liberty.jobs.JobsFile`,
     then rewrite ``jobs.toml`` via ``tomlkit`` — preserving comments + formatting on
@@ -950,7 +950,7 @@ def _pick(d: dict[str, Any], keys: set[str]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if k in keys}
 
 
-@router.get("/config/app/parsed")
+@router.get("/config/app/parsed", summary="Get app config")
 async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The curated ``[app]`` + ``[ai]`` view from app.toml. Includes ALL safe keys with their
     EFFECTIVE values (defaults applied via the Pydantic model) so the editor inputs initialise
@@ -986,7 +986,7 @@ class AppConfigBody(BaseModel):
     ai: dict[str, Any]
 
 
-@router.put("/config/app/parsed")
+@router.put("/config/app/parsed", summary="Update app config")
 async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted ``[app]`` + ``[ai]`` against AppSettings / AISettings, then
     surgically rewrite ONLY those keys in app.toml via ``tomlkit`` — comments, formatting,
@@ -1063,7 +1063,7 @@ class FindDependenciesBody(BaseModel):
     seeds: list[SeedItem]
 
 
-@router.post("/find-dependencies")
+@router.post("/find-dependencies", summary="Find dependencies")
 async def find_dependencies_endpoint(body: FindDependenciesBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Walk the dependency closure for *seeds* — every connector / query / pool / DD entry
     / lookup / sequence / chart / screen / menu item the seeds transitively reach. Returns
@@ -1092,7 +1092,7 @@ class BuildPackageBody(BaseModel):
     include: list[IncludeItem] | None = None
 
 
-@router.post("/build-package")
+@router.post("/build-package", summary="Build deployment package")
 async def build_package_endpoint(body: BuildPackageBody, request: Request, _: Superuser):
     """Build a ZIP package of the dependency closure — returns ``application/zip`` ready to
     download. Optional ``include`` list filters the closure to the operator's per-dep
@@ -1119,7 +1119,7 @@ async def build_package_endpoint(body: BuildPackageBody, request: Request, _: Su
     )
 
 
-@router.post("/import-package")
+@router.post("/import-package", summary="Import deployment package")
 async def import_package_endpoint(
     request: Request, _: Superuser,
     strategy: str = "overwrite",
@@ -1160,7 +1160,7 @@ class ExportJobBody(BaseModel):
     id: str
 
 
-@router.post("/export-job")
+@router.post("/export-job", summary="Export job package")
 async def export_job_endpoint(body: ExportJobBody, request: Request, _: Superuser):
     """Export ONE nomaflow job as a ZIP — minimal ``jobs.toml`` carrying just this job, plus
     a MANIFEST.md. Job deployment is intentionally separate from the screen / dashboard
@@ -1213,7 +1213,7 @@ async def export_job_endpoint(body: ExportJobBody, request: Request, _: Superuse
     )
 
 
-@router.post("/find-usages")
+@router.post("/find-usages", summary="Find usages")
 async def find_usages_endpoint(body: FindUsagesBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Return every reference to ``(kind, name, scope)`` across the loaded configs. Walks the
     in-memory state — call ``POST /admin/reload`` first if you've edited a file on disk and
@@ -1414,7 +1414,7 @@ _APPLY_DISPATCH: dict[str, Any] = {
 }
 
 
-@router.post("/config/apply-proposal")
+@router.post("/config/apply-proposal", summary="Apply AI proposal")
 async def apply_proposal(body: ProposalApplyBody, request: Request, _: Superuser) -> dict[str, object]:
     """Apply a proposal emitted by the AI assistant's scaffold tools. Dispatches to the
     matching merge/write path based on ``kind``, then runs /admin/reload so the new config is
@@ -1452,7 +1452,7 @@ class CloneWithDepsBody(BaseModel):
     options: dict[str, bool] = {}              # {clone_queries: bool}
 
 
-@router.post("/clone-with-deps")
+@router.post("/clone-with-deps", summary="Clone entity with dependencies")
 async def clone_with_deps_endpoint(body: CloneWithDepsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Clone *body.name* under *body.new_name* + (per options) duplicate every referenced
     query under ``<original>_<suffix>``. Rewrites the cloned entity's refs so it's a
@@ -1567,7 +1567,7 @@ class DeleteWithDepsBody(BaseModel):
     options: dict[str, bool] = {}           # {delete_queries: bool}
 
 
-@router.post("/delete-with-deps/preview")
+@router.post("/delete-with-deps/preview", summary="Preview delete-with-deps")
 async def delete_with_deps_preview(body: DeleteWithDepsBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Compute (without applying) the deletion plan: which queries are safely orphaned by
     deleting *body.name* and which would be preserved (still referenced by other entities).
@@ -1583,7 +1583,7 @@ async def delete_with_deps_preview(body: DeleteWithDepsBody, request: Request, _
     return plan.to_dict()
 
 
-@router.post("/delete-with-deps")
+@router.post("/delete-with-deps", summary="Delete entity with dependencies")
 async def delete_with_deps_endpoint(body: DeleteWithDepsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Delete *body.name* (a screen / chart / dashboard) and — when
     ``options.delete_queries`` is set — every query exclusively used by it. Queries
@@ -1757,7 +1757,7 @@ class ApiTestBody(BaseModel):
     params: dict[str, Any] | None = None                         # placeholder values forwarded to the smoke call
 
 
-@router.post("/config/api/test")
+@router.post("/config/api/test", summary="Test API connector")
 async def test_api_connector(body: ApiTestBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Smoke-test the operator's API connector definition without saving. Two modes:
 
@@ -1858,7 +1858,7 @@ class RenameBody(BaseModel):
     scope: str | None = None
 
 
-@router.post("/config/rename")
+@router.post("/config/rename", summary="Rename entity (cross-file)")
 async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Rename a top-level config key + every cross-file reference in one atomic pass.
 
@@ -1968,7 +1968,7 @@ class DeleteAppBody(BaseModel):
     app: str
 
 
-@router.post("/config/delete-app")
+@router.post("/config/delete-app", summary="Delete app")
 async def delete_app_endpoint(body: DeleteAppBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Remove a whole app namespace across the 4 config files. Surgical text-edit on
     each file — fast even on big dictionary.toml (preserves comments + formatting in
@@ -1993,7 +1993,7 @@ async def delete_app_endpoint(body: DeleteAppBody, request: Request, _: Superuse
     return result.to_dict()
 
 
-@router.post("/config/clone-app")
+@router.post("/config/clone-app", summary="Clone app")
 async def clone_app_endpoint(body: CloneAppBody, request: Request, _: Superuser) -> dict[str, Any]:
     """Clone a whole app namespace across :file:`connectors.toml`, :file:`dictionary.toml`,
     :file:`menus.toml`, and :file:`screens.toml`. Atomic: validates every rewritten doc

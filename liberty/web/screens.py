@@ -485,8 +485,22 @@ def _full_view(
     return {**body, **_list_view(screen, app=app, language=language)}
 
 
-@router.get("/screens")
+@router.get(
+    "/screens",
+    summary="List screens",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+    },
+)
 async def list_screens(request: Request, principal: CurrentPrincipal, screens: Screens) -> dict[str, Any]:
+    """Per-app catalog of screens the caller can read. The response is
+    ``{ "screens": { "<app>": [<list-view>, ...], ... } }`` — each entry is the compact
+    list-view: id / label / connector / the four CRUD query names / flags
+    (``has_dialog`` / ``has_row_menu`` / ``has_actions`` / ``has_columns``) and
+    ``dd_map`` for dashboard filter wiring.
+
+    Apps with no readable screens are dropped from the response. Labels honour the
+    request's ``Accept-Language`` / ``X-Liberty-Lang`` header."""
     lang = request_language(request)
     out: dict[str, list[dict[str, Any]]] = {}
     for app, app_screens in screens.screens.items():
@@ -500,10 +514,20 @@ async def list_screens(request: Request, principal: CurrentPrincipal, screens: S
     return {"screens": out}
 
 
-@router.get("/screens/{app}")
+@router.get(
+    "/screens/{app}",
+    summary="List app screens",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "Unknown app, or every screen in the app is permission-filtered out."},
+    },
+)
 async def list_app_screens(
     app: str, request: Request, principal: CurrentPrincipal, screens: Screens
 ) -> dict[str, Any]:
+    """Narrow ``GET /api/screens`` to a single app. Returns 404 when the app exists but
+    every screen is gated out (rather than an empty list) so the SPA's app switcher
+    treats the app as unavailable rather than empty."""
     app_screens = screens.screens.get(app)
     if not app_screens:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No screens for app {app!r}")
@@ -519,7 +543,14 @@ async def list_app_screens(
     return {"app": app, "screens": kept}
 
 
-@router.get("/screens/{app}/{screen_id}")
+@router.get(
+    "/screens/{app}/{screen_id}",
+    summary="Get screen",
+    responses={
+        401: {"description": "Missing / invalid access token."},
+        404: {"description": "Unknown screen, OR the caller lacks ``sql:<connector>:<read_query>`` (collapsed to 404 to avoid leaking screen existence)."},
+    },
+)
 async def get_screen(
     app: str,
     screen_id: str,
@@ -528,6 +559,22 @@ async def get_screen(
     screens: Screens,
     connectors: Connectors,
 ) -> dict[str, Any]:
+    """Everything the React TableView needs to render the screen:
+
+    - **Top-level fields** — the same list-view payload as ``GET /api/screens`` (id /
+      label / connector / CRUD query names / flags / dd_map / row_click_*).
+    - **columns** — each ColumnHint resolved against the dictionary in the request's
+      language (label / format / lookup / rule). Drives the table headers, widgets, and
+      formatting.
+    - **dialog** — ScreenDialog with each tab's fields enriched from matching ColumnHints
+      AND each action's ``prompt_fields`` resolved through the dictionary.
+    - **actions / row_menu / on_insert / on_update / on_delete** — each action chain's
+      prompt fields resolved (same machinery as dialog actions).
+    - **chart_id / treeview / row_click_*** — additional view modes & drill-through wiring.
+
+    Returns 404 (not 403) when the caller lacks ``sql:<connector>:<read_query>`` — same
+    convention the connector routes follow so probing for screen names yields no
+    information about what exists vs. what's forbidden."""
     app_screens = screens.screens.get(app) or {}
     screen = app_screens.get(screen_id)
     if screen is None:

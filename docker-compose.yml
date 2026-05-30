@@ -1,8 +1,11 @@
-# Liberty Next — the open framework, standalone.
+# Liberty Next — DEV compose (builds the image from source).
 #
-# Runs the public image with its default SQLite framework DB (no external database). This
-# is the "try the open framework" / dev-demo layout; the licensed full stack (Postgres +
-# nomasx1/nomajde) lives in liberty-apps/docker-compose.yml.
+# For deploying the *published* image, use the layouts under release/ instead:
+#   release/docker-compose.light.yml      — single container, SQLite
+#   release/docker-compose.full.yml       — Postgres + Traefik + pgAdmin + Portainer
+#
+# This file builds liberty-next:local from the local Dockerfile + sources — useful when
+# you want to test changes to the image before tagging a release.
 #
 #   docker compose up --build           # → http://localhost:8000
 #

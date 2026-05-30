@@ -186,7 +186,303 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await app.state.ai.aclose()
             await app.state.connectors.aclose()
 
-    app = FastAPI(title="Liberty Next", version=__version__, lifespan=lifespan)
+    # OpenAPI tag metadata — drives the per-section grouping + descriptions ReDoc shows at
+    # /redoc. Tags align with the FastAPI router prefixes so every endpoint lands under a
+    # named section instead of dumping in "default". Order matters: ReDoc renders sections
+    # in the order they appear here, so the operational ones (auth / connectors / screens)
+    # surface first and the admin endpoints sit lower.
+    #
+    # Descriptions are full Markdown — ReDoc renders them as the section intro above each
+    # tag's endpoint list. Treat them as the SDK-grade narrative an integrator needs to
+    # use the section: auth pattern, common errors, headers, the URL shape, links to
+    # related sections. Keep them current — they're load-bearing for /redoc readers who
+    # never look at the source.
+    openapi_tags = [
+        {
+            "name": "auth",
+            "description": (
+                "**Authentication + token issuance.** Liberty issues short-lived JWT access "
+                "tokens (default 1 hour) + long-lived refresh tokens (default 14 days). "
+                "Every other endpoint that needs a logged-in caller reads the access token "
+                "from the ``Authorization: Bearer <token>`` header.\n\n"
+                "### Two backends\n"
+                "- **TOML** (default) — users in ``config/auth.toml`` (Argon2-hashed). "
+                "  Suitable for development + small installs. Bootstrap with "
+                "  ``liberty-admin init-db`` (prints the first ``admin`` password).\n"
+                "- **DB** — users in the ``ly2_users`` / ``ly2_roles`` tables on the configured "
+                "  pool. Pick when you need self-service registration / shared user pool / "
+                "  thousands of users.\n\n"
+                "### OIDC\n"
+                "When ``[oidc] enabled = true`` in app.toml, ``/auth/oidc/login`` redirects to "
+                "the configured provider's authorize endpoint; the provider POSTs back to "
+                "``/auth/oidc/callback`` which exchanges the code for tokens, upserts the user "
+                "in the auth store (provider = ``oidc``), and issues a Liberty access + refresh "
+                "pair. Frontend-friendly: set ``[oidc] frontend_redirect`` to redirect the "
+                "browser to a SPA route with the tokens in the URL fragment.\n\n"
+                "### Common errors\n"
+                "- **401 Invalid credentials** — bad username / password.\n"
+                "- **401 Invalid token** — access token expired (refresh it) or signature "
+                "  invalid (signing key changed; re-login).\n"
+                "- **400 Your profile is managed by your identity provider** — OIDC users "
+                "  can't change name / email / password here (the provider owns those)."
+            ),
+        },
+        {
+            "name": "connectors",
+            "description": (
+                "**Run SQL queries + call HTTP endpoints.** Both kinds of connector are "
+                "configured in ``connectors.toml`` (or shipped via the apps repo); this section "
+                "is the runtime surface.\n\n"
+                "### URL shape\n"
+                "- ``GET /api/sql/<connector>/<query>`` — run a read query.\n"
+                "  Query params bind ``:name`` placeholders in the query's SQL: "
+                "  ``?USR_APPS_ID=NOMASX1&_limit=100&_sort=USR_ID&_dir=asc``.\n"
+                "- ``POST /api/sql/<connector>/<query>`` — run a writable query "
+                "  (``writable = true`` in connectors.toml).\n"
+                "- ``GET/POST/PUT/DELETE /api/http/<connector>/<endpoint>`` — call an API "
+                "  endpoint with the body forwarded verbatim (auth, headers, base URL applied "
+                "  by the connector).\n\n"
+                "### Reserved query params (SQL)\n"
+                "| Param | Meaning |\n"
+                "|---|---|\n"
+                "| ``_limit`` | Row cap. Falls back to the connector / pool default (1000) when omitted. |\n"
+                "| ``_offset`` | Pagination offset. |\n"
+                "| ``_sort`` / ``_dir`` | Server-side sort by a result column (``asc`` / ``desc``). |\n"
+                "| ``_count`` | Returns just the total row count, not the data. |\n"
+                "| ``_stream`` | Server-Sent-Events; each row arrives as a ``data:`` frame. |\n"
+                "| ``_filter`` | JSON-encoded filter tree applied server-side. |\n\n"
+                "### Permissions\n"
+                "- Read query: ``sql:<connector>:<query>`` (or ``*``).\n"
+                "- Writable query: ``sql:<connector>:<query>:write`` (or ``*``).\n"
+                "- API endpoint: ``api:<connector>:<endpoint>``.\n\n"
+                "A user without the permission gets **403 Forbidden** with the missing perm in "
+                "the body; the AI assistant's ``list_connectors`` tool returns the same view "
+                "the operator sees."
+            ),
+        },
+        {
+            "name": "screens",
+            "description": (
+                "**Screen rendering — the React TableView entry point.** Returns a merged "
+                "object combining the screen definition (``screens.toml`` entry), the read "
+                "query's result columns + rows, and dictionary metadata resolved for the "
+                "request's language (``Accept-Language`` / ``X-Liberty-Lang`` header).\n\n"
+                "### Lifecycle\n"
+                "1. ``GET /api/screens`` — list every screen the current user can see (the "
+                "   app switcher + the workspace menu read from here).\n"
+                "2. ``GET /api/screens/<app>`` — narrow to one app's screens.\n"
+                "3. ``GET /api/screens/<app>/<screen_id>`` — the full screen object: query "
+                "   result, resolved column hints, dialog (form) field list, prompt fields, "
+                "   action / row-menu chains. The frontend stays on this single GET as long "
+                "   as the screen is open; subsequent loads of the screen's own data hit "
+                "   ``/api/sql/<connector>/<query>`` directly.\n\n"
+                "### Permission gating\n"
+                "The user must hold ``sql:<connector>:<query>`` (or ``*``) where ``query`` is "
+                "the screen's ``read_query``. Without it the screen is hidden from "
+                "``GET /api/screens`` AND ``GET /api/screens/<app>/<screen_id>`` returns 403."
+            ),
+        },
+        {
+            "name": "menus",
+            "description": (
+                "**App switcher + per-app menu trees.** Each app's menu lives in "
+                "``[menus.<app>]`` in menus.toml — a flat list of menu items linked by "
+                "``parent`` ids. The runtime resolves the tree + filters out items the "
+                "user can't see (each leaf menu item gates on the permission of its target "
+                "query / screen / dashboard).\n\n"
+                "### Endpoints\n"
+                "- ``GET /api/menus`` — every app menu the user can see, keyed by app name. "
+                "  Each entry carries the resolved tree + the connector's ``home_path`` (the "
+                "  default landing page for that app) + ``show_in_switcher`` (whether the app "
+                "  appears in the workspace selector).\n"
+                "- ``GET /api/menus/<app>`` — narrow to a single app's menu.\n\n"
+                "### Visibility rules\n"
+                "An item is **hidden** when:\n"
+                "1. Its target query / screen / dashboard isn't loadable.\n"
+                "2. The user lacks the corresponding permission.\n"
+                "3. The item carries explicit ``roles = [...]`` and the user isn't in any of them.\n\n"
+                "Folders (no ``type``) are auto-hidden when every child is hidden."
+            ),
+        },
+        {
+            "name": "charts",
+            "description": (
+                "**Saved chart specs.** Operators save chart configurations from the TableView's "
+                "Chart toggle (the floppy icon). Saved charts can be referenced from screens "
+                "(``Screen.chart_id``) and dashboard widgets (chart-ref widget mode).\n\n"
+                "### Endpoint\n"
+                "- ``GET /api/charts/<scope>/<id>`` — one chart's metadata: connector, query, "
+                "  spec (axes / series / colours / aggregation).\n\n"
+                "Charts are scoped under their owning connector — ``[charts.<connector>.<id>]`` — "
+                "and inherit the connector's permission gate. A user who can't read the chart's "
+                "underlying query can't load the chart either."
+            ),
+        },
+        {
+            "name": "dashboards",
+            "description": (
+                "**Dashboards — widget grids with shared filters.** Each dashboard is a list "
+                "of widgets (chart / kpi / table) plus optional dashboard-level filters whose "
+                "picked value re-fetches every applicable widget with the bind applied.\n\n"
+                "### URL\n"
+                "``/dashboard/<id>`` in the SPA resolves to ``GET /api/dashboards/<id>`` which "
+                "returns the dashboard's widget list. Each widget then issues its own "
+                "``/api/sql/<connector>/<query>`` to populate.\n\n"
+                "### Widget kinds\n"
+                "- **chart** — chart-ref (id of a saved chart) OR inline (connector + query + spec)\n"
+                "- **kpi** — connector + query + aggregation column (sum / avg / count / min / max)\n"
+                "- **table** — connector + query + optional column subset"
+            ),
+        },
+        {
+            "name": "license",
+            "description": (
+                "**License status.** Liberty's open framework is free; licensed connectors "
+                "(apps repos like ``nomasx1`` / ``nomajde``) require a valid RS256 JWT license "
+                "key set via ``LIBERTY_LICENSE_KEY``. Without a key those connectors aren't "
+                "loaded (the framework runs in **restricted** mode).\n\n"
+                "### Endpoint\n"
+                "- ``GET /api/license`` — public (no auth). Returns ``{mode, customer, plan, "
+                "  apps, expires_at, error}``. ``mode`` is one of:\n"
+                "  - ``full`` — key is valid, licensed connectors are loaded.\n"
+                "  - ``restricted`` — no key OR key is invalid (``error`` carries the reason: "
+                "    expired / signature mismatch / decode error).\n\n"
+                "Public on purpose — license info isn't secret + the SPA needs to know "
+                "which licensed connectors to expect before showing the sign-in page."
+            ),
+        },
+        {
+            "name": "theme",
+            "description": (
+                "**Per-deployment branding.** Colours, primary font, app name. Loaded from "
+                "``config/theme.toml`` and resolved on every ``GET /api/theme`` so the Sign-In "
+                "page renders branded **before** the user logs in.\n\n"
+                "### Endpoint\n"
+                "- ``GET /api/theme`` — public (no auth). Returns the resolved CSS custom "
+                "  properties + the app name. The SPA applies them at boot.\n\n"
+                "Edit the theme in **Settings → Theme** (the structured editor). Changes are "
+                "live for every new request — no reload needed."
+            ),
+        },
+        {
+            "name": "ai",
+            "description": (
+                "**Anthropic-backed chat assistant.** Streaming chat over Anthropic's Messages "
+                "API with a tool-use loop. The assistant can:\n\n"
+                "1. **List connectors** + their queries / endpoints (``list_connectors``).\n"
+                "2. **Run** read-only SQL queries (``sql_query``) or call API endpoints "
+                "   (``api_call`` — opt-in, ``[ai] api_tool = true``).\n"
+                "3. **Scaffold** new config (``[ai] scaffold_tools = true``): introspect a "
+                "   table, propose CRUD queries, propose dictionary entries, propose screens, "
+                "   propose menu items. The tools return **proposals** that the chat UI surfaces "
+                "   as Apply cards — they never write directly.\n\n"
+                "### Endpoints\n"
+                "- ``GET /ai/tools`` — debug surface listing the tools currently exposed. "
+                "  Includes the model + whether the assistant is available (key wired in).\n"
+                "- ``POST /ai/chat`` — Server-Sent-Events stream. Body: standard Messages-API "
+                "  shape (``{messages: [{role, content}, ...]}``). Each ``data:`` frame is one "
+                "  ``ChatEvent``:\n\n"
+                "  | Type | Meaning |\n"
+                "  |---|---|\n"
+                "  | ``token`` | One streamed text delta from the assistant. |\n"
+                "  | ``thinking`` | Adaptive-thinking delta (only when ``thinking = true``). |\n"
+                "  | ``tool_call`` | Assistant is about to call ``name(input)`` — UI shows a pending row. |\n"
+                "  | ``tool_result`` | Tool returned ``ok / summary`` — UI flips the row icon. |\n"
+                "  | ``proposal`` | Scaffold tool returned a Proposal envelope ready for Apply. |\n"
+                "  | ``error`` | Anthropic / tool error — terminates the stream. |\n"
+                "  | ``done`` | Stream finished cleanly — ``stop_reason`` + ``usage`` totals. |"
+            ),
+        },
+        {
+            "name": "nomaflow",
+            "description": (
+                "**Nomaflow — config-driven ETL + scheduler.** Jobs are defined in "
+                "``jobs.toml`` (each ``[[jobs]]`` block: id + cron schedule + step list). Steps "
+                "run in order; results from each step are available to later steps via the "
+                "chain context. Step kinds: ``sql_copy`` / ``sql_query`` / ``python`` / "
+                "``ldap_sync`` / ``http`` / ``call_job``.\n\n"
+                "### Endpoints\n"
+                "- ``GET /admin/jobs`` — job catalogue with last-run + next-fire annotations.\n"
+                "- ``POST /admin/jobs/<id>/run`` — fire a single job manually (with optional "
+                "  per-fire overrides via the Run-with-parameters modal).\n"
+                "- ``GET /admin/jobs/runs`` — per-run history (the ``nomaflow_job_runs`` table).\n"
+                "- ``GET /admin/jobs/runs/<run_id>`` — one run's detail (per-step rows + log).\n"
+                "- ``POST /admin/jobs/runs/<run_id>/cancel`` — request cancellation.\n\n"
+                "### Operational surface\n"
+                "The catalogue, schedule, retention policy and per-job presets all edit through "
+                "the **/nomaflow** tab in the SPA (a dedicated workspace under Settings)."
+            ),
+        },
+        {
+            "name": "meta",
+            "description": (
+                "**Liveness + runtime info.** Public — used by Docker `HEALTHCHECK`, load "
+                "balancers, and operators checking install state at a glance. `/health` is the "
+                "fast probe (returns immediately); `/info` includes connector / screen / pool "
+                "counts + AI assistant status + license mode."
+            ),
+        },
+        {
+            "name": "admin",
+            "description": (
+                "**Operator-only — superuser permission required.** Everything in this section "
+                "needs the caller to be a superuser. Surfaces the structured-config CRUD, "
+                "deployment packaging, cross-file rename, dependency walks, AI assistant "
+                "proposal apply, and runtime reload.\n\n"
+                "### Major flows\n"
+                "- **Config CRUD** — ``GET /admin/config/<kind>/parsed`` + "
+                "  ``PUT /admin/config/<kind>/parsed`` for every TOML section "
+                "  (pools / connectors / dictionary / menus / screens / charts / dashboards / "
+                "  theme / jobs / app). Validated against the matching Pydantic model on write.\n"
+                "- **Find usages** — ``POST /admin/find-usages`` walks the live registries for "
+                "  every reference to a named entity. Drives the per-editor 'Find usages' button.\n"
+                "- **Dependencies** — ``POST /admin/find-dependencies`` computes the transitive "
+                "  closure of a seed (screen / dashboard / chart / menu item). "
+                "  ``POST /admin/build-package`` serializes the closure into a ZIP for "
+                "  cross-install deployment. ``POST /admin/import-package`` applies it with a "
+                "  ``merge`` / ``overwrite`` / ``replace_all`` strategy — ``overwrite`` "
+                "  respects per-entity ``override = true`` flags so customer customisations "
+                "  survive vendor upgrades.\n"
+                "- **Clone with deps** — ``POST /admin/clone-with-deps`` duplicates a screen / "
+                "  chart / dashboard and optionally the queries it references, rewriting refs "
+                "  on the cloned entity to point at the new query names.\n"
+                "- **Delete with deps** — ``POST /admin/delete-with-deps`` (+ ``/preview``) "
+                "  removes a screen / chart / dashboard and optionally the queries it "
+                "  exclusively owns (the planner preserves any query referenced from elsewhere).\n"
+                "- **AI assistant proposals** — ``POST /admin/config/apply-proposal`` applies a "
+                "  Proposal returned by a scaffold tool through the same parsed-config write "
+                "  paths the structured editors use.\n"
+                "- **Rename** — ``POST /admin/config/rename`` performs cross-file id renames "
+                "  (connector / query / table / lookup / sequence / dictionary entry / screen "
+                "  app), rewriting every reference in screens.toml / dictionary.toml / etc.\n"
+                "- **Reload** — ``POST /admin/reload`` rebuilds the live registries from disk "
+                "  (connectors / menus / screens / charts / dashboards / dictionary), swaps "
+                "  them into ``app.state``, disposes the old ones. Hot-reload (``[app] "
+                "  hot_reload = true``) watches files + reloads automatically on changes.\n\n"
+                "### Auth\n"
+                "Every endpoint here requires ``Authorization: Bearer <token>`` + the caller's "
+                "``is_superuser`` flag. Non-superusers get 403."
+            ),
+        },
+    ]
+    app = FastAPI(
+        title="Liberty Next",
+        version=__version__,
+        lifespan=lifespan,
+        description=(
+            "**Connector-driven low-code framework.** Configure SQL queries + HTTP endpoints in "
+            "TOML, the framework derives schemas at query time, serves a React admin UI on the "
+            "same port, surfaces an Anthropic tool-use assistant for natural-language access, and "
+            "wraps everything in a structured-config builder + dependency-aware deployment "
+            "packager (`Settings → Package`). See the README for install and the Liberty Apps "
+            "repo for the customer-facing nomasx1 / nomajde / nomaflow packages."
+        ),
+        contact={"name": "Liberty Next", "url": "https://github.com/fblettner/liberty-next"},
+        license_info={"name": "Open framework (licensed connectors sold separately)"},
+        openapi_tags=openapi_tags,
+        docs_url="/docs",      # Swagger UI — interactive
+        redoc_url="/redoc",    # ReDoc — print-friendly + better description rendering
+    )
     # Finish wiring the Socket.IO layer now that the FastAPI app exists. This
     # runs at create_app time (before the lifespan), so `LibertySio.__init__`
     # registers the event handlers on a real ``AsyncServer`` that's about to be
@@ -226,11 +522,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(dictgen_router)
     app.include_router(jobs_router)
 
-    @app.get("/health")
+    @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    @app.get("/info")
+    @app.get("/info", tags=["meta"], summary="Runtime info")
     async def info() -> dict[str, object]:
         s: Settings = app.state.settings
         connectors: ConnectorRegistry = app.state.connectors

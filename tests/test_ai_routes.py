@@ -193,7 +193,7 @@ def test_tools_endpoint(app) -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["available"] is False  # api_key="" in the fixture
-        assert body["model"] == "claude-opus-4-7"
+        assert body["model"] == "claude-opus-4-8"
         names = {t["name"] for t in body["tools"]}
         assert {"list_connectors", "sql_query"} <= names  # connector tools are on by default
 
@@ -218,4 +218,4 @@ def test_info_reports_ai(app) -> None:
         body = client.get("/info").json()
         assert body["ai"]["enabled"] is True
         assert body["ai"]["available"] is False  # no api key
-        assert body["ai"]["model"] == "claude-opus-4-7"
+        assert body["ai"]["model"] == "claude-opus-4-8"
