@@ -199,8 +199,8 @@ Then in the browser:
 
 1. Go to <https://github.com/fblettner/liberty-next/actions/workflows/release.yml>
 2. Click **Run workflow** (top-right).
-3. The version field defaults to the planned version — edit if needed. Leading `v` is
-   tolerated (`v7.0.1` ≡ `7.0.1`), must otherwise match `pyproject.toml` exactly.
+3. **Leave the version field empty** — it auto-reads `pyproject.toml`. (Optionally
+   type it for a typo guard; leading `v` is tolerated.)
 4. Click **Run workflow**.
 
 The workflow validates the version, builds sdist + wheel, builds + pushes the

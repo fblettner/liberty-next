@@ -27,10 +27,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release — must match pyproject.toml. Leading "v" is fine (v7.0.1 ≡ 7.0.1).'
-        required: true
+        description: 'Optional — defaults to pyproject.toml''s version. Leading "v" is tolerated.'
+        required: false
         type: string
-        default: '7.0.1'
+        default: ''
 
 permissions:
   contents: write     # create the git tag + GitHub release
@@ -53,44 +53,52 @@ jobs:
         with:
           fetch-depth: 0     # full history so we can create + push a tag
 
-      # ── normalise the input (accept both "7.0.1" and "v7.0.1") ───────────────
+      # ── resolve the version ──────────────────────────────────────────────────
+      # The input is OPTIONAL. When empty (the default) we read whatever's currently
+      # in pyproject.toml — so the workflow always defaults to "release the version
+      # you just committed", with no stale hardcoded default to maintain. When the
+      # user fills the field in, we validate it matches pyproject.toml (typo guard).
       # Everything downstream uses ``steps.norm.outputs.version`` (no v) and
       # ``steps.norm.outputs.tag`` (v-prefixed). One source of truth, no leak.
-      - name: Normalise version input
+      - name: Resolve + normalise version
         id: norm
         run: |
+          set -e
+          PKG_VERSION=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
           RAW="${{ inputs.version }}"
-          CLEAN="${RAW#v}"            # strip a leading "v" if present
+
+          if [ -z "$RAW" ]; then
+            CLEAN="$PKG_VERSION"
+            echo "Input empty → using pyproject.toml's version: $CLEAN"
+          else
+            CLEAN="${RAW#v}"                 # strip leading "v" if present
+            if [ "$CLEAN" != "$PKG_VERSION" ]; then
+              echo "::error::input version '$RAW' (→ '$CLEAN') does not match pyproject.toml ($PKG_VERSION)"
+              echo "Either leave the input empty to use $PKG_VERSION, or bump pyproject.toml first."
+              exit 1
+            fi
+          fi
+
           if ! printf '%s' "$CLEAN" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
-            echo "::error::Version '$RAW' is not a valid SemVer (expected X.Y.Z or X.Y.Z-suffix)"
+            echo "::error::Version '$CLEAN' is not a valid SemVer (expected X.Y.Z or X.Y.Z-suffix)"
             exit 1
           fi
+
           echo "version=$CLEAN"   >> "$GITHUB_OUTPUT"
           echo "tag=v$CLEAN"      >> "$GITHUB_OUTPUT"
-          echo "✔ Normalised: version=$CLEAN, tag=v$CLEAN"
-
-      # ── pre-flight: fail fast before any publish step ────────────────────────
-      - name: Verify version matches pyproject.toml
-        run: |
-          PKG_VERSION=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
-          if [ "${{ steps.norm.outputs.version }}" != "$PKG_VERSION" ]; then
-            echo "::error::input version '${{ steps.norm.outputs.version }}' does not match pyproject.toml ($PKG_VERSION)"
-            echo "Bump pyproject.toml's version + commit + push to main BEFORE running this workflow."
-            exit 1
-          fi
-          echo "✔ Version $PKG_VERSION matches input."
+          echo "✔ Releasing version=$CLEAN (tag=v$CLEAN)"
 
       - name: Verify tag doesn't already exist
         run: |
           TAG="${{ steps.norm.outputs.tag }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists locally — version was published before."
-            echo "Bump pyproject.toml to the next version + re-run."
+            echo "::error::Tag $TAG already exists locally — version $TAG was published before."
+            echo "Bump pyproject.toml to the next version (commit + push), then re-run."
             exit 1
           fi
           if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
-            echo "::error::Tag $TAG already exists on the remote — version was published before."
-            echo "Bump pyproject.toml to the next version + re-run."
+            echo "::error::Tag $TAG already exists on the remote — version $TAG was published before."
+            echo "Bump pyproject.toml to the next version (commit + push), then re-run."
             exit 1
           fi
           echo "✔ Tag $TAG is available."

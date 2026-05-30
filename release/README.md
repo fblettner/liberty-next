@@ -29,7 +29,23 @@ cd liberty-next/release
 # OR
 ./install.sh light                 # single container, SQLite
 ./install.sh full                  # full production stack
+./install.sh full --edge           # full stack, rolling tip of main (testing fixes)
+./install.sh full --tag 7.0.2      # full stack, pinned to a specific release
 ```
+
+### Which image tag does install.sh pull?
+
+| `LIBERTY_IMAGE_TAG` | What changes it | When to use |
+|---|---|---|
+| `latest` (default) | Only when `release.yml` runs (manual) | Production — stable, pinned to most recent release |
+| `<version>` (e.g. `7.0.2`) | Never — fully pinned | Production where you want explicit version control |
+| `edge` | Every push to `main` (`docker.yml` auto-rebuilds) | Testing fixes between releases / demo servers |
+
+`./install.sh ... --edge` sets `LIBERTY_IMAGE_TAG=edge` in the generated `.env`.
+`./install.sh ... --tag X.Y.Z` pins to `X.Y.Z`. Without either, you get `latest`.
+
+**If `.env` already exists**, those flags are ignored — edit `LIBERTY_IMAGE_TAG` in
+`.env` directly, then `docker compose -f docker-compose.<layout>.yml pull && up -d`.
 
 `install.sh` is idempotent — re-run it any time. If `.env` already exists it's kept
 (delete it first to regenerate secrets); if the stack is already up the script just
