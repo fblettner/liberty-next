@@ -20,6 +20,39 @@ set -euo pipefail
 
 log() { echo "[entrypoint] $*"; }
 
+seed_config() {
+  # Populate /app/config/ from the image's default templates on first boot. Mirrors
+  # ``./start.sh init-config`` — only creates files that don't already exist, so an
+  # upgrade with a populated config volume never overwrites the operator's edits.
+  # When LIBERTY_APPS_DIR is set, an external apps repo provides every per-section
+  # TOML (the licensed-customer pattern), so we skip the seed.
+  if [ -n "${LIBERTY_APPS_DIR:-}" ]; then
+    log "LIBERTY_APPS_DIR=${LIBERTY_APPS_DIR} — skipping local config seed."
+    return 0
+  fi
+  local defaults="/opt/liberty-defaults" target="/app/config"
+  if [ ! -d "$defaults" ]; then
+    log "no $defaults — image was built without seed templates."
+    return 0
+  fi
+  mkdir -p "$target"
+  local seeded=0 src base
+  for src in "$defaults"/*; do
+    [ -f "$src" ] || continue
+    base="$(basename "$src")"
+    # connectors.toml.example → connectors.toml ; app.toml stays app.toml
+    base="${base%.example}"
+    if [ ! -f "$target/$base" ]; then
+      cp "$src" "$target/$base"
+      log "seeded $target/$base"
+      seeded=$((seeded + 1))
+    fi
+  done
+  if [ "$seeded" -gt 0 ]; then
+    log "seeded $seeded config file(s) from $defaults — edit through Settings → … or by mounting /app/config to your own files."
+  fi
+}
+
 wait_for_db() {
   # Only meaningful for a networked DB. SQLite (the default) needs no wait — the URL has no
   # host, so we skip. We probe with a tiny Python connect against the framework pool URL.
@@ -52,6 +85,7 @@ PY
 }
 
 serve() {
+  seed_config
   if [ "${LIBERTY_SKIP_INITDB:-}" != "1" ]; then
     wait_for_db
     local args=()

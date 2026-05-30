@@ -47,6 +47,19 @@ COPY --from=frontend /build/frontend/dist ./frontend/dist
 COPY docker/entrypoint.sh /usr/local/bin/liberty-entrypoint
 RUN chmod +x /usr/local/bin/liberty-entrypoint
 
+# Default config templates — the entrypoint copies these into /app/config/ on first
+# boot if nothing's mounted there. Mirrors what ``./start.sh init-config`` does in the
+# dev shell so a brand-new container has a working [pools.default] without the operator
+# having to seed any files manually. ``LIBERTY_APPS_DIR`` (when set) bypasses this —
+# the external apps repo provides the per-section TOMLs.
+COPY config/app.toml             /opt/liberty-defaults/app.toml
+COPY config/connectors.toml.example  /opt/liberty-defaults/connectors.toml.example
+COPY config/dictionary.toml.example  /opt/liberty-defaults/dictionary.toml.example
+COPY config/menus.toml.example       /opt/liberty-defaults/menus.toml.example
+COPY config/screens.toml.example     /opt/liberty-defaults/screens.toml.example
+COPY config/charts.toml.example      /opt/liberty-defaults/charts.toml.example
+COPY config/dashboards.toml.example  /opt/liberty-defaults/dashboards.toml.example
+
 # 0.0.0.0 so the port is reachable from outside the container; SQLite default DB lives in
 # /app (override LIBERTY_DB_URL for Postgres). LIBERTY_APPS_DIR unset → the framework reads
 # its own ./config (the *.example-seeded open layout); the licensed image sets it.
