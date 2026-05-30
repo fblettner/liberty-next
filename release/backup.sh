@@ -49,8 +49,6 @@ COMMON_VOLUMES=(liberty-config)
 # Light-only:
 LIGHT_VOLUMES=(liberty-data)
 # Full-only:
-# pg-logs is intentionally excluded — rotated log files (not data), they regenerate
-# on the next boot and would inflate backups.
 FULL_VOLUMES=(pg-data pgadmin-data portainer-data)
 
 vol_exists() { docker volume inspect "$1" >/dev/null 2>&1; }

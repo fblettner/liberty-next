@@ -50,15 +50,17 @@ services:
       # Uncomment for TLS / Let's Encrypt:
       # - --entrypoints.websecure.address=:443
       # - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL required for TLS}
-      # - --certificatesresolvers.le.acme.storage=/etc/traefik/acme/acme.json
+      # - --certificatesresolvers.le.acme.storage=/acme/acme.json
       # - --certificatesresolvers.le.acme.tlschallenge=true
     ports:
       - "${TRAEFIK_HTTP_PORT:-80}:80"
       # - "443:443"          # uncomment when TLS is wired
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik:/etc/traefik:ro       # static file-provider configs (dynamic/)
-      - traefik-acme:/etc/traefik/acme  # ACME certificate storage (when TLS is wired)
+      - ./traefik:/etc/traefik:ro       # static file-provider configs (dynamic/) — read-only on purpose
+      # ACME storage lives OUTSIDE /etc/traefik on purpose — that path is the read-only
+      # bind-mount above, so Docker can't create subdirs there for a second mount.
+      - traefik-acme:/acme              # ACME certificate storage (when TLS is wired)
     networks:
       - liberty-network
     labels:
@@ -132,6 +134,13 @@ services:
     #     (typically < 1 s of writes). Acceptable for ETL / analytics; less so for
     #     financial workloads — flip to ``on`` if you need strict durability.
     shm_size: 512m
+    # Logging: stderr only. Postgres' logs end up in ``docker logs liberty-pg`` (or the
+    # docker logging driver you've configured globally). We DON'T enable
+    # ``logging_collector=on`` + a file-backed log volume because the official postgres
+    # image runs as UID 70 and a freshly-created named volume mounts as root:root —
+    # logging_collector then crashes the container with "Permission denied". If you want
+    # persistent log files, set a host-side logging driver (json-file with rotation,
+    # syslog, fluentd, etc.) on the daemon or per service.
     command:
       - postgres
       - -c
@@ -163,22 +172,20 @@ services:
       - -c
       - cpu_operator_cost=0.0025
       - -c
-      - logging_collector=on
-      - -c
       - log_destination=stderr
-      - -c
-      - log_directory=/var/log/postgresql
-      - -c
-      - log_rotation_age=1d
-      - -c
-      - log_rotation_size=10MB
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-liberty}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
       POSTGRES_DB: "${POSTGRES_DB:-liberty}"
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - pg-logs:/var/log/postgresql        # rotated log files — see ``logging_collector=on`` above
+    # Optional — cap each container's json-file log at 100 MB × 3 rotated files so
+    # docker logs doesn't grow without bound. Apply to any service the same way.
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     networks:
       - liberty-network
     healthcheck:
@@ -242,8 +249,6 @@ volumes:
     name: liberty-config
   pg-data:
     name: pg-data
-  pg-logs:
-    name: pg-logs
   pgadmin-data:
     name: pgadmin-data
   portainer-data:

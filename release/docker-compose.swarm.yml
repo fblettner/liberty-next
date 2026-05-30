@@ -49,7 +49,7 @@ services:
       # Uncomment for TLS / Let's Encrypt:
       # - --entrypoints.websecure.address=:443
       # - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL required for TLS}
-      # - --certificatesresolvers.le.acme.storage=/etc/traefik/acme/acme.json
+      # - --certificatesresolvers.le.acme.storage=/acme/acme.json
       # - --certificatesresolvers.le.acme.tlschallenge=true
     ports:
       - target: 80
@@ -61,7 +61,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro    # MUST be on a manager node
       - ./traefik:/etc/traefik:ro
-      - traefik-acme:/etc/traefik/acme
+      # ACME storage OUTSIDE /etc/traefik — that path is the read-only bind-mount above
+      # so Docker can't create subdirs in it for a second mount.
+      - traefik-acme:/acme
     networks:
       - liberty-network
     deploy:
@@ -150,6 +152,9 @@ services:
     # Assumes ~8 GB host RAM; scale ``shared_buffers`` / ``work_mem`` proportionally.
     # ``wal_level=minimal`` + ``synchronous_commit=off`` trade durability for throughput.
     shm_size: 512m
+    # See docker-compose.full.yml for why we don't enable logging_collector — the
+    # short version: postgres runs as UID 70, the named volume mounts as root, the
+    # collector crashes on first write. Logs go to ``docker service logs`` instead.
     command:
       - postgres
       - -c
@@ -181,22 +186,18 @@ services:
       - -c
       - cpu_operator_cost=0.0025
       - -c
-      - logging_collector=on
-      - -c
       - log_destination=stderr
-      - -c
-      - log_directory=/var/log/postgresql
-      - -c
-      - log_rotation_age=1d
-      - -c
-      - log_rotation_size=10MB
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-liberty}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
       POSTGRES_DB: "${POSTGRES_DB:-liberty}"
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - pg-logs:/var/log/postgresql
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "3"
     networks:
       - liberty-network
     healthcheck:
@@ -279,8 +280,6 @@ volumes:
     name: liberty-config
   pg-data:
     name: pg-data
-  pg-logs:
-    name: pg-logs
   pgadmin-data:
     name: pgadmin-data
   portainer-data:
