@@ -222,6 +222,15 @@ if [ ! -f "$ENV_FILE" ]; then
   fi
 fi
 
+# ── compose-file chain (used both inside the heredoc + as shell env for install-time
+# docker compose calls — compose v2's project discovery looks for compose.yaml in cwd
+# BEFORE reading .env's COMPOSE_FILE, so we must set this in the shell env too).
+COMPOSE_FILE_LINE="docker-compose.${LAYOUT}.yml"
+case "$SSL_MODE" in
+  letsencrypt) COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-letsencrypt.yml" ;;
+  provided)    COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-provided.yml" ;;
+esac
+
 # ── .env generation ───────────────────────────────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
   warn ".env already exists — keeping it. Delete it first to regenerate."
@@ -230,11 +239,11 @@ if [ -f "$ENV_FILE" ]; then
   fi
 
   # Repair: older .env files (pre-COMPOSE_FILE) cause compose to auto-discover the
-  # WRONG file (e.g. liberty-next/docker-compose.yml → dev build → 'pull access
-  # denied for liberty-next'). Add COMPOSE_FILE if missing.
+  # WRONG file (or walk up to a stray docker-compose.yml elsewhere). Add COMPOSE_FILE
+  # if missing.
   if ! grep -qE '^COMPOSE_FILE=' "$ENV_FILE"; then
-    info "Existing .env lacks COMPOSE_FILE — adding 'COMPOSE_FILE=docker-compose.${LAYOUT}.yml'"
-    printf '\n# Added by install.sh: pins compose to the right layout (no -f juggling).\nCOMPOSE_FILE=docker-compose.%s.yml\n' "$LAYOUT" >> "$ENV_FILE"
+    info "Existing .env lacks COMPOSE_FILE — adding 'COMPOSE_FILE=${COMPOSE_FILE_LINE}'"
+    printf '\n# Added by install.sh: pins compose to the right layout (no -f juggling).\nCOMPOSE_FILE=%s\n' "$COMPOSE_FILE_LINE" >> "$ENV_FILE"
   fi
 else
   info "Generating .env with random secrets…"
@@ -253,12 +262,8 @@ else
     LIBERTY_IMAGE_TAG_LINE="# LIBERTY_IMAGE_TAG=latest"
   fi
 
-  # COMPOSE_FILE chain — base layout + optional SSL overlay (set later by --apps for the apps overlay).
-  COMPOSE_FILE_LINE="docker-compose.${LAYOUT}.yml"
-  case "$SSL_MODE" in
-    letsencrypt) COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-letsencrypt.yml" ;;
-    provided)    COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-provided.yml" ;;
-  esac
+  # COMPOSE_FILE_LINE was computed above (used both in the heredoc + as shell env
+  # for install-time docker compose calls).
 
   # SSL env vars — only emit values relevant to the chosen mode; the rest stay
   # commented for documentation.
@@ -388,13 +393,17 @@ fi
 COMPOSE_FILE="docker-compose.${LAYOUT}.yml"
 [ -f "$COMPOSE_FILE" ] || die "Compose file $COMPOSE_FILE not found"
 
-# Both commands rely on COMPOSE_FILE in .env (so the apps overlay, when added later
-# by install-apps.sh, is honoured automatically without us passing -f).
-info "Pulling images…"
-docker compose pull
+# IMPORTANT: docker compose v2's project discovery looks for compose.yaml/yml in the
+# cwd BEFORE reading .env's COMPOSE_FILE. Our cwd (release/) has no such file — so
+# without the explicit COMPOSE_FILE env var here, compose walks up the tree looking
+# for one and may find a stray compose.yaml elsewhere on disk. Pin it for the
+# install-time commands. (Subsequent operator commands from release/ rely on .env's
+# COMPOSE_FILE once a project is already established by these initial up -d.)
+info "Pulling images (COMPOSE_FILE=${COMPOSE_FILE_LINE})…"
+COMPOSE_FILE="$COMPOSE_FILE_LINE" docker compose pull
 
 info "Starting the $LAYOUT stack…"
-docker compose up -d
+COMPOSE_FILE="$COMPOSE_FILE_LINE" docker compose up -d
 
 info "Waiting for liberty-next to report healthy…"
 for i in $(seq 1 60); do

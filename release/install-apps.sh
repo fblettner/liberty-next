@@ -148,8 +148,12 @@ fi
 chmod 600 .env
 
 # ── 4. restart the stack ──────────────────────────────────────────────────────
-info "Re-applying stack (COMPOSE_FILE in .env now includes docker-compose.apps.yml)…"
-docker compose up -d
+# Read the merged COMPOSE_FILE back out of .env and pass it via shell env (compose
+# v2's project discovery checks cwd for compose.yaml BEFORE reading .env, so we
+# can't rely on .env's COMPOSE_FILE alone here).
+COMPOSE_FILE_ENV="$(grep -E '^COMPOSE_FILE=' .env | head -1 | cut -d= -f2-)"
+info "Re-applying stack (COMPOSE_FILE=${COMPOSE_FILE_ENV})…"
+COMPOSE_FILE="$COMPOSE_FILE_ENV" docker compose up -d
 
 info "Waiting for liberty-next to report healthy…"
 for i in $(seq 1 60); do
