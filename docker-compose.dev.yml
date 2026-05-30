@@ -1,13 +1,18 @@
 # Liberty Next — DEV compose (builds the image from source).
 #
+# NAME deliberately ends in ``.dev.yml`` so docker compose does NOT auto-load it
+# (it only auto-discovers docker-compose.yml / compose.yml). That keeps the root
+# of the repo from interfering with anyone running ``docker compose`` from a
+# parent directory — invoke this one explicitly:
+#
+#   docker compose -f docker-compose.dev.yml up --build      # → http://localhost:8000
+#
 # For deploying the *published* image, use the layouts under release/ instead:
 #   release/docker-compose.light.yml      — single container, SQLite
 #   release/docker-compose.full.yml       — Postgres + Traefik + pgAdmin + Portainer
 #
 # This file builds liberty-next:local from the local Dockerfile + sources — useful when
 # you want to test changes to the image before tagging a release.
-#
-#   docker compose up --build           # → http://localhost:8000
 #
 # First boot prints a generated admin password in the logs (or set LIBERTY_ADMIN_PASSWORD).
 services:

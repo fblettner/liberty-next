@@ -228,6 +228,14 @@ if [ -f "$ENV_FILE" ]; then
   if [ -n "$IMAGE_TAG" ]; then
     warn "--tag was passed but .env already exists; edit LIBERTY_IMAGE_TAG=$IMAGE_TAG manually in .env, then re-run."
   fi
+
+  # Repair: older .env files (pre-COMPOSE_FILE) cause compose to auto-discover the
+  # WRONG file (e.g. liberty-next/docker-compose.yml → dev build → 'pull access
+  # denied for liberty-next'). Add COMPOSE_FILE if missing.
+  if ! grep -qE '^COMPOSE_FILE=' "$ENV_FILE"; then
+    info "Existing .env lacks COMPOSE_FILE — adding 'COMPOSE_FILE=docker-compose.${LAYOUT}.yml'"
+    printf '\n# Added by install.sh: pins compose to the right layout (no -f juggling).\nCOMPOSE_FILE=docker-compose.%s.yml\n' "$LAYOUT" >> "$ENV_FILE"
+  fi
 else
   info "Generating .env with random secrets…"
 
