@@ -36,20 +36,24 @@ Three routes — pick what fits.
 
 ### Docker Compose (recommended)
 
-Two ready-to-run layouts live under [`release/`](release/):
+Customer hosts only need the `release/` directory — sparse-checkout pulls just that:
 
 ```bash
-git clone https://github.com/fblettner/liberty-next.git
-cd liberty-next/release
-cp .env.example .env
-$EDITOR .env                                              # set the REQUIRED values
-docker compose -f docker-compose.light.yml up -d          # 1 container, SQLite
-# OR
-docker compose -f docker-compose.full.yml up -d           # 5 services (Traefik / pg / pgadmin / portainer)
+# 1. Sparse-clone — downloads ONLY release/ (no liberty/, no frontend/, no .git history of source)
+git clone --depth 1 --filter=blob:none --sparse https://github.com/fblettner/liberty-next.git
+cd liberty-next
+git sparse-checkout set release
+cd release
+
+# 2. One-shot install (interactive picks light vs full; or use a flag)
+./install.sh full
+
+# 3. (Licensed customer) overlay the apps wheel — see release/README.md
+./install-apps.sh /path/to/liberty_apps-X.Y.Z.whl --license-key <jwt>
 ```
 
-See [`release/README.md`](release/README.md) for the full deployment guide (TLS wiring,
-backups, upgrades, common ops).
+The full deployment guide (TLS wiring, backups, upgrades, swarm, common ops) lives
+in [`release/README.md`](release/README.md).
 
 ### PyPI
 
@@ -83,6 +87,35 @@ python3 -m venv ~/.local/liberty-venv
 
 First boot generates an `admin` password and prints it once — capture it from the
 logs, then sign in at <http://localhost:8000>.
+
+### Adding the licensed apps to a pipx install
+
+For Docker, [`release/install-apps.sh`](release/install-apps.sh) handles everything.
+For a pipx install, do it manually:
+
+```bash
+# 1. Inject the apps wheel into the SAME pipx venv as liberty-next
+#    (delivered to licensed customers as liberty_apps-X.Y.Z-py3-none-any.whl):
+pipx inject liberty-next /path/to/liberty_apps-7.0.1-py3-none-any.whl
+
+# 2. Materialize the wheel's payload into a writable LIBERTY_APPS_DIR
+mkdir -p ~/.local/share/liberty-next/apps
+liberty-apps install --target ~/.local/share/liberty-next/apps/config
+
+# 3. Point liberty-next at it + provide the license + run
+export LIBERTY_APPS_DIR=~/.local/share/liberty-next/apps/config
+export LIBERTY_LICENSE_KEY=<your-rs256-jwt>
+export LIBERTY_DB_URL=postgresql+asyncpg://liberty:<pw>@<host>:5432/liberty
+liberty-next
+```
+
+You'll also need an external Postgres reachable at `LIBERTY_DB_URL` (or stick with
+the default SQLite for trial — `LIBERTY_DB_URL=sqlite+aiosqlite:///./liberty.db`).
+Persist those `export`s in `~/.bashrc` / `~/.zshrc` so `liberty-next` finds them
+on every shell.
+
+Upgrade the apps later by injecting a new wheel + re-running `liberty-apps install`
+(operator-edited TOMLs are preserved; pass `--force-config` to overwrite).
 
 ### From source (development)
 

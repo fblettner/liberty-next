@@ -101,6 +101,20 @@ for v in "${TARGETS[@]}"; do
   printf "%s\n" "$(du -h "$out" | cut -f1)"
 done
 
+# Also back up the liberty-apps bind mount (when set). Bind mounts AREN'T Docker
+# volumes — they live on the host — so the loop above skips them. Most installs
+# have an apps clone tracked in git so the cost is "stash uncommitted edits";
+# always backing it up is cheap insurance.
+APPS_PATH=""
+if [ -f .env ] && grep -qE '^APPS_HOST_PATH=' .env; then
+  APPS_PATH="$(grep -E '^APPS_HOST_PATH=' .env | head -1 | cut -d= -f2-)"
+fi
+if [ -n "$APPS_PATH" ] && [ -d "$APPS_PATH" ]; then
+  printf "  %-20s → " "liberty-apps (bind)"
+  tar czf "${TARGET_ABS}/liberty-apps.tar.gz" -C "$APPS_PATH" . 2>/dev/null
+  printf "%s\n" "$(du -h "${TARGET_ABS}/liberty-apps.tar.gz" | cut -f1)"
+fi
+
 # Also stash the .env (without secrets value exposure — copy with restrictive perms)
 # so a restore knows the password values the live stack was using. Operators can decide
 # whether to keep this file alongside the volumes (NOT recommended for off-site backups).

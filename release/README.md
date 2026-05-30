@@ -91,17 +91,62 @@ Volumes:
 | `portainer-data` | Portainer state |
 | `traefik-acme` | Let's Encrypt certificate storage (when TLS is wired) |
 
-### Wiring TLS (Let's Encrypt)
+### Wiring TLS
 
-1. Point your domain at the server.
-2. In `.env`, set:
-   ```
-   LIBERTY_DOMAIN=liberty.example.com
-   ACME_EMAIL=ops@example.com
-   ```
-3. In `docker-compose.full.yml`, uncomment the `websecure` entrypoint + the `certificatesresolvers.le.*` flags + the `:443` port mapping.
-4. Add `traefik.http.routers.<name>.tls.certresolver: "le"` to each router label.
-5. `docker compose -f docker-compose.full.yml up -d`. Traefik requests certs on first hit.
+Two modes, both wired by `install.sh --ssl`. Choose at install time or re-run later
+(re-running keeps `.env` secrets but updates the SSL config + `COMPOSE_FILE`).
+
+#### Let's Encrypt (demo / public-internet hosts)
+
+```bash
+./install.sh full \
+    --ssl letsencrypt \
+    --domain liberty.example.com \
+    --email ops@example.com
+```
+
+Requirements:
+- The hostname must resolve to this host (DNS A/AAAA record).
+- :80 and :443 must be reachable from the public internet (Let's Encrypt's
+  TLS-ALPN challenge needs them).
+
+What it does:
+- Adds [`docker-compose.tls-letsencrypt.yml`](docker-compose.tls-letsencrypt.yml) to `COMPOSE_FILE`.
+- Sets `LIBERTY_DOMAIN` + `ACME_EMAIL` in `.env`.
+- Traefik handles cert request + renewal via the ACME resolver. Certs persist in the `traefik-acme` named volume.
+
+#### Operator-provided certs (corporate / air-gapped hosts)
+
+```bash
+./install.sh full \
+    --ssl provided \
+    --domain liberty.internal.example.com \
+    --cert-dir  /etc/pki/tls \
+    --cert-file liberty.crt \
+    --key-file  liberty.key
+```
+
+Requirements:
+- A directory on the host containing the cert (`.crt` / `.pem`) and the private
+  key file. `install.sh` validates both exist before continuing.
+
+What it does:
+- Adds [`docker-compose.tls-provided.yml`](docker-compose.tls-provided.yml) to `COMPOSE_FILE`.
+- Sets `CERT_HOST_PATH=<cert-dir>` in `.env` — Traefik bind-mounts that directory at `/etc/certs:ro`.
+- Generates [`traefik/dynamic/tls.yml`](traefik/dynamic/) (gitignored) with the
+  cert + key filenames substituted in. Traefik watches the file — edit it to add
+  more certs / SNI rules without restarting.
+
+#### Switching modes later
+
+Re-run `./install.sh full --ssl <new-mode> …` with the same secrets in place. The
+script swaps the overlay in `COMPOSE_FILE`, rewrites `tls.yml` (or removes it for
+LE mode), and `docker compose up -d` picks up the new config.
+
+#### No SSL (default)
+
+`./install.sh full` without `--ssl` runs HTTP-only on :80. Fine for local dev /
+behind another reverse proxy that terminates TLS upstream.
 
 ### Backing up
 
@@ -266,51 +311,99 @@ See `liberty-admin --help` / `liberty-license --help` for the full CLI.
 ## Adding the licensed apps (liberty-apps)
 
 The liberty-next image ships the **open framework** only. Customer-facing content
-(nomasx1 / nomajde / nomaflow / …) lives in the separate **liberty-apps** repo and
-is unlocked by a license key (`LIBERTY_LICENSE_KEY`).
+(nomasx1 / nomajde / nomaflow / …) lives in the separate **liberty-apps** package,
+delivered as a Python wheel (`liberty_apps-X.Y.Z-py3-none-any.whl`) and unlocked
+by a license key (`LIBERTY_LICENSE_KEY`).
 
-### TL;DR — three steps
+### Single-command install (fresh host)
 
 ```bash
-# 1. Bring up the base stack (you've done this already if you ran install.sh)
-./install.sh full
-
-# 2. Add the licensed apps on top
-./install-apps.sh --license-key <your-rs256-jwt>
-
-# 3. Refresh the page — the SPA now shows the apps' menus.
+./install.sh full \
+    --apps ./liberty_apps-7.0.1-py3-none-any.whl \
+    --license-key <your-rs256-jwt>
 ```
 
-That's it. `install-apps.sh`:
+That's everything — base stack + licensed apps + license key in one go.
 
-1. **Clones `liberty-apps` into `./apps/`** (private repo — needs SSH access or a PAT;
-   the script tells you what to do if the clone fails).
-2. **Updates `.env`** with `APPS_HOST_PATH=<absolute path to the clone>` and
-   `LIBERTY_LICENSE_KEY=<your-jwt>` if you passed `--license-key`.
-3. **Restarts the stack** with [`docker-compose.apps.yml`](docker-compose.apps.yml)
-   layered on top — mounts the apps clone at `/apps` (read-only) and sets
-   `LIBERTY_APPS_DIR=/apps/config` so the framework reads its TOMLs from there.
+### Or split it: base first, apps later
+
+```bash
+./install.sh full                                                          # base stack
+./install-apps.sh ./liberty_apps-7.0.1-py3-none-any.whl --license-key <jwt>   # add the apps
+```
+
+### What `install-apps.sh` does
+
+1. **Materializes the wheel** into `./apps/` (via a throwaway `python:3.12-slim`
+   container — your host needs no local pip / python install). The wheel ships with
+   a `liberty-apps install --target DIR` CLI that copies `config/` + `plugins/` into
+   the destination, preserving operator-edited TOMLs.
+2. **Updates `.env`**: `APPS_HOST_PATH=<absolute path>` + appends the apps overlay
+   to `COMPOSE_FILE` + `LIBERTY_LICENSE_KEY=<jwt>` (if you passed `--license-key`).
+3. **Restarts the stack** — `docker compose up -d` picks up the apps overlay
+   automatically via `COMPOSE_FILE` (no `-f` juggling).
+
+The apps land at `./apps/config/` + `./apps/plugins/` on the host. The
+[`docker-compose.apps.yml`](docker-compose.apps.yml) overlay bind-mounts `./apps`
+into the container at `/apps:ro` and sets `LIBERTY_APPS_DIR=/apps/config`.
 
 ### Common variations
 
 ```bash
-./install-apps.sh                              # clones to ./apps/, no license set (restricted mode)
-./install-apps.sh --path /opt/liberty-apps     # use an existing clone elsewhere
-./install-apps.sh --license-key eyJhbGc…       # set the license key now
-./install-apps.sh --layout light               # layer onto the light stack instead
-./install-apps.sh --repo https://<token>@github.com/fblettner/liberty-apps.git
-                                               # custom git URL (e.g. with a PAT for HTTPS clone)
+./install-apps.sh ./liberty_apps-X.Y.Z.whl                       # no license → restricted mode
+./install-apps.sh https://license-host/liberty_apps-X.Y.Z.whl    # download from a URL (curl)
+./install-apps.sh ./liberty_apps-X.Y.Z.whl --target /opt/apps    # destination override
+./install-apps.sh ./liberty_apps-X.Y.Z.whl --layout light        # layer onto the light stack
+./install-apps.sh ./liberty_apps-X.Y.Z.whl --force-config        # overwrite operator-edited TOMLs (re-install)
 ```
 
 ### Updating the apps later
 
+Drop in a new wheel and re-run:
+
 ```bash
-cd ./apps && git pull
-docker compose -f docker-compose.full.yml -f docker-compose.apps.yml restart liberty-next
+./install-apps.sh ./liberty_apps-7.0.2-py3-none-any.whl
+docker compose restart liberty-next       # picks up the new TOMLs
 ```
 
-(The framework reloads the apps' TOMLs on container restart. If `hot_reload = true`
-in `app.toml`, you don't even need the restart — file edits are picked up live.)
+Operator-edited TOMLs are preserved by default (the wheel's `liberty-apps install`
+CLI only overwrites when `--force-config` is passed). If `hot_reload = true` in
+`app.toml`, you don't even need the restart — file edits are picked up live.
+
+### Persistence + restart + backup — what's safe?
+
+| Event | `./apps/` content | DB / pgadmin / portainer data |
+|---|---|---|
+| `docker compose restart` | safe — bind mount re-attaches | safe — named volumes intact |
+| Host reboot | safe — `restart: unless-stopped` brings everything back, mount re-attaches | safe |
+| `docker compose down` (no `-v`) | safe — mount source untouched | safe |
+| `docker compose down -v` | safe — bind mount isn't a Docker volume, `-v` doesn't touch it | **WIPED** (named volumes destroyed) |
+| `./install.sh full --reset` | safe — only named volumes are dropped | **WIPED** |
+| `./backup.sh` | **included** — backup.sh reads `APPS_HOST_PATH` from `.env` and tars `./apps/` alongside the named volumes | included (`pg-data.tar.gz` etc.) |
+
+A backup directory after running `./backup.sh` contains:
+
+```
+backups/2026-05-30_170000/
+  liberty-config.tar.gz       — framework config (seeded TOMLs the operator edited via UI)
+  liberty-apps.tar.gz         — your liberty-apps clone (only when APPS_HOST_PATH is set)
+  pg-data.tar.gz              — Postgres data files
+  pgadmin-data.tar.gz         — pgAdmin state
+  portainer-data.tar.gz       — Portainer state
+  .env.snapshot               — env vars + secrets (mode 0600)
+  docker-compose.*.yml        — compose files in use
+```
+
+### COMPOSE_FILE discipline
+
+After `install-apps.sh` runs, `.env` carries:
+```
+COMPOSE_FILE=docker-compose.full.yml:docker-compose.apps.yml
+```
+Every `docker compose <command>` (with NO `-f` flag) reads this and merges both
+files automatically. **Don't pass `-f` manually** after install-apps.sh —
+compose would replace the COMPOSE_FILE list and you'd lose the apps mount on
+the next container recreate.
 
 ### What the override file actually does
 

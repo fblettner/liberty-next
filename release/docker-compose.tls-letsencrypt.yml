@@ -1,0 +1,56 @@
+# Liberty Next — TLS via Let's Encrypt (ACME).
+#
+# Additive overlay on top of docker-compose.full.yml (or .light) — adds the websecure
+# entrypoint on :443, the ACME cert resolver, and flips every router to also serve
+# HTTPS with the auto-fetched cert.
+#
+# Use with the COMPOSE_FILE chain (install.sh --ssl letsencrypt handles this):
+#   COMPOSE_FILE=docker-compose.full.yml:docker-compose.tls-letsencrypt.yml
+#
+# .env must define:
+#   LIBERTY_DOMAIN — the public hostname (e.g. liberty.example.com) — must resolve to
+#                     this host so Let's Encrypt can complete the TLS-ALPN challenge.
+#   ACME_EMAIL     — contact email for Let's Encrypt (renewal warnings + ToS).
+#
+# Use only when the host is reachable from the public internet on :80/:443 — Let's
+# Encrypt's challenge requires that. For air-gapped / corporate installs, use the
+# 'provided' overlay (docker-compose.tls-provided.yml) instead.
+
+services:
+  traefik:
+    # All TLS-relevant settings go through traefik's env-var config interface
+    # (TRAEFIK_<UPPER_DOT_TO_UNDER>=value) — that way they merge cleanly with the
+    # base compose's --command-line flags without replacing the entire command list
+    # (compose overlay-merging is REPLACE-by-key for arrays, ADD-by-key for env).
+    environment:
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
+      TRAEFIK_CERTIFICATESRESOLVERS_LE_ACME_EMAIL: "${ACME_EMAIL:?ACME_EMAIL required for letsencrypt mode}"
+      TRAEFIK_CERTIFICATESRESOLVERS_LE_ACME_STORAGE: "/acme/acme.json"
+      TRAEFIK_CERTIFICATESRESOLVERS_LE_ACME_TLSCHALLENGE: "true"
+    ports:
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
+    labels:
+      # Each label key is identical to the base compose's so the OVERLAY's value wins
+      # (compose label-merge is by key, latter wins). New keys (tls, tls.certresolver)
+      # are added alongside.
+      traefik.http.routers.traefik-dashboard.entrypoints: "web,websecure"
+      traefik.http.routers.traefik-dashboard.tls: "true"
+      traefik.http.routers.traefik-dashboard.tls.certresolver: "le"
+
+  liberty-next:
+    labels:
+      traefik.http.routers.liberty-next.entrypoints: "web,websecure"
+      traefik.http.routers.liberty-next.tls: "true"
+      traefik.http.routers.liberty-next.tls.certresolver: "le"
+
+  pgadmin:
+    labels:
+      traefik.http.routers.pgadmin.entrypoints: "web,websecure"
+      traefik.http.routers.pgadmin.tls: "true"
+      traefik.http.routers.pgadmin.tls.certresolver: "le"
+
+  portainer:
+    labels:
+      traefik.http.routers.portainer.entrypoints: "web,websecure"
+      traefik.http.routers.portainer.tls: "true"
+      traefik.http.routers.portainer.tls.certresolver: "le"

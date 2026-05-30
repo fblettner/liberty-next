@@ -2,21 +2,22 @@
 #
 # Liberty Next — install the licensed apps on top of a running liberty-next stack.
 #
-# What this does:
-#   1. Clones (or reuses) the liberty-apps repo on the host.
-#   2. Updates .env with APPS_HOST_PATH (absolute path to the clone) + optionally
+# What this does (no git clone — uses the licensed wheel you were delivered):
+#   1. Materializes the wheel's payload (config + plugins) into ./apps/ via a throwaway
+#      python:3.12-slim container — your host doesn't need python or pip.
+#   2. Updates .env: APPS_HOST_PATH, COMPOSE_FILE (adds the apps overlay), optionally
 #      LIBERTY_LICENSE_KEY.
-#   3. Restarts the stack with docker-compose.apps.yml layered on top, which mounts
-#      the apps into /apps inside the container and sets LIBERTY_APPS_DIR=/apps/config.
+#   3. Restarts the stack so liberty-next picks up the new mount.
 #
 # Usage:
-#   ./install-apps.sh                              # clones to ./apps/ (default)
-#   ./install-apps.sh --path /opt/liberty-apps     # use an existing clone
-#   ./install-apps.sh --license-key <jwt>          # also set LIBERTY_LICENSE_KEY in .env
-#   ./install-apps.sh --layout full                # which base compose to layer onto (full|light)
-#   ./install-apps.sh --repo <url>                 # override the git URL (default: github.com/fblettner/liberty-apps)
+#   ./install-apps.sh ./liberty_apps-7.0.1-py3-none-any.whl                    # local wheel
+#   ./install-apps.sh https://your-license-host/liberty_apps-7.0.1.whl        # remote wheel (curl)
+#   ./install-apps.sh ./liberty_apps-X.Y.Z.whl --license-key <jwt>            # also set license
+#   ./install-apps.sh ./liberty_apps-X.Y.Z.whl --target /opt/liberty-apps     # custom destination
+#   ./install-apps.sh ./liberty_apps-X.Y.Z.whl --layout light                 # layer onto light stack
 #
-# Re-running is idempotent: keeps your clone, refreshes .env keys, re-applies compose.
+# Re-running is idempotent: rematerializes the wheel (operator edits are preserved
+# unless you pass --force-config), refreshes .env keys, re-applies compose.
 set -euo pipefail
 
 if [ -t 1 ]; then
@@ -33,54 +34,88 @@ die()   { err "$*"; exit 1; }
 cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")"
 
 # ── args ──────────────────────────────────────────────────────────────────────
+WHEEL=""
 APPS_PATH="./apps"
 LICENSE_KEY=""
 LAYOUT="full"
-REPO_URL="https://github.com/fblettner/liberty-apps.git"
+FORCE_CONFIG="no"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --path)         [ -z "${2:-}" ] && die "--path requires a value"; APPS_PATH="$2"; shift 2 ;;
-    --license-key)  [ -z "${2:-}" ] && die "--license-key requires a value"; LICENSE_KEY="$2"; shift 2 ;;
-    --layout)       [ -z "${2:-}" ] && die "--layout requires a value (full|light)"; LAYOUT="$2"; shift 2 ;;
-    --repo)         [ -z "${2:-}" ] && die "--repo requires a URL"; REPO_URL="$2"; shift 2 ;;
-    --help|-h)      sed -n '4,18p' "$0"; exit 0 ;;
-    *)              die "Unknown argument: $1" ;;
+    --target)        [ -z "${2:-}" ] && die "--target requires a value"; APPS_PATH="$2"; shift 2 ;;
+    --license-key)   [ -z "${2:-}" ] && die "--license-key requires a value"; LICENSE_KEY="$2"; shift 2 ;;
+    --layout)        [ -z "${2:-}" ] && die "--layout requires a value (full|light)"; LAYOUT="$2"; shift 2 ;;
+    --force-config)  FORCE_CONFIG="yes"; shift ;;
+    --help|-h)       sed -n '4,21p' "$0"; exit 0 ;;
+    -*)              die "Unknown flag: $1" ;;
+    *)               [ -n "$WHEEL" ] && die "Wheel specified twice: '$WHEEL' and '$1'"
+                     WHEEL="$1"; shift ;;
   esac
 done
 
+[ -n "$WHEEL" ] || die "Usage: $0 <wheel-path-or-url> [--license-key <jwt>] [--target DIR] [--layout full|light]"
 case "$LAYOUT" in light|full) ;; *) die "--layout must be 'light' or 'full' (got: $LAYOUT)" ;; esac
 
 # ── prerequisites ─────────────────────────────────────────────────────────────
 command -v docker >/dev/null || die "docker is not installed"
-command -v git    >/dev/null || die "git is not installed (needed to clone liberty-apps)"
 [ -f .env ] || die ".env not found. Run ./install.sh ${LAYOUT} first to bring up the base stack."
 [ -f "docker-compose.${LAYOUT}.yml" ] || die "docker-compose.${LAYOUT}.yml not found"
 [ -f "docker-compose.apps.yml"        ] || die "docker-compose.apps.yml not found"
 
-# ── 1. clone or reuse the apps repo ───────────────────────────────────────────
-if [ -d "$APPS_PATH/.git" ]; then
-  info "Reusing existing liberty-apps clone at $APPS_PATH"
-elif [ -d "$APPS_PATH" ] && [ -n "$(ls -A "$APPS_PATH" 2>/dev/null)" ]; then
-  warn "$APPS_PATH exists but isn't a git clone — using it as-is (won't pull updates)."
-else
-  info "Cloning $REPO_URL → $APPS_PATH"
-  echo "  (the repo is PRIVATE — you'll need read access via SSH key or PAT)"
-  if ! git clone "$REPO_URL" "$APPS_PATH"; then
-    die "Clone failed. If the repo is private, set up SSH access:
-       git remote set-url origin git@github.com:fblettner/liberty-apps.git
-     Or pass --repo with an https URL that includes your PAT:
-       ./install-apps.sh --repo https://<token>@github.com/fblettner/liberty-apps.git"
-  fi
-fi
-APPS_ABS="$(cd "$APPS_PATH" && pwd)"
-[ -d "$APPS_ABS/config" ] || die "$APPS_ABS/config not found — is this really a liberty-apps clone?"
+# ── 1. fetch the wheel (if URL) into a local file ────────────────────────────
+WHEEL_LOCAL=""
+WHEEL_TMP=""
+case "$WHEEL" in
+  http://*|https://*)
+    WHEEL_TMP="$(mktemp -d)/$(basename "${WHEEL%%\?*}")"
+    info "Downloading $WHEEL → $WHEEL_TMP"
+    if ! curl -fsSL "$WHEEL" -o "$WHEEL_TMP"; then
+      die "Download failed. If the URL is auth-gated, pre-download the wheel and pass the local path."
+    fi
+    WHEEL_LOCAL="$WHEEL_TMP"
+    ;;
+  *)
+    [ -f "$WHEEL" ] || die "Wheel not found: $WHEEL"
+    WHEEL_LOCAL="$(cd "$(dirname "$WHEEL")" && pwd)/$(basename "$WHEEL")"
+    ;;
+esac
+case "$WHEEL_LOCAL" in *.whl) ;; *) die "Not a wheel file: $WHEEL_LOCAL (expected *.whl)" ;; esac
 
-# ── 2. update .env ────────────────────────────────────────────────────────────
+# ── 2. materialize the wheel into $APPS_PATH ─────────────────────────────────
+# Run pip inside a throwaway python:3.12-slim container. The container mounts the
+# wheel read-only + the destination read-write, installs the wheel into a tmp prefix,
+# then invokes the liberty-apps CLI which copies config/ and plugins/ into $APPS_PATH.
+# Nothing python-related is left on the host afterwards.
+APPS_ABS="$(mkdir -p "$APPS_PATH" && cd "$APPS_PATH" && pwd)"
+info "Materializing wheel into $APPS_ABS via a throwaway python:3.12-slim container…"
+
+EXTRA_FLAGS=""
+[ "$FORCE_CONFIG" = "yes" ] && EXTRA_FLAGS="--force-config"
+
+WHEEL_DIR="$(dirname "$WHEEL_LOCAL")"
+WHEEL_NAME="$(basename "$WHEEL_LOCAL")"
+
+docker run --rm \
+  -v "${WHEEL_DIR}":/wheel:ro \
+  -v "${APPS_ABS}":/dest \
+  python:3.12-slim \
+  bash -c "
+    set -e
+    pip install --quiet --no-cache-dir --root-user-action=ignore '/wheel/${WHEEL_NAME}'
+    liberty-apps install --target /dest/config ${EXTRA_FLAGS}
+  "
+
+# Clean up downloaded wheel if we fetched it
+[ -n "$WHEEL_TMP" ] && rm -rf "$(dirname "$WHEEL_TMP")"
+
+[ -d "$APPS_ABS/config" ] || die "Materialization didn't produce $APPS_ABS/config — check the wheel."
+[ -d "$APPS_ABS/plugins" ] || warn "$APPS_ABS/plugins not found — wheel may not include plugins."
+ok "Apps materialized in $APPS_ABS (config/ + plugins/)"
+
+# ── 3. update .env ────────────────────────────────────────────────────────────
 upsert_env() {
   local key="$1" val="$2"
   if grep -qE "^${key}=" .env; then
-    # Use a different sed delimiter so paths with / don't need escaping.
     sed -i.bak "s|^${key}=.*|${key}=${val}|" .env && rm -f .env.bak
     info "Updated ${key} in .env"
   else
@@ -89,29 +124,39 @@ upsert_env() {
   fi
 }
 upsert_env "APPS_HOST_PATH" "$APPS_ABS"
+
+# Append docker-compose.apps.yml to COMPOSE_FILE (colon-separated) so every
+# subsequent ``docker compose <command>`` automatically includes the overlay.
+add_compose_overlay() {
+  local overlay="docker-compose.apps.yml"
+  local current
+  current="$(grep -E '^COMPOSE_FILE=' .env | head -1 | cut -d= -f2-)"
+  [ -z "$current" ] && current="docker-compose.${LAYOUT}.yml"
+  case ":$current:" in
+    *":$overlay:"*) info "COMPOSE_FILE already includes $overlay." ;;
+    *)              upsert_env "COMPOSE_FILE" "${current}:${overlay}" ;;
+  esac
+}
+add_compose_overlay
+
 if [ -n "$LICENSE_KEY" ]; then
   upsert_env "LIBERTY_LICENSE_KEY" "$LICENSE_KEY"
-else
-  if ! grep -qE '^LIBERTY_LICENSE_KEY=.+$' .env; then
-    warn "LIBERTY_LICENSE_KEY not set in .env — the framework will start in RESTRICTED mode (licensed connectors won't load)."
-    echo "  Add it later:  ./install-apps.sh --license-key <jwt>"
-  fi
+elif ! grep -qE '^LIBERTY_LICENSE_KEY=.+$' .env; then
+  warn "LIBERTY_LICENSE_KEY not set in .env — framework will run RESTRICTED (licensed connectors won't load)."
+  echo "  Set later with:  ./install-apps.sh <wheel> --license-key <jwt>"
 fi
 chmod 600 .env
 
-# ── 3. restart with the apps overlay ──────────────────────────────────────────
-info "Re-applying stack with docker-compose.${LAYOUT}.yml + docker-compose.apps.yml…"
-docker compose \
-  -f "docker-compose.${LAYOUT}.yml" \
-  -f docker-compose.apps.yml \
-  up -d
+# ── 4. restart the stack ──────────────────────────────────────────────────────
+info "Re-applying stack (COMPOSE_FILE in .env now includes docker-compose.apps.yml)…"
+docker compose up -d
 
 info "Waiting for liberty-next to report healthy…"
 for i in $(seq 1 60); do
   status=$(docker inspect --format='{{.State.Health.Status}}' liberty-next 2>/dev/null || echo "starting")
   case "$status" in
     healthy) ok "liberty-next is healthy."; break ;;
-    unhealthy) err "liberty-next reported unhealthy — check 'docker compose -f docker-compose.${LAYOUT}.yml logs liberty-next'"; exit 1 ;;
+    unhealthy) err "liberty-next reported unhealthy — check 'docker compose logs liberty-next'"; exit 1 ;;
   esac
   sleep 2
   [ "$i" -eq 60 ] && warn "liberty-next not healthy after 120 s — continuing; check logs."
@@ -119,7 +164,7 @@ done
 
 # ── summary ───────────────────────────────────────────────────────────────────
 echo
-printf "${BOLD}━━━ Liberty Apps mounted ━━━${NC}\n"
+printf "${BOLD}━━━ Liberty Apps installed ━━━${NC}\n"
 echo
 echo "  Apps host path:   $APPS_ABS"
 echo "  Container path:   /apps"
@@ -127,16 +172,15 @@ echo "  LIBERTY_APPS_DIR: /apps/config"
 if grep -qE '^LIBERTY_LICENSE_KEY=.+$' .env; then
   echo "  License key:      set (licensed connectors loaded if the key is valid)"
 else
-  echo "  License key:      NOT set → restricted mode (only the open framework runs)"
+  echo "  License key:      NOT set → restricted mode"
 fi
 echo
 echo "  Verify in the UI:"
-echo "    open http://localhost/             # the SPA should now show the apps' menus"
+echo "    open http://localhost/             # SPA should now show the apps' menus"
 echo "    open http://localhost/info         # 'license.mode' + 'connectors.licensed' count"
 echo
-echo "  Refresh the apps (after a git pull on the host clone):"
-echo "    cd $APPS_ABS && git pull"
-echo "    docker compose -f docker-compose.${LAYOUT}.yml -f docker-compose.apps.yml restart liberty-next"
+echo "  Refresh the apps (after receiving a new wheel):"
+echo "    ./install-apps.sh /path/to/liberty_apps-NEW.whl"
 echo
 echo "  Documentation: https://docs.nomana-it.fr/liberty/getting-started/"
 echo

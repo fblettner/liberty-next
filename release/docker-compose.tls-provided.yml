@@ -1,0 +1,46 @@
+# Liberty Next — TLS via operator-provided certificates.
+#
+# Use when the customer brings their own certificate (corporate CA, internal PKI, or
+# a wildcard cert managed elsewhere). Pairs with a generated dynamic config
+# (traefik/dynamic/tls.yml) that points Traefik at the cert files inside the container.
+#
+# Use with the COMPOSE_FILE chain (install.sh --ssl provided handles this):
+#   COMPOSE_FILE=docker-compose.full.yml:docker-compose.tls-provided.yml
+#
+# .env must define:
+#   CERT_HOST_PATH — absolute host directory containing the .crt + .key files. Mounted
+#                     read-only into the container at /etc/certs. install.sh fills this
+#                     based on the --cert-dir flag.
+#
+# install.sh also writes traefik/dynamic/tls.yml referencing the specific cert filenames
+# (--cert-file + --key-file). That file is gitignored — operators can rewrite it
+# manually for fancier setups (multi-domain, separate intermediates, etc.).
+
+services:
+  traefik:
+    environment:
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
+    ports:
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
+    volumes:
+      - "${CERT_HOST_PATH:?CERT_HOST_PATH required for provided mode — set by install.sh --cert-dir}:/etc/certs:ro"
+    labels:
+      # Routers get TLS but no certresolver — the cert is served via the file-provider
+      # default cert store defined in traefik/dynamic/tls.yml.
+      traefik.http.routers.traefik-dashboard.entrypoints: "web,websecure"
+      traefik.http.routers.traefik-dashboard.tls: "true"
+
+  liberty-next:
+    labels:
+      traefik.http.routers.liberty-next.entrypoints: "web,websecure"
+      traefik.http.routers.liberty-next.tls: "true"
+
+  pgadmin:
+    labels:
+      traefik.http.routers.pgadmin.entrypoints: "web,websecure"
+      traefik.http.routers.pgadmin.tls: "true"
+
+  portainer:
+    labels:
+      traefik.http.routers.portainer.entrypoints: "web,websecure"
+      traefik.http.routers.portainer.tls: "true"

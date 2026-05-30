@@ -23,6 +23,23 @@
 # pgadmin-data with the old admin login, …). Without --reset, install.sh detects
 # stale volumes and asks before reusing them with a fresh .env (which would fail).
 #
+# Licensed apps (single-command install):
+#   --apps <wheel-path-or-url>  # after bringing up the base stack, run install-apps.sh
+#                                 with the given wheel (local file or http(s) URL).
+#   --license-key <jwt>         # forwarded to install-apps.sh if --apps is set.
+# Lets you do everything in one go:
+#   ./install.sh full --apps ./liberty_apps-7.0.1.whl --license-key <jwt>
+#
+# TLS (full layout only — light has no Traefik):
+#   --ssl letsencrypt --domain <hostname> --email <addr>
+#       Auto-fetched cert via Let's Encrypt (ACME TLS-ALPN challenge — needs the host
+#       reachable from the public internet on :80/:443). Recommended for demo servers.
+#   --ssl provided --cert-dir <dir> --cert-file <crt> --key-file <key>
+#       Operator-provided cert (corporate CA, internal PKI). install.sh copies/uses
+#       the cert files from <dir> and writes traefik/dynamic/tls.yml referencing them.
+#   --ssl none (default)
+#       HTTP only on :80.
+#
 # Re-running:
 #   .env already present + stack up → no-op (use ``docker compose pull && up -d`` to upgrade).
 #   .env already present + stack down → starts the stack with the existing .env.
@@ -53,6 +70,14 @@ docker compose version >/dev/null 2>&1 \
 LAYOUT=""
 IMAGE_TAG=""             # empty → defaults to 'latest' in the generated .env
 RESET="no"               # --reset → wipe volumes + .env before install
+APPS_WHEEL=""            # --apps <wheel> → run install-apps.sh after base install
+LICENSE_KEY=""           # --license-key <jwt> → forwarded to install-apps.sh
+SSL_MODE="none"          # --ssl none|letsencrypt|provided
+SSL_DOMAIN=""            # --domain  (letsencrypt only — public hostname)
+SSL_EMAIL=""             # --email   (letsencrypt only — ACME contact)
+SSL_CERT_DIR=""          # --cert-dir  (provided only — abs host dir with cert files)
+SSL_CERT_FILE=""         # --cert-file (provided only — cert filename within cert-dir)
+SSL_KEY_FILE=""          # --key-file  (provided only — key  filename within cert-dir)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -64,12 +89,60 @@ while [ $# -gt 0 ]; do
       IMAGE_TAG="$2"; shift 2 ;;
     --reset)
       RESET="yes"; shift ;;
+    --apps)
+      [ -z "${2:-}" ] && die "--apps requires a value (wheel path or http(s) URL)"
+      APPS_WHEEL="$2"; shift 2 ;;
+    --license-key)
+      [ -z "${2:-}" ] && die "--license-key requires a value"
+      LICENSE_KEY="$2"; shift 2 ;;
+    --ssl)
+      [ -z "${2:-}" ] && die "--ssl requires a value (none|letsencrypt|provided)"
+      SSL_MODE="$2"; shift 2 ;;
+    --domain)
+      [ -z "${2:-}" ] && die "--domain requires a value"
+      SSL_DOMAIN="$2"; shift 2 ;;
+    --email)
+      [ -z "${2:-}" ] && die "--email requires a value"
+      SSL_EMAIL="$2"; shift 2 ;;
+    --cert-dir)
+      [ -z "${2:-}" ] && die "--cert-dir requires a value"
+      SSL_CERT_DIR="$2"; shift 2 ;;
+    --cert-file)
+      [ -z "${2:-}" ] && die "--cert-file requires a value"
+      SSL_CERT_FILE="$2"; shift 2 ;;
+    --key-file)
+      [ -z "${2:-}" ] && die "--key-file requires a value"
+      SSL_KEY_FILE="$2"; shift 2 ;;
     --help|-h)
-      sed -n '4,28p' "$0"; exit 0 ;;
+      sed -n '4,46p' "$0"; exit 0 ;;
     *)
-      die "Unknown argument: $1 (expected: light | full | prepare [--tag <ver>] [--reset])" ;;
+      die "Unknown argument: $1 (expected: light | full | prepare [flags])" ;;
   esac
 done
+
+# Cross-arg validation
+[ -n "$APPS_WHEEL" ] && [ "$LAYOUT" = "prepare" ] && die "--apps cannot be combined with 'prepare' (apps need a running stack)."
+[ -n "$LICENSE_KEY" ] && [ -z "$APPS_WHEEL" ] && warn "--license-key was passed without --apps — will be ignored (it's forwarded to install-apps.sh)."
+
+case "$SSL_MODE" in
+  none) ;;
+  letsencrypt)
+    [ "$LAYOUT" != "full" ] && die "--ssl letsencrypt requires --layout full (light has no Traefik)."
+    [ -z "$SSL_DOMAIN" ] && die "--ssl letsencrypt requires --domain <hostname>"
+    [ -z "$SSL_EMAIL" ]  && die "--ssl letsencrypt requires --email <addr>"
+    ;;
+  provided)
+    [ "$LAYOUT" != "full" ] && die "--ssl provided requires --layout full (light has no Traefik)."
+    [ -z "$SSL_CERT_DIR" ]  && die "--ssl provided requires --cert-dir <abs-path>"
+    [ -z "$SSL_CERT_FILE" ] && die "--ssl provided requires --cert-file <crt-filename>"
+    [ -z "$SSL_KEY_FILE" ]  && die "--ssl provided requires --key-file <key-filename>"
+    [ -d "$SSL_CERT_DIR" ]  || die "--cert-dir not found: $SSL_CERT_DIR"
+    [ -f "$SSL_CERT_DIR/$SSL_CERT_FILE" ] || die "Cert not found: $SSL_CERT_DIR/$SSL_CERT_FILE"
+    [ -f "$SSL_CERT_DIR/$SSL_KEY_FILE" ]  || die "Key not found:  $SSL_CERT_DIR/$SSL_KEY_FILE"
+    SSL_CERT_DIR="$(cd "$SSL_CERT_DIR" && pwd)"   # normalize to absolute
+    ;;
+  *) die "Unknown --ssl mode: $SSL_MODE (expected: none | letsencrypt | provided)" ;;
+esac
 
 if [ -z "$LAYOUT" ]; then
   echo
@@ -164,19 +237,62 @@ else
   PGADMIN_PASSWORD="$(gen_secret 16)"
   LIBERTY_ADMIN_PASSWORD="$(gen_secret 16)"
 
-  # Image tag line — if the operator passed --edge or --tag <ver>, write a real
-  # assignment; otherwise leave the line commented so the compose default ('latest')
-  # kicks in.
+  # Image tag line — if the operator passed --tag <ver>, write a real assignment;
+  # otherwise leave commented so the compose default ('latest') kicks in.
   if [ -n "$IMAGE_TAG" ]; then
     LIBERTY_IMAGE_TAG_LINE="LIBERTY_IMAGE_TAG=${IMAGE_TAG}"
   else
     LIBERTY_IMAGE_TAG_LINE="# LIBERTY_IMAGE_TAG=latest"
   fi
 
+  # COMPOSE_FILE chain — base layout + optional SSL overlay (set later by --apps for the apps overlay).
+  COMPOSE_FILE_LINE="docker-compose.${LAYOUT}.yml"
+  case "$SSL_MODE" in
+    letsencrypt) COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-letsencrypt.yml" ;;
+    provided)    COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-provided.yml" ;;
+  esac
+
+  # SSL env vars — only emit values relevant to the chosen mode; the rest stay
+  # commented for documentation.
+  SSL_ENV_BLOCK=""
+  case "$SSL_MODE" in
+    letsencrypt)
+      SSL_ENV_BLOCK="$(cat <<SSL
+# TLS — Let's Encrypt (ACME) mode. Host must be reachable on :80/:443 from the public
+# internet for the cert challenge to succeed.
+LIBERTY_DOMAIN=${SSL_DOMAIN}
+ACME_EMAIL=${SSL_EMAIL}
+# TRAEFIK_HTTPS_PORT=443
+SSL
+)"
+      ;;
+    provided)
+      SSL_ENV_BLOCK="$(cat <<SSL
+# TLS — operator-provided certificate. CERT_HOST_PATH is bind-mounted into Traefik
+# at /etc/certs:ro; traefik/dynamic/tls.yml (generated by install.sh) references
+# the specific cert + key filenames.
+CERT_HOST_PATH=${SSL_CERT_DIR}
+LIBERTY_DOMAIN=${SSL_DOMAIN:-localhost}
+# TRAEFIK_HTTPS_PORT=443
+SSL
+)"
+      ;;
+    none)
+      SSL_ENV_BLOCK="# TLS — disabled. Re-run install.sh with --ssl letsencrypt or --ssl provided to enable."
+      ;;
+  esac
+
   cat > "$ENV_FILE" <<EOF
 # Generated by install.sh on $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Every secret below was generated with 'openssl rand' — none contain '\$' so they
 # pass through docker-compose substitution untouched.
+
+# ── Compose discipline ─────────────────────────────────────────────────────
+# COMPOSE_FILE is picked up by ``docker compose`` automatically — it tells compose
+# WHICH files to merge for every command. install-apps.sh / --ssl flags append
+# overlays here so subsequent ``docker compose pull / ps / up -d`` etc. (no -f
+# flags) keep the right mounts + TLS config intact. NEVER pass -f manually.
+COMPOSE_FILE=${COMPOSE_FILE_LINE}
 
 # ── REQUIRED ───────────────────────────────────────────────────────────────
 LIBERTY_JWT_SECRET=${LIBERTY_JWT_SECRET}
@@ -220,12 +336,39 @@ ${LIBERTY_IMAGE_TAG_LINE}
 # Full layout — Traefik HTTP entrypoint port.
 # TRAEFIK_HTTP_PORT=80
 
-# Full layout, TLS — set when you uncomment the websecure block in docker-compose.full.yml.
-# LIBERTY_DOMAIN=
-# ACME_EMAIL=
+${SSL_ENV_BLOCK}
 EOF
   chmod 600 "$ENV_FILE"     # secrets — owner-read-only
   ok "Generated .env (mode 0600)"
+fi
+
+# ── generate traefik/dynamic/tls.yml for --ssl provided ───────────────────────
+# The file provider doesn't do env-var substitution — so we have to bake the cert
+# filenames into the YAML at install time. Operators can edit this file later
+# (e.g. for multi-cert setups); it's gitignored.
+TLS_DYNAMIC="traefik/dynamic/tls.yml"
+if [ "$SSL_MODE" = "provided" ]; then
+  info "Writing $TLS_DYNAMIC referencing /etc/certs/${SSL_CERT_FILE} + /etc/certs/${SSL_KEY_FILE}"
+  cat > "$TLS_DYNAMIC" <<TLSEOF
+# Generated by install.sh --ssl provided on $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Edit freely — Traefik watches this file (file.watch=true), so changes apply live.
+# Re-running install.sh --ssl provided OVERWRITES this file.
+
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/certs/${SSL_CERT_FILE}
+        keyFile: /etc/certs/${SSL_KEY_FILE}
+  certificates:
+    - certFile: /etc/certs/${SSL_CERT_FILE}
+      keyFile: /etc/certs/${SSL_KEY_FILE}
+TLSEOF
+elif [ "$SSL_MODE" = "letsencrypt" ] && [ -f "$TLS_DYNAMIC" ]; then
+  # If switching from 'provided' to 'letsencrypt', the old tls.yml would still
+  # reference non-existent certs and break Traefik startup. Remove it.
+  info "Removing stale $TLS_DYNAMIC (letsencrypt mode uses the static-config resolver instead)"
+  rm -f "$TLS_DYNAMIC"
 fi
 
 if [ "$LAYOUT" = "prepare" ]; then
@@ -237,18 +380,20 @@ fi
 COMPOSE_FILE="docker-compose.${LAYOUT}.yml"
 [ -f "$COMPOSE_FILE" ] || die "Compose file $COMPOSE_FILE not found"
 
+# Both commands rely on COMPOSE_FILE in .env (so the apps overlay, when added later
+# by install-apps.sh, is honoured automatically without us passing -f).
 info "Pulling images…"
-docker compose -f "$COMPOSE_FILE" pull
+docker compose pull
 
 info "Starting the $LAYOUT stack…"
-docker compose -f "$COMPOSE_FILE" up -d
+docker compose up -d
 
 info "Waiting for liberty-next to report healthy…"
 for i in $(seq 1 60); do
   status=$(docker inspect --format='{{.State.Health.Status}}' liberty-next 2>/dev/null || echo "starting")
   case "$status" in
     healthy) ok "liberty-next is healthy."; break ;;
-    unhealthy) err "liberty-next reported unhealthy — check 'docker compose -f $COMPOSE_FILE logs liberty-next'"; exit 1 ;;
+    unhealthy) err "liberty-next reported unhealthy — check 'docker compose logs liberty-next'"; exit 1 ;;
   esac
   sleep 2
   [ "$i" -eq 60 ] && warn "liberty-next still not healthy after 120 s — continuing; check logs if anything looks off."
@@ -274,9 +419,18 @@ case "$LAYOUT" in
     echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
     ;;
   full)
-    PORT=$(grep -E '^TRAEFIK_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2- || true); PORT="${PORT:-80}"
-    BASE="http://localhost${PORT:+:$PORT}"
-    [ "$PORT" = "80" ] && BASE="http://localhost"
+    # Build the base URL — HTTPS host when TLS is on, plain HTTP otherwise.
+    if [ "$SSL_MODE" != "none" ]; then
+      DOMAIN=$(grep -E '^LIBERTY_DOMAIN=' "$ENV_FILE" | cut -d= -f2- || true); DOMAIN="${DOMAIN:-localhost}"
+      HPORT=$(grep -E '^TRAEFIK_HTTPS_PORT=' "$ENV_FILE" | cut -d= -f2- || true); HPORT="${HPORT:-443}"
+      BASE="https://${DOMAIN}${HPORT:+:$HPORT}"
+      [ "$HPORT" = "443" ] && BASE="https://${DOMAIN}"
+      echo "  TLS mode:   ${SSL_MODE}"
+    else
+      PORT=$(grep -E '^TRAEFIK_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2- || true); PORT="${PORT:-80}"
+      BASE="http://localhost${PORT:+:$PORT}"
+      [ "$PORT" = "80" ] && BASE="http://localhost"
+    fi
     echo "  Liberty:    ${BASE}/"
     echo "  ReDoc:      ${BASE}/redoc"
     echo "  pgAdmin:    ${BASE}/pgadmin"
@@ -297,3 +451,13 @@ echo "  Backup the data volumes regularly: ./backup.sh"
 echo
 echo "  Docs:       https://docs.nomana-it.fr/liberty/getting-started/"
 echo
+
+# ── chain to install-apps.sh when --apps was passed ──────────────────────────
+# Doing this AFTER the base summary keeps the credentials visible even if the apps
+# step fails (operator still has the framework login).
+if [ -n "$APPS_WHEEL" ]; then
+  info "Chaining to install-apps.sh with wheel: $APPS_WHEEL"
+  CMD=("./install-apps.sh" "$APPS_WHEEL" "--layout" "$LAYOUT")
+  [ -n "$LICENSE_KEY" ] && CMD+=("--license-key" "$LICENSE_KEY")
+  "${CMD[@]}"
+fi
