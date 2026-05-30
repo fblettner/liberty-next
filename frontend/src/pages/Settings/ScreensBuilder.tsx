@@ -33,6 +33,7 @@ import {
 import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen, DictionaryDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { validateId, suggestCloneId } from '../../services/idValidator'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -327,12 +328,10 @@ export default function ScreensBuilder() {
   // Clone / Rename / Delete operate across connectors.toml + dictionary.toml + menus.toml +
   // screens.toml + charts.toml + dashboards.toml). Per-screen Clone / Rename / Delete + Add
   // screen live here; everything else stays in the Connectors editor.
-  const validateScreenId = (v: string, app: string, oldId: string | null): string | null => {
-    if (!v) return t('common.nameRequired', 'Name is required.')
-    if (oldId && v === oldId) return t('settings.tables.duplicateSameName', 'Pick a different name.')
-    if (v in (doc?.[app] ?? {})) return t('common.nameExists', { name: v })
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier', 'Use letters, digits, underscore; leading letter.')
-    return null
+  const validateScreenId = (v: string, app: string, oldId: string | null) => {
+    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+    const existing = Object.keys(doc?.[app] ?? {}).filter((k) => k !== oldId)
+    return validateId({ kind: 'screen', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
   const addScreen = async (app: string) => {
     const id = (await modals.prompt({
@@ -364,10 +363,11 @@ export default function ScreensBuilder() {
     updateScreen(app, oldId, { ...src, id: next })
   }
   const cloneScreen = async (app: string, oldId: string) => {
+    const existing = Object.keys(doc?.[app] ?? {})
     const next = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t('settings.screens.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: `${oldId}_copy`, submitLabel: t('common.clone', 'Clone'),
+      defaultValue: suggestCloneId(oldId, existing), submitLabel: t('common.clone', 'Clone'),
       validate: (v) => validateScreenId(v.trim(), app, oldId),
     }))?.trim()
     if (!next) return

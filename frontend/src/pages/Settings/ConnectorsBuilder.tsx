@@ -17,7 +17,6 @@ import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import ApiConnectorEditor, { type ApiConnector as ApiConnectorEditorValue } from './ApiConnectorEditor'
-import { validateRename } from '../../services/keyRename'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
@@ -26,6 +25,7 @@ import { CRUD_KINDS, classifyQueryName, duplicateTable as duplicateTableQueries,
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { validateId, suggestCloneId } from '../../services/idValidator'
 import { DictionaryScan } from './DictionaryScan'
 
 type Connectors = Record<string, Record<string, unknown>>
@@ -257,9 +257,12 @@ export default function ConnectorsBuilder() {
   // it's the same name-based classification used everywhere.
   const addCustomQuery = async () => {
     if (!sel) return
+    const existing = queriesArr.map((q) => String(q.name ?? ''))
     const name = (await modals.prompt({
       title: t('settings.connectors.addQuery', 'Add query'),
       message: t('settings.connectors.queryNamePrompt', 'Query name (e.g. post_invoice, customer_balance):'),
+      placeholder: 'snake_case',
+      validate: (v) => validateId({ kind: 'query', proposed: v, existing, mode: 'add' }),
     }))?.trim()
     if (!name) return
     if (queriesArr.some((q) => q.name === name)) { setSelQuery(name); return }
@@ -269,9 +272,10 @@ export default function ConnectorsBuilder() {
   const openAddConnector = () => { setAddConnType('sql'); setAddConnName(''); setAddConnError(null); setAddConnOpen(true) }
   const submitAddConnector = () => {
     const name = addConnName.trim()
-    if (!name) { setAddConnError(t('settings.rename.empty', 'Name can\'t be empty.')); return }
-    if (!/^[a-z][a-z0-9_]*$/.test(name)) { setAddConnError(t('settings.rename.invalidIdentifier', 'Use lowercase letters, digits, underscore; leading letter.')); return }
-    if (conns && name in conns) { setAddConnError(t('settings.rename.exists', { name })); return }
+    // Use the shared validator so the connector dialog matches every other Add prompt
+    // (one source of truth for the pattern + duplicate check + warnings).
+    const result = validateId({ kind: 'connector', proposed: name, existing: conns ? Object.keys(conns) : [], mode: 'add' })
+    if (result.error) { setAddConnError(result.error); return }
     setConns((p) => ({ ...(p ?? {}), [name]: addConnType === 'api' ? { type: 'api', base_url: '' } : { type: 'sql', queries: [] } }))
     setSel(name); setStatus(null); setAddConnOpen(false)
   }
@@ -289,17 +293,15 @@ export default function ConnectorsBuilder() {
     if (!sel) return
     const src = queriesArr.find((qq) => qq.name === name)
     if (!src) return
+    const existing = queriesArr.map((qq) => String(qq.name ?? ''))
     const next = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t('settings.tables.duplicatePrompt', { name }),
-      defaultValue: `${name}_copy`,
+      defaultValue: suggestCloneId(name, existing),
       submitLabel: t('common.clone', 'Clone'),
       validate: (v) => {
-        if (!v.trim()) return t('common.nameRequired', 'Name is required.')
-        if (v === name) return t('settings.tables.duplicateSameName', 'Pick a different name.')
-        if (queriesArr.some((qq) => qq.name === v)) return t('common.nameExists', { name: v })
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier', 'Use letters, digits, underscore; leading letter.')
-        return null
+        if (v === name) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+        return validateId({ kind: 'query', proposed: v, existing, mode: 'clone' })
       },
     }))?.trim()
     if (!next) return
@@ -420,23 +422,13 @@ export default function ConnectorsBuilder() {
       // already surfaced on the banner — the operator can retry the rename).
       if (dirty) return
     }
-    const existing = Object.keys(conns)
+    const existing = Object.keys(conns).filter((k) => k !== oldName)
     const next = (await modals.prompt({
       title: t('settings.rename.button'),
       message: t('settings.connectors.renamePrompt', { name: oldName }),
       defaultValue: oldName,
       submitLabel: t('settings.rename.button'),
-      validate: (v) => {
-        const err = validateRename(oldName, v, existing)
-        if (err === 'unchanged') return null
-        if (err === 'empty') return t('settings.rename.empty')
-        if (err === 'exists') return t('settings.rename.exists', { name: v })
-        // v2 identifier shape (must match the backend's regex). Same rule slugify enforces on
-        // migration so the rename produces a name that reads like a TOML key, a permission
-        // string, and a URL segment all at once.
-        if (!/^[a-z][a-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
-        return null
-      },
+      validate: (v) => validateId({ kind: 'connector', proposed: v, existing, mode: 'rename', currentName: oldName }),
     }))?.trim()
     if (!next || next === oldName) return
     setBusy(true)
@@ -486,16 +478,10 @@ export default function ConnectorsBuilder() {
       await save()
       if (dirty) return null
     }
+    const existingMinusSelf = existing.filter((n) => n !== oldName)
     const next = (await modals.prompt({
       title, message, defaultValue: oldName, submitLabel: t('settings.rename.button'),
-      validate: (v) => {
-        const err = validateRename(oldName, v, existing)
-        if (err === 'unchanged') return null
-        if (err === 'empty') return t('settings.rename.empty')
-        if (err === 'exists') return t('settings.rename.exists', { name: v })
-        if (!/^[a-z][a-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
-        return null
-      },
+      validate: (v) => validateId({ kind: 'query', proposed: v, existing: existingMinusSelf, mode: 'rename', currentName: oldName }),
     }))?.trim()
     return next && next !== oldName ? next : null
   }
@@ -549,10 +535,15 @@ export default function ConnectorsBuilder() {
     })
     if (choice === 'cancel' || choice == null) return
     if (choice === 'wizard') { setCrudWizardOpen(true); return }
-    // Empty stub path — original behaviour.
+    // Empty stub path — original behaviour. The "id" the operator types is the table
+    // BASE name; the actual query created is ``<base>_get``. Validate against the existing
+    // table bases so two stubs can't collide.
+    const existingBases = grouped.tables.map((g) => g.base)
     const base = (await modals.prompt({
       title: t('settings.tables.addTable'),
       message: t('settings.tables.namePrompt'),
+      placeholder: 'snake_case',
+      validate: (v) => validateId({ kind: 'query', proposed: v, existing: existingBases, mode: 'add' }),
     }))?.trim()
     if (!base) return
     const cur = (conns ?? {})[connectorName] ?? {}

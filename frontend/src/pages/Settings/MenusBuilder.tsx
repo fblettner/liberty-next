@@ -20,6 +20,7 @@ import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '
 import { groupQueriesByTable } from './connectorTables'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { validateId, suggestCloneId } from '../../services/idValidator'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -411,18 +412,13 @@ export default function MenusBuilder() {
   const cloneItem = async (oldId: string) => {
     const src = items.find((it) => it.id === oldId)
     if (!src) return
+    const existing = items.map((it) => it.id)
     const next = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t('settings.menus.item.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: freshId(items, `${oldId}_copy`),
+      defaultValue: suggestCloneId(oldId, existing),
       submitLabel: t('common.clone', 'Clone'),
-      validate: (v) => {
-        const trimmed = v.trim()
-        if (!trimmed) return t('common.nameRequired', 'Name is required.')
-        if (items.some((it) => it.id === trimmed)) return t('common.nameExists', { name: trimmed })
-        if (!/^[A-Za-z0-9_.-]+$/.test(trimmed)) return t('settings.rename.invalidIdentifier', 'Invalid identifier.')
-        return null
-      },
+      validate: (v) => validateId({ kind: 'menu_item', proposed: v, existing, mode: 'clone' }),
     }))?.trim()
     if (!next) return
     const subtree = collectSubtree(items, oldId)

@@ -15,6 +15,7 @@ import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
+import { validateId as validateIdShared, suggestCloneId } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -95,12 +96,10 @@ export default function ChartsBuilder() {
     void persist(next, t('settings.charts.saved', 'Saved.'))
   }
 
-  const validateId = (v: string, oldId: string | null): string | null => {
-    if (!v) return t('common.nameRequired', 'Name is required.')
-    if (oldId && v === oldId) return t('settings.tables.duplicateSameName', 'Pick a different name.')
-    if (!/^[A-Za-z0-9_-]+$/.test(v)) return t('settings.charts.errIdShape', 'Id: letters, digits, underscore, hyphen only.')
-    if (v in (doc?.[scope] ?? {})) return t('common.nameExists', { name: v })
-    return null
+  const validateChartId = (v: string, oldId: string | null) => {
+    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+    const existing = Object.keys(doc?.[scope] ?? {}).filter((k) => k !== oldId)
+    return validateIdShared({ kind: 'chart', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
 
   const renameChart = async (oldId: string) => {
@@ -108,7 +107,7 @@ export default function ChartsBuilder() {
       title: t('settings.rename.button', 'Rename'),
       message: t('settings.charts.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
       defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
-      validate: (v) => validateId(v.trim(), oldId),
+      validate: (v) => validateChartId(v.trim(), oldId),
     }))?.trim()
     if (!next || next === oldId) return
     const byId = { ...(doc?.[scope] ?? {}) }
@@ -119,11 +118,12 @@ export default function ChartsBuilder() {
   }
 
   const cloneChart = async (oldId: string) => {
+    const existing = Object.keys(doc?.[scope] ?? {})
     const next = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t('settings.charts.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: `${oldId}_copy`, submitLabel: t('common.clone', 'Clone'),
-      validate: (v) => validateId(v.trim(), oldId),
+      defaultValue: suggestCloneId(oldId, existing), submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => validateChartId(v.trim(), oldId),
     }))?.trim()
     if (!next) return
     const byId = { ...(doc?.[scope] ?? {}) }

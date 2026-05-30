@@ -13,7 +13,8 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
-import { renameKey, validateRename } from '../../services/keyRename'
+import { renameKey } from '../../services/keyRename'
+import { validateId, suggestCloneId } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
@@ -299,6 +300,22 @@ export default function DictionaryBuilder() {
     return base
   }, [schemas, dict, scope, kind, sel, connectors])
 
+  // Other dictionary kinds in the current scope — drives the cross-kind warning in the
+  // validator (e.g. "id '1' is also used as a lookup in this scope — runtime works but
+  // it's confusing"). Lives ABOVE the early-return guards (React rules-of-hooks: hooks
+  // must run in the same order every render — moving this past the `if (!dict)` short-
+  // circuit triggers error #310 once the dict loads). Handles the not-yet-loaded case
+  // internally by returning an empty record.
+  const crossKindIds = useMemo<Record<string, string[]>>(() => {
+    if (!dict) return {}
+    const out: Record<string, string[]> = {}
+    for (const k of ['entries', 'enums', 'lookups', 'sequences'] as const) {
+      if (k === kind) continue
+      out[k] = Object.keys(getSection(dict, scope, k))
+    }
+    return out
+  }, [dict, kind, scope])
+
   if (error && !dict) return <Banner $tone="error">{error}</Banner>
   if (!dict || !schemas) return <Centered />
 
@@ -323,6 +340,7 @@ export default function DictionaryBuilder() {
     setDict(setSection(dict, scope, kind, { ...section, [key]: v }))
     setStatus(null)
   }
+
   const addRecord = async () => {
     // Framework enums are a closed set defined in liberty/framework_enums.py — operators can't
     // invent a new id, they can only override an existing one. So skip the free-text prompt and
@@ -334,15 +352,21 @@ export default function DictionaryBuilder() {
       setFrameworkAddOpen(true)
       return
     }
+    const existing = Object.keys(section)
     const raw = (await modals.prompt({
       title: t(`settings.dictionary.${kind}.add`),
       message: t(`settings.dictionary.${kind}.namePrompt`),
+      placeholder: kind === 'entries' || kind === 'enums' ? 'UPPER_SNAKE_CASE' : 'snake_case',
+      validate: (v) => {
+        // entries are uppercased on save — validate the upper form so the duplicate
+        // check matches what'll actually land.
+        const proposed = kind === 'entries' ? v.toUpperCase() : v
+        return validateId({ kind, proposed, existing, crossKindIds, mode: 'add' })
+      },
     }))?.trim()
     if (!raw) return
-    // Dictionary entry ids are UPPERCASE by convention — screen columns reference them via `dd`
-    // (uppercased by x_case) and `find_entry` is case-sensitive, so a lowercase entry would never
-    // resolve. Normalise here so a hand-typed `cust_id` lands as `CUST_ID`, matching the scanner.
     const key = kind === 'entries' ? raw.toUpperCase() : raw
+    // Duplicate guard already in the validator, but defend against a race / stale state.
     if (key in section) { setSel(key); return }
     setDict(setSection(dict, scope, kind, { ...section, [key]: newRecord(kind) }))
     setSel(key); setStatus(null)
@@ -399,22 +423,17 @@ export default function DictionaryBuilder() {
   }
   const renameRecord = async (oldKey: string) => {
     if (!dict) return
-    const existing = Object.keys(section)
+    // Exclude the current name from "existing" so renaming "X" → "X" is a no-op (caller
+    // bails on next === oldKey just below), not a duplicate-error.
+    const existing = Object.keys(section).filter((k) => k !== oldKey)
     const next = (await modals.prompt({
       title: t('settings.rename.button'),
       message: t(`settings.dictionary.${kind}.renamePrompt`, { name: oldKey }),
       defaultValue: oldKey,
       submitLabel: t('settings.rename.button'),
       validate: (v) => {
-        const err = validateRename(oldKey, v, existing)
-        if (err === 'unchanged') return null
-        if (err === 'empty') return t('settings.rename.empty')
-        if (err === 'exists') return t('settings.rename.exists', { name: v })
-        // entries are typically uppercase (USR_ID, APPS_ID, …); the rest are lowercase v2 ids.
-        // Both shapes accepted by the backend; the regex enforces letters/digits/underscores
-        // with a leading letter.
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) return t('settings.rename.invalidIdentifier')
-        return null
+        const proposed = kind === 'entries' ? v.toUpperCase() : v
+        return validateId({ kind, proposed, existing, crossKindIds, mode: 'rename', currentName: oldKey })
       },
     }))?.trim()
     if (!next || next === oldKey) return
@@ -506,17 +525,18 @@ export default function DictionaryBuilder() {
     if (!sel) return
     const src = section[oldKey]
     if (!src) return
+    const existing = Object.keys(section)
     const raw = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t(`settings.dictionary.${kind}.namePrompt`),
-      defaultValue: `${oldKey}_copy`,
+      // suggestCloneId picks a non-colliding suffix (_copy, _copy2, _copy3, …) so the
+      // operator doesn't have to manually find a free name.
+      defaultValue: suggestCloneId(oldKey, existing),
       submitLabel: t('common.clone', 'Clone'),
       validate: (v) => {
-        const key = kind === 'entries' ? v.trim().toUpperCase() : v.trim()
-        if (!key) return t('common.nameRequired', 'Name is required.')
-        if (key === oldKey) return t('settings.tables.duplicateSameName', 'Pick a different name.')
-        if (key in section) return t('common.nameExists', { name: key })
-        return null
+        const proposed = kind === 'entries' ? v.toUpperCase() : v
+        if (proposed === oldKey) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+        return validateId({ kind, proposed, existing, crossKindIds, mode: 'clone' })
       },
     }))?.trim()
     if (!raw) return

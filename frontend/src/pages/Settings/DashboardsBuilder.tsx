@@ -14,6 +14,7 @@ import { DashboardEditorModal } from './DashboardEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
+import { validateId as validateIdShared, suggestCloneId } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -99,19 +100,22 @@ export default function DashboardsBuilder() {
   }
 
   const addDashboard = async () => {
-    const id = (await modals.prompt({ title: t('settings.dashboards.add'), message: t('settings.dashboards.namePrompt') }))?.trim()
+    const existing = Object.keys(doc?.[scope] ?? {})
+    const id = (await modals.prompt({
+      title: t('settings.dashboards.add'),
+      message: t('settings.dashboards.namePrompt'),
+      placeholder: 'snake_case',
+      validate: (v) => validateIdShared({ kind: 'dashboard', proposed: v, existing, mode: 'add' }),
+    }))?.trim()
     if (!id) return
-    const existing = doc?.[scope]?.[id]
-    if (existing) { setEditing({ ...existing, id }); return }
     setEditing({ id, label: id, widgets: [] })
     setStatus(null)
   }
 
-  const validateId = (v: string, oldId: string | null): string | null => {
-    if (!v) return t('common.nameRequired', 'Name is required.')
-    if (oldId && v === oldId) return t('settings.tables.duplicateSameName', 'Pick a different name.')
-    if (v in (doc?.[scope] ?? {})) return t('common.nameExists', { name: v })
-    return null
+  const validateDashboardId = (v: string, oldId: string | null) => {
+    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+    const existing = Object.keys(doc?.[scope] ?? {}).filter((k) => k !== oldId)
+    return validateIdShared({ kind: 'dashboard', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
 
   const renameDashboard = async (oldId: string) => {
@@ -119,7 +123,7 @@ export default function DashboardsBuilder() {
       title: t('settings.rename.button', 'Rename'),
       message: t('settings.dashboards.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
       defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
-      validate: (v) => validateId(v.trim(), oldId),
+      validate: (v) => validateDashboardId(v.trim(), oldId),
     }))?.trim()
     if (!next || next === oldId) return
     const byId = { ...(doc?.[scope] ?? {}) }
@@ -130,11 +134,12 @@ export default function DashboardsBuilder() {
   }
 
   const cloneDashboard = async (oldId: string) => {
+    const existing = Object.keys(doc?.[scope] ?? {})
     const next = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t('settings.dashboards.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: `${oldId}_copy`, submitLabel: t('common.clone', 'Clone'),
-      validate: (v) => validateId(v.trim(), oldId),
+      defaultValue: suggestCloneId(oldId, existing), submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => validateDashboardId(v.trim(), oldId),
     }))?.trim()
     if (!next) return
     const byId = { ...(doc?.[scope] ?? {}) }

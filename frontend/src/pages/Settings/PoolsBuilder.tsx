@@ -10,7 +10,8 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
-import { renameKey, validateRename } from '../../services/keyRename'
+import { renameKey } from '../../services/keyRename'
+import { validateId } from '../../services/idValidator'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -104,10 +105,12 @@ export default function PoolsBuilder() {
     update(name, v)
   }
   const addPool = async () => {
+    const existing = pools ? Object.keys(pools) : []
     const name = (await modals.prompt({
       title: t('settings.pools.add'),
       message: t('settings.pools.namePrompt'),
       placeholder: t('settings.pools.namePlaceholder', 'e.g. nomasx1, jdedwards'),
+      validate: (v) => validateId({ kind: 'pool', proposed: v, existing, mode: 'add' }),
     }))?.trim()
     if (!name) return
     if (pools && name in pools) { setSel(name); return }
@@ -153,19 +156,13 @@ export default function PoolsBuilder() {
   // here would need partial-failure handling. A hint at the bottom of the builder reminds.
   const renamePool = async (oldName: string) => {
     if (!pools) return
-    const existing = Object.keys(pools)
+    const existing = Object.keys(pools).filter((k) => k !== oldName)
     const next = (await modals.prompt({
       title: t('settings.rename.button'),
       message: t('settings.pools.renamePrompt', { name: oldName }),
       defaultValue: oldName,
       submitLabel: t('settings.rename.button'),
-      validate: (v) => {
-        const err = validateRename(oldName, v, existing)
-        if (err === 'unchanged') return null  // identity is a soft no-op (close as if cancelled)
-        if (err === 'empty') return t('settings.rename.empty')
-        if (err === 'exists') return t('settings.rename.exists', { name: v })
-        return null
-      },
+      validate: (v) => validateId({ kind: 'pool', proposed: v, existing, mode: 'rename', currentName: oldName }),
     }))?.trim()
     if (!next || next === oldName) return
     setPools((p) => renameKey(p ?? {}, oldName, next))

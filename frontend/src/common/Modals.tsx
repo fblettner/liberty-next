@@ -21,7 +21,7 @@
 // at most one modal queued at a time; firing a second call while the first is open replaces it
 // (the first promise resolves to the cancel value before the new modal opens).
 import {
-  createContext, useCallback, useContext, useEffect, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -49,6 +49,16 @@ export interface ConfirmOptions {
   cancelLabel?: string
 }
 
+/** Richer validator result — allows surfacing a warning that doesn't block submit. Back-compat:
+ *  the validator may still return a plain ``string`` (treated as error) or ``null`` (OK). */
+export interface ValidateResult {
+  /** Hard error — blocks submit + shown red under the input. */
+  error?: string
+  /** Soft warning — allows submit + shown amber. Used by the id validator for
+   *  cross-kind dupes and numeric-id flags. */
+  warning?: string
+}
+
 export interface PromptOptions {
   title: string
   /** Optional description shown above the input. */
@@ -58,10 +68,11 @@ export interface PromptOptions {
   placeholder?: string
   submitLabel?: string
   cancelLabel?: string
-  /** Returns ``null`` when the value is valid, else an error string to render under the input.
-   *  Empty / whitespace-only values are rejected with the default "required" message unless
-   *  the caller opts out by passing a custom validator that accepts them. */
-  validate?: (value: string) => string | null
+  /** Returns ``null`` (OK), an error ``string`` (back-compat), or a ``ValidateResult``
+   *  with ``error`` (block) and/or ``warning`` (allow + flag). Runs live on every keystroke
+   *  AND on submit. Empty / whitespace-only values are rejected with the default
+   *  "required" message unless ``allowEmpty`` is true. */
+  validate?: (value: string) => string | null | ValidateResult
   /** Allow empty values to submit (default ``false`` — the prompt requires non-blank input,
    *  matching window.prompt's behaviour where the caller checks for non-empty anyway). */
   allowEmpty?: boolean
@@ -255,6 +266,14 @@ function ConfirmModalContent({
   )
 }
 
+/** Normalise a validator return into the canonical {error?, warning?} shape — handles the
+ *  back-compat string-or-null contract. */
+function normaliseValidate(raw: string | null | ValidateResult | undefined): ValidateResult {
+  if (raw == null) return {}
+  if (typeof raw === 'string') return { error: raw }
+  return raw
+}
+
 function PromptModalContent({
   opts, onSubmit, onCancel, t,
 }: {
@@ -264,7 +283,6 @@ function PromptModalContent({
   t: ReturnType<typeof useTranslation>['t']
 }) {
   const [value, setValue] = useState<string>(opts.defaultValue ?? '')
-  const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     // Auto-focus + select-all so a rename flow lets the user type a fresh name without first
@@ -272,18 +290,23 @@ function PromptModalContent({
     inputRef.current?.focus()
     inputRef.current?.select()
   }, [])
-  const submit = useCallback(() => {
+  // Live validation — runs on every keystroke so the operator sees errors / warnings as
+  // they type. Memoised so the validator (typically a stable function) isn't re-called
+  // when only the modal's other state changes.
+  const liveResult: ValidateResult = useMemo(() => {
     const trimmed = value.trim()
     if (!opts.allowEmpty && trimmed === '') {
-      setError(t('settings.rename.empty', 'Name cannot be empty.'))
-      return
+      return value === '' ? {} : { error: t('settings.rename.empty', 'Name cannot be empty.') }
     }
-    if (opts.validate) {
-      const err = opts.validate(trimmed)
-      if (err) { setError(err); return }
-    }
+    if (opts.validate) return normaliseValidate(opts.validate(trimmed))
+    return {}
+  }, [value, opts, t])
+  const submit = useCallback(() => {
+    const trimmed = value.trim()
+    if (!opts.allowEmpty && trimmed === '') return    // input is empty — block silently
+    if (liveResult.error) return                      // hard error — block submit
     onSubmit(trimmed)
-  }, [value, opts, onSubmit, t])
+  }, [value, opts, onSubmit, liveResult])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel()
@@ -301,18 +324,21 @@ function PromptModalContent({
             ref={inputRef}
             value={value}
             placeholder={opts.placeholder}
-            onChange={(e) => { setValue(e.target.value); if (error) setError(null) }}
+            onChange={(e) => { setValue(e.target.value) }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
           />
-          {error && (
-            <div style={{ color: 'var(--text-error, #c0392b)', fontSize: 12 }}>{error}</div>
+          {liveResult.error && (
+            <div style={{ color: 'var(--text-error, #c0392b)', fontSize: 12 }}>{liveResult.error}</div>
+          )}
+          {!liveResult.error && liveResult.warning && (
+            <div style={{ color: 'var(--text-warning, #d97706)', fontSize: 12 }}>⚠ {liveResult.warning}</div>
           )}
         </ModalBody>
         <ModalFooter>
           <Button $size="sm" $variant="ghost" onClick={onCancel}>
             {opts.cancelLabel ?? t('common.cancel')}
           </Button>
-          <Button $size="sm" $variant="primary" onClick={submit}>
+          <Button $size="sm" $variant="primary" onClick={submit} disabled={!!liveResult.error || (!opts.allowEmpty && value.trim() === '')}>
             {opts.submitLabel ?? t('common.ok', 'OK')}
           </Button>
         </ModalFooter>
