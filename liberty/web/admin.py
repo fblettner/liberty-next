@@ -1124,9 +1124,17 @@ def _apply_connector_queries(request: Request, payload: dict[str, Any]) -> str:
                             detail=f"connector {connector!r} is not a SQL connector")
     existing = conn.model_dump(exclude_defaults=True)
     by_name = {q.get("name"): q for q in existing.get("queries") or []}
+    # QueryDef.type accepts table / custom / sequence / lookup. A proposal carrying a
+    # per-CRUD-slot kind (select / insert / update / delete) — a bug in an earlier scaffold
+    # tool revision — would land as an invalid string and the name-based classifier in the
+    # builder would skip it (the query disappears from both Tables and Custom). Drop those
+    # so the name-pattern fallback (``<slug>_get`` → table) picks it up cleanly.
+    _BAD_TYPES = {"select", "insert", "update", "delete"}
     for q in queries:
         if not q.get("name"):
             continue
+        if isinstance(q.get("type"), str) and q["type"].lower() in _BAD_TYPES:
+            q = {k: v for k, v in q.items() if k != "type"}
         by_name[q["name"]] = q
     existing["queries"] = list(by_name.values())
     try:

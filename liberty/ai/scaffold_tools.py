@@ -154,11 +154,16 @@ def build_scaffold_tools(
             raise ConnectorError("key_columns is required when generating update / delete (drives the WHERE clause)")
         fq = _fq(schema, table)
         slug = _slug(prefix or table)
+        # Don't set ``type`` on the generated queries — QueryDef.type accepts
+        # ``table`` / ``custom`` / ``sequence`` / ``lookup`` (not per-CRUD-slot kinds).
+        # When unset, the builder's name-based classifier groups ``<slug>_get`` /
+        # ``_put`` / ``_post`` / ``_delete`` into the same "table" entry — exactly
+        # the same shape the frontend's CRUD wizard produces.
         builders: dict[str, dict[str, Any]] = {
-            "select": {"name": f"{slug}_get",    "type": "select", "sql": _select_sql(columns, fq)},
-            "insert": {"name": f"{slug}_post",   "type": "insert", "writable": True, "sql": _insert_sql(columns, fq)},
-            "update": {"name": f"{slug}_put",    "type": "update", "writable": True, "sql": _update_sql(columns, key_columns or [], fq)},
-            "delete": {"name": f"{slug}_delete", "type": "delete", "writable": True, "sql": _delete_sql(key_columns or [], fq)},
+            "select": {"name": f"{slug}_get",    "sql": _select_sql(columns, fq)},
+            "insert": {"name": f"{slug}_post",   "writable": True, "sql": _insert_sql(columns, fq)},
+            "update": {"name": f"{slug}_put",    "writable": True, "sql": _update_sql(columns, key_columns or [], fq)},
+            "delete": {"name": f"{slug}_delete", "writable": True, "sql": _delete_sql(key_columns or [], fq)},
         }
         queries = [builders[k] for k in chosen]
         kinds_label = "SELECT" if chosen == ["select"] else "/".join(k.upper() for k in chosen)

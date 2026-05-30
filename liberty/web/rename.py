@@ -231,12 +231,20 @@ def rename_connector(
     return result
 
 
-def _validate(label: str, doc: tomlkit.TOMLDocument, parser: Any, path: Path) -> None:
-    """Re-parse the rewritten document via ``tomllib`` (tomlkit's structure is a superset, and
-    Pydantic validators expect plain dicts) and call the matching Pydantic parser. Any error
-    becomes a :class:`RenameError` referencing the file + the underlying message."""
+def _validate(label: str, doc: Any, parser: Any, path: Path) -> None:
+    """Re-parse the rewritten document and run it through the matching Pydantic parser. Any
+    error becomes a :class:`RenameError` referencing the file + the underlying message.
+
+    Accepts either a tomlkit ``TOMLDocument`` (the comment-preserving path used by connector
+    / screen-app / query renames) OR a plain ``dict`` (the dictionary-rename path, which uses
+    tomllib + tomli-w to dodge tomlkit's O(n²) cliff on large dictionary.toml files — same
+    rationale as :func:`liberty.web.admin.put_dictionary_parsed`)."""
     try:
-        parser(tomllib.loads(tomlkit.dumps(doc)))
+        if isinstance(doc, dict) and not isinstance(doc, tomlkit.TOMLDocument):
+            import tomli_w
+            parser(tomllib.loads(tomli_w.dumps(doc)))
+        else:
+            parser(tomllib.loads(tomlkit.dumps(doc)))
     except Exception as exc:                 # noqa: BLE001 — surface any error to the operator
         raise RenameError(f"rename would make {label} ({path}) invalid: {exc}") from exc
 
@@ -464,7 +472,13 @@ def _rename_dict_collection(
     # rename — surface a useful error rather than silently no-op.
     if not dictionary_path.exists() or not dictionary_path.read_text(encoding="utf-8").strip():
         raise RenameError(f"dictionary file {dictionary_path} is missing or empty")
-    doc = tomlkit.parse(dictionary_path.read_text(encoding="utf-8"))
+    # tomllib instead of tomlkit — tomlkit.parse is O(n²)-ish on big nested-table files
+    # (5k+ lines / 100 KB+) and takes minutes on a real JDE-loaded dictionary.toml. The
+    # PUT path already documented + dodged this (see put_dictionary_parsed in admin.py).
+    # The rename path was still using tomlkit, inheriting the same hang. Dictionary is
+    # generated content (liberty-migrate dictionary) — no operator hand-edit comments to
+    # protect, so the lossy round-trip is fine here too.
+    doc = tomllib.loads(dictionary_path.read_text(encoding="utf-8"))
 
     # Resolve the section we'll mutate. Shared = doc[<coll>]; scoped = doc[connectors][scope][<coll>].
     if scope is None:
@@ -513,7 +527,8 @@ def _rename_dict_collection(
 
     # Validate the rewritten doc before writing.
     _validate("dictionary", doc, parse_dictionary, dictionary_path)
-    dictionary_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    import tomli_w
+    dictionary_path.write_text(tomli_w.dumps(doc), encoding="utf-8")
 
     result.files[str(dictionary_path)] = n
     return result
@@ -627,7 +642,9 @@ def rename_dictionary_entry(
     # 1) dictionary.toml — rename the key + update SequenceDef.dd_id + LookupDef.return_params.
     if not dictionary_path.exists() or not dictionary_path.read_text(encoding="utf-8").strip():
         raise RenameError(f"dictionary file {dictionary_path} is missing or empty")
-    d_doc = tomlkit.parse(dictionary_path.read_text(encoding="utf-8"))
+    # tomllib + tomli-w instead of tomlkit — same O(n²) rationale as the lookup / sequence
+    # rename above. See put_dictionary_parsed in admin.py for the original write of this fix.
+    d_doc = tomllib.loads(dictionary_path.read_text(encoding="utf-8"))
 
     if scope is None:
         entries_section = d_doc.get("entries")
@@ -676,19 +693,22 @@ def rename_dictionary_entry(
     result.files[str(dictionary_path)] = n_dict
 
     # 2) screens.toml — walk every ColumnHint.dd / PromptField.dd field. Both live somewhere
-    #    deep under [screens.<app>.<id>] — recursive walk is simplest.
+    #    deep under [screens.<app>.<id>] — recursive walk is simplest. tomllib + tomli-w for
+    #    the same perf reason: a JDE-loaded screens.toml is several thousand lines.
     n_scr = 0
     if screens_path.exists() and screens_path.read_text(encoding="utf-8").strip():
-        s_doc = tomlkit.parse(screens_path.read_text(encoding="utf-8"))
+        import tomli_w as _tomli_w_screens
+        s_doc = tomllib.loads(screens_path.read_text(encoding="utf-8"))
         n_scr = _replace_dd_field_recursive(s_doc.get("screens"), old=old, new=new)
         if n_scr:
             _validate("screens", s_doc, parse_screens, screens_path)
-            screens_path.write_text(tomlkit.dumps(s_doc), encoding="utf-8")
+            screens_path.write_text(_tomli_w_screens.dumps(s_doc), encoding="utf-8")
         result.files[str(screens_path)] = n_scr
     else:
         result.files[str(screens_path)] = 0
 
-    dictionary_path.write_text(tomlkit.dumps(d_doc), encoding="utf-8")
+    import tomli_w
+    dictionary_path.write_text(tomli_w.dumps(d_doc), encoding="utf-8")
     return result
 
 
