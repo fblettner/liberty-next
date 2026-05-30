@@ -128,6 +128,81 @@ async def _cmd_list_users(ctx: _Context, args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cmd_run_install_jobs(ctx: _Context, args: argparse.Namespace) -> int:
+    """Fire every job with ``install_step`` set, in ascending step order.
+
+    Used at the end of a fresh deployment to bootstrap the licensed apps (the
+    ``install.sh full --apps WHEEL`` flow chains here after the stack is up).
+    Idempotent: a job that already has a SUCCEEDED run is skipped (override
+    with ``--force``). Bails on the first failure with the run's error message.
+    """
+    from sqlalchemy import select
+
+    from liberty.jobs.models import JobRun
+    from liberty.jobs.triggers import ManualTrigger
+    from liberty.jobs.wiring import build_nomaflow, shutdown_nomaflow
+
+    components = await build_nomaflow(ctx.settings, ctx.registry)
+    if components is None:
+        print(
+            "nomaflow not configured — set [jobs] pool to an existing pool in app.toml",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        install_jobs = [j for j in components.registry.jobs() if j.install_step is not None]
+        install_jobs.sort(key=lambda j: (j.install_step, j.id))
+
+        if not install_jobs:
+            print("No install jobs (no jobs.toml entries have install_step set).")
+            return 0
+
+        print(f"Found {len(install_jobs)} install job(s):")
+        for j in install_jobs:
+            print(f"  step {j.install_step}: {j.id}")
+        print()
+
+        for job in install_jobs:
+            if not args.force:
+                async with components.db.session() as sess:
+                    stmt = (
+                        select(JobRun.id)
+                        .where(JobRun.job_id == job.id, JobRun.state == "SUCCEEDED")
+                        .limit(1)
+                    )
+                    if (await sess.execute(stmt)).scalar_one_or_none() is not None:
+                        print(
+                            f"[skip] {job.id} (step {job.install_step}) — already SUCCEEDED. "
+                            "Use --force to re-run."
+                        )
+                        continue
+
+            print(f"[run]  {job.id} (step {job.install_step}) …", flush=True)
+            trigger = ManualTrigger(triggered_by="install")
+            run = await components.runner.create_run(job, trigger)
+            await components.runner.execute_run(job, trigger, run)
+
+            async with components.db.session() as sess:
+                final = await sess.get(JobRun, run.id)
+            state = final.state if final else "UNKNOWN"
+            if state != "SUCCEEDED":
+                err = (final.error_message if final and final.error_message else "(no error message)")
+                print(
+                    f"[FAIL] {job.id} — state={state} — {err}\n"
+                    f"       Fix the underlying issue, then re-run with: "
+                    f"liberty-admin run-install-jobs",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"[done] {job.id} — SUCCEEDED")
+
+        print("\nAll install jobs completed.")
+        return 0
+    finally:
+        await shutdown_nomaflow(components)
+
+
 async def _cmd_create_role(ctx: _Context, args: argparse.Namespace) -> int:
     name, perms, desc = await ctx.backend.get_or_create_role(
         args.name, permissions=args.permission or [], description=args.description
@@ -185,6 +260,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_cr.add_argument("--permission", action="append", metavar="PERM", help="repeatable")
     p_cr.add_argument("--description")
     p_cr.set_defaults(func=_cmd_create_role)
+
+    p_rij = sub.add_parser(
+        "run-install-jobs",
+        help="fire every job with install_step set, in order — used by install-apps.sh",
+    )
+    p_rij.add_argument(
+        "--force",
+        action="store_true",
+        help="re-run jobs that already have a SUCCEEDED run (default: skip them)",
+    )
+    p_rij.set_defaults(func=_cmd_run_install_jobs)
 
     return parser
 

@@ -18,11 +18,15 @@
 services:
   liberty-next:
     volumes:
-      # Bind-mount the host's liberty-apps clone into the container, read-only. Edits
-      # made through Settings → … in the SPA would fail (the mount is :ro) — for the
-      # apps repo, edits should go through git on the host (clone → branch → PR), not
-      # through the UI. Drop ``:ro`` if you want UI edits to be writable into the apps
-      # repo on the host (be aware: the container runs as root, so file ownership shifts).
+      # Bind-mount the host's liberty-apps content into the container, READ-WRITE.
+      # Every UI 'Save' in Settings → Pools / Theme / Screens / etc. rewrites a TOML
+      # file under /apps/config/; without :rw the saves fail with 500 (Errno 30,
+      # Read-only file system). The container runs as root so on-host file ownership
+      # shifts to root — a known trade-off, far better than crippling the UI.
+      #
+      # If you absolutely don't want UI writes back to the apps dir (e.g. apps content
+      # is managed exclusively by git), add ``:ro`` here AND set
+      # ``[admin] config_editable = false`` in app.toml so the UI hides Save buttons.
       - ${APPS_HOST_PATH:?APPS_HOST_PATH not set — see install-apps.sh or set it in .env}:/apps:ro
     environment:
       # Re-route every per-section TOML default to /apps/<file>.toml (see liberty/config.py).

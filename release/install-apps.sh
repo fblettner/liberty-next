@@ -166,6 +166,21 @@ for i in $(seq 1 60); do
   [ "$i" -eq 60 ] && warn "liberty-next not healthy after 120 s — continuing; check logs."
 done
 
+# ── 5. run install-time jobs (deploy-databases, init-db, import-reference, …) ─
+# Every job tagged ``install_step = N`` in the apps' jobs.toml fires here in
+# order. Idempotent: jobs with a prior SUCCEEDED run are skipped (re-running
+# the installer on an already-deployed host is a no-op for the jobs). Pass
+# --force to liberty-admin to re-run everything.
+info "Running install-time jobs (deploy-databases / init-db / init-schema / import-reference …)…"
+if ! docker exec liberty-next liberty-admin run-install-jobs; then
+  err "Install jobs failed — see the per-job output above. Recover with:"
+  err "   docker exec liberty-next liberty-admin run-install-jobs           (skips done jobs)"
+  err "   docker exec liberty-next liberty-admin run-install-jobs --force   (re-runs everything)"
+  err "   docker logs liberty-next 2>&1 | tail -200                         (more context)"
+  exit 1
+fi
+ok "Install jobs completed."
+
 # ── summary ───────────────────────────────────────────────────────────────────
 echo
 printf "${BOLD}━━━ Liberty Apps installed ━━━${NC}\n"

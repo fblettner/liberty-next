@@ -319,6 +319,15 @@ class Job(BaseModel):
     # Empty by default; the modal hides the dropdown when this list is empty
     # so jobs without presets stay visually clean.
     presets: list[JobPreset] = Field(default_factory=list)
+    # ──────────────────────────────────────────────────────────────────────
+    # Install-time ordering. When set, ``liberty-admin run-install-jobs`` fires
+    # this job during the post-install phase (in ascending step order). Jobs
+    # without ``install_step`` are ignored by the install runner — they still
+    # cron-fire / manual-fire normally. Idempotent: the install runner skips a
+    # job that already has a SUCCEEDED run (use --force to re-run).
+    # Typical usage: deploy-databases (1) → init-db (2) → init-schema (3) →
+    # import-reference (4). One-shot bootstrap of a fresh deployment.
+    install_step: int | None = Field(default=None, ge=1)
 
     @field_validator("timezone")
     @classmethod
