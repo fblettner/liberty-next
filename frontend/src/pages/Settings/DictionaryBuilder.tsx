@@ -49,8 +49,9 @@ const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align
 const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
-  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; margin-bottom: 2px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
+  flex-shrink: 0;
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
 `
 const NavItem = styled.button<{ $active?: boolean }>`
@@ -610,12 +611,13 @@ export default function DictionaryBuilder() {
       </SubTabs>
       <Split>
         <NavCol>
-          {keys.length > 6 && (
-            <NavSearch>
-              <Search size={13} />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${keys.length}…`} />
-            </NavSearch>
-          )}
+          {/* Always render so the sub-tab switch doesn't shift the NavList up/down — every
+              dictionary kind (entries / enums / lookups / sequences / framework_enums) shows
+              the same filter row. Empty-list state still gets it; the placeholder reads "0". */}
+          <NavSearch>
+            <Search size={13} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`filter ${keys.length}…`} />
+          </NavSearch>
           <NavList>
             {shown.map((k) => {
               // Help the user find the right record at a glance — show its label/description below

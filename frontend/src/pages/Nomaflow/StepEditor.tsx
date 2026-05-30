@@ -5,7 +5,8 @@
 // Increment 4 ships the hand-written sql_copy + sql_query forms (they need live
 // connector/query dropdowns). python / ldap_sync / http get a name field + a
 // raw-values fallback until increment 5 brings their SchemaForm.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
@@ -47,7 +48,16 @@ const SubHead = styled.div`
 `
 const AddBar = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px;`
 const Note = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted};`
-const KvRow = styled.div`display: flex; gap: 6px; align-items: center;`
+// Grid (not flex) so the key + value columns stay equal width regardless of the value
+// widget's natural size — a Select for a short connector name was shrinking to its
+// content width and pushing all the space onto the key cell. ``minmax(0, 1fr)`` lets
+// long content overflow with text-ellipsis instead of blowing the column wider than 1fr.
+const KvRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 6px; align-items: center;
+  & > *:not(button) { min-width: 0; width: 100%; }
+`
 const TextArea = styled.textarea`
   width: 100%; min-height: 72px; padding: 8px 10px; resize: vertical;
   border: 1px solid ${colors.border}; border-radius: ${radius.md};
@@ -96,9 +106,60 @@ function stepSummary(s: StepConfig): string {
   }
 }
 
-// ── small key/value editor (sql_query params, etc.) ────────────────────────────────
-export function KeyValueEditor({ value, onChange }: {
-  value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void
+// ── predefined key catalog for job-level ``params`` ────────────────────────────────
+// The python steps consume well-known kwargs (apps_id / source_connector / target_connector /
+// target_schema / …) — a typo here breaks the run with a generic "missing argument"
+// downstream. The schema below tells the KeyValueEditor which keys to OFFER from a
+// dropdown when the operator clicks "+ Add param", and how to render the VALUE cell
+// for each (connector picker, schema picker dependent on a sibling key, plain text).
+//
+// "Custom" stays available — the catalog is suggestion, not enforcement.
+export type ParamWidget =
+  | { type: 'text'; placeholder?: string }
+  | { type: 'connector' }                                  // dropdown of all SQL connectors
+  | { type: 'connector_schema'; dependsOn: string }        // dropdown of schemas for sibling key's connector
+  | { type: 'select'; options: string[] }
+
+export interface ParamKeySpec {
+  key: string
+  label: string
+  description?: string
+  widget: ParamWidget
+}
+
+export const JOB_PARAM_CATALOG: ParamKeySpec[] = [
+  { key: 'apps_id', label: 'apps_id',
+    description: 'Target application id (security-* / database-* / out-* jobs read this).',
+    widget: { type: 'text', placeholder: 'e.g. NOMASX1' } },
+  { key: 'source_connector', label: 'source_connector',
+    description: 'SQL connector the python step reads from.',
+    widget: { type: 'connector' } },
+  { key: 'source_schema', label: 'source_schema',
+    description: 'Schema on the source connector.',
+    widget: { type: 'connector_schema', dependsOn: 'source_connector' } },
+  { key: 'target_connector', label: 'target_connector',
+    description: 'SQL connector the python step writes to.',
+    widget: { type: 'connector' } },
+  { key: 'target_schema', label: 'target_schema',
+    description: 'Schema on the target connector — populated lazily once you pick the connector.',
+    widget: { type: 'connector_schema', dependsOn: 'target_connector' } },
+]
+
+// ── small key/value editor — used by sql_query step params + job-level params ──────
+//
+// ``schema`` is optional. When provided (the job-level Shared params editor passes
+// JOB_PARAM_CATALOG), the "+ Add param" button opens a picker of predefined keys with
+// hints; each predefined value cell renders the right widget (connector dropdown,
+// schema dropdown that follows a sibling, …). When omitted (step-level sql_query
+// params), the editor stays the original flat key/value pair input.
+export function KeyValueEditor({ value, onChange, schema, sqlConnectors }: {
+  value: Record<string, unknown>
+  onChange: (v: Record<string, unknown>) => void
+  /** Predefined param catalog. When set, "+ Add param" opens a picker; values render
+   *  with the matching widget; custom keys stay possible via the "Custom key" option. */
+  schema?: ParamKeySpec[]
+  /** Required when ``schema`` carries connector / connector_schema widgets. */
+  sqlConnectors?: ConnectorMeta[]
 }) {
   const { t } = useTranslation()
   const entries = Object.entries(value ?? {})
@@ -107,22 +168,216 @@ export function KeyValueEditor({ value, onChange }: {
     onChange(Object.fromEntries(next))
   }
   const removeEntry = (i: number) => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))
-  const addEntry = () => onChange({ ...value, '': '' })
+  const addCustom = () => onChange({ ...value, '': '' })
+  const addPredefined = (key: string) => {
+    if (key in (value ?? {})) return                     // already present — no-op
+    onChange({ ...value, [key]: '' })
+  }
+  const specFor = (key: string) => schema?.find((s) => s.key === key)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {entries.map(([k, v], i) => (
         <KvRow key={i}>
-          <Input placeholder="key" value={k} onChange={(e) => setEntry(i, e.target.value, String(v ?? ''))} />
-          <Input placeholder="value" value={String(v ?? '')} onChange={(e) => setEntry(i, k, e.target.value)} />
+          <Input placeholder="key" value={k}
+            onChange={(e) => setEntry(i, e.target.value, String(v ?? ''))}
+            disabled={!!specFor(k)} />
+          <ParamValueCell
+            spec={specFor(k)}
+            value={String(v ?? '')}
+            onChange={(nv) => setEntry(i, k, nv)}
+            siblings={value ?? {}}
+            sqlConnectors={sqlConnectors ?? []}
+          />
           <IconBtn type="button" onClick={() => removeEntry(i)}><Trash2 size={13} /></IconBtn>
         </KvRow>
       ))}
-      <Button type="button" $variant="ghost" $size="sm" onClick={addEntry} style={{ alignSelf: 'flex-start' }}>
-        <Plus size={13} /> {t('nomaflow.steps.addParam')}
-      </Button>
+      {schema && schema.length > 0 ? (
+        <ParamAddPicker
+          schema={schema}
+          existing={new Set(Object.keys(value ?? {}))}
+          onPickPredefined={addPredefined}
+          onPickCustom={addCustom}
+        />
+      ) : (
+        <Button type="button" $variant="ghost" $size="sm" onClick={addCustom} style={{ alignSelf: 'flex-start' }}>
+          <Plus size={13} /> {t('nomaflow.steps.addParam')}
+        </Button>
+      )}
     </div>
   )
 }
+
+// Renders the right value widget for a predefined param. Plain text fallback when the key
+// isn't in the catalog (operator typed a custom key).
+function ParamValueCell({
+  spec, value, onChange, siblings, sqlConnectors,
+}: {
+  spec: ParamKeySpec | undefined
+  value: string
+  onChange: (v: string) => void
+  siblings: Record<string, unknown>
+  sqlConnectors: ConnectorMeta[]
+}) {
+  if (!spec) {
+    return <Input placeholder="value" value={value} onChange={(e) => onChange(e.target.value)} />
+  }
+  const widget = spec.widget
+  if (widget.type === 'connector') {
+    return (
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">—</option>
+        {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+      </Select>
+    )
+  }
+  if (widget.type === 'connector_schema') {
+    const connector = String(siblings[widget.dependsOn] ?? '')
+    return <SchemaSelect connector={connector || null} value={value} onChange={onChange} />
+  }
+  if (widget.type === 'select') {
+    return (
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">—</option>
+        {widget.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+      </Select>
+    )
+  }
+  return <Input placeholder={widget.placeholder ?? 'value'} value={value} onChange={(e) => onChange(e.target.value)} />
+}
+
+// Lazy schema dropdown — fetches schemas for the picked connector once, caches via
+// poolSchema's session cache so picking the same connector twice is free. Falls back to
+// a plain text input if the fetch returns no schemas (SQLite, missing perms, etc.).
+function SchemaSelect({ connector, value, onChange }: {
+  connector: string | null; value: string; onChange: (v: string) => void
+}) {
+  const [schemas, setSchemas] = useState<string[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    if (!connector) { setSchemas(null); return }
+    let cancelled = false
+    setLoading(true)
+    import('../../services/poolSchema').then(({ getPoolSchemaNames }) =>
+      getPoolSchemaNames(connector).then((r) => {
+        if (cancelled) return
+        setSchemas(r?.schemas ?? [])
+        setLoading(false)
+      }),
+    )
+    return () => { cancelled = true }
+  }, [connector])
+  if (!connector) {
+    return <Input placeholder="pick connector first" value={value} disabled />
+  }
+  if (loading) {
+    return <Input placeholder="loading schemas…" value={value} disabled />
+  }
+  if (!schemas || schemas.length === 0) {
+    // Schema picker has nothing to offer (SQLite / permissions / connector down) —
+    // fall through to plain text so the operator can still type a value.
+    return <Input placeholder="schema (free text — none discovered)" value={value} onChange={(e) => onChange(e.target.value)} />
+  }
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">—</option>
+      {schemas.map((s) => <option key={s} value={s}>{s}</option>)}
+    </Select>
+  )
+}
+
+// "+ Add param" button that opens a popover with the catalog of predefined keys
+// (greyed when already present) + a "Custom key" fallback. Picking a predefined key
+// inserts a row whose value cell renders the right widget; "Custom" inserts a blank
+// row matching the original behaviour.
+//
+// The panel is portaled to document.body with ``position: fixed`` so it escapes the
+// JobEditor's ``<Card>`` stacking context (the Steps section below was painting OVER
+// the popover otherwise — same problem the TagsField hit + solved the same way).
+function ParamAddPicker({
+  schema, existing, onPickPredefined, onPickCustom,
+}: {
+  schema: ParamKeySpec[]
+  existing: Set<string>
+  onPickPredefined: (key: string) => void
+  onPickCustom: () => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number; minWidth: number } | null>(null)
+  useEffect(() => {
+    if (!open) { setCoords(null); return }
+    const compute = () => {
+      const r = btnRef.current?.getBoundingClientRect()
+      if (!r) return
+      setCoords({ top: r.bottom + 4, left: r.left, minWidth: Math.max(r.width, 360) })
+    }
+    compute()
+    window.addEventListener('resize', compute)
+    // capture:true catches scroll on every ancestor (the JobEditor form is inside a
+    // scrolling container) — bubbling scroll skips non-Window scrollers.
+    window.addEventListener('scroll', compute, true)
+    return () => {
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
+  }, [open])
+  return (
+    <div style={{ alignSelf: 'flex-start' }}>
+      <Button ref={btnRef as never} type="button" $variant="ghost" $size="sm" onClick={() => setOpen((v) => !v)}>
+        <Plus size={13} /> {t('nomaflow.steps.addParam')}
+      </Button>
+      {open && coords && createPortal(
+        <>
+          {/* Backdrop swallows outside clicks to close the popover. Sits above the
+              app shell but below the panel itself so clicks on the panel still work. */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
+          <PickerPanel
+            style={{ top: coords.top, left: coords.left, minWidth: coords.minWidth }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {schema.map((s) => {
+              const used = existing.has(s.key)
+              return (
+                <PickerRow key={s.key} type="button" $disabled={used} disabled={used}
+                  onClick={() => { if (!used) { onPickPredefined(s.key); setOpen(false) } }}>
+                  <span className="key">{s.label}{used ? ` · ${t('nomaflow.steps.alreadyAdded', '(already added)')}` : ''}</span>
+                  {s.description && <span className="desc">{s.description}</span>}
+                </PickerRow>
+              )
+            })}
+            <PickerDivider />
+            <PickerRow type="button" onClick={() => { onPickCustom(); setOpen(false) }}>
+              <span className="key">{t('nomaflow.steps.addCustomParam', 'Custom key…')}</span>
+              <span className="desc">{t('nomaflow.steps.addCustomParamDesc', 'Free-text key not in the catalog above.')}</span>
+            </PickerRow>
+          </PickerPanel>
+        </>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+const PickerPanel = styled.div`
+  position: fixed; z-index: 9999;
+  max-height: 360px; overflow-y: auto;
+  background: ${colors.bg.dropdown ?? colors.bg.input};
+  border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+  padding: 4px 0;
+`
+const PickerRow = styled.button<{ $disabled?: boolean }>`
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; padding: 8px 12px; border: 0; background: transparent;
+  cursor: ${({ $disabled }) => ($disabled ? 'default' : 'pointer')};
+  text-align: left; color: ${colors.text.primary};
+  ${({ $disabled }) => ($disabled ? 'opacity: 0.5;' : '')}
+  & .key { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; }
+  & .desc { color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
+  &:hover:not(:disabled) { background: var(--hover-subtle); }
+`
+const PickerDivider = styled.div`height: 1px; background: ${colors.border}; margin: 4px 0;`
 
 // ── per-type forms ─────────────────────────────────────────────────────────────────
 interface FormProps {

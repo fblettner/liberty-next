@@ -18,7 +18,7 @@ import {
 } from '../../common'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import StepEditor, { KeyValueEditor } from './StepEditor'
+import StepEditor, { KeyValueEditor, JOB_PARAM_CATALOG } from './StepEditor'
 import ScheduleField from './ScheduleField'
 import type { JobConfig, JobsParsedResponse } from './types'
 
@@ -544,6 +544,12 @@ export default function JobEditor() {
             <KeyValueEditor
               value={(job.params ?? {}) as Record<string, unknown>}
               onChange={(v) => patch({ params: v })}
+              // Catalog of well-known python-step kwargs (apps_id / source_connector /
+              // target_connector / source_schema / target_schema). Picking one opens the
+              // matching widget (connector dropdown / schema dropdown that follows a sibling /
+              // text). Custom keys stay available via the picker's "Custom key…" row.
+              schema={JOB_PARAM_CATALOG}
+              sqlConnectors={(connectors ?? []).filter((c) => c.type === 'sql')}
             />
           </Section>
 
