@@ -37,20 +37,17 @@ version: "3.9"
 services:
   traefik:
     image: traefik:v3.7
-    command:
-      - --api.dashboard=true
-      - --providers.swarm=true                          # swarm provider (not docker)
-      - --providers.swarm.exposedByDefault=false
-      - --providers.swarm.network=liberty-network
-      - --providers.swarm.endpoint=unix:///var/run/docker.sock
-      - --providers.file.directory=/etc/traefik/dynamic
-      - --providers.file.watch=true
-      - --entrypoints.web.address=:80
-      # Uncomment for TLS / Let's Encrypt:
-      # - --entrypoints.websecure.address=:443
-      # - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL required for TLS}
-      # - --certificatesresolvers.le.acme.storage=/acme/acme.json
-      # - --certificatesresolvers.le.acme.tlschallenge=true
+    # All static config via env vars — see docker-compose.full.yml for why (CLI flags
+    # for map-typed sections like ``entrypoints`` block env-var additions to the same map).
+    environment:
+      TRAEFIK_API_DASHBOARD: "true"
+      TRAEFIK_PROVIDERS_SWARM: "true"                     # swarm provider (not docker)
+      TRAEFIK_PROVIDERS_SWARM_EXPOSEDBYDEFAULT: "false"
+      TRAEFIK_PROVIDERS_SWARM_NETWORK: "liberty-network"
+      TRAEFIK_PROVIDERS_SWARM_ENDPOINT: "unix:///var/run/docker.sock"
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: "/etc/traefik/dynamic"
+      TRAEFIK_PROVIDERS_FILE_WATCH: "true"
+      TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: ":80"
     ports:
       - target: 80
         published: ${TRAEFIK_HTTP_PORT:-80}

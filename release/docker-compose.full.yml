@@ -39,19 +39,20 @@ services:
     image: traefik:v3.7
     container_name: traefik
     restart: unless-stopped
-    command:
-      - --api.dashboard=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=liberty-network
-      - --providers.file.directory=/etc/traefik/dynamic
-      - --providers.file.watch=true
-      - --entrypoints.web.address=:80
-      # Uncomment for TLS / Let's Encrypt:
-      # - --entrypoints.websecure.address=:443
-      # - --certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL required for TLS}
-      # - --certificatesresolvers.le.acme.storage=/acme/acme.json
-      # - --certificatesresolvers.le.acme.tlschallenge=true
+    # All Traefik static config goes through env vars (TRAEFIK_<UPPER_DOT_TO_UNDER>=value)
+    # instead of CLI flags. WHY: when a CLI flag defines a map-typed section (like
+    # ``entrypoints``), Traefik treats the CLI-provided map as authoritative and IGNORES
+    # env-var additions to the same map. The TLS overlays add a ``websecure`` entrypoint
+    # via env vars — they'd be silently dropped if the base populated ``entrypoints`` via
+    # CLI. Env-only here = clean merging across overlays.
+    environment:
+      TRAEFIK_API_DASHBOARD: "true"
+      TRAEFIK_PROVIDERS_DOCKER: "true"
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
+      TRAEFIK_PROVIDERS_DOCKER_NETWORK: "liberty-network"
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: "/etc/traefik/dynamic"
+      TRAEFIK_PROVIDERS_FILE_WATCH: "true"
+      TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: ":80"
     ports:
       - "${TRAEFIK_HTTP_PORT:-80}:80"
       # - "443:443"          # uncomment when TLS is wired
