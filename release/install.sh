@@ -17,11 +17,12 @@
 # Without it, install.sh uses 'latest' — which is the most recent release (every
 # merge to main creates a new release, so 'latest' always reflects current main).
 #
-# Fresh-start flag:
-#   --reset                     # docker compose down -v + delete .env first.
+# Fresh-start flag (DESTRUCTIVE, WIPE-AND-EXIT):
+#   --reset                     # docker compose down -v + delete .env, then EXIT.
 # Use when a previous run left stale named volumes (pg-data with the old password,
-# pgadmin-data with the old admin login, …). Without --reset, install.sh detects
-# stale volumes and asks before reusing them with a fresh .env (which would fail).
+# pgadmin-data with the old admin login, …). Re-run install.sh AFTER --reset with
+# the full flag set you actually want — --reset deliberately does NOT auto-install
+# because earlier behaviour silently dropped the other flags into the void.
 #
 # Licensed apps (single-command install):
 #   --apps <wheel-path-or-url>  # after bringing up the base stack, run install-apps.sh
@@ -124,6 +125,22 @@ done
 [ -n "$APPS_WHEEL" ] && [ "$LAYOUT" = "prepare" ] && die "--apps cannot be combined with 'prepare' (apps need a running stack)."
 [ -n "$LICENSE_KEY" ] && [ -z "$APPS_WHEEL" ] && warn "--license-key was passed without --apps — will be ignored (it's forwarded to install-apps.sh)."
 
+# --reset is wipe-and-exit; combining with install flags is almost certainly a
+# user-error (those flags would be silently lost when --reset returns 0). Reject
+# loudly with the exact two-command sequence they probably meant.
+if [ "$RESET" = "yes" ]; then
+  combined=""
+  [ -n "$APPS_WHEEL" ]            && combined="$combined --apps"
+  [ -n "$LICENSE_KEY" ]           && combined="$combined --license-key"
+  [ "$SSL_MODE" != "none" ]       && combined="$combined --ssl $SSL_MODE"
+  if [ -n "$combined" ]; then
+    die "--reset is wipe-and-exit; combining it with install flags ($combined) drops them silently.
+       Run it as two commands instead:
+         ./install.sh $LAYOUT --reset
+         ./install.sh $LAYOUT$combined …"
+  fi
+fi
+
 case "$SSL_MODE" in
   none) ;;
   letsencrypt)
@@ -191,6 +208,26 @@ if [ "$RESET" = "yes" ]; then
   done
   rm -f "$ENV_FILE"
   ok "Reset complete."
+  # --reset is a destructive one-shot: stop here. The operator then re-runs install.sh
+  # with the full set of flags they actually want (SSL mode, --apps wheel, --license-key,
+  # etc.). Don't auto-continue with a "default" install — that swallowed flags before
+  # and ended up with a half-configured stack.
+  echo
+  echo "  Next: re-run install.sh with the flags you want, e.g.:"
+  case "$LAYOUT" in
+    full)
+      echo "    ./install.sh full \\"
+      echo "        --ssl letsencrypt --domain <host> --email <addr> \\"
+      echo "        --apps /path/to/liberty_apps-X.Y.Z.whl --license-key <jwt>"
+      ;;
+    light)
+      echo "    ./install.sh light"
+      ;;
+    *)
+      echo "    ./install.sh full [--ssl letsencrypt --domain X --email Y] [--apps wheel --license-key Z]"
+      ;;
+  esac
+  exit 0
 fi
 
 # ── stale-volume detection ────────────────────────────────────────────────────
