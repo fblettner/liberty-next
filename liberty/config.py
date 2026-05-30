@@ -196,7 +196,7 @@ class AISettings(BaseModel):
 
     enabled: bool = True
     api_key: str = ""  # ${ANTHROPIC_API_KEY}; empty → chat endpoint reports it unconfigured
-    model: str = "claude-opus-4-7"
+    model: str = "claude-opus-4-8"
     max_tokens: int = 8192
     max_iterations: int = 8  # safety cap on tool-use round trips
     system_prompt: str = ""  # empty → built-in default (see liberty.ai.assistant)
@@ -206,6 +206,11 @@ class AISettings(BaseModel):
     # Tool exposure
     connector_tools: bool = True  # list_connectors + sql_query (read-only queries only)
     api_tool: bool = False  # api_call — off by default (API endpoints may have side effects)
+    # Tier 1 scaffolding tools — introspect_table + scaffold_crud_queries / dict_entries /
+    # screen / menu_item. Each *write-capable* tool returns a Proposal envelope rather than
+    # mutating files; the chat UI surfaces it as an Apply card that POSTs to
+    # /admin/config/apply-proposal. Default OFF — operators opt in deliberately.
+    scaffold_tools: bool = False
     allowed_connectors: list[str] = Field(default_factory=list)  # empty → all
     # Server-side web_fetch (Anthropic-hosted); disabled unless domains are listed
     web_fetch_domains: list[str] = Field(default_factory=list)

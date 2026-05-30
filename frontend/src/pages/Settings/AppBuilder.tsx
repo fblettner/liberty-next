@@ -32,14 +32,17 @@ interface AiSection {
   request_timeout: number
   connector_tools: boolean
   api_tool: boolean
+  scaffold_tools: boolean
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
 }
+interface ModelChoice { id: string; label: string }
 interface Choices {
   log_levels: string[]
   effort_levels: string[]
   connectors: string[]
+  models: ModelChoice[]
 }
 interface AppParsed { path: string; app: AppSection; ai: AiSection; choices: Choices }
 
@@ -69,9 +72,9 @@ const RowFlex = styled.div`display: flex; gap: 10px; align-items: center; flex-w
 const DEFAULTS: { app: AppSection; ai: AiSection } = {
   app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en' },
   ai: {
-    enabled: true, model: 'claude-opus-4-7', max_tokens: 8192, max_iterations: 8, system_prompt: '',
+    enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
-    connector_tools: true, api_tool: false, allowed_connectors: [],
+    connector_tools: true, api_tool: false, scaffold_tools: false, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5,
   },
 }
@@ -80,7 +83,7 @@ export default function AppBuilder() {
   const { t } = useTranslation()
   const [app, setApp] = useState<AppSection>(DEFAULTS.app)
   const [ai, setAi] = useState<AiSection>(DEFAULTS.ai)
-  const [choices, setChoices] = useState<Choices>({ log_levels: [], effort_levels: [], connectors: [] })
+  const [choices, setChoices] = useState<Choices>({ log_levels: [], effort_levels: [], connectors: [], models: [] })
   const [path, setPath] = useState('')
   const [original, setOriginal] = useState('')
   const [loading, setLoading] = useState(true)
@@ -205,7 +208,20 @@ export default function AppBuilder() {
               checked={ai.enabled} onChange={(c) => setAi({ ...ai, enabled: c })} />
             <RowFlex>
               <Field label={t('settings.app.aiModel', 'Model')}>
-                <Input value={ai.model} onChange={(e) => setAi({ ...ai, model: e.target.value })} style={{ width: 240 }} />
+                {/* The dropdown always includes the saved value, even when it isn't in the
+                    canonical list — useful for experimental / legacy ids the operator may
+                    have pinned in app.toml. The label tells them when they're off-list. */}
+                {(() => {
+                  const known = choices.models.some((m) => m.id === ai.model)
+                  const options: ModelChoice[] = known
+                    ? choices.models
+                    : [{ id: ai.model, label: `${ai.model} (custom)` }, ...choices.models]
+                  return (
+                    <Select value={ai.model} onChange={(e) => setAi({ ...ai, model: e.target.value })} style={{ minWidth: 260 }}>
+                      {options.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                    </Select>
+                  )
+                })()}
               </Field>
               <Field label={t('settings.app.aiEffort', 'Effort')}>
                 <Select value={ai.effort} onChange={(e) => setAi({ ...ai, effort: e.target.value })}>
@@ -239,6 +255,8 @@ export default function AppBuilder() {
               checked={ai.connector_tools} onChange={(c) => setAi({ ...ai, connector_tools: c })} />
             <Checkbox label={t('settings.app.aiApiTool', 'API tool (api_call — endpoints may have side effects)')}
               checked={ai.api_tool} onChange={(c) => setAi({ ...ai, api_tool: c })} />
+            <Checkbox label={t('settings.app.aiScaffoldTools', 'Scaffold tools (propose new queries / dictionary / screens / menu items — propose-only, never writes directly)')}
+              checked={ai.scaffold_tools} onChange={(c) => setAi({ ...ai, scaffold_tools: c })} />
 
             <Field label={t('settings.app.aiAllowedConnectors', 'Allowed connectors (empty → all)')}>
               <ConnectorPicker

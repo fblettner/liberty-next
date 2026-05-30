@@ -17,7 +17,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+import json
+
 from liberty.ai.connector_tools import build_connector_tools
+from liberty.ai.scaffold_tools import build_scaffold_tools
 from liberty.ai.tools import ToolRegistry
 from liberty.config import AISettings
 from liberty.connectors import ConnectorRegistry
@@ -35,7 +38,23 @@ DEFAULT_SYSTEM_PROMPT = (
     "change something, explain that you can only read.\n"
     "3. If a tool fails, tell the user the tool name, the input you tried, and the error "
     "message that came back so they can debug.\n"
-    "4. Be concise and reply in the user's language."
+    "4. Be concise and reply in the user's language.\n\n"
+    "Scaffolding tools (introspect_table / scaffold_*): when enabled they let you propose "
+    "new connector queries, dictionary entries, screens, and menu items. These tools never "
+    "write to disk — they return a Proposal envelope that the user reviews and applies via "
+    "an Apply button. Work step-by-step: emit ONE proposal at a time and STOP, telling the "
+    "user what to review. After they apply, they will continue the conversation and you "
+    "can move to the next step. Do not chain multiple proposals in one turn.\n"
+    "Canonical chain to build a screen from a table:\n"
+    "  a. introspect_table to confirm columns + primary key.\n"
+    "  b. scaffold_crud_queries — STOP after this. DEFAULT to kinds=['select'] (read-only). "
+    "Only request insert/update/delete when the user EXPLICITLY asks for an editable screen; "
+    "for reports, drill-downs, aging balances, dashboards, lookups, or anything the user "
+    "describes as a view / report / list, stick to select-only. Generating write paths the "
+    "user didn't ask for is dangerous and pollutes the connector with queries they'll have to clean up.\n"
+    "  c. scaffold_dict_entries for any column ids that need labels — STOP.\n"
+    "  d. scaffold_screen pointing at the (now-applied) read_query — STOP.\n"
+    "  e. scaffold_menu_item so the screen is reachable from the sidebar — DONE."
 )
 
 # Server-side web_fetch (Anthropic-hosted). GA tool version — no beta header.
@@ -47,7 +66,7 @@ _WEB_FETCH_TYPE = "web_fetch_20260209"
 class ChatEvent:
     """One event emitted by :meth:`AiAssistant.chat`."""
 
-    type: str  # token | thinking | tool_call | tool_result | error | done
+    type: str  # token | thinking | tool_call | tool_result | proposal | error | done
     text: str | None = None
     name: str | None = None
     input: dict[str, Any] | None = None
@@ -56,6 +75,10 @@ class ChatEvent:
     message: str | None = None
     stop_reason: str | None = None
     usage: dict[str, int] | None = None
+    # Structured payload for ``proposal`` events — the Proposal envelope from
+    # liberty.ai.proposal so the chat UI can render an Apply card. None for every
+    # other event type.
+    data: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in {
@@ -68,6 +91,7 @@ class ChatEvent:
             "message": self.message,
             "stop_reason": self.stop_reason,
             "usage": self.usage,
+            "data": self.data,
         }.items() if v is not None}
 
 
@@ -196,6 +220,18 @@ class AiAssistant:
                 summary = tdef.summarize(arguments) if tdef else block.name
                 yield ChatEvent("tool_call", name=block.name, input=arguments, summary=summary)
                 content, is_error = await self.tools.execute(block.name, arguments)
+                # Sniff for a Proposal in the tool result — write-capable tools (the
+                # scaffold_* set) return ``{"proposal": {...}, "message": ...}``. When
+                # we find one, emit an extra ``proposal`` event so the chat UI can
+                # render an Apply card. The model still sees the whole dict in its
+                # tool_result so it can reference what it proposed.
+                if not is_error:
+                    try:
+                        parsed = json.loads(content)
+                    except (ValueError, TypeError):
+                        parsed = None
+                    if isinstance(parsed, dict) and isinstance(parsed.get("proposal"), dict):
+                        yield ChatEvent("proposal", name=block.name, data=parsed["proposal"])
                 yield ChatEvent("tool_result", name=block.name, ok=not is_error, summary=_truncate(content))
                 results.append({
                     "type": "tool_result",
@@ -246,5 +282,10 @@ def build_assistant(settings: AISettings, connectors: ConnectorRegistry) -> AiAs
             connectors,
             allowed=settings.allowed_connectors or None,
             include_api=settings.api_tool,
+        ))
+    if settings.scaffold_tools:
+        registry.add(*build_scaffold_tools(
+            connectors,
+            allowed=settings.allowed_connectors or None,
         ))
     return AiAssistant(settings, client=client, tools=registry)

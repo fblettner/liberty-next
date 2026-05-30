@@ -921,9 +921,23 @@ from liberty.config import DEFAULT_APP_CONFIG, AISettings, AppSettings
 _APP_SAFE_KEYS = {"name", "host", "port", "log_level", "hot_reload", "default_language"}
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
-    "effort", "request_timeout", "connector_tools", "api_tool", "allowed_connectors",
-    "web_fetch_domains", "web_fetch_max_uses",
+    "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools",
+    "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses",
 }
+
+# Canonical Anthropic model list the AppBuilder's Model dropdown offers. Keep ordered
+# best-first within each family so the recommended pick (Opus 4.8) sits at the top. The
+# editor accepts any string saved on disk — if app.toml carries a model that's not in this
+# list (an experimental id, a legacy one), the UI extends the dropdown with that value so
+# the operator's current pick stays visible.
+_AI_MODELS: list[dict[str, str]] = [
+    {"id": "claude-opus-4-8",            "label": "Opus 4.8 (latest, recommended)"},
+    {"id": "claude-opus-4-7",            "label": "Opus 4.7"},
+    {"id": "claude-opus-4-6",            "label": "Opus 4.6"},
+    {"id": "claude-sonnet-4-6",          "label": "Sonnet 4.6"},
+    {"id": "claude-sonnet-4-5",          "label": "Sonnet 4.5"},
+    {"id": "claude-haiku-4-5-20251001",  "label": "Haiku 4.5 (fast, cheap)"},
+]
 
 
 def _app_config_path() -> Path:
@@ -962,6 +976,7 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
             "log_levels": ["debug", "info", "warning", "error", "critical"],
             "effort_levels": ["", "low", "medium", "high", "xhigh", "max"],
             "connectors": connectors,
+            "models": _AI_MODELS,
         },
     }
 
@@ -1020,6 +1035,202 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path), "requires_restart": True}
+
+
+# ── Apply an AI-assistant proposal ──────────────────────────────────────────────────────────
+# The AI assistant's scaffold tools never write to disk — they return a Proposal envelope
+# (see liberty.ai.proposal) which the chat UI surfaces as an Apply card. Clicking Apply POSTs
+# the envelope here; this endpoint merges the payload into the right config file via the same
+# validation + write paths the dedicated PUT endpoints use, then runs /admin/reload so the new
+# config is live. Returns ``{applied: true}`` plus a short summary so the chat can confirm.
+#
+# Dispatching by ``kind`` keeps the chat UI from needing to know 4+ endpoint paths — one knob.
+
+
+class ProposalApplyBody(BaseModel):
+    """A Proposal envelope as emitted by ``liberty.ai.proposal.Proposal.to_dict()``."""
+
+    kind: str  # dictionary_entries | connector_queries | screen | menu_item
+    summary: str | None = None
+    target_path: str | None = None
+    payload: dict[str, Any]
+    app: str | None = None
+    connector: str | None = None
+    notes: list[str] | None = None
+
+
+def _apply_dictionary_entries(request: Request, payload: dict[str, Any]) -> str:
+    """Merge dictionary entries into the shared scope or a connector overlay."""
+    scope = payload.get("scope")
+    entries = payload.get("entries") or {}
+    if not scope or not isinstance(entries, dict) or not entries:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail="proposal payload must carry {scope, entries}")
+    # Normalise common synonyms — the assistant occasionally uses ``type`` instead of the
+    # DictionaryEntry's actual ``format`` field. Quietly rename so a sloppy proposal still
+    # validates. Same kind of forgiveness the parsed-config PUTs already offer (extra=ignore
+    # on ScreenField, etc.) but here Pydantic's extra='forbid' would reject the key outright.
+    normalised: dict[str, dict[str, Any]] = {}
+    for eid, rec in entries.items():
+        if not isinstance(rec, dict):
+            continue
+        rec = dict(rec)
+        if "type" in rec and "format" not in rec:
+            rec["format"] = rec.pop("type")
+        normalised[eid] = rec
+    entries = normalised
+    path = _dictionary_path(request.app.state.settings)
+    cfg = load_dictionary(path)
+    doc = cfg.model_dump(exclude_defaults=True)
+    if scope == "shared":
+        merged = {**(doc.get("entries") or {}), **entries}
+        doc["entries"] = merged
+    else:
+        connectors = doc.get("connectors") or {}
+        section = connectors.get(scope) or {}
+        section_entries = {**(section.get("entries") or {}), **entries}
+        section["entries"] = section_entries
+        connectors[scope] = section
+        doc["connectors"] = connectors
+    # Re-validate + write — same pattern as put_dictionary_parsed
+    try:
+        validated = DictionaryFile.model_validate(doc)
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail=f"merged dictionary invalid: {exc}") from exc
+    import tomli_w
+    new_text = tomli_w.dumps(validated.model_dump(exclude_defaults=True))
+    parse_dictionary(tomllib.loads(new_text))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return f"merged {len(entries)} entries into {scope!r} scope"
+
+
+def _apply_connector_queries(request: Request, payload: dict[str, Any]) -> str:
+    """Append (or replace by name) queries on a SQL connector. Uses tomlkit so other
+    connectors / comments in connectors.toml round-trip untouched."""
+    connector = payload.get("connector")
+    queries = payload.get("queries") or []
+    if not connector or not isinstance(queries, list) or not queries:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail="proposal payload must carry {connector, queries}")
+    path = Path(request.app.state.settings.connectors.config_path)
+    cfg = load_connectors_file(path)
+    conn = cfg.connectors.get(connector)
+    if conn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"connector {connector!r} not found")
+    if conn.type != "sql":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail=f"connector {connector!r} is not a SQL connector")
+    existing = conn.model_dump(exclude_defaults=True)
+    by_name = {q.get("name"): q for q in existing.get("queries") or []}
+    for q in queries:
+        if not q.get("name"):
+            continue
+        by_name[q["name"]] = q
+    existing["queries"] = list(by_name.values())
+    try:
+        SqlConnectorConfig.model_validate(existing)
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail=f"merged connector invalid: {exc}") from exc
+
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    connectors_tbl = doc.get("connectors")
+    if connectors_tbl is None:
+        connectors_tbl = tomlkit.table(is_super_table=True)
+        doc["connectors"] = connectors_tbl
+    # Replace the connector's subtree wholesale — preserves [pools.*] + other connectors + comments
+    # outside this connector. The connector's own subtree gets re-rendered (any inline columns become
+    # nested tables — same trade-off as put_connectors_parsed).
+    connectors_tbl[connector] = existing
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return f"added/updated {len(queries)} queries on connector {connector!r}"
+
+
+def _apply_screen(request: Request, payload: dict[str, Any]) -> str:
+    """Add or replace a screen under [screens.<app>.<screen_id>]."""
+    app = payload.get("app")
+    screen_id = payload.get("screen_id")
+    screen = payload.get("screen") or {}
+    if not app or not screen_id or not isinstance(screen, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail="proposal payload must carry {app, screen_id, screen}")
+    path = Path(request.app.state.settings.screens.config_path)
+    registry = load_screens(path)
+    # ``registry`` stores Screen instances directly per (app, id); rebuild the wire-shape doc
+    doc = {a: {sid: s.model_dump(exclude_defaults=False, exclude_none=True) for sid, s in screens.items()}
+           for a, screens in registry.screens.items()}
+    doc.setdefault(app, {})[screen_id] = screen
+    try:
+        ScreensFile.model_validate({"screens": doc})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail=f"merged screens invalid: {exc}") from exc
+    import tomli_w
+    new_text = tomli_w.dumps({"screens": doc})
+    parse_screens(tomllib.loads(new_text))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return f"saved screen {app}.{screen_id}"
+
+
+def _apply_menu_item(request: Request, payload: dict[str, Any]) -> str:
+    """Append a menu item to [menus.<app>]. If an item with the same id already exists, replace it."""
+    app = payload.get("app")
+    item = payload.get("item") or {}
+    if not app or not isinstance(item, dict) or not item.get("id"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail="proposal payload must carry {app, item: {id, ...}}")
+    path = Path(request.app.state.settings.menus.config_path)
+    cfg = load_menus(path)
+    doc = {name: app_menu.model_dump(exclude_defaults=False, exclude_none=True) for name, app_menu in cfg.menus.items()}
+    app_doc = doc.get(app) or {"items": []}
+    items = list(app_doc.get("items") or [])
+    items = [it for it in items if it.get("id") != item["id"]]
+    items.append(item)
+    app_doc["items"] = items
+    doc[app] = app_doc
+    try:
+        MenusFile.model_validate({"menus": doc})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail=f"merged menus invalid: {exc}") from exc
+    import tomli_w
+    new_text = tomli_w.dumps({"menus": doc})
+    parse_menus(tomllib.loads(new_text))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return f"saved menu item {item['id']} under {app}"
+
+
+_APPLY_DISPATCH: dict[str, Any] = {
+    "dictionary_entries": _apply_dictionary_entries,
+    "connector_queries": _apply_connector_queries,
+    "screen": _apply_screen,
+    "menu_item": _apply_menu_item,
+}
+
+
+@router.post("/config/apply-proposal")
+async def apply_proposal(body: ProposalApplyBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Apply a proposal emitted by the AI assistant's scaffold tools. Dispatches to the
+    matching merge/write path based on ``kind``, then runs /admin/reload so the new config is
+    live. Returns ``{applied, kind, summary}``.
+
+    All write paths are the same Pydantic-validated + tomli_w / tomlkit serialisers the
+    dedicated PUT endpoints use — no fast paths, no skipped validation. A bad proposal lands
+    as a 422 with the validation error, same as a hand-edited PUT."""
+    fn = _APPLY_DISPATCH.get(body.kind)
+    if fn is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"unknown proposal kind: {body.kind!r}")
+    summary = fn(request, body.payload)
+    # Reload the live registries so the new config is in effect for the next chat turn (the
+    # "applied; continue" follow-up the assistant gets needs to see the writes it just made).
+    await reload_connectors(request, _)  # type: ignore[arg-type]
+    return {"applied": True, "kind": body.kind, "summary": summary}
 
 
 # ── API connector test ──────────────────────────────────────────────────────────────────────
