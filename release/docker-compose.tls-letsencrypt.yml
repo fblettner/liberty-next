@@ -1,15 +1,17 @@
 # Liberty Next — TLS via Let's Encrypt (ACME).
 #
-# Additive overlay on top of docker-compose.full.yml (or .light) — adds the websecure
-# entrypoint on :443, the ACME cert resolver, and flips every router to also serve
-# HTTPS with the auto-fetched cert.
+# Additive overlay on top of docker-compose.full.yml — adds the websecure entrypoint
+# on :443, the ACME cert resolver, and flips every router to serve HTTPS with the
+# auto-fetched cert. Router rules ALSO get a Host() matcher (using ${LIBERTY_DOMAIN})
+# — without that, Traefik doesn't know which hostname to request a cert for and
+# falls back to its self-signed default cert.
 #
 # Use with the COMPOSE_FILE chain (install.sh --ssl letsencrypt handles this):
 #   COMPOSE_FILE=docker-compose.full.yml:docker-compose.tls-letsencrypt.yml
 #
 # .env must define:
-#   LIBERTY_DOMAIN — the public hostname (e.g. liberty.example.com) — must resolve to
-#                     this host so Let's Encrypt can complete the TLS-ALPN challenge.
+#   LIBERTY_DOMAIN — the public hostname (e.g. liberty.example.com) — must resolve
+#                     to this host so Let's Encrypt can complete the TLS-ALPN challenge.
 #   ACME_EMAIL     — contact email for Let's Encrypt (renewal warnings + ToS).
 #
 # Use only when the host is reachable from the public internet on :80/:443 — Let's
@@ -18,10 +20,9 @@
 
 services:
   traefik:
-    # All TLS-relevant settings go through traefik's env-var config interface
-    # (TRAEFIK_<UPPER_DOT_TO_UNDER>=value) — that way they merge cleanly with the
-    # base compose's --command-line flags without replacing the entire command list
-    # (compose overlay-merging is REPLACE-by-key for arrays, ADD-by-key for env).
+    # All Traefik static config via env vars (see base compose for why — CLI flags
+    # for map-typed sections like ``entrypoints`` block env-var additions to the
+    # same map; the base uses env vars only so this overlay extends cleanly).
     environment:
       TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: ":443"
       TRAEFIK_CERTIFICATESRESOLVERS_LE_ACME_EMAIL: "${ACME_EMAIL:?ACME_EMAIL required for letsencrypt mode}"
@@ -30,27 +31,33 @@ services:
     ports:
       - "${TRAEFIK_HTTPS_PORT:-443}:443"
     labels:
-      # Each label key is identical to the base compose's so the OVERLAY's value wins
-      # (compose label-merge is by key, latter wins). New keys (tls, tls.certresolver)
+      # Same router KEYS as the base → compose-overlay label merging is "later wins
+      # per key", so these values REPLACE the base's. New keys (tls, tls.certresolver)
       # are added alongside.
+      # Each rule gets a Host() prefix so ACME knows which domain to certify; without
+      # it, Traefik serves its self-signed TRAEFIK DEFAULT CERT.
+      traefik.http.routers.traefik-dashboard.rule: "Host(`${LIBERTY_DOMAIN:?LIBERTY_DOMAIN required for letsencrypt mode}`) && (PathPrefix(`/traefik`) || (PathPrefix(`/api`) && Method(`GET`) && PathRegexp(`^/api/(http|tcp|udp|providers|services|entrypoints|version|overview)`)))"
       traefik.http.routers.traefik-dashboard.entrypoints: "web,websecure"
       traefik.http.routers.traefik-dashboard.tls: "true"
       traefik.http.routers.traefik-dashboard.tls.certresolver: "le"
 
   liberty-next:
     labels:
+      traefik.http.routers.liberty-next.rule: "Host(`${LIBERTY_DOMAIN}`)"
       traefik.http.routers.liberty-next.entrypoints: "web,websecure"
       traefik.http.routers.liberty-next.tls: "true"
       traefik.http.routers.liberty-next.tls.certresolver: "le"
 
   pgadmin:
     labels:
+      traefik.http.routers.pgadmin.rule: "Host(`${LIBERTY_DOMAIN}`) && PathPrefix(`/pgadmin`)"
       traefik.http.routers.pgadmin.entrypoints: "web,websecure"
       traefik.http.routers.pgadmin.tls: "true"
       traefik.http.routers.pgadmin.tls.certresolver: "le"
 
   portainer:
     labels:
+      traefik.http.routers.portainer.rule: "Host(`${LIBERTY_DOMAIN}`) && PathPrefix(`/portainer`)"
       traefik.http.routers.portainer.entrypoints: "web,websecure"
       traefik.http.routers.portainer.tls: "true"
       traefik.http.routers.portainer.tls.certresolver: "le"
