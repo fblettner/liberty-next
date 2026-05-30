@@ -16,7 +16,7 @@
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronDown, Search, Edit3 } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy } from 'lucide-react'
 import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
@@ -226,35 +226,17 @@ const SmallX = styled.button`
   border-radius: ${radius.sm}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
   &:hover { color: ${colors.red.main}; border-color: ${colors.red.border}; }
 `
-// Edit-query trigger rendered next to query-bearing SearchSelects (LookupDef.query,
-// ChartConfig.query, SequenceDef.query/previous_query). Same look + size as the
-// screen-editor's in-line Edit button — operators see a consistent "edit this query"
-// affordance everywhere a query is picked. Disabled when the connector isn't resolvable
-// (the apply layer needs both connector + query to open the right editor).
-const InlineEditBtn = styled.button`
+// Inline action trigger rendered next to query-bearing SearchSelects (LookupDef.query,
+// ChartConfig.query, SequenceDef.query/previous_query). Hosts the Edit / Clone / Add
+// trio — same look + size everywhere a query is picked. Disabled when the connector
+// isn't resolvable (the apply layer needs the connector to open the right editor).
+const InlineActionBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
   flex-shrink: 0; border-radius: ${radius.sm}; border: 1px solid ${colors.border};
   background: transparent; color: ${colors.text.muted}; cursor: pointer;
   &:hover:not(:disabled) { color: ${colors.text.primary}; border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
   &:disabled { opacity: 0.35; cursor: not-allowed; }
 `
-
-function InlineEditQueryButton({
-  connector, queryName, onClick,
-}: { connector: string | null; queryName: string; onClick: () => void }) {
-  const canEdit = !!connector && !!queryName
-  return (
-    <InlineEditBtn
-      type="button"
-      onClick={onClick}
-      disabled={!canEdit}
-      title={canEdit ? `Edit query ${connector}.${queryName}` : 'Pick a connector first to edit the query'}
-      aria-label="Edit query"
-    >
-      <Edit3 size={13} />
-    </InlineEditBtn>
-  )
-}
 
 const ItemBox = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; margin-bottom: 6px; overflow: hidden;`
 const ItemHead = styled.button<{ $open?: boolean }>`
@@ -523,19 +505,25 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  */
 const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
 
-export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery }: {
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
   defs?: Defs
   onNavigate?: (seg: NavSeg) => void
-  /** Optional callback fired by the in-line Edit-query button rendered next to fields
-   *  whose ``x_enum_ref`` is a query-bearing one (LOOKUP_QUERIES, CHART_QUERIES, …).
-   *  The caller is expected to mount an EditQueryModal in response. The connector is
-   *  resolved from a sibling ``connector`` field on the same object, falling back to
-   *  ``defaultConnector`` (the surrounding scope's connector — passed by callers like
-   *  DictionaryBuilder that scope by connector name). */
+  /** Callbacks for the in-line query-action buttons rendered next to fields whose
+   *  ``x_enum_ref`` is a query-bearing one (LOOKUP_QUERIES, CHART_QUERIES, …). All three
+   *  are optional; when omitted the matching button doesn't render. The connector
+   *  argument resolves from a sibling ``connector`` field; the parent may fall back to
+   *  the surrounding scope.
+   *
+   *    onEditQuery  — opens the existing query for editing (Edit3 icon)
+   *    onCloneQuery — prompts for a new name, clones the existing query (Copy icon)
+   *    onAddQuery   — prompts for a new name, creates a blank query (Plus icon)
+   */
   onEditQuery?: (connector: string | null | undefined, queryName: string) => void
+  onCloneQuery?: (connector: string | null | undefined, queryName: string) => void
+  onAddQuery?: (connector: string | null | undefined) => void
 }) {
   const allDefs = { ...(schema.$defs ?? {}), ...(defs ?? {}) }
   // A discriminated union (Pydantic `Widget = ChartWidget | KpiWidget` → `oneOf` + `discriminator`)
@@ -685,21 +673,37 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
               onChange={(v) => set(key, v === '' ? undefined : applyCase(v, sub))}
               options={opts} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" allowCustom={!literalSet} />
           )
-          // Append an Edit-query button when the field is one of the query-bearing enum
-          // refs AND the caller wired an ``onEditQuery`` handler. The connector resolves
-          // from a sibling ``connector`` field on the same object (the convention for
-          // LookupDef / SequenceDef / ChartConfig — when blank the caller's onEditQuery
-          // handler is responsible for falling back to the surrounding scope).
-          if (ref && QUERY_ENUM_REFS.has(ref) && onEditQuery && cur) {
+          // Append the Edit / Clone / Add query trio when the field is one of the
+          // query-bearing enum refs AND at least one of the handlers is wired. The
+          // connector resolves from a sibling ``connector`` field on the same object
+          // (the convention for LookupDef / SequenceDef / ChartConfig — when blank
+          // the caller's handler is responsible for falling back to the surrounding
+          // scope). Edit / Clone require both connector + queryName; Add only needs
+          // connector. Each button hides itself when its prerequisites aren't met.
+          if (ref && QUERY_ENUM_REFS.has(ref) && (onEditQuery || onCloneQuery || onAddQuery)) {
             const sibConn = typeof value.connector === 'string' ? value.connector : null
+            const hasQuery = cur != null && String(cur) !== ''
             control = (
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>{picker}</div>
-                <InlineEditQueryButton
-                  connector={sibConn}
-                  queryName={String(cur)}
-                  onClick={() => onEditQuery(sibConn, String(cur))}
-                />
+                {onEditQuery && hasQuery && (
+                  <InlineActionBtn type="button" title="Edit query" aria-label="Edit query"
+                    onClick={() => onEditQuery(sibConn, String(cur))} disabled={!sibConn}>
+                    <Edit3 size={13} />
+                  </InlineActionBtn>
+                )}
+                {onCloneQuery && hasQuery && (
+                  <InlineActionBtn type="button" title="Clone query" aria-label="Clone query"
+                    onClick={() => onCloneQuery(sibConn, String(cur))} disabled={!sibConn}>
+                    <Copy size={13} />
+                  </InlineActionBtn>
+                )}
+                {onAddQuery && (
+                  <InlineActionBtn type="button" title="Add query" aria-label="Add query"
+                    onClick={() => onAddQuery(sibConn)} disabled={!sibConn}>
+                    <Plus size={13} />
+                  </InlineActionBtn>
+                )}
               </div>
             )
           } else {

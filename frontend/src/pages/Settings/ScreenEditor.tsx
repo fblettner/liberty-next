@@ -17,7 +17,7 @@
 import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Edit3, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import {
   Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
   type FrameworkEnums, type JsonSchema, type SearchSelectOption,
@@ -26,6 +26,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import { EditQueryModal } from './EditQueryModal'
+import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
 import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
@@ -521,16 +522,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
               loading={!selectedConnectorMeta}
             />
           </div>
-          {queryName && effectiveConnector && (
-            <Button
-              $variant="ghost"
-              $size="sm"
-              onClick={() => setEditQuery({ connector: effectiveConnector, queryName })}
-              title={t('settings.editQuery.edit', 'Edit query')}
-            >
-              <Edit3 size={13} />
-            </Button>
-          )}
+          {/* Edit / Clone / Add trio — same shared component the dictionary + charts
+              editors use. Clone + Add need ``existingNames`` to populate the new-name
+              validator + suggest non-colliding clone defaults. */}
+          <EditQueryButton connector={effectiveConnector} queryName={queryName} />
+          <CloneQueryButton connector={effectiveConnector} queryName={queryName}
+            existingNames={queryOptions.map((o) => o.value)} />
+          <AddQueryButton connector={effectiveConnector}
+            existingNames={queryOptions.map((o) => o.value)} />
         </Row>
       </Field>
     )

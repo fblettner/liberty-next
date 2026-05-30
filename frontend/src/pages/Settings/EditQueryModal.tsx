@@ -33,12 +33,22 @@ export interface EditQueryModalProps {
    *  state (e.g. re-fetch its config doc so any rename of the query propagates).
    *  Optional — when omitted the modal just closes after Save. */
   onSaved?: () => void
+  /** Optional seed for CREATE mode — when supplied + ``queryName`` doesn't yet exist on
+   *  the connector, the modal initialises the form from this dict (plus ``name = queryName``)
+   *  and Save APPENDS the new query to the connector. Used by the Add / Clone query buttons:
+   *
+   *    Add   → ``seed = {type: 'custom', sql: ''}``
+   *    Clone → ``seed = deepCopy(<existing query>)``
+   *
+   *  Omitted → the modal stays in EDIT mode (current behaviour: load the existing query
+   *  matching ``queryName`` and surface a "not found" banner if there's no match). */
+  seed?: Record<string, unknown>
 }
 
 type Connectors = ConnectorsDoc['connectors']
 type Query = Record<string, unknown>
 
-export function EditQueryModal({ connector, queryName, onClose, onSaved }: EditQueryModalProps) {
+export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }: EditQueryModalProps) {
   const { t } = useTranslation()
   const modals = useModals()
   const [conns, setConns] = useState<Connectors | null>(null)
@@ -61,7 +71,21 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved }: EditQ
         const defs = (sqlSchema?.$defs ?? {}) as Record<string, JsonSchema>
         setQueryDefSchema((defs.QueryDef ?? null) as JsonSchema | null)
         setAllDefs(defs)
-        setConns(d.connectors)
+        let nextConns = d.connectors
+        // CREATE mode: seed provided + queryName isn't yet on the connector. Append a
+        // fresh query entry built from ``seed`` so the SchemaForm renders against it; the
+        // form's name field is editable so the operator can still rename before saving.
+        const cur = (nextConns ?? {})[connector] ?? {}
+        const arr = (Array.isArray(cur.queries) ? cur.queries : []) as Query[]
+        const exists = arr.some((q) => q && q.name === queryName)
+        if (seed && !exists) {
+          const fresh = { ...seed, name: queryName }
+          nextConns = { ...nextConns, [connector]: { ...cur, queries: [...arr, fresh] } }
+        }
+        setConns(nextConns)
+        // Originals snapshot reflects what was on DISK — when seeding a new query, the
+        // dirty flag starts true (the seed itself is an unsaved insertion), so the Save
+        // button is immediately active.
         setOriginalJson(JSON.stringify(d.connectors))
       })
       .catch((e) => {
@@ -82,9 +106,14 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved }: EditQ
   const dirty = conns != null && JSON.stringify(conns) !== originalJson
 
   const updateQuery = (next: Query) => {
-    if (!conns || queryIdx < 0) return
+    if (!conns) return
     const cur = conns[connector] ?? {}
     const arr = Array.isArray(cur.queries) ? (cur.queries as Query[]).slice() : []
+    // Find the row we're editing. queryIdx (computed above) is the position when the
+    // form first loaded; if the operator renamed the query, the name has drifted from
+    // the original. Trust the index — the index is stable across renames within this
+    // modal session because the array isn't reordered.
+    if (queryIdx < 0) return
     arr[queryIdx] = next
     setConns({ ...conns, [connector]: { ...cur, queries: arr } })
   }
@@ -128,7 +157,9 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved }: EditQ
         <ModalHeader>
           <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <span>
-              {t('settings.editQuery.title', 'Edit query')} ·{' '}
+              {seed
+                ? t('settings.editQuery.titleNew', 'New query')
+                : t('settings.editQuery.title', 'Edit query')} ·{' '}
               <Mono style={{ display: 'inline', color: colors.text.muted, fontSize: fontSize.sm, fontWeight: 400 }}>
                 {connector}.{queryName}
               </Mono>

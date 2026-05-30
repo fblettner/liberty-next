@@ -145,10 +145,14 @@ export default function DictionaryBuilder() {
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [frameworkAddOpen, setFrameworkAddOpen] = useState(false)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
-  // Edit-query modal target — opened from the in-line edit button next to a
-  // LookupDef.query / SequenceDef.query dropdown (SchemaForm renders the button when
-  // ``onEditQuery`` is wired). null = closed.
-  const [editQueryTarget, setEditQueryTarget] = useState<{ connector: string; queryName: string } | null>(null)
+  // Query-action modal target — opened from the in-line Edit / Clone / Add buttons
+  // next to a LookupDef.query / SequenceDef.query dropdown (SchemaForm renders the
+  // trio when ``onEditQuery`` / ``onCloneQuery`` / ``onAddQuery`` are wired). The
+  // ``seed`` field is set for Clone (deep copy of the source query) + Add (blank
+  // stub); omitted for Edit. null = closed.
+  const [editQueryTarget, setEditQueryTarget] = useState<{
+    connector: string; queryName: string; seed?: Record<string, unknown>
+  } | null>(null)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -699,6 +703,49 @@ export default function DictionaryBuilder() {
                   if (!resolved) return
                   setEditQueryTarget({ connector: resolved, queryName })
                 }}
+                onCloneQuery={async (conn, queryName) => {
+                  const resolved = conn || (scope || null)
+                  if (!resolved) return
+                  try {
+                    const d = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
+                    const arr = (d.connectors[resolved]?.queries ?? []) as Record<string, unknown>[]
+                    const src = arr.find((q) => q && q.name === queryName)
+                    if (!src) return
+                    const existing = arr.map((q) => String(q.name ?? ''))
+                    const newName = (await modals.prompt({
+                      title: t('settings.editQuery.cloneTitle', 'Clone query'),
+                      message: t('settings.editQuery.clonePrompt', 'New name for the copy of "{{name}}":', { name: queryName }),
+                      defaultValue: suggestCloneId(queryName, existing),
+                      placeholder: 'snake_case',
+                      submitLabel: t('common.clone', 'Clone'),
+                      validate: (v) => v === queryName
+                        ? { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+                        : validateId({ kind: 'query', proposed: v, existing, mode: 'clone' }),
+                    }))?.trim()
+                    if (!newName) return
+                    const deep = JSON.parse(JSON.stringify(src)) as Record<string, unknown>
+                    delete deep.name
+                    setEditQueryTarget({ connector: resolved, queryName: newName, seed: deep })
+                  } catch { /* silent — operator can retry */ }
+                }}
+                onAddQuery={async (conn) => {
+                  const resolved = conn || (scope || null)
+                  if (!resolved) return
+                  try {
+                    const d = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
+                    const arr = (d.connectors[resolved]?.queries ?? []) as Record<string, unknown>[]
+                    const existing = arr.map((q) => String(q.name ?? ''))
+                    const newName = (await modals.prompt({
+                      title: t('settings.editQuery.addTitle', 'New query'),
+                      message: t('settings.editQuery.addPrompt', 'Name for the new query:'),
+                      placeholder: 'snake_case',
+                      submitLabel: t('common.add', 'Add'),
+                      validate: (v) => validateId({ kind: 'query', proposed: v, existing, mode: 'add' }),
+                    }))?.trim()
+                    if (!newName) return
+                    setEditQueryTarget({ connector: resolved, queryName: newName, seed: { type: 'custom', sql: '' } })
+                  } catch { /* silent — operator can retry */ }
+                }}
               />
             </Stack>
           ) : (
@@ -729,6 +776,7 @@ export default function DictionaryBuilder() {
         <EditQueryModal
           connector={editQueryTarget.connector}
           queryName={editQueryTarget.queryName}
+          seed={editQueryTarget.seed}
           onClose={() => setEditQueryTarget(null)}
           // Reload the dictionary doc after a save so any query rename propagates into
           // the LookupDef.query / SequenceDef.query references showing in the picker.

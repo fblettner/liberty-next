@@ -17,7 +17,7 @@ import { ChartCanvas } from '../TableView/ChartCanvas'
 import type { QueryResult } from '../../types/connectors'
 import type { ChartSpec, SavedChartSpec } from '../../types/charts'
 import { defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
-import { EditQueryButton } from './EditQueryButton'
+import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 const PREVIEW_LIMIT = 1000
@@ -181,18 +181,21 @@ export function ChartEditorModal({
                   <Input value={scope} readOnly disabled style={{ fontFamily: fonts.mono }} />
                 </Field>
                 <Field label={t('settings.charts.query', 'Query')}>
-                  {/* Edit-query affordance sits next to the picker so the operator can fix the
-                      SQL inline when the chart preview reveals a column-name typo / missing
-                      filter — without bouncing to Settings → Connectors. Shared
-                      EditQueryButton: same icon, same behaviour as the screen-editor
-                      query fields and (after the SchemaForm change) the dictionary
-                      lookup / sequence query fields. */}
+                  {/* Edit / Clone / Add trio sits next to the picker so the operator can
+                      fix the SQL inline, fork it for the customer (Clone), or scaffold a
+                      brand-new query (Add) — without bouncing to Settings → Connectors.
+                      Shared icons + EditQueryModal: same UX as the dictionary lookup /
+                      sequence + screen-editor surfaces. */}
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <SearchSelect value={query} onChange={(v) => { setQuery(v); setError(null) }}
                         options={queryOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
                     </div>
                     <EditQueryButton connector={connector} queryName={query} />
+                    <CloneQueryButton connector={connector} queryName={query}
+                      existingNames={queryOpts.map((o) => o.value)} />
+                    <AddQueryButton connector={connector}
+                      existingNames={queryOpts.map((o) => o.value)} />
                   </div>
                 </Field>
               </Grid2>
