@@ -33,8 +33,10 @@ import {
 import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen, DictionaryDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
-import { validateId, suggestCloneId } from '../../services/idValidator'
+import { validateId } from '../../services/idValidator'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
+import { CloneWithDepsModal } from './CloneWithDepsModal'
+import { DeleteWithDepsModal } from './DeleteWithDepsModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -362,44 +364,23 @@ export default function ScreensBuilder() {
     const src = (doc?.[app]?.[oldId] ?? {}) as Record<string, unknown>
     updateScreen(app, oldId, { ...src, id: next })
   }
-  const cloneScreen = async (app: string, oldId: string) => {
-    const existing = Object.keys(doc?.[app] ?? {})
-    const next = (await modals.prompt({
-      title: t('common.clone', 'Clone'),
-      message: t('settings.screens.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: suggestCloneId(oldId, existing), submitLabel: t('common.clone', 'Clone'),
-      validate: (v) => validateScreenId(v.trim(), app, oldId),
-    }))?.trim()
-    if (!next) return
-    setDoc((p) => {
-      const cur = p ?? {}
-      const appCur = { ...(cur[app] ?? {}) }
-      const src = JSON.parse(JSON.stringify(appCur[oldId])) as Record<string, unknown>
-      src.id = next
-      appCur[next] = src as unknown as Screen
-      return { ...cur, [app]: appCur }
-    })
-    setSelId(next); setStatus(null)
-  }
+  // Clone now opens CloneWithDepsModal — operator gets the "also clone referenced
+  // queries" checkbox + the live count of how many queries would be duplicated. The
+  // backend's /admin/clone-with-deps endpoint does the work atomically (clone screen +
+  // each referenced query under <name>_<suffix> + rewrites the clone's refs); the
+  // editor just reloads on success to pick up the new entries.
+  const [cloneTarget, setCloneTarget] = useState<{ app: string; oldId: string } | null>(null)
+  const cloneScreen = (app: string, oldId: string) => setCloneTarget({ app, oldId })
   const discard = () => {
     if (!original) return
     try { setDoc(JSON.parse(original) as AppScreens); setStatus(null); setError(null) } catch { /* ignore */ }
   }
-  // Deleting a screen persists immediately — a screen is a top-level record, so its delete
-  // shouldn't sit as a pending edit a reload would silently drop.
-  const removeScreen = async (app: string, id: string) => {
-    const ok = await modals.confirm({
-      title: t('settings.screens.delete'),
-      message: t('settings.screens.confirmDelete', { name: id }),
-      variant: 'danger',
-      confirmLabel: t('common.delete'),
-    })
-    if (!ok) return
-    const cur = doc ?? {}
-    const appCur = { ...(cur[app] ?? {}) }
-    delete appCur[id]
-    await persistScreens({ ...cur, [app]: appCur }, () => setSelId((s) => (s === id ? null : s)))
-  }
+  // Delete now opens DeleteWithDepsModal — the operator gets a checkbox to also delete
+  // queries exclusively used by this screen. The backend's safe-delete walker enforces
+  // the "exclusively" rule: queries also referenced by another screen / lookup / chart /
+  // dashboard stay (the modal lists them with the reason).
+  const [deleteTarget, setDeleteTarget] = useState<{ app: string; id: string } | null>(null)
+  const removeScreen = (app: string, id: string) => setDeleteTarget({ app, id })
 
   // Write the whole screens.toml + reload (the shared persist path for Save + the immediate
   // deletes). ``after`` runs on success (clear the relevant selection) before re-loading.
@@ -681,6 +662,25 @@ export default function ScreensBuilder() {
     )}
     {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
     {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
+    {cloneTarget && (
+      <CloneWithDepsModal
+        kind="screen"
+        name={cloneTarget.oldId}
+        scope={cloneTarget.app}
+        existingNames={Object.keys(doc?.[cloneTarget.app] ?? {})}
+        onCloned={(newId) => { setSelId(newId); load(); setStatus(null) }}
+        onClose={() => setCloneTarget(null)}
+      />
+    )}
+    {deleteTarget && (
+      <DeleteWithDepsModal
+        kind="screen"
+        name={deleteTarget.id}
+        scope={deleteTarget.app}
+        onDeleted={() => { setSelId((s) => (s === deleteTarget.id ? null : s)); load() }}
+        onClose={() => setDeleteTarget(null)}
+      />
+    )}
     </FrameworkEnumsContext.Provider>
   )
 }

@@ -15,7 +15,9 @@ import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
-import { validateId as validateIdShared, suggestCloneId } from '../../services/idValidator'
+import { CloneWithDepsModal } from './CloneWithDepsModal'
+import { DeleteWithDepsModal } from './DeleteWithDepsModal'
+import { validateId as validateIdShared } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -117,33 +119,17 @@ export default function ChartsBuilder() {
     void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.renamed', 'Renamed.'))
   }
 
-  const cloneChart = async (oldId: string) => {
-    const existing = Object.keys(doc?.[scope] ?? {})
-    const next = (await modals.prompt({
-      title: t('common.clone', 'Clone'),
-      message: t('settings.charts.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: suggestCloneId(oldId, existing), submitLabel: t('common.clone', 'Clone'),
-      validate: (v) => validateChartId(v.trim(), oldId),
-    }))?.trim()
-    if (!next) return
-    const byId = { ...(doc?.[scope] ?? {}) }
-    const src = JSON.parse(JSON.stringify(byId[oldId])) as Record<string, unknown>
-    src.id = next
-    byId[next] = src
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.cloned', 'Cloned.'))
-  }
+  // CloneWithDepsModal — operator can opt to also duplicate the chart's referenced
+  // query so the clone is fully isolated (editing the cloned chart's SQL doesn't
+  // bleed into the source). Backend /admin/clone-with-deps writes both atomically.
+  const [cloneTarget, setCloneTarget] = useState<string | null>(null)
+  const cloneChart = (oldId: string) => setCloneTarget(oldId)
 
-  const removeChart = async (id: string) => {
-    const ok = await modals.confirm({
-      title: t('settings.charts.delete', 'Delete chart'),
-      message: t('settings.charts.confirmDelete', 'Delete chart {{name}}?', { name: id }),
-      variant: 'danger',
-      confirmLabel: t('common.delete'),
-    })
-    if (!ok) return
-    const byId = { ...(doc?.[scope] ?? {}) }; delete byId[id]
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.deleted', 'Deleted.'))
-  }
+  // Delete opens DeleteWithDepsModal — operator gets a checkbox to also delete the
+  // chart's referenced query when it's exclusively used by this chart. Backend's
+  // safe-delete walker preserves any query also used by another entity.
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const removeChart = (id: string) => setDeleteTarget(id)
 
   const scopes = useMemo<ScopeOption[]>(
     () => Object.keys(doc ?? {}).sort().map((v) => ({ value: v, label: v })),
@@ -271,6 +257,25 @@ export default function ChartsBuilder() {
       )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
       {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
+      {cloneTarget && (
+        <CloneWithDepsModal
+          kind="chart"
+          name={cloneTarget}
+          scope={scope}
+          existingNames={Object.keys(doc?.[scope] ?? {})}
+          onCloned={() => load()}
+          onClose={() => setCloneTarget(null)}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteWithDepsModal
+          kind="chart"
+          name={deleteTarget}
+          scope={scope}
+          onDeleted={() => load()}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
     </Shell>
   )
 }

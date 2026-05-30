@@ -171,8 +171,18 @@ def _resolve(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed
 # Helpers --------------------------------------------------------------------------------
 
 def _dump(model: Any) -> dict[str, Any]:
-    """Pydantic model → plain dict, defaults dropped (matches what the structured PUTs send)."""
-    return model.model_dump(exclude_defaults=True, exclude_none=True)
+    """Pydantic model → plain dict for the closure manifest.
+
+    Defaults are KEPT (``exclude_defaults=False``) so the discriminator ``type`` fields
+    on action variants (``run_query`` / ``navigate`` / ``call_api`` / …) — emitted by
+    Pydantic as ``Literal[...]`` with the same value as the default — survive the
+    round-trip. Dropping them would make the cloned / packaged config fail validation
+    on the way back in with ``union_tag_not_found``: the import / clone-with-deps
+    pipelines feed these dicts straight into ``ScreensFile.model_validate``.
+
+    Same call shape :func:`liberty.web.admin.put_screens_parsed` uses for the same
+    reason — see the long comment there about discriminator stripping."""
+    return model.model_dump(exclude_defaults=False, exclude_none=True)
 
 
 def _get_dictionary(state: Any) -> Any:

@@ -14,7 +14,9 @@ import { DashboardEditorModal } from './DashboardEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
-import { validateId as validateIdShared, suggestCloneId } from '../../services/idValidator'
+import { CloneWithDepsModal } from './CloneWithDepsModal'
+import { DeleteWithDepsModal } from './DeleteWithDepsModal'
+import { validateId as validateIdShared } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -133,33 +135,16 @@ export default function DashboardsBuilder() {
     void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.renamed', 'Renamed.'))
   }
 
-  const cloneDashboard = async (oldId: string) => {
-    const existing = Object.keys(doc?.[scope] ?? {})
-    const next = (await modals.prompt({
-      title: t('common.clone', 'Clone'),
-      message: t('settings.dashboards.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
-      defaultValue: suggestCloneId(oldId, existing), submitLabel: t('common.clone', 'Clone'),
-      validate: (v) => validateDashboardId(v.trim(), oldId),
-    }))?.trim()
-    if (!next) return
-    const byId = { ...(doc?.[scope] ?? {}) }
-    const src = JSON.parse(JSON.stringify(byId[oldId])) as Raw
-    src.id = next
-    byId[next] = src
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.cloned', 'Cloned.'))
-  }
+  // CloneWithDepsModal — operator can opt to also duplicate every referenced query
+  // (KPI / chart / table / filter widgets) so the cloned dashboard is fully isolated.
+  // /admin/clone-with-deps writes the dashboard + each cloned query atomically.
+  const [cloneTarget, setCloneTarget] = useState<string | null>(null)
+  const cloneDashboard = (oldId: string) => setCloneTarget(oldId)
 
-  const removeDashboard = async (id: string) => {
-    const ok = await modals.confirm({
-      title: t('settings.dashboards.delete', 'Delete dashboard'),
-      message: t('settings.dashboards.confirmDelete', 'Delete dashboard {{name}}?', { name: id }),
-      variant: 'danger',
-      confirmLabel: t('common.delete'),
-    })
-    if (!ok) return
-    const byId = { ...(doc?.[scope] ?? {}) }; delete byId[id]
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.deleted', 'Deleted.'))
-  }
+  // Delete opens DeleteWithDepsModal — operator gets a checkbox to also delete the
+  // dashboard's widget / filter queries when they're exclusively used by this dashboard.
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const removeDashboard = (id: string) => setDeleteTarget(id)
 
   const scopes = useMemo<ScopeOption[]>(
     () => Object.keys(doc ?? {}).sort().map((v) => ({ value: v, label: v })),
@@ -287,6 +272,25 @@ export default function DashboardsBuilder() {
         />
       )}
       {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
+      {cloneTarget && (
+        <CloneWithDepsModal
+          kind="dashboard"
+          name={cloneTarget}
+          scope={scope || null}
+          existingNames={Object.keys(doc?.[scope] ?? {})}
+          onCloned={() => load()}
+          onClose={() => setCloneTarget(null)}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteWithDepsModal
+          kind="dashboard"
+          name={deleteTarget}
+          scope={scope || null}
+          onDeleted={() => load()}
+          onClose={() => setDeleteTarget(null)}
+        />
+      )}
     </Shell>
   )
 }
