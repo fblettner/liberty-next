@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/liberty-next.svg)](https://pypi.org/project/liberty-next/)
 [![Docker](https://img.shields.io/badge/ghcr.io-liberty--next-blue?logo=docker)](https://github.com/fblettner/liberty-next/pkgs/container/liberty-next)
 [![Release](https://github.com/fblettner/liberty-next/actions/workflows/release.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/release.yml)
-[![Docker build](https://github.com/fblettner/liberty-next/actions/workflows/docker.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/docker.yml)
+[![Docs](https://img.shields.io/badge/docs-nomana--it.fr-blue)](https://docs.nomana-it.fr/liberty/getting-started/)
 
 **Connector-driven low-code framework.** Configure SQL queries + HTTP endpoints in
 TOML; Liberty derives schemas at query time, serves a React admin UI on the same
