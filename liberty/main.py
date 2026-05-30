@@ -80,7 +80,7 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
     )
 
 
-def _ensure_plugins_on_sys_path() -> None:
+def ensure_plugins_on_sys_path() -> None:
     """Make ``${LIBERTY_APPS_DIR}/../plugins/`` importable as a Python source root —
     so a ``python`` step's ``callable = "nomasx1.security:j_x"`` resolves to
     ``<apps-repo>/plugins/nomasx1/security.py`` without the operator wiring sys.path
@@ -111,7 +111,7 @@ def _ensure_plugins_on_sys_path() -> None:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
 
     # ── Socket.IO ───────────────────────────────────────────────────────────
     # The Socket.IO server is created up-front (outside the lifespan) so we can

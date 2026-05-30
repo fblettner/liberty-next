@@ -30,6 +30,7 @@ from liberty.auth.authstore import ADMIN_ROLE, build_auth_backend
 from liberty.auth.service import AuthError
 from liberty.config import load_settings
 from liberty.connectors import load_connectors
+from liberty.main import ensure_plugins_on_sys_path
 
 
 # --------------------------------------------------------------------------- #
@@ -41,6 +42,11 @@ class _Context:
     def __init__(self, args: argparse.Namespace) -> None:
         settings = load_settings(args.config_app) if args.config_app else load_settings()
         self.settings = settings
+        # Make ``${LIBERTY_APPS_DIR}/../plugins/`` importable for the same reason the
+        # uvicorn path does it in create_app(): any subcommand that ends up resolving
+        # a job's python-step callable (``run-install-jobs``) needs ``nomasx1`` /
+        # ``nomajde`` / etc. on sys.path. No-op when LIBERTY_APPS_DIR is unset.
+        ensure_plugins_on_sys_path()
         connectors_path = args.config_connectors or settings.connectors.config_path
         self.registry = load_connectors(connectors_path)  # for the DB backend's pool; harmless for TOML
         self.backend = build_auth_backend(settings, self.registry.pools)
