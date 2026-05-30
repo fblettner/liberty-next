@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/liberty-next.svg)](https://pypi.org/project/liberty-next/)
 [![Python](https://img.shields.io/pypi/pyversions/liberty-next.svg)](https://pypi.org/project/liberty-next/)
 [![Docker](https://img.shields.io/badge/ghcr.io-liberty--next-blue?logo=docker)](https://github.com/fblettner/liberty-next/pkgs/container/liberty-next)
-[![Release](https://github.com/fblettner/liberty-next/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/pypi-release.yml)
+[![Release](https://github.com/fblettner/liberty-next/actions/workflows/release.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/release.yml)
 [![Docker build](https://github.com/fblettner/liberty-next/actions/workflows/docker.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/docker.yml)
 
 **Connector-driven low-code framework.** Configure SQL queries + HTTP endpoints in
@@ -16,6 +16,15 @@ Declarative `connectors.toml` / `screens.toml` / `dictionary.toml` / `menus.toml
 `charts.toml` / `dashboards.toml` files drive the runtime — schemas derived at query
 time, no code-gen step, every field round-trippable through the structured editors
 at **Settings → \<tab\>**.
+
+## Quick links
+
+- 📚 **Documentation** — <https://docs.nomana-it.fr/liberty/getting-started/>
+- 💻 **Source** — <https://github.com/fblettner/liberty-next>
+- 🐳 **Docker image** — <https://github.com/fblettner/liberty-next/pkgs/container/liberty-next>
+- 🚀 **Deployment configs** (Compose + Swarm + helper scripts) — [`release/`](https://github.com/fblettner/liberty-next/tree/main/release)
+- 🐛 **Issues** — <https://github.com/fblettner/liberty-next/issues>
+- 📦 **Releases** — <https://github.com/fblettner/liberty-next/releases>
 
 ---
 
