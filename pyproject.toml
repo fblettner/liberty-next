@@ -1,6 +1,6 @@
 [project]
 name = "liberty-next"
-version = "0.0.1"
+version = "7.0.1"
 description = "Liberty Next — connector-driven low-code framework"
 requires-python = ">=3.12"
 dependencies = [

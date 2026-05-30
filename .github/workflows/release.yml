@@ -1,0 +1,191 @@
+# Liberty Next — release workflow (manual, atomic, single version for Docker + PyPI).
+#
+# Triggers ONLY on a manual ``workflow_dispatch`` with a version input — no tag push,
+# no push-to-main shortcut. That keeps you in control of when a release happens and
+# (crucially) lets you re-run with the SAME version if a pre-publish step fails. The
+# only step that consumes a version irreversibly is the PyPI upload near the end, so
+# build / test / docker push all happen first; if any of them fails, nothing is wasted.
+#
+# To CUT a release:
+#   1. Bump ``version`` in pyproject.toml + commit + push to main.
+#   2. Go to https://github.com/fblettner/liberty-next/actions/workflows/release.yml
+#   3. Click "Run workflow", enter the same version (e.g. 0.1.0), click Run.
+#
+# Output:
+#   - Multi-arch Docker image at ghcr.io/fblettner/liberty-next:<version>  (also tagged ``latest``)
+#   - sdist + wheel on PyPI as liberty-next==<version>
+#   - Git tag v<version> + GitHub release on the source commit
+#
+# Pre-flight gates:
+#   - Refuses to run if the input version doesn't match pyproject.toml exactly.
+#   - Refuses to run if the git tag v<version> already exists.
+# Both failures stop the workflow BEFORE anything is pushed — no waste.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release — must match pyproject.toml. Leading "v" is fine (v7.0.1 ≡ 7.0.1).'
+        required: true
+        type: string
+        default: '7.0.1'
+
+permissions:
+  contents: write     # create the git tag + GitHub release
+  packages: write     # push to ghcr.io
+
+concurrency:
+  # One release at a time. If a second run is dispatched while the first is in flight,
+  # the second waits for the first to finish (rather than racing the PyPI upload).
+  group: release-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release v${{ inputs.version }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # full history so we can create + push a tag
+
+      # ── normalise the input (accept both "7.0.1" and "v7.0.1") ───────────────
+      # Everything downstream uses ``steps.norm.outputs.version`` (no v) and
+      # ``steps.norm.outputs.tag`` (v-prefixed). One source of truth, no leak.
+      - name: Normalise version input
+        id: norm
+        run: |
+          RAW="${{ inputs.version }}"
+          CLEAN="${RAW#v}"            # strip a leading "v" if present
+          if ! printf '%s' "$CLEAN" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
+            echo "::error::Version '$RAW' is not a valid SemVer (expected X.Y.Z or X.Y.Z-suffix)"
+            exit 1
+          fi
+          echo "version=$CLEAN"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$CLEAN"      >> "$GITHUB_OUTPUT"
+          echo "✔ Normalised: version=$CLEAN, tag=v$CLEAN"
+
+      # ── pre-flight: fail fast before any publish step ────────────────────────
+      - name: Verify version matches pyproject.toml
+        run: |
+          PKG_VERSION=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "${{ steps.norm.outputs.version }}" != "$PKG_VERSION" ]; then
+            echo "::error::input version '${{ steps.norm.outputs.version }}' does not match pyproject.toml ($PKG_VERSION)"
+            echo "Bump pyproject.toml's version + commit + push to main BEFORE running this workflow."
+            exit 1
+          fi
+          echo "✔ Version $PKG_VERSION matches input."
+
+      - name: Verify tag doesn't already exist
+        run: |
+          TAG="${{ steps.norm.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists locally — version was published before."
+            echo "Bump pyproject.toml to the next version + re-run."
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "::error::Tag $TAG already exists on the remote — version was published before."
+            echo "Bump pyproject.toml to the next version + re-run."
+            exit 1
+          fi
+          echo "✔ Tag $TAG is available."
+
+      # ── build the Python distributions (no publish yet) ──────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Build sdist + wheel
+        run: |
+          python -m build
+          # twine check rejects a long-description that won't render on PyPI — cheap,
+          # catches typos in README.md before they land in a published version.
+          python -m twine check dist/*
+          ls -lh dist/
+
+      # ── build + push the Docker image ────────────────────────────────────────
+      # If the Docker push fails, the workflow stops here — PyPI is not touched, no tag
+      # is created. Re-run with the same version after fixing.
+      - name: Set up QEMU (cross-arch emulation)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push multi-arch Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/liberty-next:${{ steps.norm.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/liberty-next:latest
+          labels: |
+            org.opencontainers.image.title=Liberty Next
+            org.opencontainers.image.description=Connector-driven low-code framework
+            org.opencontainers.image.vendor=Liberty
+            org.opencontainers.image.version=${{ steps.norm.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=See repository
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── publish to PyPI (LAST irreversible step) ─────────────────────────────
+      # This is the only step that "burns" the version. Everything before this was
+      # either re-runnable (Docker push) or trivially recoverable (sdist rebuild).
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      # ── tag + GitHub release (post-publish housekeeping) ─────────────────────
+      # If either of these fails after Docker + PyPI succeeded, no harm done — you can
+      # create the tag + release manually from the Actions log.
+      - name: Create + push annotated git tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.norm.outputs.tag }}" -m "Release ${{ steps.norm.outputs.tag }}"
+          git push origin "${{ steps.norm.outputs.tag }}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.norm.outputs.tag }}
+          name: ${{ steps.norm.outputs.tag }}
+          generate_release_notes: true     # auto-bullet the commits since the previous release
+          body: |
+            **Liberty Next ${{ steps.norm.outputs.tag }}**
+
+            - **PyPI:** https://pypi.org/project/liberty-next/${{ steps.norm.outputs.version }}/
+            - **Docker:** `ghcr.io/${{ github.repository_owner }}/liberty-next:${{ steps.norm.outputs.version }}`
+            - **Docs:** https://docs.nomana-it.fr/liberty/getting-started/
+
+            ### Install
+
+            ```bash
+            pipx install liberty-next==${{ steps.norm.outputs.version }}
+            # OR
+            docker pull ghcr.io/${{ github.repository_owner }}/liberty-next:${{ steps.norm.outputs.version }}
+            ```

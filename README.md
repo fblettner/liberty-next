@@ -145,12 +145,20 @@ upgrades don't clobber customer forks.
 
 ## Releasing
 
-Two GitHub Actions workflows handle release artifacts:
+Two GitHub Actions workflows split the release / build duties cleanly:
 
-| Trigger | Workflow | Output |
+| Workflow | Trigger | Output |
 |---|---|---|
-| Push `vX.Y.Z` tag | [`pypi-release.yml`](.github/workflows/pypi-release.yml) | sdist + wheel published to PyPI + GitHub Release |
-| Push `vX.Y.Z` tag or `main` | [`docker.yml`](.github/workflows/docker.yml) | Multi-arch image (linux/amd64 + linux/arm64) at `ghcr.io/fblettner/liberty-next:<tag>` |
+| [`release.yml`](.github/workflows/release.yml) | **Manual** — "Run workflow" with a version input | Multi-arch Docker image at `ghcr.io/fblettner/liberty-next:<version>` + `:latest`, sdist + wheel on PyPI, annotated git tag `v<version>`, GitHub release. **Atomic, single version for both.** |
+| [`docker.yml`](.github/workflows/docker.yml) | Push to `main` (auto), PR (build-only), manual | Rolling `edge` + `sha-<short>` Docker tags for "current main without chasing the SHA". |
+
+### Why manual, not tag-push
+
+A failed tag-push release burns the version: PyPI version slots are consumed
+permanently the moment they're accepted, even on partial failure. With a manual
+trigger, every pre-publish step (build, validate, Docker push) runs first; if any
+fails, you fix the issue and re-run with the **same version** — nothing is consumed
+until the actual PyPI upload near the end.
 
 ### One-time setup
 
@@ -172,20 +180,30 @@ The Docker workflow needs no secret — `GITHUB_TOKEN` doubles as the ghcr.io cr
 ### Cutting a release
 
 ```bash
-# 1. Bump version
-$EDITOR pyproject.toml          # update [project] version
-git commit -am "release: v0.2.0"
+# 1. Bump pyproject.toml's version + commit + push
+$EDITOR pyproject.toml          # change version = "..."
+git commit -am "release: v7.0.1"
 git push
-
-# 2. Tag + push
-git tag v0.2.0
-git push origin v0.2.0
-
-# 3. Watch both workflows in https://github.com/fblettner/liberty-next/actions
 ```
 
-Tag must match `pyproject.toml`'s `version` exactly; the PyPI workflow refuses the
-publish otherwise.
+Then in the browser:
+
+1. Go to <https://github.com/fblettner/liberty-next/actions/workflows/release.yml>
+2. Click **Run workflow** (top-right).
+3. The version field defaults to the planned version — edit if needed. Leading `v` is
+   tolerated (`v7.0.1` ≡ `7.0.1`), must otherwise match `pyproject.toml` exactly.
+4. Click **Run workflow**.
+
+The workflow validates the version, builds sdist + wheel, builds + pushes the
+multi-arch Docker image, publishes to PyPI, then creates the `v7.0.1` git tag +
+GitHub release. ~6-10 minutes start to finish.
+
+**If something fails before the PyPI step** (pre-flight, build, Docker push) — fix the
+issue and re-run the workflow with the same version. Nothing is consumed.
+
+**If the PyPI publish itself fails** (the only non-recoverable step) — bump the
+version in `pyproject.toml` and run again. PyPI doesn't allow re-publishing the same
+version even when the previous attempt failed.
 
 ---
 
