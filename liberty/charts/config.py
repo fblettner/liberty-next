@@ -138,6 +138,14 @@ class ChartConfig(BaseModel):
         json_schema_extra={"x_enum_ref": "CHART_QUERIES"},
     )
     spec: ChartSpec = Field(description="How to render the result.")
+    # Upgrade-safety flag — see Screen.override for the full story. Default False.
+    override: bool = Field(
+        default=False,
+        description=(
+            "Mark this chart as a customer customisation that an upgrade-package import "
+            "should NOT overwrite. Default False — operators opt in after forking."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check(self) -> ChartConfig:

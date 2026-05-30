@@ -1008,6 +1008,23 @@ class Screen(BaseModel):
         ),
     )
 
+    # ── upgrade-safety flag ────────────────────────────────────────────────────────────────
+    # When true, this screen survives an ``overwrite`` import (POST /admin/import-package
+    # strategy=overwrite). Customers tick this on screens they've forked or hand-edited so
+    # a vendor-shipped package can't clobber their customisation. The base version is still
+    # imported under its own id; this protects the operator's local fork. See the long
+    # comment in liberty/web/package_import.py for the apply semantics. Default False —
+    # operators opt in.
+    override: bool = Field(
+        default=False,
+        description=(
+            "Mark this screen as a customer customisation that an upgrade-package import "
+            "should NOT overwrite. Use after cloning the vendor's base screen + editing — "
+            "subsequent imports of the same package leave this fork alone. Doesn't affect "
+            "the runtime; only the import-package endpoint reads it."
+        ),
+    )
+
     @model_validator(mode="after")
     def _check(self) -> Screen:
         # Dialog tab ids must be unique within the dialog.

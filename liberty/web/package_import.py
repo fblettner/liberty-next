@@ -52,6 +52,12 @@ class FileReport:
     added: list[str] = field(default_factory=list)
     replaced: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)   # "kept target's" — only used by `merge`
+    preserved_overrides: list[str] = field(default_factory=list)
+    """Target entities flagged ``override = true`` that ``overwrite`` left alone.
+    Surfaces in the import report so the operator can see what their previous edits
+    survived (and which ones they may want to clear the flag on to take the new vendor
+    version). Empty under ``merge`` (every existing entity is skipped regardless of
+    flag) and ``replace_all`` (the whole file is dropped — overrides included)."""
     errors: list[str] = field(default_factory=list)
 
 
@@ -66,7 +72,9 @@ class ImportReport:
             "files": [
                 {"file": f.file, "strategy": f.strategy,
                  "added": list(f.added), "replaced": list(f.replaced),
-                 "skipped": list(f.skipped), "errors": list(f.errors)}
+                 "skipped": list(f.skipped),
+                 "preserved_overrides": list(f.preserved_overrides),
+                 "errors": list(f.errors)}
                 for f in self.files
             ],
             "warnings": list(self.warnings),
@@ -160,12 +168,20 @@ def _apply_one(filename: str, pkg_data: dict[str, Any], target: Path, strategy: 
             return report
 
     # The merge algorithm: walk each (kind, name, value) in the package; resolve target's
-    # existing value at the same key path; apply per strategy.
+    # existing value at the same key path; apply per strategy. The OVERRIDE flag adds a
+    # short-circuit on ``overwrite``: if the target's existing entity carries
+    # ``override = true``, we PRESERVE it (the customer marked it as "don't overwrite on
+    # upgrade") and report under preserved_overrides so the operator sees what survived.
     merged = _deep_copy(target_data)
     for kind, items in _enumerate_entities(pkg_data, filename):
         for name, value in items.items():
             existed = _path_exists(merged, kind, name, filename)
             if existed:
+                target_value = _get_path(merged, kind, name, filename)
+                if strategy == "overwrite" and _is_overridden(target_value):
+                    # Customer marked this as a fork — vendor upgrade leaves it alone.
+                    report.preserved_overrides.append(f"{kind}: {name}")
+                    continue
                 if strategy == "merge":
                     report.skipped.append(f"{kind}: {name}")
                     continue
@@ -255,6 +271,29 @@ def _path_exists(data: dict[str, Any], kind: str, name: str, filename: str) -> b
     return isinstance(cur, dict) and leaf in cur
 
 
+def _get_path(data: dict[str, Any], kind: str, name: str, filename: str) -> dict[str, Any] | None:
+    """Fetch the entity dict at *kind* / *name*. Returns None when not present."""
+    path, leaf = _resolve_path(kind, name, filename)
+    cur: Any = data
+    for k in path:
+        if not isinstance(cur, dict) or k not in cur:
+            return None
+        cur = cur[k]
+    if isinstance(cur, dict):
+        v = cur.get(leaf)
+        return v if isinstance(v, dict) else None
+    return None
+
+
+def _is_overridden(entity: dict[str, Any] | None) -> bool:
+    """True when *entity* carries ``override = true`` (a customer-marked fork that
+    upgrade-package imports should preserve). Lenient: missing key / None / non-bool
+    all read as False so a typo doesn't accidentally lock vendor entities."""
+    if not isinstance(entity, dict):
+        return False
+    return entity.get("override") is True
+
+
 def _set_path(data: dict[str, Any], kind: str, name: str, value: Any, filename: str) -> None:
     """Insert / replace value at the entity's path inside *data*."""
     path, leaf = _resolve_path(kind, name, filename)
@@ -311,6 +350,10 @@ def _merge_menu_items(merged: dict[str, Any], pkg_data: dict[str, Any], strategy
             if iid is None:
                 continue
             if iid in by_id:
+                target_item = target_items[by_id[iid]]
+                if strategy == "overwrite" and _is_overridden(target_item if isinstance(target_item, dict) else None):
+                    report.preserved_overrides.append(f"menu_item/{app}: {iid}")
+                    continue
                 if strategy == "merge":
                     report.skipped.append(f"menu_item/{app}: {iid}")
                     continue

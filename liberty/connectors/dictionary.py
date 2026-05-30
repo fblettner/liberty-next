@@ -110,6 +110,15 @@ class DictionaryEntry(BaseModel):
         description="Per-language label overrides.",
         json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"},
     )
+    # Upgrade-safety flag — see Screen.override for the full story. Default False.
+    override: bool = Field(
+        default=False,
+        description=(
+            "Mark this dictionary entry as a customer customisation that an upgrade-package "
+            "import should NOT overwrite. Default False — operators opt in after editing."
+        ),
+        json_schema_extra={"x_group": "Advanced"},
+    )
 
     def label_for(self, language: str | None) -> str | None:
         """The label in *language* if a translation exists, else the default label."""
@@ -149,6 +158,12 @@ class EnumDef(BaseModel):
         default_factory=list,
         description="The code → label pairs.",
         json_schema_extra={"x_group": "Values"},
+    )
+    # Upgrade-safety flag — see Screen.override.
+    override: bool = Field(
+        default=False,
+        description="Mark as customer override; upgrade-package imports skip this on overwrite.",
+        json_schema_extra={"x_group": "Advanced"},
     )
 
 
@@ -200,6 +215,12 @@ class LookupDef(BaseModel):
         ),
         json_schema_extra={"x_group": "Target"},
     )
+    # Upgrade-safety flag — see Screen.override.
+    override: bool = Field(
+        default=False,
+        description="Mark as customer override; upgrade-package imports skip this on overwrite.",
+        json_schema_extra={"x_group": "Advanced"},
+    )
 
 
 class SequenceDef(BaseModel):
@@ -242,6 +263,12 @@ class SequenceDef(BaseModel):
             "row automatically — listing them here is documentation."
         ),
         json_schema_extra={"x_group": "Target"},
+    )
+    # Upgrade-safety flag — see Screen.override.
+    override: bool = Field(
+        default=False,
+        description="Mark as customer override; upgrade-package imports skip this on overwrite.",
+        json_schema_extra={"x_group": "Advanced"},
     )
 
 

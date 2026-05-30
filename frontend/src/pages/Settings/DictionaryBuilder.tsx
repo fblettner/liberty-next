@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
+import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey } from '../../services/keyRename'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -636,9 +636,19 @@ export default function DictionaryBuilder() {
               // sub-label per kind: entries/enums → `label`; lookups/sequences → `description`.
               const sub = (kind === 'lookups' || kind === 'sequences') ? rec?.description : rec?.label
               const subStr = typeof sub === 'string' && sub.trim() ? sub : null
+              // Customer-override badge — see Screen.override for rationale.
+              // framework_enums don't have the field (different model); rest do.
+              const isOverride = rec?.override === true
               return (
                 <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
-                  <span className="name">{k}</span>
+                  <span className="name">
+                    {k}
+                    {isOverride && (
+                      <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
+                        {t('settings.override.badge', 'override')}
+                      </Tag>
+                    )}
+                  </span>
                   {subStr && <span className="sub">{subStr}</span>}
                 </NavItem>
               )

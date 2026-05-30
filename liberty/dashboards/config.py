@@ -212,6 +212,14 @@ class Dashboard(BaseModel):
         ),
     )
     widgets: list[Widget] = Field(default_factory=list, description="Widgets, in display order.")
+    # Upgrade-safety flag — see Screen.override for the full story. Default False.
+    override: bool = Field(
+        default=False,
+        description=(
+            "Mark this dashboard as a customer customisation that an upgrade-package import "
+            "should NOT overwrite. Default False — operators opt in after forking."
+        ),
+    )
 
     @property
     def qualified_id(self) -> str:

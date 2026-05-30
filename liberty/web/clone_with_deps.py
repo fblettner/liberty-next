@@ -121,6 +121,7 @@ def clone_with_deps(
     # Walk the manifest, produce a CloneItem for each entity in the rename map. The seed
     # itself comes from manifest.deps[0] (it's always included). Order matters: the seed
     # last so its rewritten config sees the final query names.
+    mark_override = bool(opts.get("mark_override"))
     seed_item: CloneItem | None = None
     for d in manifest.deps:
         if d.key() not in rename_map:
@@ -130,6 +131,15 @@ def clone_with_deps(
         # refs to the matching rename_map entry (which is keyed by the actual connector
         # scope = the app name by convention).
         new_cfg = _rewrite_refs(d.kind, d.config, rename_map, fallback_connector=d.scope)
+        is_seed = d.key() == (seed.kind, seed.scope, seed.name)
+        # Apply ``mark_override = true`` to the SEED only (operator's customer fork —
+        # protects from a vendor upgrade overwriting it). Cloned dependency queries are
+        # NOT auto-flagged: they're scaffolded support for the fork, not customer-
+        # authored content; flagging them would lock them out of future query-level
+        # vendor improvements (rare but possible). Operator can flip the flag on the
+        # cloned queries by hand if they want.
+        if is_seed and mark_override:
+            new_cfg["override"] = True
         item = CloneItem(
             kind=d.kind,
             scope=d.scope,
@@ -137,7 +147,7 @@ def clone_with_deps(
             original_key=d.key(),
             config=new_cfg,
         )
-        if d.key() == (seed.kind, seed.scope, seed.name):
+        if is_seed:
             seed_item = item
         else:
             result.items.append(item)

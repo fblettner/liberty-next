@@ -24,6 +24,7 @@ import {
   Overlay,
   Row,
   SpinnerRing,
+  Tag,
   FrameworkEnumsContext,
   VisualBuilderModal,
   useModals,
@@ -514,11 +515,23 @@ export default function ScreensBuilder() {
             actionsCount > 0 && t('settings.screens.summary.actions', { count: actionsCount }),
             rowMenuCount > 0 && t('settings.screens.summary.rowMenu', { count: rowMenuCount }),
           ].filter(Boolean).join(' · ')
+          // Customer-override badge — surfaces ``Screen.override = true`` in the list
+          // so the operator can spot their forks at a glance + audit what'll be
+          // preserved before importing an upgrade package. Same Tag look the rest of
+          // the editors use for status-like markers.
+          const isOverride = sc.override === true
           return (
             <Item key={id} onClick={() => { setStatus(null); openDesigner(id) }}>
               <FileText className="icon" size={18} />
               <span className="text">
-                <span className="name">{id}</span>
+                <span className="name">
+                  {id}
+                  {isOverride && (
+                    <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
+                      {t('settings.override.badge', 'override')}
+                    </Tag>
+                  )}
+                </span>
                 {label && <span className="label">{label}</span>}
                 {meta && <span className="meta">{meta}</span>}
               </span>

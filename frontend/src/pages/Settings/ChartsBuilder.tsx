@@ -8,7 +8,7 @@ import styled from '@emotion/styled'
 import { Plus, Trash2, BarChart3, Search, Edit3, Copy, GitBranch, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
+import { Banner, Button, Card, Centered, SpinnerRing, Tag, useModals } from '../../common'
 import type { ChartsDoc } from '../../types/config'
 import { ChartEditorModal, type ChartRecord } from './ChartEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
@@ -194,11 +194,20 @@ export default function ChartsBuilder() {
           const c = (doc[scope]?.[id] ?? {}) as ChartBody
           const type = c.spec?.type
           const meta = [c.query && `${scope}.${c.query}`, type, c.spec?.x && `x: ${c.spec.x}`].filter(Boolean).join(' · ')
+          // Customer-override badge — see ScreensBuilder for the rationale.
+          const isOverride = (c as unknown as { override?: boolean }).override === true
           return (
             <Item key={id} onClick={() => { setEditing({ ...(doc[scope][id] as unknown as ChartRecord), id, connector: scope }); setStatus(null) }}>
               <BarChart3 className="icon" size={18} />
               <span className="text">
-                <span className="name">{id}</span>
+                <span className="name">
+                  {id}
+                  {isOverride && (
+                    <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
+                      {t('settings.override.badge', 'override')}
+                    </Tag>
+                  )}
+                </span>
                 {c.label && <span className="label">{c.label}</span>}
                 {meta && <span className="meta">{meta}</span>}
               </span>

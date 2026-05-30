@@ -41,7 +41,9 @@ interface ManifestResponse {
 interface ImportReport {
   files: Array<{
     file: string; strategy: string;
-    added: string[]; replaced: string[]; skipped: string[]; errors: string[]
+    added: string[]; replaced: string[]; skipped: string[];
+    preserved_overrides: string[]
+    errors: string[]
   }>
   warnings: string[]
   reloaded: boolean
@@ -588,24 +590,36 @@ function ImportPanel() {
 
       {report && (
         <ReportTable>
-          {report.files.map((f) => (
-            <div className="row" key={f.file}>
-              <span className="file">{f.file}</span>
-              <span className="counts">
-                <span className="add">+{f.added.length} added</span>
-                <span className="repl">~{f.replaced.length} replaced</span>
-                <span className="skip">⊘{f.skipped.length} skipped</span>
-                {f.errors.length > 0 && <span className="err">✗{f.errors.length} errors</span>}
-              </span>
-              <span className="detail">
-                {(f.added.length + f.replaced.length + f.skipped.length) === 0
-                  ? '(no entities)'
-                  : [...f.added.slice(0, 3), ...f.replaced.slice(0, 3), ...f.skipped.slice(0, 3)].join(', ') +
-                    (f.added.length + f.replaced.length + f.skipped.length > 9 ? ' …' : '')}
-                {f.errors.length > 0 && ` — ERR: ${f.errors.join('; ')}`}
-              </span>
-            </div>
-          ))}
+          {report.files.map((f) => {
+            const overridesCount = (f.preserved_overrides ?? []).length
+            return (
+              <div className="row" key={f.file}>
+                <span className="file">{f.file}</span>
+                <span className="counts">
+                  <span className="add">+{f.added.length} added</span>
+                  <span className="repl">~{f.replaced.length} replaced</span>
+                  <span className="skip">⊘{f.skipped.length} skipped</span>
+                  {overridesCount > 0 && (
+                    <span style={{ color: 'var(--text-warning, #d97706)', marginRight: 8 }}>
+                      ⚑{overridesCount} override-preserved
+                    </span>
+                  )}
+                  {f.errors.length > 0 && <span className="err">✗{f.errors.length} errors</span>}
+                </span>
+                <span className="detail">
+                  {(f.added.length + f.replaced.length + f.skipped.length + overridesCount) === 0
+                    ? '(no entities)'
+                    : [
+                        ...f.added.slice(0, 3),
+                        ...f.replaced.slice(0, 3),
+                        ...f.skipped.slice(0, 3),
+                        ...(f.preserved_overrides ?? []).slice(0, 3).map((s) => `[override] ${s}`),
+                      ].join(', ')}
+                  {f.errors.length > 0 && ` — ERR: ${f.errors.join('; ')}`}
+                </span>
+              </div>
+            )
+          })}
           {report.warnings.length > 0 && (
             <Banner $tone="info">
               <ul style={{ margin: 0, paddingLeft: 18 }}>

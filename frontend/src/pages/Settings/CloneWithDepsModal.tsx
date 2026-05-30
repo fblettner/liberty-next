@@ -62,6 +62,11 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
   const { t } = useTranslation()
   const [newName, setNewName] = useState(() => suggestCloneId(name, existingNames))
   const [cloneQueries, setCloneQueries] = useState(false)
+  // Mark the clone as customer override → vendor upgrade-package imports leave it
+  // alone (the operator's fork is protected). Default ON because clone-for-fork is the
+  // dominant flow; operator can untick for an A/B test or temporary copy that should
+  // follow vendor updates.
+  const [markOverride, setMarkOverride] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Live preview — when "Also clone referenced queries" is ticked, ask the backend
@@ -99,7 +104,8 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
     if (blockedByValidation) return
     setBusy(true); setError(null)
     try {
-      const body = { kind, name, scope, new_name: newName, suffix, options: { clone_queries: cloneQueries } }
+      const body = { kind, name, scope, new_name: newName, suffix,
+        options: { clone_queries: cloneQueries, mark_override: markOverride } }
       const res = await fetch('/admin/clone-with-deps', {
         method: 'POST',
         headers: { ...authHeaders({ 'Content-Type': 'application/json' }) },
@@ -145,6 +151,21 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
               <div style={{ color: colors.orange.main, fontSize: fontSize.sm, marginTop: 4 }}>⚠ {validation.warning}</div>
             )}
           </Field>
+
+          <div style={{ marginTop: 14 }}>
+            <Checkbox
+              checked={markOverride}
+              onChange={setMarkOverride}
+              label={t('settings.cloneDeps.markOverride', 'Mark the clone as customer override (preserved by future vendor upgrades)')}
+            />
+            <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 4, paddingLeft: 24 }}>
+              {markOverride
+                ? t('settings.cloneDeps.markOverrideOn',
+                    'A subsequent upgrade-package import with the overwrite strategy will leave this clone alone.')
+                : t('settings.cloneDeps.markOverrideOff',
+                    'The clone will follow vendor updates (an upgrade may overwrite your edits). Tick the box if this is your customer fork.')}
+            </div>
+          </div>
 
           <div style={{ marginTop: 14 }}>
             <Checkbox

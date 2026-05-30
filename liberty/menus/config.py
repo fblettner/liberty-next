@@ -102,6 +102,13 @@ class MenuItem(BaseModel):
             return self.l.get(language) or self.label
         return self.label
 
+    # Upgrade-safety flag — see Screen.override.
+    override: bool = Field(
+        default=False,
+        description="Mark as customer override; upgrade-package imports skip this on overwrite.",
+        json_schema_extra={"x_group": "Advanced"},
+    )
+
     @model_validator(mode="after")
     def _check(self) -> MenuItem:
         if self.type is None:  # folder

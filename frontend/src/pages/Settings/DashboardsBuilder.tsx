@@ -7,7 +7,7 @@ import styled from '@emotion/styled'
 import { Plus, Trash2, LayoutDashboard, Search, Edit3, Copy, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
+import { Banner, Button, Card, Centered, SpinnerRing, Tag, useModals } from '../../common'
 import type { ChartsDoc, DashboardsDoc } from '../../types/config'
 import type { SavedChartSpec } from '../../types/charts'
 import { DashboardEditorModal } from './DashboardEditorModal'
@@ -215,11 +215,20 @@ export default function DashboardsBuilder() {
             filtersN > 0 && t('settings.dash.filterCount', '{{n}} filter(s)', { n: filtersN }),
             dash.description,
           ].filter(Boolean).join(' · ')
+          // Customer-override badge — see ScreensBuilder for rationale.
+          const isOverride = (dash as unknown as { override?: boolean }).override === true
           return (
             <Item key={id} onClick={() => { setEditing({ ...(doc[scope][id]), id }); setStatus(null) }}>
               <LayoutDashboard className="icon" size={18} />
               <span className="text">
-                <span className="name">{id}</span>
+                <span className="name">
+                  {id}
+                  {isOverride && (
+                    <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
+                      {t('settings.override.badge', 'override')}
+                    </Tag>
+                  )}
+                </span>
                 {dash.label && <span className="label">{dash.label}</span>}
                 {meta && <span className="meta">{meta}</span>}
               </span>
