@@ -5,12 +5,13 @@
 // Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2 } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { renameKey, validateRename } from '../../services/keyRename'
+import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Pools = Record<string, Record<string, unknown>>
@@ -71,6 +72,7 @@ export default function PoolsBuilder() {
   const [pools, setPools] = useState<Pools | null>(null)
   const [original, setOriginal] = useState<string>('')   // JSON of the last-loaded pools, for the dirty check
   const [sel, setSel] = useState<string | null>(null)
+  const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -230,6 +232,11 @@ export default function PoolsBuilder() {
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>[pools.{sel}]</strong>
                 <Row gap={6} style={{ alignItems: 'center' }}>
+                  <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({
+                    kind: 'pool', name: sel, label: `pool ${sel}`,
+                  })} disabled={busy}>
+                    <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                  </Button>
                   <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
                     <Edit3 size={13} /> {t('settings.rename.button')}
                   </Button>
@@ -248,6 +255,7 @@ export default function PoolsBuilder() {
           )}
         </FormCol>
       </Split>
+      {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

@@ -1037,6 +1037,36 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     return {"saved": True, "path": str(path), "requires_restart": True}
 
 
+# ── Find usages ─────────────────────────────────────────────────────────────────────────────
+# Every Settings editor surfaces a "Find usages" button that calls this. The reference graph
+# lives in liberty.web.usages — walks the in-memory registries (no disk reads) and returns a
+# grouped list of every place the named entity is referenced. Used to safely rename / delete
+# and to spot orphans. See usages.py for the full kind list.
+from liberty.web.usages import find_usages
+
+
+class FindUsagesBody(BaseModel):
+    kind: str
+    name: str
+    scope: str | None = None
+
+
+@router.post("/find-usages")
+async def find_usages_endpoint(body: FindUsagesBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Return every reference to ``(kind, name, scope)`` across the loaded configs. Walks the
+    in-memory state — call ``POST /admin/reload`` first if you've edited a file on disk and
+    need fresh results. Empty ``usages`` means safe to rename / delete (no references)."""
+    try:
+        results = find_usages(request.app.state, kind=body.kind, name=body.name, scope=body.scope)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "kind": body.kind, "name": body.name, "scope": body.scope,
+        "usages": [u.to_dict() for u in results],
+        "count": len(results),
+    }
+
+
 # ── Apply an AI-assistant proposal ──────────────────────────────────────────────────────────
 # The AI assistant's scaffold tools never write to disk — they return a Proposal envelope
 # (see liberty.ai.proposal) which the chat UI surfaces as an Apply card. Clicking Apply POSTs

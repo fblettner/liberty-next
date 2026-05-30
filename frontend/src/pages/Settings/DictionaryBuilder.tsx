@@ -8,7 +8,7 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy } from 'lucide-react'
+import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
@@ -16,6 +16,7 @@ import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, Dicti
 import { renameKey, validateRename } from '../../services/keyRename'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { AddScopeModal } from './AddScopeModal'
+import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -140,6 +141,7 @@ export default function DictionaryBuilder() {
   const [scanOpen, setScanOpen] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [frameworkAddOpen, setFrameworkAddOpen] = useState(false)
+  const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -628,6 +630,21 @@ export default function DictionaryBuilder() {
                   {scope ? `[connectors.${scope}.${kind}.${sel}]` : `[${kind}.${sel}]`}
                 </strong>
                 <Row gap={6}>
+                  {/* Find usages: applies to every dictionary kind except framework_enums (those
+                      are bundled overrides, not externally referenced from screens / connectors). */}
+                  {kind !== 'framework_enums' && (
+                    <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({
+                      kind: kind === 'entries' ? 'dictionary_entry'
+                          : kind === 'lookups' ? 'lookup'
+                          : kind === 'sequences' ? 'sequence'
+                          : 'enum',
+                      name: sel,
+                      scope: scope || 'shared',
+                      label: `${kind === 'entries' ? 'dictionary entry' : kind.slice(0, -1)} ${sel}`,
+                    })} disabled={busy}>
+                      <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                    </Button>
+                  )}
                   <Button $variant="ghost" $size="sm" onClick={() => renameRecord(sel)} disabled={busy}>
                     <Edit3 size={13} /> {t('settings.rename.button')}
                   </Button>
@@ -671,6 +688,7 @@ export default function DictionaryBuilder() {
           onClose={() => setFrameworkAddOpen(false)}
         />
       )}
+      {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

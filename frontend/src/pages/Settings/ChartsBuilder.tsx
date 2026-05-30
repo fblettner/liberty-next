@@ -5,7 +5,7 @@
 // charts.toml (PUT) + reloads.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, BarChart3, Search, Edit3, Copy } from 'lucide-react'
+import { Plus, Trash2, BarChart3, Search, Edit3, Copy, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SpinnerRing, useModals } from '../../common'
@@ -13,6 +13,7 @@ import type { ChartsDoc } from '../../types/config'
 import { ChartEditorModal, type ChartRecord } from './ChartEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
+import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -57,6 +58,7 @@ export default function ChartsBuilder() {
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
+  const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
   // editing === undefined → closed; null → new chart; ChartRecord → editing that chart.
   const [editing, setEditing] = useState<ChartRecord | null | undefined>(undefined)
 
@@ -213,6 +215,11 @@ export default function ChartsBuilder() {
                 {meta && <span className="meta">{meta}</span>}
               </span>
               <span className="actions" onClick={(e) => e.stopPropagation()}>
+                <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({
+                  kind: 'chart', name: id, scope, label: `chart ${scope}.${id}`,
+                })} disabled={busy}>
+                  <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameChart(id)} disabled={busy}>
                   <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
                 </Button>
@@ -255,6 +262,7 @@ export default function ChartsBuilder() {
           onClose={() => setAddScopeOpen(false)}
         />
       )}
+      {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
     </Shell>
   )
 }

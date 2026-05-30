@@ -11,7 +11,7 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2 } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -25,6 +25,7 @@ import { ScreenDesignerModal } from './ScreenDesignerModal'
 import { CRUD_KINDS, classifyQueryName, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
+import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { DictionaryScan } from './DictionaryScan'
 
 type Connectors = Record<string, Record<string, unknown>>
@@ -162,6 +163,7 @@ export default function ConnectorsBuilder() {
   // Settings tab switch. Self-contained: the modal fetches + saves screens.toml itself.
   const [screenDesigner, setScreenDesigner] = useState<{ app: string; id: string } | null>(null)
   const [selTable, setSelTable] = useState<string | null>(null)
+  const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
   const [tq, setTq] = useState('')
@@ -705,6 +707,11 @@ export default function ConnectorsBuilder() {
           ← {t('common.back')}
         </Button>
         <Mono style={{ fontSize: fontSize.sm, flex: 1 }}>{String(picked.name)}</Mono>
+        <Button $variant="ghost" $size="sm" onClick={() => sel && setUsagesTarget({
+          kind: 'query', name: String(picked.name), scope: sel, label: `query ${sel}.${picked.name}`,
+        })} disabled={busy}>
+          <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+        </Button>
         <Button $variant="ghost" $size="sm" onClick={() => renameQuery(String(picked.name))} disabled={busy}>
           <Edit3 size={13} /> {t('settings.rename.button')}
         </Button>
@@ -855,6 +862,11 @@ export default function ConnectorsBuilder() {
                       dashboards). */}
                   {(!isSql || mode === 'settings') && (
                     <>
+                      <Button $variant="ghost" $size="sm" onClick={() => sel && setUsagesTarget({
+                        kind: 'connector', name: sel, label: `connector ${sel}`,
+                      })} disabled={busy}>
+                        <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                      </Button>
                       <Button $variant="ghost" $size="sm" onClick={openCloneApp} disabled={busy || dirty}
                         title={dirty ? t('settings.connectors.cloneRequiresSave', 'Save current edits first') : t('settings.connectors.clone', 'Clone')}>
                         <Layers size={13} /> {t('settings.connectors.clone', 'Clone')}
@@ -1198,6 +1210,7 @@ export default function ConnectorsBuilder() {
           </Modal>
         </Overlay>
       )}
+      {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )
