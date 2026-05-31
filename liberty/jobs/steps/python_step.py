@@ -242,12 +242,23 @@ def _coerce_to_annotation(value: Any, annotation: Any) -> Any:
         # X | None or Union[X, Y]: try each arg in order (None already handled above).
         # If the value is already an instance of one of them, accept; otherwise
         # try coercion against the first non-None type — Optional[int] coerces to int.
+        # ``isinstance(value, list[str])`` raises TypeError on parameterized generics —
+        # use the runtime origin (``list``) for the check; pass through plain types as-is.
         non_none = [a for a in typing.get_args(annotation) if a is not type(None)]
         for arg in non_none:
-            if isinstance(value, arg):
+            check_type = typing.get_origin(arg) or arg
+            if isinstance(check_type, type) and isinstance(value, check_type):
                 return value
         if non_none:
             return _coerce_to_annotation(value, non_none[0])
+        return value
+
+    # Parameterized generic at the top level (``list[str]``, ``dict[str, int]``, …).
+    # Same isinstance() trap as in the Union branch — fall back to the runtime origin.
+    if origin is not None:
+        if isinstance(origin, type) and isinstance(value, origin):
+            return value
+        # We don't try to coerce the contained types (list-of-str etc.) — pass through.
         return value
 
     # Plain types only from here on. Already the right type → pass through.

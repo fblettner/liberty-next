@@ -135,6 +135,17 @@ def typed_optional(*, apps_id: int | None = None):
     return {"apps_id": apps_id, "type": type(apps_id).__name__}
 
 
+# Regression for the "isinstance() argument 2 cannot be a parameterized generic"
+# crash. Both shapes appear in the wild (nomasx1.db:create_databases declares
+# ``targets: list[str] | None`` and was crashed by exactly this).
+def takes_list_optional(*, targets: list[str] | None = None):
+    return {"targets": targets, "type": type(targets).__name__}
+
+
+def takes_list_plain(*, items: list[str]):
+    return {"items": items, "type": type(items).__name__}
+
+
 # --------------------------------------------------------------------------- #
 # resolve + dispatch
 # --------------------------------------------------------------------------- #
@@ -328,6 +339,33 @@ async def test_op_kwargs_already_typed_passes_through(registry) -> None:
     )
     assert res.extras["apps_id"] == 3 and res.extras["apps_id_type"] == "int"
     assert res.extras["enabled"] is False and res.extras["ratio"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_parameterized_generic_optional(registry) -> None:
+    """Headline regression: ``targets: list[str] | None`` with a list value used
+    to crash with ``isinstance() argument 2 cannot be a parameterized generic``
+    inside the coercion's Union handler. The fix uses ``typing.get_origin`` for
+    the isinstance check so ``list[str]`` reduces to ``list`` at runtime."""
+    res = await PythonStepExecutor(registry).execute(
+        _step(callable=f"{_MOD}:takes_list_optional",
+              op_kwargs={"targets": ["nomasx1", "nomajde"]}),
+        _ctx(),
+    )
+    assert res.extras["targets"] == ["nomasx1", "nomajde"]
+    assert res.extras["type"] == "list"
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_parameterized_generic_plain(registry) -> None:
+    """Same trap, top-level (``items: list[str]`` without the Union wrapper).
+    Same fix path — pass through when the value is already a list."""
+    res = await PythonStepExecutor(registry).execute(
+        _step(callable=f"{_MOD}:takes_list_plain",
+              op_kwargs={"items": ["a", "b"]}),
+        _ctx(),
+    )
+    assert res.extras == {"items": ["a", "b"], "type": "list"}
 
 
 @pytest.mark.asyncio
