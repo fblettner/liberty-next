@@ -97,11 +97,18 @@ async def _seed_default_pool(ctx: _Context) -> bool:
     if not config_path.exists():
         return False
 
+    # Use the RESOLVED url from the registry (env vars + ENC decryption applied),
+    # not the raw TOML string. An old wheel may ship ``url = "${LIBERTY_DB_URL}"``
+    # which is truthy in the file but resolves to "" at runtime when the env var
+    # isn't set — skipping the seed on raw-truthy leaves the pool with an empty
+    # effective url and pg-using callers blow up with UnknownPoolError.
+    if "default" in ctx.registry.pools.names():
+        existing_url = (ctx.registry.pools.config("default").url or "").strip()
+        if existing_url:
+            return False     # operator configured it (or already seeded)
+
     doc = tomlkit.loads(config_path.read_text())
     pools = doc.get("pools") or tomlkit.table()
-    existing = pools.get("default") or {}
-    if existing.get("url"):
-        return False     # operator configured it (or already seeded)
 
     new_table = tomlkit.table()
     pg_pw = os.environ.get("POSTGRES_PASSWORD", "").strip()
