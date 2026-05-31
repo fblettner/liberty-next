@@ -13,6 +13,10 @@ build/
 dist/
 .DS_Store
 config/local.toml
+# per-developer override of app.toml — set LIBERTY_APP_CONFIG=config/app-dev.toml in
+# your shell/.env so encrypted license / api_key values land here (gitignored) instead
+# of the committed config/app.toml
+config/app-dev.toml
 # the TOML auth store (Argon2 password hashes — a per-deployment secret); created by `liberty-admin init-db`
 config/auth.toml
 config/auth.toml.tmp

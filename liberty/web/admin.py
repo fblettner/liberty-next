@@ -49,7 +49,7 @@ from liberty.connectors.dictionary import (
     parse_dictionary,
 )
 from liberty.framework_enums import FRAMEWORK_ENUMS
-from liberty.licensing import verify_license
+from liberty.licensing import ALWAYS_LICENSED_CONNECTORS, verify_license
 from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
 from liberty.screens import Screen, load_screens
@@ -80,7 +80,7 @@ Superuser = Annotated[Principal, Depends(require_superuser)]
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
     old = request.app.state.connectors
-    license_result = verify_license(settings.license.key)
+    license_result = verify_license(settings.license.key, master_key=settings.crypto.master_key)
     new = load_connectors(
         settings.connectors.config_path,
         dictionary_path=settings.connectors.dictionary_path,
@@ -320,10 +320,16 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
 
 @router.get("/config/connectors/parsed", summary="Get connectors")
 async def get_connectors_parsed(request: Request, _: Superuser) -> dict[str, Any]:
-    """The current ``[connectors.*]`` as ``{name: connector dict}`` (default-valued keys dropped)."""
+    """The current ``[connectors.*]`` as ``{name: connector dict}`` (default-valued keys dropped).
+    ``always_licensed`` lists connector names that the framework gates regardless of their
+    on-disk ``licensed`` flag — the editor uses this to lock the corresponding checkbox."""
     path = Path(request.app.state.settings.connectors.config_path)
     cfg = load_connectors_file(path)
-    return {"path": str(path), "connectors": {name: c.model_dump(exclude_defaults=True) for name, c in cfg.connectors.items()}}
+    return {
+        "path": str(path),
+        "connectors": {name: c.model_dump(exclude_defaults=True) for name, c in cfg.connectors.items()},
+        "always_licensed": sorted(ALWAYS_LICENSED_CONNECTORS),
+    }
 
 
 class ConnectorsParsedBody(BaseModel):
@@ -343,6 +349,12 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     typed but no master key is configured, since silently storing plaintext is the worst outcome)."""
     master_key = request.app.state.settings.crypto.master_key
     for name, raw in body.connectors.items():
+        # Enforce always-licensed names: the UI may have stripped or unset the flag, but the
+        # framework gates these regardless of what's on disk — keep the file accurate by
+        # forcing ``licensed = true`` here so reads through other paths (raw TOML, package
+        # import, …) don't mislead.
+        if name in ALWAYS_LICENSED_CONNECTORS:
+            raw["licensed"] = True
         try:
             ConnectorsFile.model_validate({"connectors": {name: raw}})
         except ValidationError as exc:
@@ -913,7 +925,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 # so comments + ``${VAR}`` references on untouched keys survive a save). Changes do NOT take
 # effect live: app.toml is loaded once at startup. The PUT returns ``requires_restart: true`` to
 # nudge the UI.
-from liberty.config import DEFAULT_APP_CONFIG, AISettings, AppSettings
+from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, load_settings, resolve_app_config_path
 
 
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
@@ -923,6 +935,22 @@ _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
     "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools",
     "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses",
+    "api_key",   # sensitive — encrypted on save, masked on GET
+}
+_LICENSE_SAFE_KEYS = {"key"}   # sensitive — encrypted on save, masked on GET
+_OIDC_SAFE_KEYS = {
+    "enabled", "discovery_url", "client_id", "scopes",
+    "username_claim", "email_claim", "name_claim",
+    "redirect_url", "frontend_redirect",
+    "client_secret",   # sensitive — encrypted on save, masked on GET
+}
+
+# Fields that get encrypt-on-save + mask-on-get. Identified by (section, field) tuple
+# so encryption is targeted (other strings in the same section stay as-is).
+_APP_TOML_SENSITIVE_FIELDS: set[tuple[str, str]] = {
+    ("ai", "api_key"),
+    ("license", "key"),
+    ("oidc", "client_secret"),
 }
 
 # Canonical Anthropic model list the AppBuilder's Model dropdown offers. Keep ordered
@@ -941,9 +969,11 @@ _AI_MODELS: list[dict[str, str]] = [
 
 
 def _app_config_path() -> Path:
-    """Where app.toml lives. Mirrors :func:`load_settings`'s default — the running server
-    loads it from cwd-relative ``config/app.toml`` (no env override for this file itself)."""
-    return Path(DEFAULT_APP_CONFIG)
+    """Where app.toml lives. Honours ``LIBERTY_APP_CONFIG`` (env override; useful for a
+    gitignored ``config/app-dev.toml`` in dev), else the historical ``config/app.toml``.
+    Reads and writes go through the same resolver so the editor never targets a different
+    file than the running server is reading."""
+    return resolve_app_config_path()
 
 
 def _pick(d: dict[str, Any], keys: set[str]) -> dict[str, Any]:
@@ -952,26 +982,42 @@ def _pick(d: dict[str, Any], keys: set[str]) -> dict[str, Any]:
 
 @router.get("/config/app/parsed", summary="Get app config")
 async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
-    """The curated ``[app]`` + ``[ai]`` view from app.toml. Includes ALL safe keys with their
-    EFFECTIVE values (defaults applied via the Pydantic model) so the editor inputs initialise
-    correctly for a fresh install where the operator hasn't customised every field. Also returns
-    the choice lists (log levels, effort levels, connector names) the editor uses for selects."""
+    """The curated ``[app]`` + ``[ai]`` + ``[license]`` + ``[oidc]`` view from app.toml.
+    Sensitive fields (ai.api_key, license.key, oidc.client_secret) are MASKED — the
+    response carries an ``_set: bool`` indicator per field instead of the value, so the
+    UI knows whether to render "configured" vs "not set" and never gets the ciphertext."""
     path = _app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     raw = tomllib.loads(text) if text.strip() else {}
-    # Apply defaults via the model so the editor sees the values the running server uses,
-    # not blanks. We pass raw-on-disk values (not env-substituted) so ${VAR} references are
-    # preserved — but those keys aren't in _*_SAFE_KEYS anyway (api_key, jwt_secret, …).
     try:
         app_model = AppSettings.model_validate(raw.get("app") or {})
         ai_model = AISettings.model_validate(raw.get("ai") or {})
+        license_model = LicenseSettings.model_validate(raw.get("license") or {})
+        oidc_model = OIDCSettings.model_validate(raw.get("oidc") or {})
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"existing app.toml is invalid: {exc}") from exc
+
+    def _mask(section_name: str, model_dump: dict[str, Any], safe_keys: set[str], raw_section: dict) -> dict[str, Any]:
+        """Return the model_dump filtered to safe_keys, but replace any sensitive field's
+        value with "" and add a ``<field>_set: bool`` indicator alongside. Uses the RAW
+        on-disk value (not model_dump) for the set check so ``${VAR}``-bound legacy values
+        register as "set" too."""
+        out = _pick(model_dump, safe_keys)
+        for sec, fld in _APP_TOML_SENSITIVE_FIELDS:
+            if sec != section_name or fld not in safe_keys:
+                continue
+            raw_val = str(raw_section.get(fld) or "").strip()
+            out[fld] = ""
+            out[f"{fld}_set"] = bool(raw_val) and not raw_val.startswith("${")
+        return out
+
     connectors = sorted(request.app.state.connectors.names()) if hasattr(request.app.state, "connectors") else []
     return {
         "path": str(path),
         "app": _pick(app_model.model_dump(), _APP_SAFE_KEYS),
-        "ai": _pick(ai_model.model_dump(), _AI_SAFE_KEYS),
+        "ai": _mask("ai", ai_model.model_dump(), _AI_SAFE_KEYS, raw.get("ai") or {}),
+        "license": _mask("license", license_model.model_dump(), _LICENSE_SAFE_KEYS, raw.get("license") or {}),
+        "oidc": _mask("oidc", oidc_model.model_dump(), _OIDC_SAFE_KEYS, raw.get("oidc") or {}),
         "choices": {
             "log_levels": ["debug", "info", "warning", "error", "critical"],
             "effort_levels": ["", "low", "medium", "high", "xhigh", "max"],
@@ -982,59 +1028,131 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
 
 
 class AppConfigBody(BaseModel):
-    app: dict[str, Any]
-    ai: dict[str, Any]
+    app: dict[str, Any] = {}
+    ai: dict[str, Any] = {}
+    license: dict[str, Any] = {}
+    oidc: dict[str, Any] = {}
+
+
+def _encrypt_sensitives(section: str, fields: dict[str, Any], master_key: str) -> dict[str, Any]:
+    """Encrypt any sensitive fields in *fields*. Plaintext non-empty → ENC:<value>. Already
+    ENC:-prefixed → passthrough. Empty → passthrough (clear). Returns a new dict."""
+    out = dict(fields)
+    for sec, fld in _APP_TOML_SENSITIVE_FIELDS:
+        if sec != section or fld not in out:
+            continue
+        v = str(out.get(fld) or "")
+        if not v:
+            continue              # operator cleared the field
+        if v.startswith("ENC:"):
+            continue              # already encrypted (shouldn't happen via UI, but harmless)
+        if not master_key:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Cannot save {section}.{fld}: no master_key configured (set LIBERTY_MASTER_KEY).",
+            )
+        try:
+            out[fld] = encrypt(v, master_key)
+        except CryptoError as exc:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"encrypt({section}.{fld}) failed: {exc}",
+            ) from exc
+    return out
 
 
 @router.put("/config/app/parsed", summary="Update app config")
 async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) -> dict[str, object]:
-    """Validate the submitted ``[app]`` + ``[ai]`` against AppSettings / AISettings, then
-    surgically rewrite ONLY those keys in app.toml via ``tomlkit`` — comments, formatting,
-    and ``${VAR}`` references on every other section (auth / oidc / crypto / license / pools)
-    stay untouched. Unknown keys in the submitted dicts are rejected by the Pydantic models
-    (both use extra='ignore' implicitly but we filter to the safe set first as a defence in
-    depth — secrets cannot land here even if the UI is compromised). Changes require a server
-    restart to take effect (app.toml is loaded once at boot)."""
+    """Validate the submitted ``[app]`` + ``[ai]`` + ``[license]`` + ``[oidc]`` against
+    their Pydantic models, encrypt any sensitive fields (ai.api_key, license.key,
+    oidc.client_secret) with the install's master key, then surgically rewrite ONLY those
+    keys in app.toml via ``tomlkit`` — comments, formatting, and ``${VAR}`` references on
+    every other section stay untouched. Changes require a server restart to take effect
+    (app.toml is loaded once at boot).
+
+    Sensitive fields submitted as empty string are written as empty (clear). Already-ENC
+    values pass through unchanged (UI never round-trips ciphertext, but defensive)."""
     app_in = _pick(body.app or {}, _APP_SAFE_KEYS)
     ai_in = _pick(body.ai or {}, _AI_SAFE_KEYS)
+    license_in = _pick(body.license or {}, _LICENSE_SAFE_KEYS)
+    oidc_in = _pick(body.oidc or {}, _OIDC_SAFE_KEYS)
     try:
-        # Validate the submitted SAFE subset on top of the existing values, so partial submissions
-        # (only the fields the editor showed) don't trip required-field validation. Pydantic
-        # treats missing fields as "use default" — fine for these models which have defaults
-        # for everything.
         AppSettings.model_validate(app_in)
         AISettings.model_validate(ai_in)
+        LicenseSettings.model_validate(license_in)
+        OIDCSettings.model_validate(oidc_in)
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid app settings: {exc}") from exc
+
+    # Encrypt sensitive fields before writing. Master key comes from the LIVE settings
+    # (operator can rotate it via env without restart for this purpose — though full
+    # rotation needs re-saving every secret).
+    master_key = request.app.state.settings.crypto.master_key if hasattr(request.app.state, "settings") else ""
+    ai_in = _encrypt_sensitives("ai", ai_in, master_key)
+    license_in = _encrypt_sensitives("license", license_in, master_key)
+    oidc_in = _encrypt_sensitives("oidc", oidc_in, master_key)
 
     path = _app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
-    # Update [app] keys, preserving the table (so its leading comment stays). Create the
-    # table on the fly if app.toml didn't declare one yet.
-    if "app" not in doc:
-        doc["app"] = tomlkit.table()
-    for k, v in app_in.items():
-        doc["app"][k] = v
-    if "ai" not in doc:
-        doc["ai"] = tomlkit.table()
-    for k, v in ai_in.items():
-        doc["ai"][k] = v
+
+    def _upsert(section: str, values: dict[str, Any]) -> None:
+        if section not in doc:
+            doc[section] = tomlkit.table()
+        for k, v in values.items():
+            doc[section][k] = v
+
+    _upsert("app", app_in)
+    _upsert("ai", ai_in)
+    _upsert("license", license_in)
+    _upsert("oidc", oidc_in)
 
     new_text = tomlkit.dumps(doc)
-    # Re-parse + re-validate the FULL document — catches any tomlkit serialisation surprise
-    # before it lands on disk. We pull the [app] / [ai] tables back out and revalidate them
-    # against their models.
     try:
         reparsed = tomllib.loads(new_text)
         AppSettings.model_validate(reparsed.get("app") or {})
         AISettings.model_validate(reparsed.get("ai") or {})
+        LicenseSettings.model_validate(reparsed.get("license") or {})
+        OIDCSettings.model_validate(reparsed.get("oidc") or {})
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting app.toml is invalid: {exc}") from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
-    return {"saved": True, "path": str(path), "requires_restart": True}
+
+    # Live-apply: reload settings from disk and rebuild the three runtime objects that
+    # the new values feed into — license, AI assistant, OIDC client. Their next request
+    # sees the new key without a server restart. Uvicorn-bound [app] fields (host / port /
+    # log_level) are the only thing that still needs a hard restart; everything else
+    # (app.name / default_language / hot_reload) is re-read off the live settings on
+    # demand, so it picks up the new value naturally.
+    from liberty.ai.assistant import build_assistant
+    from liberty.auth.oidc import build_oidc
+
+    old_settings = request.app.state.settings
+    new_settings = load_settings()
+    restart_needed = (
+        new_settings.app.host != old_settings.app.host
+        or new_settings.app.port != old_settings.app.port
+        or new_settings.app.log_level != old_settings.app.log_level
+    )
+    request.app.state.settings = new_settings
+    request.app.state.license = verify_license(
+        new_settings.license.key, master_key=new_settings.crypto.master_key,
+    )
+    old_ai = getattr(request.app.state, "ai", None)
+    new_ai = build_assistant(
+        new_settings.ai, request.app.state.connectors,
+        master_key=new_settings.crypto.master_key,
+    )
+    request.app.state.ai = new_ai
+    if old_ai is not None and old_ai is not new_ai:
+        await old_ai.aclose()
+    request.app.state.oidc = build_oidc(
+        new_settings.oidc, master_key=new_settings.crypto.master_key,
+    )
+
+    return {"saved": True, "path": str(path), "requires_restart": restart_needed}
 
 
 # ── Find usages ─────────────────────────────────────────────────────────────────────────────

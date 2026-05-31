@@ -1,14 +1,17 @@
 // Settings → App — the master settings file (``config/app.toml``). Edits a curated subset of
-// AppSettings + AISettings; secrets (``${ENV_VAR}`` bound — jwt_secret, master_key, license
-// key, OIDC client secret, AI api_key) are NEVER exposed here. Path / mount fields are
-// out of scope too (operators don't move them from the UI). Saving rewrites only the
-// ``[app]`` and ``[ai]`` tables on disk; other sections of app.toml are preserved verbatim.
-// Changes don't take effect live — the file is loaded once at startup — so the save banner
-// reminds the operator to restart.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// AppSettings + AISettings + LicenseSettings + OIDCSettings. Sensitive fields (license.key,
+// ai.api_key, oidc.client_secret) round-trip masked: GET returns them empty with a
+// ``<field>_set: bool`` indicator; PUT encrypts new plaintext with the install master key
+// (``ENC:…`` on disk). The other secrets (jwt_secret, master_key) stay env-only. Saving
+// rewrites only the edited tables on disk; other sections are preserved verbatim. Changes
+// don't take effect live — app.toml is loaded once at startup — so a restart banner is shown.
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X } from 'lucide-react'
+import {
+  Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X,
+  ChevronDown, ChevronRight, KeyRound, ShieldCheck, Pencil,
+} from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Checkbox, Field, Input, SpinnerRing, Tag, Textarea } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -36,6 +39,25 @@ interface AiSection {
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
+  api_key: string
+  api_key_set?: boolean
+}
+interface LicenseSection {
+  key: string
+  key_set?: boolean
+}
+interface OidcSection {
+  enabled: boolean
+  discovery_url: string
+  client_id: string
+  client_secret: string
+  client_secret_set?: boolean
+  scopes: string
+  username_claim: string
+  email_claim: string
+  name_claim: string
+  redirect_url: string
+  frontend_redirect: string
 }
 interface ModelChoice { id: string; label: string }
 interface Choices {
@@ -44,21 +66,33 @@ interface Choices {
   connectors: string[]
   models: ModelChoice[]
 }
-interface AppParsed { path: string; app: AppSection; ai: AiSection; choices: Choices }
+interface AppParsed {
+  path: string
+  app: AppSection
+  ai: AiSection
+  license: LicenseSection
+  oidc: OidcSection
+  choices: Choices
+}
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
-const Grid = styled.div`display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; align-items: start;`
+const Stack = styled.div`display: flex; flex-direction: column; gap: 10px; align-items: stretch;`
 const Panel = styled(Card)`padding: 0; display: flex; flex-direction: column; overflow: hidden;`
-const PanelHeader = styled.div`
+const PanelHeader = styled.button`
   display: flex; align-items: center; gap: 8px; padding: 12px 14px;
-  border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input};
+  border: 0; border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input};
   font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600;
   color: ${colors.text.primary};
   text-transform: uppercase; letter-spacing: 0.06em;
-  & svg { color: ${colors.blue.main}; }
+  text-align: left; cursor: pointer; width: 100%;
+  & > .chev { color: ${colors.text.muted}; display: inline-flex; }
+  & > .icon { color: ${colors.blue.main}; display: inline-flex; }
+  & > .title { flex: 1; }
+  & > .badge { font-weight: 500; font-size: ${fontSize.sm}; text-transform: none; letter-spacing: 0; color: ${colors.text.muted}; }
+  &:hover { background: ${colors.blue.bg}; }
 `
 const PanelBody = styled.div`padding: 14px; display: flex; flex-direction: column; gap: 12px;`
 const Select = styled.select`
@@ -68,21 +102,50 @@ const Select = styled.select`
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px;`
 const RowFlex = styled.div`display: flex; gap: 10px; align-items: center; flex-wrap: wrap;`
+const MaskedRow = styled.div`
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: ${radius.md}; border: 1px solid ${colors.border};
+  background: ${colors.bg.input}; font-family: ${fonts.mono}; font-size: ${fontSize.base};
+  color: ${colors.text.muted};
+  & .dots { letter-spacing: 2px; }
+  & .status { flex: 1; }
+`
 
-const DEFAULTS: { app: AppSection; ai: AiSection } = {
+const DEFAULTS: { app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection } = {
   app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en' },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
     connector_tools: true, api_tool: false, scaffold_tools: false, allowed_connectors: [],
-    web_fetch_domains: [], web_fetch_max_uses: 5,
+    web_fetch_domains: [], web_fetch_max_uses: 5, api_key: '',
   },
+  license: { key: '' },
+  oidc: {
+    enabled: false, discovery_url: '', client_id: '', client_secret: '',
+    scopes: 'openid email profile', username_claim: 'preferred_username',
+    email_claim: 'email', name_claim: 'name', redirect_url: '', frontend_redirect: '',
+  },
+}
+
+type SectionKey = 'app' | 'license' | 'ai' | 'oidc'
+const OPEN_STORAGE_KEY = 'liberty:appbuilder:open'
+const DEFAULT_OPEN: Record<SectionKey, boolean> = { app: true, license: false, ai: false, oidc: false }
+
+function loadOpenState(): Record<SectionKey, boolean> {
+  try {
+    const raw = localStorage.getItem(OPEN_STORAGE_KEY)
+    if (!raw) return DEFAULT_OPEN
+    const parsed = JSON.parse(raw) as Partial<Record<SectionKey, boolean>>
+    return { ...DEFAULT_OPEN, ...parsed }
+  } catch { return DEFAULT_OPEN }
 }
 
 export default function AppBuilder() {
   const { t } = useTranslation()
   const [app, setApp] = useState<AppSection>(DEFAULTS.app)
   const [ai, setAi] = useState<AiSection>(DEFAULTS.ai)
+  const [license, setLicense] = useState<LicenseSection>(DEFAULTS.license)
+  const [oidc, setOidc] = useState<OidcSection>(DEFAULTS.oidc)
   const [choices, setChoices] = useState<Choices>({ log_levels: [], effort_levels: [], connectors: [], models: [] })
   const [path, setPath] = useState('')
   const [original, setOriginal] = useState('')
@@ -91,6 +154,19 @@ export default function AppBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [restartHint, setRestartHint] = useState(false)
+  const [open, setOpen] = useState<Record<SectionKey, boolean>>(loadOpenState)
+  // Per-field "Edit" toggle for masked secrets. While false, the field shows dots + an Edit
+  // button (and the wire payload sends "" — the backend treats empty as "leave unchanged"
+  // because the GET also sent ""). Flipping to true reveals an input.
+  const [editingSecret, setEditingSecret] = useState<Record<string, boolean>>({})
+
+  const toggleSection = (k: SectionKey) => {
+    setOpen((prev) => {
+      const next = { ...prev, [k]: !prev[k] }
+      try { localStorage.setItem(OPEN_STORAGE_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError(null); setStatus(null); setRestartHint(false)
@@ -99,8 +175,11 @@ export default function AppBuilder() {
       setPath(r.path)
       setApp(r.app)
       setAi(r.ai)
+      setLicense(r.license)
+      setOidc(r.oidc)
       setChoices(r.choices)
-      setOriginal(JSON.stringify({ app: r.app, ai: r.ai }))
+      setOriginal(JSON.stringify({ app: r.app, ai: r.ai, license: r.license, oidc: r.oidc }))
+      setEditingSecret({})
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -111,23 +190,36 @@ export default function AppBuilder() {
   useEffect(() => { void load() }, [load])
 
   const dirty = useMemo(
-    () => JSON.stringify({ app, ai }) !== original,
-    [app, ai, original],
+    () => JSON.stringify({ app, ai, license, oidc }) !== original,
+    [app, ai, license, oidc, original],
   )
 
   const discard = () => {
     if (!original) return
     try {
-      const seed = JSON.parse(original) as { app: AppSection; ai: AiSection }
-      setApp(seed.app); setAi(seed.ai); setStatus(null); setError(null); setRestartHint(false)
+      const seed = JSON.parse(original) as { app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection }
+      setApp(seed.app); setAi(seed.ai); setLicense(seed.license); setOidc(seed.oidc)
+      setStatus(null); setError(null); setRestartHint(false); setEditingSecret({})
     } catch { /* ignore */ }
   }
 
   const save = async () => {
     setBusy(true); setError(null); setStatus(null)
     try {
-      const r = await api.put<{ saved: boolean; requires_restart?: boolean }>('/admin/config/app/parsed', { app, ai })
-      setOriginal(JSON.stringify({ app, ai }))
+      // For each masked field: if the user didn't enable Edit, send "" so the backend's
+      // _encrypt_sensitives() skips it (empty → passthrough, on-disk value preserved).
+      // When Edit was enabled, send whatever's in the field — including "" to explicitly
+      // clear (the on-disk value becomes "" and the connector reports unconfigured).
+      const aiPayload = { ...ai, api_key: editingSecret['ai.api_key'] ? ai.api_key : '' }
+      const licensePayload = { ...license, key: editingSecret['license.key'] ? license.key : '' }
+      const oidcPayload = { ...oidc, client_secret: editingSecret['oidc.client_secret'] ? oidc.client_secret : '' }
+      const r = await api.put<{ saved: boolean; requires_restart?: boolean }>(
+        '/admin/config/app/parsed',
+        { app, ai: aiPayload, license: licensePayload, oidc: oidcPayload },
+      )
+      // Reload — refreshes the _set flags from disk so the masked rows update from "not
+      // configured" to dots immediately after a first-time Set.
+      await load()
       setStatus(t('settings.app.saved', 'Saved to {{path}}.', { path }))
       if (r?.requires_restart) setRestartHint(true)
     } catch (e) {
@@ -136,6 +228,20 @@ export default function AppBuilder() {
   }
 
   if (loading) return <SpinnerRing size={16} thickness={2} />
+
+  const renderSection = (
+    key: SectionKey, title: string, icon: ReactNode, badge: string, body: ReactNode,
+  ) => (
+    <Panel>
+      <PanelHeader type="button" onClick={() => toggleSection(key)} aria-expanded={open[key]}>
+        <span className="chev">{open[key] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+        <span className="icon">{icon}</span>
+        <span className="title">{title}</span>
+        <span className="badge">{badge}</span>
+      </PanelHeader>
+      {open[key] && <PanelBody>{body}</PanelBody>}
+    </Panel>
+  )
 
   return (
     <Shell>
@@ -157,7 +263,7 @@ export default function AppBuilder() {
       <Hint>
         {t(
           'settings.app.intro',
-          'Master settings (app.toml). Secrets and storage paths stay env / disk only and aren\'t shown here. Changes need a server restart to take effect.',
+          'Master settings (app.toml). Secrets stored here are encrypted at rest with the install master key. License key, AI api_key and OIDC client_secret take effect immediately on save — only host / port / log_level changes still need a server restart.',
         )}
         {path && <> · <span style={{ fontFamily: fonts.mono }}>{path}</span></>}
       </Hint>
@@ -169,10 +275,13 @@ export default function AppBuilder() {
         </Banner>
       )}
 
-      <Grid>
-        <Panel>
-          <PanelHeader><SettingsIcon size={14} /> {t('settings.app.appSection', 'App')}</PanelHeader>
-          <PanelBody>
+      <Stack>
+        {renderSection(
+          'app',
+          t('settings.app.appSection', 'App'),
+          <SettingsIcon size={14} />,
+          `${app.name} · :${app.port} · ${app.log_level}`,
+          <>
             <Field label={t('settings.app.name', 'App name')}>
               <Input value={app.name} onChange={(e) => setApp({ ...app, name: e.target.value })} />
             </Field>
@@ -198,14 +307,61 @@ export default function AppBuilder() {
             </RowFlex>
             <Checkbox label={t('settings.app.hotReload', 'Hot-reload config TOML files on change')}
               checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
-          </PanelBody>
-        </Panel>
+          </>,
+        )}
 
-        <Panel>
-          <PanelHeader><Sparkles size={14} /> {t('settings.app.aiSection', 'AI Assistant')}</PanelHeader>
-          <PanelBody>
+        {renderSection(
+          'license',
+          t('settings.app.licenseSection', 'License'),
+          <ShieldCheck size={14} />,
+          license.key_set
+            ? t('settings.app.licenseConfigured', 'configured')
+            : t('settings.app.licenseNotSet', 'not set — restricted mode'),
+          <>
+            <Hint>
+              {t(
+                'settings.app.licenseHint',
+                'Vendor-signed JWT that unlocks licensed connectors (nomasx1, nomajde, …). Empty → "restricted" mode: licensed connectors aren\'t loaded. Encrypted at rest with the install master key.',
+              )}
+            </Hint>
+            <Field label={t('settings.app.licenseKey', 'License key')}>
+              <MaskedSecret
+                fieldId="license.key"
+                value={license.key}
+                isSet={!!license.key_set}
+                editing={!!editingSecret['license.key']}
+                onEdit={() => setEditingSecret({ ...editingSecret, 'license.key': true })}
+                onChange={(v) => setLicense({ ...license, key: v })}
+                placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9…"
+                inputComponent="textarea"
+              />
+            </Field>
+          </>,
+        )}
+
+        {renderSection(
+          'ai',
+          t('settings.app.aiSection', 'AI Assistant'),
+          <Sparkles size={14} />,
+          ai.enabled
+            ? `${ai.model}${ai.api_key_set ? '' : ' · ' + t('settings.app.aiNoKey', 'no API key')}`
+            : t('settings.app.aiDisabled', 'disabled'),
+          <>
             <Checkbox label={t('settings.app.aiEnabled', 'Enabled')}
               checked={ai.enabled} onChange={(c) => setAi({ ...ai, enabled: c })} />
+
+            <Field label={t('settings.app.aiApiKey', 'Anthropic API key')}>
+              <MaskedSecret
+                fieldId="ai.api_key"
+                value={ai.api_key}
+                isSet={!!ai.api_key_set}
+                editing={!!editingSecret['ai.api_key']}
+                onEdit={() => setEditingSecret({ ...editingSecret, 'ai.api_key': true })}
+                onChange={(v) => setAi({ ...ai, api_key: v })}
+                placeholder="sk-ant-…"
+              />
+            </Field>
+
             <RowFlex>
               <Field label={t('settings.app.aiModel', 'Model')}>
                 {/* The dropdown always includes the saved value, even when it isn't in the
@@ -278,10 +434,135 @@ export default function AppBuilder() {
               <Input type="number" min={1} value={ai.web_fetch_max_uses}
                 onChange={(e) => setAi({ ...ai, web_fetch_max_uses: Number(e.target.value) || 0 })} style={{ width: 130 }} />
             </Field>
-          </PanelBody>
-        </Panel>
-      </Grid>
+          </>,
+        )}
+
+        {renderSection(
+          'oidc',
+          t('settings.app.oidcSection', 'OpenID Connect (SSO)'),
+          <KeyRound size={14} />,
+          oidc.enabled
+            ? (oidc.discovery_url || t('settings.app.oidcNoDiscovery', 'no discovery URL'))
+            : t('settings.app.oidcDisabled', 'disabled'),
+          <>
+            <Hint>
+              {t(
+                'settings.app.oidcHint',
+                'Single sign-on via any OIDC-compliant provider (Keycloak, Okta, Auth0, Azure AD, …). Register https://<your-host>/auth/oidc/callback as the redirect URI. The client_secret is encrypted at rest with the install master key.',
+              )}
+            </Hint>
+            <Checkbox label={t('settings.app.oidcEnabled', 'Enabled')}
+              checked={oidc.enabled} onChange={(c) => setOidc({ ...oidc, enabled: c })} />
+            <Field label={t('settings.app.oidcDiscoveryUrl', 'Discovery URL (.well-known/openid-configuration)')}>
+              <Input value={oidc.discovery_url}
+                onChange={(e) => setOidc({ ...oidc, discovery_url: e.target.value })}
+                placeholder="https://keycloak.example/realms/liberty/.well-known/openid-configuration" />
+            </Field>
+            <RowFlex>
+              <Field label={t('settings.app.oidcClientId', 'Client ID')}>
+                <Input value={oidc.client_id}
+                  onChange={(e) => setOidc({ ...oidc, client_id: e.target.value })} style={{ width: 280 }} />
+              </Field>
+              <Field label={t('settings.app.oidcScopes', 'Scopes')}>
+                <Input value={oidc.scopes}
+                  onChange={(e) => setOidc({ ...oidc, scopes: e.target.value })} style={{ width: 240 }} />
+              </Field>
+            </RowFlex>
+            <Field label={t('settings.app.oidcClientSecret', 'Client secret')}>
+              <MaskedSecret
+                fieldId="oidc.client_secret"
+                value={oidc.client_secret}
+                isSet={!!oidc.client_secret_set}
+                editing={!!editingSecret['oidc.client_secret']}
+                onEdit={() => setEditingSecret({ ...editingSecret, 'oidc.client_secret': true })}
+                onChange={(v) => setOidc({ ...oidc, client_secret: v })}
+                placeholder="…"
+              />
+            </Field>
+
+            <Hint>{t('settings.app.oidcClaims', 'Which ID-token claims to read.')}</Hint>
+            <RowFlex>
+              <Field label={t('settings.app.oidcUsernameClaim', 'Username claim')}>
+                <Input value={oidc.username_claim}
+                  onChange={(e) => setOidc({ ...oidc, username_claim: e.target.value })} style={{ width: 200 }} />
+              </Field>
+              <Field label={t('settings.app.oidcEmailClaim', 'Email claim')}>
+                <Input value={oidc.email_claim}
+                  onChange={(e) => setOidc({ ...oidc, email_claim: e.target.value })} style={{ width: 160 }} />
+              </Field>
+              <Field label={t('settings.app.oidcNameClaim', 'Name claim')}>
+                <Input value={oidc.name_claim}
+                  onChange={(e) => setOidc({ ...oidc, name_claim: e.target.value })} style={{ width: 160 }} />
+              </Field>
+            </RowFlex>
+
+            <Hint>{t('settings.app.oidcRedirects', 'Optional — override the redirect targets when running behind a proxy or for SPA flows.')}</Hint>
+            <Field label={t('settings.app.oidcRedirectUrl', 'Redirect URL override (proxy)')}>
+              <Input value={oidc.redirect_url}
+                onChange={(e) => setOidc({ ...oidc, redirect_url: e.target.value })}
+                placeholder="https://liberty.example.com/auth/oidc/callback" />
+            </Field>
+            <Field label={t('settings.app.oidcFrontendRedirect', 'Frontend redirect (SPA — JWTs in URL fragment)')}>
+              <Input value={oidc.frontend_redirect}
+                onChange={(e) => setOidc({ ...oidc, frontend_redirect: e.target.value })}
+                placeholder="https://liberty.example.com/" />
+            </Field>
+          </>,
+        )}
+      </Stack>
     </Shell>
+  )
+}
+
+// ── masked secret with reveal-to-edit ─────────────────────────────────────────────────────
+
+function MaskedSecret({
+  fieldId, value, isSet, editing, onEdit, onChange, placeholder, inputComponent = 'input',
+}: {
+  fieldId: string
+  value: string
+  isSet: boolean
+  editing: boolean
+  onEdit: () => void
+  onChange: (v: string) => void
+  placeholder?: string
+  inputComponent?: 'input' | 'textarea'
+}) {
+  const { t } = useTranslation()
+  if (!editing) {
+    return (
+      <MaskedRow>
+        <span className="status">
+          {isSet ? <span className="dots">••••••••••••</span> : <em>{t('settings.app.notConfigured', 'not configured')}</em>}
+        </span>
+        <Button $variant="ghost" $size="sm" onClick={onEdit} type="button">
+          <Pencil size={12} /> {isSet ? t('common.replace', 'Replace') : t('common.set', 'Set')}
+        </Button>
+      </MaskedRow>
+    )
+  }
+  if (inputComponent === 'textarea') {
+    return (
+      <Textarea
+        autoFocus
+        rows={3}
+        id={fieldId}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ fontFamily: fonts.mono }}
+      />
+    )
+  }
+  return (
+    <Input
+      autoFocus
+      id={fieldId}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ fontFamily: fonts.mono }}
+    />
   )
 }
 

@@ -34,6 +34,14 @@ _log = logging.getLogger(__name__)
 _PUBLIC_KEY_PATH = Path(__file__).with_name("public.pem")
 _cached_key: RSAPublicKey | None = None
 
+# Connectors that are ALWAYS licensed — operators can't bypass this via the
+# Settings checkbox or by hand-editing connectors.toml. The loader gates them
+# even when their entry sets ``licensed = false`` on disk (see
+# :func:`liberty.connectors.registry.load_connectors`); the admin PUT endpoint
+# rewrites ``licensed = true`` for these names on save. Add a name here when a
+# new vendor-licensed connector ships.
+ALWAYS_LICENSED_CONNECTORS: frozenset[str] = frozenset({"nomasx1", "nomajde"})
+
 
 @dataclass(frozen=True, slots=True)
 class LicenseResult:
@@ -100,13 +108,30 @@ def _b64url(seg: str) -> bytes:
     return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
 
 
-def verify_license(key: str | None, *, public_key_pem: str | bytes | None = None) -> LicenseResult:
+def verify_license(
+    key: str | None,
+    *,
+    public_key_pem: str | bytes | None = None,
+    master_key: str = "",
+) -> LicenseResult:
     """Verify an RS256 JWT license *key*. Returns a :class:`LicenseResult` — never raises.
 
     *public_key_pem* overrides the embedded key (testing only). An empty/blank key →
-    ``restricted`` (the normal "running the open framework" state)."""
+    ``restricted`` (the normal "running the open framework" state).
+
+    *master_key*: when the stored key is ENC:-encrypted (Settings UI save encrypts
+    with the install's master key), decrypt it before verification. An empty
+    master_key + ENC value → restricted with a clear error."""
     if not key or not key.strip():
         return _restricted("No license key configured")
+    if key.startswith("ENC:"):
+        if not master_key:
+            return _restricted("License key is encrypted but no master_key configured")
+        try:
+            from liberty.crypto import decrypt
+            key = decrypt(key, master_key)
+        except Exception as exc:  # noqa: BLE001 — surface decrypt failure as a license error
+            return _restricted(f"License key decryption failed: {exc}")
     try:
         parts = key.strip().split(".")
         if len(parts) != 3:
@@ -156,4 +181,4 @@ def _str_or_none(v: Any) -> str | None:
     return str(v) if v not in (None, "") else None
 
 
-__all__ = ["LicenseResult", "verify_license"]
+__all__ = ["ALWAYS_LICENSED_CONNECTORS", "LicenseResult", "verify_license"]

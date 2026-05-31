@@ -97,15 +97,19 @@ async def _seed_default_pool(ctx: _Context) -> bool:
     if not config_path.exists():
         return False
 
-    # Use the RESOLVED url from the registry (env vars + ENC decryption applied),
-    # not the raw TOML string. An old wheel may ship ``url = "${LIBERTY_DB_URL}"``
-    # which is truthy in the file but resolves to "" at runtime when the env var
-    # isn't set — skipping the seed on raw-truthy leaves the pool with an empty
-    # effective url and pg-using callers blow up with UnknownPoolError.
-    if "default" in ctx.registry.pools.names():
-        existing_url = (ctx.registry.pools.config("default").url or "").strip()
-        if existing_url:
-            return False     # operator configured it (or already seeded)
+    # Check the RESOLVED url (env vars applied) rather than the raw string. An old
+    # wheel may ship ``url = "${LIBERTY_DB_URL}"`` which is truthy in the file but
+    # resolves to "" at runtime when the env var isn't set. We parse the file with
+    # tomllib + substitute_env (the same path load_settings uses) so the seed
+    # decision matches what the registry will actually see.
+    import tomllib  # noqa: WPS433  — local import to keep module top tidy
+    from liberty.config import substitute_env
+
+    raw_doc = tomllib.loads(config_path.read_text())
+    resolved = substitute_env(raw_doc)
+    existing_url = ((resolved.get("pools") or {}).get("default") or {}).get("url") or ""
+    if existing_url.strip():
+        return False     # operator configured it (or already seeded)
 
     doc = tomlkit.loads(config_path.read_text())
     pools = doc.get("pools") or tomlkit.table()

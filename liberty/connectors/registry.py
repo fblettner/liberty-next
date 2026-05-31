@@ -24,7 +24,7 @@ from liberty.connectors.config import (
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryFile, load_dictionary
 from liberty.connectors.sql import SQLConnector
-from liberty.licensing import LicenseResult
+from liberty.licensing import ALWAYS_LICENSED_CONNECTORS, LicenseResult
 
 _log = logging.getLogger(__name__)
 
@@ -128,14 +128,17 @@ def load_connectors(
 
     *master_key* (see :mod:`liberty.crypto`) decrypts any ``ENC:`` auth secrets in API connector configs.
     *license* (see :mod:`liberty.licensing`): connectors with ``licensed = true`` that this key doesn't
-    cover are dropped (logged) — without a key, the open framework simply doesn't load them.
+    cover are dropped (logged) — without a key, the open framework simply doesn't load them. Names in
+    ``ALWAYS_LICENSED_CONNECTORS`` are gated the same way **regardless** of their on-disk ``licensed``
+    flag — operators can't bypass licensing on those by unchecking the Settings checkbox.
     """
     path = Path(path)
     dict_path = Path(dictionary_path) if dictionary_path else path.with_name("dictionary.toml")
     cfg = load_connectors_file(path)
     gated = {
         name for name, c in cfg.connectors.items()
-        if getattr(c, "licensed", False) and not (license is not None and license.covers(name))
+        if (getattr(c, "licensed", False) or name in ALWAYS_LICENSED_CONNECTORS)
+        and not (license is not None and license.covers(name))
     }
     if gated:
         _log.warning(

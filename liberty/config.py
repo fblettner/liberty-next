@@ -18,6 +18,19 @@ from pydantic import BaseModel, Field
 DEFAULT_APP_CONFIG = Path("config/app.toml")
 
 
+def resolve_app_config_path() -> Path:
+    """Where the master settings file (``app.toml``) actually lives.
+
+    ``LIBERTY_APP_CONFIG`` (env) wins — useful for a gitignored ``config/app-dev.toml``
+    in dev so encrypted license/api-key values don't get committed. Falls back to the
+    historical default ``config/app.toml``. Used by both :func:`load_settings` and the
+    Settings → App editor so reads + writes always target the same file."""
+    override = os.environ.get("LIBERTY_APP_CONFIG", "").strip()
+    if override:
+        return Path(override)
+    return DEFAULT_APP_CONFIG
+
+
 def _default_config_path(name: str) -> Path:
     """Default location for a per-section TOML (``connectors`` / ``screens`` / etc.).
 
@@ -269,11 +282,13 @@ class Settings(BaseModel):
 
 
 def load_settings(
-    path: Path | str = DEFAULT_APP_CONFIG, *, env: dict[str, str] | None = None
+    path: Path | str | None = None, *, env: dict[str, str] | None = None
 ) -> Settings:
-    path = Path(path)
-    if not path.exists():
+    """Load ``app.toml``. ``path=None`` → :func:`resolve_app_config_path`
+    (``LIBERTY_APP_CONFIG`` env override, else ``config/app.toml``)."""
+    p = Path(path) if path is not None else resolve_app_config_path()
+    if not p.exists():
         return Settings()
-    with path.open("rb") as f:
+    with p.open("rb") as f:
         data: dict[str, Any] = tomllib.load(f)
     return Settings.model_validate(substitute_env(data, env=env))

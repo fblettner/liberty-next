@@ -5,16 +5,18 @@
 # What this does (no git clone — uses the licensed wheel you were delivered):
 #   1. Materializes the wheel's payload (config + plugins) into ./apps/ via a throwaway
 #      python:3.12-slim container — your host doesn't need python or pip.
-#   2. Updates .env: APPS_HOST_PATH, COMPOSE_FILE (adds the apps overlay), optionally
-#      LIBERTY_LICENSE_KEY.
+#   2. Updates .env: APPS_HOST_PATH + COMPOSE_FILE (adds the apps overlay).
 #   3. Restarts the stack so liberty-next picks up the new mount.
+#   4. Runs install-time jobs (deploy-databases / init-db / import-reference …).
 #
 # Usage:
 #   ./install-apps.sh ./liberty_apps-7.0.1-py3-none-any.whl                    # local wheel
 #   ./install-apps.sh https://your-license-host/liberty_apps-7.0.1.whl        # remote wheel (curl)
-#   ./install-apps.sh ./liberty_apps-X.Y.Z.whl --license-key <jwt>            # also set license
 #   ./install-apps.sh ./liberty_apps-X.Y.Z.whl --target /opt/liberty-apps     # custom destination
 #   ./install-apps.sh ./liberty_apps-X.Y.Z.whl --layout light                 # layer onto light stack
+#
+# Set the license key AFTER install via the UI: Settings → App → License → Set.
+# (The key is encrypted at rest in app.toml with the install's LIBERTY_MASTER_KEY.)
 #
 # Re-running is idempotent: rematerializes the wheel (operator edits are preserved
 # unless you pass --force-config), refreshes .env keys, re-applies compose.
@@ -36,24 +38,24 @@ cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || ec
 # ── args ──────────────────────────────────────────────────────────────────────
 WHEEL=""
 APPS_PATH="./apps"
-LICENSE_KEY=""
 LAYOUT="full"
 FORCE_CONFIG="no"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --target)        [ -z "${2:-}" ] && die "--target requires a value"; APPS_PATH="$2"; shift 2 ;;
-    --license-key)   [ -z "${2:-}" ] && die "--license-key requires a value"; LICENSE_KEY="$2"; shift 2 ;;
     --layout)        [ -z "${2:-}" ] && die "--layout requires a value (full|light)"; LAYOUT="$2"; shift 2 ;;
     --force-config)  FORCE_CONFIG="yes"; shift ;;
-    --help|-h)       sed -n '4,21p' "$0"; exit 0 ;;
+    --license-key)
+      die "--license-key was removed — set the license via Settings → App → License after install (encrypted at rest in app.toml)." ;;
+    --help|-h)       sed -n '4,23p' "$0"; exit 0 ;;
     -*)              die "Unknown flag: $1" ;;
     *)               [ -n "$WHEEL" ] && die "Wheel specified twice: '$WHEEL' and '$1'"
                      WHEEL="$1"; shift ;;
   esac
 done
 
-[ -n "$WHEEL" ] || die "Usage: $0 <wheel-path-or-url> [--license-key <jwt>] [--target DIR] [--layout full|light]"
+[ -n "$WHEEL" ] || die "Usage: $0 <wheel-path-or-url> [--target DIR] [--layout full|light]"
 case "$LAYOUT" in light|full) ;; *) die "--layout must be 'light' or 'full' (got: $LAYOUT)" ;; esac
 
 # ── prerequisites ─────────────────────────────────────────────────────────────
@@ -138,13 +140,6 @@ add_compose_overlay() {
   esac
 }
 add_compose_overlay
-
-if [ -n "$LICENSE_KEY" ]; then
-  upsert_env "LIBERTY_LICENSE_KEY" "$LICENSE_KEY"
-elif ! grep -qE '^LIBERTY_LICENSE_KEY=.+$' .env; then
-  warn "LIBERTY_LICENSE_KEY not set in .env — framework will run RESTRICTED (licensed connectors won't load)."
-  echo "  Set later with:  ./install-apps.sh <wheel> --license-key <jwt>"
-fi
 chmod 600 .env
 
 # ── 4. restart the stack ──────────────────────────────────────────────────────
@@ -188,14 +183,12 @@ echo
 echo "  Apps host path:   $APPS_ABS"
 echo "  Container path:   /apps"
 echo "  LIBERTY_APPS_DIR: /apps/config"
-if grep -qE '^LIBERTY_LICENSE_KEY=.+$' .env; then
-  echo "  License key:      set (licensed connectors loaded if the key is valid)"
-else
-  echo "  License key:      NOT set → restricted mode"
-fi
+echo
+echo "  Next: set the license key via the UI (encrypted at rest in app.toml):"
+echo "    open http://localhost/             # Settings → App → License → Set"
+echo "  Without a license key, licensed connectors stay in restricted mode."
 echo
 echo "  Verify in the UI:"
-echo "    open http://localhost/             # SPA should now show the apps' menus"
 echo "    open http://localhost/info         # 'license.mode' + 'connectors.licensed' count"
 echo
 echo "  Refresh the apps (after receiving a new wheel):"

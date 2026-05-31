@@ -42,14 +42,10 @@ services:
       LIBERTY_MASTER_KEY: "${LIBERTY_MASTER_KEY:?LIBERTY_MASTER_KEY is required — see .env.example}"
       # Framework DB — SQLite by default, on the persisted volume.
       LIBERTY_DB_URL: "${LIBERTY_DB_URL:-sqlite+aiosqlite:////data/liberty.db}"
-      # Optional — bootstrap admin password (else init-db generates + prints one once).
+      # First-boot admin password — consumed once by init-db; safe to omit on re-runs.
+      # License key + Anthropic API key are now edited via Settings → App in the UI
+      # (stored encrypted in app.toml with LIBERTY_MASTER_KEY above).
       LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-}"
-      # Optional — license key for the licensed connectors (nomasx1 / nomajde / nomaflow
-      # premium). Without a key, the framework runs in restricted mode (those connectors
-      # don't load); everything else works.
-      LIBERTY_LICENSE_KEY: "${LIBERTY_LICENSE_KEY:-}"
-      # Optional — Anthropic API key for the AI assistant chat. Leave empty to disable.
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     volumes:
       - liberty-data:/data              # SQLite DB + auth.toml (Argon2 hashes)
       - liberty-config:/app/config      # connectors / dictionary / menus / screens / charts / dashboards

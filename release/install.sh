@@ -27,9 +27,9 @@
 # Licensed apps (single-command install):
 #   --apps <wheel-path-or-url>  # after bringing up the base stack, run install-apps.sh
 #                                 with the given wheel (local file or http(s) URL).
-#   --license-key <jwt>         # forwarded to install-apps.sh if --apps is set.
-# Lets you do everything in one go:
-#   ./install.sh full --apps ./liberty_apps-7.0.1.whl --license-key <jwt>
+# The license key is no longer a flag — set it via Settings → App → License after the
+# UI is up (encrypted at rest in app.toml with the install master key). Lets you do:
+#   ./install.sh full --apps ./liberty_apps-7.0.1.whl
 #
 # Master key (encrypts ENC: values in connectors.toml etc.) is always a fresh random
 # per-install — no flag to override. liberty-admin init-db writes [pools.default] with
@@ -77,7 +77,6 @@ LAYOUT=""
 IMAGE_TAG=""             # empty → defaults to 'latest' in the generated .env
 RESET="no"               # --reset → wipe volumes + .env before install
 APPS_WHEEL=""            # --apps <wheel> → run install-apps.sh after base install
-LICENSE_KEY=""           # --license-key <jwt> → forwarded to install-apps.sh
 SSL_MODE="none"          # --ssl none|letsencrypt|provided
 SSL_DOMAIN=""            # --domain  (letsencrypt only — public hostname)
 SSL_EMAIL=""             # --email   (letsencrypt only — ACME contact)
@@ -99,8 +98,7 @@ while [ $# -gt 0 ]; do
       [ -z "${2:-}" ] && die "--apps requires a value (wheel path or http(s) URL)"
       APPS_WHEEL="$2"; shift 2 ;;
     --license-key)
-      [ -z "${2:-}" ] && die "--license-key requires a value"
-      LICENSE_KEY="$2"; shift 2 ;;
+      die "--license-key was removed — set the license via Settings → App → License after install (encrypted at rest in app.toml)." ;;
     --ssl)
       [ -z "${2:-}" ] && die "--ssl requires a value (none|letsencrypt|provided)"
       SSL_MODE="$2"; shift 2 ;;
@@ -128,7 +126,6 @@ done
 
 # Cross-arg validation
 [ -n "$APPS_WHEEL" ] && [ "$LAYOUT" = "prepare" ] && die "--apps cannot be combined with 'prepare' (apps need a running stack)."
-[ -n "$LICENSE_KEY" ] && [ -z "$APPS_WHEEL" ] && warn "--license-key was passed without --apps — will be ignored (it's forwarded to install-apps.sh)."
 
 # --reset is wipe-and-exit; combining with install flags is almost certainly a
 # user-error (those flags would be silently lost when --reset returns 0). Reject
@@ -136,7 +133,6 @@ done
 if [ "$RESET" = "yes" ]; then
   combined=""
   [ -n "$APPS_WHEEL" ]            && combined="$combined --apps"
-  [ -n "$LICENSE_KEY" ]           && combined="$combined --license-key"
   [ "$SSL_MODE" != "none" ]       && combined="$combined --ssl $SSL_MODE"
   if [ -n "$combined" ]; then
     die "--reset is wipe-and-exit; combining it with install flags ($combined) drops them silently.
@@ -231,13 +227,14 @@ if [ "$RESET" = "yes" ]; then
     full)
       echo "    ./install.sh full \\"
       echo "        --ssl letsencrypt --domain <host> --email <addr> \\"
-      echo "        --apps /path/to/liberty_apps-X.Y.Z.whl --license-key <jwt>"
+      echo "        --apps /path/to/liberty_apps-X.Y.Z.whl"
+      echo "    (License key is now set via Settings → App in the UI after install.)"
       ;;
     light)
       echo "    ./install.sh light"
       ;;
     *)
-      echo "    ./install.sh full [--ssl letsencrypt --domain X --email Y] [--apps wheel --license-key Z]"
+      echo "    ./install.sh full [--ssl letsencrypt --domain X --email Y] [--apps wheel]"
       ;;
   esac
   exit 0
@@ -303,7 +300,12 @@ else
   LIBERTY_MASTER_KEY="$(gen_secret 32)"   # always per-install random — no override flag
   POSTGRES_PASSWORD="$(gen_secret 24)"
   PGADMIN_PASSWORD="$(gen_secret 16)"
+  # First-boot admin password is NOT written to .env — it's only needed once by init-db.
+  # We export it via the shell environment for ``docker compose up`` below so the bootstrap
+  # sees it, then show it in the install summary. On re-runs it's gone (intentionally —
+  # init-db won't recreate the user, so the value would be misleading anyway).
   LIBERTY_ADMIN_PASSWORD="$(gen_secret 16)"
+  export LIBERTY_ADMIN_PASSWORD
 
   # Image tag line — if the operator passed --tag <ver>, write a real assignment;
   # otherwise leave commented so the compose default ('latest') kicks in.
@@ -369,30 +371,17 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 # POSTGRES_PORT=5432
 
 PGADMIN_PASSWORD=${PGADMIN_PASSWORD}
-# PGADMIN_EMAIL=admin@example.com
+# PGADMIN_EMAIL=admin@liberty.fr
 
 # ── OPTIONAL ───────────────────────────────────────────────────────────────
-# First-boot Liberty Next admin password — generated here so you don't have to scrape
-# it from the container logs. Change after login through Settings → Profile.
-LIBERTY_ADMIN_PASSWORD=${LIBERTY_ADMIN_PASSWORD}
-
 # Image tag — which ghcr.io/.../liberty-next:<tag> gets pulled:
 #   <version>  — pinned (e.g. 7.0.1). Explicit version control.
 #   latest     — default. Most recent release. Every merge to main → new release.
 ${LIBERTY_IMAGE_TAG_LINE}
 
-# License key (RS256 JWT) — unlocks licensed connectors (nomasx1 / nomajde / nomaflow
-# premium). Without a key, the framework runs in 'restricted' mode.
-# LIBERTY_LICENSE_KEY=
-
-# Anthropic API key — enables the AI assistant chat. Leave empty to disable.
-# ANTHROPIC_API_KEY=
-
-# OIDC (Single Sign-On) — set _ENABLED=true + fill provider details to enable.
-# LIBERTY_OIDC_ENABLED=false
-# LIBERTY_OIDC_PROVIDER_URL=
-# LIBERTY_OIDC_CLIENT_ID=
-# LIBERTY_OIDC_CLIENT_SECRET=
+# License key, Anthropic API key, OIDC client_secret used to live here as env vars.
+# They're now edited via Settings → App in the UI and stored encrypted in app.toml
+# (AES-256-GCM with the install master key above). Nothing to set here.
 
 # Light layout — host port to expose liberty-next on.
 # LIBERTY_PORT=8000
@@ -467,12 +456,26 @@ for i in $(seq 1 60); do
   [ "$i" -eq 60 ] && warn "liberty-next still not healthy after 120 s — continuing; check logs if anything looks off."
 done
 
-# ── credentials summary ──────────────────────────────────────────────────────
+# ── chain to install-apps.sh when --apps was passed ──────────────────────────
+# Apps step runs BEFORE the credentials summary now — the admin password is the most
+# important thing the operator needs to see, and burying it above 2 minutes of wheel
+# materialisation + install-job output meant it scrolled off the screen. If --apps
+# fails the summary still fires (we trap the chain).
+if [ -n "$APPS_WHEEL" ]; then
+  info "Chaining to install-apps.sh with wheel: $APPS_WHEEL"
+  if ! ./install-apps.sh "$APPS_WHEEL" --layout "$LAYOUT"; then
+    warn "install-apps.sh failed — base stack still up. See above for the install-job error."
+  fi
+fi
+
+# ── credentials summary (LAST so the admin password is on screen) ────────────
 echo
 printf "${BOLD}━━━ Liberty Next ($LAYOUT) is up ━━━${NC}\n"
 echo
 
-LIBERTY_ADMIN_PASSWORD=$(grep -E '^LIBERTY_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+# LIBERTY_ADMIN_PASSWORD: when .env was just generated, it's exported above as a shell
+# variable (NOT written to .env — first-boot only). On a re-run with an existing .env
+# it's empty here — the existing admin user keeps its prior password.
 PGADMIN_PASSWORD=$(grep -E '^PGADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
 
 case "$LAYOUT" in
@@ -482,9 +485,14 @@ case "$LAYOUT" in
     echo "  ReDoc:      http://localhost:${PORT}/redoc"
     echo "  Swagger:    http://localhost:${PORT}/docs"
     echo
-    echo "  Sign in as:"
-    echo "    username:  admin"
-    echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
+    if [ -n "${LIBERTY_ADMIN_PASSWORD:-}" ]; then
+      echo "  Sign in as:"
+      echo "    username:  admin"
+      echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
+    else
+      echo "  Sign in as 'admin' — password unchanged from the original install."
+      echo "    (Lost it? docker exec liberty-next liberty-admin reset-admin-password)"
+    fi
     ;;
   full)
     # Build the base URL — HTTPS host when TLS is on, plain HTTP otherwise.
@@ -505,27 +513,23 @@ case "$LAYOUT" in
     echo "  Portainer:  ${BASE}/portainer"
     echo "  Traefik:    ${BASE}/traefik     (basic-auth: admin / admin — change in traefik/dynamic/dynamic.yml)"
     echo
-    echo "  Sign in to Liberty as:"
-    echo "    username:  admin"
-    echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
+    if [ -n "${LIBERTY_ADMIN_PASSWORD:-}" ]; then
+      echo "  Sign in to Liberty as:"
+      echo "    username:  admin"
+      echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
+    else
+      echo "  Sign in to Liberty as 'admin' — password unchanged from the original install."
+      echo "    (Lost it? docker exec liberty-next liberty-admin reset-admin-password)"
+    fi
     echo
-    echo "  pgAdmin:    admin@example.com / ${PGADMIN_PASSWORD}"
+    echo "  pgAdmin:    admin@liberty.fr / ${PGADMIN_PASSWORD}"
     ;;
 esac
 
 echo
-echo "  All secrets are in .env (mode 0600, NOT in git). Keep it safe."
-echo "  Backup the data volumes regularly: ./backup.sh"
+echo "  Next: set License key + Anthropic API key + OIDC via Settings → App in the UI."
+echo "  All secrets in app.toml are encrypted at rest with the install master key in .env."
+echo "  .env is mode 0600 (NOT in git). Keep it safe — backup the data volumes via ./backup.sh."
 echo
 echo "  Docs:       https://docs.nomana-it.fr/liberty/getting-started/"
 echo
-
-# ── chain to install-apps.sh when --apps was passed ──────────────────────────
-# Doing this AFTER the base summary keeps the credentials visible even if the apps
-# step fails (operator still has the framework login).
-if [ -n "$APPS_WHEEL" ]; then
-  info "Chaining to install-apps.sh with wheel: $APPS_WHEEL"
-  CMD=("./install-apps.sh" "$APPS_WHEEL" "--layout" "$LAYOUT")
-  [ -n "$LICENSE_KEY" ] && CMD+=("--license-key" "$LICENSE_KEY")
-  "${CMD[@]}"
-fi

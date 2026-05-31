@@ -54,15 +54,23 @@ class OIDCClient:
         return str(request.url_for("oidc_callback"))
 
 
-def build_oidc(settings: OIDCSettings) -> OIDCClient | None:
+def build_oidc(settings: OIDCSettings, *, master_key: str = "") -> OIDCClient | None:
     if not settings.enabled or not settings.discovery_url:
         return None
+    # client_secret is stored encrypted (ENC:) when set via Settings UI; decrypt before
+    # handing it to authlib. Plaintext values pass through unchanged for backward compat.
+    client_secret = settings.client_secret
+    if client_secret.startswith("ENC:"):
+        if not master_key:
+            raise ValueError("OIDC client_secret is ENC:-encrypted but no master_key configured")
+        from liberty.crypto import decrypt
+        client_secret = decrypt(client_secret, master_key)
     oauth = OAuth()
     oauth.register(
         name=PROVIDER_NAME,
         server_metadata_url=settings.discovery_url,
         client_id=settings.client_id,
-        client_secret=settings.client_secret,
+        client_secret=client_secret,
         client_kwargs={"scope": settings.scopes},
     )
     return OIDCClient(oauth, settings)

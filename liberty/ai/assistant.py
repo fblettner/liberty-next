@@ -260,21 +260,43 @@ def _truncate(text: str, limit: int = 280) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def build_assistant(settings: AISettings, connectors: ConnectorRegistry) -> AiAssistant | None:
+def build_assistant(
+    settings: AISettings,
+    connectors: ConnectorRegistry,
+    *,
+    master_key: str = "",
+) -> AiAssistant | None:
     """Build an :class:`AiAssistant` from settings + the connector registry.
 
     Returns ``None`` when AI is disabled. When enabled but no API key is set, the
     assistant is still returned (so the chat endpoint exists) but its calls fail
     fast with a clear error.
+
+    *master_key*: when settings.api_key is ENC:-encrypted (Settings UI save encrypts
+    with the install's master key), decrypt before instantiating AsyncAnthropic.
     """
     if not settings.enabled:
         return None
 
     client = None
-    if settings.api_key:
-        from anthropic import AsyncAnthropic  # imported lazily so tests can run without it
+    api_key = settings.api_key
+    if api_key.startswith("ENC:"):
+        import logging
+        _log = logging.getLogger("liberty.ai.assistant")
+        if not master_key:
+            _log.warning("ai.assistant: api_key is ENC:-encrypted but no master_key configured — disabling client")
+            api_key = ""
+        else:
+            from liberty.crypto import decrypt
+            try:
+                api_key = decrypt(api_key, master_key)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("ai.assistant: api_key decrypt failed (%s) — disabling client", exc)
+                api_key = ""
 
-        client = AsyncAnthropic(api_key=settings.api_key, timeout=settings.request_timeout)
+    if api_key:
+        from anthropic import AsyncAnthropic  # imported lazily so tests can run without it
+        client = AsyncAnthropic(api_key=api_key, timeout=settings.request_timeout)
 
     registry = ToolRegistry()
     if settings.connector_tools:

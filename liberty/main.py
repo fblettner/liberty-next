@@ -134,7 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
-        app.state.license = verify_license(settings.license.key)
+        app.state.license = verify_license(settings.license.key, master_key=settings.crypto.master_key)
         if app.state.license.error and settings.license.key.strip():
             logging.getLogger("liberty.licensing").warning("license: %s", app.state.license.error)
         app.state.connectors = load_connectors(
@@ -150,8 +150,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
         app.state.token_service = token_service
-        app.state.oidc = build_oidc(settings.oidc)
-        app.state.ai = build_assistant(settings.ai, app.state.connectors)
+        app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
+        app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
         # Log-handler attach against the running loop. The SIO server itself is
         # already initialised + registered with ASGIApp (below) — handlers fire
         # the moment a client connects.

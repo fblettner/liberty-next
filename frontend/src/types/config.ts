@@ -27,6 +27,9 @@ export interface PoolsDoc {
 export interface ConnectorsDoc {
   path: string
   connectors: Record<string, Record<string, unknown>>
+  /** Connector names the framework gates regardless of their on-disk `licensed` flag —
+   *  the editor uses this to lock the License checkbox so it can't be turned off. */
+  always_licensed?: string[]
 }
 
 /** One section of the shared dictionary (top-level OR nested under `connectors.<name>`). */

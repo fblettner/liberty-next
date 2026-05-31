@@ -91,14 +91,11 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:-liberty}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
       POSTGRES_DB: "${POSTGRES_DB:-liberty}"
+      # First-boot admin password — consumed once by init-db; safe to omit on re-runs
+      # (idempotent: existing admin user is not recreated). License key, Anthropic API
+      # key, and OIDC client_secret used to live here as env vars; they're now edited
+      # via Settings → App and stored encrypted in app.toml with the master key above.
       LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-}"
-      LIBERTY_LICENSE_KEY: "${LIBERTY_LICENSE_KEY:-}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-      # Optional — OIDC (set in .env if you have an identity provider):
-      LIBERTY_OIDC_ENABLED: "${LIBERTY_OIDC_ENABLED:-false}"
-      LIBERTY_OIDC_PROVIDER_URL: "${LIBERTY_OIDC_PROVIDER_URL:-}"
-      LIBERTY_OIDC_CLIENT_ID: "${LIBERTY_OIDC_CLIENT_ID:-}"
-      LIBERTY_OIDC_CLIENT_SECRET: "${LIBERTY_OIDC_CLIENT_SECRET:-}"
     volumes:
       - liberty-config:/app/config
     networks:
@@ -210,7 +207,7 @@ services:
     depends_on:
       - pg
     environment:
-      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@example.com}"
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@liberty.fr}"
       PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:?PGADMIN_PASSWORD required}"
       PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
       PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"

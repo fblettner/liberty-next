@@ -170,6 +170,9 @@ export default function ConnectorsBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Connector names the framework hardcodes as licensed — checkbox locked in the editor;
+  // the loader gates these regardless of what's on disk (see liberty/licensing/__init__.py).
+  const [alwaysLicensed, setAlwaysLicensed] = useState<Set<string>>(new Set())
 
   const load = () => {
     setError(null); setStatus(null)
@@ -184,6 +187,7 @@ export default function ConnectorsBuilder() {
     ])
       .then(([s, d, dd, p]) => {
         setSchemas(s); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
+        setAlwaysLicensed(new Set(d.always_licensed ?? []))
         setDictionary(dd.dictionary); setDictOriginal(JSON.stringify(dd.dictionary))
         // Keep the current selection across reloads; on first open default to the workspace's
         // selected app (when it's a connector here), else the first connector.
@@ -1017,12 +1021,26 @@ export default function ConnectorsBuilder() {
               {/* Settings tab — connector-wide config (pool / licensed / max_rows). ``type`` is the
                   discriminator: set at creation, fixed after, and already shown next to the
                   connector name in the header — so it's not editable here. Clone / Rename / Delete
-                  live at the top-right of this panel. */}
+                  live at the top-right of this panel. For always-licensed connectors the
+                  ``licensed`` checkbox is dropped from the form and a locked banner replaces it —
+                  the loader gates these regardless of the on-disk flag, so making it look editable
+                  would be a lie. */}
               {isSql && mode === 'settings' && selConn && selSchema && (() => {
-                const fieldKeys = ['pool', 'show_in_switcher', 'home', 'licensed', 'max_rows']
+                const locked = sel != null && alwaysLicensed.has(sel)
+                const fieldKeys = locked
+                  ? ['pool', 'show_in_switcher', 'home', 'max_rows']
+                  : ['pool', 'show_in_switcher', 'home', 'licensed', 'max_rows']
                 const settingsSchema = pickSchemaProperties(selSchema, fieldKeys)
                 return (
                   <SqlConnectorContext.Provider value={sel ?? undefined}>
+                    {locked && (
+                      <Banner $tone="info">
+                        {t(
+                          'settings.connectors.alwaysLicensed',
+                          'License: required (this connector is always licensed — the checkbox is locked).',
+                        )}
+                      </Banner>
+                    )}
                     <SchemaForm
                       schema={settingsSchema}
                       defs={allDefs}
@@ -1030,6 +1048,10 @@ export default function ConnectorsBuilder() {
                       onChange={(v: Record<string, unknown>) => {
                         const patch: Record<string, unknown> = {}
                         for (const k of fieldKeys) patch[k] = v[k]
+                        // Keep ``licensed`` pinned to true for locked connectors — the backend
+                        // enforces this on save too, but mirroring it client-side avoids a
+                        // misleading "unsaved" badge when the user hasn't actually changed anything.
+                        if (locked) patch.licensed = true
                         update(sel!, { ...selConn, ...patch })
                       }}
                     />

@@ -43,7 +43,7 @@ enabled = false
 #   Okta:      https://<org>.okta.com/.well-known/openid-configuration
 discovery_url = ""
 client_id = ""
-client_secret = "${OIDC_CLIENT_SECRET}"
+client_secret = ""               # set via Settings → OIDC (encrypted at rest)
 scopes = "openid email profile"
 username_claim = "preferred_username"   # the ID-token claim used as the local username — OneLogin/Auth0/Okta often have no `preferred_username`; use "email" (or "sub") there
 email_claim = "email"
@@ -57,6 +57,7 @@ session_secret = ""              # falls back to jwt_secret if empty
 # interoperable. Always provide it via the LIBERTY_MASTER_KEY env var — never hard-code the
 # key here. Connector auth fields prefixed "ENC:" are decrypted at runtime with this key;
 # `liberty-crypto encrypt|decrypt` and `from liberty.crypto import encrypt, decrypt` use it too.
+frontend_redirect = ""
 [crypto]
 master_key = "${LIBERTY_MASTER_KEY}"
 
