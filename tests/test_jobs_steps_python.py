@@ -120,6 +120,21 @@ def needs_settings(*, settings, label: str):
     return {"label": label, "got_settings": settings is not None}
 
 
+# Used by the op_kwargs coercion tests — TOML / UI saves are stringly-typed so the
+# executor must coerce ``"1"`` to ``1`` against the int annotation. Without that,
+# this signature blows up at asyncpg with ``DataError: 'str' object cannot be
+# interpreted as an integer`` much later in the run.
+def typed_kwargs(*, apps_id: int, enabled: bool = False, ratio: float = 1.0, label: str = ""):
+    return {"apps_id": apps_id, "enabled": enabled, "ratio": ratio, "label": label,
+            "apps_id_type": type(apps_id).__name__,
+            "enabled_type": type(enabled).__name__,
+            "ratio_type": type(ratio).__name__}
+
+
+def typed_optional(*, apps_id: int | None = None):
+    return {"apps_id": apps_id, "type": type(apps_id).__name__}
+
+
 # --------------------------------------------------------------------------- #
 # resolve + dispatch
 # --------------------------------------------------------------------------- #
@@ -255,6 +270,78 @@ async def test_op_kwargs_can_override_injection(registry) -> None:
     # needs_connectors asserts connectors is not None — sentinel passes that
     # and the function does x*2.
     assert res.rows_affected == 10
+
+
+# --------------------------------------------------------------------------- #
+# op_kwargs coercion against the callable's annotations
+# --------------------------------------------------------------------------- #
+# Regression net for the "apps_id = '1' → asyncpg DataError" bug: TOML / UI
+# saves store every op_kwargs value as a string; the executor coerces to the
+# annotated type so callables that declare ``apps_id: int`` actually receive
+# an int. Without these tests we'd silently re-introduce the cast loss next
+# time someone refactors _build_kwargs.
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_coerced_str_to_int(registry) -> None:
+    """The headline regression case — stringly-typed apps_id from TOML."""
+    res = await PythonStepExecutor(registry).execute(
+        _step(callable=f"{_MOD}:typed_kwargs", op_kwargs={"apps_id": "1"}),
+        _ctx(),
+    )
+    assert res.extras["apps_id"] == 1
+    assert res.extras["apps_id_type"] == "int"
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_coerced_str_to_bool_and_float(registry) -> None:
+    """bool/float coercion — same root cause, different annotations."""
+    res = await PythonStepExecutor(registry).execute(
+        _step(callable=f"{_MOD}:typed_kwargs",
+              op_kwargs={"apps_id": "42", "enabled": "true", "ratio": "0.5"}),
+        _ctx(),
+    )
+    assert res.extras == {
+        "apps_id": 42, "enabled": True, "ratio": 0.5, "label": "",
+        "apps_id_type": "int", "enabled_type": "bool", "ratio_type": "float",
+    }
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_coerced_through_optional(registry) -> None:
+    """Optional[int] still unwraps to int — UI never produces actual None for
+    a populated field, but TOML can carry an explicit empty / null."""
+    res = await PythonStepExecutor(registry).execute(
+        _step(callable=f"{_MOD}:typed_optional", op_kwargs={"apps_id": "7"}),
+        _ctx(),
+    )
+    assert res.extras == {"apps_id": 7, "type": "int"}
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_already_typed_passes_through(registry) -> None:
+    """Existing TOML / pre-coerced values aren't re-touched."""
+    res = await PythonStepExecutor(registry).execute(
+        _step(callable=f"{_MOD}:typed_kwargs",
+              op_kwargs={"apps_id": 3, "enabled": False, "ratio": 2.5}),
+        _ctx(),
+    )
+    assert res.extras["apps_id"] == 3 and res.extras["apps_id_type"] == "int"
+    assert res.extras["enabled"] is False and res.extras["ratio"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_op_kwargs_uncoercible_raises_step_failed(registry) -> None:
+    """A garbage value (str that's not a number, for an int slot) fails LOUD
+    in _build_kwargs with the param name + offending value — clearer than the
+    downstream asyncpg DataError we'd otherwise see."""
+    with pytest.raises(StepFailed) as exc:
+        await PythonStepExecutor(registry).execute(
+            _step(callable=f"{_MOD}:typed_kwargs", op_kwargs={"apps_id": "not-a-number"}),
+            _ctx(),
+        )
+    msg = str(exc.value)
+    assert "apps_id" in msg and "not-a-number" in msg
 
 
 # --------------------------------------------------------------------------- #

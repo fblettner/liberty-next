@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
-import { Input, Select, Button, Tag, StringListEditor, SearchSelect, type SearchSelectOption } from '../../common'
+import { Input, Select, Button, Checkbox, Tag, StringListEditor, SearchSelect, type SearchSelectOption } from '../../common'
 import { api } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
@@ -125,12 +125,23 @@ export interface ParamKeySpec {
   label: string
   description?: string
   widget: ParamWidget
+  /** Native type the value is serialized as. Without this, the editor stringifies
+   *  every value on save and a callable annotated ``int`` receives ``"1"`` — the
+   *  regression that motivated this field. ``'string'`` (the default) preserves
+   *  the historical behaviour. Server-side ``_build_kwargs`` coerces too, so this
+   *  is the cosmetic / disk-shape line of defence. */
+  type?: 'string' | 'int' | 'float' | 'bool'
 }
 
 export const JOB_PARAM_CATALOG: ParamKeySpec[] = [
   { key: 'apps_id', label: 'apps_id',
     description: 'Target application id (security-* / database-* / out-* jobs read this).',
-    widget: { type: 'text', placeholder: 'e.g. NOMASX1' } },
+    // Numeric: the python steps annotate ``apps_id: int`` and asyncpg refuses a string
+    // bind value. ``type: 'int'`` makes the editor save an int (not "1") so the disk
+    // shape matches the callable contract. Server-side _build_kwargs coerces too as
+    // a backstop for legacy TOML.
+    type: 'int',
+    widget: { type: 'text', placeholder: 'e.g. 1' } },
   { key: 'source_connector', label: 'source_connector',
     description: 'SQL connector the python step reads from.',
     widget: { type: 'connector' } },
@@ -163,27 +174,35 @@ export function KeyValueEditor({ value, onChange, schema, sqlConnectors }: {
 }) {
   const { t } = useTranslation()
   const entries = Object.entries(value ?? {})
-  const setEntry = (i: number, k: string, v: string) => {
+  // Value is ``unknown`` (not string) so typed params (int / bool / float) keep their
+  // native type all the way through to onChange. Without this, every edit round-tripped
+  // through String(...) and the next save serialized 1 as "1" — exactly the regression
+  // that broke apps_id.
+  const setEntry = (i: number, k: string, v: unknown) => {
     const next = entries.map(([ek, ev], idx) => (idx === i ? [k, v] : [ek, ev])) as [string, unknown][]
     onChange(Object.fromEntries(next))
   }
   const removeEntry = (i: number) => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))
   const addCustom = () => onChange({ ...value, '': '' })
+  const specFor = (key: string): ParamKeySpec | undefined => schema?.find((s) => s.key === key)
   const addPredefined = (key: string) => {
     if (key in (value ?? {})) return                     // already present — no-op
-    onChange({ ...value, [key]: '' })
+    // Initial value matches the spec's declared type so the first save preserves it
+    // (e.g. apps_id added with no edit lands on disk as null, not "").
+    const spec = specFor(key)
+    const init: unknown = spec?.type === 'bool' ? false : spec?.type ? null : ''
+    onChange({ ...value, [key]: init })
   }
-  const specFor = (key: string) => schema?.find((s) => s.key === key)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {entries.map(([k, v], i) => (
         <KvRow key={i}>
           <Input placeholder="key" value={k}
-            onChange={(e) => setEntry(i, e.target.value, String(v ?? ''))}
+            onChange={(e) => setEntry(i, e.target.value, v)}
             disabled={!!specFor(k)} />
           <ParamValueCell
             spec={specFor(k)}
-            value={String(v ?? '')}
+            value={v}
             onChange={(nv) => setEntry(i, k, nv)}
             siblings={value ?? {}}
             sqlConnectors={sqlConnectors ?? []}
@@ -208,23 +227,56 @@ export function KeyValueEditor({ value, onChange, schema, sqlConnectors }: {
 }
 
 // Renders the right value widget for a predefined param. Plain text fallback when the key
-// isn't in the catalog (operator typed a custom key).
+// isn't in the catalog (operator typed a custom key). The value flows in/out as ``unknown``
+// so typed params (int / float / bool) keep their native type through the round trip —
+// HTML inputs still need a string for display, so we coerce at the boundary here, not
+// in the editor's state.
 function ParamValueCell({
   spec, value, onChange, siblings, sqlConnectors,
 }: {
   spec: ParamKeySpec | undefined
-  value: string
-  onChange: (v: string) => void
+  value: unknown
+  onChange: (v: unknown) => void
   siblings: Record<string, unknown>
   sqlConnectors: ConnectorMeta[]
 }) {
+  // Typed cells handle their own input renderer; only string-shaped paths use this.
+  const strValue = value == null ? '' : String(value)
+
+  // Typed inputs — declared on the spec, render the natural widget and emit native types.
+  // ``apps_id: int`` shows as a number input; an empty field saves null so the operator
+  // can't accidentally land "" on disk (asyncpg would then crash with an even worse error).
+  if (spec?.type === 'int' || spec?.type === 'float') {
+    const isInt = spec.type === 'int'
+    return (
+      <Input
+        type="number"
+        step={isInt ? '1' : 'any'}
+        placeholder={spec.widget.type === 'text' ? spec.widget.placeholder ?? 'value' : 'value'}
+        value={strValue}
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw === '') { onChange(null); return }
+          const n = isInt ? parseInt(raw, 10) : parseFloat(raw)
+          onChange(Number.isFinite(n) ? n : raw)         // fall back to raw so user sees what they typed
+        }}
+      />
+    )
+  }
+  if (spec?.type === 'bool') {
+    return (
+      <Checkbox checked={!!value} onChange={(c) => onChange(c)} label="" />
+    )
+  }
+
+  // Untyped (legacy / custom keys): the string-shaped path.
   if (!spec) {
-    return <Input placeholder="value" value={value} onChange={(e) => onChange(e.target.value)} />
+    return <Input placeholder="value" value={strValue} onChange={(e) => onChange(e.target.value)} />
   }
   const widget = spec.widget
   if (widget.type === 'connector') {
     return (
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      <Select value={strValue} onChange={(e) => onChange(e.target.value)}>
         <option value="">—</option>
         {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
       </Select>
@@ -232,17 +284,17 @@ function ParamValueCell({
   }
   if (widget.type === 'connector_schema') {
     const connector = String(siblings[widget.dependsOn] ?? '')
-    return <SchemaSelect connector={connector || null} value={value} onChange={onChange} />
+    return <SchemaSelect connector={connector || null} value={strValue} onChange={(v) => onChange(v)} />
   }
   if (widget.type === 'select') {
     return (
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      <Select value={strValue} onChange={(e) => onChange(e.target.value)}>
         <option value="">—</option>
         {widget.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
       </Select>
     )
   }
-  return <Input placeholder={widget.placeholder ?? 'value'} value={value} onChange={(e) => onChange(e.target.value)} />
+  return <Input placeholder={widget.placeholder ?? 'value'} value={strValue} onChange={(e) => onChange(e.target.value)} />
 }
 
 // Lazy schema dropdown — fetches schemas for the picked connector once, caches via
