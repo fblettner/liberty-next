@@ -31,13 +31,10 @@
 # Lets you do everything in one go:
 #   ./install.sh full --apps ./liberty_apps-7.0.1.whl --license-key <jwt>
 #
-# Master key (encrypts/decrypts ENC: values in connectors.toml etc.):
-#   --master-key <value>        # use this value instead of a freshly-generated random.
-# Without it, install.sh generates a random 32-char master key (good for greenfield
-# installs). Use --master-key when you need to import data that was already encrypted
-# with a specific key (e.g. liberty-apps wheel's ENC: passwords, exports from another
-# install). Re-running install.sh with a new --master-key on an existing install
-# UPDATES .env + force-recreates liberty-next so the new value takes effect.
+# Master key (encrypts ENC: values in connectors.toml etc.) is always a fresh random
+# per-install — no flag to override. liberty-admin init-db writes [pools.default] with
+# the framework pg password encrypted with THIS install's key, so the value is unique
+# per customer (no shared-key security hole).
 #
 # TLS (full layout only — light has no Traefik):
 #   --ssl letsencrypt --domain <hostname> --email <addr>
@@ -81,7 +78,6 @@ IMAGE_TAG=""             # empty → defaults to 'latest' in the generated .env
 RESET="no"               # --reset → wipe volumes + .env before install
 APPS_WHEEL=""            # --apps <wheel> → run install-apps.sh after base install
 LICENSE_KEY=""           # --license-key <jwt> → forwarded to install-apps.sh
-MASTER_KEY=""            # --master-key <value> → set LIBERTY_MASTER_KEY in .env (else generated)
 SSL_MODE="none"          # --ssl none|letsencrypt|provided
 SSL_DOMAIN=""            # --domain  (letsencrypt only — public hostname)
 SSL_EMAIL=""             # --email   (letsencrypt only — ACME contact)
@@ -105,9 +101,6 @@ while [ $# -gt 0 ]; do
     --license-key)
       [ -z "${2:-}" ] && die "--license-key requires a value"
       LICENSE_KEY="$2"; shift 2 ;;
-    --master-key)
-      [ -z "${2:-}" ] && die "--master-key requires a value (use the value that encrypted your ENC: payloads)"
-      MASTER_KEY="$2"; shift 2 ;;
     --ssl)
       [ -z "${2:-}" ] && die "--ssl requires a value (none|letsencrypt|provided)"
       SSL_MODE="$2"; shift 2 ;;
@@ -301,40 +294,11 @@ if [ -f "$ENV_FILE" ]; then
     printf '\n# Added by install.sh: pins compose to the right layout (no -f juggling).\nCOMPOSE_FILE=%s\n' "$COMPOSE_FILE_LINE" >> "$ENV_FILE"
   fi
 
-  # --master-key on an existing install: UPSERT the value in .env then force-recreate
-  # liberty-next so the new key actually reaches the running container. Plain
-  # ``docker compose up -d`` / ``docker restart`` does NOT re-evaluate env vars from .env
-  # for the same service spec — operators expecting it to "just work" get a stale value.
-  if [ -n "$MASTER_KEY" ]; then
-    if grep -qE '^LIBERTY_MASTER_KEY=' "$ENV_FILE"; then
-      sed -i.bak "s|^LIBERTY_MASTER_KEY=.*|LIBERTY_MASTER_KEY=${MASTER_KEY}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
-      info "Replaced LIBERTY_MASTER_KEY in .env with the operator-supplied value."
-    else
-      printf '\nLIBERTY_MASTER_KEY=%s\n' "$MASTER_KEY" >> "$ENV_FILE"
-      info "Added LIBERTY_MASTER_KEY to .env."
-    fi
-    if docker ps --format '{{.Names}}' | grep -qx liberty-next; then
-      info "Force-recreating liberty-next so the new master key takes effect…"
-      COMPOSE_FILE="$COMPOSE_FILE_LINE" docker compose up -d --force-recreate liberty-next
-      ok "liberty-next recreated with the new LIBERTY_MASTER_KEY."
-      warn "Note: any password you SAVED via the UI on the old key is now garbage — re-enter them via Settings → Pools / Connectors / Applications."
-      exit 0
-    fi
-  fi
 else
   info "Generating .env with random secrets…"
 
   LIBERTY_JWT_SECRET="$(gen_secret 48)"
-  # Master key: operator-supplied via --master-key wins; else generate a fresh random
-  # one. Generated is the right answer for a greenfield install (no pre-encrypted data
-  # to read); supply --master-key when you need to decrypt content from elsewhere
-  # (liberty-apps wheel's ENC: passwords, an export from another install, …).
-  if [ -n "$MASTER_KEY" ]; then
-    LIBERTY_MASTER_KEY="$MASTER_KEY"
-    info "Using operator-supplied master key (--master-key)."
-  else
-    LIBERTY_MASTER_KEY="$(gen_secret 32)"
-  fi
+  LIBERTY_MASTER_KEY="$(gen_secret 32)"   # always per-install random — no override flag
   POSTGRES_PASSWORD="$(gen_secret 24)"
   PGADMIN_PASSWORD="$(gen_secret 16)"
   LIBERTY_ADMIN_PASSWORD="$(gen_secret 16)"

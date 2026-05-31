@@ -15,7 +15,11 @@
 # [auth] backend = "toml" no DB connection is needed at startup; this just falls back to a local
 # SQLite file so the app runs out of the box. Set LIBERTY_DB_URL to point it at Postgres.
 [pools.default]
-url = "${LIBERTY_DB_URL:-sqlite+aiosqlite:///./liberty.db}"
+# Empty url → ``liberty-admin init-db`` seeds it on first boot:
+#   POSTGRES_PASSWORD set → pg URL + password encrypted with LIBERTY_MASTER_KEY
+#   POSTGRES_PASSWORD unset → sqlite (pipx / dev)
+# Set a value to opt out (init-db preserves operator-configured values).
+url = ""
 pool_pre_ping = true
 
 # ── example: a Postgres app pool + its SQL connector ──────────────────────────────────

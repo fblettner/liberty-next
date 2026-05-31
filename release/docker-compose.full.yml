@@ -86,8 +86,11 @@ services:
     environment:
       LIBERTY_JWT_SECRET: "${LIBERTY_JWT_SECRET:?LIBERTY_JWT_SECRET is required — see .env.example}"
       LIBERTY_MASTER_KEY: "${LIBERTY_MASTER_KEY:?LIBERTY_MASTER_KEY is required — see .env.example}"
-      # Framework DB on the Postgres service — uses the asyncpg driver.
-      LIBERTY_DB_URL: "postgresql+asyncpg://${POSTGRES_USER:-liberty}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@pg:5432/${POSTGRES_DB:-liberty}"
+      # Pg credentials for liberty-admin init-db, which writes [pools.default] in
+      # connectors.toml with an encrypted password (per-install ciphertext).
+      POSTGRES_USER: "${POSTGRES_USER:-liberty}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
+      POSTGRES_DB: "${POSTGRES_DB:-liberty}"
       LIBERTY_ADMIN_PASSWORD: "${LIBERTY_ADMIN_PASSWORD:-}"
       LIBERTY_LICENSE_KEY: "${LIBERTY_LICENSE_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"

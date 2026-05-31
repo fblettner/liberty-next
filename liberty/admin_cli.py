@@ -77,7 +77,68 @@ def _print(obj) -> None:
 # --------------------------------------------------------------------------- #
 
 
+async def _seed_default_pool(ctx: _Context) -> bool:
+    """If ``[pools.default]`` in connectors.toml has an empty url, write a working
+    block. Picks the values based on what's in the environment:
+      - POSTGRES_PASSWORD set → postgres url + password encrypted with LIBERTY_MASTER_KEY
+      - POSTGRES_PASSWORD unset → sqlite (pipx / dev)
+    Preserves operator-set values (does NOT overwrite a non-empty url).
+    Returns True if it wrote anything (caller reloads the registry).
+    """
+    from pathlib import Path
+
+    import tomlkit
+
+    config_path = Path(ctx.settings.connectors.config_path)
+    if not config_path.exists():
+        return False
+
+    doc = tomlkit.loads(config_path.read_text())
+    pools = doc.get("pools") or tomlkit.table()
+    existing = pools.get("default") or {}
+    if existing.get("url"):
+        return False     # operator configured it (or already seeded)
+
+    new_table = tomlkit.table()
+    pg_pw = os.environ.get("POSTGRES_PASSWORD", "").strip()
+    if pg_pw:
+        master_key = ctx.settings.crypto.master_key
+        if not master_key:
+            print(
+                "[init-db] POSTGRES_PASSWORD set but LIBERTY_MASTER_KEY missing — "
+                "can't encrypt; pools.default left empty.",
+                file=sys.stderr,
+            )
+            return False
+        from liberty.crypto import encrypt
+        pg_user = os.environ.get("POSTGRES_USER", "liberty")
+        pg_host = os.environ.get("POSTGRES_HOST", "pg")
+        pg_port = os.environ.get("POSTGRES_PORT", "5432")
+        pg_db   = os.environ.get("POSTGRES_DB",   "liberty")
+        new_table["url"] = f"postgresql+asyncpg://{pg_user}@{pg_host}:{pg_port}/{pg_db}"
+        new_table["password"] = encrypt(pg_pw, master_key)
+        new_table["dialect"] = "postgresql"
+        new_table["pool_size"] = 5
+    else:
+        new_table["url"] = "sqlite+aiosqlite:///./liberty.db"
+        new_table["pool_pre_ping"] = True
+
+    if "pools" not in doc:
+        doc["pools"] = pools
+    pools["default"] = new_table
+    config_path.write_text(tomlkit.dumps(doc))
+
+    # Reload the registry so the rest of init-db (JobDatabase, etc.) sees the new pool.
+    from liberty.connectors import load_connectors
+    await ctx.registry.aclose()
+    ctx.registry = load_connectors(config_path)
+    return True
+
+
 async def _cmd_init_db(ctx: _Context, args: argparse.Namespace) -> int:
+    seeded = await _seed_default_pool(ctx)
+    if seeded:
+        print(f"[init-db] seeded [pools.default] in {ctx.settings.connectors.config_path}")
     await ctx.backend.ready()
     await ctx.backend.get_or_create_role(ADMIN_ROLE, permissions=["*"], description="Full access (wildcard).")
     # Create the nomaflow run-history tables on the same pool (idempotent — create_all
