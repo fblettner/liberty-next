@@ -13,21 +13,26 @@
 #
 # .env must define:
 #   APPS_HOST_PATH      — absolute host path to your liberty-apps clone
-#   LIBERTY_LICENSE_KEY — RS256 JWT license (without it the licensed connectors won't load)
+# License key is set via Settings → App → License in the UI after install
+# (encrypted at rest in app.toml with the install master key).
 
 services:
   liberty-next:
     volumes:
-      # Bind-mount the host's liberty-apps content into the container, READ-WRITE.
-      # Every UI 'Save' in Settings → Pools / Theme / Screens / etc. rewrites a TOML
-      # file under /apps/config/; without :rw the saves fail with 500 (Errno 30,
-      # Read-only file system). The container runs as root so on-host file ownership
-      # shifts to root — a known trade-off, far better than crippling the UI.
-      #
-      # If you absolutely don't want UI writes back to the apps dir (e.g. apps content
-      # is managed exclusively by git), add ``:ro`` here AND set
-      # ``[admin] config_editable = false`` in app.toml so the UI hides Save buttons.
-      - ${APPS_HOST_PATH:?APPS_HOST_PATH not set — see install-apps.sh or set it in .env}:/apps:ro
+      # Bind-mount the host's liberty-apps content into the container READ-WRITE
+      # (default, NO ``:ro`` suffix). Two paths absolutely require write access:
+      #   1. ``liberty-admin init-db`` seeds ``[pools.default]`` into
+      #      ``/apps/config/connectors.toml`` with the install's encrypted pg password
+      #      — without write, init-db fails with Errno 30 and the install jobs cascade
+      #      (no default pool → no nomaflow → no deploy-databases).
+      #   2. Every UI 'Save' in Settings → Pools / Theme / Screens / etc. rewrites a
+      #      TOML file under ``/apps/config/``; without write the saves 500.
+      # The container runs as root so on-host file ownership shifts to root — a known
+      # trade-off, far better than crippling the installer + UI. If you absolutely don't
+      # want either path (apps content fully managed by git), add ``:ro`` here, set
+      # ``[admin] config_editable = false`` in app.toml so the UI hides Save buttons, and
+      # pre-seed ``[pools.default]`` into the apps clone yourself.
+      - ${APPS_HOST_PATH:?APPS_HOST_PATH not set — see install-apps.sh or set it in .env}:/apps
     environment:
       # Re-route every per-section TOML default to /apps/<file>.toml (see liberty/config.py).
       LIBERTY_APPS_DIR: /apps/config

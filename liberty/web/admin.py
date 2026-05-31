@@ -1120,12 +1120,12 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
 
-    # Live-apply: reload settings from disk and rebuild the three runtime objects that
-    # the new values feed into — license, AI assistant, OIDC client. Their next request
-    # sees the new key without a server restart. Uvicorn-bound [app] fields (host / port /
-    # log_level) are the only thing that still needs a hard restart; everything else
-    # (app.name / default_language / hot_reload) is re-read off the live settings on
-    # demand, so it picks up the new value naturally.
+    # Live-apply: reload settings from disk and rebuild the runtime objects the new values
+    # feed into — license, connector registry (only if the license key changed), AI
+    # assistant, OIDC client. Their next request sees the new key without a server restart.
+    # Uvicorn-bound [app] fields (host / port / log_level) are the only thing that still
+    # needs a hard restart; everything else (app.name / default_language / hot_reload) is
+    # re-read off the live settings on demand, so it picks up the new value naturally.
     from liberty.ai.assistant import build_assistant
     from liberty.auth.oidc import build_oidc
 
@@ -1136,10 +1136,40 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         or new_settings.app.port != old_settings.app.port
         or new_settings.app.log_level != old_settings.app.log_level
     )
+    license_changed = new_settings.license.key != old_settings.license.key
     request.app.state.settings = new_settings
-    request.app.state.license = verify_license(
+    new_license = verify_license(
         new_settings.license.key, master_key=new_settings.crypto.master_key,
     )
+    request.app.state.license = new_license
+
+    # When the license key changed, rebuild the connector registry — licensed-connector
+    # filtering happens INSIDE load_connectors (see liberty/connectors/registry.py), so
+    # just reassigning app.state.license isn't enough: licensed connectors that were
+    # filtered out at startup wouldn't reappear, and ones the new key no longer covers
+    # would still be loaded. The auth backend rebinds too (DB-backend auth uses
+    # connectors.pools). Menus/screens/charts/dashboards/jobs don't depend on the
+    # license — leave them be (POST /admin/reload is still the path for a full reload).
+    if license_changed:
+        old_conns = request.app.state.connectors
+        try:
+            new_conns = load_connectors(
+                new_settings.connectors.config_path,
+                dictionary_path=new_settings.connectors.dictionary_path,
+                master_key=new_settings.crypto.master_key,
+                license=new_license,
+                default_language=new_settings.app.default_language,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface as 500 so the UI shows the cause
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Saved {path}, but rebuilding connectors with the new license failed: {exc}",
+            ) from exc
+        request.app.state.connectors = new_conns
+        request.app.state.auth_backend = build_auth_backend(new_settings, new_conns.pools)
+        await old_conns.aclose()
+
+    # Rebuild the AI assistant AFTER any connector swap — its tools bind to the registry.
     old_ai = getattr(request.app.state, "ai", None)
     new_ai = build_assistant(
         new_settings.ai, request.app.state.connectors,
