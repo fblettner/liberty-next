@@ -48,7 +48,11 @@ class _Context:
         # ``nomajde`` / etc. on sys.path. No-op when LIBERTY_APPS_DIR is unset.
         ensure_plugins_on_sys_path()
         connectors_path = args.config_connectors or settings.connectors.config_path
-        self.registry = load_connectors(connectors_path)  # for the DB backend's pool; harmless for TOML
+        # Pass master_key so the registry can decrypt ENC: password fields on pool
+        # configs (e.g. the [pools.default] block init-db writes — encrypted with
+        # this same key). Without it, the registry silently uses ENC:... as the
+        # literal password and pg auth fails.
+        self.registry = load_connectors(connectors_path, master_key=settings.crypto.master_key)
         self.backend = build_auth_backend(settings, self.registry.pools)
 
     async def aclose(self) -> None:
@@ -129,9 +133,12 @@ async def _seed_default_pool(ctx: _Context) -> bool:
     config_path.write_text(tomlkit.dumps(doc))
 
     # Reload the registry so the rest of init-db (JobDatabase, etc.) sees the new pool.
+    # MUST pass master_key — the newly-written pools.default carries an ENC: password
+    # encrypted with this key; without it, the registry would feed the literal "ENC:..."
+    # string to asyncpg and pg would reject auth.
     from liberty.connectors import load_connectors
     await ctx.registry.aclose()
-    ctx.registry = load_connectors(config_path)
+    ctx.registry = load_connectors(config_path, master_key=ctx.settings.crypto.master_key)
     return True
 
 
