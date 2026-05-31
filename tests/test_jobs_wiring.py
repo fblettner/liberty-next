@@ -37,6 +37,7 @@ from liberty.jobs.wiring import (
     NomaflowComponents,
     SioJobBroadcaster,
     build_executors,
+    refresh_executors,
     build_nomaflow,
     hot_reload_registry,
     shutdown_nomaflow,
@@ -82,6 +83,55 @@ def test_build_executors_covers_implemented_step_types(connectors) -> None:
         StepType.LDAP_SYNC,
         StepType.HTTP,
     }
+
+
+# --------------------------------------------------------------------------- #
+# refresh_executors — rebuild after a connector hot-reload
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_refresh_executors_replaces_runner_executors(connectors, tmp_path) -> None:
+    """Regression for the "UI works, jobs fail" install bug: when the framework
+    hot-reloads connectors.toml (e.g. after deploy-databases persists a fresh
+    pool password), app.state.connectors swaps to a new registry but the
+    runner's step executors still hold the OLD registry — jobs fail with the
+    stale credentials. refresh_executors must replace every per-step-type
+    executor on the runner so the next job pick up the new registry."""
+    from liberty.connectors.config import ConnectorsFile, PoolConfig, SqlConnectorConfig
+    from liberty.connectors.registry import ConnectorRegistry
+
+    jobs_toml = tmp_path / "jobs.toml"
+    jobs_toml.write_text("")
+    from liberty.jobs.db import JobDatabase
+    await JobDatabase(connectors.pools, "default").create_schema()
+
+    components = await build_nomaflow(_settings(jobs_toml), connectors)
+    try:
+        # Snapshot the original executors — keep a copy of the references so we
+        # can verify they were REPLACED (not mutated in place).
+        before = dict(components.runner._executors)  # noqa: SLF001 — test inspection
+
+        # Build a fresh registry (simulates what _reload_connectors does after
+        # a connectors.toml edit). Has to be valid even if minimal.
+        cfg = ConnectorsFile(
+            pools={"default": PoolConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'new.db'}")},
+            connectors={"db": SqlConnectorConfig(type="sql", pool="default", queries=[])},
+        )
+        new_registry = ConnectorRegistry(cfg)
+        try:
+            refresh_executors(components, connectors=new_registry, settings=_settings(jobs_toml))
+            after = dict(components.runner._executors)  # noqa: SLF001
+            # Each step type's executor is a NEW object (not the same instance as before).
+            for st in (StepType.SQL_QUERY, StepType.SQL_COPY, StepType.PYTHON,
+                       StepType.LDAP_SYNC, StepType.HTTP):
+                assert after[st] is not before[st], f"{st.value} executor not refreshed"
+            # And the python step executor's cached connectors is the NEW registry.
+            assert after[StepType.PYTHON]._connectors is new_registry  # noqa: SLF001
+        finally:
+            await new_registry.aclose()
+    finally:
+        await shutdown_nomaflow(components)
 
 
 # --------------------------------------------------------------------------- #

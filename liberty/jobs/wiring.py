@@ -126,6 +126,31 @@ def build_executors(
     return out
 
 
+def refresh_executors(
+    components: "NomaflowComponents",
+    *,
+    connectors: ConnectorRegistry,
+    settings: Settings,
+) -> None:
+    """Rebuild the runner's step executors against a NEW ConnectorRegistry.
+
+    The step executors capture ``connectors`` at construction time
+    (``PythonStepExecutor._connectors`` etc.) — after a connector hot-reload
+    swaps ``app.state.connectors``, the executors still hold the OLD reference,
+    so jobs run against the stale registry. Symptom: UI queries work (they read
+    ``app.state.connectors``) but jobs that touch the same pool fail with the
+    pre-reload credentials. This helper rebuilds the per-step-type executors
+    and atomically swaps them onto the runner.
+
+    Called by ``POST /admin/reload`` and the connectors.toml hot-reload watcher
+    (``liberty.web.hot_reload._reload_connectors``). The retention sweep + scheduler
+    don't need rebuilding — they look up pools by name through the new registry
+    on every fire."""
+    new = build_executors(connectors, settings=settings, registry=components.registry)
+    for step_type, executor in new.items():
+        components.runner.add_executor(step_type, executor)
+
+
 async def build_nomaflow(
     settings: Settings,
     connectors: ConnectorRegistry,

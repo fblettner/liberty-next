@@ -232,6 +232,18 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
         default_language=settings.app.default_language,
     )
     app.state.connectors = new
+
+    # Rebuild the nomaflow executors against the new registry — they cache a
+    # ``connectors`` reference at construction time, so a swap here is invisible
+    # to jobs without this step. Symptom: UI queries pick up the new credentials
+    # (they read app.state.connectors) but jobs touching the same pool still use
+    # the OLD registry and fail. Only matters when [app] hot_reload=true; the
+    # /admin/reload manual path does the equivalent.
+    jobs_components = getattr(app.state, "jobs", None)
+    if jobs_components is not None:
+        from liberty.jobs.wiring import refresh_executors
+        refresh_executors(jobs_components, connectors=new, settings=settings)
+
     if live_pools == on_disk_sig:
         await old.aclose()
     # Else: deliberately leak the old registry's engines; they'll be GC'd when in-flight
