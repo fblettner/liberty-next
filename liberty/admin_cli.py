@@ -107,9 +107,35 @@ async def _seed_default_pool(ctx: _Context) -> bool:
 
     raw_doc = tomllib.loads(config_path.read_text())
     resolved = substitute_env(raw_doc)
-    existing_url = ((resolved.get("pools") or {}).get("default") or {}).get("url") or ""
-    if existing_url.strip():
-        return False     # operator configured it (or already seeded)
+    existing = (resolved.get("pools") or {}).get("default") or {}
+    existing_url = (existing.get("url") or "").strip()
+    if existing_url:
+        # Stale-from-previous-install detection. ``--reset`` wipes the named volumes
+        # but NOT the /apps bind mount (that's the host filesystem) — so a previous
+        # install's [pools.default] survives, including its ENC: password encrypted
+        # with the OLD master key. The new install's master_key can't decrypt it →
+        # asyncpg gets the literal "ENC:..." as the password → InvalidPasswordError.
+        # When we detect this case, overwrite with a fresh seed. An operator who
+        # genuinely manages this pool by hand wouldn't be using an ENC: password
+        # without a matching master key.
+        existing_pw = (existing.get("password") or "").strip()
+        master_key = ctx.settings.crypto.master_key
+        if existing_pw.startswith("ENC:") and master_key:
+            from liberty.crypto import CryptoError, decrypt
+            try:
+                decrypt(existing_pw, master_key)
+            except CryptoError:
+                print(
+                    "[init-db] pools.default has an ENC: password that won't decrypt "
+                    "with the current master_key (stale from a previous install on the "
+                    "same /apps mount) — re-seeding.",
+                    file=sys.stderr,
+                )
+                # Fall through to the seeding block below.
+            else:
+                return False
+        else:
+            return False
 
     doc = tomlkit.loads(config_path.read_text())
     pools = doc.get("pools") or tomlkit.table()

@@ -80,6 +80,98 @@ def test_init_db_password_from_env(env, capsys, monkeypatch) -> None:
     assert _authenticate(db_url, "admin", "from-env-pw") is not None
 
 
+# --------------------------------------------------------------------------- #
+# _seed_default_pool — stale-master-key detection (regression for the
+# "--reset wipes named volumes but /apps bind mount survives → old ENC: password
+# can't decrypt with the new install's master_key" install failure).
+# --------------------------------------------------------------------------- #
+
+
+def _seed_ctx(tmp_path, master_key: str, connectors_text: str):
+    """Build a minimal _Context wired against connectors.toml on disk.
+
+    Pin ``[connectors] config_path`` in app.toml — ``_seed_default_pool`` reads
+    that, not whatever override _Context() got via --config-connectors, so they
+    must agree (otherwise the seed writes elsewhere than the registry reads)."""
+    from liberty.admin_cli import _Context
+    import argparse
+    conn_toml = tmp_path / "connectors.toml"
+    conn_toml.write_text(connectors_text)
+    app_toml = tmp_path / "app.toml"
+    app_toml.write_text(
+        '[auth]\nbackend = "db"\npool = "default"\n'
+        f'[crypto]\nmaster_key = "{master_key}"\n'
+        f'[connectors]\nconfig_path = "{conn_toml}"\n'
+    )
+    args = argparse.Namespace(
+        config_app=str(app_toml), config_connectors=str(conn_toml),
+    )
+    return _Context(args), conn_toml
+
+
+def test_seed_default_pool_reseeds_when_encpw_is_stale(tmp_path, monkeypatch) -> None:
+    """The headline regression: /apps survives --reset, the previous install's
+    ENC: password is still on disk encrypted with the OLD master key, the new
+    install can't decrypt → asyncpg gets the literal ENC:... and rejects auth.
+    The seed must detect this and re-seed with a fresh password."""
+    from liberty.admin_cli import _seed_default_pool
+    from liberty.crypto import decrypt, encrypt
+
+    old_key = "OLD-master-key-3zTvzr3p67VC61jmV54rIYu1545x4TlY"
+    new_key = "NEW-master-key-99999999999999999999999999999999"
+    stale_pw = encrypt("the-real-pg-password", old_key)
+
+    conn_text = (
+        '[pools.default]\n'
+        'url = "postgresql+asyncpg://liberty@pg:5432/liberty"\n'
+        f'password = "{stale_pw}"\n'
+        'dialect = "postgresql"\n'
+    )
+    monkeypatch.setenv("POSTGRES_PASSWORD", "fresh-pw-from-this-install")
+    monkeypatch.setenv("POSTGRES_USER", "liberty")
+    monkeypatch.setenv("POSTGRES_HOST", "pg")
+    monkeypatch.setenv("POSTGRES_DB", "liberty")
+    ctx, conn_toml = _seed_ctx(tmp_path, master_key=new_key, connectors_text=conn_text)
+    try:
+        seeded = asyncio.run(_seed_default_pool(ctx))
+    finally:
+        asyncio.run(ctx.aclose())
+
+    assert seeded is True, "should re-seed when the existing ENC: password won't decrypt"
+    # Verify the new password on disk decrypts cleanly with the NEW key.
+    import tomllib
+    doc = tomllib.loads(conn_toml.read_text())
+    new_pw = doc["pools"]["default"]["password"]
+    assert new_pw.startswith("ENC:")
+    assert decrypt(new_pw, new_key) == "fresh-pw-from-this-install"
+
+
+def test_seed_default_pool_skips_when_encpw_decrypts(tmp_path, monkeypatch) -> None:
+    """The healthy case: an existing [pools.default] whose ENC: password decrypts
+    cleanly with the current master key is left alone (idempotent re-run)."""
+    from liberty.admin_cli import _seed_default_pool
+    from liberty.crypto import encrypt
+
+    key = "matching-master-key-555555555555555555555555555"
+    pw_ciphertext = encrypt("real-pg-password", key)
+    conn_text = (
+        '[pools.default]\n'
+        'url = "postgresql+asyncpg://liberty@pg:5432/liberty"\n'
+        f'password = "{pw_ciphertext}"\n'
+        'dialect = "postgresql"\n'
+    )
+    monkeypatch.setenv("POSTGRES_PASSWORD", "should-not-be-written")
+    ctx, conn_toml = _seed_ctx(tmp_path, master_key=key, connectors_text=conn_text)
+    try:
+        seeded = asyncio.run(_seed_default_pool(ctx))
+    finally:
+        asyncio.run(ctx.aclose())
+
+    assert seeded is False
+    # File untouched — same ciphertext, same URL.
+    assert pw_ciphertext in conn_toml.read_text()
+
+
 def test_create_user_and_login(env, capsys) -> None:
     base, db_url = env
     _run(base, "init-db", capsys=capsys)
