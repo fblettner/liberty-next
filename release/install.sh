@@ -522,7 +522,11 @@ case "$LAYOUT" in
       echo "    (Lost it? docker exec liberty-next liberty-admin reset-admin-password)"
     fi
     echo
-    echo "  pgAdmin:    admin@liberty.fr / ${PGADMIN_PASSWORD}"
+    echo "  pgAdmin:        admin@liberty.fr / ${PGADMIN_PASSWORD}"
+    POSTGRES_PASSWORD_LINE=$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+    POSTGRES_USER_LINE=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- || true)
+    echo "  Postgres root:  ${POSTGRES_USER_LINE:-liberty} / ${POSTGRES_PASSWORD_LINE}"
+    echo "    (the licensed apps' nomasx1 + nomajde roles inherit this same password during deploy-databases)"
     ;;
 esac
 
