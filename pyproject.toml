@@ -1,6 +1,6 @@
 [project]
 name = "liberty-next"
-version = "7.0.15"
+version = "7.0.16"
 description = "Liberty Next — connector-driven low-code framework (SQL + API connectors, React admin UI, AI tool-use assistant, dependency-aware deployment packaging)"
 readme = "README.md"
 license = {text = "Open framework (free); licensed connectors sold separately — see repository"}
