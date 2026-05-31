@@ -204,8 +204,10 @@ ENV_FILE=".env"
 
 if [ "$RESET" = "yes" ]; then
   warn "--reset: tearing down stack + wiping data volumes (pg-data, pgadmin-data, portainer-data, liberty-data, liberty-config)…"
+  # NO -v on ``down`` — that would wipe ALL volumes including traefik-acme. We
+  # explicitly drop the data volumes by name below, leaving traefik-acme intact.
   for cf in docker-compose.full.yml docker-compose.light.yml; do
-    [ -f "$cf" ] && docker compose -f "$cf" down -v 2>/dev/null || true
+    [ -f "$cf" ] && docker compose -f "$cf" down 2>/dev/null || true
   done
   # In case the stack was never created with compose (e.g. swarm), drop volumes by name.
   # NOTE: traefik-acme is INTENTIONALLY excluded. Let's Encrypt has a hard limit of
