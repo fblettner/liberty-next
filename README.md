@@ -49,7 +49,8 @@ cd release
 ./install.sh full
 
 # 3. (Licensed customer) overlay the apps wheel — see release/README.md
-./install-apps.sh /path/to/liberty_apps-X.Y.Z.whl --license-key <jwt>
+./install-apps.sh /path/to/liberty_apps-X.Y.Z.whl
+# Set the license key after install via Settings → App → License (encrypted at rest in app.toml).
 ```
 
 The full deployment guide (TLS wiring, backups, upgrades, swarm, common ops) lives
@@ -72,9 +73,10 @@ liberty-next                      # → API + SPA on http://localhost:8000
 ```
 
 This gives you every CLI tool the package ships (`liberty-next`, `liberty-admin`,
-`liberty-license`, `liberty-crypto`) on the PATH, each one routed through the same
-isolated venv. Upgrade with `pipx upgrade liberty-next`; uninstall cleanly with
-`pipx uninstall liberty-next` (removes the venv + every shim, leaves nothing behind).
+`liberty-connectors`, `liberty-migrate`, `liberty-license`, `liberty-crypto`) on the PATH,
+each one routed through the same isolated venv. Upgrade with `pipx upgrade liberty-next`;
+uninstall cleanly with `pipx uninstall liberty-next` (removes the venv + every shim,
+leaves nothing behind).
 
 **Plain pip** (only when pipx isn't an option — make a venv yourself to avoid breaking
 system packages):
@@ -96,26 +98,47 @@ For a pipx install, do it manually:
 ```bash
 # 1. Inject the apps wheel into the SAME pipx venv as liberty-next
 #    (delivered to licensed customers as liberty_apps-X.Y.Z-py3-none-any.whl):
-pipx inject liberty-next /path/to/liberty_apps-7.0.1-py3-none-any.whl
+pipx inject liberty-next /path/to/liberty_apps-X.Y.Z-py3-none-any.whl
 
-# 2. Materialize the wheel's payload into a writable LIBERTY_APPS_DIR
+# 2. Persistent secrets — generate ONCE and put in ~/.bashrc / ~/.zshrc.
+#    Both must stay stable across restarts (rotating either breaks every encrypted
+#    secret in app.toml + connectors.toml).
+export LIBERTY_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n=+/')"
+export LIBERTY_MASTER_KEY="$(openssl rand -base64 32 | tr -d '\n=+/')"
+
+# 3. Postgres credentials — used by liberty-admin init-db to seed [pools.default]
+#    AND by deploy-databases to inherit-and-set the nomasx1 / nomajde role passwords.
+#    Skip if you only want SQLite for trial (licensed connectors need real pg).
+export POSTGRES_PASSWORD="your-postgres-superuser-password"
+export POSTGRES_USER=liberty
+export POSTGRES_HOST=localhost
+export POSTGRES_PORT=5432
+export POSTGRES_DB=liberty
+# SQLite fallback (no licensed connectors): export LIBERTY_DB_URL=sqlite+aiosqlite:///./liberty.db
+
+# 4. Materialize the wheel's payload into a writable LIBERTY_APPS_DIR
 mkdir -p ~/.local/share/liberty-next/apps
 liberty-apps install --target ~/.local/share/liberty-next/apps/config
-
-# 3. Point liberty-next at it + provide the license + run
 export LIBERTY_APPS_DIR=~/.local/share/liberty-next/apps/config
-export LIBERTY_LICENSE_KEY=<your-rs256-jwt>
-export LIBERTY_DB_URL=postgresql+asyncpg://liberty:<pw>@<host>:5432/liberty
-liberty-next
+
+# 5. Bootstrap the framework DB + admin user
+psql -h "$POSTGRES_HOST" -U postgres -c "CREATE ROLE $POSTGRES_USER LOGIN SUPERUSER PASSWORD '$POSTGRES_PASSWORD';"
+psql -h "$POSTGRES_HOST" -U postgres -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"
+liberty-admin init-db    # seeds [pools.default] + creates 'admin' user, prints password
+
+# 6. Run the install-time jobs (deploy-databases / init-schema / import-reference)
+liberty-admin run-install-jobs
+
+# 7. Start the server
+liberty-next             # API + SPA on http://localhost:8000
+
+# 8. Sign in as admin, then Settings → App → License → Set
+#    (encrypted at rest in app.toml with LIBERTY_MASTER_KEY)
 ```
 
-You'll also need an external Postgres reachable at `LIBERTY_DB_URL` (or stick with
-the default SQLite for trial — `LIBERTY_DB_URL=sqlite+aiosqlite:///./liberty.db`).
-Persist those `export`s in `~/.bashrc` / `~/.zshrc` so `liberty-next` finds them
-on every shell.
-
 Upgrade the apps later by injecting a new wheel + re-running `liberty-apps install`
-(operator-edited TOMLs are preserved; pass `--force-config` to overwrite).
+(operator-edited TOMLs are preserved; pass `--force-config` to overwrite). License /
+AI api_key / OIDC settings stay in app.toml and survive the upgrade.
 
 ### From source (development)
 
@@ -124,7 +147,7 @@ git clone https://github.com/fblettner/liberty-next.git
 cd liberty-next
 python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -v               # 900+ tests
+.venv/bin/pytest -v               # 920+ tests
 ./start.sh init-config            # seed config/*.toml from the .example files
 ./start.sh init-db                # FIRST RUN: create the auth store + `admin` user (prints password)
 ./start.sh                        # build frontend + serve on :8000
@@ -150,22 +173,27 @@ python3.12 -m venv .venv
 
 ## Configuration in 60 seconds
 
-Six TOML files under `config/` (or wherever `LIBERTY_APPS_DIR` points). Every file
+Eight TOML files under `config/` (or wherever `LIBERTY_APPS_DIR` points). Every file
 is round-trippable through the structured editors at **Settings → \<tab\>**:
 
 | File | What it carries | Editor |
 |---|---|---|
-| `app.toml` | App-level settings (host / port / log level / AI model / hot-reload) | Settings → App |
+| `app.toml` | App-level settings (host / port / log level / AI model / hot-reload) + encrypted secrets (license key, AI api_key, OIDC client_secret) | Settings → App |
 | `connectors.toml` | DB pools + SQL connectors with named queries + API connectors with endpoints | Settings → Pools, Settings → Connectors |
 | `dictionary.toml` | Shared + per-connector field metadata (labels / types / rules / lookups / sequences) | Settings → Dictionary |
 | `screens.toml` | Screen definitions — per-app grids + dialog forms + actions + row menus | Settings → Screens |
 | `charts.toml` | Saved chart specs referenceable from screens + dashboards | Settings → Charts |
 | `dashboards.toml` | Widget grids with shared filters | Settings → Dashboards |
 | `menus.toml` | Per-app navigation trees | Settings → Menus |
+| `jobs.toml` | nomaflow ETL pipelines + scheduled jobs (per-step `op_kwargs`, retry, retention) | Nomaflow → Jobs |
 
-`${VAR}` and `${VAR:-default}` env-var references are expanded at load time so secrets
-stay in the environment (`LIBERTY_JWT_SECRET`, `LIBERTY_MASTER_KEY`, `LIBERTY_LICENSE_KEY`,
-`ANTHROPIC_API_KEY`, OIDC client secrets) and never live in committed TOML.
+Two secrets stay env-only: `LIBERTY_JWT_SECRET` (signs access / refresh tokens) and
+`LIBERTY_MASTER_KEY` (the AES-256-GCM key that decrypts every `ENC:` value in app.toml +
+connectors.toml). Everything else — license key, Anthropic API key, OIDC client secret,
+pool / API-connector passwords — lives encrypted at rest in TOML and is edited through
+the UI's masked-secret pattern. `${VAR}` / `${VAR:-default}` env references in TOML are
+still expanded at load time for the few values an operator wants to keep externally
+managed.
 
 ---
 
@@ -173,8 +201,10 @@ stay in the environment (`LIBERTY_JWT_SECRET`, `LIBERTY_MASTER_KEY`, `LIBERTY_LI
 
 Liberty Next ships as an **open framework**. The customer-facing connectors + screens
 + dictionaries live in a separate apps repo (`liberty-apps`); the licensed ones
-(nomasx1 / nomajde / nomaflow) are unlocked by `LIBERTY_LICENSE_KEY`. Without a key
-the framework runs in **restricted** mode — those connectors aren't loaded.
+(nomasx1 / nomajde / nomaflow) are unlocked by an RS256 JWT set via **Settings → App →
+License** (encrypted at rest in app.toml with `LIBERTY_MASTER_KEY`). Without a key
+the framework runs in **restricted** mode — those connectors aren't loaded. Headless
+installs can pre-seed the encrypted value with `liberty-crypto encrypt`.
 
 The **Settings → Package** tab packages selected screens / menu items / dashboards
 plus their full dependency closure (connectors / queries / DD entries / lookups / …)
@@ -257,22 +287,27 @@ TanStack Table · Monaco (SQL editor) · Recharts (visualisation).
 ## Repository layout
 
 ```
-config/      app.toml (committed) · {connectors,dictionary,menus,screens,charts,dashboards,auth}.toml (NOT committed — per-deployment)
-liberty/     main.py · config.py · crypto.py · {cli,admin_cli,crypto_cli,license_cli}.py
+config/      app.toml (committed) · {connectors,dictionary,menus,screens,charts,dashboards,auth,jobs}.toml (NOT committed — per-deployment)
+liberty/     main.py · config.py · crypto.py · framework_enums.py · theme.py
+             · {cli,admin_cli,connectors_cli,migrate_cli,crypto_cli,license_cli}.py
              · connectors/{config,base,db,sql,api,registry,dictionary,introspect}.py
              · licensing/{__init__.py, public.pem}
              · menus/config.py · screens/config.py · charts/config.py · dashboards/config.py
              · auth/{authstore,password,tokens,principal,oidc,dependencies,routes,models,db,service}.py
              · ai/{tools,connector_tools,scaffold_tools,proposal,assistant,routes}.py
-             · web/{deps,errors,connectors,menus,screens,charts,dashboards,license,theme,admin,
-                    dependencies,package,package_import,clone_with_deps,delete_with_deps,usages}.py
+             · jobs/{schema,registry,db,runner,scheduler,wiring,coercion,triggers,models,steps/}
+             · etl/{operations,…}.py — shared SQL helpers used by nomaflow callables
+             · web/{admin,connectors,menus,screens,charts,dashboards,license,theme,jobs,
+                    access,hot_reload,errors,dependencies,deps,package,package_import,
+                    clone,clone_with_deps,delete_with_deps,rename,export,dictgen,usages}.py
 frontend/    Vite + React 19 + TS — built dist/ served by the backend
              src/{api,auth,workspace,types,services,common,pages,components,locales}/*
-.github/workflows/  pypi-release.yml · docker.yml
-docker/      entrypoint.sh — runtime config-init (init-db / init-config when env vars set)
+.github/workflows/  release.yml — auto-publishes Docker (ghcr.io) + PyPI on every push to main
+docker/      entrypoint.sh — runtime config-init (init-db when POSTGRES_PASSWORD set)
 start.sh     run/dev helper (serve | dev | api | build | frontend | init-db | init-config | help)
-tests/       335+ tests
-docs/        PLAN.md (full phased plan) · DEPLOYMENT.md · NOMAFLOW-UI.md · PHASE13.md (nomaflow)
+release/     deployment configs (Docker Compose light/full/swarm, install.sh, install-apps.sh)
+tests/       920+ tests
+docs/        PLAN.md · DEPLOYMENT.md · NOMAFLOW-UI.md · PHASE13.md
 ```
 
 ---
@@ -295,6 +330,8 @@ docs/        PLAN.md (full phased plan) · DEPLOYMENT.md · NOMAFLOW-UI.md · PH
 
 Open framework: free. Connectors flagged `licensed = true` in `connectors.toml`
 (sold separately, distributed in their own repos) are unlocked by an RS256 JWT
-license key set via `LIBERTY_LICENSE_KEY`. Without a key the framework runs in
-"restricted" mode and those connectors aren't loaded. Inspect a key with
-`liberty-license verify`; status at `GET /api/license`.
+license key, set via **Settings → App → License** (encrypted at rest in app.toml with
+the install's `LIBERTY_MASTER_KEY`). `nomasx1` and `nomajde` are always-licensed —
+the loader refuses to load them without a covering key regardless of the on-disk
+`licensed` flag. Without a key the framework runs in "restricted" mode. Inspect
+a key with `liberty-license verify`; status at `GET /api/license`.
