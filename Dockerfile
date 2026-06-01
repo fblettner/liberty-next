@@ -28,11 +28,19 @@ RUN npm run build   # emits /build/frontend/dist (vite.config.ts: outDir "dist")
 # ── Stage 2 — Python runtime (FastAPI + Socket.IO, serving the built SPA) ─────────────
 FROM python:3.12-slim AS runtime
 
-# curl: container HEALTHCHECK hits /info. No DB client libs needed — asyncpg (Postgres),
-# oracledb (thin mode, no Oracle client), and psycopg2-binary (Alembic's sync runner) all
-# ship self-contained wheels.
+# Runtime system libs:
+#   curl                         — container HEALTHCHECK hits /info
+#   libpango-1.0-0, libpangoft2-1.0-0,
+#   libharfbuzz0b, libfontconfig1 — WeasyPrint (PDF report rendering, liberty.reports.render)
+# No DB client libs needed — asyncpg (Postgres), oracledb (thin mode), and psycopg2-binary
+# (Alembic's sync runner) all ship self-contained wheels.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz0b \
+        libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

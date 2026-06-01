@@ -68,6 +68,11 @@ your PATH; no risk of polluting system Python):
 #                 # or:  python3 -m pip install --user pipx && python3 -m pipx ensurepath
 #   Windows:  py -m pip install --user pipx && py -m pipx ensurepath
 
+# Report rendering (markdown → PDF) uses WeasyPrint — install the system libs
+# it links against. Skip if you don't plan to use the /api/reports endpoints.
+#   macOS:    brew install pango
+#   Debian/Ubuntu:  sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1
+
 pipx install liberty-next
 liberty-next                      # → API + SPA on http://localhost:8000
 ```

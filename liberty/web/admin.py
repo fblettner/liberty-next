@@ -115,6 +115,12 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
             "scheduled_jobs": jobs_components.scheduler.scheduled_job_ids,
         }
 
+    # Reports — license rotation that newly covers a plugin (or stops covering
+    # one) immediately changes the registry; rebuild here so /api/reports
+    # reflects the new state without a process restart.
+    from liberty.reports.wiring import refresh_reports
+    new_reports = refresh_reports(request.app, settings, license_result)
+
     await old.aclose()
     return {
         "reloaded": True,
@@ -127,6 +133,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "dashboards": [d.qualified_id for _, _, d in request.app.state.dashboards.iter_dashboards()],
         "license_mode": license_result.mode,
         "nomaflow": nomaflow_reloaded,
+        "reports": new_reports.names(),
     }
 
 
