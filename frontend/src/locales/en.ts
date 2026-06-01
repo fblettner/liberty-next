@@ -276,6 +276,20 @@ const en = {
     newConversation: 'new conversation',
     noResponse: '(no response)',
   },
+  reports: {
+    title: 'Reports',
+    description: 'Run a report and download the result as PDF or markdown.',
+    count_one: '{{count}} report',
+    count_other: '{{count}} reports',
+    empty: 'No reports available. Reports are declared by plugins (see plugins/<name>/reports/) and gated by the reports:<scope>:*:run permission.',
+    run: 'Run',
+    runAndDownload: 'Run & download',
+    running: 'Running…',
+    format: 'Format',
+    errors: {
+      missingRequired: 'Missing required parameter: {{name}}',
+    },
+  },
   nomaflow: {
     superuserRequired: 'Superuser required',
     jobs: {

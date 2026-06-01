@@ -278,6 +278,20 @@ const fr: Resources = {
     newConversation: 'nouvelle conversation',
     noResponse: '(pas de réponse)',
   },
+  reports: {
+    title: 'Rapports',
+    description: 'Exécuter un rapport et télécharger le résultat en PDF ou markdown.',
+    count_one: '{{count}} rapport',
+    count_other: '{{count}} rapports',
+    empty: 'Aucun rapport disponible. Les rapports sont déclarés par les plugins (cf. plugins/<nom>/reports/) et protégés par la permission reports:<scope>:*:run.',
+    run: 'Exécuter',
+    runAndDownload: 'Exécuter et télécharger',
+    running: 'Exécution…',
+    format: 'Format',
+    errors: {
+      missingRequired: 'Paramètre requis manquant : {{name}}',
+    },
+  },
   nomaflow: {
     superuserRequired: 'Superutilisateur requis',
     jobs: {
