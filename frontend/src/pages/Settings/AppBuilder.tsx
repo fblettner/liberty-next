@@ -10,10 +10,12 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
   Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X,
-  ChevronDown, ChevronRight, KeyRound, ShieldCheck, Pencil, FileText, RefreshCw,
+  ChevronDown, ChevronRight, KeyRound, ShieldCheck, FileText, RefreshCw,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Checkbox, Field, Input, SpinnerRing, Tag, Textarea } from '../../common'
+import {
+  Banner, Button, Card, Checkbox, Field, Input, PasswordInput, SpinnerRing, Tag, Textarea,
+} from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 interface AppSection {
@@ -39,19 +41,20 @@ interface AiSection {
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
+  /** Plaintext or ``ENC:…`` ciphertext. GET returns the on-disk value verbatim;
+   *  PUT round-trips ``ENC:`` unchanged (encrypt() is idempotent), encrypts a
+   *  plaintext edit, and writes empty as empty (operator clear). Same pattern
+   *  pools / API connectors use for their password / auth_token fields. */
   api_key: string
-  api_key_set?: boolean
 }
 interface LicenseSection {
   key: string
-  key_set?: boolean
 }
 interface OidcSection {
   enabled: boolean
   discovery_url: string
   client_id: string
   client_secret: string
-  client_secret_set?: boolean
   scopes: string
   username_claim: string
   email_claim: string
@@ -128,14 +131,6 @@ const ColorSwatch = styled.span<{ $color: string }>`
   flex-shrink: 0;
 `
 const InlineActions = styled.div`display: flex; align-items: center; gap: 6px;`
-const MaskedRow = styled.div`
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: ${radius.md}; border: 1px solid ${colors.border};
-  background: ${colors.bg.input}; font-family: ${fonts.mono}; font-size: ${fontSize.base};
-  color: ${colors.text.muted};
-  & .dots { letter-spacing: 2px; }
-  & .status { flex: 1; }
-`
 
 const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
@@ -194,10 +189,6 @@ export default function AppBuilder() {
   const [status, setStatus] = useState<string | null>(null)
   const [restartHint, setRestartHint] = useState(false)
   const [open, setOpen] = useState<Record<SectionKey, boolean>>(loadOpenState)
-  // Per-field "Edit" toggle for masked secrets. While false, the field shows dots + an Edit
-  // button (and the wire payload sends "" — the backend treats empty as "leave unchanged"
-  // because the GET also sent ""). Flipping to true reveals an input.
-  const [editingSecret, setEditingSecret] = useState<Record<string, boolean>>({})
 
   const toggleSection = (k: SectionKey) => {
     setOpen((prev) => {
@@ -231,7 +222,6 @@ export default function AppBuilder() {
       setOriginal(JSON.stringify({
         app: r.app, ai: r.ai, license: r.license, oidc: r.oidc, branding: loadedBranding,
       }))
-      setEditingSecret({})
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -253,7 +243,7 @@ export default function AppBuilder() {
         app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
       }
       setApp(seed.app); setAi(seed.ai); setLicense(seed.license); setOidc(seed.oidc); setBranding(seed.branding)
-      setStatus(null); setError(null); setRestartHint(false); setEditingSecret({})
+      setStatus(null); setError(null); setRestartHint(false)
     } catch { /* ignore */ }
   }
 
@@ -264,16 +254,15 @@ export default function AppBuilder() {
   const save = async () => {
     setBusy(true); setError(null); setStatus(null)
     try {
-      // For each masked field: if the user didn't enable Edit, send "" so the backend's
-      // _encrypt_sensitives() skips it (empty → passthrough, on-disk value preserved).
-      // When Edit was enabled, send whatever's in the field — including "" to explicitly
-      // clear (the on-disk value becomes "" and the connector reports unconfigured).
-      const aiPayload = { ...ai, api_key: editingSecret['ai.api_key'] ? ai.api_key : '' }
-      const licensePayload = { ...license, key: editingSecret['license.key'] ? license.key : '' }
-      const oidcPayload = { ...oidc, client_secret: editingSecret['oidc.client_secret'] ? oidc.client_secret : '' }
+      // Sensitive fields (ai.api_key, license.key, oidc.client_secret) round-trip
+      // their on-disk value naturally: when the operator hasn't touched the field,
+      // the ENC: ciphertext from GET sits in state and gets sent back verbatim;
+      // backend's encrypt() is idempotent on ENC: values so it stays as-is. A new
+      // plaintext gets encrypted on write. An empty input clears the on-disk value.
+      // Same pattern as PoolsBuilder / ConnectorsBuilder.
       const r = await api.put<{ saved: boolean; requires_restart?: boolean }>(
         '/admin/config/app/parsed',
-        { app, ai: aiPayload, license: licensePayload, oidc: oidcPayload },
+        { app, ai, license, oidc },
       )
       // Branding lives in the same file but has its own endpoint — second PUT,
       // so a typo here doesn't poison the app/ai/license/oidc save above.
@@ -379,7 +368,7 @@ export default function AppBuilder() {
           'license',
           t('settings.app.licenseSection', 'License'),
           <ShieldCheck size={14} />,
-          license.key_set
+          license.key
             ? t('settings.app.licenseConfigured', 'configured')
             : t('settings.app.licenseNotSet', 'not set — restricted mode'),
           <>
@@ -390,16 +379,10 @@ export default function AppBuilder() {
               )}
             </Hint>
             <Field label={t('settings.app.licenseKey', 'License key')}>
-              <MaskedSecret
-                fieldId="license.key"
-                value={license.key}
-                isSet={!!license.key_set}
-                editing={!!editingSecret['license.key']}
-                onEdit={() => setEditingSecret({ ...editingSecret, 'license.key': true })}
-                onChange={(v) => setLicense({ ...license, key: v })}
+              <PasswordInput value={license.key}
+                onChange={(e) => setLicense({ ...license, key: e.target.value })}
                 placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9…"
-                inputComponent="textarea"
-              />
+                style={{ fontFamily: fonts.mono }} />
             </Field>
           </>,
         )}
@@ -409,22 +392,17 @@ export default function AppBuilder() {
           t('settings.app.aiSection', 'AI Assistant'),
           <Sparkles size={14} />,
           ai.enabled
-            ? `${ai.model}${ai.api_key_set ? '' : ' · ' + t('settings.app.aiNoKey', 'no API key')}`
+            ? `${ai.model}${ai.api_key ? '' : ' · ' + t('settings.app.aiNoKey', 'no API key')}`
             : t('settings.app.aiDisabled', 'disabled'),
           <>
             <Checkbox label={t('settings.app.aiEnabled', 'Enabled')}
               checked={ai.enabled} onChange={(c) => setAi({ ...ai, enabled: c })} />
 
             <Field label={t('settings.app.aiApiKey', 'Anthropic API key')}>
-              <MaskedSecret
-                fieldId="ai.api_key"
-                value={ai.api_key}
-                isSet={!!ai.api_key_set}
-                editing={!!editingSecret['ai.api_key']}
-                onEdit={() => setEditingSecret({ ...editingSecret, 'ai.api_key': true })}
-                onChange={(v) => setAi({ ...ai, api_key: v })}
+              <PasswordInput value={ai.api_key}
+                onChange={(e) => setAi({ ...ai, api_key: e.target.value })}
                 placeholder="sk-ant-…"
-              />
+                style={{ fontFamily: fonts.mono }} />
             </Field>
 
             <RowFlex>
@@ -534,15 +512,10 @@ export default function AppBuilder() {
               </Field>
             </RowFlex>
             <Field label={t('settings.app.oidcClientSecret', 'Client secret')}>
-              <MaskedSecret
-                fieldId="oidc.client_secret"
-                value={oidc.client_secret}
-                isSet={!!oidc.client_secret_set}
-                editing={!!editingSecret['oidc.client_secret']}
-                onEdit={() => setEditingSecret({ ...editingSecret, 'oidc.client_secret': true })}
-                onChange={(v) => setOidc({ ...oidc, client_secret: v })}
+              <PasswordInput value={oidc.client_secret}
+                onChange={(e) => setOidc({ ...oidc, client_secret: e.target.value })}
                 placeholder="…"
-              />
+                style={{ fontFamily: fonts.mono }} />
             </Field>
 
             <Hint>{t('settings.app.oidcClaims', 'Which ID-token claims to read.')}</Hint>
@@ -640,58 +613,6 @@ export default function AppBuilder() {
         )}
       </Stack>
     </Shell>
-  )
-}
-
-// ── masked secret with reveal-to-edit ─────────────────────────────────────────────────────
-
-function MaskedSecret({
-  fieldId, value, isSet, editing, onEdit, onChange, placeholder, inputComponent = 'input',
-}: {
-  fieldId: string
-  value: string
-  isSet: boolean
-  editing: boolean
-  onEdit: () => void
-  onChange: (v: string) => void
-  placeholder?: string
-  inputComponent?: 'input' | 'textarea'
-}) {
-  const { t } = useTranslation()
-  if (!editing) {
-    return (
-      <MaskedRow>
-        <span className="status">
-          {isSet ? <span className="dots">••••••••••••</span> : <em>{t('settings.app.notConfigured', 'not configured')}</em>}
-        </span>
-        <Button $variant="ghost" $size="sm" onClick={onEdit} type="button">
-          <Pencil size={12} /> {isSet ? t('common.replace', 'Replace') : t('common.set', 'Set')}
-        </Button>
-      </MaskedRow>
-    )
-  }
-  if (inputComponent === 'textarea') {
-    return (
-      <Textarea
-        autoFocus
-        rows={3}
-        id={fieldId}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        style={{ fontFamily: fonts.mono }}
-      />
-    )
-  }
-  return (
-    <Input
-      autoFocus
-      id={fieldId}
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      style={{ fontFamily: fonts.mono }}
-    />
   )
 }
 

@@ -990,9 +990,14 @@ def _pick(d: dict[str, Any], keys: set[str]) -> dict[str, Any]:
 @router.get("/config/app/parsed", summary="Get app config")
 async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The curated ``[app]`` + ``[ai]`` + ``[license]`` + ``[oidc]`` view from app.toml.
-    Sensitive fields (ai.api_key, license.key, oidc.client_secret) are MASKED — the
-    response carries an ``_set: bool`` indicator per field instead of the value, so the
-    UI knows whether to render "configured" vs "not set" and never gets the ciphertext."""
+
+    Sensitive fields (ai.api_key, license.key, oidc.client_secret) come back as their
+    on-disk value — encrypted (``ENC:…`` ciphertext) when configured via the UI. The
+    UI renders them in a ``<PasswordInput>`` (masked + reveal-eye) the same way pools
+    and API connectors handle their secrets. Leaking ciphertext to the browser is
+    fine: it can only be decrypted with the server-side master key. Round-tripping
+    the same ciphertext on save is a no-op because :func:`encrypt` is idempotent on
+    already-``ENC:`` values."""
     path = _app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     raw = tomllib.loads(text) if text.strip() else {}
@@ -1004,27 +1009,13 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"existing app.toml is invalid: {exc}") from exc
 
-    def _mask(section_name: str, model_dump: dict[str, Any], safe_keys: set[str], raw_section: dict) -> dict[str, Any]:
-        """Return the model_dump filtered to safe_keys, but replace any sensitive field's
-        value with "" and add a ``<field>_set: bool`` indicator alongside. Uses the RAW
-        on-disk value (not model_dump) for the set check so ``${VAR}``-bound legacy values
-        register as "set" too."""
-        out = _pick(model_dump, safe_keys)
-        for sec, fld in _APP_TOML_SENSITIVE_FIELDS:
-            if sec != section_name or fld not in safe_keys:
-                continue
-            raw_val = str(raw_section.get(fld) or "").strip()
-            out[fld] = ""
-            out[f"{fld}_set"] = bool(raw_val) and not raw_val.startswith("${")
-        return out
-
     connectors = sorted(request.app.state.connectors.names()) if hasattr(request.app.state, "connectors") else []
     return {
         "path": str(path),
         "app": _pick(app_model.model_dump(), _APP_SAFE_KEYS),
-        "ai": _mask("ai", ai_model.model_dump(), _AI_SAFE_KEYS, raw.get("ai") or {}),
-        "license": _mask("license", license_model.model_dump(), _LICENSE_SAFE_KEYS, raw.get("license") or {}),
-        "oidc": _mask("oidc", oidc_model.model_dump(), _OIDC_SAFE_KEYS, raw.get("oidc") or {}),
+        "ai": _pick(ai_model.model_dump(), _AI_SAFE_KEYS),
+        "license": _pick(license_model.model_dump(), _LICENSE_SAFE_KEYS),
+        "oidc": _pick(oidc_model.model_dump(), _OIDC_SAFE_KEYS),
         "choices": {
             "log_levels": ["debug", "info", "warning", "error", "critical"],
             "effort_levels": ["", "low", "medium", "high", "xhigh", "max"],
@@ -1043,7 +1034,10 @@ class AppConfigBody(BaseModel):
 
 def _encrypt_sensitives(section: str, fields: dict[str, Any], master_key: str) -> dict[str, Any]:
     """Encrypt any sensitive fields in *fields*. Plaintext non-empty → ENC:<value>. Already
-    ENC:-prefixed → passthrough. Empty → passthrough (clear). Returns a new dict."""
+    ENC:-prefixed → unchanged (the UI round-trips ciphertext when the operator hasn't touched
+    the field — encrypt() is idempotent on its own output). Empty → unchanged (the operator
+    cleared the field; _upsert() will write the empty string to disk, clearing the on-disk
+    value). Returns a new dict."""
     out = dict(fields)
     for sec, fld in _APP_TOML_SENSITIVE_FIELDS:
         if sec != section or fld not in out:
