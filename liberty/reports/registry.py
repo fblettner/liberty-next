@@ -101,6 +101,29 @@ class ReportRegistry:
             )
         return fn
 
+    def add(
+        self,
+        defs: Iterable[ReportDef],
+        callables: dict[str, Callable[..., Any]],
+    ) -> None:
+        """Merge an extra batch of (defs, callables) into this registry —
+        used by the wiring layer to fold operator-authored custom reports
+        (Phase 4) in alongside plugin-discovered ones.
+
+        Duplicate ``scope:id`` collisions raise :class:`ValueError` so a
+        custom report can't shadow a plugin one (and vice versa). Same
+        contract as :meth:`__init__`."""
+        for d in defs:
+            key = self._key(d.scope, d.id)
+            if key in self._defs:
+                raise ValueError(
+                    f"duplicate report id {key!r} — already declared by "
+                    f"{self._defs[key].callable!r}, also by {d.callable!r}"
+                )
+            self._defs[key] = d
+        for k, fn in callables.items():
+            self._callables[k] = fn
+
 
 def _resolve_callable(spec: str) -> Callable[..., Any]:
     """Resolve a ``module.path:function`` string to a real callable.

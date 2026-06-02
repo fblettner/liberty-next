@@ -270,11 +270,27 @@ class ReportsBrandingSettings(BaseModel):
 
 
 class ReportsSettings(BaseModel):
-    """Reports framework settings (Phase 3b). Today only carries branding
-    defaults; ``[reports.scheduling]`` etc. would land here later as further
-    sub-sections without touching the rest of the config tree."""
+    """Reports framework settings — install-wide defaults applied to every
+    report rendered through :func:`liberty.reports.render.render_content`.
+
+    * ``branding`` (Phase 3b) — PDF cover / header / footer defaults edited
+      via Settings → Reports → Branding.
+    * ``templates_config_path`` (Phase 4a) — where ``reports.toml`` lives.
+      Resolves through :func:`_default_config_path` so ``LIBERTY_APPS_DIR``
+      (when set) redirects the default to ``${LIBERTY_APPS_DIR}/reports.toml``
+      — operator-authored custom reports live alongside the other per-app
+      configs (menus / screens / dashboards / …).
+    """
 
     branding: ReportsBrandingSettings = Field(default_factory=ReportsBrandingSettings)
+    templates_config_path: Path = Field(
+        default_factory=lambda: _default_config_path("reports"),
+        description=(
+            "Path to reports.toml, which carries operator-authored custom "
+            "reports (one [reports.<id>] table per report). A missing file "
+            "is fine — no custom reports are loaded."
+        ),
+    )
 
 
 class JobsSettings(BaseModel):

@@ -1285,6 +1285,159 @@ async def put_reports_branding(
     return {"saved": True, "path": str(path)}
 
 
+# --------------------------------------------------------------------------- #
+# Reports — operator-authored custom templates (Phase 4a)
+# --------------------------------------------------------------------------- #
+# Read / write the entire ``reports.toml`` (one [reports.<id>] table per
+# template) as a structured list. Editing is rebuild-the-file rather than
+# in-place because each entry is independently validated and the whole shape
+# (id + title + params + data + template_inline + pdf_options) ships through
+# the UI in one round-trip.
+@router.get("/config/reports/parsed", summary="Get custom reports")
+async def get_reports_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """Return every ``[reports.<id>]`` block from reports.toml as a list of
+    :class:`liberty.reports.custom.CustomReportTemplate` dicts. Includes the
+    list of available connectors + their queries so the UI can populate the
+    data-binding dropdowns without a second round-trip."""
+    from liberty.reports.custom import load_custom_reports
+
+    path = request.app.state.settings.reports.templates_config_path
+    try:
+        templates = load_custom_reports(path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"existing reports.toml is invalid: {exc}",
+        ) from exc
+
+    # Connectors → their named queries — feeds the UI's data-source dropdowns.
+    connectors = getattr(request.app.state, "connectors", None)
+    connector_choices: dict[str, list[str]] = {}
+    if connectors is not None:
+        for name in sorted(connectors.names()):
+            c = connectors.get(name)
+            try:
+                # SQLConnector.query_names is a @property → not callable
+                connector_choices[name] = sorted(c.query_names)
+            except (AttributeError, TypeError):
+                # Non-SQL connector (e.g. HTTP API) — no SELECT-by-name surface
+                connector_choices[name] = []
+    return {
+        "path": str(path),
+        "templates": [t.model_dump() for t in templates],
+        "connectors": connector_choices,
+    }
+
+
+class ReportsTemplatesBody(BaseModel):
+    templates: list[dict[str, Any]]
+
+
+@router.put("/config/reports/parsed", summary="Update custom reports")
+async def put_reports_parsed(
+    body: ReportsTemplatesBody, request: Request, _: Superuser,
+) -> dict[str, object]:
+    """Replace every ``[reports.<id>]`` table in reports.toml with the
+    submitted list. Each entry is validated against
+    :class:`CustomReportTemplate` (so a typo'd field or a duplicate id surfaces
+    as 422 before disk is touched). Rebuilds the in-memory report registry on
+    success so the next ``GET /api/reports`` reflects the change without a
+    restart."""
+    from liberty.reports.custom import CustomReportTemplate
+    from liberty.reports.wiring import refresh_reports
+
+    # Validate every entry up-front — fail fast with a useful per-id message.
+    parsed: list[CustomReportTemplate] = []
+    seen_ids: set[str] = set()
+    for raw in body.templates:
+        if not isinstance(raw, dict):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"each templates[] entry must be an object, got {type(raw).__name__}",
+            )
+        rid = raw.get("id")
+        if not rid:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="each templates[] entry must carry an 'id' field",
+            )
+        if rid in seen_ids:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"duplicate template id {rid!r}",
+            )
+        seen_ids.add(rid)
+        try:
+            parsed.append(CustomReportTemplate.model_validate(raw))
+        except ValidationError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"template {rid!r}: {exc}",
+            ) from exc
+
+    # Serialise — fresh tomlkit document keyed by id. We don't preserve
+    # existing comments in reports.toml because the UI is the source of truth
+    # (operators don't edit this file by hand the way they might edit
+    # connectors.toml). A first write creates the file; subsequent writes
+    # overwrite the [reports.*] section verbatim.
+    path = Path(request.app.state.settings.reports.templates_config_path)
+    doc = tomlkit.document()
+    reports_tbl = tomlkit.table(is_super_table=True)
+    for t in parsed:
+        body_table = tomlkit.table()
+        body_table["title"] = t.title
+        if t.description:
+            body_table["description"] = t.description
+        body_table["formats"] = list(t.formats)
+        if t.params:
+            params_array = tomlkit.array()
+            for p in t.params:
+                params_array.append(p.model_dump(exclude_defaults=False))
+            body_table["params"] = params_array
+        data_tbl = tomlkit.table()
+        data_tbl["connector"] = t.data.connector
+        data_tbl["query"] = t.data.query
+        body_table["data"] = data_tbl
+        body_table["template_inline"] = tomlkit.string(
+            t.template_inline, multiline=True,
+        )
+        if t.pdf_options:
+            pdf_tbl = tomlkit.table()
+            for k, v in t.pdf_options.items():
+                pdf_tbl[k] = v
+            body_table["pdf_options"] = pdf_tbl
+        reports_tbl[t.id] = body_table
+    doc["reports"] = reports_tbl
+
+    new_text = tomlkit.dumps(doc)
+    # Round-trip validate the just-rendered TOML — catches a tomlkit serialisation
+    # quirk that survives validation above but is unreadable on next boot.
+    try:
+        reparsed = tomllib.loads(new_text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"resulting reports.toml is invalid: {exc}",
+        ) from exc
+    # Sanity: every saved id reappears post-roundtrip.
+    saved_ids = set((reparsed.get("reports") or {}).keys())
+    if saved_ids != seen_ids:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"round-trip mismatch — saved {sorted(seen_ids)}, on disk {sorted(saved_ids)}",
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+
+    # Rebuild the report registry so the new templates surface immediately
+    # in ``GET /api/reports``. The license result on app.state stays — custom
+    # reports aren't license-gated (scope='custom' is non-licensed by design).
+    license = getattr(request.app.state, "license", None)
+    refresh_reports(request.app, request.app.state.settings, license)
+    return {"saved": True, "path": str(path), "count": len(parsed)}
+
+
 # ── Find usages ─────────────────────────────────────────────────────────────────────────────
 # Every Settings editor surfaces a "Find usages" button that calls this. The reference graph
 # lives in liberty.web.usages — walks the in-memory registries (no disk reads) and returns a

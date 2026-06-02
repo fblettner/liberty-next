@@ -1057,3 +1057,115 @@ def test_reports_branding_rejects_unknown_field(env, tmp_path, monkeypatch) -> N
         after = client.get("/admin/config/reports/branding", headers=h).json()["branding"]
         assert after["author"] == "X"
         assert "unknown_field" not in after
+
+
+# --------------------------------------------------------------------------- #
+# Phase 4a — Custom report templates
+# --------------------------------------------------------------------------- #
+def test_reports_templates_round_trip(env, tmp_path, monkeypatch) -> None:
+    """``GET /admin/config/reports/parsed`` returns an empty list when the
+    file is missing; ``PUT`` writes one or more [reports.<id>] tables; the
+    next GET round-trips them; the in-memory registry refreshes so
+    ``GET /api/reports`` immediately reflects the new template."""
+    app, _conn_toml, _db_url = env
+    # Settings.reports.templates_config_path defaults to "config/reports.toml"
+    # relative to cwd; override to a tmp file so the test doesn't touch real
+    # config. Bypassing the env-var resolver because templates_config_path is
+    # a direct Settings field, not a LIBERTY_APP_CONFIG path.
+    reports_toml = tmp_path / "reports.toml"
+    # Redirect LIBERTY_APP_CONFIG so the live-apply reload doesn't touch real
+    # ./config/app.toml.
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+
+    with TestClient(app) as client:
+        # Lifespan has populated app.state.settings — override the templates
+        # path now (before any request touches the file).
+        app.state.settings.reports.templates_config_path = reports_toml
+        h = _h(client, "admin")
+        # Reader → 403 on both
+        assert client.get("/admin/config/reports/parsed", headers=_h(client, "reader")).status_code == 403
+        assert client.put("/admin/config/reports/parsed",
+                          json={"templates": []}, headers=_h(client, "reader")).status_code == 403
+
+        # First GET on missing file → empty list, with connector choices
+        r = client.get("/admin/config/reports/parsed", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["templates"] == []
+        # Connectors block is present (env's seeded "db" connector with the "answer" query)
+        assert "db" in body["connectors"] and "answer" in body["connectors"]["db"]
+
+        # PUT a new template — well-formed
+        new_template = {
+            "id": "answer-summary",
+            "title": "The answer",
+            "description": "Renders the answer query",
+            "formats": ["pdf", "markdown"],
+            "params": [],
+            "data": {"connector": "db", "query": "answer"},
+            "template_inline": "## Answer\n\n{{ ctx.data.rows[0].answer }}",
+            "pdf_options": {},
+        }
+        r = client.put(
+            "/admin/config/reports/parsed",
+            json={"templates": [new_template]},
+            headers=h,
+        )
+        assert r.status_code == 200 and r.json()["saved"] is True
+        assert r.json()["count"] == 1
+
+        # On-disk: the [reports.answer-summary] table is present + multiline
+        # template_inline got serialised correctly
+        on_disk = reports_toml.read_text(encoding="utf-8")
+        assert "[reports.answer-summary]" in on_disk
+        assert "## Answer" in on_disk
+        assert 'connector = "db"' in on_disk
+        assert 'query = "answer"' in on_disk
+
+        # GET reflects it
+        after = client.get("/admin/config/reports/parsed", headers=h).json()
+        assert len(after["templates"]) == 1
+        assert after["templates"][0]["id"] == "answer-summary"
+
+        # Registry refreshed — /api/reports shows the new entry, runnable via /run
+        # (the reader role for the API has the catalog permission elsewhere; here
+        # we just confirm the admin sees it).
+        listed = client.get("/api/reports", headers=h).json()
+        ids = {(r["scope"], r["id"]) for r in listed["reports"]}
+        assert ("custom", "answer-summary") in ids
+
+
+def test_reports_templates_rejects_duplicate_id(env, tmp_path, monkeypatch) -> None:
+    """Two templates with the same id in one PUT payload → 422 before the
+    file is touched. Mirrors the registry's collision contract."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        app.state.settings.reports.templates_config_path = tmp_path / "reports.toml"
+        h = _h(client, "admin")
+        body = {"templates": [
+            {"id": "x", "title": "X", "data": {"connector": "db", "query": "answer"},
+             "template_inline": "ok"},
+            {"id": "x", "title": "X dup", "data": {"connector": "db", "query": "answer"},
+             "template_inline": "ok"},
+        ]}
+        r = client.put("/admin/config/reports/parsed", json=body, headers=h)
+        assert r.status_code == 422
+        assert "duplicate" in r.json()["detail"].lower()
+
+
+def test_reports_templates_rejects_invalid_template_shape(env, tmp_path, monkeypatch) -> None:
+    """Missing required field (e.g. data.connector) → 422 naming the entry
+    so the operator knows which one to fix."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        app.state.settings.reports.templates_config_path = tmp_path / "reports.toml"
+        h = _h(client, "admin")
+        body = {"templates": [
+            {"id": "bad", "title": "X", "data": {"query": "answer"},  # no connector
+             "template_inline": "ok"},
+        ]}
+        r = client.put("/admin/config/reports/parsed", json=body, headers=h)
+        assert r.status_code == 422
+        assert "bad" in r.json()["detail"]
