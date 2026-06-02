@@ -1438,6 +1438,116 @@ async def put_reports_parsed(
     return {"saved": True, "path": str(path), "count": len(parsed)}
 
 
+# Render-on-the-fly preview — operators hit this from the template editor to
+# see what their Jinja markdown produces against real data BEFORE committing
+# the template to ``reports.toml``. The body matches what the PUT endpoint
+# accepts for one entry, plus an optional ``params`` dict for the test run.
+# Returns the rendered markdown (truncated when data is large) so the UI can
+# show a side-by-side preview without rendering a PDF.
+class ReportsTemplatePreviewBody(BaseModel):
+    template_inline: str
+    data: dict[str, Any]
+    params: dict[str, Any] = {}
+
+
+# Preview rows are capped so a multi-thousand-row query doesn't render a
+# multi-megabyte markdown payload back to the browser. Operators only need a
+# representative sample to validate the template shape.
+_PREVIEW_ROW_CAP = 200
+
+
+@router.post("/config/reports/preview", summary="Preview custom report")
+async def preview_report_template(
+    body: ReportsTemplatePreviewBody, request: Request, _: Superuser,
+) -> dict[str, Any]:
+    """Render *body.template_inline* against the live connector data (or an
+    empty dataset when no data binding is supplied) and return the rendered
+    markdown. Used by the Settings → Templates editor's "Test render" button.
+
+    Errors during data fetch / template parse / template render are returned as
+    422 with the underlying message — the UI shows them inline next to the
+    preview pane so operators can iterate without leaving the editor."""
+    from liberty.reports.custom import (
+        CustomReportDataBinding,
+        _make_sandbox_env,
+    )
+
+    connectors = getattr(request.app.state, "connectors", None)
+    rows: list[dict[str, Any]] = []
+    columns: list[dict[str, Any]] = []
+    truncated = False
+    fetched_count = 0
+
+    binding_payload = body.data or {}
+    connector_name = (binding_payload.get("connector") or "").strip()
+    query_name = (binding_payload.get("query") or "").strip()
+
+    if connector_name and query_name:
+        # Validate the binding via the same Pydantic shape the saved form uses
+        # so a malformed connector/query name surfaces before any I/O.
+        try:
+            binding = CustomReportDataBinding.model_validate(
+                {"connector": connector_name, "query": query_name},
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"data binding: {exc}",
+            ) from exc
+        if connectors is None or binding.connector not in connectors.names():
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"unknown connector: {binding.connector!r}",
+            )
+        connector = connectors.get(binding.connector)
+        try:
+            result = await connector.execute(binding.query, dict(body.params))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"query {binding.query!r} failed: {exc}",
+            ) from exc
+        all_rows = list(getattr(result, "rows", []) or [])
+        fetched_count = len(all_rows)
+        if fetched_count > _PREVIEW_ROW_CAP:
+            rows = all_rows[:_PREVIEW_ROW_CAP]
+            truncated = True
+        else:
+            rows = all_rows
+        columns = [
+            {"name": getattr(c, "name", None), "label": getattr(c, "label", None),
+             "type": getattr(c, "type", None)}
+            for c in (getattr(result, "columns", []) or [])
+        ]
+
+    env = _make_sandbox_env()
+    try:
+        tpl = env.from_string(body.template_inline)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"template parse error: {exc}",
+        ) from exc
+    ctx = {
+        "data": {"rows": rows, "columns": columns},
+        "params": dict(body.params),
+    }
+    try:
+        rendered = tpl.render(ctx=ctx)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"template render error: {exc}",
+        ) from exc
+    return {
+        "markdown": rendered,
+        "row_count": fetched_count,
+        "rendered_row_count": len(rows),
+        "column_count": len(columns),
+        "truncated": truncated,
+    }
+
+
 # ── Find usages ─────────────────────────────────────────────────────────────────────────────
 # Every Settings editor surfaces a "Find usages" button that calls this. The reference graph
 # lives in liberty.web.usages — walks the in-memory registries (no disk reads) and returns a

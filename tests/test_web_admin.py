@@ -1169,3 +1169,113 @@ def test_reports_templates_rejects_invalid_template_shape(env, tmp_path, monkeyp
         r = client.put("/admin/config/reports/parsed", json=body, headers=h)
         assert r.status_code == 422
         assert "bad" in r.json()["detail"]
+
+
+def test_reports_templates_preview_renders_with_data(env, tmp_path, monkeypatch) -> None:
+    """``POST /admin/config/reports/preview`` executes the bound query and
+    renders the inline template through the same sandboxed Jinja env the
+    runtime dispatcher uses. The operator gets the rendered markdown back so
+    they can iterate without saving the template."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Reader → 403
+        assert client.post(
+            "/admin/config/reports/preview",
+            json={"template_inline": "x", "data": {"connector": "db", "query": "answer"}},
+            headers=_h(client, "reader"),
+        ).status_code == 403
+
+        body = {
+            "template_inline": (
+                "# Preview\n"
+                "Rows: {{ ctx.data.rows | length }}\n"
+                "{% for row in ctx.data.rows %}- {{ row.answer }}\n{% endfor %}"
+            ),
+            "data": {"connector": "db", "query": "answer"},
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert "# Preview" in out["markdown"]
+        # The seeded "answer" query returns at least one row (it's the env's smoke query).
+        assert out["row_count"] >= 1
+        assert out["rendered_row_count"] >= 1
+        assert out["truncated"] is False
+
+
+def test_reports_templates_preview_blocks_sandbox_escape(env, tmp_path, monkeypatch) -> None:
+    """Preview MUST go through the sandboxed env — attempts to reach
+    ``__class__`` / ``__mro__`` / ``__subclasses__`` (the classic Jinja
+    escape route to arbitrary Python) surface as 422 with the sandbox
+    error, not as a successful render."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "{{ ''.__class__.__mro__[1].__subclasses__() }}",
+            "data": {"connector": "", "query": ""},  # no data fetch needed
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 422
+        assert "render" in r.json()["detail"].lower()
+
+
+def test_reports_templates_preview_without_data_binding(env, tmp_path, monkeypatch) -> None:
+    """When connector / query are blank the preview still renders the template
+    against an empty row list. Useful for iterating on a skeleton before the
+    data binding is wired."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "Rows: {{ ctx.data.rows | length }} / Params: {{ ctx.params.x }}",
+            "data": {"connector": "", "query": ""},
+            "params": {"x": "hello"},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 200
+        out = r.json()
+        assert "Rows: 0" in out["markdown"]
+        assert "hello" in out["markdown"]
+        assert out["row_count"] == 0
+        assert out["truncated"] is False
+
+
+def test_reports_templates_preview_rejects_unknown_connector(env, tmp_path, monkeypatch) -> None:
+    """An unknown connector → 422 — never falls back to a no-op render that
+    would mask a typo in the operator's binding."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "noop",
+            "data": {"connector": "nope_doesnt_exist", "query": "answer"},
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 422
+        assert "unknown connector" in r.json()["detail"].lower()
+
+
+def test_reports_templates_preview_template_parse_error(env, tmp_path, monkeypatch) -> None:
+    """A syntactically broken Jinja template → 422 with the parser's message
+    so the operator can fix it without saving."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "{{ ctx.data.rows ",  # unbalanced expression
+            "data": {"connector": "", "query": ""},
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 422
+        assert "parse error" in r.json()["detail"].lower()
