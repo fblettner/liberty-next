@@ -59,6 +59,9 @@ dependencies = [
     "alembic>=1.13",          # nomaflow plugins ship versioned schema migrations (plugins/<name>/db/alembic/) — the upgrade path
     "psycopg2-binary>=2.9",   # sync Postgres driver — Alembic's online runner is sync (the async asyncpg pool is unused there)
     "ldap3>=2.9",             # LDAP / Active Directory client — used by the nomasx1.ldap plugin (sync client, called via asyncio.to_thread). Pure Python, no native deps.
+    "weasyprint>=63.0",       # report renderer (markdown → PDF) — needs system libs: libpango, libpangoft2, libharfbuzz, libfontconfig (apt/brew)
+    "markdown>=3.7",          # markdown → HTML for the report pipeline (extensions: tables, fenced_code, toc, attr_list, md_in_html, sane_lists, nl2br)
+    "jinja2>=3.1",            # markdown templating used by plugin reports (e.g. nomasx1.reports.audit_licences); hosted in the framework so plugin packages stay zero-dep
 ]
 
 [project.optional-dependencies]

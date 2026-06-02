@@ -39,6 +39,7 @@ from liberty.web import (
     jobs_router,
     license_router,
     menus_router,
+    reports_router,
     screens_router,
     theme_router,
 )
@@ -152,6 +153,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.token_service = token_service
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
+        from liberty.reports.wiring import build_reports
+        app.state.reports = build_reports(settings, app.state.license)
         # Log-handler attach against the running loop. The SIO server itself is
         # already initialised + registered with ASGIApp (below) — handlers fire
         # the moment a client connects.
@@ -521,6 +524,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(access_router)
     app.include_router(dictgen_router)
     app.include_router(jobs_router)
+    app.include_router(reports_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:

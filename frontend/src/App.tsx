@@ -17,6 +17,7 @@ import { useWorkspace } from "./workspace/WorkspaceContext";
 const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
 const NomaflowSchedule = lazy(() => import("./pages/Nomaflow/Schedule"));
+const Reports = lazy(() => import("./pages/Reports"));
 // NomaflowRunDetail is mounted by TabHost (workspace tab kind 'nomaflow_run'), not directly
 // by a Route here — the `/nomaflow/runs/:runId` route uses TabRoute to add/activate the tab.
 
@@ -93,6 +94,10 @@ export default function App() {
             TabRoute marker just opens/activates the tab; the actual rendering happens in
             TabHost so the run-detail page sits in the tab strip alongside Job Runs / Users / … */}
         <Route path="nomaflow/runs/:runId" element={<TabRoute kind="nomaflow_run" />} />
+        {/* reports feature area — flat list of available reports + run dialog.
+            Operators add a menu entry of type='page' target='/reports' to surface
+            it in their sidebar; the API endpoints live in liberty/web/reports.py. */}
+        <Route path="reports" element={<Reports />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

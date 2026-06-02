@@ -971,3 +971,371 @@ def test_config_schema_includes_dashboards(env) -> None:
         assert "Dashboard" in defs
         # The widget discriminated union ships its variants
         assert "ChartWidget" in defs and "KpiWidget" in defs
+
+
+# --------------------------------------------------------------------------- #
+# Phase 3b — Reports → Branding endpoints
+# --------------------------------------------------------------------------- #
+def test_reports_branding_round_trips(env, tmp_path, monkeypatch) -> None:
+    """``GET /admin/config/reports/branding`` returns the defaults when the
+    file is empty; ``PUT`` writes the non-default values into a fresh
+    ``[reports.branding]`` table; the next GET round-trips them; the live
+    settings object on ``app.state`` is reloaded so the next render picks
+    them up without a restart."""
+    app, _conn_toml, _db_url = env
+    # Point the app.toml resolver at a tmp path so we don't touch the real
+    # config/app.toml when running tests.
+    app_toml = tmp_path / "app.toml"
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(app_toml))
+
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Reader can't read or write
+        assert client.get("/admin/config/reports/branding", headers=_h(client, "reader")).status_code == 403
+        assert client.put("/admin/config/reports/branding",
+                          json={"branding": {}}, headers=_h(client, "reader")).status_code == 403
+        # First GET on a missing file → defaults
+        r = client.get("/admin/config/reports/branding", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["branding"] == body["defaults"]
+        assert body["branding"]["author"] == ""
+        assert body["branding"]["primary_color"] == "#0b3a82"
+
+        # PUT new branding — only non-default values land on disk
+        new = {
+            "author": "ACME Consulting",
+            "primary_color": "#FF5722",
+            "primary_color_light": body["defaults"]["primary_color_light"],  # default — should NOT be written
+            "cover_eyebrow": "Audit Report",
+            "cover_ref": body["defaults"]["cover_ref"],                     # default
+            "footer_left": body["defaults"]["footer_left"],                 # default
+        }
+        r = client.put("/admin/config/reports/branding", json={"branding": new}, headers=h)
+        assert r.status_code == 200 and r.json()["saved"] is True
+
+        # On-disk: only the overridden keys appear, [reports.branding] header present
+        on_disk = app_toml.read_text(encoding="utf-8")
+        assert "[reports.branding]" in on_disk
+        assert 'author = "ACME Consulting"' in on_disk
+        assert 'primary_color = "#FF5722"' in on_disk
+        assert 'cover_eyebrow = "Audit Report"' in on_disk
+        # Default-valued fields are NOT serialised (terseness)
+        assert "primary_color_light" not in on_disk
+        assert "footer_left" not in on_disk
+
+        # GET reflects the new values (with defaults re-applied for omitted fields)
+        after = client.get("/admin/config/reports/branding", headers=h).json()["branding"]
+        assert after["author"] == "ACME Consulting"
+        assert after["primary_color"] == "#FF5722"
+        assert after["primary_color_light"] == body["defaults"]["primary_color_light"]
+        assert after["cover_eyebrow"] == "Audit Report"
+
+        # Live-apply: app.state.settings.reports.branding has the new author
+        live_branding = app.state.settings.reports.branding
+        assert live_branding.author == "ACME Consulting"
+        assert live_branding.primary_color == "#FF5722"
+
+
+def test_reports_branding_rejects_unknown_field(env, tmp_path, monkeypatch) -> None:
+    """Unknown branding keys land on the validation error path — Pydantic
+    rejects extras under ``model_config = ConfigDict(extra="forbid")``
+    inherited from the parent. (Today the model doesn't lock extras, so this
+    test documents the lenient behaviour — if it tightens later, change to
+    expect 422.)"""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Surplus key just gets dropped; the save succeeds
+        r = client.put(
+            "/admin/config/reports/branding",
+            json={"branding": {"author": "X", "unknown_field": "value"}},
+            headers=h,
+        )
+        assert r.status_code == 200
+        after = client.get("/admin/config/reports/branding", headers=h).json()["branding"]
+        assert after["author"] == "X"
+        assert "unknown_field" not in after
+
+
+# --------------------------------------------------------------------------- #
+# Phase 4a — Custom report templates
+# --------------------------------------------------------------------------- #
+def test_reports_templates_round_trip(env, tmp_path, monkeypatch) -> None:
+    """``GET /admin/config/reports/parsed`` returns an empty list when the
+    file is missing; ``PUT`` writes one or more [reports.<id>] tables; the
+    next GET round-trips them; the in-memory registry refreshes so
+    ``GET /api/reports`` immediately reflects the new template."""
+    app, _conn_toml, _db_url = env
+    # Settings.reports.templates_config_path defaults to "config/reports.toml"
+    # relative to cwd; override to a tmp file so the test doesn't touch real
+    # config. Bypassing the env-var resolver because templates_config_path is
+    # a direct Settings field, not a LIBERTY_APP_CONFIG path.
+    reports_toml = tmp_path / "reports.toml"
+    # Redirect LIBERTY_APP_CONFIG so the live-apply reload doesn't touch real
+    # ./config/app.toml.
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+
+    with TestClient(app) as client:
+        # Lifespan has populated app.state.settings — override the templates
+        # path now (before any request touches the file).
+        app.state.settings.reports.templates_config_path = reports_toml
+        h = _h(client, "admin")
+        # Reader → 403 on both
+        assert client.get("/admin/config/reports/parsed", headers=_h(client, "reader")).status_code == 403
+        assert client.put("/admin/config/reports/parsed",
+                          json={"templates": []}, headers=_h(client, "reader")).status_code == 403
+
+        # First GET on missing file → empty list, with connector choices
+        r = client.get("/admin/config/reports/parsed", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["templates"] == []
+        # Connectors block is present (env's seeded "db" connector with the "answer" query)
+        assert "db" in body["connectors"] and "answer" in body["connectors"]["db"]
+
+        # PUT a new template — well-formed
+        new_template = {
+            "id": "answer-summary",
+            "title": "The answer",
+            "description": "Renders the answer query",
+            "formats": ["pdf", "markdown"],
+            "params": [],
+            "data": {"connector": "db", "query": "answer"},
+            "template_inline": "## Answer\n\n{{ ctx.data.rows[0].answer }}",
+            "pdf_options": {},
+        }
+        r = client.put(
+            "/admin/config/reports/parsed",
+            json={"templates": [new_template]},
+            headers=h,
+        )
+        assert r.status_code == 200 and r.json()["saved"] is True
+        assert r.json()["count"] == 1
+
+        # On-disk: the [reports.answer-summary] table is present + multiline
+        # template_inline got serialised correctly
+        on_disk = reports_toml.read_text(encoding="utf-8")
+        assert "[reports.answer-summary]" in on_disk
+        assert "## Answer" in on_disk
+        assert 'connector = "db"' in on_disk
+        assert 'query = "answer"' in on_disk
+
+        # GET reflects it
+        after = client.get("/admin/config/reports/parsed", headers=h).json()
+        assert len(after["templates"]) == 1
+        assert after["templates"][0]["id"] == "answer-summary"
+
+        # Registry refreshed — /api/reports shows the new entry, runnable via /run
+        # (the reader role for the API has the catalog permission elsewhere; here
+        # we just confirm the admin sees it).
+        listed = client.get("/api/reports", headers=h).json()
+        ids = {(r["scope"], r["id"]) for r in listed["reports"]}
+        assert ("custom", "answer-summary") in ids
+
+
+def test_reports_templates_rejects_duplicate_id(env, tmp_path, monkeypatch) -> None:
+    """Two templates with the same id in one PUT payload → 422 before the
+    file is touched. Mirrors the registry's collision contract."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        app.state.settings.reports.templates_config_path = tmp_path / "reports.toml"
+        h = _h(client, "admin")
+        body = {"templates": [
+            {"id": "x", "title": "X", "data": {"connector": "db", "query": "answer"},
+             "template_inline": "ok"},
+            {"id": "x", "title": "X dup", "data": {"connector": "db", "query": "answer"},
+             "template_inline": "ok"},
+        ]}
+        r = client.put("/admin/config/reports/parsed", json=body, headers=h)
+        assert r.status_code == 422
+        assert "duplicate" in r.json()["detail"].lower()
+
+
+def test_reports_templates_rejects_invalid_template_shape(env, tmp_path, monkeypatch) -> None:
+    """Missing required field (e.g. data.connector) → 422 naming the entry
+    so the operator knows which one to fix."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        app.state.settings.reports.templates_config_path = tmp_path / "reports.toml"
+        h = _h(client, "admin")
+        body = {"templates": [
+            {"id": "bad", "title": "X", "data": {"query": "answer"},  # no connector
+             "template_inline": "ok"},
+        ]}
+        r = client.put("/admin/config/reports/parsed", json=body, headers=h)
+        assert r.status_code == 422
+        assert "bad" in r.json()["detail"]
+
+
+def test_reports_templates_preview_renders_with_data(env, tmp_path, monkeypatch) -> None:
+    """``POST /admin/config/reports/preview`` executes the bound query and
+    renders the inline template through the same sandboxed Jinja env the
+    runtime dispatcher uses. The operator gets the rendered markdown back so
+    they can iterate without saving the template."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Reader → 403
+        assert client.post(
+            "/admin/config/reports/preview",
+            json={"template_inline": "x", "data": {"connector": "db", "query": "answer"}},
+            headers=_h(client, "reader"),
+        ).status_code == 403
+
+        body = {
+            "template_inline": (
+                "# Preview\n"
+                "Rows: {{ ctx.data.rows | length }}\n"
+                "{% for row in ctx.data.rows %}- {{ row.answer }}\n{% endfor %}"
+            ),
+            "data": {"connector": "db", "query": "answer"},
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert "# Preview" in out["markdown"]
+        # The seeded "answer" query returns at least one row (it's the env's smoke query).
+        assert out["row_count"] >= 1
+        assert out["rendered_row_count"] >= 1
+        assert out["truncated"] is False
+
+
+def test_reports_templates_preview_blocks_sandbox_escape(env, tmp_path, monkeypatch) -> None:
+    """Preview MUST go through the sandboxed env — attempts to reach
+    ``__class__`` / ``__mro__`` / ``__subclasses__`` (the classic Jinja
+    escape route to arbitrary Python) surface as 422 with the sandbox
+    error, not as a successful render."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "{{ ''.__class__.__mro__[1].__subclasses__() }}",
+            "data": {"connector": "", "query": ""},  # no data fetch needed
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 422
+        assert "render" in r.json()["detail"].lower()
+
+
+def test_reports_templates_preview_without_data_binding(env, tmp_path, monkeypatch) -> None:
+    """When connector / query are blank the preview still renders the template
+    against an empty row list. Useful for iterating on a skeleton before the
+    data binding is wired."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "Rows: {{ ctx.data.rows | length }} / Params: {{ ctx.params.x }}",
+            "data": {"connector": "", "query": ""},
+            "params": {"x": "hello"},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 200
+        out = r.json()
+        assert "Rows: 0" in out["markdown"]
+        assert "hello" in out["markdown"]
+        assert out["row_count"] == 0
+        assert out["truncated"] is False
+
+
+def test_reports_templates_preview_rejects_unknown_connector(env, tmp_path, monkeypatch) -> None:
+    """An unknown connector → 422 — never falls back to a no-op render that
+    would mask a typo in the operator's binding."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "noop",
+            "data": {"connector": "nope_doesnt_exist", "query": "answer"},
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 422
+        assert "unknown connector" in r.json()["detail"].lower()
+
+
+def test_reports_templates_columns_returns_query_metadata(env, tmp_path, monkeypatch) -> None:
+    """``POST /admin/config/reports/columns`` runs the bound query with a
+    1-row cap and returns its column metadata — feeds the template editor's
+    autocomplete and the 'Scaffold from query' button."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Reader → 403
+        assert client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "db", "query": "answer"},
+            headers=_h(client, "reader"),
+        ).status_code == 403
+
+        r = client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "db", "query": "answer", "params": {}},
+            headers=h,
+        )
+        assert r.status_code == 200, r.text
+        out = r.json()
+        # At least one column comes back with a name
+        assert len(out["columns"]) >= 1
+        names = {c["name"] for c in out["columns"]}
+        assert "answer" in names
+
+
+def test_reports_templates_columns_rejects_unknown_connector(env, tmp_path, monkeypatch) -> None:
+    """Unknown connector → 422 — never silently returns an empty column list
+    that would mask a typo in the operator's binding."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "nope_doesnt_exist", "query": "answer"},
+            headers=h,
+        )
+        assert r.status_code == 422
+        assert "unknown connector" in r.json()["detail"].lower()
+
+
+def test_reports_templates_columns_propagates_query_error(env, tmp_path, monkeypatch) -> None:
+    """A connector that exists but doesn't carry the named query → 422 with
+    the underlying error, so the operator can fix the binding."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "db", "query": "no_such_query"},
+            headers=h,
+        )
+        assert r.status_code == 422
+        assert "no_such_query" in r.json()["detail"]
+
+
+def test_reports_templates_preview_template_parse_error(env, tmp_path, monkeypatch) -> None:
+    """A syntactically broken Jinja template → 422 with the parser's message
+    so the operator can fix it without saving."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {
+            "template_inline": "{{ ctx.data.rows ",  # unbalanced expression
+            "data": {"connector": "", "query": ""},
+            "params": {},
+        }
+        r = client.post("/admin/config/reports/preview", json=body, headers=h)
+        assert r.status_code == 422
+        assert "parse error" in r.json()["detail"].lower()

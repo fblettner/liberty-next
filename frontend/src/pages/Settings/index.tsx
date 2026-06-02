@@ -27,9 +27,13 @@ const ChartsBuilder = lazy(() => import('./ChartsBuilder'))
 const ThemeBuilder = lazy(() => import('./ThemeBuilder'))
 const AccessBuilder = lazy(() => import('./AccessBuilder'))
 const AppBuilder = lazy(() => import('./AppBuilder'))
+// Custom reports — operator-authored Jinja markdown templates rendered through
+// the framework. PDF branding (the install-wide defaults that wrap every
+// report) lives inside AppBuilder now since it's stored in app.toml.
+const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
 const PackageBuilder = lazy(() => import('./PackageBuilder'))
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'theme', 'access', 'app', 'package'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'package'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -75,6 +79,10 @@ export default function Settings() {
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts', 'Charts')}</TabBtn>
         <TabBtn $active={tab === 'dashboards'} onClick={() => setTab('dashboards')}>{t('settings.tabs.dashboards')}</TabBtn>
+        {/* Reports — operator-authored Jinja markdown templates rendered through
+            the framework. Sits next to dashboards as the other "visualization
+            output" surface. Install-wide PDF branding is in the App tab now. */}
+        <TabBtn $active={tab === 'reports'} onClick={() => setTab('reports')}>{t('settings.tabs.reports', 'Reports')}</TabBtn>
         <TabSep />
         {/* Shared — install-wide, not tied to any connector/app. */}
         <TabGroupLabel>{t('settings.tabGroups.shared', 'Shared')}</TabGroupLabel>
@@ -92,6 +100,7 @@ export default function Settings() {
           : tab === 'screens' ? <ScreensBuilder />
           : tab === 'charts' ? <ChartsBuilder />
           : tab === 'dashboards' ? <DashboardsBuilder />
+          : tab === 'reports' ? <ReportsBuilder />
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
           : tab === 'app' ? <AppBuilder />
