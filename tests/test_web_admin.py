@@ -1264,6 +1264,66 @@ def test_reports_templates_preview_rejects_unknown_connector(env, tmp_path, monk
         assert "unknown connector" in r.json()["detail"].lower()
 
 
+def test_reports_templates_columns_returns_query_metadata(env, tmp_path, monkeypatch) -> None:
+    """``POST /admin/config/reports/columns`` runs the bound query with a
+    1-row cap and returns its column metadata — feeds the template editor's
+    autocomplete and the 'Scaffold from query' button."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Reader → 403
+        assert client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "db", "query": "answer"},
+            headers=_h(client, "reader"),
+        ).status_code == 403
+
+        r = client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "db", "query": "answer", "params": {}},
+            headers=h,
+        )
+        assert r.status_code == 200, r.text
+        out = r.json()
+        # At least one column comes back with a name
+        assert len(out["columns"]) >= 1
+        names = {c["name"] for c in out["columns"]}
+        assert "answer" in names
+
+
+def test_reports_templates_columns_rejects_unknown_connector(env, tmp_path, monkeypatch) -> None:
+    """Unknown connector → 422 — never silently returns an empty column list
+    that would mask a typo in the operator's binding."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "nope_doesnt_exist", "query": "answer"},
+            headers=h,
+        )
+        assert r.status_code == 422
+        assert "unknown connector" in r.json()["detail"].lower()
+
+
+def test_reports_templates_columns_propagates_query_error(env, tmp_path, monkeypatch) -> None:
+    """A connector that exists but doesn't carry the named query → 422 with
+    the underlying error, so the operator can fix the binding."""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post(
+            "/admin/config/reports/columns",
+            json={"connector": "db", "query": "no_such_query"},
+            headers=h,
+        )
+        assert r.status_code == 422
+        assert "no_such_query" in r.json()["detail"]
+
+
 def test_reports_templates_preview_template_parse_error(env, tmp_path, monkeypatch) -> None:
     """A syntactically broken Jinja template → 422 with the parser's message
     so the operator can fix it without saving."""

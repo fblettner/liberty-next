@@ -15,20 +15,24 @@
 // editor. Test params seed from the declared `default` values and stay
 // editable in-place.
 import '../../services/monaco' // side effect: register Monaco + the markdown language
-import MonacoEditor, { type OnChange } from '@monaco-editor/react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import MonacoEditor, { type OnChange, type OnMount } from '@monaco-editor/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
-  FileText, Plus, Trash2, Save, X, Edit3, Database, Play, EyeOff,
+  FileText, Plus, Trash2, Save, X, Edit3, Database, Play, EyeOff, Sparkles,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   Banner, Button, Card, Field, Input, Select, Tag,
   Overlay, Modal, ModalHeader, ModalBody, ModalFooter, SpinnerRing, Checkbox,
-  Centered, useIsLight,
+  Centered, useIsLight, useModals,
 } from '../../common'
 import { Markdown } from '../../common/Markdown'
+import {
+  attachTemplateContext,
+  type TemplateColumn,
+} from '../../services/templateCompletion'
 import { colors, fontSize, fonts, radius, EDITOR_FONT_PX } from '../../theme'
 
 // --------------------------------------------------------------------------- //
@@ -115,10 +119,22 @@ const EditorFrame = styled.div`
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;
   background: ${colors.bg.input}; min-height: 320px; height: 360px;
 `
+// Preview pane scrolls in both axes — markdown tables built from real query
+// results often have more columns than the side-by-side layout gives the pane
+// width for. Without horizontal overflow + per-cell `white-space: nowrap`,
+// each cell wraps its content one character per line (UUIDs become tall
+// stacks). Letting cells keep their natural width + scrolling horizontally
+// reads the way operators expect.
 const PreviewPane = styled.div`
   border: 1px solid ${colors.border}; border-radius: ${radius.md};
-  background: ${colors.bg.card}; min-height: 320px; max-height: 360px;
+  background: ${colors.bg.card}; min-height: 320px; max-height: 420px;
   overflow: auto; padding: 10px 14px;
+  table { display: table; width: auto; }
+  th, td { white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  /* Long-running text outside tables (UUIDs in a list, JSON dumps) still wraps
+     so the operator can read the full value — only tabular cells get the
+     ellipsis treatment. */
+  p, li, blockquote { word-break: break-word; }
 `
 const PreviewHeader = styled.div`
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -279,6 +295,7 @@ function coerceTestValue(raw: string, type: ParamType): unknown {
 // --------------------------------------------------------------------------- //
 export default function ReportTemplatesBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const [path, setPath] = useState('')
   const [templates, setTemplates] = useState<CustomTemplate[] | null>(null)
   const [connectors, setConnectors] = useState<Record<string, string[]>>({})
@@ -338,7 +355,13 @@ export default function ReportTemplatesBuilder() {
 
   const handleDelete = async (id: string) => {
     if (!templates) return
-    if (!window.confirm(t('settings.templates.confirmDelete', { id }))) return
+    const ok = await modals.confirm({
+      title: t('settings.templates.confirmDeleteTitle'),
+      message: t('settings.templates.confirmDelete', { id }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
     await save(templates.filter((t) => t.id !== id))
   }
 
@@ -431,6 +454,7 @@ function TemplateEditDialog({
   busy: boolean
 }) {
   const { t } = useTranslation()
+  const modals = useModals()
   const isLight = useIsLight()
   const [tpl, setTpl] = useState<CustomTemplate>(template)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -447,6 +471,19 @@ function TemplateEditDialog({
     for (const p of template.params) out[p.name] = defaultAsString(p)
     return out
   })
+  // Columns of the bound query — drives Monaco's autocomplete (row.<col>) and
+  // the "Scaffold from query" button. Fetched lazily once the operator picks a
+  // connector + query; if the query takes params, we send the test-params
+  // payload so the introspection runs the same way the eventual render will.
+  const [columns, setColumns] = useState<TemplateColumn[]>([])
+  const [columnsError, setColumnsError] = useState<string | null>(null)
+  // Holds the Monaco model so we can re-attach the (columns, params) context
+  // whenever either changes after mount — the completion provider reads from
+  // the WeakMap by model.
+  const monacoRef = useRef<{
+    monaco: Parameters<OnMount>[1]
+    model: ReturnType<Parameters<OnMount>[0]['getModel']>
+  } | null>(null)
 
   const update = <K extends keyof CustomTemplate>(k: K, v: CustomTemplate[K]) => {
     setTpl((p) => ({ ...p, [k]: v }))
@@ -475,6 +512,110 @@ function TemplateEditDialog({
       return next
     })
   }, [tpl.params])
+
+  // Stable param-name list — feeds the autocomplete provider and is the
+  // dependency the columns fetch / context re-attach effects watch on.
+  const paramNames = useMemo(
+    () => tpl.params.map((p) => p.name).filter(Boolean),
+    [tpl.params],
+  )
+
+  // Fetch query columns whenever the data binding changes. Best-effort —
+  // failure just clears the column list (and shows the error inline) so the
+  // operator can still author against an empty completion list.
+  const fetchColumns = useCallback(async () => {
+    if (!tpl.data.connector || !tpl.data.query) {
+      setColumns([])
+      setColumnsError(null)
+      return
+    }
+    // Send the current test-params payload so a query that requires inputs to
+    // run still introspects cleanly (the connector binds missing keys to NULL,
+    // but any real-typed param the operator already set goes through).
+    const params: Record<string, unknown> = {}
+    for (const p of tpl.params) {
+      if (!p.name) continue
+      params[p.name] = coerceTestValue(testParams[p.name] ?? '', p.type)
+    }
+    try {
+      const r = await api.post<{ columns: TemplateColumn[] }>(
+        '/admin/config/reports/columns',
+        { connector: tpl.data.connector, query: tpl.data.query, params },
+      )
+      setColumns(r.columns ?? [])
+      setColumnsError(null)
+    } catch (e) {
+      setColumns([])
+      setColumnsError(e instanceof ApiError ? e.message : String(e))
+    }
+    // We intentionally don't depend on `testParams` here — changing test inputs
+    // shouldn't re-fetch columns. The binding change (connector / query) is the
+    // signal that drives the fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tpl.data.connector, tpl.data.query, tpl.params])
+
+  useEffect(() => { void fetchColumns() }, [fetchColumns])
+
+  // Re-attach the Monaco context whenever columns or paramNames change so the
+  // completion provider sees the latest. Cheap (WeakMap set).
+  useEffect(() => {
+    const ref = monacoRef.current
+    if (!ref || !ref.model) return
+    attachTemplateContext(ref.monaco, ref.model, { columns, paramNames })
+  }, [columns, paramNames])
+
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    const model = editor.getModel()
+    monacoRef.current = { monaco, model }
+    if (model) {
+      attachTemplateContext(monaco, model, { columns, paramNames })
+    }
+  }
+
+  // Replace the editor body with a markdown table derived from the real
+  // column metadata of the bound query. Uses the column labels for headers
+  // (falls back to the name) and the names for the body cells. Confirms
+  // before overwriting non-pristine content.
+  const handleScaffoldFromQuery = async () => {
+    if (columns.length === 0) return
+    const headerCells = columns.map((c) => c.label || c.name).join(' | ')
+    const dividerCells = columns.map(() => '---').join(' | ')
+    const bodyCells = columns.map((c) => `{{ row.${c.name} }}`).join(' | ')
+    const scaffold =
+      `## ${tpl.title || 'Report'}\n\n`
+      + '{% if ctx.data.rows %}\n'
+      + `| ${headerCells} |\n`
+      + `| ${dividerCells} |\n`
+      + '{% for row in ctx.data.rows %}'
+      + `| ${bodyCells} |\n`
+      + '{% endfor %}\n'
+      + '\n_{{ ctx.data.rows | length }} row(s)_\n'
+      + '{% else %}_No data._\n'
+      + '{% endif %}\n'
+    if (!(await confirmOverwriteIfDirty())) return
+    update('template_inline', scaffold)
+    setPreview(null)
+    setPreviewError(null)
+  }
+
+  // Shared "replace the editor body?" guard — only prompts when the current
+  // body is something the operator actually typed (not the EMPTY_TEMPLATE
+  // default and not one of the unedited example bodies). Returns true when
+  // the caller can proceed with the overwrite.
+  const confirmOverwriteIfDirty = async (): Promise<boolean> => {
+    const current = tpl.template_inline.trim()
+    const isPristine =
+      current === ''
+      || current === EMPTY_TEMPLATE.template_inline.trim()
+      || TEMPLATE_EXAMPLES.some((e) => current === e.body.trim())
+    if (isPristine) return true
+    return modals.confirm({
+      title: t('settings.templates.examples.replaceTitle'),
+      message: t('settings.templates.examples.replaceConfirm'),
+      variant: 'danger',
+      confirmLabel: t('settings.templates.examples.replaceConfirmLabel'),
+    })
+  }
 
   const validate = (): string | null => {
     if (!tpl.id) return t('settings.templates.errors.idRequired')
@@ -682,15 +823,8 @@ function TemplateEditDialog({
                   key={ex.id}
                   $size="sm" $variant="ghost"
                   type="button"
-                  onClick={() => {
-                    // Only confirm when the operator already has work-in-progress
-                    // — empty / unchanged-default bodies overwrite silently.
-                    const current = tpl.template_inline.trim()
-                    const isPristine =
-                      current === ''
-                      || current === EMPTY_TEMPLATE.template_inline.trim()
-                      || TEMPLATE_EXAMPLES.some((e) => current === e.body.trim())
-                    if (!isPristine && !window.confirm(t('settings.templates.examples.replaceConfirm'))) return
+                  onClick={async () => {
+                    if (!(await confirmOverwriteIfDirty())) return
                     update('template_inline', ex.body)
                     setPreview(null)
                     setPreviewError(null)
@@ -700,6 +834,22 @@ function TemplateEditDialog({
                   {t(ex.labelKey)}
                 </Button>
               ))}
+              <Button
+                $size="sm" $variant="ghost"
+                type="button"
+                onClick={handleScaffoldFromQuery}
+                disabled={columns.length === 0}
+                title={
+                  columns.length === 0
+                    ? t('settings.templates.scaffoldDisabled') as string
+                    : t('settings.templates.scaffoldTitle', { n: columns.length }) as string
+                }
+              >
+                <Sparkles size={12} /> {t('settings.templates.scaffold')}
+              </Button>
+              {columnsError && (
+                <Tag $tone="red">{t('settings.templates.columnsError')}</Tag>
+              )}
             </ExamplesBar>
             <Split $hasPreview={showPreview}>
               <EditorFrame>
@@ -710,6 +860,7 @@ function TemplateEditDialog({
                   value={tpl.template_inline}
                   loading={<Centered />}
                   onChange={handleEditorChange}
+                  onMount={handleEditorMount}
                   options={{
                     fontSize: EDITOR_FONT_PX,
                     fontFamily: fonts.mono,

@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption } from '../../common'
+import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
@@ -585,6 +585,7 @@ function RunWithParamsModal({
   onSavePreset: (preset: import('./types').JobPreset) => Promise<void>
 }) {
   const { t } = useTranslation()
+  const modals = useModals()
   const { connectors } = useWorkspace()
   const connectorOptions = useMemo<SearchSelectOption[]>(
     () => (connectors ?? []).map((c) => ({ value: c.name, label: c.name, mono: c.name })),
@@ -679,7 +680,13 @@ function RunWithParamsModal({
     }
   }
   const handleSavePreset = async () => {
-    const name = window.prompt(t('nomaflow.runParams.savePresetPrompt', 'Preset name:'))?.trim()
+    const rawName = await modals.prompt({
+      title: t('nomaflow.runParams.savePresetTitle', 'Save preset'),
+      message: t('nomaflow.runParams.savePresetPrompt', 'Preset name:'),
+      placeholder: t('nomaflow.runParams.savePresetPlaceholder', 'e.g. nightly-batch') as string,
+      submitLabel: t('common.save'),
+    })
+    const name = rawName?.trim()
     if (!name) return
     setSavePresetBusy(true); setSavePresetError(null)
     try {

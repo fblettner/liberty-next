@@ -1548,6 +1548,73 @@ async def preview_report_template(
     }
 
 
+# Column introspection for a (connector, query) pair — feeds the template
+# editor's Monaco autocomplete (so ``row.<TAB>`` suggests real column names)
+# and the "Scaffold from query" button (which emits a markdown table with the
+# columns pre-filled). Runs the query with ``max_rows=1`` to keep DB cost
+# trivial; the row payload is discarded, only ``columns`` rides back.
+class ReportsTemplateColumnsBody(BaseModel):
+    connector: str
+    query: str
+    params: dict[str, Any] = {}
+
+
+@router.post("/config/reports/columns", summary="Introspect query columns")
+async def introspect_report_query_columns(
+    body: ReportsTemplateColumnsBody, request: Request, _: Superuser,
+) -> dict[str, Any]:
+    """Return the column metadata for *body.query* on *body.connector*.
+
+    Used by the Settings → Templates editor for two things:
+
+    * Monaco autocomplete — typing ``row.`` suggests the actual column names
+      the query returns.
+    * The "Scaffold from query" button — fills the template body with a
+      markdown table whose header row uses real column labels.
+
+    Runs the query with ``max_rows=1`` so the DB only pays for the metadata
+    fetch, not a full result set. Errors (unknown connector, query failure)
+    surface as 422 so the UI can show a clear "couldn't introspect" message."""
+    from liberty.reports.custom import CustomReportDataBinding
+
+    connectors = getattr(request.app.state, "connectors", None)
+    if connectors is None:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="connector registry not initialised",
+        )
+    try:
+        binding = CustomReportDataBinding.model_validate(
+            {"connector": body.connector, "query": body.query},
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"binding: {exc}",
+        ) from exc
+    if binding.connector not in connectors.names():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"unknown connector: {binding.connector!r}",
+        )
+    connector = connectors.get(binding.connector)
+    try:
+        result = await connector.execute(
+            binding.query, dict(body.params), max_rows=1,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"query {binding.query!r} failed: {exc}",
+        ) from exc
+    columns = [
+        {"name": getattr(c, "name", None), "label": getattr(c, "label", None),
+         "type": getattr(c, "type", None)}
+        for c in (getattr(result, "columns", []) or [])
+    ]
+    return {"columns": columns}
+
+
 # ── Find usages ─────────────────────────────────────────────────────────────────────────────
 # Every Settings editor surfaces a "Find usages" button that calls this. The reference graph
 # lives in liberty.web.usages — walks the in-memory registries (no disk reads) and returns a
