@@ -450,7 +450,7 @@ const en = {
       invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports', templates: 'Templates' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports' },
     templates: {
       title: 'Report templates',
       description: 'Operator-authored reports — declared in reports.toml and rendered through the framework like any plugin report. Each template binds to a connector query that feeds rows to its Jinja markdown body.',

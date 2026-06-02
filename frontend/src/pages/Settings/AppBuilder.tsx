@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
   Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X,
-  ChevronDown, ChevronRight, KeyRound, ShieldCheck, Pencil,
+  ChevronDown, ChevronRight, KeyRound, ShieldCheck, Pencil, FileText, RefreshCw,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Checkbox, Field, Input, SpinnerRing, Tag, Textarea } from '../../common'
@@ -74,6 +74,24 @@ interface AppParsed {
   oidc: OidcSection
   choices: Choices
 }
+// PDF branding (``[reports.branding]`` in app.toml) — applied to every report
+// rendered through the framework. Layered precedence at render time:
+//   framework defaults  <  this section  <  per-report pdf_options
+// Lives next to the rest of the app settings (it's in the same file), surfaced
+// as its own collapsible panel below.
+interface BrandingFields {
+  author: string
+  primary_color: string
+  primary_color_light: string
+  cover_eyebrow: string
+  cover_ref: string
+  footer_left: string
+}
+interface BrandingResponse {
+  path: string
+  branding: BrandingFields
+  defaults: BrandingFields
+}
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
@@ -102,6 +120,14 @@ const Select = styled.select`
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px;`
 const RowFlex = styled.div`display: flex; gap: 10px; align-items: center; flex-wrap: wrap;`
+const ColorRow = styled.div`display: flex; align-items: center; gap: 8px;`
+const ColorSwatch = styled.span<{ $color: string }>`
+  width: 28px; height: 28px; border-radius: ${radius.sm};
+  border: 1px solid ${colors.border};
+  background: ${({ $color }) => $color || 'transparent'};
+  flex-shrink: 0;
+`
+const InlineActions = styled.div`display: flex; align-items: center; gap: 6px;`
 const MaskedRow = styled.div`
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; border-radius: ${radius.md}; border: 1px solid ${colors.border};
@@ -111,7 +137,9 @@ const MaskedRow = styled.div`
   & .status { flex: 1; }
 `
 
-const DEFAULTS: { app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection } = {
+const DEFAULTS: {
+  app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
+} = {
   app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en' },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
@@ -125,11 +153,17 @@ const DEFAULTS: { app: AppSection; ai: AiSection; license: LicenseSection; oidc:
     scopes: 'openid email profile', username_claim: 'preferred_username',
     email_claim: 'email', name_claim: 'name', redirect_url: '', frontend_redirect: '',
   },
+  branding: {
+    author: '', primary_color: '', primary_color_light: '',
+    cover_eyebrow: '', cover_ref: '', footer_left: '',
+  },
 }
 
-type SectionKey = 'app' | 'license' | 'ai' | 'oidc'
+type SectionKey = 'app' | 'license' | 'ai' | 'oidc' | 'branding'
 const OPEN_STORAGE_KEY = 'liberty:appbuilder:open'
-const DEFAULT_OPEN: Record<SectionKey, boolean> = { app: true, license: false, ai: false, oidc: false }
+const DEFAULT_OPEN: Record<SectionKey, boolean> = {
+  app: true, license: false, ai: false, oidc: false, branding: false,
+}
 
 function loadOpenState(): Record<SectionKey, boolean> {
   try {
@@ -146,6 +180,11 @@ export default function AppBuilder() {
   const [ai, setAi] = useState<AiSection>(DEFAULTS.ai)
   const [license, setLicense] = useState<LicenseSection>(DEFAULTS.license)
   const [oidc, setOidc] = useState<OidcSection>(DEFAULTS.oidc)
+  const [branding, setBranding] = useState<BrandingFields>(DEFAULTS.branding)
+  // The framework's hard-coded defaults — used as input placeholders + by the
+  // "Reset to defaults" button. Loaded alongside the current values so the UI
+  // knows what "empty" actually means.
+  const [brandingDefaults, setBrandingDefaults] = useState<BrandingFields>(DEFAULTS.branding)
   const [choices, setChoices] = useState<Choices>({ log_levels: [], effort_levels: [], connectors: [], models: [] })
   const [path, setPath] = useState('')
   const [original, setOriginal] = useState('')
@@ -171,14 +210,27 @@ export default function AppBuilder() {
   const load = useCallback(async () => {
     setLoading(true); setError(null); setStatus(null); setRestartHint(false)
     try {
-      const r = await api.get<AppParsed>('/admin/config/app/parsed')
+      // app/parsed + branding live in the same file (app.toml) but are exposed
+      // by separate endpoints — fetch them concurrently, populate state once
+      // both resolve. A branding fetch failure isn't fatal: the rest of the
+      // App tab still works; we just seed branding from defaults and surface
+      // the error.
+      const [r, b] = await Promise.all([
+        api.get<AppParsed>('/admin/config/app/parsed'),
+        api.get<BrandingResponse>('/admin/config/reports/branding').catch(() => null),
+      ])
       setPath(r.path)
       setApp(r.app)
       setAi(r.ai)
       setLicense(r.license)
       setOidc(r.oidc)
       setChoices(r.choices)
-      setOriginal(JSON.stringify({ app: r.app, ai: r.ai, license: r.license, oidc: r.oidc }))
+      const loadedBranding = b?.branding ?? DEFAULTS.branding
+      setBranding(loadedBranding)
+      setBrandingDefaults(b?.defaults ?? DEFAULTS.branding)
+      setOriginal(JSON.stringify({
+        app: r.app, ai: r.ai, license: r.license, oidc: r.oidc, branding: loadedBranding,
+      }))
       setEditingSecret({})
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -190,17 +242,23 @@ export default function AppBuilder() {
   useEffect(() => { void load() }, [load])
 
   const dirty = useMemo(
-    () => JSON.stringify({ app, ai, license, oidc }) !== original,
-    [app, ai, license, oidc, original],
+    () => JSON.stringify({ app, ai, license, oidc, branding }) !== original,
+    [app, ai, license, oidc, branding, original],
   )
 
   const discard = () => {
     if (!original) return
     try {
-      const seed = JSON.parse(original) as { app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection }
-      setApp(seed.app); setAi(seed.ai); setLicense(seed.license); setOidc(seed.oidc)
+      const seed = JSON.parse(original) as {
+        app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
+      }
+      setApp(seed.app); setAi(seed.ai); setLicense(seed.license); setOidc(seed.oidc); setBranding(seed.branding)
       setStatus(null); setError(null); setRestartHint(false); setEditingSecret({})
     } catch { /* ignore */ }
+  }
+
+  const resetBrandingToDefaults = () => {
+    setBranding({ ...brandingDefaults })
   }
 
   const save = async () => {
@@ -216,6 +274,13 @@ export default function AppBuilder() {
       const r = await api.put<{ saved: boolean; requires_restart?: boolean }>(
         '/admin/config/app/parsed',
         { app, ai: aiPayload, license: licensePayload, oidc: oidcPayload },
+      )
+      // Branding lives in the same file but has its own endpoint — second PUT,
+      // so a typo here doesn't poison the app/ai/license/oidc save above.
+      // Live-applies: next /api/reports/.../run picks the new values up.
+      await api.put<{ saved: boolean; path: string }>(
+        '/admin/config/reports/branding',
+        { branding },
       )
       // Reload — refreshes the _set flags from disk so the masked rows update from "not
       // configured" to dots immediately after a first-time Set.
@@ -507,6 +572,70 @@ export default function AppBuilder() {
                 onChange={(e) => setOidc({ ...oidc, frontend_redirect: e.target.value })}
                 placeholder="https://liberty.example.com/" />
             </Field>
+          </>,
+        )}
+
+        {renderSection(
+          'branding',
+          t('settings.app.brandingSection', 'PDF branding'),
+          <FileText size={14} />,
+          branding.author || t('settings.app.brandingDefaults', 'framework defaults'),
+          <>
+            <Hint>
+              {t(
+                'settings.app.brandingHint',
+                'Applied to every report generated through the framework. Per-report pdf_options still wins; anything a report doesn\'t set inherits from here.',
+              )}
+            </Hint>
+            <InlineActions>
+              <Button $size="sm" $variant="ghost" onClick={resetBrandingToDefaults} disabled={busy} type="button">
+                <RefreshCw size={13} /> {t('settings.reports.resetDefaults', 'Reset to defaults')}
+              </Button>
+            </InlineActions>
+            <RowFlex>
+              <Field label={t('settings.reports.fields.author', 'Author / company name')}>
+                <Input value={branding.author}
+                  onChange={(e) => setBranding({ ...branding, author: e.target.value })}
+                  placeholder={brandingDefaults.author || 'NOMANA-IT'} style={{ width: 280 }} />
+              </Field>
+              <Field label={t('settings.reports.fields.coverEyebrow', 'Cover eyebrow text')}>
+                <Input value={branding.cover_eyebrow}
+                  onChange={(e) => setBranding({ ...branding, cover_eyebrow: e.target.value })}
+                  placeholder={brandingDefaults.cover_eyebrow} style={{ width: 280 }} />
+              </Field>
+            </RowFlex>
+            <RowFlex>
+              <Field label={t('settings.reports.fields.primaryColor', 'Primary colour')}>
+                <ColorRow>
+                  <Input value={branding.primary_color}
+                    onChange={(e) => setBranding({ ...branding, primary_color: e.target.value })}
+                    placeholder={brandingDefaults.primary_color}
+                    style={{ width: 130, fontFamily: fonts.mono }} />
+                  <ColorSwatch $color={branding.primary_color} />
+                </ColorRow>
+              </Field>
+              <Field label={t('settings.reports.fields.primaryColorLight', 'Primary colour (lighter)')}>
+                <ColorRow>
+                  <Input value={branding.primary_color_light}
+                    onChange={(e) => setBranding({ ...branding, primary_color_light: e.target.value })}
+                    placeholder={brandingDefaults.primary_color_light}
+                    style={{ width: 130, fontFamily: fonts.mono }} />
+                  <ColorSwatch $color={branding.primary_color_light} />
+                </ColorRow>
+              </Field>
+            </RowFlex>
+            <RowFlex>
+              <Field label={t('settings.reports.fields.coverRef', 'Cover footer reference')}>
+                <Input value={branding.cover_ref}
+                  onChange={(e) => setBranding({ ...branding, cover_ref: e.target.value })}
+                  placeholder={brandingDefaults.cover_ref} style={{ width: 280 }} />
+              </Field>
+              <Field label={t('settings.reports.fields.footerLeft', 'Page footer (left)')}>
+                <Input value={branding.footer_left}
+                  onChange={(e) => setBranding({ ...branding, footer_left: e.target.value })}
+                  placeholder={brandingDefaults.footer_left} style={{ width: 280 }} />
+              </Field>
+            </RowFlex>
           </>,
         )}
       </Stack>
