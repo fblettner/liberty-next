@@ -1324,6 +1324,72 @@ def test_reports_templates_columns_propagates_query_error(env, tmp_path, monkeyp
         assert "no_such_query" in r.json()["detail"]
 
 
+def test_app_parsed_secret_round_trip_via_enc_ciphertext(env, tmp_path, monkeypatch) -> None:
+    """Regression: PUT /admin/config/app/parsed must preserve an already-encrypted
+    secret when the operator saves the form without touching it. The UI follows
+    the same pattern as pools / API-connector secrets: GET returns the on-disk
+    ``ENC:…`` value, the input renders masked via ``<PasswordInput>``, and PUT
+    sends back whatever's in the field — ``ENC:…`` unchanged when the operator
+    didn't edit. The backend's :func:`_encrypt_sensitives` is idempotent on
+    ``ENC:`` values so the round-trip is a no-op.
+
+    The historical bug: AppBuilder used to send ``api_key: ""`` for "unedited"
+    secrets (via an "Edit" toggle that hid the value behind a Set button), and
+    the backend wrote that empty string to disk — wiping the operator's
+    encrypted license key / Anthropic API key / OIDC secret. The toggle is gone;
+    this test pins the saner contract that replaced it."""
+    app, _conn_toml, _db_url = env
+    app_toml = tmp_path / "app.toml"
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(app_toml))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # 1) Set an api_key the first time — backend encrypts it on disk.
+        r = client.put(
+            "/admin/config/app/parsed",
+            json={"ai": {"enabled": True, "api_key": "sk-test-1234"}},
+            headers=h,
+        )
+        assert r.status_code == 200, r.text
+        disk1 = app_toml.read_text(encoding="utf-8")
+        assert "sk-test-1234" not in disk1  # plaintext must not land on disk
+        assert "ENC:" in disk1               # encrypted form did
+        encrypted_line = next(l for l in disk1.splitlines() if l.startswith("api_key"))
+
+        # 2) The GET now returns the ENC: ciphertext (no masking) so the UI can
+        # round-trip it untouched. Same shape as pools/connectors.
+        got = client.get("/admin/config/app/parsed", headers=h).json()
+        assert got["ai"]["api_key"].startswith("ENC:")
+        # ``_set`` indicator fields are gone — the UI checks for non-empty value.
+        assert "api_key_set" not in got["ai"]
+
+        # 3) Operator saves the form without touching the secret — UI sends the
+        # same ENC: value back. Backend's encrypt() is idempotent → byte-for-byte
+        # unchanged on disk.
+        r = client.put(
+            "/admin/config/app/parsed",
+            json={"ai": got["ai"]},
+            headers=h,
+        )
+        assert r.status_code == 200, r.text
+        disk2 = app_toml.read_text(encoding="utf-8")
+        assert any(l == encrypted_line for l in disk2.splitlines()), (
+            f"api_key changed: was {encrypted_line!r}, now "
+            f"{[l for l in disk2.splitlines() if l.startswith('api_key')]!r}"
+        )
+
+        # 4) Explicit empty string still means CLEAR — operator deleted the
+        # field contents and saved. The on-disk value becomes empty.
+        cleared = {**got["ai"], "api_key": ""}
+        r = client.put(
+            "/admin/config/app/parsed",
+            json={"ai": cleared},
+            headers=h,
+        )
+        assert r.status_code == 200
+        disk3 = app_toml.read_text(encoding="utf-8")
+        assert 'api_key = ""' in disk3
+
+
 def test_reports_templates_preview_template_parse_error(env, tmp_path, monkeypatch) -> None:
     """A syntactically broken Jinja template → 422 with the parser's message
     so the operator can fix it without saving."""
