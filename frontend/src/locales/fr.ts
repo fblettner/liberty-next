@@ -452,7 +452,22 @@ const fr: Resources = {
       invalidIdentifier: 'Utilisez des lettres minuscules, des chiffres et des underscores ; commencez par une lettre (compatible avec les clés TOML, les permissions et les segments d\'URL).',
       unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App' },
+    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App', reports: 'Rapports' },
+    reports: {
+      title: 'Valeurs par défaut PDF',
+      description: 'Appliquées à chaque rapport généré par le framework. Les rapports peuvent surcharger ces valeurs au cas par cas (titre, sous-titre…), mais ce qu\'ils ne définissent pas hérite d\'ici.',
+      unsaved: 'non sauvegardé',
+      resetDefaults: 'Réinitialiser aux valeurs par défaut',
+      saved: 'Sauvegardé. Les nouveaux défauts s\'appliquent à la prochaine exécution — pas besoin de redémarrer.',
+      fields: {
+        author: 'Auteur / nom de société',
+        coverEyebrow: 'Texte d\'accroche de couverture',
+        primaryColor: 'Couleur principale',
+        primaryColorLight: 'Couleur principale (claire)',
+        coverRef: 'Référence en pied de couverture',
+        footerLeft: 'Pied de page (gauche)',
+      },
+    },
     theme: {
       intro: "Personnalisez l'apparence de toute l'installation — choisissez une palette, définissez la couleur d'accent principale et nommez l'application. S'applique à tous les utilisateurs ; le mode clair/sombre reste un choix individuel.",
       preset: 'Préréglage',

@@ -932,7 +932,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 # so comments + ``${VAR}`` references on untouched keys survive a save). Changes do NOT take
 # effect live: app.toml is loaded once at startup. The PUT returns ``requires_restart: true`` to
 # nudge the UI.
-from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, load_settings, resolve_app_config_path
+from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path
 
 
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
@@ -1190,6 +1190,99 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     )
 
     return {"saved": True, "path": str(path), "requires_restart": restart_needed}
+
+
+# --------------------------------------------------------------------------- #
+# Reports — branding defaults (Phase 3b)
+# --------------------------------------------------------------------------- #
+# Read / write JUST the ``[reports.branding]`` section of app.toml. The render
+# pipeline (liberty.reports.render.render_content) folds these in as
+# BuildOptions defaults between the framework's title/author values and the
+# plugin's per-report pdf_options overrides — so the operator can theme every
+# report's PDF cover from one place without touching plugin code.
+@router.get("/config/reports/branding", summary="Get reports branding defaults")
+async def get_reports_branding(request: Request, _: Superuser) -> dict[str, Any]:
+    """Return the install-wide PDF branding defaults from
+    ``[reports.branding]`` (author, primary_color, cover_eyebrow, …) plus the
+    canonical defaults so the UI can show "Reset" against them."""
+    path = _app_config_path()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    raw = tomllib.loads(text) if text.strip() else {}
+    section = (raw.get("reports") or {}).get("branding") or {}
+    try:
+        model = ReportsBrandingSettings.model_validate(section)
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"existing [reports.branding] is invalid: {exc}",
+        ) from exc
+    return {
+        "path": str(path),
+        "branding": model.model_dump(),
+        "defaults": ReportsBrandingSettings().model_dump(),
+    }
+
+
+class ReportsBrandingBody(BaseModel):
+    branding: dict[str, Any] = {}
+
+
+@router.put("/config/reports/branding", summary="Update reports branding defaults")
+async def put_reports_branding(
+    body: ReportsBrandingBody, request: Request, _: Superuser,
+) -> dict[str, object]:
+    """Validate the submitted branding fields, then surgically rewrite ONLY
+    the ``[reports.branding]`` section of app.toml via ``tomlkit`` — every
+    other table stays byte-identical (comments, formatting, ``${VAR}``
+    references on other sections all preserved). Live-applies via
+    ``load_settings()``; no restart needed because the next report render
+    reads ``app.state.settings.reports.branding`` fresh."""
+    try:
+        model = ReportsBrandingSettings.model_validate(body.branding or {})
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"invalid branding: {exc}",
+        ) from exc
+
+    path = _app_config_path()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+
+    # Ensure [reports] super-table exists, then [reports.branding] under it.
+    if "reports" not in doc:
+        doc["reports"] = tomlkit.table(is_super_table=True)
+    reports_tbl = doc["reports"]
+    if "branding" not in reports_tbl:
+        reports_tbl["branding"] = tomlkit.table()
+    branding_tbl = reports_tbl["branding"]
+
+    # Persist only non-default values to keep the file terse — defaults are
+    # reapplied automatically by the Pydantic model on next read.
+    normalised = model.model_dump(exclude_defaults=True)
+    for stale in [k for k in list(branding_tbl.keys()) if k not in normalised]:
+        del branding_tbl[stale]
+    for k, v in normalised.items():
+        branding_tbl[k] = v
+
+    new_text = tomlkit.dumps(doc)
+    try:
+        reparsed = tomllib.loads(new_text)
+        ReportsBrandingSettings.model_validate(
+            ((reparsed.get("reports") or {}).get("branding") or {})
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"resulting app.toml is invalid: {exc}",
+        ) from exc
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+
+    # Live-apply — next render picks the new branding up without a restart.
+    request.app.state.settings = load_settings()
+    return {"saved": True, "path": str(path)}
 
 
 # ── Find usages ─────────────────────────────────────────────────────────────────────────────

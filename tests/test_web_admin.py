@@ -971,3 +971,89 @@ def test_config_schema_includes_dashboards(env) -> None:
         assert "Dashboard" in defs
         # The widget discriminated union ships its variants
         assert "ChartWidget" in defs and "KpiWidget" in defs
+
+
+# --------------------------------------------------------------------------- #
+# Phase 3b — Reports → Branding endpoints
+# --------------------------------------------------------------------------- #
+def test_reports_branding_round_trips(env, tmp_path, monkeypatch) -> None:
+    """``GET /admin/config/reports/branding`` returns the defaults when the
+    file is empty; ``PUT`` writes the non-default values into a fresh
+    ``[reports.branding]`` table; the next GET round-trips them; the live
+    settings object on ``app.state`` is reloaded so the next render picks
+    them up without a restart."""
+    app, _conn_toml, _db_url = env
+    # Point the app.toml resolver at a tmp path so we don't touch the real
+    # config/app.toml when running tests.
+    app_toml = tmp_path / "app.toml"
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(app_toml))
+
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Reader can't read or write
+        assert client.get("/admin/config/reports/branding", headers=_h(client, "reader")).status_code == 403
+        assert client.put("/admin/config/reports/branding",
+                          json={"branding": {}}, headers=_h(client, "reader")).status_code == 403
+        # First GET on a missing file → defaults
+        r = client.get("/admin/config/reports/branding", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["branding"] == body["defaults"]
+        assert body["branding"]["author"] == ""
+        assert body["branding"]["primary_color"] == "#0b3a82"
+
+        # PUT new branding — only non-default values land on disk
+        new = {
+            "author": "ACME Consulting",
+            "primary_color": "#FF5722",
+            "primary_color_light": body["defaults"]["primary_color_light"],  # default — should NOT be written
+            "cover_eyebrow": "Audit Report",
+            "cover_ref": body["defaults"]["cover_ref"],                     # default
+            "footer_left": body["defaults"]["footer_left"],                 # default
+        }
+        r = client.put("/admin/config/reports/branding", json={"branding": new}, headers=h)
+        assert r.status_code == 200 and r.json()["saved"] is True
+
+        # On-disk: only the overridden keys appear, [reports.branding] header present
+        on_disk = app_toml.read_text(encoding="utf-8")
+        assert "[reports.branding]" in on_disk
+        assert 'author = "ACME Consulting"' in on_disk
+        assert 'primary_color = "#FF5722"' in on_disk
+        assert 'cover_eyebrow = "Audit Report"' in on_disk
+        # Default-valued fields are NOT serialised (terseness)
+        assert "primary_color_light" not in on_disk
+        assert "footer_left" not in on_disk
+
+        # GET reflects the new values (with defaults re-applied for omitted fields)
+        after = client.get("/admin/config/reports/branding", headers=h).json()["branding"]
+        assert after["author"] == "ACME Consulting"
+        assert after["primary_color"] == "#FF5722"
+        assert after["primary_color_light"] == body["defaults"]["primary_color_light"]
+        assert after["cover_eyebrow"] == "Audit Report"
+
+        # Live-apply: app.state.settings.reports.branding has the new author
+        live_branding = app.state.settings.reports.branding
+        assert live_branding.author == "ACME Consulting"
+        assert live_branding.primary_color == "#FF5722"
+
+
+def test_reports_branding_rejects_unknown_field(env, tmp_path, monkeypatch) -> None:
+    """Unknown branding keys land on the validation error path — Pydantic
+    rejects extras under ``model_config = ConfigDict(extra="forbid")``
+    inherited from the parent. (Today the model doesn't lock extras, so this
+    test documents the lenient behaviour — if it tightens later, change to
+    expect 422.)"""
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Surplus key just gets dropped; the save succeeds
+        r = client.put(
+            "/admin/config/reports/branding",
+            json={"branding": {"author": "X", "unknown_field": "value"}},
+            headers=h,
+        )
+        assert r.status_code == 200
+        after = client.get("/admin/config/reports/branding", headers=h).json()["branding"]
+        assert after["author"] == "X"
+        assert "unknown_field" not in after

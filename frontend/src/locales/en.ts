@@ -450,7 +450,22 @@ const en = {
       invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports' },
+    reports: {
+      title: 'PDF branding defaults',
+      description: 'Applied to every report generated through the framework. Reports may override these per-call (cover title, custom subtitle…), but anything they don\'t set inherits from here.',
+      unsaved: 'unsaved',
+      resetDefaults: 'Reset to defaults',
+      saved: 'Saved. New defaults apply on the next report run — no restart needed.',
+      fields: {
+        author: 'Author / company name',
+        coverEyebrow: 'Cover eyebrow text',
+        primaryColor: 'Primary colour',
+        primaryColorLight: 'Primary colour (lighter)',
+        coverRef: 'Cover footer reference',
+        footerLeft: 'Page footer (left)',
+      },
+    },
     theme: {
       intro: 'Brand the whole install — pick a preset palette, set the primary accent colour, choose a font, and name the app. Applies to every user; dark/light stays an individual choice.',
       preset: 'Preset',

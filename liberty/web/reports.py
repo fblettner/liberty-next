@@ -247,14 +247,25 @@ async def run_report(
                    f"expected ReportContent",
         )
 
-    # Render in the requested format. Use the install's app name as the cover
-    # default (per the design call); ReportContent.pdf_options overrides per-call.
+    # Render in the requested format. Cover defaults come from three layers:
+    #   1. framework — title, cover_brand=app_name, author=app_name
+    #   2. operator branding (Phase 3b) — Settings → Reports → Branding,
+    #      persisted in app.toml's [reports.branding]; overrides framework
+    #      defaults but yields to per-report pdf_options
+    #   3. plugin — ReportContent.pdf_options always wins
     settings = request.app.state.settings
+    branding_dict: dict[str, Any] = {}
+    reports_settings = getattr(settings, "reports", None)
+    if reports_settings is not None:
+        branding = getattr(reports_settings, "branding", None)
+        if branding is not None:
+            branding_dict = branding.model_dump()
     body_bytes, content_type, filename = render_content(
         raw,
         body.format,
         app_name=getattr(settings.app, "name", ""),
         report_title=d.title,
+        branding=branding_dict,
     )
 
     safe_filename = "".join(

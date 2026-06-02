@@ -27,9 +27,10 @@ const ChartsBuilder = lazy(() => import('./ChartsBuilder'))
 const ThemeBuilder = lazy(() => import('./ThemeBuilder'))
 const AccessBuilder = lazy(() => import('./AccessBuilder'))
 const AppBuilder = lazy(() => import('./AppBuilder'))
+const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
 const PackageBuilder = lazy(() => import('./PackageBuilder'))
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'theme', 'access', 'app', 'package'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'theme', 'access', 'app', 'reports', 'package'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -82,6 +83,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'theme'} onClick={() => setTab('theme')}>{t('settings.tabs.theme', 'Theme')}</TabBtn>
         <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
         <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app', 'App')}</TabBtn>
+        <TabBtn $active={tab === 'reports'} onClick={() => setTab('reports')}>{t('settings.tabs.reports', 'Reports')}</TabBtn>
         <TabBtn $active={tab === 'package'} onClick={() => setTab('package')}>{t('settings.tabs.package', 'Package')}</TabBtn>
       </Tabs>
       <Suspense fallback={<Centered />}>
@@ -95,6 +97,7 @@ export default function Settings() {
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
           : tab === 'app' ? <AppBuilder />
+          : tab === 'reports' ? <ReportsBuilder />
           : <PackageBuilder />}
       </Suspense>
     </PageLayout>

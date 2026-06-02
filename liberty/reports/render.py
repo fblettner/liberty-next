@@ -693,12 +693,21 @@ def render_content(
     *,
     app_name: str = "",
     report_title: str = "",
+    branding: dict[str, Any] | None = None,
 ) -> tuple[bytes, str, str]:
     """Render *content* to *fmt*. Returns ``(body, content_type, filename)``.
 
     The framework calls this from the web layer after dispatching the report
     callable. ``app_name`` and ``report_title`` provide the cover-page
     defaults when ``content.pdf_options`` doesn't override them.
+
+    ``branding`` (Phase 3b) is the operator-curated install-wide PDF defaults
+    from ``Settings → Reports → Branding`` (persisted in ``[reports.branding]``
+    of ``app.toml``). It fills the gaps between framework defaults and the
+    plugin's per-report ``pdf_options`` — typically the company's brand colour,
+    author name, eyebrow text. Per-call ``content.pdf_options`` still wins,
+    so a plugin can pick a different colour for a specific report. Unknown
+    branding keys are silently dropped so a stale field doesn't error.
     """
     if fmt == "markdown":
         body = content.markdown.encode("utf-8")
@@ -706,14 +715,19 @@ def render_content(
         return body, "text/markdown; charset=utf-8", filename
 
     if fmt == "pdf":
-        # Cover defaults: report title → ReportDef.title → app name. Per-call
-        # ``pdf_options`` always wins.
-        defaults = {
+        # Framework defaults — least specific.
+        defaults: dict[str, Any] = {
             "title": content.title or report_title or "Report",
             "cover_brand": app_name,
             "author": app_name,
         }
-        merged = {**defaults, **(content.pdf_options or {})}
+        # Operator-curated branding — overrides framework defaults but yields
+        # to per-report pdf_options. Drop empty strings so a half-filled
+        # branding form doesn't clobber sensible defaults with blanks.
+        if branding:
+            branding = {k: v for k, v in branding.items() if v not in (None, "")}
+        # Plugin's per-report overrides — most specific, always wins.
+        merged = {**defaults, **(branding or {}), **(content.pdf_options or {})}
         # Only keep BuildOptions-known keys to avoid silently swallowing typos.
         known = {f.name for f in BuildOptions.__dataclass_fields__.values()}
         merged = {k: v for k, v in merged.items() if k in known}

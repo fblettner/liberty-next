@@ -247,6 +247,36 @@ class LicenseSettings(BaseModel):
     key: str = ""   # ${LIBERTY_LICENSE_KEY}
 
 
+class ReportsBrandingSettings(BaseModel):
+    """Install-wide PDF cover / header / footer defaults applied to every
+    report rendered through :func:`liberty.reports.render.render_content`.
+
+    Plugin-supplied ``pdf_options`` on the :class:`~liberty.reports.ReportContent`
+    return value still override these per-report (so a report can pick its
+    own ``subtitle`` or ``primary_color`` if it wants). The operator-curated
+    branding here just fills the gaps — typically: company name as ``author``,
+    customer brand color, a neutral eyebrow like "Rapport d'audit".
+
+    Edited via Settings → Reports (frontend ``ReportsBuilder``); persisted in
+    ``[reports.branding]`` inside ``app.toml`` (see
+    :func:`liberty.web.admin.put_reports_branding`)."""
+
+    author: str = ""
+    primary_color: str = "#0b3a82"
+    primary_color_light: str = "#2563eb"
+    cover_eyebrow: str = "Rapport"
+    cover_ref: str = "Document confidentiel"
+    footer_left: str = "Confidentiel"
+
+
+class ReportsSettings(BaseModel):
+    """Reports framework settings (Phase 3b). Today only carries branding
+    defaults; ``[reports.scheduling]`` etc. would land here later as further
+    sub-sections without touching the rest of the config tree."""
+
+    branding: ReportsBrandingSettings = Field(default_factory=ReportsBrandingSettings)
+
+
 class JobsSettings(BaseModel):
     """nomaflow — config-driven ETL + scheduler (see ``docs/PHASE13.md``).
 
@@ -279,6 +309,7 @@ class Settings(BaseModel):
     crypto: CryptoSettings = Field(default_factory=CryptoSettings)
     license: LicenseSettings = Field(default_factory=LicenseSettings)
     jobs: JobsSettings = Field(default_factory=JobsSettings)
+    reports: ReportsSettings = Field(default_factory=ReportsSettings)
 
 
 def load_settings(

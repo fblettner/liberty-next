@@ -169,6 +169,56 @@ def test_render_content_drops_unknown_pdf_options() -> None:
     assert body.startswith(b"%PDF-")
 
 
+def test_render_content_branding_overrides_framework_defaults_but_not_plugin() -> None:
+    """Phase 3b precedence: operator-curated branding (Settings → Reports →
+    Branding, persisted in ``[reports.branding]`` of app.toml) sits BETWEEN
+    framework defaults and the plugin's per-report ``pdf_options``.
+
+    * Framework defaults — title / cover_brand / author (least specific)
+    * Branding from this call — overrides defaults but yields to plugin
+    * Plugin's ``content.pdf_options`` — most specific, always wins
+
+    Validated by capturing the BuildOptions instance the merge produces."""
+    from unittest.mock import patch
+    from liberty.reports import render as render_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_build_pdf(_md: str, _svg, opts: render_mod.BuildOptions) -> bytes:
+        captured["opts"] = opts
+        return b"%PDF-1.4 fake"
+
+    c = ReportContent(
+        markdown="# x",
+        filename_base="x",
+        pdf_options={"primary_color": "#FF0000"},  # plugin pick, must survive
+    )
+    branding = {
+        "author": "ACME Consulting",           # overrides app_name
+        "primary_color": "#00FF00",            # SHOULD be overridden by plugin
+        "primary_color_light": "#00AA00",      # plugin doesn't set → branding wins
+        "cover_eyebrow": "Rapport d'audit",    # framework default → branding wins
+        "footer_left": "",                     # empty → ignored (no clobber)
+    }
+    with patch.object(render_mod, "build_pdf", side_effect=fake_build_pdf):
+        render_content(
+            c, "pdf",
+            app_name="Liberty Next",
+            report_title="Audit",
+            branding=branding,
+        )
+
+    opts: render_mod.BuildOptions = captured["opts"]  # type: ignore[assignment]
+    # Plugin wins for primary_color
+    assert opts.primary_color == "#FF0000"
+    # Branding wins for everything not set by the plugin
+    assert opts.author == "ACME Consulting"
+    assert opts.primary_color_light == "#00AA00"
+    assert opts.cover_eyebrow == "Rapport d'audit"
+    # Empty branding value didn't clobber the framework default
+    assert opts.footer_left == "Confidentiel"
+
+
 def test_render_content_unknown_format_raises_value_error() -> None:
     """Defensive — the web layer validates format against ``ReportDef.formats``
     before calling this, but a programming error shouldn't silently produce
