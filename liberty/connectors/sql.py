@@ -494,7 +494,7 @@ from liberty.connectors.base import (
 )
 from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig, _crud_slot_to_querydef
 from liberty.connectors.db import PoolRegistry
-from liberty.connectors.dictionary import DictionaryFile, SequenceDef
+from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, SequenceDef
 
 # Internal sentinel raised by `test_run(dry_run=True)` on a write — forces `engine.begin()`'s
 # context manager to roll back; caught outside the `async with`. Not part of the public surface.
@@ -1876,14 +1876,30 @@ def _resolve_hint(
     the hint — see :func:`_apply_column_hints`)."""
     label, fmt = h.label, h.format
     rule: dict[str, Any] | None = None
-    if h.dictionary_key:
-        entry = dictionary.find_entry(h.dictionary_key, connector=connector)
-        if entry is not None:
-            if label is None:
-                label = entry.label_for(language)
-            if fmt is None:
-                fmt = entry.format
-            rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+    entry = dictionary.find_entry(h.dictionary_key, connector=connector) if h.dictionary_key else None
+    if entry is not None:
+        if label is None:
+            label = entry.label_for(language)
+        if fmt is None:
+            fmt = entry.format
+    # The hint's OWN ``rules`` override wins over the dictionary entry's rule — e.g. APPS_ID is a
+    # global LOOKUP in the dictionary but THIS screen overrides it to SEQUENCE (it creates the row).
+    # Without honouring the override the grid kept rendering the LOOKUP. Build a synthetic entry so
+    # the override resolves (SEQUENCE / NN resolve to no display rule → the grid shows the raw value).
+    hint_rules = h.rules.strip().upper() if h.rules else None
+    if hint_rules:
+        synth = DictionaryEntry(
+            label=(entry.label if entry else None),
+            format=fmt or (entry.format if entry else None),
+            rules=hint_rules,
+            rules_values=(h.rules_values.strip() if h.rules_values else None),
+            lookup_params=(entry.lookup_params if entry else {}),
+            false_value=(entry.false_value if entry else None),
+            default=(entry.default if entry else None),
+        )
+        rule = dictionary.resolve_rule(synth, connector=connector, language=language)
+    elif entry is not None:
+        rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],

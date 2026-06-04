@@ -196,36 +196,50 @@ def _resolve_screen_fields_in_dialog(
     tabs = out.get("tabs")
     if not isinstance(tabs, list):
         return out
+    def _resolve_fields(fields: list[Any], hints: dict[str, "ColumnHint"]) -> list[Any]:
+        return [
+            _resolve_screen_field(f, column_hints=hints, connector=connector, language=language, dictionary=dictionary)
+            if isinstance(f, dict) else f
+            for f in fields
+        ]
+
+    # Locate the column-hints map for a form / nested_form whose fields belong to a (possibly
+    # different) screen identified by its read query. Empty map → fields resolve via their own
+    # ``dd`` (or name) against the dictionary, which is exactly what a from-scratch nested form
+    # relies on (it has no Screen.columns layer of its own).
+    def _hints_for_read_query(data_pool: str | None, read_query: str | None) -> dict[str, "ColumnHint"]:
+        if screens is None or not read_query:
+            return {}
+        s = _find_screen_by_read_query(screens, connector=(data_pool or connector), read_query=read_query, app=app)
+        return {h.name.lower(): h for h in s.columns} if (s is not None and s.columns) else {}
+
     new_tabs = []
     for tab in tabs:
-        if not (isinstance(tab, dict) and isinstance(tab.get("fields"), list)):
+        if not isinstance(tab, dict):
             new_tabs.append(tab); continue
-        # Pick the right column-hints map for this tab.
         tab_type = tab.get("type") or "form"
-        tab_hints = column_hints
-        if tab_type == "nested_form" and screens is not None:
-            # ``tab.connector`` is the nested form's data-pool connector — used to locate the
-            # matching nested screen. The dictionary scope still follows the (parent's) app —
-            # operator metadata lives under one app's scope even when the screen runs against
-            # a different data pool.
-            nested_data_pool = tab.get("connector") or connector
-            nested_read = tab.get("read_query")
-            nested_screen = _find_screen_by_read_query(
-                screens, connector=nested_data_pool, read_query=nested_read, app=app,
+        new_tab = dict(tab)
+        # The tab's own field grid (form + nested_form). A nested_form tab's fields belong to its
+        # own read query, so prefer that screen's column hints; a plain form tab uses the parent's.
+        if isinstance(tab.get("fields"), list):
+            tab_hints = (
+                _hints_for_read_query(tab.get("connector"), tab.get("read_query"))
+                if tab_type == "nested_form" else column_hints
             )
-            if nested_screen is not None and nested_screen.columns:
-                tab_hints = {h.name.lower(): h for h in nested_screen.columns}
-        tab = {
-            **tab,
-            "fields": [
-                _resolve_screen_field(
-                    f, column_hints=tab_hints,
-                    connector=connector, language=language, dictionary=dictionary,
-                ) if isinstance(f, dict) else f
-                for f in tab["fields"]
-            ],
-        }
-        new_tabs.append(tab)
+            new_tab["fields"] = _resolve_fields(tab["fields"], tab_hints)
+        # Embedded nested forms on a FORM tab — resolve EACH one's fields too, against its own read
+        # query's columns (or, failing that, each field's ``dd``). Without this their ``dd`` links
+        # never resolve and every embedded field renders as a plain text box (the bug: a nested
+        # ULFRMT linked to FRMT showed as text while the main-dialog ULFRMT rendered its rule).
+        if isinstance(tab.get("nested_forms"), list):
+            resolved_nf = []
+            for nf in tab["nested_forms"]:
+                if not (isinstance(nf, dict) and isinstance(nf.get("fields"), list)):
+                    resolved_nf.append(nf); continue
+                nf_hints = _hints_for_read_query(nf.get("connector"), nf.get("read_query"))
+                resolved_nf.append({**nf, "fields": _resolve_fields(nf["fields"], nf_hints)})
+            new_tab["nested_forms"] = resolved_nf
+        new_tabs.append(new_tab)
     out["tabs"] = new_tabs
     return out
 

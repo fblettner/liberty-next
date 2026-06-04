@@ -220,6 +220,29 @@ async def test_column_hints_attach_display_rule(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
+async def test_column_hint_rules_override_wins_over_dictionary(pools: PoolRegistry) -> None:
+    """A column hint's own ``rules`` override wins over the dictionary entry's rule. The bug:
+    APPS_ID is a global LOOKUP in the dictionary, but a screen that CREATES the row overrides the
+    column to SEQUENCE — yet the grid kept rendering the LOOKUP. SEQUENCE resolves to no display
+    rule (it's insert-time), so the grid should show the raw value, not a lookup label."""
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection, LookupDef
+    d = DictionaryFile(connectors={"db": DictionarySection(
+        entries={"id": DictionaryEntry(label="App", rules="LOOKUP", rules_values="apps")},
+        lookups={"apps": LookupDef(query="all", value="id", label="name")},
+    )})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id")])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # No override → the dictionary's LOOKUP rule applies.
+    base = {c.name: c for c in (await conn.execute("all", column_hints=[ColumnHint(name="id"), ColumnHint(name="name")])).columns}
+    assert base["id"].rule and base["id"].rule["kind"] == "lookup"
+    # Column overrides rules → SEQUENCE: the LOOKUP must NOT win — SEQUENCE has no display rule.
+    over = {c.name: c for c in (await conn.execute("all", column_hints=[
+        ColumnHint(name="id", rules="SEQUENCE", rules_values="seq_app"), ColumnHint(name="name"),
+    ])).columns}
+    assert over["id"].rule is None
+
+
+@pytest.mark.asyncio
 async def test_column_hints_match_case_insensitively(pools: PoolRegistry) -> None:
     # The database may report column names in a different case than the hints use
     # (Postgres folds unquoted identifiers to lowercase; v1's migrated col_target/dd are
