@@ -37,6 +37,7 @@ import ActionEditorModal from './ActionEditorModal'
 import ExportEditor from './ExportEditor'
 import type { ActionPath } from './actionPath'
 import type { Column, QueryResult } from '../../types/connectors'
+import type { DictionaryDoc } from '../../types/config'
 import { api } from '../../api/client'
 
 type Row = Record<string, unknown>
@@ -229,6 +230,20 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     return () => { cancelled = true }
   }, [])
 
+  // Fetch the dictionary so the Columns editor's ``rules_values`` field — whose ``x_enum_ref_when``
+  // swaps between ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS based on the chosen ``rules`` — renders a
+  // dropdown of the ids that actually exist (shared + this connector's overlay). Without this only
+  // BOOLEAN works (its ``BOOLEAN_TRUE_VALUES`` enum is static); SEQUENCE / LOOKUP / ENUM came back
+  // empty. Mirrors what DictionaryBuilder does for the same field.
+  const [dict, setDict] = useState<DictionaryDoc['dictionary'] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api.get<DictionaryDoc>('/admin/config/dictionary/parsed')
+      .then((r) => { if (!cancelled) setDict(r.dictionary) })
+      .catch(() => { /* silent — dropdowns just stay empty */ })
+    return () => { cancelled = true }
+  }, [])
+
   // Augment the parent's framework enums with SCREEN_COLUMNS — the read query's column names.
   // Consumed by Screen fields that declare ``x_enum_ref: "SCREEN_COLUMNS"`` (currently:
   // ``initial_group_by``, ``treeview.parent/child/label/order_by``). Also adds CHART_IDS for
@@ -236,13 +251,22 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // FrameworkEnumsContext; we LAYER the per-screen enums on top via a nested Provider around
   // the General SchemaForm so the dropdown options match the live state.
   const parentEnums = useContext(FrameworkEnumsContext)
+  // The screen's columns for the SCREEN_COLUMNS picker (initial_group_by, treeview, row-click
+  // source binds). PREFER the screen's OWN ``Screen.columns`` — the Phase-3 single source of
+  // truth, always present and free (no DB round-trip). Fall back to the live read-query
+  // introspection only when the screen hasn't defined columns yet. This is what fixes the empty
+  // dropdown on screens whose read query takes a required ``:param`` (e.g. ``WHERE APPS_ID =
+  // :APPS_ID``): the ``?_limit=0`` introspection of such a query can fail, but we no longer
+  // depend on it when the screen already lists its columns.
+  const effectiveScreenColumns = useMemo<Column[]>(() => {
+    const defined = Array.isArray(value.columns) ? (value.columns as unknown as Column[]) : []
+    return defined.length ? defined : (screenColumns ?? [])
+  }, [value.columns, screenColumns])
   const augmentedEnums = useMemo<FrameworkEnums>(() => {
     const base: FrameworkEnums = { ...(parentEnums ?? {}) }
-    const colValues = (screenColumns ?? []).map((c) => ({
-      value: c.name,
-      label: c.label ?? c.name,
-      mono: c.name,
-    }))
+    const colValues = effectiveScreenColumns
+      .filter((c) => c.name)
+      .map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name }))
     base.SCREEN_COLUMNS = { label: `Columns — ${readQueryName || '(no read query)'}`, values: colValues }
     // CHART_IDS — every entry in charts.toml. Operators pick from a dropdown
     // of "<label> (id)" rows; the id is what we store. Empty catalog = the
@@ -255,8 +279,34 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       mono: id,
     }))
     base.CHART_IDS = { label: 'Saved charts', values: chartValues }
+    // ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS — the dictionary ids in this screen's connector scope
+    // (shared + the connector overlay). Drive the Columns editor's ``rules_values`` dropdown via
+    // its ``x_enum_ref_when`` (rules=ENUM → ENUM_IDS, LOOKUP → LOOKUP_IDS, SEQUENCE/NN →
+    // SEQUENCE_IDS). Without these the dropdown only worked for BOOLEAN (static enum).
+    const mkIdValues = (
+      labelKeys: ReadonlyArray<string>,
+      ...maps: (Record<string, Record<string, unknown>> | undefined)[]
+    ) => {
+      const out = new Map<string, string>()
+      for (const m of maps) {
+        if (!m) continue
+        for (const [id, rec] of Object.entries(m)) {
+          let lbl = id
+          for (const k of labelKeys) {
+            const v = (rec as Record<string, unknown>)?.[k]
+            if (typeof v === 'string' && v.trim()) { lbl = v; break }
+          }
+          out.set(id, lbl)
+        }
+      }
+      return [...out.entries()].map(([value, label]) => ({ value, label, mono: value }))
+    }
+    const dscope = dict?.connectors?.[effectiveConnector]
+    base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
+    base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
+    base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
     return base
-  }, [parentEnums, screenColumns, readQueryName, chartsCatalog])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
@@ -269,8 +319,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // typing: source = this screen's read-query columns (+ the #BUILTIN# paths); param = the
   // target read_query's declared params + scanned ``:bind_params``.
   const rowClickSourceOptions = useMemo<SearchSelectOption[]>(
-    () => mergeCandidates(screenReadColumnOptions(screenColumns), builtinSourceOptions()),
-    [screenColumns],
+    () => mergeCandidates(screenReadColumnOptions(effectiveScreenColumns), builtinSourceOptions()),
+    [effectiveScreenColumns],
   )
   // Connector picker for the (optional) row-click connector override — SQL connectors only.
   const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
@@ -655,19 +705,24 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     return (
       <>
         <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
-        <SchemaNavigator
-          root={{
-            label: t('settings.screens.editor.columnsCrumb', { id }),
-            schema: columnsSchema,
-            value: { columns: currentColumns },
-            onChange: (v) => {
-              const next = Array.isArray(v.columns) && (v.columns as unknown[]).length
-                ? (v.columns as unknown[])
-                : null
-              setProp('columns', next)
-            },
-          }}
-        />
+        {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
+            ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — not just
+            the static BOOLEAN_TRUE_VALUES. */}
+        <FrameworkEnumsContext.Provider value={augmentedEnums}>
+          <SchemaNavigator
+            root={{
+              label: t('settings.screens.editor.columnsCrumb', { id }),
+              schema: columnsSchema,
+              value: { columns: currentColumns },
+              onChange: (v) => {
+                const next = Array.isArray(v.columns) && (v.columns as unknown[]).length
+                  ? (v.columns as unknown[])
+                  : null
+                setProp('columns', next)
+              },
+            }}
+          />
+        </FrameworkEnumsContext.Provider>
       </>
     )
   }
