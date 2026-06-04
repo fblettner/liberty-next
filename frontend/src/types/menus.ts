@@ -9,7 +9,7 @@ export interface MenuNode {
   // folder:
   items?: MenuNode[]
   // leaf:
-  type?: 'query' | 'endpoint' | 'dashboard' | 'page'
+  type?: 'screen' | 'query' | 'endpoint' | 'dashboard' | 'page'
   /** Connector name. Absent on `dashboard` and `page` leaves (no connector); always
    *  present on `query` / `endpoint` leaves. */
   connector?: string

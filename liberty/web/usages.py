@@ -63,6 +63,7 @@ UsageType = Literal[
     "chart_query",              # ChartConfig.query
     "dashboard_widget_query",   # Widget.query (chart / kpi / table / select widgets)
     "nomaflow_step_query",      # nomaflow SQL step's query field
+    "menu_target_query",        # MenuItem.target (a query leaf) pointing at this query
     # connector references
     "screen_connector",         # Screen.connector
     "nested_tab_connector",     # NestedFormTab / NestedTableTab .connector
@@ -385,6 +386,26 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                                 deep_link=_screen_deep_link(app, sid),
                             ))
 
+    # Menus pointing at this query — a ``query`` leaf's ``target`` is a query name on the item's
+    # connector (defaults to the menu app). This is how a menu opens a table view / screen, so a
+    # query that nothing else references is still "in use" if a menu links to it.
+    menus = getattr(state, "menus", None)
+    if menus is not None:
+        menu_map = menus.menus if hasattr(menus, "menus") else menus
+        for menu_app, app_menu in (menu_map or {}).items():
+            for item in getattr(app_menu, "items", None) or []:
+                # A ``query`` leaf targets a query name directly. (A ``screen`` leaf targets a
+                # screen id, not a query — those surface under the screen's usages instead.)
+                if getattr(item, "type", None) != "query":
+                    continue
+                item_conn = getattr(item, "connector", None) or menu_app
+                if getattr(item, "target", None) == query and item_conn == connector:
+                    out.append(Usage(
+                        type="menu_target_query",
+                        label=f"{menu_app} · {item.id} → {item.target}",
+                        deep_link=_menu_deep_link(menu_app, item.id),
+                    ))
+
     # Lookups + sequences (within the connector's scope OR shared).
     dictionary = _get_dictionary(state)
     if dictionary is not None:
@@ -565,17 +586,31 @@ def _find_api_endpoint_usages(state: Any, connector: str, endpoint: str) -> list
 
 def _find_screen_usages(state: Any, app: str, screen_id: str) -> list[Usage]:
     out: list[Usage] = []
-    # Menus pointing at this screen (MenuItem.target with type ∈ table / form / chart).
+    # Resolve this screen's read query + effective connector. A menu opens a screen by linking to
+    # its read query (e.g. ``f0004_get``), NOT the screen id — so to find the menus that open THIS
+    # screen we match the menu target against the read query, on the screen's connector. We also
+    # keep the direct ``target == screen_id`` match for any future screen-id menu target.
+    screens = getattr(state, "screens", None)
+    all_screens = (screens.screens if hasattr(screens, "screens") else {}) if screens is not None else {}
+    app_screens = all_screens.get(app) if isinstance(all_screens, dict) else None
+    screen_obj = app_screens.get(screen_id) if isinstance(app_screens, dict) else None
+    read_query = getattr(screen_obj, "read_query", None)
+    screen_conn = getattr(screen_obj, "connector", None) or app
+    # Menus pointing at this screen — either directly by screen id, or (the common case) via the
+    # screen's read query on the screen's connector.
     menus = getattr(state, "menus", None)
     if menus is not None:
         menu_map = menus.menus if hasattr(menus, "menus") else menus
         for menu_app, app_menu in (menu_map or {}).items():
             for item in getattr(app_menu, "items", None) or []:
-                if (getattr(item, "target", None) == screen_id
-                        and (getattr(item, "connector", None) or menu_app) == app):
+                target = getattr(item, "target", None)
+                item_conn = getattr(item, "connector", None) or menu_app
+                direct = target == screen_id and item_conn == app
+                via_query = read_query is not None and target == read_query and item_conn == screen_conn
+                if direct or via_query:
                     out.append(Usage(
                         type="menu_target_screen",
-                        label=f"{menu_app} · {item.id} → {item.target}",
+                        label=f"{menu_app} · {item.id} → {target}",
                         deep_link=_menu_deep_link(menu_app, item.id),
                     ))
     # NestedTableTab.screen — a parent screen embedding this one.

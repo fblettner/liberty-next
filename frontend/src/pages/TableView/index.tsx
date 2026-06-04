@@ -63,10 +63,10 @@ const ViewToggle = styled.div`
   }
 `
 
-export default function TableView({ connector, query }: { connector: string; query: string }) {
+export default function TableView({ connector, query, screenApp, screenId }: { connector: string; query: string; screenApp?: string; screenId?: string }) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { menus, findScreen } = useWorkspace()
+  const { menus, findScreen, findScreenById } = useWorkspace()
   // URL search params seed the param form / filter panel on initial load — that's how the
   // row-menu's NavigateAction drill-down works ("?USR_ID=42" → the destination's USR_ID param
   // is pre-filled, then auto_load fires the query against that value). Also makes screens
@@ -146,7 +146,10 @@ export default function TableView({ connector, query }: { connector: string; que
   // to load doesn't hang the drill seed (and the auto-run it gates) forever.
   const [screenReady, setScreenReady] = useState(false)
   useEffect(() => {
-    const stub = findScreen(connector, query)
+    // When a specific screen is requested (a ``screen`` menu leaf → ``/screen/<app>/<id>``), open
+    // THAT screen by id — two screens on the same read query stay distinct. Otherwise resolve the
+    // screen by (connector, query) as usual (the inline / generic path).
+    const stub = screenId ? findScreenById(screenApp ?? connector, screenId) : findScreen(connector, query)
     setScreenReady(false)
     // Phase 3 — every Screen drives per-query behaviour now (columns / auto_load / audit / max_rows
     // / update_query / etc.), so always fetch the full body when a Screen exists for this
@@ -165,7 +168,7 @@ export default function TableView({ connector, query }: { connector: string; que
       .catch(() => { if (!cancelled) setScreen(null) })
       .finally(() => { if (!cancelled) setScreenReady(true) })
     return () => { cancelled = true }
-  }, [findScreen, connector, query])
+  }, [findScreen, findScreenById, connector, query, screenApp, screenId])
 
   // Server-filter fields: columns flagged `filter` in the *screen*'s ``columns`` if present,
   // else the query's `columns` config (v1's col_filter). The migrated SQL is wrapped in

@@ -12,7 +12,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 // is the first non-SQL/HTTP page wrapped as a tab — opened from row_click_route on the Job Runs
 // screen so the run detail lives alongside Job Runs / Users / etc. in the tab strip instead of
 // hijacking the workspace or popping a browser tab.
-export type TabKind = 'sql' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring'
+// 'screen' opens a designed screen by id (``/screen/<app>/<screen_id>``); the tab's ``connector``
+// segment carries the screen's APP and ``target`` its id, so two screens sharing a read query get
+// distinct tabs (a plain 'sql' tab keys on connector+query and would collide).
+export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind

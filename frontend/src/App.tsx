@@ -81,6 +81,8 @@ export default function App() {
       >
         <Route index element={<Home />} />
         <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
+        {/* A designed screen by id — ``:connector`` carries the screen's app, ``:target`` its id. */}
+        <Route path="screen/:connector/:target" element={<TabRoute kind="screen" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
         <Route path="settings" element={<TabRoute kind="settings" />} />

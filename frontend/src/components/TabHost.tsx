@@ -8,6 +8,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import i18n from 'i18next'
 import { Centered } from '../common'
 import { useTabs } from '../tabs/TabsContext'
+import { useWorkspace } from '../workspace/WorkspaceContext'
 
 const TableView = lazy(() => import('../pages/TableView'))
 const HttpRunner = lazy(() => import('../pages/HttpRunner'))
@@ -15,6 +16,17 @@ const DashboardView = lazy(() => import('../pages/DashboardView'))
 const NomaflowRunDetail = lazy(() => import('../pages/Nomaflow/RunDetail'))
 const Settings = lazy(() => import('../pages/Settings'))
 const Monitoring = lazy(() => import('../pages/Monitoring'))
+
+// A ``screen`` tab opens a designed screen by id (``/screen/<app>/<id>``). We resolve the screen
+// from the workspace catalog to get its connector + read query, then drive the TableView with the
+// screen-id override so the exact screen's columns / dialog apply (even when another screen shares
+// the same read query). A spinner shows until the catalog resolves it (or it's been deleted).
+function ScreenTab({ app, screenId }: { app: string; screenId: string }) {
+  const { findScreenById } = useWorkspace()
+  const scr = findScreenById(app, screenId)
+  if (!scr) return <Centered />
+  return <TableView connector={scr.connector} query={scr.read_query} screenApp={app} screenId={screenId} />
+}
 
 export default function TabHost({ hidden }: { hidden: boolean }) {
   const { tabs, activeId } = useTabs()
@@ -49,6 +61,8 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
               <Settings />
             ) : tab.kind === 'monitoring' ? (
               <Monitoring />
+            ) : tab.kind === 'screen' ? (
+              <ScreenTab app={tab.connector} screenId={tab.target} />
             ) : (
               <TableView connector={tab.connector} query={tab.target} />
             )}
