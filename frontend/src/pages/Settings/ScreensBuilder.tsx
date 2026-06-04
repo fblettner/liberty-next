@@ -263,10 +263,14 @@ export default function ScreensBuilder() {
   }
   useEffect(load, [t])
 
-  // When the app changes, drop the search + restore (or clear) the screen selection.
+  // Drop the search ONLY when switching apps — not when ``doc`` changes. ``doc`` is rewritten on
+  // every edit / rename / save-reload, so keying the reset on it wiped the operator's filter each
+  // time they touched a screen (they had to re-type it constantly).
+  useEffect(() => { setQ('') }, [selApp])
+  // Keep the screen selection valid as the app or doc changes (e.g. after a delete / rename) —
+  // without clearing the search.
   useEffect(() => {
     if (!doc || !selApp) { setSelId(null); return }
-    setQ('')
     const ids = Object.keys(doc[selApp] ?? {})
     setSelId((cur) => (cur && doc[selApp]?.[cur] ? cur : ids[0] ?? null))
   }, [selApp, doc])
