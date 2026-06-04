@@ -240,7 +240,7 @@ export default function ActionTreeView({
 }: ActionTreeViewProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors: wsConnectors, screens: wsScreens, findScreen } = useWorkspace()
+  const { connectors: wsConnectors, screens: wsScreens, findScreen, findScreenById } = useWorkspace()
 
   // ── workspace catalog → dropdown options ───────────────────────────────────────────────
   const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
@@ -383,12 +383,18 @@ export default function ActionTreeView({
     const targetConn = (typeof selectedForTarget.connector === 'string' && selectedForTarget.connector.trim()
       ? selectedForTarget.connector
       : effectiveConnector) as string
+    if (!targetConn) return null
+    // navigate-to-SCREEN: the target screen is named directly (no read_query to reverse-resolve).
+    if (aType === 'navigate' && typeof selectedForTarget.screen === 'string' && selectedForTarget.screen) {
+      const byId = findScreenById(targetConn, selectedForTarget.screen)
+      return byId ? { app: byId.app, id: byId.id } : { app: targetConn, id: selectedForTarget.screen }
+    }
     const targetQuery = String((aType === 'navigate' ? selectedForTarget.to : selectedForTarget.query) ?? '')
-    if (!targetConn || !targetQuery) return null
+    if (!targetQuery) return null
     const hit = findScreen(targetConn, targetQuery)
     if (!hit) return null
     return { app: hit.app, id: hit.id }
-  }, [selectedForTarget, effectiveConnector, findScreen])
+  }, [selectedForTarget, effectiveConnector, findScreen, findScreenById])
   useEffect(() => {
     if (!targetScreenKey) return
     const cacheKey = `${targetScreenKey.app}/${targetScreenKey.id}`
@@ -412,6 +418,24 @@ export default function ActionTreeView({
     // ESLint can't see through the ref — explicitly listing the tick is the idiomatic dance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetScreenKey, targetScreenColumnsTick])
+  // The selected action's ``param`` (target placeholder) candidates. ``targetParamOptions`` keys
+  // off ``to`` (the query name) for navigate — but a navigate-to-SCREEN has no ``to``, so resolve
+  // the target screen's read_query first and feed THAT as the query. (Without this the PARAM field
+  // fell back to a plain text input whenever the navigate targeted a screen.)
+  const selectedDeclaredParamOptions = useMemo<SearchSelectOption[]>(() => {
+    if (!selectedForTarget) return []
+    if (String(selectedForTarget.type) === 'navigate'
+        && typeof selectedForTarget.screen === 'string' && selectedForTarget.screen) {
+      const conn = (typeof selectedForTarget.connector === 'string' && selectedForTarget.connector.trim()
+        ? selectedForTarget.connector
+        : effectiveConnector) as string
+      const hit = findScreenById(conn, selectedForTarget.screen)
+      if (!hit?.read_query) return []
+      const tConn = hit.connector || conn
+      return targetParamOptions({ type: 'navigate', to: hit.read_query, connector: tConn }, wsConnectors, tConn)
+    }
+    return targetParamOptions(selectedForTarget, wsConnectors, effectiveConnector)
+  }, [selectedForTarget, effectiveConnector, wsConnectors, findScreenById])
 
   // ── path-aware mutators (delegating to the immutable helpers) ──────────────────────────
   const patchSelected = (patch: Row) => {
@@ -1111,7 +1135,7 @@ export default function ActionTreeView({
               onChange={(next) => patchSelected({ param_binds: next.length ? next : null })}
               sourceOptions={sourceOptions}
               paramOptions={mergeCandidates(
-                targetParamOptions(selected, wsConnectors, effectiveConnector),
+                selectedDeclaredParamOptions,
                 targetScreenColumnOptions,
               )}
             />

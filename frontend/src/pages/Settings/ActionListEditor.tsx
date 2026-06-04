@@ -187,7 +187,21 @@ export default function ActionListEditor({
 }: ActionListEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors: wsConnectors, screens: wsScreens } = useWorkspace()
+  const { connectors: wsConnectors, screens: wsScreens, findScreenById } = useWorkspace()
+  // ``param`` (target placeholder) candidates for an action. ``targetParamOptions`` keys off ``to``
+  // (the query name) for navigate — a navigate-to-SCREEN has no ``to``, so resolve the target
+  // screen's read_query first and feed THAT as the query, otherwise the PARAM field falls back to a
+  // plain text input. (Mirrors ActionTreeView.selectedDeclaredParamOptions.)
+  const paramOptionsForAction = (a: Row): SearchSelectOption[] => {
+    if (String(a?.type) === 'navigate' && typeof a?.screen === 'string' && a.screen) {
+      const conn = (typeof a.connector === 'string' && a.connector.trim() ? a.connector : effectiveConnector) as string
+      const hit = findScreenById(conn, a.screen)
+      if (!hit?.read_query) return []
+      const tConn = hit.connector || conn
+      return targetParamOptions({ type: 'navigate', to: hit.read_query, connector: tConn }, wsConnectors, tConn)
+    }
+    return targetParamOptions(a, wsConnectors, effectiveConnector)
+  }
 
   // Per-row expansion: ``actionsExpanded`` for the outer action list, ``promptExpanded`` keyed
   // by ``<actionIdx>`` for the inner PromptField list (one per action).
@@ -697,7 +711,7 @@ export default function ActionListEditor({
                             screenReadColumnOptions(screenReadColumns),
                             builtinSourceOptions(),
                           )}
-                          paramOptions={targetParamOptions(a, wsConnectors, effectiveConnector)}
+                          paramOptions={paramOptionsForAction(a)}
                         />
                       </Stack>
                     )}
