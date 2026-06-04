@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import tomli_w
 import tomlkit
 
 from liberty.charts.config import parse_charts
@@ -54,6 +55,36 @@ from liberty.connectors.dictionary import parse_dictionary
 from liberty.dashboards.config import parse_dashboards
 from liberty.menus.config import parse_menus
 from liberty.screens.config import parse_screens
+
+
+# ── TOML round-trip routing (the single source of truth) ─────────────────────────────────────
+# tomlkit's parse + dumps is O(n²) and chokes on the 15k+-line screens.toml / dictionary.toml the
+# visual builders generate, so the BIG config files round-trip through tomllib + tomli_w (which
+# drops comments — operators don't hand-edit those; the structured UI is the source of truth).
+# Small, hand-edited files (connectors.toml) stay on tomlkit to keep their pool / credential
+# comments. Every rewrite helper walks via ``isinstance(node, dict | list)`` so it doesn't care
+# which library produced the tree. EVERY rename path loads/writes through these two helpers so the
+# choice can never drift per-function again. See [[project-tomlkit-o2-cliff]].
+_BIG_LABELS = frozenset({"screens", "menus", "dictionary", "dashboards", "charts"})
+
+
+def _empty_doc(label: str) -> Any:
+    """An empty doc of the right kind for *label* (plain dict for big files, tomlkit doc else)."""
+    return {} if label in _BIG_LABELS else tomlkit.document()
+
+
+def _load_doc(label: str, path: Path | None) -> Any:
+    """Parse *path* for *label* — tomllib (fast) for big files, tomlkit (comment-preserving) for
+    small ones. Missing / empty file → an empty doc of the right kind."""
+    if path is not None and path.exists() and path.read_text(encoding="utf-8").strip():
+        text = path.read_text(encoding="utf-8")
+        return tomllib.loads(text) if label in _BIG_LABELS else tomlkit.parse(text)
+    return _empty_doc(label)
+
+
+def _dump_doc(label: str, doc: Any) -> str:
+    """Serialise *doc* for *label* — tomli_w for big files, tomlkit for small ones."""
+    return tomli_w.dumps(doc) if label in _BIG_LABELS else tomlkit.dumps(doc)
 
 
 # A v2-friendly identifier — same rules slugify already enforces on migration. We keep the
@@ -146,17 +177,8 @@ def rename_connector(
 
     result = RenameResult(kind="connector", old_name=old, new_name=new)
 
-    # Pre-load every doc we'll touch (file missing → empty doc; that's fine, we just won't
-    # write anything for it). The list below pairs each path with the in-memory document we'll
-    # rewrite and the Pydantic validator that has to accept the result.
-    #
-    # connectors.toml stays on tomlkit (small file — comment preservation is cheap and useful
-    # for hand-edited pools / credentials). Everything else (screens, menus, dictionary,
-    # dashboards, charts) goes through tomllib + tomli_w because tomlkit's parse + dumps is
-    # O(n²) and chokes on the 15k+-line screens.toml / dictionary.toml the visual builders
-    # generate. The rewrite helpers walk via ``isinstance(node, dict|list)`` so they don't
-    # care whether the tree came from tomlkit or tomllib. See [[project-tomlkit-o2-cliff]].
-    _BIG_LABELS = {"screens", "menus", "dictionary", "dashboards", "charts"}
+    # Pre-load every doc we'll touch via the shared loader (big files → tomllib, small → tomlkit;
+    # missing file → empty doc reported as zero, not skipped). See ``_load_doc``.
     docs: dict[str, tuple[Path, Any]] = {}
     for label, path in (
         ("connectors", connectors_path),
@@ -168,15 +190,8 @@ def rename_connector(
     ):
         if path is None:
             continue
-        empty: Any = {} if label in _BIG_LABELS else tomlkit.document()
-        if path.exists() and path.read_text(encoding="utf-8").strip():
-            text = path.read_text(encoding="utf-8")
-            docs[label] = (
-                path,
-                tomllib.loads(text) if label in _BIG_LABELS else tomlkit.parse(text),
-            )
-        else:
-            docs[label] = (path, empty)
+        docs[label] = (path, _load_doc(label, path))
+        if not (path.exists() and path.read_text(encoding="utf-8").strip()):
             result.files[str(path)] = 0   # file absent → reported as zero, not skipped
 
     # 1) connectors.toml — rename the top-level [connectors.<old>] table + update any
@@ -234,19 +249,12 @@ def rename_connector(
     if "charts" in docs and result.files.get(str(docs["charts"][0])):
         _validate("charts", docs["charts"][1], parse_charts, docs["charts"][0])
 
-    # ── write pass — every touched file lands in one batch ──
-    # Big files round-trip via tomli_w (lose comments — operators don't hand-edit screens.toml
-    # / dictionary.toml anyway; the structured UI is the source of truth). Small files stay on
-    # tomlkit so connectors.toml keeps its pool / credential comments intact.
-    import tomli_w
+    # ── write pass — every touched file lands in one batch (big via tomli_w, small via tomlkit) ──
     for label, (path, doc) in docs.items():
         if not result.files.get(str(path), 0):
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        if label in _BIG_LABELS:
-            path.write_text(tomli_w.dumps(doc), encoding="utf-8")
-        else:
-            path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+        path.write_text(_dump_doc(label, doc), encoding="utf-8")
 
     return result
 
@@ -584,7 +592,7 @@ def rename_screen_app(
     # ``rename_menu_app`` op).
     if not screens_path.exists() or not screens_path.read_text(encoding="utf-8").strip():
         raise RenameError(f"screens file {screens_path} is missing or empty")
-    scr_doc = tomlkit.parse(screens_path.read_text(encoding="utf-8"))
+    scr_doc = _load_doc("screens", screens_path)   # plain dict via tomllib (screens.toml is big)
     screens_table = scr_doc.get("screens") or {}
     if not isinstance(screens_table, dict) or old not in screens_table:
         raise RenameError(f"screens app {old!r} not found in {screens_path}")
@@ -598,7 +606,7 @@ def rename_screen_app(
     # wanted a rename of the screen side would surprise them; renaming both is the typical
     # case, so do it but tell them what happened.
     if menus_path.exists() and menus_path.read_text(encoding="utf-8").strip():
-        menu_doc = tomlkit.parse(menus_path.read_text(encoding="utf-8"))
+        menu_doc = _load_doc("menus", menus_path)
         menus_table = menu_doc.get("menus") or {}
         if isinstance(menus_table, dict) and old in menus_table:
             if new in menus_table:
@@ -607,7 +615,7 @@ def rename_screen_app(
             del menus_table[old]
             result.files[str(menus_path)] = 1
             _validate("menus", menu_doc, parse_menus, menus_path)
-            menus_path.write_text(tomlkit.dumps(menu_doc), encoding="utf-8")
+            menus_path.write_text(_dump_doc("menus", menu_doc), encoding="utf-8")
         else:
             result.warnings.append(
                 f"no matching [menus.{old}] block in {menus_path} — left untouched."
@@ -617,7 +625,7 @@ def rename_screen_app(
         result.files[str(menus_path)] = 0
 
     _validate("screens", scr_doc, parse_screens, screens_path)
-    screens_path.write_text(tomlkit.dumps(scr_doc), encoding="utf-8")
+    screens_path.write_text(_dump_doc("screens", scr_doc), encoding="utf-8")
     return result
 
 
@@ -882,26 +890,26 @@ def _load_rename_docs(
     dictionary_path: Path,
     charts_path: Path | None = None,
     dashboards_path: Path | None = None,
-) -> dict[str, tuple[Path, tomlkit.TOMLDocument]]:
+) -> dict[str, tuple[Path, Any]]:
     """Pre-load every doc a query / table rename touches (missing file → empty doc, recorded as
-    zero touches). Shared by :func:`rename_queries` and :func:`rename_table`."""
-    docs: dict[str, tuple[Path, tomlkit.TOMLDocument]] = {}
+    zero touches). Big files (screens / menus / dictionary / charts / dashboards) come back as
+    plain dicts via tomllib (fast); connectors.toml stays on tomlkit. Shared by
+    :func:`rename_queries` and :func:`rename_table`."""
+    docs: dict[str, tuple[Path, Any]] = {}
     for label, path in (
         ("connectors", connectors_path), ("screens", screens_path), ("menus", menus_path),
         ("dictionary", dictionary_path), ("charts", charts_path), ("dashboards", dashboards_path),
     ):
         if path is None:
             continue
-        if path.exists() and path.read_text(encoding="utf-8").strip():
-            docs[label] = (path, tomlkit.parse(path.read_text(encoding="utf-8")))
-        else:
-            docs[label] = (path, tomlkit.document())
+        docs[label] = (path, _load_doc(label, path))
+        if not (path.exists() and path.read_text(encoding="utf-8").strip()):
             result.files[str(path)] = 0
     return docs
 
 
 def _rewrite_cross_file_refs_and_write(
-    docs: dict[str, tuple[Path, tomlkit.TOMLDocument]],
+    docs: dict[str, tuple[Path, Any]],
     result: RenameResult,
     *,
     connector: str,
@@ -949,7 +957,7 @@ def _rewrite_cross_file_refs_and_write(
         if not result.files.get(str(path), 0):
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+        path.write_text(_dump_doc(label, doc), encoding="utf-8")
 
 
 def rename_queries(
