@@ -203,12 +203,13 @@ export default function Layout() {
   // Rules of Hooks). nomaflow run detail + Settings are hosted as workspace tabs so they sit in the
   // tab strip alongside the screens instead of replacing the workspace view.
   const sqlMatch = useMatch('/sql/:connector/:target')
+  const screenMatch = useMatch('/screen/:connector/:target')
   const httpMatch = useMatch('/http/:connector/:target')
   const dashboardMatch = useMatch('/dashboard/:target')
   const nomaflowRunMatch = useMatch('/nomaflow/runs/:runId')
   const settingsMatch = useMatch('/settings')
   const monitoringMatch = useMatch('/monitoring')
-  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch)
+  const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch)
 
   return (
     <Shell>

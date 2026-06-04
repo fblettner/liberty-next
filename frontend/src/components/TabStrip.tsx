@@ -171,7 +171,7 @@ export default function TabStrip() {
           } else if (tab.kind === 'monitoring') {
             label = t('nav.monitoring', 'Monitoring')
           } else {
-            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
+            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'screen' | 'http' | 'dashboard'; connector: string; target: string })
             label = hit?.label ?? tab.target
             appLabel = hit?.appLabel
           }
