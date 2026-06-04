@@ -17,7 +17,6 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
-import { flattenConnectorSections, groupQueriesByTable } from './connectorTables'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -225,7 +224,7 @@ export default function MenusBuilder() {
     ])
       .then(([s, d, c]) => {
         setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
-        setConnectors(flattenConnectorSections(c.connectors))
+        setConnectors(c.connectors)
         setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -299,19 +298,24 @@ export default function MenusBuilder() {
     const conn = connectors && connKey ? connectors[connKey] : undefined
     const targets: { value: string; label: string; mono?: string }[] = []
     if (selRec?.type === 'query' && conn?.type === 'sql') {
-      const qs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
-      const grouped = groupQueriesByTable(qs)
-      for (const g of grouped.tables) {
-        if (!g.slots.get) continue   // a table without a _get isn't a viewable target
-        const q = g.slots.get.query
-        const desc = typeof q?.description === 'string' ? q.description : (typeof q?.label === 'string' ? q.label : '')
-        targets.push({ value: g.slots.get.name, label: desc || g.base, mono: g.base })
+      // Navigable targets only: each table's read (`<base>_get`) and the standalone custom
+      // queries. Sequences / lookups are internal value-sources (never a menu destination), so
+      // they're excluded. Sorted by name.
+      const tables = Array.isArray(conn.tables) ? (conn.tables as Record<string, unknown>[]) : []
+      for (const tb of tables) {
+        if (!tb.get) continue   // a table without a read isn't a viewable target
+        const name = `${tb.name}_get`
+        const desc = typeof tb.description === 'string' ? tb.description : (typeof tb.label === 'string' ? tb.label : '')
+        targets.push({ value: name, label: desc || String(tb.name), mono: String(tb.name) })
       }
-      for (const ls of grouped.loose) {
-        if (!ls.name) continue
-        const desc = typeof ls.query?.description === 'string' ? ls.query.description : (typeof ls.query?.label === 'string' ? ls.query.label : '')
-        targets.push({ value: ls.name, label: desc || ls.name, mono: ls.name })
+      const customs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
+      for (const q of customs) {
+        const name = typeof q.name === 'string' ? q.name : ''
+        if (!name) continue
+        const desc = typeof q.description === 'string' ? q.description : (typeof q.label === 'string' ? q.label : '')
+        targets.push({ value: name, label: desc || name, mono: name })
       }
+      targets.sort((a, b) => (a.mono ?? a.value).localeCompare(b.mono ?? b.value))
     } else if (selRec?.type === 'endpoint' && conn?.type === 'api') {
       const es = Array.isArray(conn.endpoints) ? (conn.endpoints as Record<string, unknown>[]) : []
       for (const e of es) {

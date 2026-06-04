@@ -185,6 +185,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       mono: q.name,
     }))
   }, [selectedConnectorMeta])
+  // CRUD tables on the effective connector — drives the "pick a table → fill all four queries"
+  // shortcut so operators don't wire read / update / insert / delete one by one. Sorted by name.
+  const tableOptions = useMemo<SearchSelectOption[]>(() => {
+    if (selectedConnectorMeta?.type !== 'sql' || !selectedConnectorMeta.tables) return []
+    return [...selectedConnectorMeta.tables]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((tbl) => ({ value: tbl.name, label: tbl.description || tbl.label || tbl.name, mono: tbl.name }))
+  }, [selectedConnectorMeta])
   // Fetch the read query's columns once we know the effective connector + read query —
   // powers the SCREEN_COLUMNS augmented enum (the column picker for ``initial_group_by``).
   // Same pattern as the Columns tab in ScreenVisualBuilder: ``_limit=0`` returns the column
@@ -282,6 +290,26 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     const next = { ...value }
     if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) delete next[k]
     else next[k] = v
+    onChange(next)
+  }
+  // Fill the four CRUD query fields from a chosen table's slots in one shot. A present slot sets
+  // its field (read=`_get`, update=`_put`, insert=`_post`, delete=`_delete`); an absent slot
+  // clears the matching field — except read_query (required), which we only overwrite when the
+  // table has a read. The operator can still fine-tune any field afterwards.
+  const applyTable = (base: string) => {
+    if (selectedConnectorMeta?.type !== 'sql') return
+    const tbl = (selectedConnectorMeta.tables ?? []).find((t) => t.name === base)
+    if (!tbl) return
+    const slot = (crud: string): string | undefined => tbl.slots.find((s) => s.crud === crud)?.name
+    const next = { ...value }
+    const set = (key: string, name: string | undefined, keepWhenMissing: boolean) => {
+      if (name) next[key] = name
+      else if (!keepWhenMissing) delete next[key]
+    }
+    set('read_query', slot('get'), true)
+    set('update_query', slot('put'), false)
+    set('insert_query', slot('post'), false)
+    set('delete_query', slot('delete'), false)
     onChange(next)
   }
   const dialog = (value.dialog && typeof value.dialog === 'object' ? value.dialog : null) as { title?: string; tabs?: Row[] } | null
@@ -537,6 +565,18 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   const renderQueries = (): ReactNode => (
     <>
       <Sub>{t('settings.screens.editor.queriesHint')}</Sub>
+      {tableOptions.length > 0 && (
+        <Field label={t('settings.screens.editor.queries.fromTable', 'Fill from table')}>
+          <SearchSelect
+            value=""
+            options={tableOptions}
+            onChange={(v) => v && applyTable(v)}
+            anyLabel={t('settings.screens.editor.queries.fromTableHint', 'Pick a table to fill all four CRUD queries…')}
+            placeholder={t('common.pick')}
+            loading={!selectedConnectorMeta}
+          />
+        </Field>
+      )}
       {renderQueryField('read_query', true)}
       {renderQueryField('update_query', false)}
       {renderQueryField('insert_query', false)}

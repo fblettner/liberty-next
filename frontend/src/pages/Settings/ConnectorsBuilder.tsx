@@ -11,7 +11,7 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -597,6 +597,106 @@ export default function ConnectorsBuilder() {
     setSelTable(newBase)
   }
 
+  // Reclassify a connector entity between the four sections. A standalone query / sequence /
+  // lookup is the same `QueryDef` shape, so moving among those three keeps the name (and every
+  // reference) intact. Crossing the Table boundary changes the *runtime* name — a table's slot is
+  // addressed as `<base>_<crud>`, a standalone query by its bare name — so we confirm first and the
+  // operator updates any screen / action / dictionary reference afterwards. Converting a table is
+  // only offered for a single-slot table (a multi-slot table is genuinely a CRUD set, not one
+  // query). Common reason: a v1 query mis-tagged `type = "table"` migrated into a one-slot table.
+  type SectionKind = 'tables' | 'queries' | 'sequences' | 'lookups'
+  const sectionLabel = (k: SectionKind): string => ({
+    tables: t('settings.tables.tablesView'),
+    queries: t('settings.tables.looseSectionLabel', 'Queries'),
+    sequences: t('settings.connectors.sequencesView', 'Sequences'),
+    lookups: t('settings.connectors.lookupsView', 'Lookups'),
+  }[k])
+  const modeFor = (k: SectionKind): 'tables' | 'custom' | 'sequences' | 'lookups' => (k === 'queries' ? 'custom' : k)
+  const changeType = async (fromKind: SectionKind, name: string) => {
+    if (!sel || !conns) return
+    const conn = conns[sel] ?? {}
+    const arrOf = (k: SectionKind) => (Array.isArray(conn[k]) ? conn[k] : []) as Record<string, unknown>[]
+    const choice = await modals.choose({
+      title: t('settings.connectors.changeTypeTitle', 'Change type'),
+      message: t('settings.connectors.changeTypePrompt', 'Move "{{name}}" to which kind?', { name }),
+      options: (['tables', 'queries', 'sequences', 'lookups'] as SectionKind[])
+        .filter((k) => k !== fromKind)
+        .map((k) => ({ value: k, label: sectionLabel(k) })),
+      cancelValue: 'cancel',
+      cancelLabel: t('common.cancel'),
+    })
+    if (!choice || choice === 'cancel') return
+    const toKind = choice as SectionKind
+    const crossesTable = (fromKind === 'tables') !== (toKind === 'tables')
+
+    let queryDef: Record<string, unknown> | null = null
+    let tableEntry: TableEntry | null = null
+    const nextConn: Record<string, unknown> = { ...conn }
+
+    if (fromKind === 'tables') {
+      const tb = (arrOf('tables') as unknown as TableEntry[]).find((x) => x.name === name)
+      if (!tb) return
+      const filled = CRUD_KINDS.filter((c) => tb[c])
+      if (filled.length > 1) {
+        await modals.alert({
+          title: t('settings.connectors.changeTypeTitle', 'Change type'),
+          message: t('settings.connectors.changeTypeMultiSlot', 'This table has more than one CRUD slot, so it is a real CRUD set — not a single query. Delete the extra slots first if it is really just one query.'),
+          variant: 'danger',
+        })
+        return
+      }
+      const slot = (tb[filled[0]] ?? {}) as Record<string, unknown>
+      queryDef = {
+        name: tb.name, sql: slot.sql ?? '',
+        ...(slot.writable != null ? { writable: slot.writable } : {}),
+        ...(slot.params != null ? { params: slot.params } : {}),
+        ...(tb.label != null ? { label: tb.label } : {}),
+        ...(tb.description != null ? { description: tb.description } : {}),
+      }
+      nextConn.tables = removeTableByName(arrOf('tables') as unknown as TableEntry[], name)
+    } else {
+      const q = arrOf(fromKind).find((x) => x.name === name)
+      if (!q) return
+      nextConn[fromKind] = arrOf(fromKind).filter((x) => x.name !== name)
+      if (toKind === 'tables') {
+        tableEntry = {
+          name: String(q.name),
+          ...(q.label != null ? { label: q.label as string } : {}),
+          ...(q.description != null ? { description: q.description as string } : {}),
+          get: {
+            sql: q.sql ?? '',
+            ...(q.writable != null ? { writable: q.writable as boolean } : {}),
+            ...(q.params != null ? { params: q.params as unknown[] } : {}),
+          },
+        }
+      } else {
+        queryDef = { ...q }   // same QueryDef shape — just changes which section it lives in
+      }
+    }
+
+    if (crossesTable) {
+      const oldRef = fromKind === 'tables' ? `${name}_get` : name
+      const newRef = toKind === 'tables' ? `${name}_get` : name
+      const ok = await modals.confirm({
+        title: t('settings.connectors.changeTypeTitle', 'Change type'),
+        message: t('settings.connectors.changeTypeRenameWarn', 'This changes the query\'s runtime name from "{{old}}" to "{{new}}". Update any screen / action / dictionary reference to the new name afterwards. Continue?', { old: oldRef, new: newRef }),
+        confirmLabel: t('settings.connectors.changeTypeTitle', 'Change type'),
+      })
+      if (!ok) return
+    }
+
+    if (toKind === 'tables' && tableEntry) {
+      const cur = (Array.isArray(nextConn.tables) ? nextConn.tables : []) as TableEntry[]
+      nextConn.tables = [...cur, tableEntry]
+    } else if (queryDef) {
+      const cur = (Array.isArray(nextConn[toKind]) ? nextConn[toKind] : []) as Record<string, unknown>[]
+      nextConn[toKind] = [...cur, queryDef]
+    }
+    setConns((p) => ({ ...(p ?? {}), [sel]: nextConn }))
+    setSelTable(null); setSelQuery(null); setStatus(null)
+    setMode(modeFor(toKind))
+  }
+
   // Handler for the scaffold modal save: append the new query to the connector + the new
   // dictionary entry under the connector's per-connector scope (creating the scope if it
   // doesn't exist yet — same convention DictionaryBuilder uses). The operator then hits the
@@ -720,6 +820,9 @@ export default function ConnectorsBuilder() {
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => renameQuery(String(picked.name))} disabled={busy}>
           <Edit3 size={13} /> {t('settings.rename.button')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => changeType(curSection().key as SectionKind, String(picked.name))} disabled={busy}>
+          <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => duplicateQuery(String(picked.name))} disabled={busy}>
           <Copy size={13} /> {t('settings.tables.duplicate')}
@@ -921,6 +1024,15 @@ export default function ConnectorsBuilder() {
                       onBack={() => setSelTable(null)}
                       onDuplicate={() => sel && duplicateTable(sel, selTable)}
                       onRename={() => renameTable(selTable)}
+                      onChangeType={() => changeType('tables', selTable)}
+                      onFindUsages={() => {
+                        if (!sel) return
+                        // Target the read slot (else the first present slot) — the dependent
+                        // screens / menus reference the table through its slot query names.
+                        const crud = CRUD_KINDS.find((c) => table[c]) ?? 'get'
+                        const qn = `${table.name}_${table.get ? 'get' : crud}`
+                        setUsagesTarget({ kind: 'query', name: qn, scope: sel, label: `table ${sel}.${table.name}` })
+                      }}
                       screenLink={matchedScreen ? { app: matchedScreen.app, id: matchedScreen.id } : null}
                       onOpenScreen={(app, id) => setScreenDesigner({ app, id })}
                     />

@@ -12,7 +12,7 @@
 // "Open in Screens" link in this editor's header jumps to the matching screen.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, Copy, Edit3, ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -91,6 +91,12 @@ export interface ConnectorsTableEditorProps {
   /** Cross-file rename of the table name (all CRUD slot refs + screen bindings). Parent wires it
    *  to the rename endpoint; absent → no Rename button. */
   onRename?: () => void
+  /** Reclassify the table to a standalone query / sequence / lookup (single-slot tables only).
+   *  Absent → no Change-type button. */
+  onChangeType?: () => void
+  /** Find every screen / menu / action / dictionary reference to this table (via its slot
+   *  queries). Absent → no Find-usages button. */
+  onFindUsages?: () => void
   /** When the parent finds a Screen whose `read_query` matches `<name>_get`, it passes `{app, id}`
    *  so the header shows an "Open visual builder" button. */
   screenLink?: { app: string; id: string } | null
@@ -98,7 +104,7 @@ export interface ConnectorsTableEditorProps {
 }
 
 export default function ConnectorsTableEditor({
-  table, connectorName, tableDefSchema, crudSlotSchema, defs, onChange, onDelete, onBack, onDuplicate, onRename, screenLink, onOpenScreen,
+  table, connectorName, tableDefSchema, crudSlotSchema, defs, onChange, onDelete, onBack, onDuplicate, onRename, onChangeType, onFindUsages, screenLink, onOpenScreen,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -208,9 +214,19 @@ export default function ConnectorsTableEditor({
               <ExternalLink size={13} /> {t('settings.tables.openInScreens')}
             </Button>
           )}
+          {onFindUsages && (
+            <Button $variant="ghost" $size="sm" onClick={onFindUsages}>
+              <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+            </Button>
+          )}
           {onRename && (
             <Button $variant="ghost" $size="sm" onClick={onRename}>
               <Edit3 size={13} /> {t('settings.rename.button')}
+            </Button>
+          )}
+          {onChangeType && (
+            <Button $variant="ghost" $size="sm" onClick={onChangeType}>
+              <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
             </Button>
           )}
           {onDuplicate && (

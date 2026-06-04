@@ -37,10 +37,30 @@ export interface ApiEndpointMeta {
   params: ParamDef[]
 }
 
+/** One CRUD slot of a table in the runtime connector meta — a query-meta plus which CRUD verb
+ *  it fills (`get` / `put` / `post` / `delete`). */
+export interface TableSlotMeta extends SqlQueryMeta {
+  crud: string
+}
+
+/** A first-class CRUD table in the runtime connector meta — its own name / label / description
+ *  plus the present CRUD slots. Emitted by `public_connector` alongside the flat `queries` so the
+ *  screen editor can offer "pick a table → fill its read/update/insert/delete queries at once". */
+export interface TableMeta {
+  name: string
+  label: string | null
+  description: string | null
+  slots: TableSlotMeta[]
+}
+
 export interface SqlConnectorMeta {
   name: string
   type: 'sql'
+  /** Every runnable query, flat — table CRUD slots (synthesised `<base>_<crud>` names), custom
+   *  queries, sequences and lookups. The historical shape; TableView + pickers read this. */
   queries: SqlQueryMeta[]
+  /** The CRUD tables, grouped — present alongside `queries` for editors that want the grouping. */
+  tables?: TableMeta[]
 }
 
 export interface ApiConnectorMeta {
