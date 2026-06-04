@@ -374,9 +374,20 @@ def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                     if getattr(tab, "type", None) == "nested_table" and getattr(tab, "screen", None):
                         reached.add((app, tab.screen))
                 for _where, action in _iter_screen_actions(s):
-                    if getattr(action, "type", None) == "navigate" and getattr(action, "screen", None):
-                        aconn = getattr(action, "connector", None) or conn
-                        reached.add((aconn, action.screen))
+                    if getattr(action, "type", None) != "navigate":
+                        continue
+                    aconn = getattr(action, "connector", None) or conn
+                    nav_screen = getattr(action, "screen", None)
+                    if nav_screen:
+                        reached.add((aconn, nav_screen))
+                    # A navigate to a QUERY opens the screen whose read query matches it (the
+                    # runtime resolves /sql/<conn>/<to> → a screen by read query) — so that screen
+                    # is reachable too, same as a query-type menu leaf.
+                    nav_to = getattr(action, "to", None)
+                    if nav_to:
+                        for sid_t, rq in idx.read_query_by_app.get(aconn, {}).items():
+                            if rq == nav_to:
+                                reached.add((aconn, sid_t))
         for app, smap in (getattr(screens, "screens", None) or {}).items():
             for sid in smap:
                 if (app, sid) not in reached:

@@ -114,6 +114,24 @@ def test_dashboard_menu_target_uses_qualified_id() -> None:
     assert any("app.ghost" in m for m in msgs)          # missing → flagged
 
 
+def test_navigate_to_query_marks_target_screen_reachable() -> None:
+    """A screen reached only via a row-menu navigate-to-QUERY (resolved to the screen by its read
+    query) must NOT be flagged orphan — find-usages finds it, integrity must agree."""
+    state = _state(
+        conns={"nomasx1": ["audit_trail_get", "audit_trail_query"]},
+        screens={"nomasx1": {
+            "audit_trail": {
+                "connector": "nomasx1", "read_query": "audit_trail_get",
+                "row_menu": [{"id": "d", "type": "navigate", "to": "audit_trail_query"}],
+            },
+            "audit_trail_query": {"connector": "nomasx1", "read_query": "audit_trail_query"},
+        }},
+        menus={"nomasx1": {"items": [{"id": "u", "label": "Audit", "type": "screen", "target": "audit_trail"}]}},
+    )
+    orphans = [i.message for i in check_integrity(state) if i.category == "Orphan screen"]
+    assert not any("audit_trail_query" in m for m in orphans)
+
+
 def test_broken_home_detected() -> None:
     state = _state(
         conns={"jde": ["f0004_get"]},
