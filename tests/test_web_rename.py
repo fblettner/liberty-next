@@ -1055,11 +1055,13 @@ def test_rename_screen_cascades_to_menus_and_screen_refs(tmp_path: Path) -> None
     menu = tmp_path / "menus.toml"
     _write(scr, """
         [screens.foo.users]
+        id = "users"
         connector = "foo"
         read_query = "users_get"
         row_click_screen = "users_detail"
 
         [screens.foo.users_detail]
+        id = "users_detail"
         connector = "foo"
         read_query = "users_get"
 
@@ -1083,6 +1085,7 @@ def test_rename_screen_cascades_to_menus_and_screen_refs(tmp_path: Path) -> None
                   screens_path=scr, menus_path=menu)
     s = tomllib.loads(scr.read_text())["screens"]["foo"]
     assert "user_profile" in s and "users_detail" not in s
+    assert s["user_profile"]["id"] == "user_profile"   # body id follows the key
     assert s["users"]["row_click_screen"] == "user_profile"
     nav = [a for a in s["users"]["row_menu"] if a.get("type") == "navigate"][0]
     assert nav["screen"] == "user_profile"

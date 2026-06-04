@@ -681,8 +681,14 @@ def rename_screen(
     if new in app_screens:
         raise RenameError(f"screen {new!r} already exists under app {app!r} — pick another name")
     # Rename the key (rebuild to preserve order) + rewrite intra-app screen-id references.
-    scr_doc["screens"][app] = {(new if k == old else k): v for k, v in app_screens.items()}
-    n = 1 + _rename_screen_refs(scr_doc["screens"][app], old=old, new=new)
+    renamed = {(new if k == old else k): v for k, v in app_screens.items()}
+    # A screen body carries an ``id`` field that MUST equal its key (parse_screens enforces it),
+    # so update the moved screen's ``id`` to the new key too.
+    moved = renamed.get(new)
+    if isinstance(moved, dict):
+        moved["id"] = new
+    scr_doc["screens"][app] = renamed
+    n = 1 + _rename_screen_refs(renamed, old=old, new=new)
     result.files[str(screens_path)] = n
     _validate("screens", scr_doc, parse_screens, screens_path)
 
