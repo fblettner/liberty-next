@@ -629,6 +629,84 @@ def rename_screen_app(
     return result
 
 
+# ── screen (id) rename ───────────────────────────────────────────────────────────────────────
+
+
+def _rename_screen_refs(node: Any, *, old: str, new: str) -> int:
+    """Walk a screens subtree and rename every reference to screen id *old* → *new*: a
+    ``nested_table`` tab's / ``navigate`` action's ``screen`` field, and any ``row_click_screen``.
+    These are all app-scoped screen ids, so renaming within one app's subtree is safe."""
+    n = 0
+    if isinstance(node, dict):
+        if node.get("type") in ("nested_table", "navigate") and node.get("screen") == old:
+            node["screen"] = new
+            n += 1
+        if node.get("row_click_screen") == old:
+            node["row_click_screen"] = new
+            n += 1
+        for v in node.values():
+            n += _rename_screen_refs(v, old=old, new=new)
+    elif isinstance(node, list):
+        for v in node:
+            n += _rename_screen_refs(v, old=old, new=new)
+    return n
+
+
+def rename_screen(
+    old: str,
+    new: str,
+    *,
+    app: str,
+    screens_path: Path,
+    menus_path: Path,
+    **_ignored: Any,
+) -> RenameResult:
+    """Rename a screen id ``[screens.<app>.<old>]`` → ``<new>`` + every reference to it: the
+    ``screen`` menu leaves (``MenuItem.target`` where ``type = "screen"``) and intra-app screen
+    references (``nested_table`` tab ``screen`` / ``row_click_screen`` / ``NavigateAction.screen``).
+    Without this a screen rename orphaned its menu items + drill targets. Big files round-trip via
+    tomllib + tomli_w (see ``_load_doc`` / ``_dump_doc``)."""
+    if old == new:
+        raise RenameError(f"old and new screen ids are identical ({old!r}) — nothing to do")
+    validate_identifier(new, what="new screen id")
+
+    result = RenameResult(kind="screen", old_name=old, new_name=new)
+
+    if not screens_path.exists() or not screens_path.read_text(encoding="utf-8").strip():
+        raise RenameError(f"screens file {screens_path} is missing or empty")
+    scr_doc = _load_doc("screens", screens_path)
+    app_screens = (scr_doc.get("screens") or {}).get(app)
+    if not isinstance(app_screens, dict) or old not in app_screens:
+        raise RenameError(f"screen {old!r} not found under app {app!r} in {screens_path}")
+    if new in app_screens:
+        raise RenameError(f"screen {new!r} already exists under app {app!r} — pick another name")
+    # Rename the key (rebuild to preserve order) + rewrite intra-app screen-id references.
+    scr_doc["screens"][app] = {(new if k == old else k): v for k, v in app_screens.items()}
+    n = 1 + _rename_screen_refs(scr_doc["screens"][app], old=old, new=new)
+    result.files[str(screens_path)] = n
+    _validate("screens", scr_doc, parse_screens, screens_path)
+
+    # menus.toml — `screen` leaves whose target is this screen id (scoped to the same app).
+    menu_doc = None
+    menu_n = 0
+    if menus_path is not None and menus_path.exists() and menus_path.read_text(encoding="utf-8").strip():
+        menu_doc = _load_doc("menus", menus_path)
+        am = (menu_doc.get("menus") or {}).get(app)
+        if isinstance(am, dict):
+            for it in am.get("items") or []:
+                if isinstance(it, dict) and it.get("type") == "screen" and it.get("target") == old:
+                    it["target"] = new
+                    menu_n += 1
+        result.files[str(menus_path)] = menu_n
+        if menu_n:
+            _validate("menus", menu_doc, parse_menus, menus_path)
+
+    screens_path.write_text(_dump_doc("screens", scr_doc), encoding="utf-8")
+    if menu_n and menu_doc is not None:
+        menus_path.write_text(_dump_doc("menus", menu_doc), encoding="utf-8")
+    return result
+
+
 # ── dictionary entry rename ─────────────────────────────────────────────────────────────────
 
 

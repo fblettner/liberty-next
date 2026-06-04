@@ -66,6 +66,7 @@ from liberty.web.rename import (
     rename_dictionary_entry,
     rename_lookup,
     rename_query,
+    rename_screen,
     rename_screen_app,
     rename_sequence,
     rename_table,
@@ -323,6 +324,20 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/integrity", summary="Config integrity check")
+async def config_integrity(request: Request, _: Superuser) -> dict[str, Any]:
+    """Walk every cross-reference in the loaded config and report broken references (errors) +
+    smells (unused connectors / orphan screens — warnings). Runs against the in-memory registries
+    (``app.state``), so it reflects the last ``/admin/reload``. Feeds Settings → Integrity."""
+    from liberty.web.integrity import check_integrity
+    issues = check_integrity(request.app.state)
+    return {
+        "issues": [i.to_dict() for i in issues],
+        "errors": sum(1 for i in issues if i.severity == "error"),
+        "warnings": sum(1 for i in issues if i.severity == "warning"),
+    }
 
 
 @router.get("/config/connectors/parsed", summary="Get connectors")
@@ -2540,10 +2555,19 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 charts_path=Path(settings.charts.config_path),
                 dashboards_path=Path(settings.dashboards.config_path),
             )
+        elif body.kind == "screen":
+            if not body.scope:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="a screen rename requires `scope` (the app name)")
+            result = rename_screen(
+                body.old_name, body.new_name,
+                app=body.scope,
+                screens_path=Path(settings.screens.config_path),
+                menus_path=Path(settings.menus.config_path),
+            )
         else:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen_app, dictionary_entry, query, table",
+                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen, screen_app, dictionary_entry, query, table",
             )
     except RenameError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

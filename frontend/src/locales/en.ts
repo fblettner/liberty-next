@@ -452,7 +452,12 @@ const en = {
       invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports', integrity: 'Integrity' },
+    integrity: {
+      errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',
+      filter: 'Filter…', recheck: 'Re-check', goto: 'Go to',
+      clean: 'No integrity issues — every reference resolves.',
+    },
     templates: {
       title: 'Report templates',
       description: 'Operator-authored reports — declared in reports.toml and rendered through the framework like any plugin report. Each template binds to a connector query that feeds rows to its Jinja markdown body.',
@@ -795,6 +800,8 @@ const en = {
     screens: {
       add: 'Add screen',
       delete: 'Delete screen',
+      renamePrompt: 'New id for "{{name}}":',
+      renameSaveFirst: 'Save your changes before renaming — the rename rewrites the saved files (screens + menus).',
       openDesigner: 'Open Screen Designer',
       designerTitle: 'Screen Designer',
       scopeLabel: 'App:',

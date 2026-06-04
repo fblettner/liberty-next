@@ -1047,6 +1047,49 @@ def test_rename_query_new_shape_walks_sequences_section(tmp_path: Path) -> None:
     assert d["connectors"]["foo"]["sequences"]["SEQ"]["query"] == "next_user_id"
 
 
+def test_rename_screen_cascades_to_menus_and_screen_refs(tmp_path: Path) -> None:
+    """Renaming a screen id updates the screen key, the ``screen`` menu leaf targeting it, and
+    intra-app screen references (nested_table tab / row_click_screen / navigate.screen)."""
+    from liberty.web.rename import rename_screen
+    scr = tmp_path / "screens.toml"
+    menu = tmp_path / "menus.toml"
+    _write(scr, """
+        [screens.foo.users]
+        connector = "foo"
+        read_query = "users_get"
+        row_click_screen = "users_detail"
+
+        [screens.foo.users_detail]
+        connector = "foo"
+        read_query = "users_get"
+
+        [[screens.foo.users.row_menu]]
+        id = "drill"
+        type = "navigate"
+        connector = "foo"
+        to = "users_get"
+        screen = "users_detail"
+    """)
+    _write(menu, """
+        [menus.foo]
+        label = "Foo"
+        [[menus.foo.items]]
+        id = "ud"
+        label = "User detail"
+        type = "screen"
+        target = "users_detail"
+    """)
+    rename_screen("users_detail", "user_profile", app="foo",
+                  screens_path=scr, menus_path=menu)
+    s = tomllib.loads(scr.read_text())["screens"]["foo"]
+    assert "user_profile" in s and "users_detail" not in s
+    assert s["users"]["row_click_screen"] == "user_profile"
+    nav = [a for a in s["users"]["row_menu"] if a.get("type") == "navigate"][0]
+    assert nav["screen"] == "user_profile"
+    m = tomllib.loads(menu.read_text())["menus"]["foo"]["items"][0]
+    assert m["target"] == "user_profile"
+
+
 def test_rename_query_rejects_collision(cfg_tree: dict[str, Path]) -> None:
     from liberty.web.rename import rename_query, RenameError
     with pytest.raises(RenameError):

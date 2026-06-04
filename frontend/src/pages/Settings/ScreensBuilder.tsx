@@ -75,7 +75,7 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp } = useWorkspace()
+  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
@@ -358,6 +358,18 @@ export default function ScreensBuilder() {
     openDesigner()
   }
   const renameScreen = async (app: string, oldId: string) => {
+    // Cross-file rename via the backend — it rewrites the screen key AND every reference
+    // (``screen`` menu leaves + intra-app nested_table / row_click_screen / navigate.screen).
+    // It operates on the SAVED files, so unsaved edits must be committed first (else the reload
+    // below would discard them). This replaces the old in-place id swap, which left menus dangling.
+    if (dirty) {
+      await modals.alert({
+        title: t('settings.rename.button', 'Rename'),
+        message: t('settings.screens.renameSaveFirst', 'Save your changes before renaming — the rename rewrites the saved files (screens + menus).'),
+        variant: 'danger',
+      })
+      return
+    }
     const next = (await modals.prompt({
       title: t('settings.rename.button', 'Rename'),
       message: t('settings.screens.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
@@ -365,9 +377,20 @@ export default function ScreensBuilder() {
       validate: (v) => validateScreenId(v.trim(), app, oldId),
     }))?.trim()
     if (!next || next === oldId) return
-    // Reuse updateScreen's id-rename machinery (also rewrites same-app sibling references to oldId).
-    const src = (doc?.[app]?.[oldId] ?? {}) as Record<string, unknown>
-    updateScreen(app, oldId, { ...src, id: next })
+    setBusy(true)
+    try {
+      const result = await api.post<{ files: Record<string, number>; total_refs: number }>(
+        '/admin/config/rename', { kind: 'screen', old_name: oldId, new_name: next, scope: app },
+      )
+      await api.post('/admin/reload')
+      refreshWorkspace()
+      setSelId(next)
+      load()
+      const filesTouched = Object.values(result.files).filter((n) => n > 0).length
+      setStatus(t('settings.connectors.renamedAcross', { from: oldId, to: next, refs: result.total_refs, files: filesTouched }))
+    } catch (e) {
+      setError(t('settings.connectors.renameFailed', { name: oldId, error: e instanceof ApiError ? e.message : String(e) }))
+    } finally { setBusy(false) }
   }
   // Clone now opens CloneWithDepsModal — operator gets the "also clone referenced
   // queries" checkbox + the live count of how many queries would be duplicated. The

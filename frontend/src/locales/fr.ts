@@ -454,7 +454,12 @@ const fr: Resources = {
       invalidIdentifier: 'Utilisez des lettres minuscules, des chiffres et des underscores ; commencez par une lettre (compatible avec les clés TOML, les permissions et les segments d\'URL).',
       unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App', reports: 'Rapports' },
+    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App', reports: 'Rapports', integrity: 'Intégrité' },
+    integrity: {
+      errors: 'erreurs', warnings: 'avertissements', errorsOnly: 'Erreurs', warningsOnly: 'Avertissements',
+      filter: 'Filtrer…', recheck: 'Revérifier', goto: 'Ouvrir',
+      clean: 'Aucun problème d\'intégrité — toutes les références sont résolues.',
+    },
     templates: {
       title: 'Modèles de rapport',
       description: 'Rapports authorés par l\'opérateur — déclarés dans reports.toml et rendus par le framework comme n\'importe quel rapport plugin. Chaque modèle est lié à une requête sur un connecteur qui fournit les lignes au corps Jinja markdown.',
@@ -793,6 +798,8 @@ const fr: Resources = {
     screens: {
       add: 'Ajouter un écran',
       delete: 'Supprimer l\'écran',
+      renamePrompt: 'Nouvel id pour « {{name}} » :',
+      renameSaveFirst: 'Enregistrez vos modifications avant de renommer — le renommage réécrit les fichiers enregistrés (écrans + menus).',
       openDesigner: 'Ouvrir le Designer d\'Écran',
       designerTitle: 'Designer d\'Écran',
       scopeLabel: 'Application :',

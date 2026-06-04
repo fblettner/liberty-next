@@ -32,8 +32,11 @@ const AppBuilder = lazy(() => import('./AppBuilder'))
 // report) lives inside AppBuilder now since it's stored in app.toml.
 const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
 const PackageBuilder = lazy(() => import('./PackageBuilder'))
+// Integrity — read-only diagnostics across every config file (broken refs, unused connectors,
+// orphan screens). Not an editor; it deep-links into the others to fix what it finds.
+const IntegrityBuilder = lazy(() => import('./IntegrityBuilder'))
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'package'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'package', 'integrity'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -91,6 +94,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
         <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app', 'App')}</TabBtn>
         <TabBtn $active={tab === 'package'} onClick={() => setTab('package')}>{t('settings.tabs.package', 'Package')}</TabBtn>
+        <TabBtn $active={tab === 'integrity'} onClick={() => setTab('integrity')}>{t('settings.tabs.integrity', 'Integrity')}</TabBtn>
       </Tabs>
       <Suspense fallback={<Centered />}>
         {tab === 'pools' ? <PoolsBuilder />
@@ -104,6 +108,7 @@ export default function Settings() {
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
           : tab === 'app' ? <AppBuilder />
+          : tab === 'integrity' ? <IntegrityBuilder />
           : <PackageBuilder />}
       </Suspense>
     </PageLayout>
