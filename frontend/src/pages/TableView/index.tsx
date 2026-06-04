@@ -325,8 +325,14 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   // True when *this* tab's TableView is the active route. Every tab stays mounted (TabHost) and
   // they all share one ``useSearchParams`` / ``useLocation``, so the URL binds belong to whichever
   // tab the path points at — gate the drill logic on this so an inactive tab never reacts to
-  // another tab's drill URL.
-  const onThisTab = location.pathname === tabPath({ kind: 'sql', connector, target: query })
+  // another tab's drill URL. A screen tab routes through ``/screen/<app>/<id>`` (not
+  // ``/sql/<connector>/<query>``), so match the right path — otherwise the drill binds (filters
+  // passed between screens) never seed and auto_load runs unfiltered.
+  const onThisTab = location.pathname === (
+    screenId
+      ? tabPath({ kind: 'screen', connector: screenApp ?? connector, target: screenId })
+      : tabPath({ kind: 'sql', connector, target: query })
+  )
 
   // Auto-load: run a SELECT immediately when the screen opens, once, if the screen asks for it.
   // Phase 3 — ``auto_load`` is a screen-level flag now; fall back to the (deprecated) meta-level
