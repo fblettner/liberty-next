@@ -239,7 +239,7 @@ export default function ActionTreeView({
 }: ActionTreeViewProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors: wsConnectors, findScreen } = useWorkspace()
+  const { connectors: wsConnectors, screens: wsScreens, findScreen } = useWorkspace()
 
   // ── workspace catalog → dropdown options ───────────────────────────────────────────────
   const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
@@ -639,6 +639,25 @@ export default function ActionTreeView({
             )}
           </Row>
         </Field>
+        {/* navigate → optional target SCREEN. When several screens share the same read query,
+            the query alone is ambiguous (no columns / filters / auto_load apply); picking the
+            screen opens that exact one. Sourced from the target connector's designed screens. */}
+        {aType === 'navigate' && (() => {
+          const screenOpts: SearchSelectOption[] = ((wsScreens ?? {})[actionConn] ?? [])
+            .map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id }))
+            .sort((x, y) => String(x.mono).localeCompare(String(y.mono)))
+          return (
+            <Field label={t('settings.screens.action.navigateScreen', 'Target screen (optional)')}>
+              <SearchSelect
+                value={(a.screen as string | undefined) ?? ''}
+                options={screenOpts}
+                onChange={(v) => onPatch({ screen: v || null })}
+                anyLabel={t('settings.screens.action.navigateScreenAny', 'Open the query directly (no specific screen)')}
+                placeholder={t('common.pick')}
+              />
+            </Field>
+          )
+        })()}
       </>
     )
   }
