@@ -54,6 +54,24 @@ def test_screen_usages_finds_menu_via_read_query() -> None:
     assert any(u.type == "menu_target_screen" for u in usages)
 
 
+def test_screen_usages_finds_navigate_action_pinning_it() -> None:
+    """A row-menu navigate that pins a specific screen (NavigateAction.screen) must show up in
+    that screen's usages — so renaming/auditing the screen surfaces the drill."""
+    screens = {
+        "jde": {
+            "f0004": {"connector": "jde", "read_query": "f0004_get"},
+            "f0004_objects": {"connector": "jde", "read_query": "f0004_objects_get"},
+        },
+    }
+    # f0004's row menu drills into the f0004_objects SCREEN specifically.
+    screens["jde"]["f0004"]["row_menu"] = [
+        {"id": "objs", "label": "Objects", "type": "navigate", "to": "f0004_objects_get", "screen": "f0004_objects"},
+    ]
+    state = _state(screens=screens)
+    usages = find_usages(state, kind="screen", name="f0004_objects", scope="jde")
+    assert any(u.type == "action_navigate_screen" for u in usages)
+
+
 def test_menu_target_query_respects_connector() -> None:
     """A menu item on a different connector must NOT match."""
     menus = {"jde": {"items": [{"id": "u", "label": "U", "type": "query", "connector": "other", "target": "f0004_get"}]}}

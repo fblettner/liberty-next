@@ -66,9 +66,10 @@ export interface ActionRunnerDeps {
   confirm?: (message: string, opts?: { confirmLabel?: string | null; cancelLabel?: string | null }) => Promise<boolean>
   /** Optional router push — used by :class:`NavigateAction`. The runner resolves the action's
    *  param_binds + passes them as ``params``; the caller decides how to build the URL (the
-   *  row-menu / toolbar use ``/sql/<connector>/<to>?<qs>``). When unset, ``navigate`` actions
-   *  land a soft warning (ScreenDialog has no navigation target; row-menu / toolbar do). */
-  navigate?: (to: string, connector: string, params: Record<string, string>) => void
+   *  row-menu / toolbar use ``/sql/<connector>/<to>?<qs>``, or ``/screen/<connector>/<screen>``
+   *  when the action pins a specific screen). When unset, ``navigate`` actions land a soft
+   *  warning (ScreenDialog has no navigation target; row-menu / toolbar do). */
+  navigate?: (to: string, connector: string, params: Record<string, string>, screen?: string | null) => void
 }
 
 // ── source-path resolution ──────────────────────────────────────────────────────────────────
@@ -485,7 +486,7 @@ async function runOneAction(
         if (deps.navigate) {
           const target = a.connector || deps.defaultConnector
           const bound = resolveBinds(a.param_binds, ctx, formCtx)
-          deps.navigate(a.to, target, bound)
+          deps.navigate(a.to, target, bound, a.screen)
           // The route change will unmount the firing surface — abort the rest of the chain.
           return { abort: true }
         }

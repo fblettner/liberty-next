@@ -972,6 +972,8 @@ const fr: Resources = {
           call_api: 'Endpoint',
           navigate: 'Requête cible',
         },
+        navigateScreen: 'Écran cible (optionnel)',
+        navigateScreenAny: 'Ouvrir la requête directement (aucun écran spécifique)',
         unknownType: 'Type d\'action inconnu : « {{type}} ».',
         wrapInChain: 'Englober dans une chaîne',
       },

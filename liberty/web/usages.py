@@ -613,24 +613,36 @@ def _find_screen_usages(state: Any, app: str, screen_id: str) -> list[Usage]:
                         label=f"{menu_app} · {item.id} → {target}",
                         deep_link=_menu_deep_link(menu_app, item.id),
                     ))
-    # NestedTableTab.screen — a parent screen embedding this one.
+    # NestedTableTab.screen — a parent screen embedding this one — and navigate actions that pin
+    # this screen (NavigateAction.screen) so a drill opens it specifically.
     screens = getattr(state, "screens", None)
     if screens is not None:
         for app_p, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
             for sid_p, screen in screen_map.items():
                 dialog = getattr(screen, "dialog", None)
-                if dialog is None:
-                    continue
-                for tab in getattr(dialog, "tabs", None) or []:
-                    if getattr(tab, "type", None) == "nested_table" and getattr(tab, "screen", None) == screen_id:
-                        # Nested-table screens are keyed by id only — they're resolved against the
-                        # parent screen's app. So a match in any app is a real reference.
-                        if app_p == app:
-                            out.append(Usage(
-                                type="nested_table_screen",
-                                label=f"{app_p}.{sid_p} · tab[{tab.id}]",
-                                deep_link=_screen_deep_link(app_p, sid_p),
-                            ))
+                if dialog is not None:
+                    for tab in getattr(dialog, "tabs", None) or []:
+                        if getattr(tab, "type", None) == "nested_table" and getattr(tab, "screen", None) == screen_id:
+                            # Nested-table screens are keyed by id only — they're resolved against
+                            # the parent screen's app. So a match in any app is a real reference.
+                            if app_p == app:
+                                out.append(Usage(
+                                    type="nested_table_screen",
+                                    label=f"{app_p}.{sid_p} · tab[{tab.id}]",
+                                    deep_link=_screen_deep_link(app_p, sid_p),
+                                ))
+                # NavigateAction.screen — a row-menu / toolbar drill that pins THIS screen.
+                firing_conn = getattr(screen, "connector", None) or app_p
+                for where, action in _iter_screen_actions(screen):
+                    if getattr(action, "type", None) != "navigate" or getattr(action, "screen", None) != screen_id:
+                        continue
+                    nav_conn = getattr(action, "connector", None) or firing_conn
+                    if nav_conn == screen_conn:
+                        out.append(Usage(
+                            type="action_navigate_screen",
+                            label=f"{app_p}.{sid_p} · {where} · navigate",
+                            deep_link=_screen_deep_link(app_p, sid_p),
+                        ))
     return out
 
 

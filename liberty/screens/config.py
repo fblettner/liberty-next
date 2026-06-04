@@ -424,6 +424,16 @@ class NavigateAction(_PromptableMixin, _ActionBase):
         default=None,
         description="Connector hosting the target query. Blank uses the firing screen's connector.",
     )
+    screen: str | None = Field(
+        default=None,
+        description=(
+            "Optional target screen id. When set, the drill opens that specific designed screen "
+            "(``/screen/<connector>/<screen>``) so ITS columns / filters / dialog apply — use it "
+            "to pick one screen when several share the same read query. Blank → open the query "
+            "directly (``/sql/<connector>/<to>``), where the runtime resolves a screen by read "
+            "query (ambiguous if more than one screen uses it, so none is applied)."
+        ),
+    )
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description="Forwarded as ``?<param>=<value>`` query-string entries. The target's filter panel seeds from these.",

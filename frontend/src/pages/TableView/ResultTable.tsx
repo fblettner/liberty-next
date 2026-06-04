@@ -519,14 +519,17 @@ export function ResultTable({
     const result = await runChain([a], {}, ctx, {
       defaultConnector: connector,
       requestPrompt,
-      navigate: (to, conn, params) => {
+      navigate: (to, conn, params, screen) => {
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
           if (v != null && v !== '') qs.set(k, String(v))
         }
-        const url =
-          `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}` +
-          (qs.toString() ? `?${qs.toString()}` : '')
+        // A pinned screen opens the dedicated /screen/<conn>/<id> route (that exact screen's
+        // columns / filters / dialog apply); otherwise the query route, resolved by read query.
+        const base = screen
+          ? `/screen/${encodeURIComponent(conn)}/${encodeURIComponent(screen)}`
+          : `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}`
+        const url = base + (qs.toString() ? `?${qs.toString()}` : '')
         // Close the menu *before* navigating — leaving it open during the route change makes the
         // overlay flicker on the destination page until the document-mousedown listener fires.
         setMenuBusy(null); closeMenu()
@@ -599,15 +602,15 @@ export function ResultTable({
     const result = await runChain([a], {}, {}, {
       defaultConnector: connector,
       requestPrompt,
-      navigate: (to, conn, params) => {
+      navigate: (to, conn, params, screen) => {
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
           if (v != null && v !== '') qs.set(k, String(v))
         }
-        navigate(
-          `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}` +
-          (qs.toString() ? `?${qs.toString()}` : ''),
-        )
+        const base = screen
+          ? `/screen/${encodeURIComponent(conn)}/${encodeURIComponent(screen)}`
+          : `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}`
+        navigate(base + (qs.toString() ? `?${qs.toString()}` : ''))
       },
     })
     setActionBusy(null)

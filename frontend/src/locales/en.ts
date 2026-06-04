@@ -974,6 +974,8 @@ const en = {
           call_api: 'Endpoint',
           navigate: 'Target query',
         },
+        navigateScreen: 'Target screen (optional)',
+        navigateScreenAny: 'Open the query directly (no specific screen)',
         unknownType: 'Unknown action type "{{type}}".',
         wrapInChain: 'Wrap in chain',
       },

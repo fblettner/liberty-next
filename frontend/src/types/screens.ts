@@ -213,6 +213,7 @@ export type Action =
       type: 'navigate'
       to: string             // target query name on `connector`
       connector?: string | null  // blank → the firing screen's effective connector
+      screen?: string | null  // optional target screen id → opens /screen/<connector>/<screen>
       param_binds?: ParamBind[]
     })
   | (ActionCommon & {
