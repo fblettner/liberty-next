@@ -24,8 +24,9 @@ export function AddScopeModal({
   const [value, setValue] = useState('')
   const opts: SearchSelectOption[] = candidates.map((c) => ({ value: c, label: c, mono: c }))
   const none = candidates.length === 0
+  // No backdrop-click-to-close — outside clicks must not discard the typed scope name (Cancel / Escape).
   return (
-    <Overlay onClick={onClose}>
+    <Overlay>
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 94vw)' }}>
         <ModalHeader>{title ?? t('settings.addScope', 'Add scope')}</ModalHeader>
         <ModalBody>

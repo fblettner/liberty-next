@@ -1243,7 +1243,8 @@ export default function ConnectorsBuilder() {
         />
       )}
       {cloneModalOpen && (
-        <Overlay onClick={() => !cloneBusy && setCloneModalOpen(false)}>
+        // No backdrop-click-to-close — outside clicks must not abandon the clone form mid-fill.
+        <Overlay>
           <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
             <ModalHeader>{t('settings.connectors.clone', 'Clone')}</ModalHeader>
             <ModalBody>
@@ -1302,7 +1303,8 @@ export default function ConnectorsBuilder() {
       {/* "+ Connector" — type (sql / api) + name. The type is the discriminator: chosen here at
           creation, fixed afterwards (so it isn't shown/editable in the Settings tab). */}
       {addConnOpen && (
-        <Overlay onClick={() => setAddConnOpen(false)}>
+        // No backdrop-click-to-close — outside clicks must not abandon the new-connector form.
+        <Overlay>
           <Modal style={{ width: 'min(440px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
             <ModalHeader>{t('settings.connectors.addConnectorTitle', 'Add a connector')}</ModalHeader>
             <ModalBody>

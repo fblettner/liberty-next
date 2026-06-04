@@ -76,11 +76,11 @@ export default function ActionEditorModal({
   }, [onClose])
 
   return createPortal(
-    // Click on the Overlay backdrop = close (the dialog convention everywhere). Only the
-    // Overlay itself dismisses; the modal stops propagation so clicks on its content don't
-    // bubble up to either this overlay or the surrounding designer's overlay (which would
-    // close the designer entirely — that was the bug in the first cut of this component).
-    <RaisedOverlay onClick={onClose}>
+    // No backdrop-click-to-close — an outside click must not discard in-progress action edits.
+    // Close via the header X / Cancel only. The modal still stops propagation so clicks on its
+    // content don't bubble up to the surrounding designer's overlay (which would close the
+    // designer entirely — that was the bug in the first cut of this component).
+    <RaisedOverlay>
       <ScreenDialogModal onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <Row gap={10} style={{ alignItems: 'center', justifyContent: 'space-between' }}>

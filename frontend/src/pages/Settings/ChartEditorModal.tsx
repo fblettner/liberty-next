@@ -147,8 +147,9 @@ export function ChartEditorModal({
     // keep / null → stay
   }
 
+  // No backdrop-click-to-close — outside clicks must not discard edits (Cancel / Escape).
   return (
-    <Overlay onClick={() => void requestClose()}>
+    <Overlay>
       <Box onClick={(e) => e.stopPropagation()}>
         <Header>
           <BarChart3 size={17} color={colors.blue.main} />

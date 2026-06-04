@@ -824,8 +824,9 @@ function FrameworkEnumPickerModal({
     mono: k,
   }))
   const none = opts.length === 0
+  // No backdrop-click-to-close — outside clicks must not discard the enum-customization form.
   return (
-    <Overlay onClick={onClose}>
+    <Overlay>
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(480px, 94vw)' }}>
         <ModalHeader>{t('settings.dictionary.framework_enums.add', 'Customize framework enum')}</ModalHeader>
         <ModalBody>

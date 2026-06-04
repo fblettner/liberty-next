@@ -171,8 +171,9 @@ export function WidgetEditorModal({
     ? { type: 'table', label: label || null, col_span: colSpan, row_span: rowSpan, connector, query, columns, ...(maxRows ? { max_rows: parseInt(maxRows, 10) } : {}) }
     : null
 
+  // No backdrop-click-to-close — outside clicks must not discard edits (Cancel / Escape).
   return (
-    <Overlay onClick={() => void requestClose()}>
+    <Overlay>
       <Box onClick={(e) => e.stopPropagation()}>
         <Header>
           <span className="title">{t('settings.dash.widget', 'Widget')}</span>

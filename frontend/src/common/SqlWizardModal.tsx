@@ -146,8 +146,9 @@ export function SqlWizardModal({ schema, initialTable, initialSql, onInsert, onC
   // ``position: fixed`` element inside such an ancestor positions relative to that
   // ancestor instead of the viewport — the wizard would appear offset inside the
   // editor's frame instead of centered on the screen.
+  // No backdrop-click-to-close — outside clicks must not discard wizard input (Cancel / Escape).
   return createPortal(
-    <Overlay onClick={onCancel}>
+    <Overlay>
       <Modal style={{ width: 'min(900px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{t('settings.sqlWizard.title')}</ModalHeader>
         <ModalBody>

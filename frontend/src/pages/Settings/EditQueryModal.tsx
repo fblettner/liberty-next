@@ -138,6 +138,15 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
     onClose()
   }
 
+  // Escape closes (through the same dirty-prompt as Cancel) — the only keyboard close affordance
+  // now that backdrop-click no longer dismisses the modal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void cancel() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancel reads stable state
+  }, [dirty])
+
   const save = async () => {
     if (!conns) return
     setBusy(true); setError(null)
@@ -152,11 +161,15 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
   }
 
   const modalNode = (
-    // Local Overlay (z-index 400) — sits ABOVE the parent modal (e.g. ScreenDesigner at 400 too,
-    // but this one renders later in the body → DOM-order on-top). For prompts we open via
-    // ``useModals`` from inside this modal, those use a higher TopOverlay (z-index 2000) so
-    // they paint above us too — same convention every other modal in the app follows.
-    <Overlay onClick={cancel}>
+    // z-index 600 — this modal is frequently opened from INSIDE another modal (the Screen
+    // Designer / Action editor, both at the base Overlay's 400), so it must paint above them.
+    // Sits below SearchSelect dropdowns (1000) and the global confirm TopOverlay (2000) so its
+    // own pickers + the unsaved-changes prompt still appear on top.
+    //
+    // No backdrop-click-to-close: an editor modal must not discard in-progress edits because
+    // the operator clicked outside it. Closing is via Cancel / Escape only (Escape still routes
+    // through ``cancel`` → the unsaved-changes prompt when dirty).
+    <Overlay style={{ zIndex: 600 }}>
       <Modal style={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>

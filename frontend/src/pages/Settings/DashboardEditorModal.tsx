@@ -197,8 +197,9 @@ export function DashboardEditorModal({
 
   const editingInitial = editIdx != null ? widgets[editIdx] : null
 
+  // No backdrop-click-to-close — outside clicks must not discard edits (Cancel / Escape).
   return (
-    <Overlay onClick={() => void requestClose()}>
+    <Overlay>
       <Box onClick={(e) => e.stopPropagation()}>
         <Header>
           <LayoutDashboard size={17} color={colors.blue.main} />

@@ -100,8 +100,9 @@ export function SaveChartModal({
     }
   }
 
+  // No backdrop-click-to-close — outside clicks must not discard the chart-save form (Cancel / Escape).
   return (
-    <Overlay onClick={onCancel}>
+    <Overlay>
       <Modal style={{ width: 'min(520px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{t('chart.save.title')}</ModalHeader>
         <ModalBody>

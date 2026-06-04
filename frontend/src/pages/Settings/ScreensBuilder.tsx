@@ -610,12 +610,11 @@ export default function ScreensBuilder() {
         ScreenEditor with its 5 internal tabs (General / Queries / Dialog / Actions / Row menu).
         Portaled to document.body because Settings panels use backdrop-filter (the liquid-glass
         surface), which would otherwise clamp position:fixed to the panel bounds. The modal closes
-        on Overlay click, header X, and Escape (handler bound above). Edits flow through the same
-        updateScreen → setDoc chain as before; ScreensBuilder's Save bar at the bottom commits. */}
+        on header X and Escape (handler bound above) — NOT on backdrop click, so an outside click
+        can't discard in-progress edits. Edits flow through the same updateScreen → setDoc chain;
+        ScreensBuilder's Save bar at the bottom commits. */}
     {designerOpen && selScreen && selApp && selId && createPortal(
-      // Overlay click = Cancel (revert in-modal edits). Matches the dialog convention everywhere
-      // else in the app: clicking outside a modal cancels.
-      <Overlay onClick={cancelDesigner}>
+      <Overlay>
         <VisualBuilderModal $fullscreen={designerFullscreen} onClick={(e) => e.stopPropagation()}>
           <ModalHeader>
             {/* The header is two flex regions — title on the left, actions clustered on the
