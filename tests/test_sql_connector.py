@@ -692,7 +692,15 @@ async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
     # to the source column's type — so an empty CHAR ORIGINAL bind becomes " " (space).
     # Char sentinel is " " (space) not "" because Oracle treats "" as NULL on every string
     # type — binding "" to a NCHAR NOT-NULL column still violates the constraint.
-    col_types = {"NAME": "char", "AMOUNT": "number", "STATUS": "char"}
+    # Cache shape carries ``{kind, length}`` per column — kind distinguishes fixed-width
+    # CHAR / NCHAR (``char_fixed``) from VARCHAR2 / NVARCHAR2 (``char``); both trigger the
+    # space sentinel here, but only ``char_fixed`` triggers the WHERE-bind right-padding
+    # (covered by the separate ``_pad_char_binds`` test below).
+    col_types = {
+        "NAME": {"kind": "char_fixed", "length": 10},
+        "AMOUNT": {"kind": "number", "length": None},
+        "STATUS": {"kind": "char", "length": None},
+    }
     bound = {
         "NAME": None,            # CHAR none → space
         "AMOUNT": "",            # NUMBER empty → 0 (frontend sends "" for blank inputs)
@@ -708,6 +716,59 @@ async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
         "EXTRA": None,              # column unknown — pass through
         "NAME_ORIGINAL": " ",       # _ORIGINAL suffix strip → still CHAR → space
     }
+
+
+def test_pad_char_binds_right_pads_to_declared_char_width() -> None:
+    """``trim_strings = true`` rounds out the JDE round-trip: reads strip trailing whitespace,
+    writes pad the bind back to the column's declared CHAR(N) width before binding. Without
+    it, a DELETE / UPDATE WHERE bound from a trimmed read value matches 0 rows on Oracle
+    (CHAR(10) stored ``"JDE       "`` vs VARCHAR2 bind ``"JDE"`` is non-blank-padded → unequal).
+
+    Only touches fixed-width ``CHAR`` / ``NCHAR`` — VARCHAR2 binds stay untouched (padding
+    would BREAK the comparison; stored ``"JDE"`` ≠ bind ``"JDE       "`` on VARCHAR2).
+    Already-long-enough values pass through; ``_ORIGINAL``-suffixed UPDATE rebinds resolve
+    to the source column's metadata."""
+    from liberty.connectors.sql import _pad_char_binds
+
+    col_types = {
+        "ULUSER": {"kind": "char_fixed", "length": 10},     # CHAR(10) — pad
+        "ULMNI":  {"kind": "char_fixed", "length": 1},      # CHAR(1)  — already fits
+        "NOTES":  {"kind": "char",       "length": None},   # VARCHAR2 — never pad
+        "AMOUNT": {"kind": "number",     "length": None},   # numbers untouched
+    }
+    bound = {
+        "ULUSER": "JDE",                # CHAR(10) → "JDE       " (7 spaces)
+        "ULMNI": "Y",                   # CHAR(1)  → unchanged (length already met)
+        "NOTES": "free text",           # VARCHAR2 → unchanged (mustn't pad)
+        "AMOUNT": "123",                # number → unchanged
+        "ULUSER_ORIGINAL": "JDE",       # _ORIGINAL → resolves to ULUSER → pad to 10
+        "UNKNOWN": "value",             # column not in cache → unchanged
+        "ULUSER_EMPTY": "",             # empty string → left to coalesce, not this step
+        "ULUSER_NONE": None,            # None → not a string → unchanged
+    }
+    out = _pad_char_binds(bound, col_types)
+    assert out["ULUSER"] == "JDE       "
+    assert len(out["ULUSER"]) == 10
+    assert out["ULMNI"] == "Y"
+    assert out["NOTES"] == "free text"
+    assert out["AMOUNT"] == "123"
+    assert out["ULUSER_ORIGINAL"] == "JDE       "
+    assert out["UNKNOWN"] == "value"
+    assert out["ULUSER_EMPTY"] == ""
+    assert out["ULUSER_NONE"] is None
+
+    # Empty col_types → no-op (introspection failed or no schema → skip silently).
+    assert _pad_char_binds({"X": "val"}, {}) == {"X": "val"}
+
+    # Length-missing or zero → skip (can't pad without a width).
+    assert _pad_char_binds(
+        {"X": "val"},
+        {"X": {"kind": "char_fixed", "length": None}},
+    ) == {"X": "val"}
+    assert _pad_char_binds(
+        {"X": "val"},
+        {"X": {"kind": "char_fixed", "length": 0}},
+    ) == {"X": "val"}
 
 
 def test_trim_strings_and_coalesce_nulls_are_explicit_per_pool() -> None:

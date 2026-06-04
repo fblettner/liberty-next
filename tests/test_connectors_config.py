@@ -24,16 +24,18 @@ def test_querydef_plain_sql() -> None:
     assert q.sql_for("oracle") == "SELECT 1" and q.default_sql == "SELECT 1" and q.dialects == ["default"]
 
 
-def test_querydef_type_is_optional_and_round_trips() -> None:
-    # `type` classifies a query for the editor's tabs; absent by default, kept when set.
-    assert QueryDef(name="q", sql="SELECT 1").type is None
-    assert QueryDef(name="q", type="sequence", sql="SELECT 1").type == "sequence"
-
-
-def test_query_type_enum_exposed() -> None:
-    from liberty.framework_enums import FRAMEWORK_ENUMS
-    vals = {v["value"] for v in FRAMEWORK_ENUMS["QUERY_TYPE"]["values"]}
-    assert vals == {"table", "custom", "sequence", "lookup"}
+def test_querydef_no_type_field() -> None:
+    """The ``type`` field is gone — a query's role (custom / sequence / lookup) is implied
+    by the section it lives under (``[[connectors.X.queries]]`` / ``.sequences`` /
+    ``.lookups``). Constructing a ``QueryDef`` with ``type=`` raises because the field
+    isn't declared. The framework enum ``QUERY_TYPE`` is no longer surfaced — section IS
+    the type."""
+    q = QueryDef(name="q", sql="SELECT 1")
+    assert not hasattr(q, "type")
+    # extra="ignore" silently drops a stray ``type=`` kwarg on a custom query (legacy
+    # files might still carry it during one cycle), but the field never round-trips.
+    q2 = QueryDef.model_validate({"name": "q", "type": "custom", "sql": "SELECT 1"})
+    assert not hasattr(q2, "type")
 
 
 def test_querydef_dialect_map() -> None:

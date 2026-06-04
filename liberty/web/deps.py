@@ -55,17 +55,53 @@ def public_query(query: dict) -> dict:
 
 
 def public_connector(desc: dict, principal: Principal) -> dict | None:
-    """Filter one connector descriptor to what *principal* may use; ``None`` if nothing."""
+    """Filter one connector descriptor to what *principal* may use; ``None`` if nothing.
+
+    SQL connectors carry the sectioned :meth:`SQLConnector.describe` shape (``tables`` /
+    ``queries`` / ``sequences`` / ``lookups``). We emit BOTH:
+
+      * a **flat** ``queries`` list — every permitted query across all four sections, with
+        table CRUD slots flattened to their synthesised ``<table>_<crud>`` name. This is the
+        shape the runtime TableView and the screen-designer pickers have always read, so
+        they need no change.
+      * the **sectioned** shape (``tables`` / ``queries`` / ``sequences`` / ``lookups``),
+        permission-filtered, for consumers that want the table grouping.
+
+    A query is permitted under ``sql:<connector>:<query-name>``. SQL text is stripped from
+    every emitted descriptor via :func:`public_query`."""
     name = desc["name"]
     if desc["type"] == "sql":
-        queries = [
-            public_query(q) for q in desc["queries"]
-            if principal.has_permission(f"sql:{name}:{q['name']}")
-        ]
-        if not queries:
+        def _allowed(q: dict) -> bool:
+            return principal.has_permission(f"sql:{name}:{q['name']}")
+
+        tables: list[dict] = []
+        flat: list[dict] = []
+        for tbl in desc.get("tables", []):
+            slots = [public_query(s) for s in tbl.get("slots", []) if _allowed(s)]
+            flat.extend(slots)
+            if slots:
+                tables.append({
+                    "name": tbl.get("name"),
+                    "label": tbl.get("label"),
+                    "description": tbl.get("description"),
+                    "slots": slots,
+                })
+        sections: dict[str, list[dict]] = {}
+        for key in ("queries", "sequences", "lookups"):
+            kept = [public_query(q) for q in desc.get(key, []) if _allowed(q)]
+            sections[key] = kept
+            flat.extend(kept)
+        if not flat:
             return None
-        return {"name": name, "type": "sql", "queries": queries,
-                "show_in_switcher": desc.get("show_in_switcher", True)}
+        return {
+            "name": name, "type": "sql",
+            "queries": flat,                       # backwards-compat flat list
+            "tables": tables,
+            "customs": sections["queries"],        # sectioned custom queries
+            "sequences": sections["sequences"],
+            "lookups": sections["lookups"],
+            "show_in_switcher": desc.get("show_in_switcher", True),
+        }
     if desc["type"] == "api":
         endpoints = [
             e for e in desc["endpoints"]

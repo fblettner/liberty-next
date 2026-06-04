@@ -23,6 +23,7 @@ import {
   SchemaForm, SqlConnectorContext, SpinnerRing, useModals, type JsonSchema,
 } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
+import { flattenConnectorSections } from './connectorTables'
 import { colors, fontSize, fonts } from '../../theme'
 
 export interface EditQueryModalProps {
@@ -71,7 +72,10 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
         const defs = (sqlSchema?.$defs ?? {}) as Record<string, JsonSchema>
         setQueryDefSchema((defs.QueryDef ?? null) as JsonSchema | null)
         setAllDefs(defs)
-        let nextConns = d.connectors
+        // Flatten the sectioned connector shape into the flat `queries[]` the modal edits; the
+        // PUT on save re-buckets it server-side (same contract as ConnectorsBuilder).
+        const flatConns = flattenConnectorSections(d.connectors)
+        let nextConns = flatConns
         // CREATE mode: seed provided + queryName isn't yet on the connector. Append a
         // fresh query entry built from ``seed`` so the SchemaForm renders against it; the
         // form's name field is editable so the operator can still rename before saving.
@@ -83,10 +87,10 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
           nextConns = { ...nextConns, [connector]: { ...cur, queries: [...arr, fresh] } }
         }
         setConns(nextConns)
-        // Originals snapshot reflects what was on DISK — when seeding a new query, the
-        // dirty flag starts true (the seed itself is an unsaved insertion), so the Save
+        // Originals snapshot reflects the flattened on-disk state — when seeding a new query,
+        // the dirty flag starts true (the seed itself is an unsaved insertion), so the Save
         // button is immediately active.
-        setOriginalJson(JSON.stringify(d.connectors))
+        setOriginalJson(JSON.stringify(flatConns))
       })
       .catch((e) => {
         if (cancelled) return

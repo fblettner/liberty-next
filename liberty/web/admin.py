@@ -355,6 +355,12 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     contract as pools (idempotent on already-ENC: values; raises 422 if a plaintext secret was
     typed but no master key is configured, since silently storing plaintext is the worst outcome)."""
     master_key = request.app.state.settings.crypto.master_key
+    # Migrate legacy-shape connector bodies in place before validation / write. A stale UI
+    # client could still POST flat-``queries``-with-``type`` payloads; the loader's same
+    # migration normalises them so the disk always lands in the new sectioned shape.
+    from liberty.connectors.config import _migrate_legacy_shape
+    migrated = _migrate_legacy_shape({"connectors": body.connectors})
+    body.connectors = migrated.get("connectors") or {}
     for name, raw in body.connectors.items():
         # Enforce always-licensed names: the UI may have stripped or unset the flag, but the
         # framework gates these regardless of what's on disk — keep the file accurate by
@@ -1887,20 +1893,37 @@ def _apply_connector_queries(request: Request, payload: dict[str, Any]) -> str:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail=f"connector {connector!r} is not a SQL connector")
     existing = conn.model_dump(exclude_defaults=True)
-    by_name = {q.get("name"): q for q in existing.get("queries") or []}
-    # QueryDef.type accepts table / custom / sequence / lookup. A proposal carrying a
-    # per-CRUD-slot kind (select / insert / update / delete) — a bug in an earlier scaffold
-    # tool revision — would land as an invalid string and the name-based classifier in the
-    # builder would skip it (the query disappears from both Tables and Custom). Drop those
-    # so the name-pattern fallback (``<slug>_get`` → table) picks it up cleanly.
-    _BAD_TYPES = {"select", "insert", "update", "delete"}
-    for q in queries:
-        if not q.get("name"):
+    # Bucket the incoming proposals into the four sections with the SAME classifier the loader
+    # uses (``type`` field wins, else CRUD-suffix guess → table). It drops the stray ``type``
+    # field, so an earlier scaffold revision's bad per-slot kind (select / insert / …) falls
+    # through to the name-pattern fallback cleanly. Then merge per section:
+    #   * queries / sequences / lookups — replace-by-name, append new.
+    #   * tables — merge by table name: incoming slots + non-null label/description win, new
+    #     tables are appended. (A clone of a CRUD screen re-forms its ``<base>_<suffix>_<crud>``
+    #     slots back into one table here.)
+    from liberty.connectors.config import _split_legacy_queries
+    incoming = _split_legacy_queries(connector, [dict(q) for q in queries if q.get("name")])
+    for section in ("queries", "sequences", "lookups"):
+        by_name = {q.get("name"): q for q in (existing.get(section) or [])}
+        for q in incoming.get(section) or []:
+            by_name[q.get("name")] = q
+        merged = list(by_name.values())
+        if merged:
+            existing[section] = merged
+    tbl_by_name: dict[Any, dict[str, Any]] = {t.get("name"): t for t in (existing.get("tables") or [])}
+    for t in incoming.get("tables") or []:
+        cur = tbl_by_name.get(t.get("name"))
+        if cur is None:
+            tbl_by_name[t.get("name")] = t
             continue
-        if isinstance(q.get("type"), str) and q["type"].lower() in _BAD_TYPES:
-            q = {k: v for k, v in q.items() if k != "type"}
-        by_name[q["name"]] = q
-    existing["queries"] = list(by_name.values())
+        for meta_key in ("label", "description"):
+            if t.get(meta_key) is not None:
+                cur[meta_key] = t[meta_key]
+        for crud in ("get", "put", "post", "delete"):
+            if crud in t:
+                cur[crud] = t[crud]
+    if tbl_by_name:
+        existing["tables"] = list(tbl_by_name.values())
     try:
         SqlConnectorConfig.model_validate(existing)
     except ValidationError as exc:
@@ -2277,8 +2300,14 @@ async def _delete_dashboard(request: Request, scope: str | None, dashboard_id: s
 
 
 async def _delete_connector_queries(request: Request, connector: str, query_names: list[str]) -> None:
-    """Remove *query_names* from ``[connectors.<connector>].queries`` via tomlkit so other
-    connectors / comments in connectors.toml round-trip untouched."""
+    """Remove *query_names* from ``[connectors.<connector>]`` via tomlkit so other connectors /
+    comments in connectors.toml round-trip untouched.
+
+    *query_names* are flat synthesised names, so a name is matched against all four sections:
+    a custom ``queries`` / ``sequences`` / ``lookups`` entry is dropped by name, and a table
+    slot (``<base>_<crud>``) is removed from its :class:`TableDef` — a table left with no
+    slots is dropped entirely (an operator deleting every CRUD op of a table means to remove
+    the table)."""
     path = Path(request.app.state.settings.connectors.config_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
@@ -2286,12 +2315,28 @@ async def _delete_connector_queries(request: Request, connector: str, query_name
     if connectors_tbl is None or connector not in connectors_tbl:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"connector {connector!r} not found")
     conn_tbl = connectors_tbl[connector]
-    queries = conn_tbl.get("queries")
-    if not isinstance(queries, list):
-        return
     to_drop = set(query_names)
-    kept = [q for q in queries if not (isinstance(q, dict) and q.get("name") in to_drop)]
-    conn_tbl["queries"] = kept
+    # Flat sections — drop standalone entries by name.
+    for section in ("queries", "sequences", "lookups"):
+        lst = conn_tbl.get(section)
+        if isinstance(lst, list):
+            conn_tbl[section] = [q for q in lst if not (isinstance(q, dict) and q.get("name") in to_drop)]
+    # Tables — drop the matching ``<base>_<crud>`` slot off each table; remove a table that's
+    # left with no slots at all.
+    tables = conn_tbl.get("tables")
+    if isinstance(tables, list):
+        kept_tables = []
+        for t in tables:
+            if not isinstance(t, dict):
+                kept_tables.append(t)
+                continue
+            base = t.get("name")
+            for crud in ("get", "put", "post", "delete"):
+                if f"{base}_{crud}" in to_drop:
+                    t.pop(crud, None)
+            if any(crud in t for crud in ("get", "put", "post", "delete")):
+                kept_tables.append(t)
+        conn_tbl["tables"] = kept_tables
     # Re-validate the connector after the drops — refuses to write a connector that's now
     # invalid (e.g. a sequence config that pointed at one of the deleted queries).
     try:

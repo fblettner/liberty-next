@@ -350,7 +350,7 @@ export default function ActionTreeView({
   // anything specific — the function returns the same dehydrated catalog every render.
   const sourceOptions = useMemo<SearchSelectOption[]>(
     () => mergeCandidates(
-      sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value })),
+      sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value, group: c.group })),
       screenColumnOptions,
       builtinSourceOptions(),
     ),

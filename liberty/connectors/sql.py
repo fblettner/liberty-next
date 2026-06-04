@@ -61,11 +61,15 @@ def _oracle_target_table(sql: str) -> tuple[str | None, str] | None:
     return (owner.upper() if owner else None, table.upper())
 
 
-# Per-(pool, owner, table) cache of {column_name: simple_type} where simple_type is one of
-# "char" / "number" / "other". Populated lazily on first write to a table — refreshed on
-# registry rebuild via :func:`reset_oracle_column_cache`. Module-level so all SQLConnectors
-# sharing a pool also share the cache.
-_ORACLE_COL_TYPES_CACHE: dict[tuple[str, str | None, str], dict[str, str]] = {}
+# Per-(pool, owner, table) cache of column metadata. Each entry is
+# ``{column_name: {"kind": str, "length": int | None}}`` where ``kind`` is one of
+# ``"char_fixed"`` (CHAR / NCHAR — space-padded by Oracle), ``"char"`` (VARCHAR2 / NVARCHAR2
+# / CLOB / NCLOB / LONG — not padded), ``"number"``, or ``"other"``. ``length`` carries the
+# declared CHAR length and is only meaningful for ``"char_fixed"`` (None elsewhere — VARCHAR2
+# binds don't pad). Populated lazily on first write to a table — refreshed on registry rebuild
+# via :func:`reset_oracle_column_cache`. Module-level so all SQLConnectors sharing a pool also
+# share the cache.
+_ORACLE_COL_TYPES_CACHE: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
 
 
 def reset_oracle_column_cache() -> None:
@@ -86,7 +90,17 @@ def reset_audit_table_cache() -> None:
     _AUDIT_TABLES_VERIFIED.clear()
 
 
-_ORACLE_CHAR_TYPES = {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
+# Fixed-width CHAR family — Oracle space-pads stored values to the column's declared length.
+# Comparisons against a VARCHAR2 bind use non-blank-padded semantics, so a trimmed read value
+# bound back into a WHERE clause won't match its CHAR(N) source unless the bind is re-padded
+# to N spaces. ``_pad_char_binds`` does that under the ``trim_strings`` pool flag.
+_ORACLE_FIXED_CHAR_TYPES = {"CHAR", "NCHAR"}
+# Variable-width / large character storage — never padded; padding a bind here would BREAK
+# the comparison (stored "JDE" ≠ bind "JDE       " under non-blank-padded VARCHAR2 semantics).
+_ORACLE_VAR_CHAR_TYPES = {"VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
+# Union — used by the empty-bind coalesce path (every Oracle string column treats ``""`` as
+# NULL, so all of these need the single-space sentinel for NOT-NULL columns).
+_ORACLE_CHAR_TYPES = _ORACLE_FIXED_CHAR_TYPES | _ORACLE_VAR_CHAR_TYPES
 _ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT"}
 
 # ── write-time type coercion + form-rule resolution ────────────────────────────────────────
@@ -414,11 +428,55 @@ def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> 
         base = k.upper()
         if base.endswith("_ORIGINAL"):
             base = base[: -len("_ORIGINAL")]
-        t = col_types.get(base)
-        if t == "char":
+        meta = col_types.get(base)
+        kind = (meta or {}).get("kind")
+        if kind in ("char", "char_fixed"):
             out[k] = " "  # space, not '' — Oracle treats '' as NULL on every string type
-        elif t == "number":
+        elif kind == "number":
             out[k] = 0
+    return out
+
+
+def _pad_char_binds(
+    bound: dict[str, Any], col_types: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Right-pad non-empty string binds with spaces to the column's declared width when the
+    target is a fixed-width ``CHAR(N)`` / ``NCHAR(N)``. Powers the symmetric round-trip the
+    ``trim_strings`` pool flag promises: reads strip trailing whitespace, writes (especially
+    DELETE / UPDATE WHERE clauses) pad the bind back so Oracle's non-blank-padded VARCHAR2 vs
+    CHAR comparison matches the stored value.
+
+    Without this, a JDE F0092 row read as ``ULUSER="JDE"`` (post-trim) is unfindable on
+    DELETE / UPDATE — Oracle compares CHAR(10) ``"JDE       "`` against VARCHAR2 bind ``"JDE"``
+    with non-blank-padded semantics → no match, 0 rows affected, 200 OK. The fix lives in the
+    bind layer so operators don't have to hand-roll ``RPAD(:col, 10)`` in every WHERE.
+
+    Only touches columns whose ``ALL_TAB_COLUMNS.data_type`` is CHAR / NCHAR. VARCHAR2 stays
+    untouched (padding a VARCHAR2 bind would make it NOT match a non-padded stored value).
+    Skips binds that aren't non-empty strings (numbers, dates, None, "" — the latter is the
+    coalesce step's domain). The migration's ``:<COL>_ORIGINAL`` UPDATE rebind strips the
+    suffix to find the source column metadata.
+
+    Long-enough values pass through unchanged: ``len(v) >= length`` means the operator already
+    typed a fully-padded string (or a longer one — which would error at the DB layer anyway)."""
+    if not col_types:
+        return bound
+    out = dict(bound)
+    for k, v in list(out.items()):
+        if not isinstance(v, str) or not v:
+            continue
+        base = k.upper()
+        if base.endswith("_ORIGINAL"):
+            base = base[: -len("_ORIGINAL")]
+        meta = col_types.get(base)
+        if not meta or meta.get("kind") != "char_fixed":
+            continue
+        length = meta.get("length")
+        if not isinstance(length, int) or length <= 0:
+            continue
+        if len(v) >= length:
+            continue
+        out[k] = v.ljust(length)
     return out
 
 from sqlalchemy import text
@@ -434,7 +492,7 @@ from liberty.connectors.base import (
     detect_statement_type,
     find_bind_params,
 )
-from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig
+from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig, _crud_slot_to_querydef
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryFile, SequenceDef
 
@@ -634,6 +692,20 @@ class StreamDone:
 StreamEvent = StreamMeta | StreamRows | StreamDone
 
 
+def flatten_query_metas(desc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a sectioned SQL :meth:`SQLConnector.describe` dict back into the single flat
+    query-meta list every pre-sections consumer expects: each table's present CRUD slots
+    (already named ``<table>_<crud>``) in CRUD order, then custom ``queries``, then
+    ``sequences``, then ``lookups``. SQL text is preserved — callers publishing over HTTP
+    strip it via :func:`liberty.web.deps.public_query`."""
+    out: list[dict[str, Any]] = []
+    for tbl in desc.get("tables", []):
+        out.extend(tbl.get("slots", []))
+    for key in ("queries", "sequences", "lookups"):
+        out.extend(desc.get(key, []))
+    return out
+
+
 class SQLConnector:
     """A connector exposing a fixed set of named queries against one pool."""
 
@@ -670,7 +742,12 @@ class SQLConnector:
         # App-wide fallback language — used when a request supplies no Accept-Language. Lives on
         # [app] in app.toml; passed through by ConnectorRegistry so it's a single source of truth.
         self._default_language = default_language
-        self._queries: dict[str, QueryDef] = {q.name: q for q in config.queries}
+        # Unified name → QueryDef index across every section the new SqlConnectorConfig
+        # exposes — tables (each present CRUD slot synthesised as ``<table_name>_<crud>``),
+        # custom queries, sequences, lookups. Callers see one flat namespace and don't have
+        # to know which section a query came from; the section IS the type. Duplicate names
+        # raise ValueError at config-build time (caller logs + skips that connector).
+        self._queries: dict[str, QueryDef] = dict(config.iter_named_queries())
         self._dialect: str | None = None  # lazily resolved from the pool
 
     def _resolve_dialect(self) -> str:
@@ -703,29 +780,57 @@ class SQLConnector:
         onto :class:`liberty.screens.config.Screen`. This output now carries only the SQL-layer
         bits: the statement, declared params, bind names, writable flag, dialects, and
         friendly labels. The frontend reads per-screen behaviour from
-        ``GET /api/screens/{app}/{id}`` instead."""
+        ``GET /api/screens/{app}/{id}`` instead.
+
+        **Sectioned shape** — the output mirrors :class:`SqlConnectorConfig`'s four
+        sections: ``tables`` (each a ``{name, label, description, slots}`` where every
+        present CRUD slot is a query-meta dict tagged with its ``crud``), plus flat
+        ``queries`` (custom), ``sequences`` and ``lookups``. The synthesised slot name
+        is ``<table_name>_<crud>``. :func:`liberty.web.deps.public_connector` flattens
+        all four sections back into one ``queries`` list for the runtime TableView /
+        screen-picker consumers, so they don't need to know about sections."""
+        def _qmeta(q: QueryDef) -> dict[str, Any]:
+            return {
+                "name": q.name,
+                "label": q.label,
+                "description": q.description,
+                "writable": q.writable,
+                "statement_type": detect_statement_type(q.default_sql),
+                "dialects": q.dialects,
+                "params": [
+                    {"name": p.name, "label": p.label, "default": p.default}
+                    for p in q.params
+                ],
+                "bind_params": find_bind_params(q.default_sql),
+                "sql": q.sql,
+            }
+
+        tables: list[dict[str, Any]] = []
+        for tbl in self.config.tables:
+            slots: list[dict[str, Any]] = []
+            for crud, slot in tbl.slots():
+                qname = f"{tbl.name}_{crud}"
+                meta = _qmeta(_crud_slot_to_querydef(
+                    qname, slot, label=tbl.label, description=tbl.description, crud=crud,
+                ))
+                meta["crud"] = crud
+                slots.append(meta)
+            tables.append({
+                "name": tbl.name,
+                "label": tbl.label,
+                "description": tbl.description,
+                "slots": slots,
+            })
+
         return {
             "name": self.name,
             "type": "sql",
             "pool": self.pool_name,
             "show_in_switcher": self.config.show_in_switcher,
-            "queries": [
-                {
-                    "name": q.name,
-                    "label": q.label,
-                    "description": q.description,
-                    "writable": q.writable,
-                    "statement_type": detect_statement_type(q.default_sql),
-                    "dialects": q.dialects,
-                    "params": [
-                        {"name": p.name, "label": p.label, "default": p.default}
-                        for p in q.params
-                    ],
-                    "bind_params": find_bind_params(q.default_sql),
-                    "sql": q.sql,
-                }
-                for q in self._queries.values()
-            ],
+            "tables": tables,
+            "queries": [_qmeta(q) for q in self.config.queries],
+            "sequences": [_qmeta(q) for q in self.config.sequences],
+            "lookups": [_qmeta(q) for q in self.config.lookups],
         }
 
     # -- execution --------------------------------------------------------- #
@@ -1227,48 +1332,85 @@ class SQLConnector:
                 truncated=truncated,
             )
 
-        # Oracle write-time null coalesce — see the helpers at the top of the module. Lookup
-        # the target table's column types once (cached), replace None bind values with the
-        # right sentinel. Skipped silently if the SQL shape doesn't match a single-target
-        # write (the operator can still hand-roll COALESCE / NVL in unusual shapes).
-        if self._pools.coalesce_nulls(self.pool_name):
+        # Oracle write-time bind hygiene — both transformers consult the same Oracle column
+        # metadata, so the introspection runs once when either pool flag is on:
+        #
+        #   * ``coalesce_nulls`` → :func:`_coalesce_oracle_nulls` replaces empty string binds
+        #     with " " for CHAR-family columns and 0 for NUMBER columns. Fixes ORA-01400 on
+        #     INSERTs / UPDATEs against NOT-NULL Oracle string columns (JDE F-tables typically).
+        #   * ``trim_strings`` → :func:`_pad_char_binds` right-pads non-empty string binds to
+        #     the declared CHAR(N) width for fixed-width CHAR / NCHAR columns. The symmetric
+        #     partner of the reads-side trim — without it, a trimmed bind doesn't match the
+        #     space-padded stored value on a DELETE / UPDATE WHERE clause, the SQL returns
+        #     200 OK with 0 rows affected, and the operator is left wondering why their delete
+        #     "worked" but the row is still there. See [[project-jde-pool-settings]].
+        #
+        # The introspection REQUIRES both ``owner`` (schema) AND ``table``. With ``owner=None``
+        # the ``all_tab_columns`` query would match the same table across every schema the
+        # connection user can see (JDE: PRODDTA / DEMODTA / TESTDTA …) and pollute the cache
+        # with mixed column metadata. We skip + warn instead so the operator notices the SQL
+        # needs a ``#SCHEMA.<NAME>#`` placeholder.
+        wants_coalesce = self._pools.coalesce_nulls(self.pool_name)
+        wants_pad = self._pools.trim_strings(self.pool_name)
+        if wants_coalesce or wants_pad:
             target = _oracle_target_table(sql_text)
-            if target is not None:
+            if target is None:
+                col_types: dict[str, dict[str, Any]] = {}
+            else:
                 owner, table = target
-                key = (self.pool_name, owner, table)
-                col_types = _ORACLE_COL_TYPES_CACHE.get(key)
-                if col_types is None:
-                    try:
-                        introspect_sql = (
-                            "SELECT column_name, data_type FROM all_tab_columns "
-                            "WHERE table_name = :t"
-                        ) + (" AND owner = :o" if owner else "")
-                        introspect_params: dict[str, Any] = {"t": table}
-                        if owner:
-                            introspect_params["o"] = owner
-                        async with engine.connect() as introspect_conn:
-                            r = await introspect_conn.execute(text(introspect_sql), introspect_params)
+                if owner is None:
+                    _log.warning(
+                        "oracle bind hygiene skipped for table %r on pool %r: no schema in SQL — "
+                        "use ``#SCHEMA.<NAME>#`` to qualify it, otherwise ``all_tab_columns`` "
+                        "returns the same table from every schema in scope.",
+                        table, self.pool_name,
+                    )
+                    col_types = {}
+                else:
+                    key = (self.pool_name, owner, table)
+                    col_types = _ORACLE_COL_TYPES_CACHE.get(key) or {}
+                    if not col_types:
+                        try:
+                            introspect_sql = (
+                                "SELECT column_name, data_type, char_length "
+                                "FROM all_tab_columns "
+                                "WHERE owner = :o AND table_name = :t"
+                            )
+                            async with engine.connect() as introspect_conn:
+                                r = await introspect_conn.execute(
+                                    text(introspect_sql), {"o": owner, "t": table},
+                                )
+                                col_types = {}
+                                for row in r.mappings():
+                                    cname = str(row.get("column_name") or "").upper()
+                                    dtype = str(row.get("data_type") or "").upper()
+                                    raw_len = row.get("char_length")
+                                    try:
+                                        clen: int | None = int(raw_len) if raw_len is not None else None
+                                    except (TypeError, ValueError):
+                                        clen = None
+                                    if not cname:
+                                        continue
+                                    if dtype in _ORACLE_FIXED_CHAR_TYPES:
+                                        col_types[cname] = {"kind": "char_fixed", "length": clen}
+                                    elif dtype in _ORACLE_VAR_CHAR_TYPES:
+                                        col_types[cname] = {"kind": "char", "length": None}
+                                    elif dtype in _ORACLE_NUMBER_TYPES:
+                                        col_types[cname] = {"kind": "number", "length": None}
+                                    else:
+                                        col_types[cname] = {"kind": "other", "length": None}
+                                _ORACLE_COL_TYPES_CACHE[key] = col_types
+                        except Exception as e:
+                            _log.warning(
+                                "oracle column introspection failed for %s.%s on pool %r: %s — "
+                                "writes proceed without bind hygiene",
+                                owner, table, self.pool_name, e,
+                            )
                             col_types = {}
-                            for row in r.mappings():
-                                cname = str(row.get("column_name") or "").upper()
-                                dtype = str(row.get("data_type") or "").upper()
-                                if not cname:
-                                    continue
-                                if dtype in _ORACLE_CHAR_TYPES:
-                                    col_types[cname] = "char"
-                                elif dtype in _ORACLE_NUMBER_TYPES:
-                                    col_types[cname] = "number"
-                                else:
-                                    col_types[cname] = "other"
-                            _ORACLE_COL_TYPES_CACHE[key] = col_types
-                    except Exception as e:
-                        _log.warning(
-                            "oracle column introspection failed for %s.%s on pool %r: %s — "
-                            "writes proceed without null coalesce",
-                            owner or "?", table, self.pool_name, e,
-                        )
-                        col_types = {}
+            if wants_coalesce:
                 bound = _coalesce_oracle_nulls(bound, col_types)
+            if wants_pad:
+                bound = _pad_char_binds(bound, col_types)
 
         async with engine.begin() as conn:
             # SEQUENCE / NN — run the named "next number" query in the *same* transaction as
@@ -1281,6 +1423,20 @@ class SQLConnector:
             )
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
+            # 0-row write watch — a successful SQL execute that didn't touch any row is almost
+            # always a config bug worth surfacing: a DELETE/UPDATE whose WHERE doesn't match
+            # the stored value (CHAR vs VARCHAR2 padding, case mismatch), an INSERT that
+            # silently no-ops because the target table is partitioned away, an action chain
+            # pointing at the wrong query variant (``_put`` instead of ``_post``), etc.
+            # Logged as a WARN so it shows up in the server console without making the call
+            # itself fail (some writes legitimately affect 0 rows — e.g. an idempotent
+            # cleanup that runs whether the row exists or not).
+            if stmt_type in WRITE_STATEMENTS and rowcount == 0:
+                _log.warning(
+                    "%s.%s: %s affected 0 rows — check the WHERE clause (CHAR padding, "
+                    "case, missing bind) or the target query variant. SQL=%r bound=%r",
+                    self.name, query_name, stmt_type, sql_text, bound,
+                )
             # AUD audit (v1's tbl_audit = 'Y' → migrated as Screen.audit_table = "AUD_<table>",
             # threaded in by the route layer). The mirror INSERT runs in the *same* transaction
             # so a successful write + failing audit rolls back together — a missing/misshapen

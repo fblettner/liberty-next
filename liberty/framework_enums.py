@@ -59,15 +59,10 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "SYSDATE", "label": "Date Today"},
         ],
     },
-    "QUERY_TYPE": {
-        "label": "Query Type",
-        "values": [
-            {"value": "table", "label": "Table (CRUD)"},
-            {"value": "custom", "label": "Custom query"},
-            {"value": "sequence", "label": "Sequence"},
-            {"value": "lookup", "label": "Lookup"},
-        ],
-    },
+    # QUERY_TYPE retired — a query's role is implied by which section it sits under in
+    # connectors.toml (``[[connectors.X.tables]]`` / ``queries`` / ``sequences`` /
+    # ``lookups``). Kept here as a comment so a future contributor searching for it lands
+    # on this explanation instead of resurrecting the enum.
     "DATASOURCE_TYPE": {
         "label": "Datasource Type",
         "values": [

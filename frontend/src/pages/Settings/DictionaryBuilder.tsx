@@ -22,7 +22,7 @@ import { EditQueryModal } from './EditQueryModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { groupQueriesByTable } from './connectorTables'
+import { flattenConnectorSections, groupQueriesByTable } from './connectorTables'
 
 type DictionaryData = DictionaryDoc['dictionary']
 
@@ -163,7 +163,7 @@ export default function DictionaryBuilder() {
     ])
       .then(([s, d, c]) => {
         setSchemas(s); setDict(d.dictionary); setOriginal(JSON.stringify(d.dictionary))
-        setConnectors(c.connectors)
+        setConnectors(flattenConnectorSections(c.connectors))
         // On first open, default the scope to the workspace's selected app when it has its own
         // dictionary overlay (else stay on the shared scope). Only when scope is untouched.
         if (currentApp && (d.dictionary.connectors ?? {})[currentApp]) {
@@ -718,7 +718,8 @@ export default function DictionaryBuilder() {
                   if (!resolved) return
                   try {
                     const d = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
-                    const arr = (d.connectors[resolved]?.queries ?? []) as Record<string, unknown>[]
+                    const conns = flattenConnectorSections(d.connectors)
+                    const arr = (conns[resolved]?.queries ?? []) as Record<string, unknown>[]
                     const src = arr.find((q) => q && q.name === queryName)
                     if (!src) return
                     const existing = arr.map((q) => String(q.name ?? ''))
@@ -743,7 +744,8 @@ export default function DictionaryBuilder() {
                   if (!resolved) return
                   try {
                     const d = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
-                    const arr = (d.connectors[resolved]?.queries ?? []) as Record<string, unknown>[]
+                    const conns = flattenConnectorSections(d.connectors)
+                    const arr = (conns[resolved]?.queries ?? []) as Record<string, unknown>[]
                     const existing = arr.map((q) => String(q.name ?? ''))
                     const newName = (await modals.prompt({
                       title: t('settings.editQuery.addTitle', 'New query'),

@@ -401,9 +401,13 @@ def _resolve_query(state: Any, seed: Seed) -> tuple[Dependency | None, list[tupl
         return None, []
     conn = cr.get(seed.scope)
     cfg = getattr(conn, "config", None)
-    if cfg is None:
+    if cfg is None or not hasattr(cfg, "iter_named_queries"):
         return None, []
-    q = next((q for q in (getattr(cfg, "queries", None) or []) if getattr(q, "name", None) == seed.name), None)
+    # A query name is the flat synthesised name — a table CRUD slot (``<base>_<crud>``), a
+    # custom query, a sequence or a lookup. ``iter_named_queries`` is the single index across
+    # all four sections, so a screen referencing ``f0092_get`` resolves whether it's a table
+    # slot or a hand-written custom query.
+    q = next((qd for name, qd in cfg.iter_named_queries() if name == seed.name), None)
     if q is None:
         return None, []
     dep = Dependency(kind="query", name=seed.name, scope=seed.scope, config=_dump(q))

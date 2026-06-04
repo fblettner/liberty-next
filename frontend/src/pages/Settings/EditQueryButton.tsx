@@ -23,6 +23,7 @@ import { Edit3, Copy, Plus } from 'lucide-react'
 import { Button, useModals } from '../../common'
 import { api } from '../../api/client'
 import { EditQueryModal } from './EditQueryModal'
+import { flattenConnectorSections } from './connectorTables'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 
 export interface EditQueryButtonProps {
@@ -80,8 +81,9 @@ export function CloneQueryButton({ connector, queryName, onSaved, title, size = 
     // Fetch the source query so the seed is a deep copy of its current on-disk values.
     // Same endpoint EditQueryModal hits — cheap (the registry is in memory on the backend).
     try {
-      const d = await api.get<{ connectors: Record<string, { queries?: Record<string, unknown>[] }> }>('/admin/config/connectors/parsed')
-      const arr = d.connectors[connector]?.queries ?? []
+      const d = await api.get<{ connectors: Record<string, Record<string, unknown>> }>('/admin/config/connectors/parsed')
+      const conns = flattenConnectorSections(d.connectors)
+      const arr = (conns[connector]?.queries ?? []) as Record<string, unknown>[]
       const src = arr.find((q) => q && (q.name as string) === queryName)
       if (!src) return
       const existing = existingNames ?? arr.map((q) => String(q.name ?? ''))

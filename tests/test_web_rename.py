@@ -957,6 +957,96 @@ def test_rename_table_renames_all_slots_and_bindings(cfg_tree: dict[str, Path]) 
     assert rq["query"] == "accounts_put"
 
 
+def test_rename_table_new_shape_renames_table_name_and_bindings(tmp_path: Path) -> None:
+    """New sectioned shape: a table rename touches the single ``tables[].name`` field (slots
+    are synthesised, so there's nothing else to rewrite in connectors.toml) while the
+    ``<base>_<crud>`` cross-file bindings still flip to the new base."""
+    from liberty.web.rename import rename_table
+    conn = tmp_path / "connectors.toml"
+    scr = tmp_path / "screens.toml"
+    _write(conn, """
+        [pools.default]
+        url = "sqlite+aiosqlite:///:memory:"
+
+        [connectors.foo]
+        type = "sql"
+        pool = "default"
+
+        [[connectors.foo.tables]]
+        name = "users"
+        label = "Users"
+        description = "App users"
+        [connectors.foo.tables.get]
+        sql = "SELECT 1 AS id"
+        [connectors.foo.tables.put]
+        sql = "UPDATE users SET name = :name WHERE id = :id"
+        writable = true
+
+        [[connectors.foo.queries]]
+        name = "custom_report"
+        sql = "SELECT 2 AS id"
+    """)
+    _write(scr, """
+        [screens.foo.users]
+        connector = "foo"
+        read_query = "users_get"
+        update_query = "users_put"
+    """)
+    rename_table(
+        "users", "accounts", connector="foo",
+        connectors_path=conn, screens_path=scr,
+        menus_path=tmp_path / "menus.toml", dictionary_path=tmp_path / "dictionary.toml",
+    )
+    foo = tomllib.loads(conn.read_text())["connectors"]["foo"]
+    assert {t["name"] for t in foo["tables"]} == {"accounts"}
+    # slots ride along on the table — they're addressed by the synthesised base, not renamed.
+    assert "get" in foo["tables"][0] and "put" in foo["tables"][0]
+    # the custom query is untouched.
+    assert {q["name"] for q in foo["queries"]} == {"custom_report"}
+    s = tomllib.loads(scr.read_text())["screens"]["foo"]["users"]
+    assert s["read_query"] == "accounts_get" and s["update_query"] == "accounts_put"
+
+
+def test_rename_query_new_shape_walks_sequences_section(tmp_path: Path) -> None:
+    """A standalone query rename finds entries in any flat section — here a ``sequences`` entry
+    in the new sectioned shape — and rewrites its dictionary references."""
+    from liberty.web.rename import rename_query
+    conn = tmp_path / "connectors.toml"
+    dct = tmp_path / "dictionary.toml"
+    _write(conn, """
+        [pools.default]
+        url = "sqlite+aiosqlite:///:memory:"
+
+        [connectors.foo]
+        type = "sql"
+        pool = "default"
+
+        [[connectors.foo.tables]]
+        name = "users"
+        [connectors.foo.tables.get]
+        sql = "SELECT 1 AS id"
+
+        [[connectors.foo.sequences]]
+        name = "next_id"
+        sql = "SELECT COALESCE(MAX(id), 0) + 1 AS id FROM users"
+    """)
+    _write(dct, """
+        default_language = "en"
+        [connectors.foo.sequences.SEQ]
+        connector = "foo"
+        query = "next_id"
+    """)
+    rename_query(
+        "next_id", "next_user_id", connector="foo",
+        connectors_path=conn, screens_path=tmp_path / "screens.toml",
+        menus_path=tmp_path / "menus.toml", dictionary_path=dct,
+    )
+    foo = tomllib.loads(conn.read_text())["connectors"]["foo"]
+    assert {q["name"] for q in foo["sequences"]} == {"next_user_id"}
+    d = tomllib.loads(dct.read_text())
+    assert d["connectors"]["foo"]["sequences"]["SEQ"]["query"] == "next_user_id"
+
+
 def test_rename_query_rejects_collision(cfg_tree: dict[str, Path]) -> None:
     from liberty.web.rename import rename_query, RenameError
     with pytest.raises(RenameError):

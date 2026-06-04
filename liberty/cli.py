@@ -18,7 +18,7 @@ import sys
 from typing import Any
 
 from liberty.config import load_settings
-from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, load_connectors
+from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, flatten_query_metas, load_connectors
 from liberty.connectors.base import ConnectorError
 
 
@@ -63,7 +63,7 @@ async def _cmd_list(args: argparse.Namespace) -> int:
 
 def _item_names(desc: dict[str, Any]) -> list[str]:
     if desc["type"] == "sql":
-        return [q["name"] for q in desc["queries"]]
+        return [q["name"] for q in flatten_query_metas(desc)]
     return [e["name"] for e in desc["endpoints"]]
 
 

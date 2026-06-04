@@ -250,6 +250,8 @@ const en = {
     deleteTitle: 'Delete this row?',
     deleteMessage: 'The row will be removed and any on_delete actions will fire. This cannot be undone.',
     nestedSaveFailed: 'The main row was saved, but the {{tab}} tab failed to save: {{message}}',
+    deleteNoMatch: 'Delete affected 0 rows — the row may have already been removed, or the WHERE clause didn\'t match. Try refreshing.',
+    updateNoMatch: 'Update affected 0 rows — the row may have already been modified or removed. Try refreshing.',
     nested: {
       pendingBinds: 'Save the row first to load the linked data.',
       noRecord: 'No linked record yet. Edit the fields and save to create one.',
@@ -1133,8 +1135,8 @@ const en = {
       hint: 'Save validates every dashboard + widget, writes dashboards.toml, and reloads. Reference dashboards from menus.toml with ``type = "dashboard"`` and ``target = "<id>"``.',
     },
     tables: {
-      tablesView: 'Queries',
-      looseSectionLabel: 'Unclassified',
+      tablesView: 'Tables',
+      looseSectionLabel: 'Queries',
       looseSectionHint: 'Queries not part of a table’s get/put/post/delete set — used by actions, charts, AIS calls or referenced by lookups. Click one to edit it.',
       addTable: 'Add queries',
       namePrompt: 'New table base name (e.g. F0005):',

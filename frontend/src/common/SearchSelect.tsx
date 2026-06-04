@@ -25,6 +25,9 @@ export interface SearchSelectOption {
   /** Optional secondary text rendered in a mono-font column beside `label` (typically the same as
    *  `value` for framework-enum dropdowns). When absent the option renders as a single column. */
   mono?: string
+  /** Optional grouping key — consumed by the grouped suggestion overlay in ParamBindList's
+   *  ``SourcePathInput`` (chain inputs / step results / loop). SearchSelect itself ignores it. */
+  group?: string
 }
 
 // Everything inside the panel shares the same 12px left inset so the trigger label, the search

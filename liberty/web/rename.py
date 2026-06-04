@@ -147,9 +147,17 @@ def rename_connector(
     result = RenameResult(kind="connector", old_name=old, new_name=new)
 
     # Pre-load every doc we'll touch (file missing → empty doc; that's fine, we just won't
-    # write anything for it). The list below pairs each path with the in-memory ``tomlkit``
-    # document we'll rewrite and the Pydantic validator that has to accept the result.
-    docs: dict[str, tuple[Path, tomlkit.TOMLDocument]] = {}
+    # write anything for it). The list below pairs each path with the in-memory document we'll
+    # rewrite and the Pydantic validator that has to accept the result.
+    #
+    # connectors.toml stays on tomlkit (small file — comment preservation is cheap and useful
+    # for hand-edited pools / credentials). Everything else (screens, menus, dictionary,
+    # dashboards, charts) goes through tomllib + tomli_w because tomlkit's parse + dumps is
+    # O(n²) and chokes on the 15k+-line screens.toml / dictionary.toml the visual builders
+    # generate. The rewrite helpers walk via ``isinstance(node, dict|list)`` so they don't
+    # care whether the tree came from tomlkit or tomllib. See [[project-tomlkit-o2-cliff]].
+    _BIG_LABELS = {"screens", "menus", "dictionary", "dashboards", "charts"}
+    docs: dict[str, tuple[Path, Any]] = {}
     for label, path in (
         ("connectors", connectors_path),
         ("screens", screens_path),
@@ -160,10 +168,15 @@ def rename_connector(
     ):
         if path is None:
             continue
+        empty: Any = {} if label in _BIG_LABELS else tomlkit.document()
         if path.exists() and path.read_text(encoding="utf-8").strip():
-            docs[label] = (path, tomlkit.parse(path.read_text(encoding="utf-8")))
+            text = path.read_text(encoding="utf-8")
+            docs[label] = (
+                path,
+                tomllib.loads(text) if label in _BIG_LABELS else tomlkit.parse(text),
+            )
         else:
-            docs[label] = (path, tomlkit.document())
+            docs[label] = (path, empty)
             result.files[str(path)] = 0   # file absent → reported as zero, not skipped
 
     # 1) connectors.toml — rename the top-level [connectors.<old>] table + update any
@@ -222,11 +235,18 @@ def rename_connector(
         _validate("charts", docs["charts"][1], parse_charts, docs["charts"][0])
 
     # ── write pass — every touched file lands in one batch ──
+    # Big files round-trip via tomli_w (lose comments — operators don't hand-edit screens.toml
+    # / dictionary.toml anyway; the structured UI is the source of truth). Small files stay on
+    # tomlkit so connectors.toml keeps its pool / credential comments intact.
+    import tomli_w
     for label, (path, doc) in docs.items():
         if not result.files.get(str(path), 0):
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+        if label in _BIG_LABELS:
+            path.write_text(tomli_w.dumps(doc), encoding="utf-8")
+        else:
+            path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
     return result
 
@@ -783,52 +803,88 @@ def _replace_query_refs_by_scope(scoped: Any, *, mapping: dict[str, str], target
     return n
 
 
+# The three flat query sections that carry standalone ``name``d entries. Tables live in their
+# own ``tables`` section and are renamed by base name (see ``_rewrite_connectors_table_base``).
+_FLAT_QUERY_SECTIONS = ("queries", "sequences", "lookups")
+
+
 def _rewrite_connectors_queries(doc: tomlkit.TOMLDocument, *, connector: str, mapping: dict[str, str]) -> int:
-    """Rename matching queries inside ``[connectors.<connector>].queries``. Raises on a collision
-    with an existing (non-renamed) query name. Returns the count renamed (0 → caller raises)."""
+    """Rename matching queries by ``name`` across the connector's flat query sections —
+    ``queries`` (custom), ``sequences`` and ``lookups``. Shape-tolerant: the legacy flat shape
+    kept every query (including sequences / lookups) in ``queries``, so walking all three covers
+    both. Raises on a collision with an existing (non-renamed) name. Returns the count renamed
+    (0 → caller raises)."""
     conns = doc.get("connectors")
     if not isinstance(conns, dict) or connector not in conns:
         raise RenameError(f"connector {connector!r} not found in connectors.toml")
-    queries = conns[connector].get("queries")
-    if not isinstance(queries, list):
-        return 0
-    existing = {q.get("name") for q in queries if isinstance(q, dict)}
+    conn = conns[connector]
+    existing: set[str | None] = set()
+    for section in _FLAT_QUERY_SECTIONS:
+        lst = conn.get(section)
+        if isinstance(lst, list):
+            existing |= {q.get("name") for q in lst if isinstance(q, dict)}
     for new_name in mapping.values():
         if new_name in existing and new_name not in mapping:
             raise RenameError(f"query {new_name!r} already exists in connector {connector!r} — pick another name")
     n = 0
-    for q in queries:
-        if isinstance(q, dict):
-            name = q.get("name")
-            if isinstance(name, str) and name in mapping:
-                q["name"] = mapping[name]
-                n += 1
+    for section in _FLAT_QUERY_SECTIONS:
+        lst = conn.get(section)
+        if not isinstance(lst, list):
+            continue
+        for q in lst:
+            if isinstance(q, dict):
+                name = q.get("name")
+                if isinstance(name, str) and name in mapping:
+                    q["name"] = mapping[name]
+                    n += 1
     return n
 
 
-def rename_queries(
-    connector: str,
-    mapping: dict[str, str],
+def _rewrite_connectors_table_base(doc: tomlkit.TOMLDocument, *, connector: str, old_base: str, new_base: str) -> int:
+    """Rename a CRUD table base inside ``[connectors.<connector>]``. Shape-tolerant:
+
+      * **new shape** — rename the single ``[[connectors.<c>.tables]]`` entry whose ``name``
+        field equals *old_base*. The ``<base>_<crud>`` slot names are synthesised, so there is
+        nothing else to touch in connectors.toml.
+      * **legacy shape** — no ``tables`` section; fall back to renaming the flat
+        ``<old_base>_<crud>`` entries in ``queries`` via :func:`_rewrite_connectors_queries`.
+
+    Either way the cross-file rewrite (screens / menus / dictionary / charts / dashboards) is
+    driven by the ``<old>_<crud>`` → ``<new>_<crud>`` mapping the caller builds. Returns the
+    count renamed in connectors.toml (0 → caller raises)."""
+    conns = doc.get("connectors")
+    if not isinstance(conns, dict) or connector not in conns:
+        raise RenameError(f"connector {connector!r} not found in connectors.toml")
+    conn = conns[connector]
+    tables = conn.get("tables")
+    if isinstance(tables, list) and tables:
+        names = {t.get("name") for t in tables if isinstance(t, dict)}
+        if new_base in names:
+            raise RenameError(f"table {new_base!r} already exists in connector {connector!r} — pick another name")
+        n = 0
+        for t in tables:
+            if isinstance(t, dict) and t.get("name") == old_base:
+                t["name"] = new_base
+                n += 1
+        if n:
+            return n
+    # Legacy flat shape — rename the synthesised slot entries directly.
+    mapping = {f"{old_base}_{c}": f"{new_base}_{c}" for c in ("get", "put", "post", "delete")}
+    return _rewrite_connectors_queries(doc, connector=connector, mapping=mapping)
+
+
+def _load_rename_docs(
+    result: RenameResult,
     *,
-    kind: str,
-    old_name: str,
-    new_name: str,
     connectors_path: Path,
     screens_path: Path,
     menus_path: Path,
     dictionary_path: Path,
     charts_path: Path | None = None,
     dashboards_path: Path | None = None,
-) -> RenameResult:
-    """Rename one or more queries of *connector* (``mapping`` = old→new) + every cross-file
-    reference, atomically. Same two-pass (rewrite → validate → write) strategy as
-    :func:`rename_connector`. ``kind`` / ``old_name`` / ``new_name`` are for the result summary."""
-    if any(o == nw for o, nw in mapping.items()):
-        raise RenameError("old and new query names are identical — nothing to do")
-    for nw in mapping.values():
-        validate_identifier(nw, what="new query name")
-
-    result = RenameResult(kind=kind, old_name=old_name, new_name=new_name)
+) -> dict[str, tuple[Path, tomlkit.TOMLDocument]]:
+    """Pre-load every doc a query / table rename touches (missing file → empty doc, recorded as
+    zero touches). Shared by :func:`rename_queries` and :func:`rename_table`."""
     docs: dict[str, tuple[Path, tomlkit.TOMLDocument]] = {}
     for label, path in (
         ("connectors", connectors_path), ("screens", screens_path), ("menus", menus_path),
@@ -841,13 +897,21 @@ def rename_queries(
         else:
             docs[label] = (path, tomlkit.document())
             result.files[str(path)] = 0
+    return docs
 
-    conn_path, conn_doc = docs["connectors"]
-    n = _rewrite_connectors_queries(conn_doc, connector=connector, mapping=mapping)
-    result.files[str(conn_path)] = n
-    if n == 0:
-        raise RenameError(f"no matching query found in connector {connector!r} — nothing to rename")
 
+def _rewrite_cross_file_refs_and_write(
+    docs: dict[str, tuple[Path, tomlkit.TOMLDocument]],
+    result: RenameResult,
+    *,
+    connector: str,
+    mapping: dict[str, str],
+) -> None:
+    """Cross-file pass shared by query + table renames: rewrite every ``<old>`` → ``<new>``
+    query reference in screens / menus / dictionary / charts / dashboards (the connectors.toml
+    rewrite already happened in the caller), validate every touched doc, then write the batch.
+    The reference machinery is name-based, so it's identical whether *mapping* came from a
+    single query rename or a table's four synthesised ``<base>_<crud>`` slot names."""
     scr_path, scr_doc = docs["screens"]
     result.files[str(scr_path)] = _replace_query_refs(scr_doc.get("screens"), mapping=mapping, target_conn=connector, default_conn=None)
     menu_path, menu_doc = docs["menus"]
@@ -876,7 +940,7 @@ def rename_queries(
         da_path, da_doc = docs["dashboards"]
         result.files[str(da_path)] = _replace_query_refs_by_scope(da_doc.get("dashboards"), mapping=mapping, target_conn=connector)
 
-    _validate("connectors", conn_doc, parse_connectors, conn_path)
+    _validate("connectors", docs["connectors"][1], parse_connectors, docs["connectors"][0])
     for label, parser in (("screens", parse_screens), ("menus", parse_menus), ("dictionary", parse_dictionary), ("charts", parse_charts), ("dashboards", parse_dashboards)):
         if label in docs and result.files.get(str(docs[label][0])):
             _validate(label, docs[label][1], parser, docs[label][0])
@@ -886,6 +950,42 @@ def rename_queries(
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+
+def rename_queries(
+    connector: str,
+    mapping: dict[str, str],
+    *,
+    kind: str,
+    old_name: str,
+    new_name: str,
+    connectors_path: Path,
+    screens_path: Path,
+    menus_path: Path,
+    dictionary_path: Path,
+    charts_path: Path | None = None,
+    dashboards_path: Path | None = None,
+) -> RenameResult:
+    """Rename one or more queries of *connector* (``mapping`` = old→new) + every cross-file
+    reference, atomically. Same two-pass (rewrite → validate → write) strategy as
+    :func:`rename_connector`. ``kind`` / ``old_name`` / ``new_name`` are for the result summary."""
+    if any(o == nw for o, nw in mapping.items()):
+        raise RenameError("old and new query names are identical — nothing to do")
+    for nw in mapping.values():
+        validate_identifier(nw, what="new query name")
+
+    result = RenameResult(kind=kind, old_name=old_name, new_name=new_name)
+    docs = _load_rename_docs(
+        result, connectors_path=connectors_path, screens_path=screens_path, menus_path=menus_path,
+        dictionary_path=dictionary_path, charts_path=charts_path, dashboards_path=dashboards_path,
+    )
+    conn_path, conn_doc = docs["connectors"]
+    n = _rewrite_connectors_queries(conn_doc, connector=connector, mapping=mapping)
+    result.files[str(conn_path)] = n
+    if n == 0:
+        raise RenameError(f"no matching query found in connector {connector!r} — nothing to rename")
+
+    _rewrite_cross_file_refs_and_write(docs, result, connector=connector, mapping=mapping)
     return result
 
 
@@ -894,11 +994,37 @@ def rename_query(old: str, new: str, *, connector: str, **paths: Any) -> RenameR
     return rename_queries(connector, {old: new}, kind="query", old_name=old, new_name=new, **paths)
 
 
-def rename_table(old_base: str, new_base: str, *, connector: str, **paths: Any) -> RenameResult:
-    """Rename a CRUD table base — every existing ``<old_base>_<get|put|post|delete>`` slot + the
-    screen bindings that point at them — scoped to *connector*."""
+def rename_table(
+    old_base: str,
+    new_base: str,
+    *,
+    connector: str,
+    connectors_path: Path,
+    screens_path: Path,
+    menus_path: Path,
+    dictionary_path: Path,
+    charts_path: Path | None = None,
+    dashboards_path: Path | None = None,
+) -> RenameResult:
+    """Rename a CRUD table base, atomically. In the new shape this renames the single
+    ``[[connectors.<c>.tables]]`` ``name`` field; in the legacy shape it renames the flat
+    ``<old_base>_<crud>`` query entries. Either way every cross-file binding that points at a
+    ``<old_base>_<crud>`` slot is rewritten to ``<new_base>_<crud>``."""
     if old_base == new_base:
         raise RenameError(f"old and new base names are identical ({old_base!r}) — nothing to do")
     validate_identifier(new_base, what="new table name")
+
+    result = RenameResult(kind="table", old_name=old_base, new_name=new_base)
+    docs = _load_rename_docs(
+        result, connectors_path=connectors_path, screens_path=screens_path, menus_path=menus_path,
+        dictionary_path=dictionary_path, charts_path=charts_path, dashboards_path=dashboards_path,
+    )
+    conn_path, conn_doc = docs["connectors"]
+    n = _rewrite_connectors_table_base(conn_doc, connector=connector, old_base=old_base, new_base=new_base)
+    result.files[str(conn_path)] = n
+    if n == 0:
+        raise RenameError(f"no matching table {old_base!r} found in connector {connector!r} — nothing to rename")
+
     mapping = {f"{old_base}_{c}": f"{new_base}_{c}" for c in ("get", "put", "post", "delete")}
-    return rename_queries(connector, mapping, kind="table", old_name=old_base, new_name=new_base, **paths)
+    _rewrite_cross_file_refs_and_write(docs, result, connector=connector, mapping=mapping)
+    return result

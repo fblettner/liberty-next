@@ -16,12 +16,13 @@ from liberty.connectors.config import (
 )
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.registry import ConnectorRegistry, load_connectors
-from liberty.connectors.sql import Column, QueryResult, SQLConnector
+from liberty.connectors.sql import Column, QueryResult, SQLConnector, flatten_query_metas
 
 __all__ = [
     "APIConnector",
     "ApiResult",
     "Column",
+    "flatten_query_metas",
     "ConnectorError",
     "ConnectorRegistry",
     "ConnectorsFile",

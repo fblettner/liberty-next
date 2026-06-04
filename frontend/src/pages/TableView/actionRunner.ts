@@ -386,15 +386,27 @@ async function runOneAction(
         break
       }
       case 'run_query': {
-        // ``QueryResult.to_dict`` returns ``{rows, columns, row_count, rowcount, …}``. If we
-        // get past ``api.post`` without throwing, the call succeeded; on error ``api.post``
-        // raises ``ApiError`` which the outer ``try`` catches.
+        // ``QueryResult.to_dict`` returns ``{rows, columns, row_count, rowcount, statement_type,
+        // …}``. If we get past ``api.post`` without throwing, the call succeeded; on error
+        // ``api.post`` raises ``ApiError`` which the outer ``try`` catches.
         const target = a.connector || deps.defaultConnector
         const bound = resolveBinds(a.param_binds, ctx, formCtx)
-        const resp = await api.post<{ rows?: Row[]; columns?: unknown; row_count?: number }>(
+        const resp = await api.post<{
+          rows?: Row[]; columns?: unknown; row_count?: number; rowcount?: number;
+          statement_type?: string;
+        }>(
           `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
           { params: withUpper(bound) },
         )
+        // 0-row write surface — a write that affected zero rows is almost always a config
+        // bug (CHAR-padding mismatch, wrong query variant ``_put`` vs ``_post``, etc.).
+        // Surface as a warning on the chain result so the dialog can show it; the backend
+        // logs the same case to the server console for the operator's logs.
+        if (resp?.statement_type && resp.statement_type !== 'SELECT' && resp.rowcount === 0) {
+          result.warnings.push(
+            `${a.label || a.id}: ${resp.statement_type} affected 0 rows on ${target}.${a.query}.`,
+          )
+        }
         if (a.bind_result) {
           const rows = Array.isArray(resp?.rows) ? resp.rows : []
           ctx[a.id] = {
@@ -406,11 +418,20 @@ async function runOneAction(
         break
       }
       case 'call_api': {
-        // ``ApiResult.to_dict`` from the backend is ``{success, status_code, data, error}``.
-        // Note: a non-2xx response is **not** an exception — the route returns HTTP 200 with
-        // ``success: false`` set. Check the body so ``bind_result`` reflects what happened.
+        // ``ApiResult.to_dict`` from the backend is
+        // ``{success, status_code, url, json, body, extracted, mapped, error, duration_ms}``
+        // — the parsed payload is in ``json`` (null when the response wasn't JSON), with the
+        // raw text in ``body``. Note: a non-2xx response is **not** an exception — the route
+        // returns HTTP 200 with ``success: false`` set, so we check the flag explicitly.
         const bound = resolveBinds(a.param_binds, ctx, formCtx)
-        const resp = await api.post<{ success?: boolean; data?: unknown; status_code?: number; error?: string | null }>(
+        const resp = await api.post<{
+          success?: boolean
+          status_code?: number
+          error?: string | null
+          json?: unknown
+          body?: string | null
+          extracted?: unknown
+        }>(
           `/api/http/${encodeURIComponent(a.connector)}/${encodeURIComponent(a.endpoint)}`,
           bound,
         )
@@ -421,12 +442,13 @@ async function runOneAction(
           break
         }
         if (a.bind_result) {
-          // API responses don't have a standard shape — wrap ``data`` in a rows array so the
-          // chain-context interface stays uniform. A list payload becomes ``rows`` directly; a
-          // scalar / object payload becomes a single-element ``rows`` (so ``first_row.foo``
-          // works regardless).
-          const data = resp?.data
-          const rows = Array.isArray(data) ? (data as Row[]) : (data == null ? [] : [data as Row])
+          // Prefer the endpoint's ``response_field`` projection (``extracted``) when configured —
+          // that's the operator's "what I actually care about" path. Else use the parsed JSON
+          // payload. Wrap whatever we end up with in a single-element ``rows`` array (list
+          // payloads pass through) so the chain-context shape stays uniform: ``<id>.first_row.<col>``
+          // works for object payloads, ``<id>.rows`` for arrays.
+          const payload = resp?.extracted != null ? resp.extracted : resp?.json
+          const rows = Array.isArray(payload) ? (payload as Row[]) : (payload == null ? [] : [payload as Row])
           ctx[a.id] = {
             rows,
             first_row: (rows[0] ?? {}) as Row,

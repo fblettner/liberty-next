@@ -499,10 +499,23 @@ export function ScreenDialog({
     try {
       const targetConn = screen.connector || connector
       const params = withUpper(savedRow)
-      await api.post(
+      // Capture the response so we can detect a no-op delete (200 OK + rowcount 0). The most
+      // common cause is a CHAR-padding mismatch on the WHERE clause — covered by the pool's
+      // ``trim_strings`` flag on Oracle/JDE — but stale data, the wrong delete_query, or a
+      // race with another deleter can also produce it. We surface as a hard error here
+      // (rather than the chain's soft warning) because the operator's intent on Delete is
+      // unambiguous: "this row should be gone".
+      const resp = await api.post<{ rowcount?: number; statement_type?: string }>(
         `/api/sql/${encodeURIComponent(targetConn)}/${encodeURIComponent(screen.delete_query)}`,
         { params },
       )
+      if (resp?.rowcount === 0) {
+        setDeleting(false)
+        setError(t('dialog.deleteNoMatch', {
+          defaultValue: 'Delete affected 0 rows — the row may have already been removed, or the WHERE clause didn\'t match. Try refreshing.',
+        }))
+        return
+      }
       // Row-level on_delete hook — fires once with the deleted row's values as context.
       const onDelete = (screen.on_delete ?? []) as Action[]
       if (onDelete.length > 0) {
@@ -582,10 +595,22 @@ export function ScreenDialog({
       const params = mode === 'edit'
         ? { ...baseSaved, ...sent, ...originalKeys(baseSaved) }
         : sent
-      await api.post(
+      const writeResp = await api.post<{ rowcount?: number; statement_type?: string }>(
         `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
         { params: withUpper(params) },
       )
+      // No-op UPDATE — same pathology as the no-op DELETE above: the SQL succeeded but
+      // the WHERE clause matched 0 rows (most often a CHAR-padding mismatch covered by
+      // the pool's ``trim_strings`` flag, sometimes a stale primary-key value or the
+      // wrong update_query). INSERT can't be 0-row at this layer (the SQL would have
+      // raised), so only edit mode is checked.
+      if (mode === 'edit' && writeResp?.rowcount === 0) {
+        setSaving(false)
+        setError(t('dialog.updateNoMatch', {
+          defaultValue: 'Update affected 0 rows — the row may have already been modified or removed. Try refreshing.',
+        }))
+        return
+      }
       // Nested-form saves — v1's FormsDialog inside FormsDialog flow. Walk the registry of
       // NestedFormView savers in registration order (Map iteration is insertion order), each
       // contributing its own ``update_query`` / ``insert_query`` against its own connector.

@@ -252,6 +252,8 @@ const fr: Resources = {
     deleteTitle: 'Supprimer cette ligne ?',
     deleteMessage: 'La ligne sera supprimée et les actions on_delete s’exécuteront. Cette action est irréversible.',
     nestedSaveFailed: 'La ligne principale a été enregistrée, mais l’onglet {{tab}} n’a pas pu être enregistré : {{message}}',
+    deleteNoMatch: 'La suppression n’a affecté aucune ligne — la ligne a peut-être déjà été supprimée, ou la clause WHERE ne correspond pas. Rafraîchir la vue.',
+    updateNoMatch: 'La mise à jour n’a affecté aucune ligne — la ligne a peut-être déjà été modifiée ou supprimée. Rafraîchir la vue.',
     nested: {
       pendingBinds: 'Enregistrez la ligne d’abord pour charger les données liées.',
       noRecord: 'Pas encore de fiche liée. Modifiez les champs et enregistrez pour la créer.',
@@ -1126,8 +1128,8 @@ const fr: Resources = {
       hint: 'Enregistrer valide chaque tableau de bord + widget, écrit dashboards.toml et recharge. Référencez les tableaux de bord depuis menus.toml avec ``type = "dashboard"`` et ``target = "<id>"``.',
     },
     tables: {
-      tablesView: 'Requêtes',
-      looseSectionLabel: 'Non classées',
+      tablesView: 'Tables',
+      looseSectionLabel: 'Requêtes',
       looseSectionHint: 'Requêtes hors du jeu get/put/post/delete d’une table — utilisées par des actions, graphiques, appels AIS ou référencées par des lookups. Cliquez pour modifier.',
       addTable: 'Ajouter des requêtes',
       namePrompt: 'Nom de base de la nouvelle table (ex. F0005) :',

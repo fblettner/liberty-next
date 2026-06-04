@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
-import { groupQueriesByTable } from './connectorTables'
+import { flattenConnectorSections, groupQueriesByTable } from './connectorTables'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -225,7 +225,7 @@ export default function MenusBuilder() {
     ])
       .then(([s, d, c]) => {
         setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
-        setConnectors(c.connectors)
+        setConnectors(flattenConnectorSections(c.connectors))
         setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
