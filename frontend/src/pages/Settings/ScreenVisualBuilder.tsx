@@ -39,6 +39,7 @@ import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import ActionTreeView from './ActionTreeView'
+import EmbeddedFormsEditor from './EmbeddedFormsEditor'
 import { breadcrumbCrumbs, type ActionPath } from './actionPath'
 
 type Row = Record<string, unknown>
@@ -52,7 +53,7 @@ type Row = Record<string, unknown>
 // on ScreenField as ``bool | None`` (null = inherit the column's value), and the canvas badges
 // + dialog runtime read the effective value (field value, else column default).
 const FIELD_BASIC_KEYS = ['dd', 'label'] as const
-const FIELD_ADVANCED_KEYS = ['colspan', 'default'] as const
+const FIELD_ADVANCED_KEYS = ['colspan', 'default', 'format'] as const
 const FIELD_BINDS_KEY = 'lookup_param_binds'
 const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
 
@@ -160,6 +161,9 @@ const ColTitle = styled.div`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; color: ${colors.text.muted};
   text-transform: uppercase; letter-spacing: 0.04em;
 `
+// Section heading + hint inside the Tab Settings panel (e.g. the Embedded forms block).
+const SubHead = styled.strong`display: block; color: ${colors.text.primary}; font-size: ${fontSize.sm}; margin-top: 4px;`
+const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.micro}; line-height: 1.4; margin: 2px 0 8px;`
 const SubTabs = styled.div`display: inline-flex; gap: 3px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input};`
 const SubTab = styled.button<{ $active?: boolean }>`
   height: 24px; padding: 0 9px; border-radius: ${radius.sm}; border: none; cursor: pointer;
@@ -915,6 +919,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // property — operators rarely set colspan / default / per-field flags but always set
   // ``dd`` / ``label`` / ``required``.
   const fieldDef = useMemo<JsonSchema>(() => ({ ...((defs.ScreenField as JsonSchema | undefined) ?? { type: 'object' }), $defs: defs }), [defs])
+  // ``dd`` (+ label / format / rule overrides) shown for EVERY field. On the main dialog they
+  // default to blank → the field inherits from its Screen.columns entry at runtime; the operator
+  // can still override per-dialog here. A nested_form field has no column layer, so this is where
+  // it links its dictionary entry.
   const basicPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_BASIC_KEYS as unknown as string[]), [fieldDef])
   const advancedPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_ADVANCED_KEYS as unknown as string[]), [fieldDef])
   const bindsSchema = useMemo<JsonSchema>(() => {
@@ -1172,6 +1180,25 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               </Row>
               {renderTabBindsEditor()}
             </>
+          )}
+          {/* form tabs only: embedded nested forms — labelled sections rendered below this tab's
+              own fields, so one tab edits the main table + related tables in a single Save. */}
+          {tabType === 'form' && (
+            <div style={{ marginTop: 12 }}>
+              <SubHead>{t('settings.screens.visual.embedded.heading', 'Embedded forms')}</SubHead>
+              <Sub>{t('settings.screens.visual.embedded.hint',
+                'Child-record forms shown below this tab’s fields. Each writes its own table on Save, bound to this row’s key — no on_save action needed.')}</Sub>
+              <EmbeddedFormsEditor
+                value={Array.isArray(selTab.nested_forms) ? (selTab.nested_forms as Row[]) : []}
+                onChange={(next) => patchTab({ nested_forms: next })}
+                app={app}
+                parentConnector={connector}
+                parentColumnOptions={parentColumnOptions}
+                screenOptions={sameAppScreenOptions}
+                onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
+                defs={defs}
+              />
+            </div>
           )}
           {/* Per-tab actions — v2's port of v1's ``col_component='InputAction'`` rows. Toolbar
               buttons placed *inside* this tab (Roles tab on NOMASX1's settings_applications

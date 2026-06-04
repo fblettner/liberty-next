@@ -112,6 +112,45 @@ class ScreenField(BaseModel):
         description="Require a value on this dialog. Leave blank to inherit from the column.",
     )
     colspan: int | None = Field(default=None, description="How many tab-grid columns this field spans.")
+    # ── self-contained field metadata (dd / label / format / rule) ──────────────────────────────
+    # The MAIN screen's dialog fields inherit these from the matching ``Screen.columns`` entry — set
+    # them on the column, not here. But a NESTED form's fields reference a different table that has
+    # no ``Screen.columns`` layer, so they carry their own ``dd`` (→ the dictionary resolves the
+    # field's BOOLEAN/ENUM/LOOKUP rule, label, format) and optional per-field rule overrides. All
+    # optional + blank by default, so existing screens are unchanged and the backend's field
+    # resolver (``_resolve_screen_field``) keys off ``dd`` when present, else the field ``name``.
+    dd: str | None = Field(
+        default=None,
+        description="Dictionary entry this field inherits its label / format / rule from. Blank → the field ``name`` is the key. Mainly for nested-form fields (the main screen sets ``dd`` on its columns).",
+        json_schema_extra={"x_enum_ref": "DD_ENTRIES", "x_case": "upper"},
+    )
+    label: str | None = Field(default=None, description="Display label override (blank → the dictionary / column label).")
+    format: str | None = Field(
+        default=None,
+        description="Render format override (date / number / boolean / …). Blank → inherit from the dd / column.",
+        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
+    )
+    default: str | None = Field(default=None, description="Default value pre-filled when adding a new record.")
+    rules: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
+        description="Per-field widget rule override (BOOLEAN / ENUM / LOOKUP / SEQUENCE). Blank → inherit from the dd.",
+    )
+    rules_values: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "x_group": "Rule",
+            "x_enum_ref_when": {
+                "field": "rules",
+                "map": {"BOOLEAN": "BOOLEAN_TRUE_VALUES", "ENUM": "ENUM_IDS", "LOOKUP": "LOOKUP_IDS", "SEQUENCE": "SEQUENCE_IDS", "NN": "SEQUENCE_IDS"},
+            },
+        },
+        description="The rule's value: ENUM → enum id; LOOKUP → lookup id; SEQUENCE / NN → sequence id; BOOLEAN → the true marker.",
+    )
+    lookup_param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Binds for this field's LOOKUP query (when its dd / rule resolves to LOOKUP). Same shape as elsewhere.",
+    )
     visible_when: list[FieldCondition] = Field(
         default_factory=list,
         description=(
@@ -166,6 +205,16 @@ class FormTab(_ScreenTabBase):
     type: Literal["form"] = "form"
     cols: int | None = Field(default=None, description="How many columns the tab's grid spans.")
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown on this tab, in display order.")
+    nested_forms: list["NestedFormTab"] = Field(
+        default_factory=list,
+        description=(
+            "Embedded child-record forms shown as labelled sections BELOW this tab's own fields — "
+            "so one tab edits the main table PLUS one or more related tables, all saved in a single "
+            "Save (no on_save action needed). Each is a full nested_form (own connector + "
+            "read/update/insert queries OR a ``form_screen`` reference, fields, and ``param_binds`` "
+            "binding the parent's PK in). Same save coordination as a stand-alone nested_form tab."
+        ),
+    )
 
 
 class NestedFormTab(_ScreenTabBase):

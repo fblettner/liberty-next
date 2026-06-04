@@ -138,8 +138,13 @@ def _resolve_screen_field(
     # override(s). Otherwise → use the dictionary entry's rule as-is (the SQL connector's
     # read-column path already resolves that; the frontend can fall back to ``column.rule``
     # if we don't ship a field-level one here).
-    hint_rules = hint.rules.strip().upper() if (hint and hint.rules) else None
-    hint_rules_values = hint.rules_values.strip() if (hint and hint.rules_values) else None
+    # A field's OWN ``rules`` / ``rules_values`` win over the column hint's — this is how a nested
+    # form field (no column hint at all) declares its widget, and how any field overrides the
+    # column default. Fall back to the hint's when the field doesn't set them.
+    field_rules = str(raw.get("rules")).strip().upper() if raw.get("rules") else None
+    field_rules_values = str(raw.get("rules_values")).strip() if raw.get("rules_values") else None
+    hint_rules = field_rules or (hint.rules.strip().upper() if (hint and hint.rules) else None)
+    hint_rules_values = field_rules_values or (hint.rules_values.strip() if (hint and hint.rules_values) else None)
     if hint_rules:
         synth = DictionaryEntry(
             label=(entry.label if entry else None),

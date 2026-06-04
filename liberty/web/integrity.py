@@ -224,6 +224,20 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                         if q and tab_conn in idx.conn_names and q not in tsql:
                             out.append(Issue("error", "Missing query",
                                              f"{app}.{sid} · tab[{getattr(tab, 'id', '?')}] {attr} '{q}' does not exist on {tab_conn}", link))
+                # A form tab may embed nested forms (its own field grid PLUS related tables). Each is
+                # a nested_form — validate its form_screen reference / inline queries the same way.
+                for nf in getattr(tab, "nested_forms", None) or []:
+                    nf_conn = getattr(nf, "connector", None) or conn
+                    fscreen = getattr(nf, "form_screen", None)
+                    if fscreen and fscreen not in app_screens:
+                        out.append(Issue("error", "Broken screen reference",
+                                         f"{app}.{sid} · tab[{getattr(tab, 'id', '?')}] embedded form '{getattr(nf, 'id', '?')}' form_screen '{fscreen}' does not exist", link))
+                    nf_sql = idx.sql_by_conn.get(nf_conn, set())
+                    for attr in ("read_query", "update_query", "insert_query"):
+                        q = getattr(nf, attr, None)
+                        if q and nf_conn in idx.conn_names and q not in nf_sql:
+                            out.append(Issue("error", "Missing query",
+                                             f"{app}.{sid} · tab[{getattr(tab, 'id', '?')}] embedded form '{getattr(nf, 'id', '?')}' {attr} '{q}' does not exist on {nf_conn}", link))
             # actions — navigate (to / screen), run_query (query), call_api (endpoint)
             for where, action in _iter_screen_actions(s):
                 atype = getattr(action, "type", None)
@@ -397,6 +411,10 @@ def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                     # A reference-mode nested_form embeds another screen's form → that screen is reached.
                     if getattr(tab, "form_screen", None):
                         reached.add((app, tab.form_screen))
+                    # …and a form tab's embedded nested forms can each reference a screen too.
+                    for nf in getattr(tab, "nested_forms", None) or []:
+                        if getattr(nf, "form_screen", None):
+                            reached.add((app, nf.form_screen))
                 for _where, action in _iter_screen_actions(s):
                     if getattr(action, "type", None) != "navigate":
                         continue

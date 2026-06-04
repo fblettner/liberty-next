@@ -78,7 +78,7 @@ function effectiveConnector(tab: { connector?: string | null }, parentConnector:
 // nested layer: retrying re-fires update/insert with the current form state).
 
 export function NestedFormView({
-  tab, parentFormValues, parentConnector, app, parentMode,
+  tab, parentFormValues, parentConnector, app, parentMode, parentDuplicating = false,
 }: {
   tab: NestedFormTab
   /** Live parent form state — `source` binds read from here at fetch time. */
@@ -92,6 +92,12 @@ export function NestedFormView({
    *  its own insert), so the FK binds can't resolve — but we still render the nested form so the
    *  operator can fill it; the FK is supplied at save time via ``parentExtra``. */
   parentMode: DialogMode
+  /** The parent is being DUPLICATED: this nested form already loaded its child (in the parent's
+   *  edit), and we want to keep those values but write them as a NEW child tied to the parent's
+   *  new PK. We don't change ``parentMode`` (that would re-run the fetch and wipe the loaded data);
+   *  instead this flag marks the saver to INSERT (not update) and to fire even though the operator
+   *  didn't retype anything. */
+  parentDuplicating?: boolean
 }) {
   const { t } = useTranslation()
   const savers = useContext(NestedSaversContext)
@@ -164,6 +170,13 @@ export function NestedFormView({
   // User-touched flag — only fire insert when add-mode and the user actually typed
   // something (otherwise navigating to a never-used JD Edwards tab would insert empty rows).
   const touchedRef = useRef(false)
+
+  // Parent duplicate: keep the loaded child values, but mark them to be written as a NEW child
+  // (insert, not update) on Save — bound to the parent's freshly-assigned PK via ``parentExtra``.
+  // ``touchedRef`` is forced so the saver fires even though the operator didn't retype anything.
+  useEffect(() => {
+    if (parentDuplicating) { isExistingRef.current = false; touchedRef.current = true }
+  }, [parentDuplicating])
 
   useEffect(() => {
     // NEVER read in parent-add mode: the parent row doesn't exist yet, so it has no linked child.
@@ -260,10 +273,13 @@ export function NestedFormView({
   useEffect(() => {
     if (!savers) return
     const save = async (parentExtra?: Row) => {
-      // Add-mode + the user never touched the form: skip insert. Otherwise we'd create
-      // empty rows just because the user opened the parent dialog and ignored this tab.
-      const isExisting = isExistingRef.current
-      if (!isExisting && !touchedRef.current) return
+      // When the parent is being DUPLICATED, ALWAYS insert a new child — never update. This is
+      // forced here (not just via isExistingRef) because a stale/in-flight read could otherwise
+      // flip ``isExistingRef`` back to true and make the save UPDATE the ORIGINAL child instead.
+      const isExisting = parentDuplicating ? false : isExistingRef.current
+      // Add-mode + the user never touched the form: skip insert (don't create empty rows just
+      // because the operator opened the dialog). Duplicating always writes — the values are copied.
+      if (!isExisting && !touchedRef.current && !parentDuplicating) return
 
       // Re-resolve the FK binds against the parent state MERGED with ``parentExtra`` — the values
       // the parent write just produced (its server-assigned SEQUENCE PK on an ADD). In add mode
@@ -319,16 +335,18 @@ export function NestedFormView({
     }
     savers.register(tab.id, save)
     return () => savers.unregister(tab.id)
-  }, [savers, tab.id, effFields, effUpdate, effInsert, formValues, savedRow, bound, colByName, connector, fieldStateOf, t])
+  }, [savers, tab.id, effFields, effUpdate, effInsert, formValues, savedRow, bound, colByName, connector, fieldStateOf, t, parentDuplicating, parentFormValues])
 
   const cols = Math.max(1, tab.cols ?? 2)
   if (refError) return <Banner $tone="error">{refError}</Banner>
   if (isRef && !refScreen) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   // When the PARENT is being added, its PK is assigned (by sequence) only on its own insert, so
   // the FK binds can't resolve yet — but we still render the form so the operator fills it in the
-  // same pass; the FK lands at save time from ``parentExtra``. Only show "pending" when the parent
-  // already exists (edit) but the binds genuinely don't resolve.
-  if (!hasBinds && parentMode !== 'add') return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
+  // same pass; the FK lands at save time from ``parentExtra``. Same while DUPLICATING: the parent's
+  // key was just cleared (so the bind can't resolve) but the form already holds the copied values
+  // and must stay visible to review/edit before Save. Only show "pending" on a genuine edit whose
+  // binds don't resolve.
+  if (!hasBinds && parentMode !== 'add' && !parentDuplicating) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (loading && !result) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   if (error) return <Banner $tone="error">{error}</Banner>
   // Even in add mode (no linked row) we render the form — the user can type values and

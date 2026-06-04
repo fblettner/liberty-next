@@ -45,25 +45,28 @@ def test_param_bind_either_mode() -> None:
 
 
 def test_screen_field_shape() -> None:
-    """Phase 2: ScreenField is **layout-only** — just ``name`` + ``hidden`` / ``disabled`` /
-    ``required`` / ``colspan`` + the three conditional rule lists. Display metadata (``dd`` /
-    ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` / ``lookup_param_binds``)
-    lives on the matching :class:`~liberty.connectors.config.ColumnHint` in
-    ``Screen.columns`` (single source of truth for both grid + dialog)."""
+    """ScreenField carries placement (``colspan``) + per-dialog override flags (``hidden`` /
+    ``disabled`` / ``required``) + the conditional rule lists, PLUS optional self-contained display
+    metadata (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` /
+    ``lookup_param_binds``). The MAIN screen's fields inherit the display metadata from the matching
+    ``Screen.columns`` (set it there), but a NESTED form's fields — which reference a table with no
+    column-hint layer — carry their own ``dd`` so the dictionary resolves their rule/label/format."""
     f = ScreenField(name="USR_ROLE_ID", hidden=False, disabled=True, required=True, colspan=2)
     assert f.name == "USR_ROLE_ID" and f.required is True and f.colspan == 2 and f.disabled is True
     # `name` is mandatory
     with pytest.raises(Exception):
         ScreenField()  # type: ignore[call-arg]
-    # Legacy field-level metadata is *silently dropped* on parse (extra='ignore' — back-compat
-    # so a screens.toml from before Phase 2 keeps loading). Operators re-migrate at their pace.
-    legacy = ScreenField.model_validate({
-        "name": "USR_ROLE_ID", "dd": "ROL_ID", "label": "Role", "rules": "LOOKUP",
-        "rules_values": "5", "default": "ADMIN", "format": "text",
+    # Field-level display metadata is KEPT (a nested-form field links its dd here, since it has no
+    # Screen.columns layer to inherit from).
+    withdd = ScreenField.model_validate({
+        "name": "JDE_SY", "dd": "SY", "label": "System", "rules": "LOOKUP",
+        "rules_values": "get_sy", "default": "920", "format": "text",
         "lookup_param_binds": [{"param": "X", "source": "Y"}],
     })
-    # The legacy fields are dropped — only the layout-only ones survive.
-    assert legacy.model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
+    assert withdd.dd == "SY" and withdd.rules == "LOOKUP" and withdd.rules_values == "get_sy"
+    assert withdd.lookup_param_binds[0].source == "Y"
+    # A layout-only field omits all of it — stays terse on dump.
+    assert ScreenField(name="USR_ROLE_ID").model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
 
 
 def test_screen_row_click_route_validates_placeholders() -> None:
@@ -339,12 +342,12 @@ def test_parse_screens_injects_id_from_key() -> None:
     # discriminated union resolves cleanly. Backward compat for every screens.toml file
     # written before the nested-tab variants were added.
     assert isinstance(tab, FormTab) and tab.type == "form"
-    # Phase 2: legacy per-field metadata (``dd`` / ``lookup_param_binds``) is silently dropped
-    # by ``extra="ignore"`` — the ScreenField is layout-only now. A re-migrated screens.toml
-    # would have these moved onto the matching ColumnHint in ``Screen.columns``.
+    # Field-level ``dd`` + ``lookup_param_binds`` are KEPT — a field links its own dictionary entry
+    # (the main screen usually inherits via Screen.columns, but nested-form fields rely on this).
     field = tab.fields[1]
     assert field.name == "USR_ROLE_ID"
-    assert not hasattr(field, "dd")  # dropped from the schema
+    assert field.dd == "ROL_ID"
+    assert field.lookup_param_binds[0].source == "USR_APPS_ID"
 
 
 def test_parse_screens_with_nested_tab_kinds() -> None:
@@ -476,6 +479,32 @@ def test_nested_form_reference_mode() -> None:
     assert tab.form_screen == "settings_jdedwards"
     assert tab.read_query == ""                       # inherited from the referenced screen at runtime
     assert tab.param_binds[0].source == "APPS_ID"
+
+
+def test_form_tab_embeds_nested_forms() -> None:
+    """A ``form`` tab can carry ``nested_forms`` — embedded child forms saved alongside the main
+    table in one pass. Each is a full NestedFormTab (inline queries or a form_screen reference)."""
+    sf = parse_screens({
+        "screens": {"nomajde": {"f0092": {
+            "read_query": "f0092_get",
+            "dialog": {"tabs": [{
+                "id": "main", "type": "form",
+                "fields": [{"name": "ULUSER"}],
+                "nested_forms": [{
+                    "id": "sec", "label": "F00926",
+                    "read_query": "f00926_get", "insert_query": "f00926_post",
+                    "fields": [{"name": "SECUSER"}],
+                    "param_binds": [{"param": "USER", "source": "ULUSER"}],
+                }],
+            }]},
+        }}},
+    })
+    tab = sf.screens["nomajde"]["f0092"].dialog.tabs[0]  # type: ignore[union-attr]
+    assert isinstance(tab, FormTab)
+    assert len(tab.nested_forms) == 1
+    nf = tab.nested_forms[0]
+    assert nf.type == "nested_form" and nf.read_query == "f00926_get"
+    assert nf.param_binds[0].source == "ULUSER"
 
 
 def test_nested_form_without_source_rejected() -> None:

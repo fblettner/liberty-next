@@ -15,7 +15,7 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
+import { Copy, Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import { useSio, useLockState } from '../../sio/SioContext'
@@ -73,6 +73,15 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
 `
+// A labelled section for an embedded nested form rendered below a form tab's own fields — so one
+// tab edits the main table plus related tables. The rule + heading separate it from the main grid.
+const NestedSection = styled.div`
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid ${colors.border};
+`
+const NestedSectionTitle = styled.div`
+  font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;
+`
 
 export function ScreenDialog({
   open, mode, screen, columns, row, connector, keyColumns, onClose, onSaved, nested = false,
@@ -128,6 +137,15 @@ export function ScreenDialog({
   // remains visible behind). Resets to windowed on each open.
   const [fullscreen, setFullscreen] = useState(false)
   useEffect(() => { if (!open) setFullscreen(false) }, [open])
+
+  // Duplicate: in EDIT mode, "Duplicate" turns the current record into a NEW one — the form keeps
+  // every value the operator sees, but the dialog now behaves as ADD (Save → insert_query, a fresh
+  // PK is assigned). ``duplicating`` overrides the parent's ``mode`` prop for that purpose; it's
+  // reset whenever the dialog (re-)opens or the underlying row changes so reopening an existing row
+  // is a normal edit again.
+  const [duplicating, setDuplicating] = useState(false)
+  useEffect(() => { setDuplicating(false) }, [open, row])
+  const effMode: DialogMode = duplicating ? 'add' : mode
 
   // Nested-form save coordination — NestedFormView components mount inside the dialog body
   // (one per ``nested_form`` tab) and register their own save function here. Stored in a ref
@@ -499,6 +517,23 @@ export function ScreenDialog({
   // the dialog closes + the caller's onSaved() refreshes the grid.
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Duplicate the open record into a new one: drop the key columns (so a fresh PK is assigned by
+  // the sequence, or typed by the operator) and flip to add-mode behaviour. Every other value the
+  // operator sees is kept, so they just tweak + Save → insert_query writes a new row. ``savedRow``
+  // is cleared so no ``:_ORIGINAL`` WHERE binds carry over from the source record.
+  const handleDuplicate = useCallback(() => {
+    setFormValues((prev) => {
+      const next = { ...prev }
+      for (const k of Object.keys(next)) {
+        if (keyColumnSet.has(k.toLowerCase())) delete next[k]
+      }
+      return next
+    })
+    setSavedRow({})
+    setError(null)
+    setDuplicating(true)
+  }, [keyColumnSet])
+
   const handleDelete = useCallback(async () => {
     if (!screen.delete_query) return
     setDeleting(true); setError(null); setActionStatus(null)
@@ -553,9 +588,9 @@ export function ScreenDialog({
   }, [tabs, tabIdx])
 
   const submit = useCallback(async () => {
-    const targetQuery = mode === 'edit' ? screen.update_query : screen.insert_query
+    const targetQuery = effMode === 'edit' ? screen.update_query : screen.insert_query
     if (!targetQuery) {
-      setError(t(mode === 'edit' ? 'table.editNoUpdate' : 'table.editNoInsert'))
+      setError(t(effMode === 'edit' ? 'table.editNoUpdate' : 'table.editNoInsert'))
       return
     }
     // Collect every value that's on a *currently visible* field on a non-hidden tab. Fields
@@ -572,13 +607,13 @@ export function ScreenDialog({
     // their own update/insert queries (slice 2 — coordinated via a register-on-parent-save hook).
     for (const tab of tabs.filter(isFormTab)) {
       for (const f of tab.fields ?? []) {
-        if (!fieldStateOf(f).visible && mode !== 'add') continue
+        if (!fieldStateOf(f).visible && effMode !== 'add') continue
         if (!(f.name in formValues)) continue
         const v = formValues[f.name]
         // On add, also skip empty hidden fields — there's no point binding NULL to a hidden
         // column the operator never saw; let the backend's defaults take over. Only hidden
         // fields WITH a value (from seed / bind / explicit default) flow through.
-        if (mode === 'add' && !fieldStateOf(f).visible && (v == null || v === '')) continue
+        if (effMode === 'add' && !fieldStateOf(f).visible && (v == null || v === '')) continue
         const col = colByName.get(f.name.toLowerCase()) ?? null
         if (isPassword(col) && (v == null || v === '')) continue
         sent[f.name] = v
@@ -592,13 +627,13 @@ export function ScreenDialog({
       // overwrite. The migrated _put queries reference :PASSWORD only in their SET clause; not
       // sending it means the column keeps its current DB value. (When the user *did* type a new
       // password, `sent` carries it and overrides.)
-      const baseSaved: Row = mode === 'edit'
+      const baseSaved: Row = effMode === 'edit'
         ? Object.fromEntries(Object.entries(savedRow).filter(([k]) => {
             const c = colByName.get(k.toLowerCase()) ?? null
             return !isPassword(c)
           }))
         : {}
-      const params = mode === 'edit'
+      const params = effMode === 'edit'
         ? { ...baseSaved, ...sent, ...originalKeys(baseSaved) }
         : sent
       const writeResp = await api.post<{ rowcount?: number; statement_type?: string; resolved_binds?: Record<string, unknown> }>(
@@ -614,7 +649,7 @@ export function ScreenDialog({
       // the pool's ``trim_strings`` flag, sometimes a stale primary-key value or the
       // wrong update_query). INSERT can't be 0-row at this layer (the SQL would have
       // raised), so only edit mode is checked.
-      if (mode === 'edit' && writeResp?.rowcount === 0) {
+      if (effMode === 'edit' && writeResp?.rowcount === 0) {
         setSaving(false)
         setError(t('dialog.updateNoMatch', {
           defaultValue: 'Update affected 0 rows — the row may have already been modified or removed. Try refreshing.',
@@ -646,7 +681,7 @@ export function ScreenDialog({
       // so an operator can wire e.g. v1 FormsTable evt 2 actions there without polluting on_save.
       const ctx: Row = { ...savedRow, ...sent }
       const dialogActions = (screen.dialog?.on_save ?? []) as Action[]
-      const screenRowActions = mode === 'add'
+      const screenRowActions = effMode === 'add'
         ? ((screen.on_insert ?? []) as Action[])
         : ((screen.on_update ?? []) as Action[])
       const actions = [...dialogActions, ...screenRowActions]
@@ -718,7 +753,7 @@ export function ScreenDialog({
         <ModalHeader>
           <FlexRow gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ flex: 1 }}>
-              {mode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
+              {effMode === 'edit' ? t('dialog.editTitle', { title }) : t('dialog.addTitle', { title })}
             </span>
             {/* Fullscreen / restore — only meaningful for the top-level dialog (nested ones are
                 deliberately smaller so the parent's frame stays visible). Same affordance the
@@ -761,7 +796,7 @@ export function ScreenDialog({
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentMode={mode} />
+                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentMode={mode} parentDuplicating={duplicating} />
                     </div>
                   )
                 }
@@ -775,34 +810,62 @@ export function ScreenDialog({
                 // FormTab — lazy render: only mount when active. The state (formValues) lives
                 // on the parent, so switching tabs keeps the values intact. Filters its fields
                 // through `fieldStateOf` (visible_when / required_when / disabled_when).
-                if (!active) return null
+                // Plain form tabs lazy-render (perf — their field state lives on the parent, so
+                // nothing is lost on unmount). But a tab WITH embedded nested forms must STAY
+                // mounted when inactive (display:none) — each NestedFormView owns its local input +
+                // saver registration, which an unmount would discard, so switching tabs then Saving
+                // would drop the nested write. The main field grid still renders only when active
+                // (it reads ``visibleFields``, which is the ACTIVE tab's fields).
+                const embedded = (tab as FormTab).nested_forms ?? []
+                if (!active && embedded.length === 0) return null
                 return (
-                  <FieldGrid key={tab.id} $cols={gridCols}>
-                    {visibleFields.map((f) => {
-                      const st = fieldStateOf(f)
-                      return (
-                        <FieldRow
-                          key={f.name}
-                          field={f}
-                          column={colByName.get(f.name.toLowerCase()) ?? null}
-                          formValues={formValues}
-                          onChange={onFieldChange}
-                          // Foreign-lock wins over per-field rules: every input is
-                          // disabled when someone else holds the row's lock. The
-                          // banner above the body explains why.
-                          disabled={st.disabled || readOnly}
-                          required={st.required}
-                          suppressLookup={mode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
-                          onLookupPick={onLookupReturnValues}
-                        />
-                      )
-                    })}
-                    {visibleFields.length === 0 && (
-                      <CellWrap $span={gridCols}>
-                        <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
-                      </CellWrap>
+                  <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
+                    {active && (
+                      <FieldGrid $cols={gridCols}>
+                        {visibleFields.map((f) => {
+                          const st = fieldStateOf(f)
+                          return (
+                            <FieldRow
+                              key={f.name}
+                              field={f}
+                              column={colByName.get(f.name.toLowerCase()) ?? null}
+                              formValues={formValues}
+                              onChange={onFieldChange}
+                              // Foreign-lock wins over per-field rules: every input is
+                              // disabled when someone else holds the row's lock. The
+                              // banner above the body explains why.
+                              disabled={st.disabled || readOnly}
+                              required={st.required}
+                              suppressLookup={effMode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
+                              onLookupPick={onLookupReturnValues}
+                            />
+                          )
+                        })}
+                        {visibleFields.length === 0 && embedded.length === 0 && (
+                          <CellWrap $span={gridCols}>
+                            <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
+                          </CellWrap>
+                        )}
+                      </FieldGrid>
                     )}
-                  </FieldGrid>
+                    {/* Embedded nested forms — labelled sections below the main fields. Each mounts a
+                        NestedFormView that registers its own saver, so this one tab writes the main
+                        table + every embedded related table in a single Save (Part B). Always
+                        mounted (hidden when inactive) to keep their state + registration alive. */}
+                    {embedded.map((nf) => (
+                      <NestedSection key={nf.id}>
+                        <NestedSectionTitle>{nf.label || nf.id}</NestedSectionTitle>
+                        <NestedFormView
+                          tab={nf}
+                          parentFormValues={formValues}
+                          parentConnector={connector}
+                          app={screen.app}
+                          parentMode={mode}
+                          parentDuplicating={duplicating}
+                        />
+                      </NestedSection>
+                    ))}
+                  </div>
                 )
               })}
             </>
@@ -867,7 +930,7 @@ export function ScreenDialog({
             {/* Delete (edit mode + delete_query). v1 didn't have this — delete lived on the
                 table — but it's a useful v2 extension: you may want to edit + decide to drop
                 the row without closing the dialog first. Confirms before firing. */}
-            {mode === 'edit' && screen.delete_query && !readOnly && (
+            {effMode === 'edit' && screen.delete_query && !readOnly && (
               <Button
                 $size="sm"
                 $variant="danger"
@@ -876,6 +939,20 @@ export function ScreenDialog({
                 title={t('common.delete')}
               >
                 {deleting ? <SpinnerRing size={13} thickness={2} /> : <Trash2 size={13} />} {t('common.delete')}
+              </Button>
+            )}
+            {/* Duplicate (edit mode + insert_query) — turn this record into a new one: drop the key
+                columns, switch to add behaviour, keep the rest. Mirrors the table's bulk-edit
+                duplicate, but from inside the open form. Hidden once duplicating (effMode → add). */}
+            {effMode === 'edit' && screen.insert_query && !readOnly && (
+              <Button
+                $size="sm"
+                $variant="ghost"
+                onClick={handleDuplicate}
+                disabled={saving || closing || deleting}
+                title={t('dialog.duplicate', { defaultValue: 'Duplicate' })}
+              >
+                <Copy size={13} /> {t('dialog.duplicate', { defaultValue: 'Duplicate' })}
               </Button>
             )}
             <Button $size="sm" $variant="ghost" onClick={() => { void handleClose() }} disabled={saving || closing || deleting}>

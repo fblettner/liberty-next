@@ -125,6 +125,10 @@ export interface FormTab extends TabCommon {
   type?: 'form'
   cols?: number | null
   fields: ScreenField[]
+  /** Embedded child-record forms rendered as labelled sections below this tab's own fields, so
+   *  one tab edits the main table PLUS related tables, all saved in a single Save. Each is a full
+   *  nested_form (own queries or a `form_screen` reference + `param_binds`). */
+  nested_forms?: NestedFormTab[]
 }
 
 /** A child-record form embedded inline in this tab (v2's port of v1's "FormsDialog inside a
