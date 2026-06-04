@@ -27,21 +27,22 @@ const Scroller = styled.div`
   display: flex; align-items: stretch; gap: 4px; flex: 1; min-width: 0;
   overflow-x: auto; scrollbar-width: thin;
 `
-// Edge buttons (scroll arrows + close-all) — compact square toolbar controls, vertically centred
-// in the strip and lifted just above its bottom border to line up with the tabs.
-const EdgeBtn = styled.button<{ $danger?: boolean }>`
+// Edge buttons (the tab scroll arrows) — compact square toolbar controls, vertically centred in
+// the strip and lifted just above its bottom border to line up with the tabs. (Close-all moved to
+// the top-right utility pill so it aligns with the other toolbar controls.)
+const EdgeBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   width: 30px; height: 30px; align-self: center; margin-bottom: 6px; padding: 0;
   border: 1px solid transparent; border-radius: ${radius.md};
   background: transparent;
-  color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.secondary)};
+  color: ${colors.text.secondary};
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
   & svg { display: block; }   /* lift the inline baseline gap that nudged the icon down a pixel */
   &:hover:not(:disabled) {
-    background: ${({ $danger }) => ($danger ? colors.red.bg : 'var(--hover-subtle)')};
-    border-color: ${({ $danger }) => ($danger ? colors.red.border : colors.border)};
-    color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.primary)};
+    background: var(--hover-subtle);
+    border-color: ${colors.border};
+    color: ${colors.text.primary};
   }
   &:disabled { opacity: 0.35; cursor: default; }
 `
@@ -77,7 +78,7 @@ const CloseX = styled.span`
 
 export default function TabStrip() {
   const { t } = useTranslation()
-  const { tabs, activeId, setActive, close, closeAll } = useTabs()
+  const { tabs, activeId, setActive, close } = useTabs()
   const { menus } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
@@ -139,7 +140,6 @@ export default function TabStrip() {
       close(tab.id)
     }
   }
-  const onCloseAll = () => { closeAll(); navigate('/') }
   const by = (dx: number) => scrollerRef.current?.scrollBy({ left: dx, behavior: 'smooth' })
 
   return (
@@ -192,11 +192,6 @@ export default function TabStrip() {
         <EdgeBtn onClick={() => by(240)} disabled={scroll.atEnd}
           title={t('tabs.scrollRight', 'Scroll right')} aria-label={t('tabs.scrollRight', 'Scroll right')}>
           <ChevronRight size={16} />
-        </EdgeBtn>
-      )}
-      {tabs.length >= 2 && (
-        <EdgeBtn $danger onClick={onCloseAll} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
-          <X size={16} />
         </EdgeBtn>
       )}
     </Bar>
