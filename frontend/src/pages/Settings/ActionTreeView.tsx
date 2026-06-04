@@ -39,6 +39,7 @@ import type { ScreenDetail } from '../../types/screens'
 import type { Column } from '../../types/connectors'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import { NavigateTargetField } from './NavigateTargetField'
 import {
   ACTION_DEF_NAME, ACTION_OVERRIDE_KEYS, ACTION_TYPES, blankActionOfType,
   PROMPT_FIELDS_KEY, PROMPT_FIELD_ADVANCED_KEYS, PROMPT_FIELD_BASIC_KEYS, PROMPT_FIELD_BINDS_KEY,
@@ -616,58 +617,18 @@ export default function ActionTreeView({
             placeholder={effectiveConnector}
           />
         </Field>
-        {aType === 'navigate' ? (() => {
-          // Query | Screen toggle + one dropdown (mirrors the menu editor). Exactly one of
-          // `to` / `screen` is set; a screen target opens that exact screen.
-          const navType: 'query' | 'screen' = typeof a.screen === 'string' ? 'screen' : 'query'
-          const screenOpts: SearchSelectOption[] = ((wsScreens ?? {})[actionConn] ?? [])
-            .map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id }))
-            .sort((x, y) => String(x.mono).localeCompare(String(y.mono)))
-          return (
-            <>
-              <Field label={t('settings.screens.action.navTargetType', 'Target type')}>
-                <SearchSelect
-                  value={navType}
-                  options={[
-                    { value: 'query', label: t('settings.screens.action.navTargetQuery', 'Query') },
-                    { value: 'screen', label: t('settings.screens.action.navTargetScreen', 'Screen') },
-                  ]}
-                  onChange={(v) => onPatch(v === 'screen' ? { screen: '', to: null } : { to: '', screen: null })}
-                />
-              </Field>
-              {navType === 'screen' ? (
-                <Field label={t('settings.screens.action.navTargetScreen', 'Screen') + ' *'}>
-                  <SearchSelect
-                    value={(a.screen as string | undefined) ?? ''}
-                    options={screenOpts}
-                    onChange={(v) => onPatch({ screen: v || '' })}
-                    placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                    loading={!targetConnMeta}
-                  />
-                </Field>
-              ) : (
-                <Field label={t('settings.screens.action.navTargetQuery', 'Query') + ' *'}>
-                  <Row gap={6} style={{ alignItems: 'center' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <SearchSelect
-                        value={(a.to as string | undefined) ?? ''}
-                        options={targetOpts}
-                        onChange={(v) => onPatch({ to: v || '' })}
-                        placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                        loading={!targetConnMeta}
-                      />
-                    </div>
-                    {typeof a.to === 'string' && a.to && actionConn && (
-                      <Button $variant="ghost" $size="sm" onClick={() => onEditQuery(actionConn, String(a.to))} title={t('settings.editQuery.edit', 'Edit query')}>
-                        <Edit3 size={13} />
-                      </Button>
-                    )}
-                  </Row>
-                </Field>
-              )}
-            </>
-          )
-        })() : (
+        {aType === 'navigate' ? (
+          <NavigateTargetField
+            key={`${a.id ?? ''}:navtarget`}
+            action={a}
+            onPatch={onPatch}
+            actionConn={actionConn}
+            hasConnector={!!targetConnMeta}
+            queryOptions={targetOpts}
+            screenOptions={((wsScreens ?? {})[actionConn] ?? []).map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id })).sort((x, y) => String(x.mono).localeCompare(String(y.mono)))}
+            onEditQuery={onEditQuery}
+          />
+        ) : (
           <Field label={targetLabel + ' *'}>
             <Row gap={6} style={{ alignItems: 'center' }}>
               <div style={{ flex: 1, minWidth: 0 }}>

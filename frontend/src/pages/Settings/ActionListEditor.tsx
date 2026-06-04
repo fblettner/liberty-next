@@ -31,6 +31,7 @@ import ParamBindList, { type ParamBind } from './ParamBindList'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import { NavigateTargetField } from './NavigateTargetField'
 import {
   builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
 } from './actionCandidates'
@@ -321,7 +322,18 @@ export default function ActionListEditor({
           />
         </Field>
         {aType === 'navigate'
-          ? renderNavigateTarget(a, onPatch, { actionConn, targetConnMeta, targetOpts })
+          ? (
+            <NavigateTargetField
+              key={`${a.id ?? ''}:navtarget`}
+              action={a}
+              onPatch={onPatch}
+              actionConn={actionConn}
+              hasConnector={!!targetConnMeta}
+              queryOptions={targetOpts}
+              screenOptions={((wsScreens ?? {})[actionConn] ?? []).map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id })).sort((x, y) => String(x.mono).localeCompare(String(y.mono)))}
+              onEditQuery={onEditQuery}
+            />
+          )
           : (
             <Field label={targetLabel + ' *'}>
               <Row gap={6} style={{ alignItems: 'center' }}>
@@ -347,64 +359,6 @@ export default function ActionListEditor({
               </Row>
             </Field>
           )}
-      </>
-    )
-  }
-
-  // navigate's target: a Query | Screen type toggle + one dropdown that swaps source by choice
-  // (mirrors the menu editor — a screen target opens that exact screen; a query opens /sql + the
-  // runtime resolves the screen by read query). Exactly one of `to` / `screen` is set.
-  const renderNavigateTarget = (
-    a: Row,
-    onPatch: (patch: Row) => void,
-    ctx: { actionConn: string; targetConnMeta: { type: string } | undefined; targetOpts: SearchSelectOption[] },
-  ): ReactNode => {
-    const navType: 'query' | 'screen' = typeof a.screen === 'string' ? 'screen' : 'query'
-    const screenOpts: SearchSelectOption[] = ((wsScreens ?? {})[ctx.actionConn] ?? [])
-      .map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id }))
-      .sort((x, y) => String(x.mono).localeCompare(String(y.mono)))
-    return (
-      <>
-        <Field label={t('settings.screens.action.navTargetType', 'Target type')}>
-          <SearchSelect
-            value={navType}
-            options={[
-              { value: 'query', label: t('settings.screens.action.navTargetQuery', 'Query') },
-              { value: 'screen', label: t('settings.screens.action.navTargetScreen', 'Screen') },
-            ]}
-            onChange={(v) => onPatch(v === 'screen' ? { screen: '', to: null } : { to: '', screen: null })}
-          />
-        </Field>
-        {navType === 'screen' ? (
-          <Field label={t('settings.screens.action.navTargetScreen', 'Screen') + ' *'}>
-            <SearchSelect
-              value={(a.screen as string | undefined) ?? ''}
-              options={screenOpts}
-              onChange={(v) => onPatch({ screen: v || '' })}
-              placeholder={ctx.targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-              loading={!ctx.targetConnMeta}
-            />
-          </Field>
-        ) : (
-          <Field label={t('settings.screens.action.navTargetQuery', 'Query') + ' *'}>
-            <Row gap={6} style={{ alignItems: 'center' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <SearchSelect
-                  value={(a.to as string | undefined) ?? ''}
-                  options={ctx.targetOpts}
-                  onChange={(v) => onPatch({ to: v || '' })}
-                  placeholder={ctx.targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                  loading={!ctx.targetConnMeta}
-                />
-              </div>
-              {typeof a.to === 'string' && a.to && ctx.actionConn && (
-                <Button $variant="ghost" $size="sm" onClick={() => onEditQuery(ctx.actionConn, String(a.to))} title={t('settings.editQuery.edit', 'Edit query')}>
-                  <Edit3 size={13} />
-                </Button>
-              )}
-            </Row>
-          </Field>
-        )}
       </>
     )
   }
