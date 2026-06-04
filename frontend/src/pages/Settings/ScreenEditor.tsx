@@ -19,9 +19,13 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2 } from 'lucide-react'
 import {
-  Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
+  Banner, Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
   type FrameworkEnums, type JsonSchema, type SearchSelectOption,
 } from '../../common'
+import ParamBindList, { type ParamBind } from './ParamBindList'
+import {
+  builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
+} from './actionCandidates'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
@@ -63,11 +67,6 @@ const GENERAL_FORM_KEYS = [
   'chart_id',
 ] as const
 
-// Sub-schema for the "open dialog" mode — the three fields that go together. We render this
-// through SchemaForm so the ParamBind list editor (Add row, source/value picker, …) comes for
-// free instead of being hand-rolled here.
-const ROW_CLICK_DIALOG_KEYS = ['row_click_screen', 'row_click_connector', 'row_click_binds'] as const
-
 // Known SPA-route targets the row-click can drill into. Hand-curated because these are
 // React-defined routes (not discoverable via the API), so the dropdown ships with the frontend
 // and grows as new ones are added (NOMAFLOW-UI chunk 5 dashboards, future detail pages…).
@@ -104,6 +103,10 @@ const RowClickHeader = styled.div`
   margin-top: 18px; padding-top: 14px; border-top: 1px solid ${colors.border};
   font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
   text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+`
+// Muted one-liner under a row-click dialog control (the ``Field`` component has no help slot).
+const RowClickHint = styled.div`
+  font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 5px; line-height: 1.4;
 `
 // Column-placeholder chip row under the row_click_route input. Each chip inserts the
 // matching ``{column}`` token into the route at the current cursor position so operators
@@ -161,7 +164,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // Workspace connectors carry their query list; we render the connector + query pickers as
   // SearchSelects driven off that list (instead of plain text fields). Fetched once at login;
   // permission-pruned to what the caller can read.
-  const { connectors: wsConnectors } = useWorkspace()
+  const { connectors: wsConnectors, findScreenById } = useWorkspace()
   // Workspace context streams the connector list after login; until then it's null. Guard
   // both reads so the pickers show ``loading`` placeholders instead of crashing on first render.
   const effectiveConnector = (typeof value.connector === 'string' && value.connector.trim() ? value.connector : app)
@@ -259,22 +262,65 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
   // its field-level enums + descriptions kick in.
   const generalSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, GENERAL_FORM_KEYS as unknown as string[]), [schema])
-  // Sub-schema for the row-click "open dialog" mode's three fields. We render this with
-  // SchemaForm to reuse its ParamBind list editor for ``row_click_binds``; the screen +
-  // connector strings get text inputs (we override row_click_screen with a SearchSelect of
-  // sibling screens further below — the schema render is the fallback when the parent
-  // didn't pass siblingScreenIds).
-  const rowClickDialogSchema = useMemo<JsonSchema>(() => {
-    const picked = pickSchemaProperties(schema, ROW_CLICK_DIALOG_KEYS as unknown as string[])
-    // When we have a sibling-screen dropdown, hide the auto-rendered text field for it so we
-    // don't show two controls for the same thing.
-    if (siblingScreenIds.length > 0 && picked.properties && typeof picked.properties === 'object') {
-      const p = { ...(picked.properties as Record<string, JsonSchema>) }
-      delete p.row_click_screen
-      return { ...picked, properties: p }
-    }
-    return picked
-  }, [schema, siblingScreenIds.length])
+
+  // ── Row-click "open a sibling Screen as a dialog" binds ───────────────────────────────────
+  // The binds map THIS screen's clicked-row columns (``source``) → the TARGET screen's
+  // read_query params (``param``). Both sides get a dropdown so the operator picks instead of
+  // typing: source = this screen's read-query columns (+ the #BUILTIN# paths); param = the
+  // target read_query's declared params + scanned ``:bind_params``.
+  const rowClickSourceOptions = useMemo<SearchSelectOption[]>(
+    () => mergeCandidates(screenReadColumnOptions(screenColumns), builtinSourceOptions()),
+    [screenColumns],
+  )
+  // Connector picker for the (optional) row-click connector override — SQL connectors only.
+  const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
+    () => (wsConnectors ?? [])
+      .filter((c) => c.type === 'sql')
+      .map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+      .sort((a, b) => a.value.localeCompare(b.value)),
+    [wsConnectors],
+  )
+  // Resolve the target screen → its read_query → the query def carrying its params.
+  const rowClickTarget = (typeof value.row_click_screen === 'string' && value.row_click_screen)
+    ? findScreenById(app, value.row_click_screen)
+    : null
+  const rowClickConnector = (typeof value.row_click_connector === 'string' && value.row_click_connector.trim())
+    ? value.row_click_connector
+    : (rowClickTarget?.connector || effectiveConnector)
+  // The target read_query def — ``null`` until we can locate it in the workspace catalog (target
+  // screen not picked yet, query renamed, connector not visible…). Distinguishing "not found" from
+  // "found with zero params" is what lets the unmatched-param warning fire on a query that declares
+  // NO params at all (the user's ``:APPS_ID``-missing case) without false-positiving on an
+  // unresolvable target.
+  const rowClickTargetQuery = useMemo(() => {
+    if (!rowClickTarget?.read_query) return null
+    const conn = (wsConnectors ?? []).find((c) => c.name === rowClickConnector)
+    if (!conn || conn.type !== 'sql') return null
+    return conn.queries.find((q) => q.name === rowClickTarget.read_query) ?? null
+  }, [rowClickTarget?.read_query, rowClickConnector, wsConnectors])
+  // ``param`` dropdown — reuse ``targetParamOptions`` (declared params ∪ scanned ``:bind_params``)
+  // by shaping a synthetic ``navigate`` action whose ``to`` is the target read_query.
+  const rowClickParamOptions = useMemo<SearchSelectOption[]>(
+    () => (rowClickTarget?.read_query
+      ? targetParamOptions(
+          { type: 'navigate', to: rowClickTarget.read_query, connector: rowClickConnector },
+          wsConnectors,
+          rowClickConnector,
+        )
+      : []),
+    [rowClickTarget?.read_query, rowClickConnector, wsConnectors],
+  )
+  // #2 — warn when a bind targets a ``param`` that isn't an actual ``:placeholder`` on the target
+  // read_query: the runtime fetches the row server-side, so a bind with no matching placeholder is
+  // silently dropped and the dialog opens unfiltered. Only checked once the target query RESOLVES
+  // (``rowClickTargetQuery`` non-null) — an unresolvable target stays silent (we can't judge it).
+  const rowClickUnmatchedParams = useMemo<string[]>(() => {
+    if (!rowClickTargetQuery) return []
+    const known = new Set(rowClickParamOptions.map((o) => o.value))
+    const binds = Array.isArray(value.row_click_binds) ? (value.row_click_binds as ParamBind[]) : []
+    return binds.map((b) => b?.param).filter((p): p is string => !!p && !known.has(p))
+  }, [rowClickTargetQuery, rowClickParamOptions, value.row_click_binds])
+
   // Phase 3 — the Columns tab edits ``Screen.columns`` via SchemaNavigator. Same ColumnHint
   // shape used elsewhere; carries the full ``$defs`` map so nested ``filter_from`` /
   // ``visible_when`` / ``lookup_param_binds`` drill in via the breadcrumb navigator.
@@ -424,30 +470,45 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
 
         {currentMode === 'dialog' && (
           <>
-            {siblingScreenIds.length > 0 && (
-              <Field label={t('settings.screens.editor.rowClickScreenLabel', 'Target screen')}>
-                <SearchSelect
-                  value={(value.row_click_screen as string | undefined) ?? ''}
-                  options={siblingScreenIds.map((sid) => ({ value: sid, label: sid, mono: sid }))}
-                  onChange={(v) => setProp('row_click_screen', v || null)}
-                  placeholder={t('settings.screens.editor.rowClickScreenPlaceholder', 'Pick a sibling screen…')}
-                />
-              </Field>
+            <Field label={t('settings.screens.editor.rowClickScreenLabel', 'Target screen')}>
+              <SearchSelect
+                value={(value.row_click_screen as string | undefined) ?? ''}
+                options={[...siblingScreenIds].sort((a, b) => a.localeCompare(b)).map((sid) => ({ value: sid, label: sid, mono: sid }))}
+                onChange={(v) => setProp('row_click_screen', v || null)}
+                placeholder={t('settings.screens.editor.rowClickScreenPlaceholder', 'Pick a sibling screen…')}
+              />
+            </Field>
+            <Field label={t('settings.screens.editor.rowClickConnectorLabel', 'Target connector')}>
+              <SearchSelect
+                value={(value.row_click_connector as string | undefined) ?? ''}
+                options={sqlConnectorOptions}
+                onChange={(v) => setProp('row_click_connector', v || null)}
+                anyLabel={t('settings.screens.editor.rowClickConnectorInherit', '(inherit — {{conn}})', { conn: rowClickTarget?.connector || effectiveConnector })}
+                placeholder={t('settings.screens.editor.rowClickConnectorPlaceholder', 'Inherit from target screen')}
+              />
+              <RowClickHint>{t('settings.screens.editor.rowClickConnectorHelp', 'Connector hosting the target screen; blank → the target screen’s own (or this screen’s) connector.')}</RowClickHint>
+            </Field>
+            <Field label={t('settings.screens.editor.rowClickBindsLabel', 'Pass these values to the target')}>
+              <ParamBindList
+                value={Array.isArray(value.row_click_binds) ? (value.row_click_binds as ParamBind[]) : []}
+                onChange={(next) => setProp('row_click_binds', next.length ? next : null)}
+                sourceOptions={rowClickSourceOptions}
+                paramOptions={rowClickParamOptions}
+                paramPlaceholder={t('settings.screens.editor.rowClickParamPlaceholder', 'Target param (:placeholder)')}
+              />
+              <RowClickHint>{t('settings.screens.editor.rowClickBindsHelp', 'Bind the clicked row’s columns into the target screen’s read_query. “source” reads a column on this screen’s row; “value” is a literal.')}</RowClickHint>
+            </Field>
+            {rowClickUnmatchedParams.length > 0 && (
+              <Banner $tone="warning">
+                {t('settings.screens.editor.rowClickUnmatchedWarning',
+                  'These binds target a param the read_query “{{q}}” doesn’t declare, so they won’t filter the row: {{params}}. Add the matching “:{{first}}” placeholder to that query (Edit query), or remove the bind.',
+                  {
+                    q: rowClickTarget?.read_query ?? '',
+                    params: rowClickUnmatchedParams.join(', '),
+                    first: rowClickUnmatchedParams[0],
+                  })}
+              </Banner>
             )}
-            <SchemaForm
-              schema={rowClickDialogSchema}
-              defs={defs}
-              value={value}
-              onChange={(v) => {
-                const next: Row = { ...value }
-                for (const k of ROW_CLICK_DIALOG_KEYS) {
-                  const val = v[k]
-                  if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
-                  else next[k] = val
-                }
-                onChange(next)
-              }}
-            />
           </>
         )}
 
