@@ -147,7 +147,7 @@ export default function TabStrip() {
       {scroll.overflow && (
         <EdgeBtn onClick={() => by(-240)} disabled={scroll.atStart}
           title={t('tabs.scrollLeft', 'Scroll left')} aria-label={t('tabs.scrollLeft', 'Scroll left')}>
-          <ChevronLeft size={18} strokeWidth={2.25} />
+          <ChevronLeft size={16} />
         </EdgeBtn>
       )}
       <Scroller ref={scrollerRef} onScroll={measure}>
@@ -191,12 +191,12 @@ export default function TabStrip() {
       {scroll.overflow && (
         <EdgeBtn onClick={() => by(240)} disabled={scroll.atEnd}
           title={t('tabs.scrollRight', 'Scroll right')} aria-label={t('tabs.scrollRight', 'Scroll right')}>
-          <ChevronRight size={18} strokeWidth={2.25} />
+          <ChevronRight size={16} />
         </EdgeBtn>
       )}
       {tabs.length >= 2 && (
         <EdgeBtn $danger onClick={onCloseAll} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
-          <X size={18} strokeWidth={2.25} />
+          <X size={16} />
         </EdgeBtn>
       )}
     </Bar>
