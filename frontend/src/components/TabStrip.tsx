@@ -79,7 +79,7 @@ const CloseX = styled.span`
 export default function TabStrip() {
   const { t } = useTranslation()
   const { tabs, activeId, setActive, close } = useTabs()
-  const { menus, findScreenById } = useWorkspace()
+  const { menus, connectors, findScreenById } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
 
@@ -170,14 +170,25 @@ export default function TabStrip() {
             label = t('nav.settings', 'Settings')
           } else if (tab.kind === 'monitoring') {
             label = t('nav.monitoring', 'Monitoring')
+          } else if (tab.kind === 'screen') {
+            // A screen tab IS identified by its screen, so always show the SCREEN's own label —
+            // consistent whether it was opened from a menu or a row-menu drill, and not the menu
+            // item's name (which can differ from the screen, and differs per entry point). The
+            // menu label is only a fallback for a screen with no label of its own.
+            const scr = findScreenById(tab.connector, tab.target)
+            const hit = findMenuLabelWithApp(menus, tab as { kind: 'screen'; connector: string; target: string })
+            label = scr?.label ?? hit?.label ?? tab.target
+            appLabel = scr?.app ?? hit?.appLabel
           } else {
-            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'screen' | 'http' | 'dashboard'; connector: string; target: string })
-            // A screen tab opened via a row-menu drill (not from a menu) won't match a menu leaf —
-            // fall back to the screen's own friendly label + its app, so the tab reads
-            // "nomasx1 / Users to rights" instead of the raw id "security_users_rights".
-            const scr = tab.kind === 'screen' ? findScreenById(tab.connector, tab.target) : null
-            label = hit?.label ?? scr?.label ?? tab.target
-            appLabel = hit?.appLabel ?? (scr ? scr.app : undefined)
+            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
+            // sql / http: menu label first; but a drill-navigate to a query that isn't in any menu
+            // would otherwise show the raw query name — fall back to the query's friendly label.
+            const cm = (connectors ?? []).find((c) => c.name === tab.connector)
+            const q = tab.kind === 'sql' && cm?.type === 'sql'
+              ? cm.queries.find((x) => x.name === tab.target)
+              : undefined
+            label = hit?.label ?? q?.description ?? q?.label ?? tab.target
+            appLabel = hit?.appLabel
           }
           const tip = tab.connector || tab.target ? `${label} — ${tab.connector}.${tab.target}` : label
           return (
