@@ -1174,6 +1174,8 @@ const en = {
       looseHint: '{{count}} other (non-CRUD) queries — open the Settings… modal to edit them.',
       missingSlot: 'No {{crud}} query for this table yet (would be {{name}}).',
       createSlot: 'Create {{crud}} query',
+      deleteSlot: 'Delete query',
+      confirmDeleteSlot: 'Delete the {{crud}} query "{{name}}"? Any screen / action / dictionary reference to it will break until updated.',
       needRead: 'This tab edits the read query — create {{name}} first.',
       generalHint: 'Shared metadata for this table (lives on the read query — that is where columns/labels/etc. apply).',
       columnsHint: 'The result columns — display hints (label, hidden, width, align, data-dictionary key) plus the filter/cascade/visibility rules. Drill in to edit one.',

@@ -139,6 +139,19 @@ export default function ConnectorsTableEditor({
     if (!ok) return
     onDelete()
   }
+  // Delete a single CRUD slot off the table (the operator created one they don't want, or a v1
+  // migration left a stray _put/_post/_delete). The slot's synthesised name `<base>_<crud>` may be
+  // referenced elsewhere; deleting it can leave a dangling ref (the Integrity tab flags those).
+  const removeSlot = async (crud: CrudKind) => {
+    const ok = await modals.confirm({
+      title: t('settings.tables.deleteSlot', 'Delete query'),
+      message: t('settings.tables.confirmDeleteSlot', 'Delete the {{crud}} query "{{name}}"? Any screen / action / dictionary reference to it will break until updated.', { crud: crud.toUpperCase(), name: `${table.name}_${crud}` }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
+    setSlot(crud, undefined)
+  }
 
   // Pre-pick the subset schemas — flatten x_group so the inner SchemaForm has no nested tabs.
   const generalSchema: JsonSchema = pickSchemaProperties(tableDefSchema, GENERAL_KEYS)
@@ -163,7 +176,12 @@ export default function ConnectorsTableEditor({
     const keys = crud === 'get' ? READ_BODY_KEYS : WRITE_BODY_KEYS
     return (
       <>
-        <Sub><code style={{ fontFamily: fonts.mono }}>{`${table.name}_${crud}`}</code></Sub>
+        <Row style={{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <Sub style={{ marginBottom: 0 }}><code style={{ fontFamily: fonts.mono }}>{`${table.name}_${crud}`}</code></Sub>
+          <Button $variant="ghost" $size="sm" onClick={() => removeSlot(crud)} style={{ color: colors.red.main }}>
+            <Trash2 size={13} /> {t('common.delete', 'Delete')}
+          </Button>
+        </Row>
         <SchemaForm
           schema={schema}
           defs={defs}

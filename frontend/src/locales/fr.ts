@@ -1167,6 +1167,8 @@ const fr: Resources = {
       looseHint: '{{count}} autres requêtes (hors CRUD) — ouvrez le modal Settings… pour les modifier.',
       missingSlot: "Aucune requête {{crud}} pour cette table (serait {{name}}).",
       createSlot: 'Créer la requête {{crud}}',
+      deleteSlot: 'Supprimer la requête',
+      confirmDeleteSlot: 'Supprimer la requête {{crud}} « {{name}} » ? Toute référence (écran / action / dictionnaire) sera cassée jusqu\'à mise à jour.',
       needRead: "Cet onglet édite la requête de lecture — créez d'abord {{name}}.",
       generalHint: 'Métadonnées partagées de cette table (portées par la requête de lecture — où colonnes/labels/etc. s\'appliquent).',
       columnsHint: 'Les colonnes du résultat — indications d\'affichage (libellé, masqué, largeur, alignement, clé du dictionnaire) plus les règles de filtre/cascade/visibilité. Cliquez une colonne pour l\'éditer.',
