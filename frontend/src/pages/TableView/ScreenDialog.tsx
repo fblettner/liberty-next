@@ -43,8 +43,14 @@ export type DialogMode = 'edit' | 'add'
  *  After the parent's own update/insert succeeds, ``submit()`` walks the registry and awaits
  *  each entry sequentially — same as v1's FormsDialog flow (main first, then sub-dialogs,
  *  each contributing their own write). A throwing save aborts the chain and surfaces on the
- *  parent's error banner; the dialog stays open so the operator can retry. */
-export type NestedSaver = () => Promise<void>
+ *  parent's error banner; the dialog stays open so the operator can retry.
+ *
+ *  ``parentExtra`` carries values the parent write just produced that aren't in the parent's
+ *  form state yet — specifically the server-assigned SEQUENCE/auto-ID PK from an ADD (returned
+ *  on the insert as ``resolved_binds``). The nested saver resolves its ``source`` binds against
+ *  the parent form state MERGED with these, so a child insert can tie to the parent's brand-new
+ *  PK in the same Save instead of requiring the operator to save the parent first. */
+export type NestedSaver = (parentExtra?: Record<string, unknown>) => Promise<void>
 export interface NestedSaversCtx {
   /** Mount a saver under *tabId*. Idempotent — re-registering replaces the previous fn (which
    *  is exactly what we want when NestedFormView's closure captures a new `formValues`). */
@@ -595,10 +601,14 @@ export function ScreenDialog({
       const params = mode === 'edit'
         ? { ...baseSaved, ...sent, ...originalKeys(baseSaved) }
         : sent
-      const writeResp = await api.post<{ rowcount?: number; statement_type?: string }>(
+      const writeResp = await api.post<{ rowcount?: number; statement_type?: string; resolved_binds?: Record<string, unknown> }>(
         `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
         { params: withUpper(params) },
       )
+      // Values the server assigned for binds we left empty — the SEQUENCE/auto-ID PK on an ADD.
+      // Merge them into the parent state we hand to the nested savers so a child insert can bind
+      // to the parent's freshly-assigned PK in this same Save (the "save both at once" flow).
+      const parentExtra: Row = { ...sent, ...(writeResp?.resolved_binds ?? {}) }
       // No-op UPDATE — same pathology as the no-op DELETE above: the SQL succeeded but
       // the WHERE clause matched 0 rows (most often a CHAR-padding mismatch covered by
       // the pool's ``trim_strings`` flag, sometimes a stale primary-key value or the
@@ -618,7 +628,7 @@ export function ScreenDialog({
       // is already written so the user can retry the nested save without re-doing the parent.
       for (const [tabId, save] of nestedSaversRef.current) {
         try {
-          await save()
+          await save(parentExtra)
         } catch (e) {
           setSaving(false)
           setError(t('dialog.nestedSaveFailed', {
@@ -751,7 +761,7 @@ export function ScreenDialog({
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
+                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentMode={mode} />
                     </div>
                   )
                 }

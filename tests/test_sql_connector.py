@@ -1357,6 +1357,32 @@ async def test_form_rule_sequence_resolves_in_same_transaction(pools: PoolRegist
 
 
 @pytest.mark.asyncio
+async def test_resolved_binds_surfaces_sequence_assigned_pk(pools: PoolRegistry) -> None:
+    """An INSERT whose PK the server fills from a SEQUENCE returns that value in
+    ``resolved_binds`` (uppercased key) so a caller can chain a dependent child write to the
+    parent's brand-new key. A caller-supplied explicit value is NOT echoed (nothing was assigned),
+    and a non-sequence INSERT returns an empty ``resolved_binds``."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="item_next_id"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="item_next_id", sql="SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM item"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="ID"), ColumnHint(name="NAME")]
+    # Sequence-assigned PK → surfaced (fixture has 1,2,3 → next is 4).
+    r = await conn.execute("ins", {"ID": None, "NAME": "from-seq"}, column_hints=hints)
+    assert r.resolved_binds == {"ID": 4}
+    assert r.to_dict()["resolved_binds"] == {"ID": 4}
+    # Caller supplied the value → nothing was assigned → not echoed.
+    r2 = await conn.execute("ins", {"ID": 50, "NAME": "explicit"}, column_hints=hints)
+    assert r2.resolved_binds == {}
+
+
+@pytest.mark.asyncio
 async def test_form_rule_sequence_missing_query_logs_and_falls_through(pools: PoolRegistry, caplog) -> None:
     """A SEQUENCE rule pointing at a query that doesn't exist on this connector logs a
     warning and leaves the bind as NULL — the DB will reject the row if the column is NOT NULL,

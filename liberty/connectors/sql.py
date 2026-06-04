@@ -632,6 +632,12 @@ class QueryResult:
     rowcount: int = -1
     duration_ms: float = 0.0
     truncated: bool = False
+    # Values the server filled in for binds the caller left empty — currently the SEQUENCE / NN
+    # auto-IDs assigned during an INSERT (e.g. a sequence-driven PK). Surfaced so a caller can
+    # chain a dependent write against the freshly-assigned key (parent insert → child insert
+    # bound to the parent's new PK) without a separate read-back. Keys are uppercased column
+    # names. Empty for SELECTs and for writes where the caller supplied every value explicitly.
+    resolved_binds: dict[str, Any] = field(default_factory=dict)
 
     @property
     def row_count(self) -> int:
@@ -649,6 +655,7 @@ class QueryResult:
             "rowcount": self.rowcount,
             "truncated": self.truncated,
             "duration_ms": round(self.duration_ms, 3),
+            "resolved_binds": self.resolved_binds,
         }
 
 
@@ -1417,10 +1424,19 @@ class SQLConnector:
             # the INSERT so a concurrent insert can't grab the same value (the surrounding
             # ``engine.begin()`` block serialises). A missing/failing sequence logs and falls
             # through with NULL (the DB will then reject the row if the column is NOT NULL).
+            pre_seq = dict(bound)
             bound = await self._resolve_sequences(
                 conn, bound, qdef, stmt_type=stmt_type, language=lang, column_hints=column_hints,
                 dict_scope=dict_scope,
             )
+            # The binds the sequence machinery just filled (empty → value) — these are the
+            # freshly-assigned auto-IDs (typically the PK). Surfaced on the result so a caller
+            # can bind a dependent child insert to the parent's new key in the same Save.
+            seq_assigned = {
+                k.upper(): v for k, v in bound.items()
+                if pre_seq.get(k) in (None, "") and v not in (None, "")
+                and not k.upper().endswith("_ORIGINAL")
+            }
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
             # 0-row write watch — a successful SQL execute that didn't touch any row is almost
@@ -1454,6 +1470,7 @@ class SQLConnector:
             statement_type=stmt_type,
             rowcount=rowcount,
             duration_ms=duration_ms,
+            resolved_binds=seq_assigned,
         )
 
     async def execute_stream(

@@ -78,7 +78,7 @@ function effectiveConnector(tab: { connector?: string | null }, parentConnector:
 // nested layer: retrying re-fires update/insert with the current form state).
 
 export function NestedFormView({
-  tab, parentFormValues, parentConnector, app,
+  tab, parentFormValues, parentConnector, app, parentMode,
 }: {
   tab: NestedFormTab
   /** Live parent form state — `source` binds read from here at fetch time. */
@@ -88,6 +88,10 @@ export function NestedFormView({
   /** The parent screen's app — used to fetch the referenced screen in reference mode
    *  (GET /api/screens/{app}/{form_screen}). */
   app: string
+  /** The PARENT dialog's mode. In ``add`` the parent has no PK yet (it's sequence-assigned on
+   *  its own insert), so the FK binds can't resolve — but we still render the nested form so the
+   *  operator can fill it; the FK is supplied at save time via ``parentExtra``. */
+  parentMode: DialogMode
 }) {
   const { t } = useTranslation()
   const savers = useContext(NestedSaversContext)
@@ -162,7 +166,13 @@ export function NestedFormView({
   const touchedRef = useRef(false)
 
   useEffect(() => {
-    if (!hasBinds) {
+    // NEVER read in parent-add mode: the parent row doesn't exist yet, so it has no linked child.
+    // Reading here is actively dangerous — if the parent form carries a stale/seeded PK (e.g. the
+    // previously-selected row's), the read would load THAT parent's child, mark it "existing", and
+    // on Save fire an UPDATE that rebinds the FK to the new parent — moving one record's child onto
+    // another. In add mode we always start empty and INSERT, bound to the parent's freshly-assigned
+    // PK (via parentExtra) at save time.
+    if (!hasBinds || parentMode === 'add') {
       setResult(null); setError(null); isExistingRef.current = false; return
     }
     setLoading(true); setError(null)
@@ -171,7 +181,7 @@ export function NestedFormView({
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boundKey is the stable serialization of bound
-  }, [connector, effRead, boundKey, hasBinds])
+  }, [connector, effRead, boundKey, hasBinds, parentMode])
 
   const colByName = useMemo(() => {
     const m = new Map<string, Column>()
@@ -186,7 +196,20 @@ export function NestedFormView({
   // `:_ORIGINAL` rebinds.
   useEffect(() => {
     if (!result) return
-    const row = result.rows?.[0] ?? null
+    // Pick the row that MATCHES the bind — never blindly rows[0]. The nested read is meant to
+    // narrow to the single linked child via param_binds (parent PK → :param), but a migrated read
+    // query may lack the WHERE clause and return every row. Trusting rows[0] would then show /
+    // update a DIFFERENT parent's child (e.g. apps_id 1's row while editing apps_id 2). Match each
+    // bound value against the row's matching column (case-insensitive); fall back to rows[0] only
+    // when there are no binds (legacy single-record forms with no parent key).
+    const rows = (result.rows ?? []) as Row[]
+    const boundEntries = Object.entries(bound)
+    const row = boundEntries.length === 0
+      ? (rows[0] ?? null)
+      : (rows.find((r) => boundEntries.every(([k, v]) => {
+          const rv = valueFor(k, r)
+          return rv != null && String(rv) === String(v)
+        })) ?? null)
     isExistingRef.current = row != null
     touchedRef.current = false
     const seeded: Row = {}
@@ -236,11 +259,19 @@ export function NestedFormView({
   // re-register simply overwrites the previous entry. Unregister on unmount.
   useEffect(() => {
     if (!savers) return
-    const save = async () => {
+    const save = async (parentExtra?: Row) => {
       // Add-mode + the user never touched the form: skip insert. Otherwise we'd create
       // empty rows just because the user opened the parent dialog and ignored this tab.
       const isExisting = isExistingRef.current
       if (!isExisting && !touchedRef.current) return
+
+      // Re-resolve the FK binds against the parent state MERGED with ``parentExtra`` — the values
+      // the parent write just produced (its server-assigned SEQUENCE PK on an ADD). In add mode
+      // the parent's PK wasn't in ``parentFormValues`` when ``bound`` was memoised, so without
+      // this the child FK would bind to NULL; with it, the child ties to the parent's new PK.
+      const effBound = parentExtra && Object.keys(parentExtra).length
+        ? resolveBindList(tab.param_binds, { ...parentFormValues, ...parentExtra })
+        : bound
 
       // Collect values from visible fields only (a hidden field on save isn't written —
       // same convention the top-level dialog uses). Drop empty password values.
@@ -253,10 +284,16 @@ export function NestedFormView({
         if (isPassword(col) && (v == null || v === '')) continue
         sent[f.name] = v
       }
-      // Bound FK columns (e.g. APPS_ID) — make sure they're posted so an insert ties the
-      // child to its parent and an update's WHERE on a key column has the right value.
-      for (const [k, v] of Object.entries(bound)) {
-        if (!(k in sent) && !(k.toLowerCase() in sent)) sent[k] = v
+      // Bound FK columns (e.g. APPS_ID) are AUTHORITATIVE: the child's parent-key column must be
+      // the parent's PK, never whatever value the nested form's own field happens to show. When the
+      // FK is also a visible field, its displayed value is stale on an ADD (the parent's real PK is
+      // only assigned at save) — so the bind must WIN, not defer. Drop any case-variant the field
+      // collection added (APPS_ID vs apps_id), then set the bound value.
+      for (const [k, v] of Object.entries(effBound)) {
+        for (const sk of Object.keys(sent)) {
+          if (sk !== k && sk.toLowerCase() === k.toLowerCase()) delete sent[sk]
+        }
+        sent[k] = v
       }
 
       const targetQuery = isExisting ? effUpdate : effInsert
@@ -287,12 +324,16 @@ export function NestedFormView({
   const cols = Math.max(1, tab.cols ?? 2)
   if (refError) return <Banner $tone="error">{refError}</Banner>
   if (isRef && !refScreen) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
-  if (!hasBinds) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
+  // When the PARENT is being added, its PK is assigned (by sequence) only on its own insert, so
+  // the FK binds can't resolve yet — but we still render the form so the operator fills it in the
+  // same pass; the FK lands at save time from ``parentExtra``. Only show "pending" when the parent
+  // already exists (edit) but the binds genuinely don't resolve.
+  if (!hasBinds && parentMode !== 'add') return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (loading && !result) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   if (error) return <Banner $tone="error">{error}</Banner>
   // Even in add mode (no linked row) we render the form — the user can type values and
-  // saving will fire insert_query (binding the FK columns from `bound`). The Hint banner
-  // surfaces the "no record yet" state so it's not invisible.
+  // saving will fire insert_query (binding the FK columns from `parentExtra` at save time).
+  // The Hint banner surfaces the "no record yet" state so it's not invisible.
   return (
     <div>
       {!isExistingRef.current && result && <Hint>{t('dialog.nested.noRecord')}</Hint>}
