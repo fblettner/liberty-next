@@ -15,7 +15,11 @@ import { findMenuLabelWithApp } from '../services/menuLabels'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
-  min-height: 40px; border-bottom: 1px solid ${colors.border};
+  /* Fixed header height: 8px top padding + the 42px tab row = 50px, which lines the bottom
+     divider up with the floating utility pill's bottom edge. The empty (no-tab) state used to
+     fall back to a shorter 40px, so its divider sat too high — pin the same 50px here so the
+     header height is constant whether or not tabs are open. */
+  min-height: 50px; border-bottom: 1px solid ${colors.border};
   /* Keep clear of the fixed utility pill floating over the top-right (Layout publishes its width as
      --utilbar-width). +28px = its 16px right offset + a 12px gap, so the right arrow / close-all and
      the last tab never slide under it. Falls back to a sane reserve before the first measure. */
@@ -25,7 +29,10 @@ const Bar = styled.div`
 // old single-element bar so the active tab's seamless-bottom trick is unchanged.
 const Scroller = styled.div`
   display: flex; align-items: stretch; gap: 4px; flex: 1; min-width: 0;
-  overflow-x: auto; scrollbar-width: thin;
+  /* overflow-y MUST be pinned: setting only overflow-x to auto makes the browser compute
+     overflow-y as auto too, and the 42px-tall tabs overflow the strip, so a phantom vertical
+     scrollbar capsule appears in the header (it scrolls nothing). Hidden removes it. */
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
 `
 // Edge buttons (the tab scroll arrows) — compact square toolbar controls, vertically centred in
 // the strip and lifted just above its bottom border to line up with the tabs. (Close-all moved to
@@ -47,7 +54,10 @@ const EdgeBtn = styled.button`
   &:disabled { opacity: 0.35; cursor: default; }
 `
 const TitleBlock = styled.div`
-  display: flex; align-items: baseline; gap: 10px; padding: 4px 6px 12px;
+  /* Centre the title vertically in the now-taller (50px) bar instead of stretching + sitting high.
+     align-self center opts out of the Bar's align-items stretch so it keeps its natural height. */
+  align-self: center;
+  display: flex; align-items: baseline; gap: 10px; padding: 0 6px;
   & .name { font-size: ${fontSize['2xl']}; font-weight: 700; letter-spacing: -0.3px; line-height: 1; color: ${colors.blue.main}; }
   & .sub { font-size: ${fontSize.base}; color: ${colors.text.muted}; }
 `
