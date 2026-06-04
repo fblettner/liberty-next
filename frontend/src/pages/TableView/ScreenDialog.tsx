@@ -751,7 +751,7 @@ export function ScreenDialog({
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} />
+                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
                     </div>
                   )
                 }

@@ -184,11 +184,25 @@ class NestedFormTab(_ScreenTabBase):
         default=None,
         description="Connector hosting the nested CRUD queries; blank → the parent screen's effective connector.",
     )
-    read_query: str = Field(description="Reads the linked row (typically returning 0 or 1 rows after the bind narrows it).")
-    update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists.")
-    insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed.")
+    form_screen: str | None = Field(
+        default=None,
+        description=(
+            "REFERENCE MODE — id of an existing v2 screen whose form this tab reuses (its "
+            "read/update/insert queries + fields), instead of configuring them inline below. When "
+            "set, ``read_query`` / ``update_query`` / ``insert_query`` / ``fields`` are inherited "
+            "from that screen and may be left blank here; ``param_binds`` still bind the parent's "
+            "values into the referenced read query. Blank → INLINE MODE (configure the queries + "
+            "fields on this tab — a self-contained form that can use queries the parent screen doesn't)."
+        ),
+    )
+    read_query: str = Field(
+        default="",
+        description="INLINE MODE: reads the linked row (0 or 1 rows after the bind narrows it). Ignored / inherited in reference mode.",
+    )
+    update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists. Inherited from ``form_screen`` in reference mode.")
+    insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed. Inherited from ``form_screen`` in reference mode.")
     cols: int | None = Field(default=None, description="How many columns the nested form's grid spans.")
-    fields: list[ScreenField] = Field(default_factory=list, description="Fields shown in the nested form, in display order.")
+    fields: list[ScreenField] = Field(default_factory=list, description="INLINE MODE: fields shown in the nested form, in display order. Inherited from ``form_screen`` in reference mode.")
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description=(
@@ -197,6 +211,17 @@ class NestedFormTab(_ScreenTabBase):
             "parent dialog's live form state (same shape as ``ScreenField.lookup_param_binds``)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _check_form_source(self) -> "NestedFormTab":
+        """A nested_form needs a source: either ``form_screen`` (reference an existing screen) OR
+        an inline ``read_query``. Reject a tab that gives neither (it would render empty)."""
+        if not self.form_screen and not self.read_query:
+            raise ValueError(
+                f"nested_form tab '{self.id}' needs either a 'form_screen' (reference an existing "
+                "screen) or a 'read_query' (inline form) — it has neither."
+            )
+        return self
 
 
 class NestedTableTab(_ScreenTabBase):
@@ -1138,7 +1163,10 @@ def parse_screens(data: dict[str, Any]) -> ScreensFile:
                         if isinstance(tab, dict) and not tab.get("type"):
                             if isinstance(tab.get("screen"), str):
                                 tab["type"] = "nested_table"
-                            elif isinstance(tab.get("read_query"), str):
+                            elif isinstance(tab.get("form_screen"), str) or isinstance(tab.get("read_query"), str):
+                                # ``form_screen`` → reference-mode nested_form; ``read_query`` →
+                                # inline nested_form. (``screen`` above is table-only, so the two
+                                # screen-reference keys stay unambiguous across the round-trip.)
                                 tab["type"] = "nested_form"
                             else:
                                 tab["type"] = "form"

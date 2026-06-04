@@ -505,6 +505,12 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // The selected tab's `type` discriminator — drives which Tab Settings fields render. A tab
   // missing ``type`` is treated as 'form' (matches the backend's `parse_screens` default).
   const tabType = (selTab && typeof selTab.type === 'string' ? selTab.type : 'form') as 'form' | 'nested_form' | 'nested_table'
+  // A nested_form is in REFERENCE mode when it carries ``form_screen`` (reuse an existing screen's
+  // form). In that mode its queries + fields are inherited, so the inline query pickers and the
+  // field canvas are hidden — the picker itself is the mode switch (pick a screen → reference;
+  // clear it → inline). ``tabHasOwnFields`` gates everything that edits this tab's OWN field grid.
+  const nestedFormIsRef = tabType === 'nested_form' && typeof selTab?.form_screen === 'string' && !!selTab.form_screen
+  const tabHasOwnFields = tabType === 'form' || (tabType === 'nested_form' && !nestedFormIsRef)
 
   // ── workspace + cross-screen pickers ──────────────────────────────────────────────────────
   // Dropdowns inside the Tab Settings panel read from the workspace catalog (same source the
@@ -608,7 +614,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       keep.fields = Array.isArray(selTab.fields) ? selTab.fields : []
     } else if (newType === 'nested_form') {
       keep.type = 'nested_form'
-      keep.read_query = (selTab.read_query as string | undefined) ?? ''
+      // Carry a reference (form_screen) across when present — e.g. a nested_table's ``screen``
+      // becomes the reference-mode form_screen, so switching table↔form keeps the chosen screen.
+      const ref = (selTab.form_screen ?? selTab.screen) as string | undefined
+      if (ref) keep.form_screen = ref
+      else keep.read_query = (selTab.read_query as string | undefined) ?? ''
       keep.fields = Array.isArray(selTab.fields) ? selTab.fields : []
       if (selTab.connector) keep.connector = selTab.connector
       if (selTab.update_query) keep.update_query = selTab.update_query
@@ -616,7 +626,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       if (Array.isArray(selTab.param_binds)) keep.param_binds = selTab.param_binds
     } else if (newType === 'nested_table') {
       keep.type = 'nested_table'
-      keep.screen = (selTab.screen as string | undefined) ?? ''
+      keep.screen = (selTab.screen as string | undefined) ?? (selTab.form_screen as string | undefined) ?? ''
       if (selTab.connector) keep.connector = selTab.connector
       if (Array.isArray(selTab.param_binds)) keep.param_binds = selTab.param_binds
     }
@@ -653,6 +663,9 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // ── external data: dictionary entries scoped to the connector + read-query columns ───────
   const [ddEntries, setDdEntries] = useState<Map<string, DictEntry> | null>(null)
   const [readColumns, setReadColumns] = useState<Column[] | null>(null)
+  // An inline nested_form tab has its OWN read query → the palette's Columns tab must offer THAT
+  // query's columns (not the parent screen's). Fetched separately when such a tab is selected.
+  const [nestedTabColumns, setNestedTabColumns] = useState<Column[] | null>(null)
   const [externalError, setExternalError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -705,6 +718,24 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     return () => { cancelled = true }
   }, [connector, readQuery])
 
+  // Columns for an INLINE nested_form tab's own read query — powers the palette's Columns tab when
+  // such a tab is selected (so the operator picks the nested query's columns, not the parent's).
+  // Reference-mode nested_forms inherit fields from the referenced screen, so they need no palette.
+  const nestedFormReadQuery = (tabType === 'nested_form' && !selTab?.form_screen && typeof selTab?.read_query === 'string')
+    ? (selTab.read_query as string) : ''
+  const nestedFormConnector = (typeof selTab?.connector === 'string' && selTab.connector.trim()
+    ? (selTab.connector as string) : connector)
+  useEffect(() => {
+    setNestedTabColumns(null)
+    if (!nestedFormReadQuery || !nestedFormConnector) return
+    let cancelled = false
+    api.get<QueryResult>(
+      `/api/sql/${encodeURIComponent(nestedFormConnector)}/${encodeURIComponent(nestedFormReadQuery)}?_limit=0`,
+    ).then((r) => { if (!cancelled) setNestedTabColumns(r.columns) })
+      .catch(() => { /* silent — the Columns tab just stays empty for this nested form */ })
+    return () => { cancelled = true }
+  }, [nestedFormConnector, nestedFormReadQuery])
+
   // ── canvas mutations ────────────────────────────────────────────────────────────────────
   const setDialog = useCallback((next: { title?: string; tabs?: Row[] } | null) => {
     if (!next || (!next.title && (!next.tabs || next.tabs.length === 0))) {
@@ -748,11 +779,16 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     if (tabType !== 'nested_form' && tabType !== 'nested_table') return []
     let nestedReadQuery: string | undefined
     let nestedConnector: string | undefined
-    if (tabType === 'nested_form') {
+    if (tabType === 'nested_form' && !selTab?.form_screen) {
+      // Inline nested_form — binds feed the tab's OWN read_query.
       nestedReadQuery = selTab?.read_query as string | undefined
       nestedConnector = (selTab?.connector as string | undefined) || connector
     } else {
-      const targetScreenId = selTab?.screen as string | undefined
+      // nested_table (``screen``) OR reference-mode nested_form (``form_screen``) — binds feed the
+      // read query of the referenced screen, resolved in the parent app first then anywhere.
+      const targetScreenId = (tabType === 'nested_form'
+        ? selTab?.form_screen
+        : selTab?.screen) as string | undefined
       if (!targetScreenId) return []
       // Look in the parent screen's app first, then fall back to scanning every app — the
       // target screen could legitimately live elsewhere (operator pointing the nested_table
@@ -903,19 +939,29 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       : all
     return filtered.sort((a, b) => a.id.localeCompare(b.id))
   }, [ddEntries, paletteQ])
+  // The Columns palette source: an inline nested_form's own query columns when such a tab is
+  // selected, else the parent screen's read-query columns.
+  const paletteColumns = nestedFormReadQuery ? nestedTabColumns : readColumns
   const colItems = useMemo(() => {
-    if (!readColumns) return [] as Column[]
+    if (!paletteColumns) return [] as Column[]
     const needle = paletteQ.trim().toLowerCase()
-    return needle ? readColumns.filter((c) => c.name.toLowerCase().includes(needle) || (c.label ?? '').toLowerCase().includes(needle)) : readColumns
-  }, [readColumns, paletteQ])
+    return needle ? paletteColumns.filter((c) => c.name.toLowerCase().includes(needle) || (c.label ?? '').toLowerCase().includes(needle)) : paletteColumns
+  }, [paletteColumns, paletteQ])
+
+  // Column names come back from the SQL result lowercased (Postgres folds unquoted identifiers),
+  // but every other surface in the app uses the UPPERCASE canonical name (the dictionary keys, the
+  // migrated Screen.columns, the save path's ``withUpper``). Normalise to upper here so the palette
+  // reads consistently AND a dictionary auto-link actually matches (its keys are uppercase).
+  const colFieldName = (c: Column) => c.name.toUpperCase()
 
   // Adding from each palette source. Dictionary: use the entry id as the field's name (matches
-  // v1's convention where dd_id == col_target). Columns: use the column name; if a matching DD
-  // entry exists, auto-link it via `dd` for free.
+  // v1's convention where dd_id == col_target). Columns: use the UPPERCASE column name; if a
+  // matching DD entry exists, auto-link it via `dd` for free.
   const addFromDict = (e: DictEntry) => addFieldFromName(e.id, e.id)
   const addFromCol = (c: Column) => {
-    const matchedDd = ddEntries?.get(c.name) ? c.name : null
-    addFieldFromName(c.name, matchedDd)
+    const name = colFieldName(c)
+    const matchedDd = ddEntries?.get(name) ? name : null
+    addFieldFromName(name, matchedDd)
   }
 
   // ── tabs strip helpers ───────────────────────────────────────────────────────────────────
@@ -960,7 +1006,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       }
       return m
     })()
-    const colsInconsistent = tabType !== 'nested_table' && cols < maxColspan
+    const colsInconsistent = tabHasOwnFields && cols < maxColspan
     // Auto-open when the tab carries per-tab actions (operators land on F0092 / F00926 in
     // NOMAJDE and need to find the workflow buttons; default-collapsed hid them).
     const hasTabActions = tabActions.length > 0
@@ -1015,7 +1061,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 />
               </Field>
             </div>
-            {tabType !== 'nested_table' && (
+            {tabHasOwnFields && (
               <div style={{ flex: 1 }}>
                 <Field label={t('settings.screens.visual.tabSettings.cols')}>
                   <Input
@@ -1037,40 +1083,65 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               </div>
             )}
           </Row>
-          {/* nested_form: connector + read/update/insert query pickers + ParamBinds. */}
+          {/* nested_form: a "Reuse a screen" picker chooses the mode. Pick a screen → REFERENCE
+              mode (inherits that screen's queries + fields; only the screen + binds are editable
+              here). Leave it "(inline)" → INLINE mode (configure connector + queries + the field
+              canvas on this tab). The picker's presence/absence IS the mode — no separate toggle. */}
           {tabType === 'nested_form' && (
             <>
-              <Row gap={10}>
-                <div style={{ flex: 1 }}>
-                  <Field label={t('settings.screens.visual.tabSettings.connector')}>
-                    <SearchSelect
-                      value={(selTab.connector as string | undefined) ?? ''}
-                      options={sqlConnectorOptions}
-                      onChange={(v) => patchTab({ connector: v && v !== connector ? v : null })}
-                      anyLabel={t('settings.screens.editor.connectorUseApp', { app: connector })}
-                      placeholder={connector}
-                    />
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label={`${t('settings.screens.editor.queries.read_query')} *`}>
-                    {renderTabQueryPicker('read_query', { required: true, anyLabel: undefined })}
-                  </Field>
-                </div>
-              </Row>
-              <Row gap={10}>
-                <div style={{ flex: 1 }}>
-                  <Field label={t('settings.screens.editor.queries.update_query')}>
-                    {renderTabQueryPicker('update_query', { required: false, anyLabel: t('common.none') })}
-                  </Field>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label={t('settings.screens.editor.queries.insert_query')}>
-                    {renderTabQueryPicker('insert_query', { required: false, anyLabel: t('common.none') })}
-                  </Field>
-                </div>
-              </Row>
-              {renderTabBindsEditor()}
+              <Field label={t('settings.screens.visual.tabSettings.reuseScreen', 'Reuse a screen')}>
+                <SearchSelect
+                  value={(selTab.form_screen as string | undefined) ?? ''}
+                  options={sameAppScreenOptions}
+                  onChange={(v) => patchTab({ form_screen: v || null })}
+                  anyLabel={t('settings.screens.visual.tabSettings.reuseScreenInline', '(inline — configure the form below)')}
+                  placeholder={t('settings.screens.visual.tabSettings.reuseScreenInline', '(inline — configure the form below)')}
+                />
+              </Field>
+              {nestedFormIsRef ? (
+                <>
+                  <Banner $tone="info">
+                    {t('settings.screens.visual.tabSettings.reuseScreenHint',
+                      'This tab reuses the "{{screen}}" screen\'s form (its queries + fields). Edit those on that screen; here you only bind the parent\'s values into it.',
+                      { screen: String(selTab.form_screen) })}
+                  </Banner>
+                  {renderTabBindsEditor()}
+                </>
+              ) : (
+                <>
+                  <Row gap={10}>
+                    <div style={{ flex: 1 }}>
+                      <Field label={t('settings.screens.visual.tabSettings.connector')}>
+                        <SearchSelect
+                          value={(selTab.connector as string | undefined) ?? ''}
+                          options={sqlConnectorOptions}
+                          onChange={(v) => patchTab({ connector: v && v !== connector ? v : null })}
+                          anyLabel={t('settings.screens.editor.connectorUseApp', { app: connector })}
+                          placeholder={connector}
+                        />
+                      </Field>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <Field label={`${t('settings.screens.editor.queries.read_query')} *`}>
+                        {renderTabQueryPicker('read_query', { required: true, anyLabel: undefined })}
+                      </Field>
+                    </div>
+                  </Row>
+                  <Row gap={10}>
+                    <div style={{ flex: 1 }}>
+                      <Field label={t('settings.screens.editor.queries.update_query')}>
+                        {renderTabQueryPicker('update_query', { required: false, anyLabel: t('common.none') })}
+                      </Field>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <Field label={t('settings.screens.editor.queries.insert_query')}>
+                        {renderTabQueryPicker('insert_query', { required: false, anyLabel: t('common.none') })}
+                      </Field>
+                    </div>
+                  </Row>
+                  {renderTabBindsEditor()}
+                </>
+              )}
             </>
           )}
           {/* nested_table: target screen + connector + ParamBinds. */}
@@ -1262,7 +1333,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               </PaletteItem>
             ))
           ) : (
-            readColumns == null ? (
+            paletteColumns == null ? (
               externalError
                 ? <Empty>{externalError}</Empty>
                 : <Empty>{t('common.loading')}</Empty>
@@ -1271,7 +1342,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             ) : colItems.map((c) => (
               <PaletteItem key={c.name} type="button" onClick={() => addFromCol(c)} title={c.type ?? ''}>
                 <Code2 size={11} />
-                <span className="lbl">{c.name}</span>
+                <span className="lbl">{colFieldName(c)}</span>
                 {c.label && <span className="sub">{c.label}</span>}
               </PaletteItem>
             ))
@@ -1408,10 +1479,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                     parent's APPS_ID via param_binds — previously invisible in the visual
                     builder, now front-and-centre. */}
                 {renderTabSettings()}
-                {/* Field grid — only meaningful for form and nested_form tabs (a nested_table
-                    has no own fields; its target screen carries them). For nested_table we
-                    just show a hint pointing at the Tab Settings panel above. */}
-                {tabType !== 'nested_table' && (
+                {/* Field grid — only meaningful for tabs with their OWN fields (form, or an
+                    INLINE nested_form). A nested_table and a REFERENCE-mode nested_form both carry
+                    no own fields (their target/referenced screen does), so we show a hint instead. */}
+                {tabHasOwnFields && (
                   <FieldGrid $cols={cols}>
                     {visibleFields.map(renderCard)}
                     <AddSlot onClick={async () => {
@@ -1428,12 +1499,17 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 {tabType === 'nested_table' && (
                   <Empty>{t('settings.screens.visual.tabSettings.nestedTableNoFields')}</Empty>
                 )}
+                {nestedFormIsRef && (
+                  <Empty>{t('settings.screens.visual.tabSettings.reuseScreenNoFields',
+                    'Fields + queries come from the reused "{{screen}}" screen. Edit them on that screen.',
+                    { screen: String(selTab.form_screen) })}</Empty>
+                )}
                 {/* Hidden fields — collapsible group at the bottom. Migrated v1 screens often
                     have 20+ hidden columns kept around so the _put / _post queries' :NAME binds
                     don't null out untouched columns; this lets the operator see them without
                     flooding the visible canvas. Click a card to edit; in the inspector flip
                     ``hidden`` off to promote it into the visible group above. */}
-                {tabType !== 'nested_table' && hiddenFields.length > 0 && (
+                {tabHasOwnFields && hiddenFields.length > 0 && (
                   <HiddenGroup>
                     <summary>
                       <ChevronRightIcon size={12} />

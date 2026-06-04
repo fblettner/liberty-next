@@ -147,6 +147,28 @@ def test_connector_used_only_by_call_api_action_not_unused() -> None:
     assert not any("'ais'" in m for m in unused)
 
 
+def test_nested_form_reference_marks_target_reachable_and_validates() -> None:
+    """A screen embedded only via a reference-mode nested_form (``form_screen``) is reached — not an
+    orphan; and a form_screen pointing at a missing screen is a broken reference."""
+    state = _state(
+        conns={"nomasx1": ["parent_get", "child_get"]},
+        screens={"nomasx1": {
+            "parent": {"connector": "nomasx1", "read_query": "parent_get", "dialog": {"tabs": [
+                {"id": "child", "type": "nested_form", "form_screen": "child",
+                 "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}]},
+                {"id": "ghost", "type": "nested_form", "form_screen": "no_such_screen"},
+            ]}},
+            "child": {"connector": "nomasx1", "read_query": "child_get"},
+        }},
+        menus={"nomasx1": {"items": [{"id": "u", "label": "Parent", "type": "screen", "target": "parent"}]}},
+    )
+    issues = check_integrity(state)
+    orphans = [i.message for i in issues if i.category == "Orphan screen"]
+    assert not any("nomasx1.child" in m for m in orphans)   # reached via the nested_form reference
+    broken = [i.message for i in issues if i.category == "Broken screen reference"]
+    assert any("no_such_screen" in m for m in broken)        # dangling reference flagged
+
+
 def test_broken_home_detected() -> None:
     state = _state(
         conns={"jde": ["f0004_get"]},

@@ -128,13 +128,20 @@ export interface FormTab extends TabCommon {
 }
 
 /** A child-record form embedded inline in this tab (v2's port of v1's "FormsDialog inside a
- *  FormsDialog"). The parent's PK is bound into the nested `read_query` via `param_binds`;
- *  the linked row (if any) populates the fields, and saving fires `update_query` (or
- *  `insert_query` when the row didn't exist yet). All on `connector` (default: parent's). */
+ *  FormsDialog"). Two modes:
+ *   • REFERENCE — `form_screen` set: reuse an existing screen's form (its read/update/insert
+ *     queries + fields). `read_query` / `fields` are inherited from that screen and left blank here.
+ *   • INLINE — `form_screen` blank: configure the queries + fields on this tab (a self-contained
+ *     form that can use queries the parent screen doesn't).
+ *  Either way the parent's PK is bound into the read query via `param_binds`; the linked row (if
+ *  any) populates the fields, and saving fires `update_query` (or `insert_query` when none existed). */
 export interface NestedFormTab extends TabCommon {
   type: 'nested_form'
   connector?: string | null
-  read_query: string
+  /** Reference mode: id of the screen whose form this tab reuses. Blank → inline mode. */
+  form_screen?: string | null
+  /** Inline mode read query. Blank in reference mode (inherited from `form_screen`). */
+  read_query?: string
   update_query?: string | null
   insert_query?: string | null
   cols?: number | null

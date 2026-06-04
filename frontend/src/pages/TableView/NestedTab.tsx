@@ -78,17 +78,64 @@ function effectiveConnector(tab: { connector?: string | null }, parentConnector:
 // nested layer: retrying re-fires update/insert with the current form state).
 
 export function NestedFormView({
-  tab, parentFormValues, parentConnector,
+  tab, parentFormValues, parentConnector, app,
 }: {
   tab: NestedFormTab
   /** Live parent form state — `source` binds read from here at fetch time. */
   parentFormValues: Row
   /** The parent screen's effective connector — used when `tab.connector` is blank. */
   parentConnector: string
+  /** The parent screen's app — used to fetch the referenced screen in reference mode
+   *  (GET /api/screens/{app}/{form_screen}). */
+  app: string
 }) {
   const { t } = useTranslation()
-  const connector = effectiveConnector(tab, parentConnector)
   const savers = useContext(NestedSaversContext)
+
+  // Reference mode: when ``tab.form_screen`` is set this tab reuses an existing screen's form —
+  // its read/update/insert queries + fields come from that screen, not from the tab. We fetch the
+  // referenced screen's detail and derive the effective config below. Inline mode (no form_screen)
+  // uses the tab's own queries + fields exactly as before.
+  const isRef = !!tab.form_screen
+  const [refScreen, setRefScreen] = useState<ScreenDetail | null>(null)
+  const [refError, setRefError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isRef || !tab.form_screen) { setRefScreen(null); return }
+    setRefError(null)
+    let cancelled = false
+    api.get<ScreenDetail>(`/api/screens/${encodeURIComponent(app)}/${encodeURIComponent(tab.form_screen)}`)
+      .then((s) => { if (!cancelled) setRefScreen(s) })
+      .catch((e) => { if (!cancelled) setRefError(e instanceof ApiError ? e.message : String(e)) })
+    return () => { cancelled = true }
+  }, [isRef, app, tab.form_screen])
+
+  // Effective form config — from the referenced screen (reference mode) or the tab (inline mode).
+  // The referenced screen's fields are, in priority order:
+  //   1. its dialog form-tab fields, flattened in display order (full field config — a referenced
+  //      screen's grouping into sub-tabs collapses into one inline grid here), else
+  //   2. its ``columns`` (Phase-3 single-source column hints) mapped to fields — covers screens
+  //      that drive their dialog from ``Screen.columns`` rather than explicit dialog fields.
+  const refFields = useMemo<NestedFormTab['fields']>(() => {
+    if (!refScreen) return []
+    const fromDialog: NestedFormTab['fields'] = []
+    for (const tb of refScreen.dialog?.tabs ?? []) {
+      if (Array.isArray((tb as { fields?: unknown }).fields)) fromDialog.push(...(tb as NestedFormTab).fields)
+    }
+    if (fromDialog.length) return fromDialog
+    return (refScreen.columns ?? []).map((c) => ({
+      name: c.name,
+      label: c.label,
+      format: c.format,
+      hidden: c.hidden,
+      rule: c.rule,
+    }))
+  }, [refScreen])
+  const inlineConnector = effectiveConnector(tab, parentConnector)
+  const connector = isRef ? (refScreen?.connector || inlineConnector) : inlineConnector
+  const effRead = (isRef ? refScreen?.read_query : tab.read_query) ?? ''
+  const effUpdate = (isRef ? refScreen?.update_query : tab.update_query) ?? null
+  const effInsert = (isRef ? refScreen?.insert_query : tab.insert_query) ?? null
+  const effFields = isRef ? refFields : tab.fields
 
   // Resolve bound params against the live parent state. JSON-stringified key drives the
   // fetch effect — re-running the read query when the parent's PK / context changes.
@@ -96,7 +143,9 @@ export function NestedFormView({
   const boundKey = useMemo(() => JSON.stringify(bound), [bound])
   // Skip the fetch entirely when no binds resolved (a not-yet-saved parent in "add" mode):
   // firing the read_query with no params would return every row in the underlying table.
-  const hasBinds = Object.keys(bound).length > 0
+  // In reference mode we also wait for the referenced screen's read_query to resolve — until then
+  // ``effRead`` is '' and firing a query with an empty name would 404.
+  const hasBinds = Object.keys(bound).length > 0 && !!effRead
 
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -117,12 +166,12 @@ export function NestedFormView({
       setResult(null); setError(null); isExistingRef.current = false; return
     }
     setLoading(true); setError(null)
-    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(tab.read_query)}${bindsToQuery(bound)}`)
+    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(effRead)}${bindsToQuery(bound)}`)
       .then((r) => setResult(r))
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boundKey is the stable serialization of bound
-  }, [connector, tab.read_query, boundKey, hasBinds])
+  }, [connector, effRead, boundKey, hasBinds])
 
   const colByName = useMemo(() => {
     const m = new Map<string, Column>()
@@ -143,7 +192,7 @@ export function NestedFormView({
     const seeded: Row = {}
     const original: Row = {}
     if (row) {
-      for (const f of tab.fields) {
+      for (const f of effFields) {
         const col = colByName.get(f.name.toLowerCase()) ?? null
         const v = valueFor(f.name, row)
         if (v !== undefined) original[f.name] = v
@@ -152,7 +201,7 @@ export function NestedFormView({
       }
     } else {
       // Add mode — seed FK columns from bind values + field defaults.
-      for (const f of tab.fields) {
+      for (const f of effFields) {
         const fromBind = bound[f.name] ?? bound[f.name.toUpperCase()]
         if (fromBind !== undefined) seeded[f.name] = fromBind
         else if (f.default != null && f.default !== '') seeded[f.name] = f.default
@@ -160,7 +209,7 @@ export function NestedFormView({
     }
     setFormValues(seeded)
     setSavedRow(original)
-  }, [result, tab.fields, colByName, bound])
+  }, [result, effFields, colByName, bound])
 
   const onFieldChange = useCallback((name: string, v: unknown) => {
     touchedRef.current = true
@@ -196,7 +245,7 @@ export function NestedFormView({
       // Collect values from visible fields only (a hidden field on save isn't written —
       // same convention the top-level dialog uses). Drop empty password values.
       const sent: Row = {}
-      for (const f of tab.fields) {
+      for (const f of effFields) {
         if (!fieldStateOf(f).visible) continue
         if (!(f.name in formValues)) continue
         const v = formValues[f.name]
@@ -210,7 +259,7 @@ export function NestedFormView({
         if (!(k in sent) && !(k.toLowerCase() in sent)) sent[k] = v
       }
 
-      const targetQuery = isExisting ? tab.update_query : tab.insert_query
+      const targetQuery = isExisting ? effUpdate : effInsert
       if (!targetQuery) {
         throw new Error(t(isExisting ? 'table.editNoUpdate' : 'table.editNoInsert'))
       }
@@ -233,9 +282,11 @@ export function NestedFormView({
     }
     savers.register(tab.id, save)
     return () => savers.unregister(tab.id)
-  }, [savers, tab.id, tab.fields, tab.update_query, tab.insert_query, formValues, savedRow, bound, colByName, connector, fieldStateOf, t])
+  }, [savers, tab.id, effFields, effUpdate, effInsert, formValues, savedRow, bound, colByName, connector, fieldStateOf, t])
 
   const cols = Math.max(1, tab.cols ?? 2)
+  if (refError) return <Banner $tone="error">{refError}</Banner>
+  if (isRef && !refScreen) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   if (!hasBinds) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (loading && !result) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
   if (error) return <Banner $tone="error">{error}</Banner>
@@ -246,7 +297,7 @@ export function NestedFormView({
     <div>
       {!isExistingRef.current && result && <Hint>{t('dialog.nested.noRecord')}</Hint>}
       <FieldGrid $cols={cols}>
-        {tab.fields
+        {effFields
           .filter((f) => fieldStateOf(f).visible)
           .map((f) => {
             const st = fieldStateOf(f)
@@ -262,7 +313,7 @@ export function NestedFormView({
               />
             )
           })}
-        {tab.fields.filter((f) => fieldStateOf(f).visible).length === 0 && (
+        {effFields.filter((f) => fieldStateOf(f).visible).length === 0 && (
           <CellWrap $span={cols}>
             <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
           </CellWrap>

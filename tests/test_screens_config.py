@@ -447,6 +447,48 @@ def test_parse_screens_infers_nested_tab_type_from_keys() -> None:
     assert tabs[2].screen == "settings_activity_log"
 
 
+def test_nested_form_reference_mode() -> None:
+    """A ``nested_form`` can REFERENCE an existing screen (``form_screen``) instead of inlining its
+    queries + fields. The reference is unambiguous across the type-stripped round-trip: a tab with
+    ``screen`` is a nested_table, one with ``form_screen`` (or ``read_query``) is a nested_form."""
+    raw = {
+        "screens": {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "settings_applications_get",
+                    "dialog": {
+                        "tabs": [
+                            # Reference mode: no type, no read_query — just ``form_screen``.
+                            {
+                                "id": "jd_edwards",
+                                "form_screen": "settings_jdedwards",
+                                "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    }
+    sf = parse_screens(raw)
+    tab = sf.screens["nomasx1"]["settings_applications"].dialog.tabs[0]  # type: ignore[union-attr]
+    assert isinstance(tab, NestedFormTab)
+    assert tab.form_screen == "settings_jdedwards"
+    assert tab.read_query == ""                       # inherited from the referenced screen at runtime
+    assert tab.param_binds[0].source == "APPS_ID"
+
+
+def test_nested_form_without_source_rejected() -> None:
+    """A nested_form with neither ``form_screen`` nor ``read_query`` would render empty — reject it."""
+    with pytest.raises(Exception):
+        parse_screens({
+            "screens": {"nomasx1": {"s": {
+                "read_query": "s_get",
+                "dialog": {"tabs": [{"id": "bad", "type": "nested_form", "fields": [{"name": "X"}]}]},
+            }}},
+        })
+
+
 def test_parse_screens_id_mismatch_rejected() -> None:
     """An explicit ``id`` field that doesn't match its dict key is a config bug — fail loudly."""
     with pytest.raises(Exception):
