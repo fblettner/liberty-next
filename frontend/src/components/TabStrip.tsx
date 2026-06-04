@@ -79,7 +79,7 @@ const CloseX = styled.span`
 export default function TabStrip() {
   const { t } = useTranslation()
   const { tabs, activeId, setActive, close } = useTabs()
-  const { menus } = useWorkspace()
+  const { menus, findScreenById } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
 
@@ -172,8 +172,12 @@ export default function TabStrip() {
             label = t('nav.monitoring', 'Monitoring')
           } else {
             const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'screen' | 'http' | 'dashboard'; connector: string; target: string })
-            label = hit?.label ?? tab.target
-            appLabel = hit?.appLabel
+            // A screen tab opened via a row-menu drill (not from a menu) won't match a menu leaf —
+            // fall back to the screen's own friendly label + its app, so the tab reads
+            // "nomasx1 / Users to rights" instead of the raw id "security_users_rights".
+            const scr = tab.kind === 'screen' ? findScreenById(tab.connector, tab.target) : null
+            label = hit?.label ?? scr?.label ?? tab.target
+            appLabel = hit?.appLabel ?? (scr ? scr.app : undefined)
           }
           const tip = tab.connector || tab.target ? `${label} — ${tab.connector}.${tab.target}` : label
           return (
