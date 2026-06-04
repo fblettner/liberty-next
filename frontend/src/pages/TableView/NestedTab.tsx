@@ -228,10 +228,18 @@ export function NestedFormView({
     const seeded: Row = {}
     const original: Row = {}
     if (row) {
+      // ``savedRow`` must carry the ORIGINAL of EVERY loaded column — not just the visible fields —
+      // so the migrated _put's WHERE ``:<KEY>_ORIGINAL`` binds resolve even when the key column
+      // isn't a form field. The main dialog gets this from its hidden key columns; a nested form
+      // has no Columns tab to add them, so capture the whole row here. Passwords excluded (never
+      // rebind the stored hash).
+      for (const [k, v] of Object.entries(row)) {
+        if (isPassword(colByName.get(k.toLowerCase()) ?? null)) continue
+        original[k] = v
+      }
       for (const f of effFields) {
         const col = colByName.get(f.name.toLowerCase()) ?? null
         const v = valueFor(f.name, row)
-        if (v !== undefined) original[f.name] = v
         if (isPassword(col)) continue
         if (v !== undefined) seeded[f.name] = v
       }
