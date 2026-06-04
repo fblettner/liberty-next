@@ -132,6 +132,21 @@ def test_navigate_to_query_marks_target_screen_reachable() -> None:
     assert not any("audit_trail_query" in m for m in orphans)
 
 
+def test_connector_used_only_by_call_api_action_not_unused() -> None:
+    """A connector referenced only by a screen action's `connector` (e.g. a call_api) is in use —
+    must not be flagged unused. (Regression: the check didn't walk screen actions.)"""
+    state = _state(
+        conns={"nomajde": ["f0092_get"], "ais": ["x_get"]},
+        screens={"nomajde": {"f0092": {
+            "connector": "nomajde", "read_query": "f0092_get",
+            "row_menu": [{"id": "ping", "type": "call_api", "connector": "ais", "endpoint": "x_get"}],
+        }}},
+        menus={"nomajde": {"items": [{"id": "u", "label": "F0092", "type": "screen", "target": "f0092"}]}},
+    )
+    unused = [i.message for i in check_integrity(state) if i.category == "Unused connector"]
+    assert not any("'ais'" in m for m in unused)
+
+
 def test_broken_home_detected() -> None:
     state = _state(
         conns={"jde": ["f0004_get"]},

@@ -298,12 +298,26 @@ def _check_homes(state: Any, idx: _Index, out: list[Issue]) -> None:
 def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
     """A connector referenced by nothing AND with no menu of its own is dead weight."""
     referenced: set[str] = set(idx.menu_items_by_app.keys())  # apps with a menu count as "used"
-    # screens
+    # screens — the screen's own connector PLUS every connector its dialog tabs, actions
+    # (run_query / call_api / navigate), and export sheets target (a connector used only by, say,
+    # a call_api action is still in use).
     screens = getattr(state, "screens", None)
     if screens is not None:
         for app, smap in (getattr(screens, "screens", None) or {}).items():
             for _sid, s in smap.items():
-                referenced.add(getattr(s, "connector", None) or app)
+                screen_conn = getattr(s, "connector", None) or app
+                referenced.add(screen_conn)
+                dialog = getattr(s, "dialog", None)
+                for tab in (getattr(dialog, "tabs", None) or []) if dialog is not None else []:
+                    if getattr(tab, "connector", None):
+                        referenced.add(tab.connector)
+                for _where, action in _iter_screen_actions(s):
+                    if getattr(action, "connector", None):
+                        referenced.add(action.connector)
+                export = getattr(s, "export", None)
+                for sheet in (getattr(export, "sheets", None) or []) if export is not None else []:
+                    if getattr(sheet, "connector", None):
+                        referenced.add(sheet.connector)
     # menus
     menus = getattr(state, "menus", None)
     if menus is not None:
