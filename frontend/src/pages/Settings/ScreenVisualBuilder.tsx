@@ -34,6 +34,7 @@ import { api, ApiError } from '../../api/client'
 import { Banner, Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import type { Column, QueryResult } from '../../types/connectors'
+import type { ScreenDetail } from '../../types/screens'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -761,6 +762,23 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     () => (readColumns ?? []).map((c) => ({ value: c.name, label: c.label || c.name, mono: c.name })),
     [readColumns],
   )
+  // The referenced screen's columns for a nested_table (or reference-mode nested_form) — lazy
+  // fetched so the param-binding TARGET picker can offer them. Sourcing from the screen's columns
+  // (not the query's declared :params) means no per-query param setup — the bind value narrows the
+  // nested read at runtime. Best-effort + reset per target.
+  const [nestedTargetScreenColumns, setNestedTargetScreenColumns] = useState<string[]>([])
+  useEffect(() => {
+    const targetId = tabType === 'nested_table'
+      ? (selTab?.screen as string | undefined)
+      : (tabType === 'nested_form' ? (selTab?.form_screen as string | undefined) : undefined)
+    setNestedTargetScreenColumns([])
+    if (!targetId) return
+    let cancelled = false
+    api.get<ScreenDetail>(`/api/screens/${encodeURIComponent(app)}/${encodeURIComponent(targetId)}`)
+      .then((s) => { if (!cancelled) setNestedTargetScreenColumns((s.columns ?? []).map((c) => c.name.toUpperCase())) })
+      .catch(() => { /* silent — the picker falls back to the query's declared params */ })
+    return () => { cancelled = true }
+  }, [tabType, selTab?.screen, selTab?.form_screen, app])
   // Target-param suggestions for the bind editor — the ``:NAME`` placeholders on the nested
   // query (the query the binds feed into). For ``nested_form`` that's the tab's own
   // ``read_query``; for ``nested_table`` it's the read query of the *target screen* (one
@@ -814,14 +832,19 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       // honouring an explicit tab override first (rare but valid), else the target screen's.
       nestedConnector = (selTab?.connector as string | undefined) || target.connector
     }
-    if (!nestedReadQuery || !nestedConnector) return []
-    const meta = (wsConnectors ?? []).find((c) => c.name === nestedConnector)
-    if (!meta || meta.type !== 'sql') return []
-    const q = meta.queries.find((qq) => qq.name === nestedReadQuery)
-    if (!q) return []
     const names = new Set<string>()
-    for (const p of q.params ?? []) names.add(p.name)
-    for (const b of q.bind_params ?? []) names.add(b)
+    const meta = nestedConnector ? (wsConnectors ?? []).find((c) => c.name === nestedConnector) : undefined
+    const q = (meta && meta.type === 'sql' && nestedReadQuery)
+      ? meta.queries.find((qq) => qq.name === nestedReadQuery)
+      : undefined
+    for (const p of q?.params ?? []) names.add(p.name)
+    for (const b of q?.bind_params ?? []) names.add(b)
+    // ALSO offer the target SCREEN's columns — for a nested_table (or reference-mode nested_form)
+    // the bind target is a column on the referenced screen, and its read query often declares no
+    // ``:params`` (it narrows via the passed bind value). Sourcing from the screen's columns means
+    // no per-query param setup. (Inline nested_forms have no screen, so they rely on the query's
+    // params above — same trade-off the operator already understands.)
+    for (const c of nestedTargetScreenColumns) names.add(c)
     // Drop the FilterPanel's operator-picker placeholders — they're paired with each
     // filter-flagged column as ``:COL`` + ``:COL_op``, set by the TableView's per-column
     // operator combobox at runtime, never by a static param_bind.
@@ -829,7 +852,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       .filter((n) => !n.endsWith('_op'))
       .sort()
       .map((n) => ({ value: n, label: n, mono: n }))
-  }, [tabType, selTab, wsScreens, wsConnectors, connector, app])
+  }, [tabType, selTab, wsScreens, wsConnectors, connector, app, nestedTargetScreenColumns])
   const updateFields = useCallback((nextFields: Row[]) => updateTab(tabIdx, { fields: nextFields }), [tabIdx, updateTab])
   const addFieldFromName = useCallback((fieldName: string, ddId?: string | null) => {
     if (!fieldName) return
