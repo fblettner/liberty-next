@@ -320,48 +320,91 @@ export default function ActionListEditor({
             placeholder={effectiveConnector}
           />
         </Field>
-        <Field label={targetLabel + ' *'}>
-          <Row gap={6} style={{ alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <SearchSelect
-                value={(a[targetKey] as string | undefined) ?? ''}
-                options={targetOpts}
-                onChange={(v) => onPatch({ [targetKey]: v || '' })}
-                placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                loading={!targetConnMeta}
-              />
-            </div>
-            {(aType === 'run_query' || aType === 'navigate') && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
-              <Button
-                $variant="ghost"
-                $size="sm"
-                onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
-                title={t('settings.editQuery.edit', 'Edit query')}
-              >
-                <Edit3 size={13} />
-              </Button>
-            )}
-          </Row>
-        </Field>
-        {/* navigate → optional target SCREEN. When several screens share the same read query, the
-            query alone is ambiguous (no columns / filters / auto_load apply); picking the screen
-            opens that exact one. Sourced from the target connector's designed screens. */}
-        {aType === 'navigate' && (() => {
-          const screenOpts: SearchSelectOption[] = ((wsScreens ?? {})[actionConn] ?? [])
-            .map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id }))
-            .sort((x, y) => String(x.mono).localeCompare(String(y.mono)))
-          return (
-            <Field label={t('settings.screens.action.navigateScreen', 'Target screen (optional)')}>
-              <SearchSelect
-                value={(a.screen as string | undefined) ?? ''}
-                options={screenOpts}
-                onChange={(v) => onPatch({ screen: v || null })}
-                anyLabel={t('settings.screens.action.navigateScreenAny', 'Open the query directly (no specific screen)')}
-                placeholder={t('common.pick')}
-              />
+        {aType === 'navigate'
+          ? renderNavigateTarget(a, onPatch, { actionConn, targetConnMeta, targetOpts })
+          : (
+            <Field label={targetLabel + ' *'}>
+              <Row gap={6} style={{ alignItems: 'center' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <SearchSelect
+                    value={(a[targetKey] as string | undefined) ?? ''}
+                    options={targetOpts}
+                    onChange={(v) => onPatch({ [targetKey]: v || '' })}
+                    placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+                    loading={!targetConnMeta}
+                  />
+                </div>
+                {aType === 'run_query' && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
+                  <Button
+                    $variant="ghost"
+                    $size="sm"
+                    onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
+                    title={t('settings.editQuery.edit', 'Edit query')}
+                  >
+                    <Edit3 size={13} />
+                  </Button>
+                )}
+              </Row>
             </Field>
-          )
-        })()}
+          )}
+      </>
+    )
+  }
+
+  // navigate's target: a Query | Screen type toggle + one dropdown that swaps source by choice
+  // (mirrors the menu editor — a screen target opens that exact screen; a query opens /sql + the
+  // runtime resolves the screen by read query). Exactly one of `to` / `screen` is set.
+  const renderNavigateTarget = (
+    a: Row,
+    onPatch: (patch: Row) => void,
+    ctx: { actionConn: string; targetConnMeta: { type: string } | undefined; targetOpts: SearchSelectOption[] },
+  ): ReactNode => {
+    const navType: 'query' | 'screen' = typeof a.screen === 'string' ? 'screen' : 'query'
+    const screenOpts: SearchSelectOption[] = ((wsScreens ?? {})[ctx.actionConn] ?? [])
+      .map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id }))
+      .sort((x, y) => String(x.mono).localeCompare(String(y.mono)))
+    return (
+      <>
+        <Field label={t('settings.screens.action.navTargetType', 'Target type')}>
+          <SearchSelect
+            value={navType}
+            options={[
+              { value: 'query', label: t('settings.screens.action.navTargetQuery', 'Query') },
+              { value: 'screen', label: t('settings.screens.action.navTargetScreen', 'Screen') },
+            ]}
+            onChange={(v) => onPatch(v === 'screen' ? { screen: '', to: null } : { to: '', screen: null })}
+          />
+        </Field>
+        {navType === 'screen' ? (
+          <Field label={t('settings.screens.action.navTargetScreen', 'Screen') + ' *'}>
+            <SearchSelect
+              value={(a.screen as string | undefined) ?? ''}
+              options={screenOpts}
+              onChange={(v) => onPatch({ screen: v || '' })}
+              placeholder={ctx.targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+              loading={!ctx.targetConnMeta}
+            />
+          </Field>
+        ) : (
+          <Field label={t('settings.screens.action.navTargetQuery', 'Query') + ' *'}>
+            <Row gap={6} style={{ alignItems: 'center' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <SearchSelect
+                  value={(a.to as string | undefined) ?? ''}
+                  options={ctx.targetOpts}
+                  onChange={(v) => onPatch({ to: v || '' })}
+                  placeholder={ctx.targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+                  loading={!ctx.targetConnMeta}
+                />
+              </div>
+              {typeof a.to === 'string' && a.to && ctx.actionConn && (
+                <Button $variant="ghost" $size="sm" onClick={() => onEditQuery(ctx.actionConn, String(a.to))} title={t('settings.editQuery.edit', 'Edit query')}>
+                  <Edit3 size={13} />
+                </Button>
+              )}
+            </Row>
+          </Field>
+        )}
       </>
     )
   }

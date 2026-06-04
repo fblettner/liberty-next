@@ -486,7 +486,7 @@ async function runOneAction(
         if (deps.navigate) {
           const target = a.connector || deps.defaultConnector
           const bound = resolveBinds(a.param_binds, ctx, formCtx)
-          deps.navigate(a.to, target, bound, a.screen)
+          deps.navigate(a.to ?? '', target, bound, a.screen)
           // The route change will unmount the firing surface — abort the rest of the chain.
           return { abort: true }
         }

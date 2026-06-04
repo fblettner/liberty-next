@@ -419,25 +419,37 @@ class NavigateAction(_PromptableMixin, _ActionBase):
     "usr_id"}]}`` and ends up opening ``/sql/nomasx1/roles_get?USR_ID=<the-clicked-user-id>``."""
 
     type: Literal["navigate"] = "navigate"
-    to: str = Field(description="Target query name (the destination URL is ``/sql/<connector>/<to>``).")
+    to: str | None = Field(
+        default=None,
+        description=(
+            "Target query name (opens ``/sql/<connector>/<to>``). Required UNLESS ``screen`` is set "
+            "— a screen target carries its own read query, so ``to`` is unused there."
+        ),
+    )
     connector: str | None = Field(
         default=None,
-        description="Connector hosting the target query. Blank uses the firing screen's connector.",
+        description="Connector hosting the target. Blank uses the firing screen's connector.",
     )
     screen: str | None = Field(
         default=None,
         description=(
-            "Optional target screen id. When set, the drill opens that specific designed screen "
-            "(``/screen/<connector>/<screen>``) so ITS columns / filters / dialog apply — use it "
-            "to pick one screen when several share the same read query. Blank → open the query "
-            "directly (``/sql/<connector>/<to>``), where the runtime resolves a screen by read "
-            "query (ambiguous if more than one screen uses it, so none is applied)."
+            "Target screen id. When set, the drill opens that specific designed screen "
+            "(``/screen/<connector>/<screen>``) so ITS columns / filters / dialog apply — pick a "
+            "screen when several share the same read query. Set EITHER ``screen`` OR ``to``: a "
+            "bare ``to`` opens the query, where the runtime resolves a screen by read query "
+            "(ambiguous if more than one screen uses it, so none is applied)."
         ),
     )
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description="Forwarded as ``?<param>=<value>`` query-string entries. The target's filter panel seeds from these.",
     )
+
+    @model_validator(mode="after")
+    def _check_target(self) -> NavigateAction:
+        if not self.to and not self.screen:
+            raise ValueError(f"navigate action {self.id!r}: needs a target — set `to` (a query) or `screen` (a screen id)")
+        return self
 
 
 class SetFieldAction(_ActionBase):

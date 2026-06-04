@@ -211,9 +211,9 @@ export type Action =
     })
   | (ActionCommon & PromptableAction & {
       type: 'navigate'
-      to: string             // target query name on `connector`
+      to?: string | null     // target query name on `connector` (unset when `screen` is set)
       connector?: string | null  // blank → the firing screen's effective connector
-      screen?: string | null  // optional target screen id → opens /screen/<connector>/<screen>
+      screen?: string | null  // target screen id → opens /screen/<connector>/<screen>
       param_binds?: ParamBind[]
     })
   | (ActionCommon & {
