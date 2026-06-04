@@ -118,9 +118,10 @@ def _build_index(state: Any) -> _Index:
 
     dashboard_ids: set[str] = set()
     if dashboards is not None:
-        for _scope, dmap in (getattr(dashboards, "dashboards", None) or {}).items():
+        for scope, dmap in (getattr(dashboards, "dashboards", None) or {}).items():
             if isinstance(dmap, dict):
-                dashboard_ids.update(dmap.keys())
+                # A dashboard's public id (what menus target) is the qualified ``<scope>.<id>``.
+                dashboard_ids.update(f"{scope}.{did}" for did in dmap.keys())
 
     charts_by_scope: dict[str, set[str]] = {}
     if charts is not None:

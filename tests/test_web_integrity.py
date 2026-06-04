@@ -30,12 +30,20 @@ class _Registry:
         return self._conns[n]
 
 
-def _state(*, conns, screens=None, menus=None, homes=None):
+def _dashboards(spec: dict[str, list[str]]):
+    # {scope: [id, ...]} → a fake DashboardsFile-shaped object (only .dashboards is read here).
+    return SimpleNamespace(dashboards={
+        scope: {did: SimpleNamespace(connector=None, widgets=[]) for did in ids}
+        for scope, ids in spec.items()
+    })
+
+
+def _state(*, conns, screens=None, menus=None, homes=None, dashboards=None):
     return SimpleNamespace(
         connectors=_Registry(conns, homes=homes),
         screens=parse_screens({"screens": screens}) if screens is not None else None,
         menus=parse_menus({"menus": menus}) if menus is not None else None,
-        dashboards=None,
+        dashboards=_dashboards(dashboards) if dashboards is not None else None,
         charts=None,
     )
 
@@ -87,6 +95,23 @@ def test_unused_connector_and_orphan_screen_warn() -> None:
     cats = _cats(issues)
     assert any(c[0] == "warning" and c[1] == "Unused connector" and "ais_backup" in c[2] for c in cats)
     assert any(c[0] == "warning" and c[1] == "Orphan screen" and "lonely" in c[2] for c in cats)
+
+
+def test_dashboard_menu_target_uses_qualified_id() -> None:
+    """A `dashboard` menu leaf targets the QUALIFIED `<scope>.<id>` — an existing one must not be
+    flagged, a missing one must be. (Regression: the index used bare ids → false positives.)"""
+    state = _state(
+        conns={"app": ["x_get"]},
+        dashboards={"app": ["overview"]},
+        menus={"app": {"items": [
+            {"id": "ok", "label": "Overview", "type": "dashboard", "target": "app.overview"},
+            {"id": "bad", "label": "Ghost", "type": "dashboard", "target": "app.ghost"},
+        ]}},
+    )
+    issues = check_integrity(state)
+    msgs = [i.message for i in issues if i.category == "Broken menu target"]
+    assert not any("app.overview" in m for m in msgs)   # exists → no issue
+    assert any("app.ghost" in m for m in msgs)          # missing → flagged
 
 
 def test_broken_home_detected() -> None:
