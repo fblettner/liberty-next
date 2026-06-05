@@ -67,6 +67,7 @@ from liberty.web.rename import (
     rename_connector,
     rename_dictionary_entry,
     rename_lookup,
+    rename_action,
     rename_query,
     rename_screen,
     rename_screen_app,
@@ -2621,10 +2622,16 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 screens_path=Path(settings.screens.config_path),
                 menus_path=Path(settings.menus.config_path),
             )
+        elif body.kind == "action":
+            result = rename_action(
+                body.old_name, body.new_name,
+                actions_path=Path(settings.actions.config_path),
+                screens_path=Path(settings.screens.config_path),
+            )
         else:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen, screen_app, dictionary_entry, query, table",
+                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen, screen_app, dictionary_entry, query, table, action",
             )
     except RenameError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

@@ -53,6 +53,7 @@ from liberty.charts.config import parse_charts
 from liberty.connectors.config import parse_connectors
 from liberty.connectors.dictionary import parse_dictionary
 from liberty.dashboards.config import parse_dashboards
+from liberty.actions.config import parse_actions
 from liberty.menus.config import parse_menus
 from liberty.screens.config import parse_screens
 
@@ -710,6 +711,73 @@ def rename_screen(
     screens_path.write_text(_dump_doc("screens", scr_doc), encoding="utf-8")
     if menu_n and menu_doc is not None:
         menus_path.write_text(_dump_doc("menus", menu_doc), encoding="utf-8")
+    return result
+
+
+# ── shared action (id) rename ────────────────────────────────────────────────────────────────
+
+
+def _rename_action_refs(node: Any, *, old: str, new: str) -> int:
+    """Walk a screens / actions subtree and rewrite every ``call_action`` reference to shared
+    action *old* → *new* (``type = "call_action"`` + ``ref == old``)."""
+    n = 0
+    if isinstance(node, dict):
+        if node.get("type") == "call_action" and node.get("ref") == old:
+            node["ref"] = new
+            n += 1
+        for v in node.values():
+            n += _rename_action_refs(v, old=old, new=new)
+    elif isinstance(node, list):
+        for v in node:
+            n += _rename_action_refs(v, old=old, new=new)
+    return n
+
+
+def rename_action(
+    old: str,
+    new: str,
+    *,
+    actions_path: Path,
+    screens_path: Path | None = None,
+    **_ignored: Any,
+) -> RenameResult:
+    """Rename a shared action ``[actions.<old>]`` → ``<new>`` + every ``call_action`` reference to
+    it — in screens.toml (any hook / tab / row menu) and in other shared actions that compose it.
+    Without this, renaming an action orphaned every screen that called it."""
+    if old == new:
+        raise RenameError(f"old and new action ids are identical ({old!r}) — nothing to do")
+    validate_identifier(new, what="new action id")
+
+    result = RenameResult(kind="action", old_name=old, new_name=new)
+
+    if not actions_path.exists() or not actions_path.read_text(encoding="utf-8").strip():
+        raise RenameError(f"actions file {actions_path} is missing or empty")
+    act_doc = _load_doc("actions", actions_path)
+    actions = act_doc.get("actions") or {}
+    if not isinstance(actions, dict) or old not in actions:
+        raise RenameError(f"shared action {old!r} not found in {actions_path}")
+    if new in actions:
+        raise RenameError(f"shared action {new!r} already exists — pick another name")
+    # Rename the key (rebuild to preserve order) + rewrite call_action refs in OTHER actions.
+    renamed = {(new if k == old else k): v for k, v in actions.items()}
+    act_doc["actions"] = renamed
+    n = 1 + _rename_action_refs(renamed, old=old, new=new)
+    result.files[str(actions_path)] = n
+    _validate("actions", act_doc, parse_actions, actions_path)
+
+    # screens.toml — call_action refs across every screen.
+    scr_doc = None
+    scr_n = 0
+    if screens_path is not None and screens_path.exists() and screens_path.read_text(encoding="utf-8").strip():
+        scr_doc = _load_doc("screens", screens_path)
+        scr_n = _rename_action_refs(scr_doc.get("screens") or {}, old=old, new=new)
+        result.files[str(screens_path)] = scr_n
+        if scr_n:
+            _validate("screens", scr_doc, parse_screens, screens_path)
+
+    actions_path.write_text(_dump_doc("actions", act_doc), encoding="utf-8")
+    if scr_n and scr_doc is not None:
+        screens_path.write_text(_dump_doc("screens", scr_doc), encoding="utf-8")
     return result
 
 

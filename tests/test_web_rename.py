@@ -36,6 +36,7 @@ from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
 from liberty.web.rename import (
     RenameError,
+    rename_action,
     rename_connector,
     rename_dictionary_entry,
     rename_lookup,
@@ -1138,3 +1139,51 @@ def test_rename_query_is_connector_scoped(tmp_path: Path) -> None:
     s = tomllib.loads(scr.read_text())["screens"]
     assert s["foo"]["a"]["read_query"] == "list_all"
     assert s["bar"]["b"]["read_query"] == "list_get"                    # bar's ref untouched
+
+
+def test_rename_action_rewrites_key_and_screen_refs(tmp_path: Path) -> None:
+    """Renaming a shared action rewrites its actions.toml key AND every screen's call_action.ref
+    (+ refs in other shared actions). Without this, a rename would orphan every caller."""
+    a_path = tmp_path / "actions.toml"
+    s_path = tmp_path / "screens.toml"
+    _write(a_path, """
+        [actions.create_role]
+        label = "Create role"
+        [[actions.create_role.steps]]
+        id = "s"
+        type = "run_query"
+        connector = "jde"
+        query = "f0092_post"
+
+        [actions.wrapper]
+        [[actions.wrapper.steps]]
+        id = "w"
+        type = "call_action"
+        ref = "create_role"
+    """)
+    _write(s_path, """
+        [screens.jde.f1]
+        read_query = "g"
+        [[screens.jde.f1.on_insert]]
+        id = "a"
+        type = "call_action"
+        ref = "create_role"
+    """)
+    result = rename_action("create_role", "make_role", actions_path=a_path, screens_path=s_path)
+    assert result.files[str(a_path)] == 2          # the key + the wrapper's call_action ref
+    assert result.files[str(s_path)] == 1          # the screen's call_action ref
+    a = tomllib.loads(a_path.read_text())
+    s = tomllib.loads(s_path.read_text())
+    assert "create_role" not in a["actions"] and "make_role" in a["actions"]
+    assert a["actions"]["wrapper"]["steps"][0]["ref"] == "make_role"
+    assert s["screens"]["jde"]["f1"]["on_insert"][0]["ref"] == "make_role"
+
+
+def test_rename_action_rejects_existing_target(tmp_path: Path) -> None:
+    a_path = tmp_path / "actions.toml"
+    _write(a_path, """
+        [actions.a]
+        [actions.b]
+    """)
+    with pytest.raises(RenameError, match="already exists"):
+        rename_action("a", "b", actions_path=a_path, screens_path=None)

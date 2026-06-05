@@ -4,13 +4,14 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Plus, Trash2, Copy, GitBranch, Link2 } from 'lucide-react'
+import { Plus, Trash2, Copy, GitBranch, GitMerge, Edit3, Link2 } from 'lucide-react'
 import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { validateId } from '../../services/idValidator'
 import ActionDesignerModal from './ActionDesignerModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 
 type Row = Record<string, unknown>
 
@@ -35,6 +36,7 @@ export default function ActionsBuilder() {
   const [doc, setDoc] = useState<Record<string, Row> | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -88,6 +90,29 @@ export default function ActionsBuilder() {
     await persist({ ...doc, [newId]: JSON.parse(JSON.stringify(doc[id])) as Row })
   }
 
+  const renameAction = async (id: string) => {
+    if (!doc) return
+    const next = (await modals.prompt({
+      title: t('settings.rename.button', 'Rename'),
+      message: t('settings.actions.renamePrompt', 'New id for "{{id}}":', { id }),
+      defaultValue: id,
+      submitLabel: t('settings.rename.button', 'Rename'),
+      validate: (v) => validateId({ kind: 'action', proposed: v, existing: Object.keys(doc), mode: 'rename', currentName: id }),
+    }))?.trim()
+    if (!next || next === id) return
+    setBusy(true); setError(null)
+    try {
+      // Cross-file rename — rewrites the actions.toml key + every screen's call_action.ref.
+      const res = await api.post<{ total_refs?: number }>('/admin/config/rename', { kind: 'action', old_name: id, new_name: next })
+      await api.post('/admin/reload')
+      await load()
+      setError(null)
+      void res
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+
   const deleteAction = async (id: string) => {
     if (!doc) return
     const ok = await modals.confirm({
@@ -138,6 +163,13 @@ export default function ActionsBuilder() {
                   onClick={() => setUsagesTarget({ kind: 'action', name: id, label: `shared action ${id}` })}>
                   <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
                 </Button>
+                <Button $variant="ghost" $size="sm" disabled={busy}
+                  onClick={() => setDepsSeeds([{ kind: 'action', name: id, label: `shared action ${id}` }])}>
+                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                </Button>
+                <Button $variant="ghost" $size="sm" disabled={busy} onClick={() => void renameAction(id)}>
+                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
+                </Button>
                 <Button $variant="ghost" $size="sm" disabled={busy} onClick={() => void cloneAction(id)}>
                   <Copy size={13} /> {t('common.clone', 'Clone')}
                 </Button>
@@ -153,6 +185,7 @@ export default function ActionsBuilder() {
 
       {editing && <ActionDesignerModal actionId={editing} onClose={() => setEditing(null)} onSaved={() => void load()} />}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+      {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
     </>
   )
 }
