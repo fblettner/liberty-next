@@ -195,6 +195,33 @@ def test_form_tab_embedded_nested_form_validated_and_reachable() -> None:
     assert not any("child_screen" in m for m in orphans)            # embedded form_screen reachable
 
 
+def test_column_group_queries_and_refs_validated() -> None:
+    """A column_group's write queries must exist, and every column.group must reference a defined
+    group (the 1:1 related-table write-back feature)."""
+    state = _state(
+        conns={"nomajde": ["f0092_get", "f0092_put", "f0101_put"]},
+        screens={"nomajde": {"f0092": {
+            "connector": "nomajde", "read_query": "f0092_get", "update_query": "f0092_put",
+            "columns": [
+                {"name": "ULUSER", "key": True},
+                {"name": "ABALPH", "group": "addr"},
+                {"name": "BOGUS", "group": "ghost"},
+            ],
+            "column_groups": [
+                {"id": "addr", "update_query": "f0101_put", "param_binds": [{"param": "ABAN8", "source": "ULUSER"}]},
+                {"id": "bad", "update_query": "no_such_put"},
+            ],
+        }}},
+        menus={"nomajde": {"items": [{"id": "u", "label": "F0092", "type": "screen", "target": "f0092"}]}},
+    )
+    issues = check_integrity(state)
+    missing = [i.message for i in issues if i.category == "Missing query"]
+    assert any("no_such_put" in m for m in missing)                 # group's bad query flagged
+    broken = [i.message for i in issues if i.category == "Broken column group"]
+    assert any("ghost" in m for m in broken)                        # column → undefined group flagged
+    assert not any("'addr'" in m for m in broken)                   # valid group not flagged
+
+
 def test_broken_home_detected() -> None:
     state = _state(
         conns={"jde": ["f0004_get"]},

@@ -21,9 +21,10 @@ import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeade
 import { useSio, useLockState } from '../../sio/SioContext'
 import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
-import type { Action, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { evalConditions, originalKeys, type Row, withUpper } from './dialogHelpers'
+import { evalConditions, type Row, withUpper } from './dialogHelpers'
+import { saveScreenRow } from './saveScreenRow'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
@@ -627,29 +628,29 @@ export function ScreenDialog({
       // overwrite. The migrated _put queries reference :PASSWORD only in their SET clause; not
       // sending it means the column keeps its current DB value. (When the user *did* type a new
       // password, `sent` carries it and overrides.)
-      const baseSaved: Row = effMode === 'edit'
-        ? Object.fromEntries(Object.entries(savedRow).filter(([k]) => {
-            const c = colByName.get(k.toLowerCase()) ?? null
-            return !isPassword(c)
-          }))
-        : {}
-      const params = effMode === 'edit'
-        ? { ...baseSaved, ...sent, ...originalKeys(baseSaved) }
-        : sent
-      const writeResp = await api.post<{ rowcount?: number; statement_type?: string; resolved_binds?: Record<string, unknown> }>(
-        `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(targetQuery)}`,
-        { params: withUpper(params) },
-      )
+      // Write the main row + any related 1:1 column groups in one pass — the multi-table split
+      // lives in the shared saveScreenRow helper (also used by the grid). Captures the server-
+      // assigned SEQUENCE PK on add.
+      const { rowcount: mainRowcount, resolvedBinds } = await saveScreenRow({
+        connector,
+        mode: effMode,
+        sent,
+        savedRow,
+        columns,
+        columnGroups: (screen.column_groups ?? []) as ColumnGroup[],
+        mainUpdateQuery: screen.update_query,
+        mainInsertQuery: screen.insert_query,
+        isPassword: (name) => isPassword(colByName.get(name.toLowerCase()) ?? null),
+      })
       // Values the server assigned for binds we left empty — the SEQUENCE/auto-ID PK on an ADD.
-      // Merge them into the parent state we hand to the nested savers so a child insert can bind
-      // to the parent's freshly-assigned PK in this same Save (the "save both at once" flow).
-      const parentExtra: Row = { ...sent, ...(writeResp?.resolved_binds ?? {}) }
+      // Merge into the parent state handed to nested savers so a child insert can bind the new PK.
+      const parentExtra: Row = { ...sent, ...resolvedBinds }
       // No-op UPDATE — same pathology as the no-op DELETE above: the SQL succeeded but
       // the WHERE clause matched 0 rows (most often a CHAR-padding mismatch covered by
       // the pool's ``trim_strings`` flag, sometimes a stale primary-key value or the
       // wrong update_query). INSERT can't be 0-row at this layer (the SQL would have
       // raised), so only edit mode is checked.
-      if (effMode === 'edit' && writeResp?.rowcount === 0) {
+      if (effMode === 'edit' && mainRowcount === 0) {
         setSaving(false)
         setError(t('dialog.updateNoMatch', {
           defaultValue: 'Update affected 0 rows — the row may have already been modified or removed. Try refreshing.',

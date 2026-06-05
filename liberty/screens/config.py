@@ -923,6 +923,35 @@ class ScreenTreeview(BaseModel):
     )
 
 
+class ColumnGroup(BaseModel):
+    """A 1:1 related table whose columns are edited INLINE on this screen (grid + dialog) and written
+    back to the related table on Save — the lightweight alternative to a nested form when it's a
+    one-to-one relationship.
+
+    The main ``read_query`` JOINs the related table, so its columns come back in the same result and
+    render like any other column (no per-row fetch — works in the grid). Each column assigned to this
+    group via ``ColumnHint.group`` is split out at Save time and written through this group's queries,
+    linked to the parent row by ``param_binds``. Update-vs-insert is decided per row by whether the
+    group's ``key_columns`` came back non-null from the JOIN (a LEFT-JOIN miss ⇒ no related row yet ⇒
+    INSERT, else UPDATE)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Stable id within the screen — referenced by ``ColumnHint.group``.")
+    label: str | None = Field(default=None, description="Display label for the group (editor only).")
+    connector: str | None = Field(default=None, description="Connector the write queries live on; blank → the screen's.")
+    update_query: str = Field(description="Writes edits to the related row.")
+    insert_query: str | None = Field(default=None, description="Writes a new related row when the JOIN found none.")
+    key_columns: list[str] = Field(
+        default_factory=list,
+        description="The related table's key columns AS THEY APPEAR IN THE JOINED RESULT — non-null ⇒ the row exists ⇒ UPDATE, else INSERT.",
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Link the parent row into the related write: ``source`` reads a main column, ``param`` is the related query's :placeholder (the FK).",
+    )
+
+
 class Screen(BaseModel):
     """A screen — list + dialog. Keyed by ``id`` within the app's screens map."""
 
@@ -952,6 +981,15 @@ class Screen(BaseModel):
             "both the grid view and the dialog form. Add one entry per column the read query "
             "returns that needs explicit configuration; columns not listed here keep the query's "
             "discovered name and the dictionary's defaults."
+        ),
+    )
+    column_groups: list[ColumnGroup] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Columns"},
+        description=(
+            "Related 1:1 tables whose columns are edited inline on this screen and written back on "
+            "Save. The read query JOINs them; a column joins a group via ``ColumnHint.group``. Use "
+            "this for one-to-one related tables (a nested form/table tab is the choice for 1:N)."
         ),
     )
     auto_load: bool = Field(default=False, description="Run the read query as soon as the screen opens, with no Run click.")

@@ -297,6 +297,15 @@ class ColumnHint(BaseModel):
             "row's current application id."
         ),
     )
+    group: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "When set, this column lives on a RELATED 1:1 table (it comes from the read query's "
+            "JOIN) and is written back through the screen's matching ``column_groups`` entry on Save "
+            "— not the main update query. Blank → the column writes to the main table."
+        ),
+    )
 
     @property
     def visible_when_rules(self) -> list[VisibleWhen]:

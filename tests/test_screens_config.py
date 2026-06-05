@@ -507,6 +507,33 @@ def test_form_tab_embeds_nested_forms() -> None:
     assert nf.param_binds[0].source == "ULUSER"
 
 
+def test_column_groups_and_column_group_ref() -> None:
+    """A screen can declare related 1:1 write-back ``column_groups``; a column joins one via its
+    ``group`` field. (The read query JOINs the related table; the save splits writes per table.)"""
+    sf = parse_screens({
+        "screens": {"nomajde": {"f0092": {
+            "read_query": "f0092_get", "update_query": "f0092_put",
+            "columns": [
+                {"name": "ULUSER", "key": True},
+                {"name": "ABALPH", "group": "addr"},
+            ],
+            "column_groups": [{
+                "id": "addr", "label": "Address Book",
+                "update_query": "f0101_put", "insert_query": "f0101_post",
+                "key_columns": ["ABAN8"],
+                "param_binds": [{"param": "ABAN8", "source": "ULUSER"}],
+            }],
+        }}},
+    })
+    s = sf.screens["nomajde"]["f0092"]
+    assert [c.name for c in s.columns if c.group == "addr"] == ["ABALPH"]
+    grp = s.column_groups[0]
+    assert grp.id == "addr" and grp.update_query == "f0101_put" and grp.key_columns == ["ABAN8"]
+    assert grp.param_binds[0].source == "ULUSER"
+    # A column with no group writes to the main table.
+    assert next(c for c in s.columns if c.name == "ULUSER").group is None
+
+
 def test_nested_form_without_source_rejected() -> None:
     """A nested_form with neither ``form_screen`` nor ``read_query`` would render empty — reject it."""
     with pytest.raises(Exception):

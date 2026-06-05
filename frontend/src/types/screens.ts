@@ -427,6 +427,24 @@ export interface ScreenDetail extends ScreenListItem {
    *  set when ``Screen.columns`` is non-empty; when absent the TableView falls back to the SQL
    *  endpoint's resolved columns from the query level. */
   columns?: Column[]
+  /** Related 1:1 tables whose columns are edited inline on this screen and written back on Save.
+   *  A column joins a group via its ``group`` field; the save path splits the row's writes per
+   *  table using these definitions. */
+  column_groups?: ColumnGroup[]
+}
+
+/** A 1:1 related-table write-back target. The main read query JOINs the related table so its
+ *  columns render inline (grid + dialog); on Save the columns tagged with this group's id are
+ *  written through ``update_query`` / ``insert_query``, linked to the parent row by ``param_binds``.
+ *  Update-vs-insert is decided by whether ``key_columns`` came back non-null from the JOIN. */
+export interface ColumnGroup {
+  id: string
+  label?: string | null
+  connector?: string | null
+  update_query: string
+  insert_query?: string | null
+  key_columns?: string[]
+  param_binds?: ParamBind[]
 }
 
 /** `GET /api/screens` reply — apps → list view. */

@@ -587,6 +587,9 @@ class Column:
     format: str | None = None
     rule: dict[str, Any] | None = None
     dd: str | None = None
+    # The related-table write-back group this column belongs to (``ColumnHint.group``). Surfaced so
+    # the save path can split a row's writes per table; ``None`` ⇒ writes to the main table.
+    group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "type": self.type}
@@ -612,6 +615,8 @@ class Column:
             d["format"] = self.format
         if self.rule is not None:
             d["rule"] = self.rule
+        if self.group is not None:
+            d["group"] = self.group
         return d
 
 
@@ -1911,6 +1916,7 @@ def _resolve_hint(
         # this to cross-map columns by dictionary key (`APPS_ID` matches USR_APPS_ID / RLU_APPS_ID
         # / CFD_APPS_ID across queries).
         dd=h.dd if h.dd else None,
+        group=h.group or None,
     )
 
 

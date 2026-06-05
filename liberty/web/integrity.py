@@ -200,6 +200,25 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
             if chart_id and chart_id not in idx.charts_by_scope.get(conn, set()):
                 out.append(Issue("error", "Broken chart reference",
                                  f"{app}.{sid} · chart_id '{chart_id}' does not exist on {conn}", link))
+            # column groups (related 1:1 write-back tables) — validate their write queries + that
+            # every column's ``group`` references a real group.
+            group_ids = set()
+            for grp in getattr(s, "column_groups", None) or []:
+                gid = getattr(grp, "id", None)
+                if gid:
+                    group_ids.add(gid)
+                g_conn = getattr(grp, "connector", None) or conn
+                g_sql = idx.sql_by_conn.get(g_conn, set())
+                for attr in ("update_query", "insert_query"):
+                    q = getattr(grp, attr, None)
+                    if q and g_conn in idx.conn_names and q not in g_sql:
+                        out.append(Issue("error", "Missing query",
+                                         f"{app}.{sid} · column group '{gid}' {attr} '{q}' does not exist on {g_conn}", link))
+            for col in getattr(s, "columns", None) or []:
+                cg = getattr(col, "group", None)
+                if cg and cg not in group_ids:
+                    out.append(Issue("error", "Broken column group",
+                                     f"{app}.{sid} · column '{getattr(col, 'name', '?')}' group '{cg}' is not defined in column_groups", link))
             # dialog tabs — nested_table screen + nested_form (reference screen OR inline queries)
             dialog = getattr(s, "dialog", None)
             for tab in (getattr(dialog, "tabs", None) or []) if dialog is not None else []:

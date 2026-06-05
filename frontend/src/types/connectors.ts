@@ -132,6 +132,10 @@ export interface Column {
    *  filters can cross-map columns by dd — one `APPS_ID` filter targets USR_APPS_ID,
    *  RLU_APPS_ID, CFD_APPS_ID, etc. across queries. Absent when the operator never set `dd`. */
   dd?: string
+  /** The related-table write-back group this column belongs to (Screen.column_groups[].id). When
+   *  set, the column comes from the read query's JOIN and is written back to the related table on
+   *  Save (not the main update query). Absent ⇒ writes to the main table. */
+  group?: string | null
 }
 
 export interface QueryResult {
