@@ -25,6 +25,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, AsyncIterator
 
 _log = logging.getLogger(__name__)
@@ -442,6 +443,24 @@ def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> 
         elif kind == "number":
             out[k] = 0
     return out
+
+
+def _jsonable_number(v: Any) -> Any:
+    """Serialize a driver ``Decimal`` (Postgres ``numeric`` / ``decimal``, Oracle ``NUMBER``) as a
+    JSON **number** instead of the string ``default=str`` / FastAPI's ``jsonable_encoder`` would
+    emit. Without this a ``numeric`` column comes back as ``"123"`` and a chart / numeric consumer
+    breaks — which is why queries grew ``CAST(col AS INTEGER)`` workarounds. Now they don't need to:
+
+      * integral decimal (``Decimal('123')`` / ``Decimal('123.00')``) → ``int`` — lossless;
+      * fractional (``Decimal('1.5')``) → ``float`` — JS / charts use floats anyway;
+      * non-finite (``NaN`` / ``Infinity``) → ``str`` — not representable as a JSON number.
+
+    Everything else (str / int / float / date / bytes / None) passes through untouched."""
+    if isinstance(v, Decimal):
+        if not v.is_finite():
+            return str(v)
+        return int(v) if v == v.to_integral_value() else float(v)
+    return v
 
 
 def _pad_char_binds(
@@ -1319,7 +1338,8 @@ class SQLConnector:
                     if len(rows) >= cap:
                         truncated = True
                         break
-                    rows.append(dict(row))
+                    # Decimal → JSON number (so numeric columns don't serialize as strings).
+                    rows.append({k: _jsonable_number(v) for k, v in row.items()})
             # Oracle CHAR/NCHAR columns are space-padded to their declared width; the trailing
             # spaces leak into UI labels and form fields and make editing painful (cursor lands
             # after the padding, search/sort sees "Test    " ≠ "Test"). v1 stripped automatically;
@@ -1595,7 +1615,7 @@ class SQLConnector:
                     if sent + len(out) >= cap:
                         truncated = True
                         break
-                    row = dict(raw)
+                    row = {k: _jsonable_number(v) for k, v in raw.items()}   # Decimal → JSON number
                     if _trim:
                         for k, v in row.items():
                             if isinstance(v, str):
@@ -1663,7 +1683,8 @@ class SQLConnector:
                     if len(rows) >= cap:
                         truncated = True
                         break
-                    rows.append(dict(row))
+                    # Decimal → JSON number (so numeric columns don't serialize as strings).
+                    rows.append({k: _jsonable_number(v) for k, v in row.items()})
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name, query="<test-run>", statement_type=stmt_type,

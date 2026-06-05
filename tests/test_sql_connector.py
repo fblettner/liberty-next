@@ -1659,3 +1659,23 @@ def test_filter_predicate_trims_text_column_under_trim_strings() -> None:
         "lib_flt.DTSY = CAST(:DTSY AS VARCHAR(4000))"
     # numeric column is never trimmed, even with trim on
     assert _build_filter_predicate("AN8", "integer", "equals", "postgresql", trim_text=True) == "lib_flt.AN8 = :AN8"
+
+
+def test_jsonable_number_coerces_decimal_to_json_number() -> None:
+    """Postgres ``numeric``/Oracle ``NUMBER`` come back from the driver as ``Decimal``. The result
+    layer serializes them as JSON numbers (not the string ``default=str`` would emit), so a
+    ``numeric`` column returns ``123`` not ``"123"`` and queries don't need ``CAST(col AS INTEGER)``.
+    Integral → int (lossless), fractional → float, non-finite → str, everything else untouched."""
+    from decimal import Decimal
+    from liberty.connectors.sql import _jsonable_number
+
+    assert _jsonable_number(Decimal("123")) == 123 and isinstance(_jsonable_number(Decimal("123")), int)
+    assert _jsonable_number(Decimal("123.00")) == 123 and isinstance(_jsonable_number(Decimal("123.00")), int)
+    assert _jsonable_number(Decimal("-7")) == -7
+    v = _jsonable_number(Decimal("1.5"))
+    assert v == 1.5 and isinstance(v, float)
+    # non-finite isn't a JSON number → string
+    assert _jsonable_number(Decimal("NaN")) == "NaN"
+    # non-Decimal passes through unchanged (identity for str / int / float / None)
+    for x in ("abc", 42, 3.14, None):
+        assert _jsonable_number(x) is x
