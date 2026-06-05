@@ -146,6 +146,19 @@ const PathPanel = styled.div`
   box-shadow: ${shadow.lg}; overflow: hidden; display: flex; flex-direction: column;
   max-height: min(360px, 60vh); min-width: 260px;
 `
+// Filter box pinned at the top of the panel — type to narrow a long candidate list (JDE tables
+// carry 30+ columns). Sits outside the scroll area so it stays visible while the list scrolls.
+const PathSearch = styled.div`
+  flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
+  & input {
+    display: block; width: 100%; box-sizing: border-box; border: none; background: transparent; outline: none;
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+    &::placeholder { color: ${colors.text.muted}; }
+  }
+`
+// Scrollable list region — without this the panel's ``overflow: hidden`` clipped any list taller
+// than its max-height with no way to reach the rest. ``min-height: 0`` unlocks flex shrink.
+const PathList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto;`
 const PathGroup = styled.div`
   padding: 4px 0;
   & + & { border-top: 1px solid ${colors.border}; }
@@ -179,6 +192,10 @@ function SourcePathInput({
   const { t } = useTranslation()
   const wrapRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Filter text for the suggestion popover (separate from the field ``value`` — typing here
+  // narrows the list without touching what gets bound). Reset every time the popover opens.
+  const [query, setQuery] = useState('')
   // Separate ref for the portaled popover — outside-click check must accept clicks inside
   // it too (the portal renders into ``document.body``, so it isn't a descendant of wrapRef).
   const panelRef = useRef<HTMLDivElement>(null)
@@ -204,6 +221,14 @@ function SourcePathInput({
       window.removeEventListener('resize', updatePosition)
       window.removeEventListener('scroll', updatePosition, true)
     }
+  }, [open])
+
+  // Clear the filter + focus the search box each time the popover opens, so the operator can
+  // start typing immediately to narrow a long list.
+  useEffect(() => {
+    if (!open) { setQuery(''); return }
+    const id = requestAnimationFrame(() => searchRef.current?.focus())
+    return () => cancelAnimationFrame(id)
   }, [open])
 
   // Outside-click + Escape — same lifecycle SearchSelect uses, kept inline so this
@@ -264,11 +289,15 @@ function SourcePathInput({
     setOpen(false)
   }
 
-  // Group the options by their `group` prop when available — matches the chainContext
-  // candidate shape (inputs / step_results / loop). Falls back to a single ungrouped list
-  // for callers that pass flat options.
+  // Narrow by the filter text (case-insensitive, matches the path OR its label), then group by
+  // the `group` prop when present — matches the chainContext candidate shape (inputs /
+  // step_results / loop). Falls back to a single ungrouped list for callers that pass flat options.
+  const q = query.trim().toLowerCase()
+  const visible = q
+    ? options.filter((o) => o.value.toLowerCase().includes(q) || (o.label ?? '').toLowerCase().includes(q))
+    : options
   const grouped: Map<string | undefined, SearchSelectOption[]> = new Map()
-  for (const o of options) {
+  for (const o of visible) {
     const k = o.group
     const arr = grouped.get(k) ?? []
     arr.push(o)
@@ -300,27 +329,44 @@ function SourcePathInput({
         <PathPanel
           ref={panelRef}
           style={{ left: panelPos.left, top: panelPos.top, width: panelPos.width }}
-          onMouseDown={(e) => e.preventDefault() /* keep input focus */}
         >
-          {options.length === 0 ? (
-            <PathEmpty>{t('settings.screens.paramBinds.pickerEmpty', 'No suggestions — type the path directly.')}</PathEmpty>
-          ) : (
-            Array.from(grouped.entries()).map(([groupKey, items]) => (
-              <PathGroup key={groupKey ?? '_default'}>
-                {groupKey && <PathGroupLabel>{groupKey.replace(/_/g, ' ')}</PathGroupLabel>}
-                {items.map((opt) => (
-                  <PathItem
-                    key={opt.value}
-                    type="button"
-                    onClick={() => insertAtCursor(opt.value)}
-                  >
-                    <span className="mono">{opt.value}</span>
-                    {opt.label && opt.label !== opt.value && <span className="hint">{opt.label}</span>}
-                  </PathItem>
-                ))}
-              </PathGroup>
-            ))
+          {options.length > 0 && (
+            <PathSearch>
+              <input
+                ref={searchRef}
+                value={query}
+                placeholder={t('settings.screens.paramBinds.pickerFilter', 'Filter suggestions…')}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter picks the first match — fast path for a filtered list of one.
+                  if (e.key === 'Enter' && visible.length > 0) { e.preventDefault(); insertAtCursor(visible[0].value) }
+                }}
+              />
+            </PathSearch>
           )}
+          <PathList onMouseDown={(e) => e.preventDefault() /* keep focus while clicking an item */}>
+            {options.length === 0 ? (
+              <PathEmpty>{t('settings.screens.paramBinds.pickerEmpty', 'No suggestions — type the path directly.')}</PathEmpty>
+            ) : visible.length === 0 ? (
+              <PathEmpty>{t('settings.screens.paramBinds.pickerNoMatch', 'No match — type the path directly.')}</PathEmpty>
+            ) : (
+              Array.from(grouped.entries()).map(([groupKey, items]) => (
+                <PathGroup key={groupKey ?? '_default'}>
+                  {groupKey && <PathGroupLabel>{groupKey.replace(/_/g, ' ')}</PathGroupLabel>}
+                  {items.map((opt) => (
+                    <PathItem
+                      key={opt.value}
+                      type="button"
+                      onClick={() => insertAtCursor(opt.value)}
+                    >
+                      <span className="mono">{opt.value}</span>
+                      {opt.label && opt.label !== opt.value && <span className="hint">{opt.label}</span>}
+                    </PathItem>
+                  ))}
+                </PathGroup>
+              ))
+            )}
+          </PathList>
         </PathPanel>,
         document.body,
       )}
