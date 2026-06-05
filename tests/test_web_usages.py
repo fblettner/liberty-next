@@ -14,13 +14,15 @@ from liberty.screens.config import parse_screens
 from liberty.web.usages import find_usages
 
 
-def _state(*, menus: dict | None = None, screens: dict | None = None) -> SimpleNamespace:
+def _state(*, menus: dict | None = None, screens: dict | None = None, actions: dict | None = None) -> SimpleNamespace:
+    from liberty.actions import parse_actions
     return SimpleNamespace(
         menus=parse_menus({"menus": menus}) if menus is not None else None,
         screens=parse_screens({"screens": screens}) if screens is not None else None,
         connectors=None,
         charts=None,
         dashboards=None,
+        actions=parse_actions({"actions": actions}) if actions is not None else None,
     )
 
 
@@ -78,3 +80,22 @@ def test_menu_target_query_respects_connector() -> None:
     state = _state(menus=menus, screens=_SCREENS)
     usages = find_usages(state, kind="query", name="f0004_get", scope="jde")
     assert not any(u.type == "menu_target_query" for u in usages)
+
+
+def test_action_usages_finds_screen_call_action_and_composing_action() -> None:
+    """find_usages(kind="action") surfaces both a screen's `call_action` and another shared action
+    whose steps call it (composition) — what the Actions builder's Find-usages reads."""
+    state = _state(
+        screens={"jde": {"f1": {"connector": "jde", "read_query": "g",
+                                 "on_insert": [{"id": "a", "type": "call_action", "ref": "create_role"}]}}},
+        actions={
+            "create_role": {"steps": []},
+            "wrapper": {"steps": [{"id": "w", "type": "call_action", "ref": "create_role"}]},
+        },
+    )
+    usages = find_usages(state, kind="action", name="create_role")
+    labels = [u.label for u in usages]
+    assert any("jde.f1" in lbl and "on_insert" in lbl for lbl in labels)
+    assert any("wrapper" in lbl for lbl in labels)
+    # an unreferenced action has no usages (safe to delete)
+    assert find_usages(state, kind="action", name="wrapper") == []

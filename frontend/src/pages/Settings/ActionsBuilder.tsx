@@ -9,16 +9,22 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Plus, Trash2, Save } from 'lucide-react'
+import { Plus, Trash2, Save, Copy, GitBranch } from 'lucide-react'
 import {
-  Banner, Button, Field, FrameworkEnumsContext, Input, useModals,
+  Banner, Button, Field, FrameworkEnumsContext, Input, SearchSelect, useModals,
   type FrameworkEnums, type JsonSchema,
 } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { validateId } from '../../services/idValidator'
 import ActionTreeView from './ActionTreeView'
+import { builtinSourceOptions } from './actionCandidates'
+import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import type { ActionPath } from './actionPath'
+
+// Predefined runtime values an operator can pick for a param default (instead of remembering the
+// ``#LOGIN_USER#`` syntax). ``allowCustom`` keeps literals (Y / QPRINT / 0) typeable.
+const BUILTIN_VALUE_OPTIONS = builtinSourceOptions()
 
 type Row = Record<string, unknown>
 
@@ -65,6 +71,7 @@ export default function ActionsBuilder() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [savedNote, setSavedNote] = useState<string | null>(null)
+  const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -110,6 +117,25 @@ export default function ActionsBuilder() {
     if (!id) return
     setDoc({ ...doc, actions: { ...actions, [id]: { label: '', steps: [] } } })
     setSelectedId(id); setPath(null); setDirty(true); setSavedNote(null)
+  }
+
+  const cloneAction = async (id: string) => {
+    if (!doc) return
+    const existing = Object.keys(actions)
+    const newId = (await modals.prompt({
+      title: t('settings.actions.clone', 'Clone shared action'),
+      message: t('settings.actions.clonePrompt', 'New id for the copy of "{{id}}":', { id }),
+      defaultValue: `${id}_copy`,
+      placeholder: 'snake_case',
+      submitLabel: t('common.clone', 'Clone'),
+      validate: (v) => v === id
+        ? { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+        : validateId({ kind: 'action', proposed: v, existing, mode: 'clone' }),
+    }))?.trim()
+    if (!newId) return
+    const copy = JSON.parse(JSON.stringify(actions[id])) as Row   // deep copy; refs to queries/plugins are by name, safe to share
+    setDoc({ ...doc, actions: { ...actions, [newId]: copy } })
+    setSelectedId(newId); setPath(null); setDirty(true); setSavedNote(null)
   }
 
   const removeAction = async (id: string) => {
@@ -192,11 +218,13 @@ export default function ActionsBuilder() {
                   <Input value={typeof p.name === 'string' ? p.name : ''}
                     placeholder={t('settings.actions.paramName', 'name')}
                     onChange={(e) => { const next = params.slice(); next[i] = { ...next[i], name: e.target.value }; setParams(next) }} />
-                  <Input value={typeof p.default === 'string' ? p.default : ''}
-                    placeholder={t('settings.actions.paramDefault', 'default — literal or #LOGIN_USER#')}
-                    onChange={(e) => {
+                  <SearchSelect value={typeof p.default === 'string' ? p.default : ''}
+                    options={BUILTIN_VALUE_OPTIONS} allowCustom
+                    anyLabel={t('common.none', '(none)')}
+                    placeholder={t('settings.actions.paramDefault', 'default — literal or built-in')}
+                    onChange={(v) => {
                       const next = params.slice(); const cur = { ...next[i] }
-                      if (e.target.value) cur.default = e.target.value; else delete cur.default
+                      if (v) cur.default = v; else delete cur.default
                       next[i] = cur; setParams(next)
                     }} />
                   <SmallRemove type="button" onClick={() => { const next = params.slice(); next.splice(i, 1); setParams(next) }}><Trash2 size={14} /></SmallRemove>
@@ -206,7 +234,13 @@ export default function ActionsBuilder() {
                 <Plus size={13} /> {t('settings.actions.addParam', 'Add input')}
               </Button>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({ kind: 'action', name: selectedId, label: `shared action ${selectedId}` })}>
+                <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+              </Button>
+              <Button $variant="ghost" $size="sm" onClick={() => void cloneAction(selectedId)}>
+                <Copy size={13} /> {t('common.clone', 'Clone')}
+              </Button>
               <Button $variant="danger" $size="sm" onClick={() => void removeAction(selectedId)}>
                 <Trash2 size={13} /> {t('settings.actions.delete', 'Delete')}
               </Button>
@@ -228,6 +262,7 @@ export default function ActionsBuilder() {
           <Sub>{t('settings.actions.empty', 'No shared actions yet — add one to get started.')}</Sub>
         )}
       </Layout>
+      {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
     </FrameworkEnumsContext.Provider>
   )
 }

@@ -23,6 +23,13 @@ import {
   Button, Input, SearchSelect, Stack, type SearchSelectOption,
 } from '../../common'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
+import { BUILTIN_SOURCE_PATHS } from '../TableView/actionRunner'
+
+// Predefined runtime values for the source-mode default fallback (resolves the same built-ins a
+// source does) — a picker so operators don't memorise the ``#…#`` syntax.
+const BUILTIN_DEFAULT_OPTIONS: SearchSelectOption[] = BUILTIN_SOURCE_PATHS.map((b) => ({
+  value: b.value, label: b.label, mono: b.value,
+}))
 
 /** One ParamBind shape — matches :class:`liberty.connectors.config.ParamBind`. */
 export interface ParamBind {
@@ -526,12 +533,15 @@ export default function ParamBindList({
             {sourceMode && typeof b.default === 'string' && (
               <DefaultRow>
                 <span className="arrow" title={t('settings.screens.paramBinds.defaultTip')}>↳</span>
-                <Input
+                {/* The fallback resolves built-ins (``#LOGIN_USER#`` / ``#SYSDATE#`` / …) just like
+                    a source — offer them in a picker so the operator doesn't memorise the syntax;
+                    ``allowCustom`` keeps a plain literal (``0`` / ``Y``) typeable. */}
+                <SearchSelect
                   value={b.default}
-                  onChange={(e) => updateBind(i, { default: e.target.value })}
+                  onChange={(v) => updateBind(i, { default: v })}
+                  options={BUILTIN_DEFAULT_OPTIONS}
+                  allowCustom
                   placeholder={t('settings.screens.paramBinds.defaultPlaceholder')}
-                  title={t('settings.screens.paramBinds.defaultTip')}
-                  autoFocus={b.default === ''}
                 />
                 <ClearDefaultBtn
                   type="button"

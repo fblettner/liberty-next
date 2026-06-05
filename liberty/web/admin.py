@@ -747,13 +747,16 @@ async def get_actions_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     ``id`` is the map key, so it's dropped from each body (re-injected by parse_actions on save)."""
     path = Path(request.app.state.settings.actions.config_path)
     cfg = load_actions(path)
-    return {
-        "path": str(path),
-        "actions": {
-            aid: a.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id"})
-            for aid, a in cfg.actions.items()
-        },
-    }
+    out: dict[str, Any] = {}
+    for aid, a in cfg.actions.items():
+        d = a.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id"})
+        # Re-inject the Action ``type`` discriminator on every step (+ nested then/else/steps) —
+        # exclude_defaults strips it, and the editor's union parser needs it to render each step
+        # as its real variant (else an `if` reaches the builder typeless and renders as run_query).
+        for s_dict, s_model in zip(d.get("steps", []), a.steps):
+            _reinject_action_type(s_dict, s_model)
+        out[aid] = d
+    return {"path": str(path), "actions": out}
 
 
 class ActionsBody(BaseModel):

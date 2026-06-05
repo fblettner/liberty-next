@@ -779,6 +779,34 @@ def _iter_dict_sections(dictionary: Any) -> Any:
 # ── dispatcher ───────────────────────────────────────────────────────────────────────────
 
 
+def _find_action_usages(state: Any, name: str) -> list[Usage]:
+    """Every reference to shared action *name* — a screen's ``call_action`` (any hook / tab / row
+    menu) and another shared action whose steps call it (composition)."""
+    out: list[Usage] = []
+    screens = getattr(state, "screens", None)
+    if screens is not None:
+        for app, smap in (getattr(screens, "screens", None) or {}).items():
+            for sid, screen in (smap or {}).items():
+                for where, action in _iter_screen_actions(screen):
+                    if getattr(action, "type", None) == "call_action" and getattr(action, "ref", None) == name:
+                        out.append(Usage(
+                            type="action_ref",
+                            label=f"{app}.{sid} · {where}",
+                            deep_link=_screen_deep_link(app, sid),
+                        ))
+    actions = getattr(state, "actions", None)
+    if actions is not None:
+        for aid, a in (getattr(actions, "actions", None) or {}).items():
+            if aid == name:
+                continue
+            if any(
+                getattr(act, "type", None) == "call_action" and getattr(act, "ref", None) == name
+                for act in _iter_actions(getattr(a, "steps", None) or [])
+            ):
+                out.append(Usage(type="action_ref", label=f"action · {aid}", deep_link={"editor": "actions", "action": aid}))
+    return out
+
+
 def find_usages(state: Any, *, kind: str, name: str, scope: str | None = None) -> list[Usage]:
     """Main entry point. Returns every reference to ``(kind, name, scope)`` across the
     loaded configs. Empty list when nothing references it (useful: that means safe to
@@ -811,4 +839,6 @@ def find_usages(state: Any, *, kind: str, name: str, scope: str | None = None) -
         if not scope:
             raise ValueError("chart lookups require scope = the connector name")
         return _find_chart_usages(state, scope, name)
+    if kind == "action":
+        return _find_action_usages(state, name)
     raise ValueError(f"unknown kind: {kind!r}")
