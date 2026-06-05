@@ -19,6 +19,7 @@ import { Copy, Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } fr
 import { ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import { useSio, useLockState } from '../../sio/SioContext'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
 import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
@@ -112,6 +113,7 @@ export function ScreenDialog({
   nested?: boolean
 }) {
   const { t } = useTranslation()
+  const { sharedActions } = useWorkspace()
   const dlg = screen.dialog
   // Filter tabs by mode (v1's tab_disable_add/_edit → hide_on_add/_edit). An empty list after the
   // filter shouldn't happen in practice but we surface it as a banner instead of crashing.
@@ -385,6 +387,7 @@ export function ScreenDialog({
     const result = await runChain(actions, baseCtx, baseCtx, {
       defaultConnector: connector,
       requestPrompt,
+      sharedActions: sharedActions ?? undefined,
     })
     // :class:`ReturnAction` / :class:`SetFieldAction` write into the caller's form — apply
     // those before returning so the dialog reflects the workflow's output. Match by
@@ -408,7 +411,7 @@ export function ScreenDialog({
       refresh: result.refresh,
       error: result.error,
     }
-  }, [connector, requestPrompt])
+  }, [connector, requestPrompt, sharedActions])
 
   // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —
   // the v1 model attaches actions either to *events* (``ly_evt_cpt`` → ``dialog.on_save``,

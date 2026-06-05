@@ -221,6 +221,24 @@ export type Action =
       bind_result?: boolean
     })
   | (ActionCommon & PromptableAction & {
+      /** Invoke a server-side plugin callable (`module:function` — the same entry points nomaflow
+       *  runs as python job steps). `param_binds` become its keyword args (coerced server-side to
+       *  each param's annotated type). With `bind_result`, the callable's return lands under this
+       *  step's `id` as `{rows, first_row, success}`. */
+      type: 'call_plugin'
+      callable: string
+      param_binds?: ParamBind[]
+      bind_result?: boolean
+    })
+  | (ActionCommon & {
+      /** Run a SHARED action (defined once in actions.toml) by id. The runner inlines its steps
+       *  and runs them against the firing context; `param_binds` seed the shared action's
+       *  `INPUT.<param>` so its steps can read caller-provided values. */
+      type: 'call_action'
+      ref: string
+      param_binds?: ParamBind[]
+    })
+  | (ActionCommon & PromptableAction & {
       type: 'navigate'
       to?: string | null     // target query name on `connector` (unset when `screen` is set)
       connector?: string | null  // blank → the firing screen's effective connector
@@ -447,6 +465,26 @@ export interface ColumnGroup {
   delete_query?: string | null
   key_columns?: string[]
   param_binds?: ParamBind[]
+}
+
+/** One reusable shared action (actions.toml `[actions.<id>]`) — a named chain referenced by a
+ *  screen's `call_action`. The same typed steps a screen uses; served by `GET /api/actions`. */
+/** A shared action's declared input — bound at the call site (`call_action.param_binds`), read by
+ *  steps as `INPUT.<name>`. The `default` lives here (used when the caller doesn't bind it). */
+export interface ActionParam {
+  name: string
+  label?: string | null
+  default?: string | null
+  description?: string | null
+}
+
+export interface SharedAction {
+  id: string
+  label?: string | null
+  description?: string | null
+  params?: ActionParam[]
+  prompt_fields?: PromptField[]
+  steps?: Action[]
 }
 
 /** `GET /api/screens` reply — apps → list view. */

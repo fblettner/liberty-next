@@ -26,8 +26,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  ChevronDown, ChevronRight, CornerDownLeft, Edit3, FileText, GitBranch, LayoutList, Layers,
-  Plus, Repeat, Trash2, Zap,
+  Boxes, ChevronDown, ChevronRight, CornerDownLeft, Edit3, FileText, GitBranch, LayoutList, Layers,
+  Link2, Plus, Repeat, Trash2, Zap,
 } from 'lucide-react'
 import {
   Button, Field, Row, SchemaForm, SearchSelect, Stack, useModals,
@@ -125,6 +125,8 @@ function variantIcon(type: ActionType): ReactNode {
   switch (type) {
     case 'run_query': return <Zap size={13} />
     case 'call_api': return <Layers size={13} />
+    case 'call_plugin': return <Boxes size={13} />
+    case 'call_action': return <Link2 size={13} />
     case 'navigate': return <CornerDownLeft size={13} />
     case 'if': return <GitBranch size={13} />
     case 'loop': return <Repeat size={13} />
@@ -152,6 +154,17 @@ function summarize(a: Row): string {
     const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
     const captureHint = a.bind_result ? ' · captures result' : ''
     return `→ ${a.connector ?? '?'}/${a.endpoint ?? '?'}${bindHint}${captureHint}`
+  }
+  if (t === 'call_plugin') {
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
+    const captureHint = a.bind_result ? ' · captures result' : ''
+    return `⚙ ${a.callable ?? '?'}${bindHint}${captureHint}`
+  }
+  if (t === 'call_action') {
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
+    return `↪ ${a.ref ?? '?'}${bindHint}`
   }
   if (t === 'navigate') {
     const conn = a.connector ? String(a.connector) : '<screen connector>'
@@ -251,6 +264,46 @@ export default function ActionTreeView({
     () => (wsConnectors ?? []).filter((c) => c.type === 'api').map((c) => ({ value: c.name, label: c.name, mono: c.name })),
     [wsConnectors],
   )
+  // Plugin callables for the ``call_plugin`` picker — the discovered ``j_*`` catalog (same one the
+  // Job Designer reads), fetched once. ``allowCustom`` on the picker lets the operator type a
+  // callable the AST walk didn't surface. Best-effort: a failure just leaves the dropdown empty.
+  const [pluginCallableOptions, setPluginCallableOptions] = useState<SearchSelectOption[]>([])
+  const [pluginCallablesLoading, setPluginCallablesLoading] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setPluginCallablesLoading(true)
+    api.get<{ callables: { callable: string; module: string; name: string; docstring: string | null }[] }>('/api/plugins/callables')
+      .then((r) => {
+        if (cancelled) return
+        setPluginCallableOptions((r.callables ?? []).map((c) => ({
+          value: c.callable, label: c.docstring || c.callable, mono: c.callable,
+        })))
+      })
+      .catch(() => { /* leave empty; picker stays freeform */ })
+      .finally(() => { if (!cancelled) setPluginCallablesLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+  // Shared actions for the ``call_action`` ref picker + the per-ref declared params (so the bind
+  // editor offers the action's INPUT names as bind targets). actions.toml, via /api/actions.
+  const [sharedActionOptions, setSharedActionOptions] = useState<SearchSelectOption[]>([])
+  const [sharedActionParams, setSharedActionParams] = useState<Record<string, SearchSelectOption[]>>({})
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ actions: { id: string; label?: string | null; description?: string | null; params?: { name: string; label?: string | null; description?: string | null }[] }[] }>('/api/actions')
+      .then((r) => {
+        if (cancelled) return
+        setSharedActionOptions((r.actions ?? []).map((a) => ({
+          value: a.id, label: a.label || a.description || a.id, mono: a.id,
+        })))
+        const pmap: Record<string, SearchSelectOption[]> = {}
+        for (const a of r.actions ?? []) {
+          pmap[a.id] = (a.params ?? []).map((p) => ({ value: p.name, label: p.label || p.description || p.name, mono: p.name }))
+        }
+        setSharedActionParams(pmap)
+      })
+      .catch(() => { /* leave empty; picker stays freeform */ })
+    return () => { cancelled = true }
+  }, [])
 
   // ── variant + PromptField sub-schemas (memoised against defs — identical to ActionListEditor) ──
   const actionVariantSchema = (a: Row): JsonSchema | null => {
@@ -611,6 +664,35 @@ export default function ActionTreeView({
   // shared module (the function is ~40 LOC, copying is simpler than restructuring).
   const renderActionOverrides = (a: Row, onPatch: (patch: Row) => void): ReactNode => {
     const aType = (a.type as ActionType) || 'run_query'
+    // call_action: a single ``ref`` picker (the shared action id) — no connector / query target.
+    if (aType === 'call_action') {
+      return (
+        <Field label={t('settings.screens.action.sharedRef', 'Shared action *')}>
+          <SearchSelect
+            value={(a.ref as string | undefined) ?? ''}
+            options={sharedActionOptions}
+            onChange={(v) => onPatch({ ref: v || '' })}
+            allowCustom
+            placeholder={t('settings.screens.action.sharedRefPick', 'Pick a shared action…')}
+          />
+        </Field>
+      )
+    }
+    // call_plugin: a single ``callable`` picker (module:function) — no connector / query target.
+    if (aType === 'call_plugin') {
+      return (
+        <Field label={t('settings.screens.action.callable', 'Plugin callable *')}>
+          <SearchSelect
+            value={(a.callable as string | undefined) ?? ''}
+            options={pluginCallableOptions}
+            onChange={(v) => onPatch({ callable: v || '' })}
+            allowCustom
+            placeholder={t('settings.screens.action.callablePick', 'Pick a plugin callable…')}
+            loading={pluginCallablesLoading}
+          />
+        </Field>
+      )
+    }
     if (aType !== 'run_query' && aType !== 'call_api' && aType !== 'navigate') return null
     const isApi = aType === 'call_api'
     const opts = isApi ? apiConnectorOptions : sqlConnectorOptions
@@ -1116,7 +1198,7 @@ export default function ActionTreeView({
             source field is the same chain-context autocomplete the Condition / LoopAction
             source fields use. ``param_binds`` is stripped from the variant SchemaForm via
             ACTION_OVERRIDE_KEYS so this is the single editing surface for binds. */}
-        {(sType === 'run_query' || sType === 'call_api' || sType === 'navigate') && (
+        {(sType === 'run_query' || sType === 'call_api' || sType === 'call_plugin' || sType === 'call_action' || sType === 'navigate') && (
           <Stack gap={6}>
             <SubHead>{t('settings.screens.paramBinds.heading')}</SubHead>
             <Sub>{t('settings.screens.paramBinds.hint')}</Sub>
@@ -1128,16 +1210,19 @@ export default function ActionTreeView({
                     ``Screen.columns`` lists the columns the operator is binding to.
                 Never mixes in the firing screen's own columns — that would be a v1-shaped foot
                 gun (target = where you're writing, not where you came from).
+                For call_plugin the ``param`` is the callable's keyword-argument name (not
+                discoverable from the AST catalog), so the left column stays freeform.
                 ``sourceOptions`` (right column) = the firing context (firing screen's columns +
                 chain context + standard built-ins). */}
             <ParamBindList
               value={Array.isArray(selected.param_binds) ? (selected.param_binds as ParamBind[]) : []}
               onChange={(next) => patchSelected({ param_binds: next.length ? next : null })}
               sourceOptions={sourceOptions}
-              paramOptions={mergeCandidates(
-                selectedDeclaredParamOptions,
-                targetScreenColumnOptions,
-              )}
+              paramOptions={sType === 'call_plugin' ? []
+                : sType === 'call_action' ? (sharedActionParams[String(selected.ref ?? '')] ?? [])
+                : mergeCandidates(selectedDeclaredParamOptions, targetScreenColumnOptions)}
+              paramPlaceholder={sType === 'call_plugin' ? t('settings.screens.action.kwarg', 'kwarg')
+                : sType === 'call_action' ? t('settings.screens.action.inputName', 'input') : undefined}
             />
           </Stack>
         )}

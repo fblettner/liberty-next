@@ -152,6 +152,13 @@ class ChartSettings(BaseModel):
     config_path: Path = Field(default_factory=lambda: _default_config_path("charts"))
 
 
+class ActionSettings(BaseModel):
+    """Shared actions — reusable named action chains (see :mod:`liberty.actions`). ``[actions.<id>]``
+    per action; a missing file is fine (no shared actions → screens just use inline chains)."""
+
+    config_path: Path = Field(default_factory=lambda: _default_config_path("actions"))
+
+
 class DashboardSettings(BaseModel):
     """Dashboard layouts — Phase 8 slice 3 (see :mod:`liberty.dashboards`). A dashboard is a
     grid of widgets (chart, kpi, …) surfaced through the menu system like any other screen."""
@@ -317,6 +324,7 @@ class Settings(BaseModel):
     menus: MenuSettings = Field(default_factory=MenuSettings)
     screens: ScreenSettings = Field(default_factory=ScreenSettings)
     charts: ChartSettings = Field(default_factory=ChartSettings)
+    actions: ActionSettings = Field(default_factory=ActionSettings)
     dashboards: DashboardSettings = Field(default_factory=DashboardSettings)
     theme: ThemeSettings = Field(default_factory=ThemeSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)

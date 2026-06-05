@@ -534,6 +534,32 @@ def test_column_groups_and_column_group_ref() -> None:
     assert next(c for c in s.columns if c.name == "ULUSER").group is None
 
 
+def test_call_plugin_action_round_trips() -> None:
+    """``call_plugin`` is a first-class action (sibling of run_query / call_api): the discriminator
+    resolves it, its ``callable`` carries the PLUGIN_CALLABLES picker hint, and param_binds + the
+    promptable mixin fields parse."""
+    import json
+
+    from liberty.screens.config import Action
+    from pydantic import TypeAdapter
+
+    a = TypeAdapter(Action).validate_python({
+        "type": "call_plugin", "id": "remerge", "label": "Re-merge security",
+        "callable": "nomajde.security:j_remerge_security",
+        "param_binds": [{"param": "role_id", "source": "AUUSER"}],
+        "bind_result": True,
+    })
+    assert type(a).__name__ == "CallPluginAction"
+    assert a.callable == "nomajde.security:j_remerge_security"
+    assert a.param_binds[0].param == "role_id" and a.bind_result is True
+    # The editor's callable dropdown is schema-driven via the PLUGIN_CALLABLES enum ref.
+    schema = TypeAdapter(Action).json_schema()
+    cp = next(s for s in schema["$defs"].values() if s.get("title") == "CallPluginAction")
+    assert cp["properties"]["callable"].get("x_enum_ref") == "PLUGIN_CALLABLES"
+    # round-trips through a JSON dump unchanged
+    assert json.loads(a.model_dump_json())["type"] == "call_plugin"
+
+
 def test_column_group_per_column_picker_is_schema_driven() -> None:
     """The per-column ``group`` dropdown in the Columns-tab editor is schema-driven — it resolves
     its options from the ``COLUMN_GROUPS`` enum the ScreenEditor injects (the screen's defined group

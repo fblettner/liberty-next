@@ -24,12 +24,14 @@ from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
 from liberty.connectors.base import ConnectorError
 from liberty.licensing import verify_license
+from liberty.actions import load_actions
 from liberty.charts import load_charts
 from liberty.dashboards import load_dashboards
 from liberty.menus import load_menus
 from liberty.screens import load_screens
 from liberty.web import (
     access_router,
+    actions_router,
     admin_router,
     charts_router,
     dictgen_router,
@@ -39,6 +41,7 @@ from liberty.web import (
     jobs_router,
     license_router,
     menus_router,
+    plugins_router,
     reports_router,
     screens_router,
     theme_router,
@@ -148,6 +151,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
         app.state.charts = load_charts(settings.charts.config_path)
+        app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
         app.state.token_service = token_service
@@ -516,6 +520,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(screens_router)
     app.include_router(export_router)
     app.include_router(charts_router)
+    app.include_router(actions_router)
     app.include_router(dashboards_router)
     app.include_router(license_router)
     app.include_router(theme_router)
@@ -524,6 +529,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(access_router)
     app.include_router(dictgen_router)
     app.include_router(jobs_router)
+    app.include_router(plugins_router)
     app.include_router(reports_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")

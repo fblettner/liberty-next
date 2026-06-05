@@ -31,12 +31,13 @@ const AppBuilder = lazy(() => import('./AppBuilder'))
 // the framework. PDF branding (the install-wide defaults that wrap every
 // report) lives inside AppBuilder now since it's stored in app.toml.
 const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
+const ActionsBuilder = lazy(() => import('./ActionsBuilder'))
 const PackageBuilder = lazy(() => import('./PackageBuilder'))
 // Integrity — read-only diagnostics across every config file (broken refs, unused connectors,
 // orphan screens). Not an editor; it deep-links into the others to fix what it finds.
 const IntegrityBuilder = lazy(() => import('./IntegrityBuilder'))
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'package', 'integrity'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'package', 'integrity'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -78,6 +79,7 @@ export default function Settings() {
         <TabGroupLabel>{t('settings.tabGroups.perConnector', 'Per connector')}</TabGroupLabel>
         <TabBtn $active={tab === 'connectors'} onClick={() => setTab('connectors')}>{t('settings.tabs.connectors')}</TabBtn>
         <TabBtn $active={tab === 'dictionary'} onClick={() => setTab('dictionary')}>{t('settings.tabs.dictionary')}</TabBtn>
+        <TabBtn $active={tab === 'actions'} onClick={() => setTab('actions')}>{t('settings.tabs.actions', 'Actions')}</TabBtn>
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts', 'Charts')}</TabBtn>
@@ -105,6 +107,7 @@ export default function Settings() {
           : tab === 'charts' ? <ChartsBuilder />
           : tab === 'dashboards' ? <DashboardsBuilder />
           : tab === 'reports' ? <ReportsBuilder />
+          : tab === 'actions' ? <ActionsBuilder />
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
           : tab === 'app' ? <AppBuilder />

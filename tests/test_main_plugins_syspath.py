@@ -1,4 +1,4 @@
-"""Tests for ``liberty.main._ensure_plugins_on_sys_path`` — the import-hook
+"""Tests for ``liberty.main.ensure_plugins_on_sys_path`` — the import-hook
 that makes ``${LIBERTY_APPS_DIR}/../plugins/`` importable so a python step's
 ``callable = "nomasx1.security:j_x"`` resolves to the apps repo (PHASE13 §5.3).
 """
@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from liberty.main import _ensure_plugins_on_sys_path
+from liberty.main import ensure_plugins_on_sys_path
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def test_injects_plugins_dir_when_apps_dir_set(tmp_path, monkeypatch) -> None:
     apps_config.mkdir(parents=True)
 
     monkeypatch.setenv("LIBERTY_APPS_DIR", str(apps_config))
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
 
     expected = str(plugins.resolve())
     assert sys.path[0] == expected
@@ -51,7 +51,7 @@ def test_resolves_real_callable_under_plugins(tmp_path, monkeypatch) -> None:
     (pkg / "fn.py").write_text("def hello() -> str:\n    return 'world'\n")
 
     monkeypatch.setenv("LIBERTY_APPS_DIR", str(apps_config))
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
 
     # Clear cached imports of the same module name if a prior test left them.
     for mod_name in [m for m in sys.modules if m == "fakemod" or m.startswith("fakemod.")]:
@@ -71,9 +71,9 @@ def test_idempotent_on_repeat_calls(tmp_path, monkeypatch) -> None:
     apps_config.mkdir(parents=True)
 
     monkeypatch.setenv("LIBERTY_APPS_DIR", str(apps_config))
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
     after_first = list(sys.path)
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
     assert sys.path == after_first
 
 
@@ -86,7 +86,7 @@ def test_no_op_when_plugins_dir_missing(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setenv("LIBERTY_APPS_DIR", str(apps_config))
     before = list(sys.path)
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
     assert sys.path == before
 
 
@@ -97,5 +97,5 @@ def test_no_op_when_apps_dir_unset(monkeypatch) -> None:
     # Force cwd to a place without a plugins/ dir.
     monkeypatch.chdir("/tmp")
     before = list(sys.path)
-    _ensure_plugins_on_sys_path()
+    ensure_plugins_on_sys_path()
     assert sys.path == before

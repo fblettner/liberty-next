@@ -27,6 +27,7 @@ import { genericFilterFn, type FilterKind, type FilterMeta } from '../../common/
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
@@ -337,6 +338,7 @@ export function ResultTable({
   // BackButton can close the drill tab + return in one click ("same tab" feel, see UI 3).
   const location = useLocation()
   const { activeId } = useTabs()
+  const { sharedActions } = useWorkspace()
   const canEdit = !!(updateQuery || insertQuery)
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -507,6 +509,7 @@ export function ResultTable({
     const result = await runChain([a], {}, ctx, {
       defaultConnector: connector,
       requestPrompt,
+      sharedActions: sharedActions ?? undefined,
       navigate: (to, conn, params, screen) => {
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
@@ -534,7 +537,7 @@ export function ResultTable({
       // eslint-disable-next-line no-console
       console.info('row-menu warnings:', result.warnings)
     }
-  }, [connector, onSaved, closeMenu, navigate, requestPrompt])
+  }, [connector, onSaved, closeMenu, navigate, requestPrompt, sharedActions])
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
   // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
   // ParamBinds resolve to literal `value`s only — a `source` bind against an unset form falls
@@ -590,6 +593,7 @@ export function ResultTable({
     const result = await runChain([a], {}, {}, {
       defaultConnector: connector,
       requestPrompt,
+      sharedActions: sharedActions ?? undefined,
       navigate: (to, conn, params, screen) => {
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
@@ -611,7 +615,7 @@ export function ResultTable({
     const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : (a.label || a.id)
     setActionStatus({ message: msg, tone: 'ok' })
     onSaved?.()
-  }, [connector, onSaved, navigate, requestPrompt])
+  }, [connector, onSaved, navigate, requestPrompt, sharedActions])
 
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
@@ -837,6 +841,7 @@ export function ResultTable({
       const result = await runChain(actions, {}, ctx, {
         defaultConnector: connector,
         requestPrompt,   // batch-save hooks rarely prompt, but a migrated chain might carry one
+        sharedActions: sharedActions ?? undefined,
       })
       if (result.warnings.length > 0) {
         // eslint-disable-next-line no-console
@@ -864,7 +869,7 @@ export function ResultTable({
     setSaving(false)
     if (hookErrs.length) setSaveErrors([...new Set(hookErrs)])
     else { resetEdit(); onSaved?.() }
-  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen])
+  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen, sharedActions])
 
   // ── rule helpers (memoized per result) ──
   const enumMaps = useMemo(() => {

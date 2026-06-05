@@ -18,7 +18,7 @@
 // Slice B does *not* tackle: navigate (URL push from the runner), set_field side-effects,
 // confirm modals from inside the runner (the dialog injects its own confirm provider).
 import { api, ApiError } from '../../api/client'
-import type { Action, Condition, ParamBind, PromptField } from '../../types/screens'
+import type { Action, Condition, ParamBind, PromptField, SharedAction } from '../../types/screens'
 
 export type Row = Record<string, unknown>
 
@@ -70,6 +70,12 @@ export interface ActionRunnerDeps {
    *  when the action pins a specific screen). When unset, ``navigate`` actions land a soft
    *  warning (ScreenDialog has no navigation target; row-menu / toolbar do). */
   navigate?: (to: string, connector: string, params: Record<string, string>, screen?: string | null) => void
+  /** Shared-action catalog (actions.toml, via ``GET /api/actions``), keyed by id — the runner
+   *  resolves a ``call_action`` against this and inlines the referenced action's steps. */
+  sharedActions?: Record<string, SharedAction>
+  /** Internal — the chain of shared-action ids currently being inlined, for cycle detection.
+   *  Callers leave this unset; the runner threads it through nested ``call_action`` runs. */
+  _actionStack?: string[]
 }
 
 // ── source-path resolution ──────────────────────────────────────────────────────────────────
@@ -303,7 +309,7 @@ function withUpper(o: Row): Row {
 /** Pull the prompt spec off any promptable action variant. Returns null for non-promptable
  *  variants or when ``prompt_fields`` is empty. */
 function actionPrompt(a: Action): { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null } | null {
-  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'navigate' && a.type !== 'chain') return null
+  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'call_plugin' && a.type !== 'navigate' && a.type !== 'chain') return null
   // The four promptable variants share the ``_PromptableMixin`` shape via the Pydantic union.
   const r = a as Action & {
     prompt_fields?: PromptField[]; prompt_title?: string | null;
@@ -341,6 +347,57 @@ async function runOneAction(
       case 'chain': {
         for (const step of (a.steps as Action[] | undefined) ?? []) {
           const r = await runOneAction(step, ctx, formCtx, deps, result)
+          if (r.abort) return r
+        }
+        break
+      }
+      case 'call_action': {
+        // Resolve + inline a SHARED action (actions.toml). The referenced action's steps run in
+        // the SAME chain context — its results land under their own step ids, and INPUT carries
+        // both the caller's param_binds (seeded first) and the shared action's own prompt.
+        const shared = deps.sharedActions?.[a.ref]
+        if (!shared) {
+          const msg = `${a.label || a.id}: shared action '${a.ref}' is not defined`
+          if (a.stop_on_error !== false) { result.error = msg; result.ok = false; return { abort: true } }
+          result.warnings.push(msg)
+          break
+        }
+        // Cycle guard — a shared action that (transitively) calls itself would loop forever.
+        const stack = deps._actionStack ?? []
+        if (stack.includes(a.ref)) {
+          result.error = `shared action cycle: ${[...stack, a.ref].join(' → ')}`
+          result.ok = false
+          return { abort: true }
+        }
+        // Build INPUT in precedence order: the action's declared param defaults (lowest), then the
+        // call_action's param_binds (the caller maps its own source → each param), which win. So
+        // the same action takes ``role`` from AUUSER on one screen and ULUSER on another, while its
+        // defaults live on the action itself.
+        const paramDefaults: Row = {}
+        for (const p of shared.params ?? []) {
+          if (p.default == null) continue
+          // A default may be a built-in (``#LOGIN_USER#`` / ``#SYSDATE#`` / …) — resolve those;
+          // a plain literal (``Y`` / ``QPRINT``) passes through unchanged.
+          const d = p.default
+          paramDefaults[p.name] = (d.startsWith('#') && d.endsWith('#') && d.length > 2)
+            ? (resolveBuiltin(d.slice(1, -1)) ?? d)
+            : d
+        }
+        const seed = resolveBinds(a.param_binds, ctx, formCtx)
+        ctx.INPUT = { ...ctx.INPUT, ...paramDefaults, ...seed }
+        // Prompt for the shared action's own prompt_fields (if any); the caller's seeded binds win
+        // over the prompt for the same key (re-applied after) so a bound input isn't overwritten.
+        if (shared.prompt_fields && shared.prompt_fields.length > 0) {
+          const v = await deps.requestPrompt(
+            { fields: shared.prompt_fields, title: shared.label ?? null, cols: null, submitLabel: null },
+            shared.label || a.ref,
+          )
+          if (v == null) { result.cancelled = true; return { abort: true } }
+          ctx.INPUT = { ...ctx.INPUT, ...v, ...seed }
+        }
+        const childDeps: ActionRunnerDeps = { ...deps, _actionStack: [...stack, a.ref] }
+        for (const step of shared.steps ?? []) {
+          const r = await runOneAction(step, ctx, formCtx, childDeps, result)
           if (r.abort) return r
         }
         break
@@ -453,6 +510,33 @@ async function runOneAction(
           ctx[a.id] = {
             rows,
             first_row: (rows[0] ?? {}) as Row,
+            success: true,
+          }
+        }
+        break
+      }
+      case 'call_plugin': {
+        // Invoke a server-side plugin callable (``module:function``). The endpoint resolves it via
+        // the same machinery nomaflow's python steps use — coerces ``params`` to each kwarg's
+        // annotated type, injects ``connectors`` / ``settings``, runs it synchronously, and returns
+        // ``{success, rows_affected, extras, rows, first_row}``. A failing callable comes back as a
+        // 4xx → ``api.post`` raises ``ApiError``, caught by the outer try.
+        const bound = resolveBinds(a.param_binds, ctx, formCtx)
+        const resp = await api.post<{
+          success?: boolean
+          rows_affected?: number | null
+          extras?: Row
+          rows?: Row[]
+          first_row?: Row
+        }>(
+          '/api/plugins/run',
+          { callable: a.callable, params: bound },
+        )
+        if (a.bind_result) {
+          const rows = Array.isArray(resp?.rows) ? resp.rows : []
+          ctx[a.id] = {
+            rows,
+            first_row: (resp?.first_row ?? rows[0] ?? {}) as Row,
             success: true,
           }
         }

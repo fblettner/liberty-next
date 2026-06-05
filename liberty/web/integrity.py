@@ -79,6 +79,7 @@ class _Index:
     dashboard_ids: set[str]
     charts_by_scope: dict[str, set[str]]
     homes: dict[str, str | None]            # connector → home menu-item id
+    shared_action_ids: set[str]             # actions.toml [actions.<id>] — call_action targets
 
 
 def _build_index(state: Any) -> _Index:
@@ -128,11 +129,14 @@ def _build_index(state: Any) -> _Index:
         for scope, cmap in (getattr(charts, "charts", None) or {}).items():
             charts_by_scope[scope] = set(cmap.keys()) if isinstance(cmap, dict) else set()
 
+    actions = getattr(state, "actions", None)
+    shared_action_ids: set[str] = set((getattr(actions, "actions", None) or {}).keys()) if actions is not None else set()
+
     return _Index(
         conn_names=conn_names, sql_by_conn=sql_by_conn, api_by_conn=api_by_conn,
         screens_by_app=screens_by_app, read_query_by_app=read_query_by_app,
         menu_items_by_app=menu_items_by_app, dashboard_ids=dashboard_ids,
-        charts_by_scope=charts_by_scope, homes=homes,
+        charts_by_scope=charts_by_scope, homes=homes, shared_action_ids=shared_action_ids,
     )
 
 
@@ -280,6 +284,11 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                     if ep and aconn in idx.conn_names and ep not in idx.api_by_conn.get(aconn, set()):
                         out.append(Issue("error", "Missing endpoint",
                                          f"{app}.{sid} · {where} call_api '{aconn}.{ep}' does not exist", link))
+                elif atype == "call_action":
+                    ref = getattr(action, "ref", None)
+                    if ref and ref not in idx.shared_action_ids:
+                        out.append(Issue("error", "Broken action reference",
+                                         f"{app}.{sid} · {where} call_action → shared action '{ref}' is not defined", link))
 
 
 def _check_dictionary(state: Any, idx: _Index, out: list[Issue]) -> None:

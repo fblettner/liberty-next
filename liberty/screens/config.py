@@ -483,6 +483,57 @@ class CallApiAction(_PromptableMixin, _ActionBase):
     )
 
 
+class CallPluginAction(_PromptableMixin, _ActionBase):
+    """Invoke a server-side plugin callable — the same ``module:function`` entry points nomaflow
+    runs as ``python`` job steps, now callable inline from a screen action (the symmetric sibling
+    of :class:`RunQueryAction` / :class:`CallApiAction`: SQL, HTTP, and now Python).
+
+    The framework resolves the callable, coerces ``param_binds`` against its annotations, injects
+    ``connectors`` / ``settings`` when the callable declares them, awaits it, and (when
+    ``bind_result``) lands its return under this step's ``id`` so later chain steps can bind from
+    it. Runs synchronously — for long batch work, point the same callable at a nomaflow job and
+    fire that instead."""
+
+    type: Literal["call_plugin"] = "call_plugin"
+    callable: str = Field(
+        description="Plugin entry point as ``module:function`` (e.g. ``nomajde.security:j_remerge_security``).",
+        json_schema_extra={"x_enum_ref": "PLUGIN_CALLABLES"},
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Bind the callable's keyword arguments from the firing context (coerced to the param's annotated type).",
+    )
+    bind_result: bool = Field(
+        default=False,
+        description=(
+            "Capture the callable's return value into the chain context so later steps in the same "
+            "Chain can reference it via ``source: '<step_id>.first_row.<col>'``."
+        ),
+    )
+
+
+class CallActionAction(_ActionBase):
+    """Run a SHARED action by id — v1's reusable named action (``ly_actions``). The action is
+    defined once in ``actions.toml`` (``[actions.<ref>]``) and referenced from any screen hook /
+    button / row-menu. The referenced action's steps run against the firing context; ``param_binds``
+    seed its ``INPUT.<param>`` so the shared steps can read caller-supplied values (the same
+    ``INPUT.<name>`` slot a prompt fills) without re-prompting.
+
+    This is the reuse primitive that keeps orchestration in ONE place: ``create_role`` /
+    ``import_security`` / … are authored once in the Actions editor (as run_query / call_api /
+    call_plugin / if / chain steps) and every screen just references them."""
+
+    type: Literal["call_action"] = "call_action"
+    ref: str = Field(
+        description="Shared action id — an entry in ``actions.toml`` (``[actions.<ref>]``).",
+        json_schema_extra={"x_enum_ref": "SHARED_ACTIONS"},
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Seed the shared action's ``INPUT.<param>`` from the firing context before it runs.",
+    )
+
+
 class NavigateAction(_PromptableMixin, _ActionBase):
     """Open another TableView (v1's "drill into another table" pattern) — the row-menu staple.
     ``to`` names the target query (matching a ``QueryDef.name`` on ``connector``); the URL the
@@ -693,7 +744,7 @@ class ReturnAction(_ActionBase):
 # subclass when validating a raw dict (so screens.toml's `[[on_save]] type = "run_query"` validates).
 Action = Annotated[
     Union[
-        RunQueryAction, CallApiAction, NavigateAction, SetFieldAction,
+        RunQueryAction, CallApiAction, CallPluginAction, CallActionAction, NavigateAction, SetFieldAction,
         ConfirmAction, NotifyAction, RefreshAction,
         ChainAction, IfAction, LoopAction, ReturnAction,
     ],

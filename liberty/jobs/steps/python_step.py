@@ -33,16 +33,19 @@ counts them against the retry policy) — *except* :class:`StepCancelled` and
 from __future__ import annotations
 
 import asyncio
-import importlib
-import inspect
 import logging
-from typing import Any, Callable
 
-from liberty.coercion import CoercionError, annotation_name, coerce_kwargs
 from liberty.config import Settings
 from liberty.connectors import ConnectorRegistry
 from liberty.jobs.schema import Step, StepType
 from liberty.jobs.steps.base import RunContext, StepCancelled, StepFailed, StepResult
+from liberty.plugins.invoke import (
+    PluginInvocationError,
+    build_kwargs,
+    call_target,
+    normalise_result,
+    resolve_callable,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -72,8 +75,23 @@ class PythonStepExecutor:
                 f"python step {step.name!r}: `callable` is required (format 'module:function')"
             )
 
-        target = self._resolve(step)
-        kwargs = self._build_kwargs(step, ctx, target)
+        # Resolve + bind via the shared invoker; re-wrap its operator-friendly error as
+        # StepFailed so the runner's retry/broadcast semantics are unchanged.
+        try:
+            target = resolve_callable(step.callable)
+            kwargs = build_kwargs(
+                target,
+                dict(step.op_kwargs),
+                injections=(
+                    ("connectors", self._connectors),
+                    ("ctx", ctx),
+                    # ``settings`` only when the executor was built with one (build_executors passes
+                    # it; bare-registry tests leave it None — and the invoker skips None injections).
+                    ("settings", self._settings),
+                ),
+            )
+        except PluginInvocationError as exc:
+            raise StepFailed(f"python step {step.name!r}: {exc}") from exc
 
         _log.info(
             "nomaflow.python start run=%s step=%r callable=%s kwargs=%s",
@@ -81,14 +99,7 @@ class PythonStepExecutor:
         )
 
         try:
-            if inspect.iscoroutinefunction(target):
-                raw = await target(**kwargs)
-            else:
-                # Sync callable: hop to a worker thread so a slow blocking call doesn't
-                # stall the scheduler loop. The runner's per-step timeout still applies
-                # — asyncio.wait_for cancels the await, which the to_thread wrapper
-                # surfaces as CancelledError back here.
-                raw = await asyncio.to_thread(_call_sync, target, kwargs)
+            raw = await call_target(target, kwargs)
         except (StepCancelled, asyncio.CancelledError):
             raise
         except StepFailed:
@@ -100,107 +111,12 @@ class PythonStepExecutor:
             )
             raise StepFailed(f"python step {step.name!r}: {exc}") from exc
 
-        result = self._normalise(raw, step)
+        try:
+            result = normalise_result(raw)
+        except PluginInvocationError as exc:
+            raise StepFailed(f"python step {step.name!r}: {exc}") from exc
         _log.info(
             "nomaflow.python done run=%s step=%r rows=%s",
             ctx.run_id, step.name, result.rows_affected,
         )
         return result
-
-    # -- internals ------------------------------------------------------- #
-
-    def _resolve(self, step: Step) -> Callable[..., Any]:
-        """Import the module + look up the function. Wraps the two failure
-        modes (ImportError + AttributeError) in :class:`StepFailed` with the
-        operator-friendly callable string in the message, since the raw
-        exceptions name the module/function in a less-obvious way."""
-        assert step.callable is not None
-        module_path, _, function_name = step.callable.partition(":")
-        try:
-            module = importlib.import_module(module_path)
-        except ImportError as exc:
-            raise StepFailed(
-                f"python step {step.name!r}: cannot import module {module_path!r} "
-                f"from callable {step.callable!r} — {exc}"
-            ) from exc
-        try:
-            return getattr(module, function_name)
-        except AttributeError as exc:
-            raise StepFailed(
-                f"python step {step.name!r}: module {module_path!r} has no attribute "
-                f"{function_name!r} (from callable {step.callable!r})"
-            ) from exc
-
-    def _build_kwargs(self, step: Step, ctx: RunContext, target: Callable[..., Any]) -> dict[str, Any]:
-        """Merge ``op_kwargs`` with the standard-name injections (connectors / ctx).
-        Inject only when the callable declares the name — otherwise the unknown
-        kwarg would TypeError at call time.
-
-        Coerce each op_kwargs value against the matching parameter's annotation
-        (int / float / bool / str + Optional). Stringly-typed values are a
-        regression magnet — TOML stores ``apps_id = "1"`` and every UI save round-
-        trips it as a string, so a callable annotated ``apps_id: int`` would push
-        ``"1"`` into asyncpg and crash with a DataError much later. Coerce here so
-        the type written to disk (string) doesn't need to match the type the
-        callable expects (int)."""
-        try:
-            kwargs: dict[str, Any] = coerce_kwargs(dict(step.op_kwargs), target)
-        except CoercionError as exc:
-            raise StepFailed(
-                f"python step {step.name!r}: op_kwargs[{exc.key!r}]={exc.value!r} "
-                f"cannot be coerced to {annotation_name(exc.annotation)}: {exc.cause}"
-            ) from exc
-
-        try:
-            sig = inspect.signature(target, eval_str=True)
-        except (TypeError, ValueError, NameError):  # pragma: no cover — builtins / undefined names
-            return kwargs
-        params = sig.parameters
-        accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
-
-        injections: list[tuple[str, Any]] = [
-            ("connectors", self._connectors),
-            ("ctx", ctx),
-        ]
-        # ``settings`` only when the executor was constructed with one (the wiring in
-        # build_executors passes it; tests that build the executor with just a registry
-        # leave it as None — and we don't inject ``None`` because that'd silently break
-        # a callable that expected a real Settings).
-        if self._settings is not None:
-            injections.append(("settings", self._settings))
-        for name, value in injections:
-            if accepts_kwargs or name in params:
-                # Operator-provided op_kwargs win — they may want to override (e.g. a test
-                # injects a stub registry). Only fill in the default when absent.
-                kwargs.setdefault(name, value)
-        return kwargs
-
-    def _normalise(self, raw: Any, step: Step) -> StepResult:
-        """Turn what the callable returned into a :class:`StepResult`. Accepts
-        the four shapes documented in the module docstring; anything else is a
-        :class:`StepFailed` so a typo doesn't silently land as an empty result."""
-        if raw is None:
-            return StepResult()
-        if isinstance(raw, StepResult):
-            return raw
-        if isinstance(raw, bool):
-            # Catch this before the int branch — `True` would otherwise become
-            # rows_affected=1, which is not what an "ok" boolean means.
-            raise StepFailed(
-                f"python step {step.name!r}: callable returned a bool — expected "
-                f"None, int, dict, or StepResult"
-            )
-        if isinstance(raw, int):
-            return StepResult(rows_affected=raw)
-        if isinstance(raw, dict):
-            return StepResult(extras=dict(raw))
-        raise StepFailed(
-            f"python step {step.name!r}: callable returned unsupported type "
-            f"{type(raw).__name__} (expected None, int, dict, or StepResult)"
-        )
-
-
-def _call_sync(fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
-    """Tiny adapter so ``asyncio.to_thread(_call_sync, fn, kwargs)`` works (to_thread's
-    signature passes args positionally; this lets us forward a kwargs dict)."""
-    return fn(**kwargs)

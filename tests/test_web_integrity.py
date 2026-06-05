@@ -38,13 +38,15 @@ def _dashboards(spec: dict[str, list[str]]):
     })
 
 
-def _state(*, conns, screens=None, menus=None, homes=None, dashboards=None):
+def _state(*, conns, screens=None, menus=None, homes=None, dashboards=None, actions=None):
+    from liberty.actions import parse_actions
     return SimpleNamespace(
         connectors=_Registry(conns, homes=homes),
         screens=parse_screens({"screens": screens}) if screens is not None else None,
         menus=parse_menus({"menus": menus}) if menus is not None else None,
         dashboards=_dashboards(dashboards) if dashboards is not None else None,
         charts=None,
+        actions=parse_actions({"actions": actions}) if actions is not None else None,
     )
 
 
@@ -221,6 +223,25 @@ def test_column_group_queries_and_refs_validated() -> None:
     broken = [i.message for i in issues if i.category == "Broken column group"]
     assert any("ghost" in m for m in broken)                        # column → undefined group flagged
     assert not any("'addr'" in m for m in broken)                   # valid group not flagged
+
+
+def test_call_action_ref_validated() -> None:
+    """A screen action referencing a shared action by id must resolve to a defined
+    ``[actions.<id>]`` — a dangling ref is a "Broken action reference"; a defined one is clean."""
+    state = _state(
+        conns={"jde": ["f0004_get"]},
+        screens={"jde": {"f0004": {
+            "connector": "jde", "read_query": "f0004_get",
+            "on_insert": [{"id": "a", "type": "call_action", "ref": "create_role"}],
+            "on_delete": [{"id": "b", "type": "call_action", "ref": "ghost_action"}],
+        }}},
+        menus={"jde": {"items": [{"id": "u", "label": "F0004", "type": "screen", "target": "f0004"}]}},
+        actions={"create_role": {"label": "Create", "steps": []}},
+    )
+    issues = check_integrity(state)
+    broken = [i.message for i in issues if i.category == "Broken action reference"]
+    assert any("ghost_action" in m for m in broken)        # undefined ref flagged
+    assert not any("create_role" in m for m in broken)     # defined ref clean
 
 
 def test_broken_home_detected() -> None:

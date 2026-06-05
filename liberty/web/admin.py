@@ -54,6 +54,8 @@ from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
 from liberty.screens import Screen, load_screens
 from liberty.screens.config import ScreensFile, parse_screens
+from liberty.actions import load_actions
+from liberty.actions.config import SharedActionsFile, parse_actions
 from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
@@ -94,6 +96,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     request.app.state.menus = load_menus(settings.menus.config_path)
     request.app.state.screens = load_screens(settings.screens.config_path)
     request.app.state.charts = load_charts(settings.charts.config_path)
+    request.app.state.actions = load_actions(settings.actions.config_path)
     request.app.state.dashboards = load_dashboards(settings.dashboards.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
 
@@ -222,6 +225,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "menus": MenusFile.model_json_schema(),
         "screens": ScreensFile.model_json_schema(),
         "charts": ChartsFile.model_json_schema(),
+        "actions": SharedActionsFile.model_json_schema(),
         "dashboards": DashboardsFile.model_json_schema(),
         "framework_enums": bundled,
     }
@@ -732,6 +736,56 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting charts are invalid: {exc}") from exc
 
     path = Path(request.app.state.settings.charts.config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/actions/parsed", summary="Get shared actions config")
+async def get_actions_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``actions.toml`` parsed — ``{path, actions: {<id>: SharedAction dict}}``. The
+    ``id`` is the map key, so it's dropped from each body (re-injected by parse_actions on save)."""
+    path = Path(request.app.state.settings.actions.config_path)
+    cfg = load_actions(path)
+    return {
+        "path": str(path),
+        "actions": {
+            aid: a.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id"})
+            for aid, a in cfg.actions.items()
+        },
+    }
+
+
+class ActionsBody(BaseModel):
+    actions: dict[str, dict[str, Any]]
+
+
+@router.put("/config/actions/parsed", summary="Update shared actions config")
+async def put_actions_parsed(body: ActionsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted dict against :class:`SharedActionsFile`, then rewrite ``actions.toml``
+    via ``tomli-w`` (tomllib+tomli_w, not tomlkit — actions can carry large step trees). Re-parses
+    the written text. Does not reload — call ``POST /admin/reload``."""
+    try:
+        validated = parse_actions({"actions": body.actions})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid actions: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid actions: {exc}") from exc
+
+    # ``exclude_defaults=False`` is intentional — the same reason as screens / menus: an Action's
+    # ``type`` discriminator equals its Literal default, so excluding defaults would strip it and
+    # the re-validation below (+ the runtime) couldn't pick the union branch.
+    normalized = validated.model_dump(exclude_defaults=False, exclude_none=True)
+    for action in normalized.get("actions", {}).values():
+        action.pop("id", None)   # id is the table key
+    import tomli_w
+    new_text = tomli_w.dumps(normalized)
+    try:
+        parse_actions(tomllib.loads(new_text))   # belt-and-braces re-validation
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting actions are invalid: {exc}") from exc
+
+    path = Path(request.app.state.settings.actions.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
