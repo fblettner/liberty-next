@@ -940,8 +940,20 @@ class ColumnGroup(BaseModel):
     id: str = Field(description="Stable id within the screen — referenced by ``ColumnHint.group``.")
     label: str | None = Field(default=None, description="Display label for the group (editor only).")
     connector: str | None = Field(default=None, description="Connector the write queries live on; blank → the screen's.")
+    # NOTE: the Columns-tab editor renders column groups via the dedicated ``ColumnGroupsEditor``
+    # (connector / query / key-column / FK-bind dropdowns), NOT the generic schema navigator — so
+    # these fields carry no ``x_enum_ref``. The one picker that IS schema-driven is the per-column
+    # ``ColumnHint.group`` dropdown (x_enum_ref COLUMN_GROUPS).
     update_query: str = Field(description="Writes edits to the related row.")
     insert_query: str | None = Field(default=None, description="Writes a new related row when the JOIN found none.")
+    delete_query: str | None = Field(
+        default=None,
+        description=(
+            "Removes the related row when the MAIN row is deleted (grid or dialog) — without it a "
+            "delete leaves the related 1:1 row orphaned. Run before the main delete (child first). "
+            "Blank → the related row is left untouched (use an ``on_delete`` action for custom cleanup)."
+        ),
+    )
     key_columns: list[str] = Field(
         default_factory=list,
         description="The related table's key columns AS THEY APPEAR IN THE JOINED RESULT — non-null ⇒ the row exists ⇒ UPDATE, else INSERT.",

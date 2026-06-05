@@ -443,6 +443,8 @@ export interface ColumnGroup {
   connector?: string | null
   update_query: string
   insert_query?: string | null
+  /** Removes the related row when the main row is deleted (FK-safe: child first). Blank → leave it. */
+  delete_query?: string | null
   key_columns?: string[]
   param_binds?: ParamBind[]
 }

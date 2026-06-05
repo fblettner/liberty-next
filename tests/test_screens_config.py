@@ -534,6 +534,60 @@ def test_column_groups_and_column_group_ref() -> None:
     assert next(c for c in s.columns if c.name == "ULUSER").group is None
 
 
+def test_column_group_per_column_picker_is_schema_driven() -> None:
+    """The per-column ``group`` dropdown in the Columns-tab editor is schema-driven — it resolves
+    its options from the ``COLUMN_GROUPS`` enum the ScreenEditor injects (the screen's defined group
+    ids). Guards that wiring so the operator picks a group instead of hand-typing its id. (The group
+    EDITOR's own connector / query / bind dropdowns are the dedicated ColumnGroupsEditor component,
+    not schema enums, so only this one field carries an ``x_enum_ref``.)"""
+    defs = ScreensFile.model_json_schema()["$defs"]
+    assert defs["ColumnHint"]["properties"]["group"].get("x_enum_ref") == "COLUMN_GROUPS"
+
+
+def test_column_groups_roundtrip_through_toml(tmp_path) -> None:
+    """A screen authored with ``column_groups`` + a grouped column survives a load → dump → load
+    cycle — the shape the editor writes back is parsed identically on the next open."""
+    f = tmp_path / "screens.toml"
+    f.write_text(
+        textwrap.dedent(
+            """
+            [screens.nomajde.f0092]
+            read_query = "f0092_get"
+            update_query = "f0092_put"
+
+            [[screens.nomajde.f0092.columns]]
+            name = "ULUSER"
+            key = true
+
+            [[screens.nomajde.f0092.columns]]
+            name = "ABALPH"
+            group = "addr"
+
+            [[screens.nomajde.f0092.column_groups]]
+            id = "addr"
+            label = "Address Book"
+            update_query = "f0101_put"
+            insert_query = "f0101_post"
+            delete_query = "f0101_delete"
+            key_columns = ["ABAN8"]
+
+            [[screens.nomajde.f0092.column_groups.param_binds]]
+            param = "ABAN8"
+            source = "ULUSER"
+            """
+        )
+    )
+    s = load_screens(f).screens["nomajde"]["f0092"]
+    # Re-dump the parsed model (what the editor's Save serialises) and parse it again.
+    redumped = parse_screens({"screens": {"nomajde": {"f0092": s.model_dump(exclude_defaults=True)}}})
+    s2 = redumped.screens["nomajde"]["f0092"]
+    grp = s2.column_groups[0]
+    assert grp.id == "addr" and grp.update_query == "f0101_put" and grp.insert_query == "f0101_post"
+    assert grp.delete_query == "f0101_delete"
+    assert grp.key_columns == ["ABAN8"] and grp.param_binds[0].source == "ULUSER"
+    assert next(c for c in s2.columns if c.name == "ABALPH").group == "addr"
+
+
 def test_nested_form_without_source_rejected() -> None:
     """A nested_form with neither ``form_screen`` nor ``read_query`` would render empty — reject it."""
     with pytest.raises(Exception):

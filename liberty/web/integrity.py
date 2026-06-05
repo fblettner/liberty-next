@@ -209,7 +209,7 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                     group_ids.add(gid)
                 g_conn = getattr(grp, "connector", None) or conn
                 g_sql = idx.sql_by_conn.get(g_conn, set())
-                for attr in ("update_query", "insert_query"):
+                for attr in ("update_query", "insert_query", "delete_query"):
                     q = getattr(grp, attr, None)
                     if q and g_conn in idx.conn_names and q not in g_sql:
                         out.append(Issue("error", "Missing query",

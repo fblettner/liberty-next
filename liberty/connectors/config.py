@@ -299,7 +299,7 @@ class ColumnHint(BaseModel):
     )
     group: str | None = Field(
         default=None,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Rule", "x_enum_ref": "COLUMN_GROUPS"},
         description=(
             "When set, this column lives on a RELATED 1:1 table (it comes from the read query's "
             "JOIN) and is written back through the screen's matching ``column_groups`` entry on Save "

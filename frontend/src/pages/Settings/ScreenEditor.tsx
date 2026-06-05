@@ -31,6 +31,7 @@ import { colors, fontSize, fonts } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import { EditQueryModal } from './EditQueryModal'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
+import ColumnGroupsEditor from './ColumnGroupsEditor'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
 import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
@@ -97,6 +98,7 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   &:hover { color: ${colors.text.primary}; }
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
+const GroupsHr = styled.div`border-top: 1px solid ${colors.border}; margin: 18px 0 14px;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 // Section divider for the row-click block in General — visually separates it from the schema-form
 // fields above so the mode picker reads as "a different decision", not "yet another field".
@@ -305,8 +307,18 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
     base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
+    // COLUMN_GROUPS — the group ids defined on this screen, for the per-column ``group`` picker.
+    // (The group editor itself — connector / query / bind dropdowns — is the dedicated
+    // ColumnGroupsEditor, not a schema-enum field, so no WRITABLE_QUERIES enum is needed here.)
+    const groups = Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []
+    base.COLUMN_GROUPS = {
+      label: 'Column groups',
+      values: groups
+        .filter((g) => typeof g?.id === 'string' && g.id)
+        .map((g) => ({ value: g.id as string, label: g.label ? `${g.label} (${g.id})` : (g.id as string), mono: g.id as string })),
+    }
     return base
-  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector, selectedConnectorMeta, value.column_groups])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
@@ -378,6 +390,19 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     () => ({ ...pickSchemaProperties(schema, COLUMNS_KEYS as unknown as string[]), $defs: defs }),
     [schema, defs],
   )
+  // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
+  // "Columns in this group" chips in the ColumnGroupsEditor so the operator sees the mapping
+  // without scanning the whole column list.
+  const columnsByGroup = useMemo<Map<string, string[]>>(() => {
+    const m = new Map<string, string[]>()
+    const cols = Array.isArray(value.columns) ? (value.columns as Record<string, unknown>[]) : []
+    for (const c of cols) {
+      const g = typeof c.group === 'string' ? c.group : ''
+      const name = typeof c.name === 'string' ? c.name : ''
+      if (g && name) { const list = m.get(g) ?? []; list.push(name); m.set(g, list) }
+    }
+    return m
+  }, [value.columns])
   // (Schema-mode sub-schemas + tab/field mutation helpers are gone — the visual builder owns
   // the dialog-tab/field editing experience now. ``setProp`` / ``dialog`` / ``setDialog`` /
   // ``createDialog`` remain since they're used by the Dialog tab's empty-state "Create dialog"
@@ -702,12 +727,31 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // column hint and its nested rules.
   const renderColumns = (): ReactNode => {
     const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
+    const currentGroups = Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []
+    // Source / key candidates for the group binds + key_columns — the screen's own columns.
+    const columnOptions: SearchSelectOption[] = effectiveScreenColumns
+      .filter((c) => c.name)
+      .map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name }))
     return (
       <>
+        {/* Related-table write-back groups (1:1) FIRST — define them, then tag columns with a
+            group in the list below. Each group names its update/insert queries + the FK binds and
+            shows which columns are attached, so the column→table mapping is visible at a glance. */}
+        <Sub>{t('settings.screens.editor.columnGroupsHint',
+          'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) in the column list below.')}</Sub>
+        <ColumnGroupsEditor
+          value={currentGroups}
+          onChange={(next) => setProp('column_groups', next.length ? next : null)}
+          screenConnector={effectiveConnector}
+          connectorOptions={connectorOptions}
+          columnOptions={columnOptions}
+          columnsByGroup={columnsByGroup}
+        />
+        <GroupsHr />
         <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
         {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
-            ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — not just
-            the static BOOLEAN_TRUE_VALUES. */}
+            ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
+            COLUMN_GROUPS for the per-column ``group`` picker. */}
         <FrameworkEnumsContext.Provider value={augmentedEnums}>
           <SchemaNavigator
             root={{

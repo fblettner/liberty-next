@@ -16,15 +16,15 @@ import { createContext, useCallback, useEffect, useMemo, useRef, useState } from
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Copy, Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
-import { api, ApiError } from '../../api/client'
+import { ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import { useSio, useLockState } from '../../sio/SioContext'
 import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
 import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { evalConditions, type Row, withUpper } from './dialogHelpers'
-import { saveScreenRow } from './saveScreenRow'
+import { evalConditions, type Row } from './dialogHelpers'
+import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
@@ -540,17 +540,18 @@ export function ScreenDialog({
     setDeleting(true); setError(null); setActionStatus(null)
     try {
       const targetConn = screen.connector || connector
-      const params = withUpper(savedRow)
-      // Capture the response so we can detect a no-op delete (200 OK + rowcount 0). The most
-      // common cause is a CHAR-padding mismatch on the WHERE clause — covered by the pool's
-      // ``trim_strings`` flag on Oracle/JDE — but stale data, the wrong delete_query, or a
-      // race with another deleter can also produce it. We surface as a hard error here
-      // (rather than the chain's soft warning) because the operator's intent on Delete is
-      // unambiguous: "this row should be gone".
-      const resp = await api.post<{ rowcount?: number; statement_type?: string }>(
-        `/api/sql/${encodeURIComponent(targetConn)}/${encodeURIComponent(screen.delete_query)}`,
-        { params },
-      )
+      // Delete the related 1:1 group rows first (FK-safe), then the main row — mirrors the
+      // multi-table split on Save so a delete doesn't orphan the related rows. Capture the main
+      // delete's rowcount so we can detect a no-op delete (200 OK + rowcount 0). The most common
+      // cause is a CHAR-padding mismatch on the WHERE clause — covered by the pool's
+      // ``trim_strings`` flag on Oracle/JDE — but stale data, the wrong delete_query, or a race
+      // with another deleter can also produce it. We surface as a hard error here (rather than the
+      // chain's soft warning) because the operator's intent on Delete is unambiguous.
+      const resp = await deleteScreenRow({
+        connector: targetConn, row: savedRow,
+        columnGroups: (screen.column_groups ?? []) as ColumnGroup[],
+        mainDeleteQuery: screen.delete_query,
+      })
       if (resp?.rowcount === 0) {
         setDeleting(false)
         setError(t('dialog.deleteNoMatch', {

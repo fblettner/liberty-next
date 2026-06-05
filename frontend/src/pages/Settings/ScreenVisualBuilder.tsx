@@ -1204,15 +1204,18 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               {renderTabBindsEditor()}
             </>
           )}
-          {/* form tabs only: embedded nested forms — labelled sections rendered below this tab's
-              own fields, so one tab edits the main table + related tables in a single Save. */}
-          {tabType === 'form' && (
+          {/* form tabs only: embedded nested forms — labelled sub-forms rendered below this tab's
+              own fields. Superseded for the 1:1 case by column_groups (Columns tab), which edit a
+              related table's columns INLINE (grid + dialog). So we only surface this section when a
+              tab ALREADY has embedded forms — existing config stays fully editable, but new 1:1
+              work is steered to column groups. (Drop the ``length`` guard to re-enable adding.) */}
+          {tabType === 'form' && Array.isArray(selTab.nested_forms) && (selTab.nested_forms as Row[]).length > 0 && (
             <div style={{ marginTop: 12 }}>
               <SubHead>{t('settings.screens.visual.embedded.heading', 'Embedded forms')}</SubHead>
               <Sub>{t('settings.screens.visual.embedded.hint',
-                'Child-record forms shown below this tab’s fields. Each writes its own table on Save, bound to this row’s key — no on_save action needed.')}</Sub>
+                'Child-record forms shown below this tab’s fields. Each writes its own table on Save, bound to this row’s key — no on_save action needed. For a 1:1 relationship, prefer a column group (Columns tab) so the related columns edit inline.')}</Sub>
               <EmbeddedFormsEditor
-                value={Array.isArray(selTab.nested_forms) ? (selTab.nested_forms as Row[]) : []}
+                value={selTab.nested_forms as Row[]}
                 onChange={(next) => patchTab({ nested_forms: next })}
                 app={app}
                 parentConnector={connector}

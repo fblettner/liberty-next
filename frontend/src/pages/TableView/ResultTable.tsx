@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
 import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { Action, PromptField, ScreenDetail } from '../../types/screens'
+import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError, authHeaders } from '../../api/client'
 import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
@@ -32,6 +32,7 @@ import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { resolveBindList, type Row as CtxRow } from './dialogHelpers'
+import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
 type DataRow = Record<string, unknown>
@@ -74,22 +75,9 @@ const filterPropsFor = (kind: FilterKind, options?: { value: string; label: stri
     ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
     : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
 
-// Send both the as-is keys and UPPERCASE copies: the migrated `_put`/`_post`/`_delete` queries
-// use v1's uppercase column names, while Postgres returns the read result's columns lowercased;
-// `text()` binds only the `:params` it references, so the extras are harmless.
-function withUpper(o: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...o }
-  for (const [k, v] of Object.entries(o)) out[k.toUpperCase()] = v
-  return out
-}
-// The row's original (pre-edit) values, keyed `<NAME>_ORIGINAL` — so an `_put` query whose WHERE
-// must match a column the user just edited (e.g. a business key) can bind `:<NAME>_ORIGINAL` to the
-// old value. The verbatim-migrated v1 `_put` queries don't reference these (their WHERE reuses
-// `:<NAME>`, so editing the key matches nothing — same behaviour as v1); they're forward-compat,
-// and harmless when unused since `text()` only binds the `:params` the SQL actually mentions.
-function originalKeys(row: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(row).map(([k, v]) => [`${k}_ORIGINAL`, v]))
-}
+// (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
+// ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
+// write/delete path shared with the dialog.)
 
 // Slice 6 — row context menu action runner: resolve a list of ParamBinds against a row's live
 // values. `value` binds are literal; `source` binds read another column on the same row
@@ -798,26 +786,36 @@ export function ResultTable({
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
     const jobs: Promise<unknown>[] = []
-    const post = (q: string, params: Record<string, unknown>) =>
-      jobs.push(api.post(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}`, { params: withUpper(params) }))
     const localErrs: string[] = []
-    // edited existing rows → `_put`: new values for SET, plus `:<NAME>_ORIGINAL` for a key-aware WHERE
+    // Same write path as the dialog Save: ``saveScreenRow`` splits each row across the main table
+    // and any ``column_groups`` (related 1:1 tables) by each column's ``group``, so an inline grid
+    // edit to a JOINed column lands in its related table. New-row inserts capture the
+    // server-assigned PK (``resolvedBinds``) so the ``on_insert`` hook + FK binds see it.
+    const columnGroups = (screen?.column_groups ?? []) as ColumnGroup[]
+    const newBinds = new Map<DataRow, Record<string, unknown>>()
+    const writeRow = (mode: 'add' | 'edit', sent: Record<string, unknown>, savedRow: DataRow) =>
+      saveScreenRow({
+        connector, mode, sent, savedRow, columns: result.columns, columnGroups,
+        mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery,
+      })
+    // edited existing rows → main `_put` (+ each group's update/insert), key-aware WHERE via originals
     for (const row of dirtyRows) {
       if (deleted.has(row)) continue
       if (!updateQuery) { localErrs.push(t('table.editNoUpdate')); break }
-      post(updateQuery, { ...row, ...editsRef.current.get(row), ...originalKeys(row) })
+      jobs.push(writeRow('edit', editsRef.current.get(row) ?? {}, row))
     }
-    // new rows → `_post`: just the entered values (nothing existed before)
+    // new rows → main `_post` (+ each group's insert): just the entered values (nothing existed before)
     for (const row of newRows) {
       if (deleted.has(row)) continue
       if (!insertQuery) { localErrs.push(t('table.editNoInsert')); break }
-      post(insertQuery, editsRef.current.get(row) ?? {})
+      jobs.push(writeRow('add', editsRef.current.get(row) ?? {}, {}).then((r) => { newBinds.set(row, r.resolvedBinds) }))
     }
-    // rows marked for deletion → `_delete`: the current row identifies it (it wasn't edited if it's deleted)
+    // rows marked for deletion → main `_delete` (+ each group's delete first, FK-safe): the
+    // current row identifies it (it wasn't edited if it's deleted)
     for (const row of deleted) {
       if (newRows.includes(row)) continue
       if (!deleteQuery) { localErrs.push(t('table.editNoDelete')); break }
-      post(deleteQuery, { ...row })
+      jobs.push(deleteScreenRow({ connector, row, columnGroups, mainDeleteQuery: deleteQuery }))
     }
     const settled = await Promise.allSettled(jobs)
     const reqErrs = settled
@@ -855,7 +853,7 @@ export function ResultTable({
     }
     for (const row of newRows) {
       if (deleted.has(row)) continue
-      const err = await fireChain(screen?.on_insert, editsRef.current.get(row) ?? {})
+      const err = await fireChain(screen?.on_insert, { ...editsRef.current.get(row), ...newBinds.get(row) })
       if (err) hookErrs.push(err)
     }
     for (const row of deleted) {

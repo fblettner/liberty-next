@@ -108,3 +108,43 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
 
   return { rowcount: resp.rowcount ?? 0, resolvedBinds: resolved }
 }
+
+export interface DeleteScreenRowArgs {
+  /** The screen's effective connector (the main delete query lives here). */
+  connector: string
+  /** The full loaded row — identifies the main row to delete AND each related row (its key
+   *  columns / FK come from here). */
+  row: Row
+  /** The screen's related-table write-back groups. */
+  columnGroups: ColumnGroup[]
+  mainDeleteQuery?: string | null
+}
+
+/** Delete the main row AND each related group's row. Children are deleted FIRST (FK-safe), then
+ *  the main row — the mirror of saveScreenRow, so a delete no longer orphans the related 1:1 rows
+ *  (previously only an ``on_delete`` action chain could clean them up). Returns the main delete's
+ *  rowcount so the caller can flag a no-op delete (200 OK + 0 rows). */
+export async function deleteScreenRow(a: DeleteScreenRowArgs): Promise<{ rowcount: number }> {
+  // ── related groups first (children) ──
+  for (const grp of a.columnGroups) {
+    if (!grp.delete_query) continue   // no delete query → leave the related row (opt-out)
+    // Only delete a related row that actually exists — its key columns came back non-null from the
+    // JOIN. With no key_columns declared we can't tell, so we still attempt (a non-matching WHERE
+    // is a harmless 0-row delete).
+    const keyCols = grp.key_columns ?? []
+    const exists = keyCols.length > 0 ? keyCols.every((kc) => valueFor(kc, a.row) != null) : true
+    if (!exists) continue
+    const gConn = grp.connector || a.connector
+    // Same FK link as the write path — bind the parent's value so a delete query keyed off the FK
+    // (rather than the related key) still resolves. The whole row is also sent so a delete keyed
+    // off the related key columns binds them directly.
+    const fk = resolveBindList(grp.param_binds, a.row)
+    await api.post(`/api/sql/${enc(gConn)}/${enc(grp.delete_query)}`, { params: withUpper({ ...a.row, ...fk }) })
+  }
+  // ── main row (parent) ──
+  if (!a.mainDeleteQuery) return { rowcount: 0 }
+  const resp = await api.post<{ rowcount?: number }>(
+    `/api/sql/${enc(a.connector)}/${enc(a.mainDeleteQuery)}`, { params: withUpper({ ...a.row }) },
+  )
+  return { rowcount: resp.rowcount ?? 0 }
+}

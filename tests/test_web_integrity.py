@@ -209,7 +209,7 @@ def test_column_group_queries_and_refs_validated() -> None:
             ],
             "column_groups": [
                 {"id": "addr", "update_query": "f0101_put", "param_binds": [{"param": "ABAN8", "source": "ULUSER"}]},
-                {"id": "bad", "update_query": "no_such_put"},
+                {"id": "bad", "update_query": "no_such_put", "delete_query": "no_such_delete"},
             ],
         }}},
         menus={"nomajde": {"items": [{"id": "u", "label": "F0092", "type": "screen", "target": "f0092"}]}},
@@ -217,6 +217,7 @@ def test_column_group_queries_and_refs_validated() -> None:
     issues = check_integrity(state)
     missing = [i.message for i in issues if i.category == "Missing query"]
     assert any("no_such_put" in m for m in missing)                 # group's bad query flagged
+    assert any("no_such_delete" in m for m in missing)              # group's bad delete query flagged too
     broken = [i.message for i in issues if i.category == "Broken column group"]
     assert any("ghost" in m for m in broken)                        # column → undefined group flagged
     assert not any("'addr'" in m for m in broken)                   # valid group not flagged
