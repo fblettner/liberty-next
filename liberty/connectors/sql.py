@@ -361,7 +361,7 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     return "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
 
 
-def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -> str:
+def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False) -> str:
     """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``.
 
     Text columns get the operator-aware ``LOWER(col) LIKE LOWER(...)`` family for
@@ -371,6 +371,13 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -
     the previous universal CAST AS VARCHAR(4000) on every column kept it from ever using
     an index.
 
+    ``trim_text`` (the pool's ``trim_strings`` flag) wraps the *text* column side in ``TRIM``.
+    JDE stores CHAR(N) blank-padded, so ``DTSY`` comes back ``'01        '``; an ``equals``
+    filter binding ``'01'`` would never match the raw column. The pool flag already trims the
+    *result* rows — this makes the *filter* honour it too, so a query author no longer has to
+    hand-write ``TRIM(DTSY)`` in the SELECT just to make its filters work. (Number / date columns
+    aren't space-padded, so trimming is text-only.)
+
     Non-text columns (number / date / boolean / jdedate) only use ``equals``. The wrap
     helper coerces the bind to the right *Python* type before passing it down (so a
     string ``"10"`` becomes ``int(10)``) — asyncpg then sends the proper type code and
@@ -379,7 +386,7 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -
     reject the string ``"10"`` even though Postgres would have accepted it.
     """
     text_format = (fmt or "").lower() in _TEXT_FORMATS or fmt is None or fmt == ""
-    col_ref = f"lib_flt.{name}"
+    col_ref = f"TRIM(lib_flt.{name})" if (text_format and trim_text) else f"lib_flt.{name}"
     if text_format:
         # The bind side still casts to a wide VARCHAR — asyncpg can't infer the type of a
         # bind otherwise (Postgres needs the cast to know whether to compare as text vs
@@ -926,7 +933,10 @@ class SQLConnector:
         if not active:
             return sql_text, params
         dialect = self._resolve_dialect()
-        preds = [_build_filter_predicate(name, fmt, op, dialect) for name, fmt, op, _ in active]
+        # Honour the pool's ``trim_strings`` on the filter's text columns too (JDE CHAR(N) is
+        # blank-padded — without this a query that doesn't hand-TRIM its SELECT can't be filtered).
+        trim_text = self._pools.trim_strings(self.pool_name)
+        preds = [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text) for name, fmt, op, _ in active]
         body, order_clause = _split_order_by(sql_text)
         where_clause = " AND ".join(f"({p})" for p in preds)
         out = f"SELECT * FROM (\n{body}\n) lib_flt\nWHERE 1=1 AND {where_clause}"

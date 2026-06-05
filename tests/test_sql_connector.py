@@ -1640,3 +1640,22 @@ async def test_jdedate_columns_converted_to_iso_on_read(pools: PoolRegistry) -> 
     assert rs[1] == {"id": 2, "upmj": 0}
     # NULL stays NULL
     assert rs[2] == {"id": 3, "upmj": None}
+
+
+def test_filter_predicate_trims_text_column_under_trim_strings() -> None:
+    """The runtime filter wrap must honour the pool's ``trim_strings`` on TEXT columns — JDE
+    CHAR(N) is blank-padded, so ``DTSY`` comes back ``'01      '`` and an ``equals`` filter
+    binding ``'01'`` would never match the raw column. With trim on, the column side is wrapped
+    in TRIM so the filter works without the query hand-TRIMming its SELECT. Numbers aren't padded,
+    so they stay untrimmed (preserves index usage / typed binds)."""
+    from liberty.connectors.sql import _build_filter_predicate
+
+    # text + trim → TRIM(col); LIKE family too
+    assert _build_filter_predicate("DTSY", "text", "equals", "postgresql", trim_text=True) == \
+        "TRIM(lib_flt.DTSY) = CAST(:DTSY AS VARCHAR(4000))"
+    assert "LOWER(TRIM(lib_flt.DTSY))" in _build_filter_predicate("DTSY", "text", "contains", "postgresql", trim_text=True)
+    # text + no trim → raw column (default, unchanged behaviour)
+    assert _build_filter_predicate("DTSY", "text", "equals", "postgresql") == \
+        "lib_flt.DTSY = CAST(:DTSY AS VARCHAR(4000))"
+    # numeric column is never trimmed, even with trim on
+    assert _build_filter_predicate("AN8", "integer", "equals", "postgresql", trim_text=True) == "lib_flt.AN8 = :AN8"
