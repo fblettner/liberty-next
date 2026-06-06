@@ -121,6 +121,12 @@ class PoolRegistry:
         if url.get_backend_name() != "sqlite":
             kwargs["pool_size"] = cfg.pool_size
             kwargs["max_overflow"] = cfg.max_overflow
+        # Oracle fetch batch — the oracledb driver defaults cursor.arraysize to 100, which means
+        # ~10x more DB round-trips than asyncpg on a large read. The oracledb dialect accepts
+        # ``arraysize`` as a create_engine kwarg (sets the default for every cursor, streaming
+        # included), so raising it here speeds up big tables. Oracle only; other backends ignore it.
+        if cfg.arraysize and url.get_backend_name() == "oracle":
+            kwargs["arraysize"] = int(cfg.arraysize)
         engine = create_async_engine(url, **kwargs)
         # SQLite ships with FK enforcement OFF by default — without ``PRAGMA
         # foreign_keys=ON`` per-connection, ON DELETE CASCADE silently no-ops on

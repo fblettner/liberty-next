@@ -93,6 +93,12 @@ class PoolConfig(BaseModel):
     max_rows: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
         "Default row cap for SELECTs on this pool. Falls back to 1000. Per-screen / per-request overrides win."
     ))
+    arraysize: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
+        "Oracle only — rows fetched per DB round-trip (cursor ``arraysize``). The oracledb driver "
+        "defaults to 100, which is conservative for large reads; raise it (e.g. 500–1000) to cut "
+        "round-trips and speed up big tables. Ignored on non-Oracle pools (asyncpg/Postgres already "
+        "batches larger). Blank → the driver default."
+    ))
     trim_strings: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
         "Strip trailing whitespace from string cells on SELECT. Enable for Oracle pools with "
         "space-padded CHAR / NCHAR columns (JD Edwards is the canonical case)."
