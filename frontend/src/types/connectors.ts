@@ -105,6 +105,10 @@ export type DisplayRule =
       /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
        *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
       return_params?: string[]
+      /** The lookup's declared query params double as the **key columns** that disambiguate a
+       *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
+       *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
+      key_columns?: string[]
     }
 
 export interface Column {

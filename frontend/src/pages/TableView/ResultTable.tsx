@@ -973,10 +973,17 @@ export function ResultTable({
       // and emit a {column, value} narrow entry when set. EditCell filters the lookup
       // rows on the fly so the dropdown shows only matching options (DRSY=01 → DRRT only
       // shows the RT codes where SY=01). Empty values mean "no narrowing for that dep".
+      // Prefer the screen's explicit ``filter_from``; else fall back to the lookup's own declared
+      // ``key_columns`` (same-named row column → lookup column) so the edit dropdown auto-narrows
+      // to the right rows for a non-unique value, matching the grid's display disambiguation.
       const narrowBy: { column: string; value: unknown }[] | undefined =
-        c.rule?.kind === 'lookup' && c.filter_from && c.filter_from.length > 0
-          ? c.filter_from.map((dep) => ({ column: dep.column, value: cur(row, dep.source) }))
-          : undefined
+        c.rule?.kind !== 'lookup'
+          ? undefined
+          : c.filter_from && c.filter_from.length > 0
+            ? c.filter_from.map((dep) => ({ column: dep.column, value: cur(row, dep.source) }))
+            : (c.rule.key_columns && c.rule.key_columns.length > 0
+                ? c.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
+                : undefined)
       return (
         <EditCell
           ctrl={editCtrlOf(c)}
@@ -998,6 +1005,39 @@ export function ResultTable({
         const r = c.rule
         const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
         const map = data?.map
+        // Per-row label disambiguation. A lookup ``value`` need not be globally unique — e.g.
+        // USR_ID repeats across apps and is only unique per USR_APPS_ID — so the value→label
+        // ``map`` collides (it keeps whichever row landed last). Resolve the label using the
+        // row's *key columns*: explicit ``filter_from`` if the screen set it, else the lookup's
+        // own declared ``key_columns`` (automatic, no per-column config). Build a composite
+        // ``<key…>\0<value>`` → label map ONCE per lookup column (O(rows)), then resolve each
+        // cell in O(1). Falls back to the plain ``map`` when no key columns / no composite hit.
+        const keyDeps: { source: string; column: string }[] =
+          c.filter_from && c.filter_from.length > 0
+            ? c.filter_from.map((d) => ({ source: d.source, column: d.column }))
+            : (r.key_columns ?? []).map((kc) => ({ source: kc, column: kc }))
+        const norm = (x: unknown) => String(x ?? '').trim()
+        const compositeMap = (() => {
+          if (!keyDeps.length || !data?.rows) return undefined
+          const m = new Map<string, string>()
+          for (const lr of data.rows) {
+            const key = [
+              ...keyDeps.map((d) => norm(lr[data.byColLower.get(d.column.toLowerCase()) ?? d.column])),
+              norm(lr[data.vKey]),
+            ].join(' ')
+            m.set(key, lr[data.lKey] == null ? '' : String(lr[data.lKey]))
+          }
+          return m
+        })()
+        const resolveLabel = (row: DataRow, value: unknown): string | undefined => {
+          const raw = value == null ? '' : String(value)
+          if (compositeMap) {
+            const key = [...keyDeps.map((d) => norm(cur(row, d.source))), norm(value)].join(' ')
+            const hit = compositeMap.get(key)
+            if (hit != null && hit !== '') return hit
+          }
+          return map?.get(raw)
+        }
         // Lookup-filter options for both the (ID) and the resolved-label columns: the ID
         // column filters by code, the label column filters by label. Each picker shows
         // "<code> — <label>" so the operator sees both. Empty until the lookup table loads.
@@ -1035,14 +1075,17 @@ export function ResultTable({
         out.push({
           id: `${c.name}__lookup`,
           header: colHeader(c),
-          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (map?.get(String(v)) ?? String(v)) },
+          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
           ...filterPropsFor('lookup', lookupOptsByLabel),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code
             const raw = cur(info.row.original as DataRow, c.name)
+            const resolved = resolveLabel(info.row.original as DataRow, raw)
             const { text, kind, isNull } = ruleCell(raw, c, undefined, map)
-            return span(text, isNull ? 'null' : kind, align, isNull ? undefined : String(raw ?? ''))
+            // ``resolved`` (composite/key-column hit) wins over the value-only ``map`` so the right
+            // label shows when the same code maps to different labels across key-column values.
+            return span(resolved ?? text, isNull ? 'null' : (resolved ? 'lookup' : kind), align, isNull ? undefined : String(raw ?? ''))
           },
         })
         continue

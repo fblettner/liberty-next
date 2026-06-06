@@ -414,6 +414,13 @@ class DictionaryFile(BaseModel):
             # wire so the frontend's lookup-pick handler can populate sibling fields.
             if lk.return_params:
                 wire["return_params"] = list(lk.return_params)
+            # ``params`` (the lookup's declared query params) double as the **key columns** that
+            # disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same USR_ID across
+            # apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to resolve the
+            # right label per row (match the row's same-named column), so the operator doesn't have
+            # to add a ``filter_from`` to every lookup column — it's automatic from the lookup def.
+            if lk.params:
+                wire["key_columns"] = list(lk.params)
             return wire
         # Form-layer auto-fill rules — v1's `dd_rules` shapes the dialog runtime can act on at
         # *open time* (add mode only). Each maps to a built-in source the frontend resolves
