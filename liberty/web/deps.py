@@ -93,9 +93,13 @@ def public_connector(desc: dict, principal: Principal) -> dict | None:
             flat.extend(kept)
         if not flat:
             return None
+        # Sort the flat list by name so every query-picker dropdown (screen designer, charts,
+        # column groups, exports, actions…) lists queries alphabetically rather than in section
+        # order (all the CRUD slots first, then customs/sequences/lookups). Case-insensitive.
+        flat.sort(key=lambda q: str(q.get("name", "")).lower())
         return {
             "name": name, "type": "sql",
-            "queries": flat,                       # backwards-compat flat list
+            "queries": flat,                       # backwards-compat flat list, name-sorted
             "tables": tables,
             "customs": sections["queries"],        # sectioned custom queries
             "sequences": sections["sequences"],
