@@ -12,7 +12,7 @@
 // "Open in Screens" link in this editor's header jumps to the matching screen.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -97,6 +97,8 @@ export interface ConnectorsTableEditorProps {
   /** Find every screen / menu / action / dictionary reference to this table (via its slot
    *  queries). Absent → no Find-usages button. */
   onFindUsages?: () => void
+  /** Move this table (all its CRUD slots) to another connector + rewrite refs. Absent → no button. */
+  onMove?: () => void
   /** When the parent finds a Screen whose `read_query` matches `<name>_get`, it passes `{app, id}`
    *  so the header shows an "Open visual builder" button. */
   screenLink?: { app: string; id: string } | null
@@ -104,7 +106,7 @@ export interface ConnectorsTableEditorProps {
 }
 
 export default function ConnectorsTableEditor({
-  table, connectorName, tableDefSchema, crudSlotSchema, defs, onChange, onDelete, onBack, onDuplicate, onRename, onChangeType, onFindUsages, screenLink, onOpenScreen,
+  table, connectorName, tableDefSchema, crudSlotSchema, defs, onChange, onDelete, onBack, onDuplicate, onRename, onChangeType, onFindUsages, onMove, screenLink, onOpenScreen,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -245,6 +247,11 @@ export default function ConnectorsTableEditor({
           {onChangeType && (
             <Button $variant="ghost" $size="sm" onClick={onChangeType}>
               <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
+            </Button>
+          )}
+          {onMove && (
+            <Button $variant="ghost" $size="sm" onClick={onMove}>
+              <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton', 'Move')}
             </Button>
           )}
           {onDuplicate && (

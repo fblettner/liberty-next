@@ -11,7 +11,7 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -25,6 +25,7 @@ import { CRUD_KINDS, type TableEntry, duplicateTableEntry, findTableIndex, newEm
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { MoveQueryModal } from './MoveQueryModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { DictionaryScan } from './DictionaryScan'
 
@@ -164,6 +165,7 @@ export default function ConnectorsBuilder() {
   const [screenDesigner, setScreenDesigner] = useState<{ app: string; id: string } | null>(null)
   const [selTable, setSelTable] = useState<string | null>(null)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [moveTarget, setMoveTarget] = useState<{ kind: 'table' | 'query' | 'sequence' | 'lookup'; name: string } | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
   const [tq, setTq] = useState('')
@@ -824,6 +826,12 @@ export default function ConnectorsBuilder() {
         <Button $variant="ghost" $size="sm" onClick={() => changeType(curSection().key as SectionKind, String(picked.name))} disabled={busy}>
           <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
         </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => {
+          const k = curSection().key
+          setMoveTarget({ kind: k === 'sequences' ? 'sequence' : k === 'lookups' ? 'lookup' : 'query', name: String(picked.name) })
+        }} disabled={busy}>
+          <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton', 'Move')}
+        </Button>
         <Button $variant="ghost" $size="sm" onClick={() => duplicateQuery(String(picked.name))} disabled={busy}>
           <Copy size={13} /> {t('settings.tables.duplicate')}
         </Button>
@@ -1025,6 +1033,7 @@ export default function ConnectorsBuilder() {
                       onDuplicate={() => sel && duplicateTable(sel, selTable)}
                       onRename={() => renameTable(selTable)}
                       onChangeType={() => changeType('tables', selTable)}
+                      onMove={() => setMoveTarget({ kind: 'table', name: selTable })}
                       onFindUsages={() => {
                         if (!sel) return
                         // Target the read slot (else the first present slot) — the dependent
@@ -1337,6 +1346,16 @@ export default function ConnectorsBuilder() {
         </Overlay>
       )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+      {moveTarget && sel && (
+        <MoveQueryModal
+          kind={moveTarget.kind}
+          name={moveTarget.name}
+          fromConnector={sel}
+          candidates={Object.keys(conns ?? {}).filter((n) => n !== sel && (conns?.[n]?.type ?? 'sql') !== 'api')}
+          onMoved={() => { load(); void refreshWorkspace() }}
+          onClose={() => { setMoveTarget(null); setSelQuery(null); setSelTable(null) }}
+        />
+      )}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

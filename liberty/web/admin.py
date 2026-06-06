@@ -62,6 +62,7 @@ from liberty.dashboards import load_dashboards
 from liberty.dashboards.config import DashboardsFile, parse_dashboards
 from liberty.theme import font_choices, load_theme, parse_theme, preset_choices, resolve_theme
 from liberty.web.clone import CloneError, clone_app, delete_app
+from liberty.web.move import MoveError, move_query
 from liberty.web.rename import (
     RenameError,
     rename_connector,
@@ -2634,6 +2635,46 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen, screen_app, dictionary_entry, query, table, action",
             )
     except RenameError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    return result.to_dict()
+
+
+class MoveBody(BaseModel):
+    """Payload for ``POST /admin/config/move`` — move a query definition between connectors.
+
+    ``kind`` is one of ``table`` / ``query`` / ``sequence`` / ``lookup`` (the connectors.toml
+    section that holds the definition). ``name`` is the entry's name (a table base, e.g.
+    ``f0004`` — its ``<base>_<crud>`` slots move together). ``from_connector`` / ``to_connector``
+    are the source and (already-existing) target connectors."""
+
+    kind: str
+    name: str
+    from_connector: str
+    to_connector: str
+
+
+@router.post("/config/move", summary="Move query between connectors (cross-file)")
+async def move_query_between_connectors(body: MoveBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Relocate a table / query / sequence / lookup definition from one connector to another and
+    rewrite every safe reference (dictionary lookups/sequences, menus, charts, dashboard widgets,
+    actions, and screens whose connector isn't shared with queries left behind). References that
+    can't be auto-rewritten come back in ``manual_refs`` for the operator to fix.
+
+    Atomic — nothing is written unless every rewritten doc re-parses. Does **not** reload; the
+    caller runs ``POST /admin/reload`` after to apply the change."""
+    settings = request.app.state.settings
+    try:
+        result = move_query(
+            body.kind, body.name, body.from_connector, body.to_connector,
+            connectors_path=Path(settings.connectors.config_path),
+            screens_path=Path(settings.screens.config_path),
+            menus_path=Path(settings.menus.config_path),
+            dictionary_path=_dictionary_path(settings),
+            charts_path=Path(settings.charts.config_path),
+            dashboards_path=Path(settings.dashboards.config_path),
+            actions_path=Path(settings.actions.config_path),
+        )
+    except MoveError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return result.to_dict()
 
