@@ -54,6 +54,7 @@ UsageType = Literal[
     "nested_form_read_query",   # NestedFormTab.read_query (dialog tab OR FormTab.nested_forms)
     "nested_form_update_query", # NestedFormTab.update_query
     "nested_form_insert_query", # NestedFormTab.insert_query
+    "nested_form_delete_query", # NestedFormTab.delete_query (child cleanup on parent delete)
     "column_group_update_query",# ColumnGroup.update_query (1:1 related-table write-back)
     "column_group_insert_query",# ColumnGroup.insert_query
     "column_group_delete_query",# ColumnGroup.delete_query
@@ -373,6 +374,7 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                                 ("read_query", "nested_form_read_query"),
                                 ("update_query", "nested_form_update_query"),
                                 ("insert_query", "nested_form_insert_query"),
+                                ("delete_query", "nested_form_delete_query"),
                             ):
                                 if getattr(nf, attr, None) == query and nf_conn == connector:
                                     out.append(Usage(

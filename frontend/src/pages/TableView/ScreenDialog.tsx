@@ -22,7 +22,7 @@ import { useSio, useLockState } from '../../sio/SioContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
-import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, ColumnGroup, FormTab, NestedFormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
 import { evalConditions, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
@@ -550,9 +550,19 @@ export function ScreenDialog({
       // ``trim_strings`` flag on Oracle/JDE — but stale data, the wrong delete_query, or a race
       // with another deleter can also produce it. We surface as a hard error here (rather than the
       // chain's soft warning) because the operator's intent on Delete is unambiguous.
+      // Flatten every nested form (dialog ``nested_form`` tabs + each FormTab's embedded
+      // ``nested_forms``) so deleteScreenRow can cascade-delete the children that declared a
+      // ``delete_query`` (no DB cascade) before removing the parent.
+      const nestedFormDeletes = tabs.flatMap((tab) => {
+        const forms: NestedFormTab[] = isFormTab(tab)
+          ? (tab.nested_forms ?? [])
+          : (tab.type === 'nested_form' ? [tab as NestedFormTab] : [])
+        return forms.map((nf) => ({ delete_query: nf.delete_query, connector: nf.connector, param_binds: nf.param_binds }))
+      })
       const resp = await deleteScreenRow({
         connector: targetConn, row: savedRow,
         columnGroups: (screen.column_groups ?? []) as ColumnGroup[],
+        nestedForms: nestedFormDeletes,
         mainDeleteQuery: screen.delete_query,
       })
       if (resp?.rowcount === 0) {

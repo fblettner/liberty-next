@@ -549,7 +549,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // EditQueryModal so the operator can tweak the SQL without leaving the visual designer.
   // Same shape the Screen Editor's Queries tab uses. ``patchTab`` is bound from the closure.
   const renderTabQueryPicker = (
-    key: 'read_query' | 'update_query' | 'insert_query',
+    key: 'read_query' | 'update_query' | 'insert_query' | 'delete_query',
     opts: { required: boolean; anyLabel: string | undefined },
   ): ReactNode => {
     const val = (selTab && typeof selTab[key] === 'string' ? (selTab[key] as string) : '') || ''
@@ -628,6 +628,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       if (selTab.connector) keep.connector = selTab.connector
       if (selTab.update_query) keep.update_query = selTab.update_query
       if (selTab.insert_query) keep.insert_query = selTab.insert_query
+      if (selTab.delete_query) keep.delete_query = selTab.delete_query
       if (Array.isArray(selTab.param_binds)) keep.param_binds = selTab.param_binds
     } else if (newType === 'nested_table') {
       keep.type = 'nested_table'
@@ -1169,6 +1170,14 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                         {renderTabQueryPicker('insert_query', { required: false, anyLabel: t('common.none') })}
                       </Field>
                     </div>
+                  </Row>
+                  <Row gap={10}>
+                    <div style={{ flex: 1 }}>
+                      <Field label={t('settings.screens.editor.queries.delete_query', 'Delete query')}>
+                        {renderTabQueryPicker('delete_query', { required: false, anyLabel: t('common.none') })}
+                      </Field>
+                    </div>
+                    <div style={{ flex: 1 }} />
                   </Row>
                   {renderTabBindsEditor()}
                 </>

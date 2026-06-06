@@ -152,6 +152,9 @@ export interface NestedFormTab extends TabCommon {
   read_query?: string
   update_query?: string | null
   insert_query?: string | null
+  /** Removes the linked child when the PARENT row is deleted (run child-first, bound by
+   *  `param_binds`). Blank → rely on a DB ON DELETE CASCADE / an `on_delete` action. */
+  delete_query?: string | null
   cols?: number | null
   fields: ScreenField[]
   param_binds?: ParamBind[]

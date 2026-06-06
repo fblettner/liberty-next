@@ -64,7 +64,8 @@ def test_query_usages_descends_into_column_groups_and_embedded_nested_forms() ->
                 "dialog": {
                     "tabs": [
                         {"id": "main", "type": "form", "nested_forms": [
-                            {"id": "child", "type": "nested_form", "read_query": "f00922_get"},
+                            {"id": "child", "type": "nested_form", "read_query": "f00922_get",
+                             "delete_query": "f00922_delete"},
                         ]},
                     ],
                 },
@@ -78,6 +79,8 @@ def test_query_usages_descends_into_column_groups_and_embedded_nested_forms() ->
                for u in find_usages(state, kind="query", name="f00921_post", scope="nomajde"))
     assert any(u.type == "nested_form_read_query"
                for u in find_usages(state, kind="query", name="f00922_get", scope="nomajde"))
+    assert any(u.type == "nested_form_delete_query"
+               for u in find_usages(state, kind="query", name="f00922_delete", scope="nomajde"))
 
 
 def test_screen_usages_finds_menu_via_read_query() -> None:

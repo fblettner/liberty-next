@@ -244,7 +244,7 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                         out.append(Issue("error", "Broken screen reference",
                                          f"{app}.{sid} · tab[{getattr(tab, 'id', '?')}] nested_form form_screen '{fscreen}' does not exist", link))
                     tsql = idx.sql_by_conn.get(tab_conn, set())
-                    for attr in ("read_query", "update_query", "insert_query"):
+                    for attr in ("read_query", "update_query", "insert_query", "delete_query"):
                         q = getattr(tab, attr, None)
                         if q and tab_conn in idx.conn_names and q not in tsql:
                             out.append(Issue("error", "Missing query",
@@ -258,7 +258,7 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                         out.append(Issue("error", "Broken screen reference",
                                          f"{app}.{sid} · tab[{getattr(tab, 'id', '?')}] embedded form '{getattr(nf, 'id', '?')}' form_screen '{fscreen}' does not exist", link))
                     nf_sql = idx.sql_by_conn.get(nf_conn, set())
-                    for attr in ("read_query", "update_query", "insert_query"):
+                    for attr in ("read_query", "update_query", "insert_query", "delete_query"):
                         q = getattr(nf, attr, None)
                         if q and nf_conn in idx.conn_names and q not in nf_sql:
                             out.append(Issue("error", "Missing query",

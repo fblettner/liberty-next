@@ -250,6 +250,16 @@ class NestedFormTab(_ScreenTabBase):
     )
     update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists. Inherited from ``form_screen`` in reference mode.")
     insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed. Inherited from ``form_screen`` in reference mode.")
+    delete_query: str | None = Field(
+        default=None,
+        description=(
+            "Removes the linked child row when the PARENT row is deleted — the nested-form analogue "
+            "of ``ColumnGroup.delete_query``. Run before the parent delete (child first), bound by "
+            "``param_binds``. Blank → the child is left untouched (rely on a DB ``ON DELETE CASCADE`` "
+            "FK, or an ``on_delete`` action). Set it when there's no cascade, so deleting the parent "
+            "doesn't orphan the child."
+        ),
+    )
     cols: int | None = Field(default=None, description="How many columns the nested form's grid spans.")
     fields: list[ScreenField] = Field(default_factory=list, description="INLINE MODE: fields shown in the nested form, in display order. Inherited from ``form_screen`` in reference mode.")
     param_binds: list[ParamBind] = Field(
