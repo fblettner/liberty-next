@@ -17,8 +17,10 @@ from typing import Any
 from liberty.web.usages import (
     _chart_deep_link,
     _connector_deep_link,
+    _connector_query_deep_link,
     _dashboard_deep_link,
     _dict_deep_link,
+    _find_query_usages,
     _get_dictionary,
     _iter_dict_sections,
     _iter_screen_actions,
@@ -465,6 +467,28 @@ def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                                      f"{app}.{sid} is not reachable from any menu or drill", _screen_deep_link(app, sid)))
 
 
+def _check_unused_queries(state: Any, idx: _Index, out: list[Issue]) -> None:
+    """A connector query (table CRUD slot / custom query / lookup / sequence source) that
+    nothing in the loaded config references is dead weight — the canonical case being a
+    lookup-backing query left behind after its dictionary lookup was repointed at another
+    connector. Reuses :func:`_find_query_usages` — the exact reverse-reference walk Find usages
+    shows — so the report stays consistent with it: a query flagged here is one Find usages would
+    also report as "0 references — safe to delete". That walk covers every config reference path
+    (screens incl. column groups + embedded nested forms, dialog tabs, actions, menus, dictionary
+    lookups/sequences, charts, dashboards, exports), so this is reliable, not a guess.
+
+    Warning-level, not error: the query is still valid SQL and harmless to keep — it's dead weight
+    to clean up, not a broken reference."""
+    for conn in sorted(idx.sql_by_conn.keys()):
+        for q in sorted(idx.sql_by_conn.get(conn, set())):
+            if not _find_query_usages(state, conn, q):
+                out.append(Issue(
+                    "warning", "Unused query",
+                    f"query '{conn}.{q}' is referenced by nothing in the loaded config",
+                    _connector_query_deep_link(conn, q),
+                ))
+
+
 def check_integrity(state: Any) -> list[Issue]:
     """Run every check against the loaded config and return the issues (errors first, then
     warnings; stable within each by category + message)."""
@@ -477,5 +501,6 @@ def check_integrity(state: Any) -> list[Issue]:
     _check_homes(state, idx, out)
     _check_unused_connectors(state, idx, out)
     _check_orphan_screens(state, idx, out)
+    _check_unused_queries(state, idx, out)
     out.sort(key=lambda i: (0 if i.severity == "error" else 1, i.category, i.message))
     return out

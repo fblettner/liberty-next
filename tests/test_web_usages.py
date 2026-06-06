@@ -48,6 +48,38 @@ def test_query_usages_includes_menu_target() -> None:
     assert "screen_read_query" in kinds  # the screen reads it too
 
 
+def test_query_usages_descends_into_column_groups_and_embedded_nested_forms() -> None:
+    """A query referenced only by a column group's write-back query, or by a nested form embedded
+    in a form tab, must NOT look unused — the reverse walk descends into the same nested screen
+    structures integrity validates. Regression for ``f00921`` (used by ``f0092``'s columns) showing
+    "0 references, safe to delete"."""
+    screens = {
+        "nomajde": {
+            "f0092": {
+                "connector": "nomajde",
+                "read_query": "f0092_get",
+                "column_groups": [
+                    {"id": "extra", "update_query": "f00921_put", "insert_query": "f00921_post"},
+                ],
+                "dialog": {
+                    "tabs": [
+                        {"id": "main", "type": "form", "nested_forms": [
+                            {"id": "child", "type": "nested_form", "read_query": "f00922_get"},
+                        ]},
+                    ],
+                },
+            },
+        },
+    }
+    state = _state(screens=screens)
+    assert any(u.type == "column_group_update_query"
+               for u in find_usages(state, kind="query", name="f00921_put", scope="nomajde"))
+    assert any(u.type == "column_group_insert_query"
+               for u in find_usages(state, kind="query", name="f00921_post", scope="nomajde"))
+    assert any(u.type == "nested_form_read_query"
+               for u in find_usages(state, kind="query", name="f00922_get", scope="nomajde"))
+
+
 def test_screen_usages_finds_menu_via_read_query() -> None:
     """Searching the SCREEN (id ``f0004``) must surface the menu that targets its read query
     ``f0004_get`` — the case the operator reported as returning nothing."""

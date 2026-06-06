@@ -51,9 +51,12 @@ UsageType = Literal[
     "screen_update_query",      # Screen.update_query
     "screen_insert_query",      # Screen.insert_query
     "screen_delete_query",      # Screen.delete_query
-    "nested_form_read_query",   # NestedFormTab.read_query
+    "nested_form_read_query",   # NestedFormTab.read_query (dialog tab OR FormTab.nested_forms)
     "nested_form_update_query", # NestedFormTab.update_query
     "nested_form_insert_query", # NestedFormTab.insert_query
+    "column_group_update_query",# ColumnGroup.update_query (1:1 related-table write-back)
+    "column_group_insert_query",# ColumnGroup.insert_query
+    "column_group_delete_query",# ColumnGroup.delete_query
     "action_run_query",         # RunQueryAction.query
     "action_navigate_to",       # NavigateAction.to
     "lookup_query",             # LookupDef.query
@@ -358,6 +361,45 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                                     label=f"{app}.{sid} · tab[{tab.id}].{attr}",
                                     deep_link=_screen_deep_link(app, sid),
                                 ))
+                        # A FormTab can EMBED nested forms (``FormTab.nested_forms``) — each a
+                        # NestedFormTab with its own read/update/insert queries + connector. The
+                        # loop above only sees tabs that *are* nested forms; these are nested
+                        # *inside* a form tab, so they need an explicit walk (integrity validates
+                        # them too — see _check_screens). Without this a query referenced only by an
+                        # embedded form looks unused.
+                        for nf in getattr(tab, "nested_forms", None) or []:
+                            nf_conn = getattr(nf, "connector", None) or tab_conn
+                            for attr, kind in (
+                                ("read_query", "nested_form_read_query"),
+                                ("update_query", "nested_form_update_query"),
+                                ("insert_query", "nested_form_insert_query"),
+                            ):
+                                if getattr(nf, attr, None) == query and nf_conn == connector:
+                                    out.append(Usage(
+                                        type=kind,
+                                        label=f"{app}.{sid} · tab[{tab.id}] · form[{getattr(nf, 'id', '?')}].{attr}",
+                                        deep_link=_screen_deep_link(app, sid),
+                                    ))
+                # Column groups — a 1:1 related table edited inline and written back through the
+                # group's own update / insert / delete queries (``ColumnGroup``). Effective connector
+                # is the group's own, else the screen's. Integrity validates these (``_check_screens``);
+                # usages must see them too — else a query referenced ONLY by a column group (e.g.
+                # ``f00921`` from ``f0092``'s columns) shows 0 references and looks safe to delete.
+                for grp in getattr(screen, "column_groups", None) or []:
+                    g_conn = getattr(grp, "connector", None) or screen_conn
+                    if g_conn != connector:
+                        continue
+                    for attr, kind in (
+                        ("update_query", "column_group_update_query"),
+                        ("insert_query", "column_group_insert_query"),
+                        ("delete_query", "column_group_delete_query"),
+                    ):
+                        if getattr(grp, attr, None) == query:
+                            out.append(Usage(
+                                type=kind,
+                                label=f"{app}.{sid} · group[{getattr(grp, 'id', '?')}].{attr}",
+                                deep_link=_screen_deep_link(app, sid),
+                            ))
                 # Actions — run_query (`query`) + navigate (`to`).
                 for where, action in _iter_screen_actions(screen):
                     a_type = getattr(action, "type", None)

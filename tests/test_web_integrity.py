@@ -99,6 +99,20 @@ def test_unused_connector_and_orphan_screen_warn() -> None:
     assert any(c[0] == "warning" and c[1] == "Orphan screen" and "lonely" in c[2] for c in cats)
 
 
+def test_unused_query_warns_and_referenced_query_does_not() -> None:
+    # ``orphan_get`` is owned by jde but nothing references it (the canonical "lookup-backing
+    # query left behind after the dictionary lookup moved connectors" case); ``f0004_get`` is
+    # the screen's read_query and must NOT be flagged.
+    state = _state(
+        conns={"jde": ["f0004_get", "orphan_get"]},
+        screens={"jde": {"f0004": {"connector": "jde", "read_query": "f0004_get"}}},
+        menus={"jde": {"items": [{"id": "u", "label": "U", "type": "screen", "target": "f0004"}]}},
+    )
+    msgs = [i.message for i in check_integrity(state) if i.category == "Unused query"]
+    assert any("jde.orphan_get" in m for m in msgs)
+    assert not any("jde.f0004_get" in m for m in msgs)
+
+
 def test_dashboard_menu_target_uses_qualified_id() -> None:
     """A `dashboard` menu leaf targets the QUALIFIED `<scope>.<id>` — an existing one must not be
     flagged, a missing one must be. (Regression: the index used bare ids → false positives.)"""
