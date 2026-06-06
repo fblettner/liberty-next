@@ -1029,6 +1029,21 @@ export function ResultTable({
           }
           return m
         })()
+        // Trim-tolerant value->label map for display resolution only. ``data.map`` is keyed on the
+        // RAW value because EditCell uses it for the edit dropdown's option values + return-param
+        // row matching, which must stay exact (and write-back must keep the value's padding). So we
+        // build a SEPARATE trimmed-key map here, used only to resolve the displayed label — never
+        // written back. Comparison-only, like the server-side filter-bind trim.
+        const trimmedMap = (() => {
+          if (!data?.rows) return undefined
+          const m = new Map<string, string>()
+          for (const lr of data.rows) {
+            const v = lr[data.vKey]
+            if (v == null) continue
+            m.set(norm(v), lr[data.lKey] == null ? String(v) : String(lr[data.lKey]))
+          }
+          return m
+        })()
         const resolveLabel = (row: DataRow, value: unknown): string | undefined => {
           const raw = value == null ? '' : String(value)
           if (compositeMap) {
@@ -1036,7 +1051,10 @@ export function ResultTable({
             const hit = compositeMap.get(key)
             if (hit != null && hit !== '') return hit
           }
-          return map?.get(raw)
+          // Exact match first (fast, padding-preserving), then trim-tolerant (JDE pads / right-
+          // justifies codes, so the cell's raw value and the lookup's value column can differ in
+          // padding for the same logical code). Resolution-only — never written back.
+          return map?.get(raw) ?? trimmedMap?.get(norm(value))
         }
         // Lookup-filter options for both the (ID) and the resolved-label columns: the ID
         // column filters by code, the label column filters by label. Each picker shows

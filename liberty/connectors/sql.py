@@ -986,7 +986,14 @@ class SQLConnector:
         # Merge the coerced active-filter values into a fresh params dict so the
         # downstream ``_build_params`` picks them up (it reads the dict by bind name).
         new_params: dict[str, Any] = dict(params or {})
-        for name, _fmt, _op, coerced in active:
+        for name, fmt, _op, coerced in active:
+            # Symmetric with the predicate's column side: when ``trim_strings`` wraps a text
+            # column in ``TRIM()``, trim the *bind* too (both sides — Oracle TRIM is both-sided).
+            # JDE codes are space-padded *and* sometimes right-justified, so a lookup value reads
+            # back as ``'      01'``; without this it never equals ``TRIM(col) = '01'``. Text
+            # columns only — numbers / dates aren't space-padded.
+            if trim_text and isinstance(coerced, str) and ((fmt or "").lower() in _TEXT_FORMATS or not fmt):
+                coerced = coerced.strip()
             new_params[name] = coerced
         return out, new_params
 
@@ -1381,6 +1388,15 @@ class SQLConnector:
             # after the padding, search/sort sees "Test    " ≠ "Test"). v1 stripped automatically;
             # v2 does the same when the pool flag is set (auto-on for Oracle, see ``PoolRegistry.
             # trim_strings``). The trim only touches strings — numbers, dates, bytes pass through.
+            #
+            # ``rstrip`` only (NOT ``strip``): a right-justified JDE code (KY in F0005, MCU
+            # everywhere) is *left*-padded, and a live read is an edit-then-write-back round trip —
+            # stripping the leading padding would make ``_pad_char_binds`` (which only right-pads)
+            # restore the wrong justification on save. Leading padding is preserved here and trimmed
+            # *only* where it's safe: the filter bind, for a comparison that's never written back
+            # (see ``_apply_filter_wrap``). The nomaflow copy path can strip both sides because its
+            # target is a clean Postgres replica, never written back to JDE (see coercion.py's
+            # ``strip_both_columns``).
             if self._pools.trim_strings(self.pool_name):
                 for row in rows:
                     for k, v in row.items():
@@ -1657,7 +1673,7 @@ class SQLConnector:
                     if _trim:
                         for k, v in row.items():
                             if isinstance(v, str):
-                                row[k] = v.rstrip()
+                                row[k] = v.rstrip()   # trailing only — preserve left-padding for write-back (see execute())
                     if _jdedate_cols:
                         for cn in _jdedate_cols:
                             if cn in row:

@@ -652,11 +652,13 @@ def test_describe_lists_metadata(pools: PoolRegistry) -> None:
 async def test_trim_strings_strips_trailing_whitespace_when_enabled() -> None:
     """v1's automatic trim for Oracle CHAR/NCHAR — re-enable on any pool via the explicit
     ``trim_strings = true`` flag. SQLite (used in tests) doesn't space-pad on its own, so we
-    feed pre-padded values to verify the strip logic runs."""
+    feed pre-padded values to verify the strip logic runs. TRAILING only: leading padding on a
+    right-justified JDE code (KY/MCU) is preserved so an edit-then-write-back round trip restores
+    the right justification (the filter bind is trimmed separately for comparison)."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as c:
         await c.execute(text("CREATE TABLE lbl (id INTEGER PRIMARY KEY, name TEXT)"))
-        await c.execute(text("INSERT INTO lbl VALUES (1, 'role   '), (2, 'demo')"))
+        await c.execute(text("INSERT INTO lbl VALUES (1, 'role   '), (2, 'demo'), (3, '      01')"))
     pools = PoolRegistry({"on": PoolConfig(url="sqlite://", trim_strings=True)})
     pools.register_engine("on", engine)
     conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="on", queries=[
@@ -667,7 +669,8 @@ async def test_trim_strings_strips_trailing_whitespace_when_enabled() -> None:
                 ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
                 ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
             ])
-    assert [row["name"] for row in r.rows] == ["role", "demo"]   # trailing spaces stripped
+    # trailing stripped; leading padding on the right-justified code preserved for write-back
+    assert [row["name"] for row in r.rows] == ["role", "demo", "      01"]
     await engine.dispose()
 
 
@@ -1659,6 +1662,27 @@ def test_filter_predicate_trims_text_column_under_trim_strings() -> None:
         "lib_flt.DTSY = CAST(:DTSY AS VARCHAR(4000))"
     # numeric column is never trimmed, even with trim on
     assert _build_filter_predicate("AN8", "integer", "equals", "postgresql", trim_text=True) == "lib_flt.AN8 = :AN8"
+
+
+@pytest.mark.asyncio
+async def test_filter_bind_trimmed_to_match_trimmed_column() -> None:
+    """End-to-end counterpart to the predicate test: a padded filter value (a right-justified JDE
+    UDC code arrives as ``'      01'``) must match the ``TRIM()``'d column. The wrap trims BOTH the
+    column and the bind, so the comparison is symmetric — without the bind trim the equals filter
+    returns 0 rows (the bug the operator hit moving f0004 to read jdedwards directly)."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE f0004 (id INTEGER PRIMARY KEY, dtsy TEXT)"))
+        await c.execute(text("INSERT INTO f0004 VALUES (1, '01'), (2, '02')"))
+    pools = PoolRegistry({"on": PoolConfig(url="sqlite://", trim_strings=True)})
+    pools.register_engine("on", engine)
+    conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="on", queries=[
+        QueryDef(name="get", sql="SELECT id, dtsy FROM f0004 ORDER BY id"),
+    ]), pools)
+    hints = [ColumnHint(name="dtsy", label="System", filter=True, format="text")]
+    r = await conn.execute("get", {"dtsy": "      01", "dtsy_op": "equals"}, column_hints=hints)
+    assert [row["id"] for row in r.rows] == [1]   # leading-space bind still matches TRIM(dtsy)='01'
+    await engine.dispose()
 
 
 def test_jsonable_number_coerces_decimal_to_json_number() -> None:
