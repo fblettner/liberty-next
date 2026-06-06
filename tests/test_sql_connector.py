@@ -1679,3 +1679,31 @@ def test_jsonable_number_coerces_decimal_to_json_number() -> None:
     # non-Decimal passes through unchanged (identity for str / int / float / None)
     for x in ("abc", 42, 3.14, None):
         assert _jsonable_number(x) is x
+
+
+@pytest.mark.asyncio
+async def test_declared_param_wraps_as_optional_lookup_filter(pools: PoolRegistry) -> None:
+    """A plain lookup query that declares a ``params`` entry gets an optional equality filter
+    applied by the framework when a value is supplied — so the lookup query stays a plain
+    ``SELECT col… FROM table`` (no lib_lkp wrap / CAST baked into the TOML). No value → all rows;
+    value → filtered."""
+    conn = _connector(pools, QueryDef(
+        name="lkp",
+        sql="SELECT id, name, status FROM item ORDER BY id",
+        params=[ParamDef(name="status")],
+    ))
+    assert [r["id"] for r in (await conn.execute("lkp", {"status": "off"})).rows] == [3]      # filtered
+    assert [r["id"] for r in (await conn.execute("lkp", {})).rows] == [1, 2, 3]                # no value → all
+    assert [r["id"] for r in (await conn.execute("lkp", {"status": ""})).rows] == [1, 2, 3]    # empty → all
+
+
+@pytest.mark.asyncio
+async def test_declared_param_that_is_a_sql_bind_is_not_wrapped(pools: PoolRegistry) -> None:
+    """When the declared param is already a ``:placeholder`` in the SQL, the author owns it — the
+    framework must NOT also wrap it (which could reference a non-result column and error)."""
+    conn = _connector(pools, QueryDef(
+        name="own",
+        sql="SELECT id, name FROM item WHERE status = :status ORDER BY id",
+        params=[ParamDef(name="status")],
+    ))
+    assert [r["id"] for r in (await conn.execute("own", {"status": "on"})).rows] == [1, 2]

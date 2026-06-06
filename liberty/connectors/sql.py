@@ -921,11 +921,11 @@ class SQLConnector:
         strict-type check rejects a string against an INTEGER-typed bind, so the wrap
         helper is the place to convert ``"10"`` → ``int(10)`` before binding. Non-active
         params and any other binds pass through untouched."""
-        if stmt_type != "SELECT" or not column_hints:
+        if stmt_type != "SELECT":
             return sql_text, params
-        _ = qdef  # kept for signature symmetry — no longer reads qdef.columns (Phase 3).
         active: list[tuple[str, str | None, str, Any]] = []
-        for col in column_hints:
+        active_names: set[str] = set()
+        for col in column_hints or []:
             if not col.filter:
                 continue
             v = (params or {}).get(col.name)
@@ -949,6 +949,28 @@ class SQLConnector:
             # asyncpg gets to send the column's native type code and the index applies.
             coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
             active.append((col.name, fmt, op, coerced))
+            active_names.add(col.name.upper())
+        # Declared query params (``QueryDef.params``) used as OPTIONAL equality filters — the v1
+        # lib_lkp lookup pattern, now applied by the framework so the lookup query stays a plain
+        # ``SELECT col… FROM table``. A declared param filters its matching result column when
+        # (a) it isn't already a ``:bind`` in the SQL (the author would handle that themselves) and
+        # (b) a non-empty value was supplied. ``equals`` semantics (exact match), typed bind, and
+        # trim-aware via the shared predicate builder — no CAST/wrap noise in the TOML.
+        declared = [pd.name for pd in (getattr(qdef, "params", None) or [])]
+        if declared:
+            sql_binds = {b.upper() for b in find_bind_params(sql_text)}
+            for name in declared:
+                up = name.upper()
+                if up in sql_binds or up in active_names:
+                    continue
+                v = (params or {}).get(name)
+                if v is None or v == "":
+                    continue
+                entry = self._dict.find_entry(name, connector=dict_scope or self.name)
+                fmt = entry.format if (entry is not None and entry.format) else None
+                coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
+                active.append((name, fmt, "equals", coerced))
+                active_names.add(up)
         if not active:
             return sql_text, params
         dialect = self._resolve_dialect()
