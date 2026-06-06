@@ -1270,6 +1270,19 @@ class SQLConnector:
         cap = override if override is not None else (screen_max_rows if screen_max_rows is not None else self.max_rows)
         return max(1, min(int(cap), self.HARD_MAX_ROWS))
 
+    def _debug_log_sql(self, query_name: str, stmt_type: str, sql_text: str, bound: dict[str, Any]) -> None:
+        """When the pool's ``debug_sql`` flag is on, log the statement *as it reaches the driver*:
+        the resolved SQL (schema placeholders + filter wrap applied) and the final bound params
+        (post trim / coalesce / pad / sequence). Logged at WARNING so it surfaces on the console
+        even under ``log_level = "warning"`` — the flag is opt-in per pool, so this is intentional,
+        not noise. The flag check is cheap; building the message only happens when it's on."""
+        if not self._pools.debug_sql(self.pool_name):
+            return
+        _log.warning(
+            "[debug_sql] %s.%s (%s) on pool %r\n  SQL: %s\n  binds: %r",
+            self.name, query_name, stmt_type, self.pool_name, sql_text, bound,
+        )
+
     async def execute(
         self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
         max_rows: int | None = None, user: str | None = None,
@@ -1349,6 +1362,7 @@ class SQLConnector:
 
         started = time.perf_counter()
         if is_select:
+            self._debug_log_sql(query_name, stmt_type, sql_text, bound)
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
                 columns = _apply_column_hints(
@@ -1494,6 +1508,7 @@ class SQLConnector:
                 if pre_seq.get(k) in (None, "") and v not in (None, "")
                 and not k.upper().endswith("_ORIGINAL")
             }
+            self._debug_log_sql(query_name, stmt_type, sql_text, bound)
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
             # 0-row write watch — a successful SQL execute that didn't touch any row is almost
@@ -1600,6 +1615,7 @@ class SQLConnector:
         stmt = text(sql_text)
         engine: AsyncEngine = self._pools.engine(self.pool_name)
         _trim = self._pools.trim_strings(self.pool_name)
+        self._debug_log_sql(query_name, stmt_type, sql_text, bound)
         started = time.perf_counter()
 
         # Server-side cursor via conn.stream(). The ``stream_results=True`` execution option
@@ -1695,6 +1711,7 @@ class SQLConnector:
         engine = self._pools.engine(self.pool_name)
         started = time.perf_counter()
         if is_select:
+            self._debug_log_sql("<test-run>", stmt_type, sql_text, bound)
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
                 # No QueryDef → no column hints to overlay; we still expose discovered names + types.
@@ -1717,6 +1734,7 @@ class SQLConnector:
         # when the block exits with an exception); we catch it outside and report the rowcount.
         # Without dry_run the block exits normally and the transaction commits.
         rowcount = -1
+        self._debug_log_sql("<test-run>", stmt_type, sql_text, bound)
         try:
             async with engine.begin() as conn:
                 result = await conn.execute(stmt, bound)

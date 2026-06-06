@@ -102,6 +102,12 @@ class PoolConfig(BaseModel):
         "CHAR-family columns, 0 for numerics). Enable for Oracle pools with NOT-NULL string "
         "columns (Oracle treats ``''`` as NULL)."
     ))
+    debug_sql: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
+        "Log every executed statement on this pool — the resolved SQL (schema placeholders + "
+        "filter wrap applied) and the final bound parameters (after trim / coalesce / sequence "
+        "resolution), i.e. exactly what reaches the driver. Turn on to debug writes that affect "
+        "0 rows; leave off in production (binds may contain sensitive values)."
+    ))
     # NB: an earlier iteration carried ``strip_both_columns`` on the pool — moved to the
     # sql_copy step (Step.strip_both_columns) because JDE column names embed a 2-letter
     # table prefix (F0005's right-justified code is ``DRKY``, not ``KY``), so the right
