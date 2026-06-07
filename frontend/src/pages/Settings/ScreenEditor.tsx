@@ -58,7 +58,11 @@ type Row = Record<string, unknown>
 // with no hint that some are mutually exclusive). The picker turns it into one decision per
 // screen — "what happens when a row is clicked" — then reveals only the relevant fields.
 const GENERAL_FORM_KEYS = [
-  'label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable',
+  'label', 'description', 'audit_table',
+  // Change-package capture (Settings → Packages): toggle on to record every write on this
+  // screen into the app's active change package, with ``change_entity`` as its grouping label.
+  'change_tracked', 'change_entity',
+  'max_rows', 'auto_load', 'editable', 'uploadable',
   // Default tanstack-table grouping — column(s) the grid groups by on first open. Surfaces
   // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
   // ``x_enum_ref`` mechanism the Columns tab uses to pick column names.
