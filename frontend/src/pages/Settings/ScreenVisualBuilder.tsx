@@ -973,7 +973,27 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   }, [ddEntries, paletteQ])
   // The Columns palette source: an inline nested_form's own query columns when such a tab is
   // selected, else the parent screen's read-query columns.
-  const paletteColumns = nestedFormReadQuery ? nestedTabColumns : readColumns
+  // Column-group fields live on a related table joined into the read query — but an operator can add
+  // a group field that ISN'T in the read SELECT (e.g. a write-only field whose value comes from a DD
+  // default/rule). Those never come back from the read-query introspection above, so they'd be
+  // invisible in the picker. Merge them in from the screen config (any ``columns`` entry tagged with
+  // a ``group``) so every group field is pickable, deduped against what the read query already returns.
+  const groupConfigColumns = useMemo<Column[]>(() => {
+    const seen = new Set((readColumns ?? []).map((c) => c.name.toLowerCase()))
+    const out: Column[] = []
+    for (const c of screenColumns) {
+      const name = String(c.name ?? '')
+      if (!name || !c.group) continue
+      if (seen.has(name.toLowerCase())) continue
+      seen.add(name.toLowerCase())
+      out.push({ name, type: null, label: typeof c.label === 'string' ? c.label : undefined })
+    }
+    return out
+  }, [screenColumns, readColumns])
+  // Group fields belong to the MAIN dialog, not an inline nested-form tab — only merge for the parent.
+  const paletteColumns = nestedFormReadQuery
+    ? nestedTabColumns
+    : [...(readColumns ?? []), ...groupConfigColumns]
   const colItems = useMemo(() => {
     if (!paletteColumns) return [] as Column[]
     const needle = paletteQ.trim().toLowerCase()
