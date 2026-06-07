@@ -192,6 +192,20 @@ async def reject_package(session: AsyncSession, package_id: str, *, user: str | 
     return pkg
 
 
+async def mark_exported(session: AsyncSession, package_id: str) -> ChangePackage | None:
+    """Approved → exported (records ``exported_at``). Returns None if not found; raises
+    :class:`LifecycleError` if it isn't approved/exported. Re-exporting an already-exported package
+    is allowed (the bundle is the artifact)."""
+    pkg = await session.get(ChangePackage, package_id)
+    if pkg is None:
+        return None
+    if pkg.status not in (PackageStatus.APPROVED.value, PackageStatus.EXPORTED.value):
+        raise LifecycleError(f"only an approved package can be exported (this one is {pkg.status!r})")
+    pkg.status = PackageStatus.EXPORTED.value
+    pkg.exported_at = _utcnow()
+    return pkg
+
+
 async def set_entry_excluded(session: AsyncSession, entry_id: str, *, excluded: bool) -> ChangeEntry | None:
     """Cherry-pick: mark an entry excluded (skipped on submit/export) or back to captured. Returns
     None if not found; raises :class:`LifecycleError` if the entry was already applied/conflicted, or

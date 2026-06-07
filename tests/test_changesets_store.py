@@ -127,3 +127,23 @@ async def test_lifecycle_exclude_entry_and_reject() -> None:
     async with db.session() as s:
         with pytest.raises(store.LifecycleError):
             await store.set_entry_excluded(s, eid, excluded=True)
+
+
+@pytest.mark.asyncio
+async def test_mark_exported_requires_approved() -> None:
+    db = await _db()
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT")
+    async with db.session() as s:
+        pid = (await store.get_active_package(s, "jde")).id
+    async with db.session() as s:                       # draft can't be exported
+        with pytest.raises(store.LifecycleError):
+            await store.mark_exported(s, pid)
+    async with db.session() as s:
+        await store.submit_package(s, pid, user="u")
+    async with db.session() as s:
+        await store.approve_package(s, pid, user="b")
+    async with db.session() as s:
+        p = await store.mark_exported(s, pid)
+        assert p.status == PackageStatus.EXPORTED.value and p.exported_at is not None
+    async with db.session() as s:                       # re-export allowed
+        assert (await store.mark_exported(s, pid)).status == PackageStatus.EXPORTED.value

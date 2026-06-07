@@ -8,6 +8,8 @@ the captured row values across the connector.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -16,7 +18,28 @@ from sqlalchemy import func, select
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.changesets import store
+from liberty.changesets.compaction import compact
 from liberty.changesets.models import ChangeEntry
+
+BUNDLE_FORMAT = "liberty-changeset/1"
+
+
+def _bundle(pkg: Any, ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """Assemble the portable promotion bundle: package metadata + the compacted (replay-ready) ops
+    + a checksum over the ops so the apply side can detect tampering / truncation."""
+    clean = [{k: v for k, v in o.items() if k != "source_ids"} for o in ops]
+    checksum = hashlib.sha256(json.dumps(clean, sort_keys=True, default=str).encode()).hexdigest()
+    return {
+        "format": BUNDLE_FORMAT,
+        "package": {
+            "id": pkg.id, "name": pkg.name, "application": pkg.application,
+            "approved_by": pkg.approved_by,
+            "approved_at": pkg.approved_at.isoformat() if pkg.approved_at is not None else None,
+        },
+        "op_count": len(clean),
+        "ops": clean,
+        "checksum": checksum,
+    }
 
 router = APIRouter(prefix="/admin/changesets", tags=["admin", "changesets"])
 
@@ -164,3 +187,24 @@ async def exclude_entry(package_id: str, entry_id: str, request: Request, _: Sup
 @router.post("/{package_id}/entries/{entry_id}/include", summary="Re-include a previously excluded entry")
 async def include_entry(package_id: str, entry_id: str, request: Request, _: Superuser) -> dict[str, Any]:
     return await _set_excluded(request, entry_id, excluded=False)
+
+
+# ── export (Phase 3) ─────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/{package_id}/export", summary="Export an approved package as a promotion bundle")
+async def export_changeset(package_id: str, request: Request, _: Superuser) -> dict[str, Any]:
+    """Compact the (approved) package's entries to the net change per row and return a portable
+    bundle for promotion to another environment. Marks the package ``exported``. 409 if it isn't
+    approved/exported."""
+    db = _db(request)
+    async with db.session() as session:
+        pkg = await store.get_package(session, package_id)
+        if pkg is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change package {package_id!r} not found")
+        ops = compact(pkg.entries)
+        try:
+            await store.mark_exported(session, package_id)
+        except store.LifecycleError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        return _bundle(pkg, ops)
