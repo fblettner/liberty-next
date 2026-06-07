@@ -29,6 +29,8 @@ import { DataTable } from '../../common/DataTable'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { NestedFormTab, NestedTableTab, ScreenDetail } from '../../types/screens'
 import { evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
+import { enumMap } from '../../services/cells'
+import { lookupKey, useLookupTables, type LookupSpec } from '../../services/lookups'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { colors, fontSize } from '../../theme'
 // Circular import: ScreenDialog also imports NestedFormView/NestedTableView. ESM resolves
@@ -441,14 +443,46 @@ export function NestedTableView({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boundKey serializes bound
   }, [nestedScreen, connector, boundKey, hasBinds, refreshTick])
 
-  // Minimal column defs — one TanStack column per result column, displaying the raw value.
-  // No rules (BOOLEAN / ENUM / LOOKUP), no filters, no batch edit yet — that lands when /
-  // if the user asks for more. Read display is enough for activity_log / audit_trail and
-  // good enough for editable rules tables since clicking a row opens the full ScreenDialog.
-  // Password-typed columns are dropped entirely — never display a stored hash / ENC: blob
-  // in a grid cell, regardless of whether the migration flagged it ``hidden`` (v1's audit
-  // tables didn't always do so). The full ScreenDialog still lets the user *set* a new
-  // password through its masked input; the grid is read-only context.
+  // Rule resolution for the grid — same as the main result table so a LOOKUP / ENUM column shows
+  // its label, not the raw code (the cell was previously raw ``String(v)``, so a nested grid showed
+  // e.g. component "1309" while the edit dialog resolved it). enum → static enumMap; lookup → a
+  // trim-tolerant value→label map built from the fetched lookup rows (JDE codes can read back
+  // padded, so key by the trimmed value, matching the main grid).
+  const enumMaps = useMemo(() => {
+    const m = new Map<string, Map<string, string>>()
+    for (const c of result?.columns ?? []) if (c.rule?.kind === 'enum') m.set(c.name, enumMap(c.rule))
+    return m
+  }, [result])
+  const lookupSpecs = useMemo<LookupSpec[]>(
+    () => (result?.columns ?? []).filter((c) => c.rule?.kind === 'lookup').map((c) => {
+      const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
+    }),
+    [result],
+  )
+  const lookupMaps = useLookupTables(lookupSpecs)
+  const lookupLabelMaps = useMemo(() => {
+    const m = new Map<string, Map<string, string>>()
+    for (const c of result?.columns ?? []) {
+      if (c.rule?.kind !== 'lookup') continue
+      const r = c.rule
+      const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
+      if (!data?.rows) continue
+      const tm = new Map<string, string>()
+      for (const lr of data.rows) {
+        const v = lr[data.vKey]
+        if (v == null) continue
+        tm.set(String(v).trim(), data.lKey != null && lr[data.lKey] != null ? String(lr[data.lKey]) : String(v))
+      }
+      m.set(c.name, tm)
+    }
+    return m
+  }, [result, lookupMaps])
+
+  // One TanStack column per result column. Resolves BOOLEAN / ENUM / LOOKUP to a label (falls back
+  // to the raw value when a lookup hasn't loaded / doesn't match). Password-typed columns are
+  // dropped entirely — never display a stored hash / ENC: blob in a grid cell, regardless of
+  // whether the migration flagged it ``hidden``. Clicking a row opens the full ScreenDialog.
   const columns = useMemo(() => {
     const cols = result?.columns ?? []
     return cols
@@ -459,10 +493,16 @@ export function NestedTableView({
         header: c.label ?? c.name,
         cell: ({ getValue }: { getValue: () => unknown }) => {
           const v = getValue()
-          return v == null ? '' : String(v)
+          if (v === null || v === undefined || v === '') return ''
+          const raw = String(v)
+          const rule = c.rule
+          if (rule?.kind === 'lookup') return lookupLabelMaps.get(c.name)?.get(raw.trim()) ?? raw
+          if (rule?.kind === 'enum') return enumMaps.get(c.name)?.get(raw) ?? raw
+          if (rule?.kind === 'boolean') return raw === rule.true_value ? '✓' : raw
+          return raw
         },
       }))
-  }, [result])
+  }, [result, enumMaps, lookupLabelMaps])
 
   // Open the sub-dialog in "add" mode with the FK columns pre-filled from the bind values
   // (e.g. parent's APPS_ID = 7 → ACL_APPS_ID = 7 on the activity-log row). The dialog's
