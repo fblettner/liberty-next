@@ -98,6 +98,24 @@ async def test_capture_write_records_tracked_write_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_package_removes_it_and_its_entries() -> None:
+    """delete_package drops the package + cascades its entries; returns False when already gone."""
+    db = await _db()
+    await capture_write(db, connector="jdedwards", query="f0092_post", statement_type="INSERT",
+                        params={"ULUSER": "DEMO3"}, user="admin",
+                        key_columns=["ULUSER"], read_query="f0092_get", entity="user")
+    async with db.session() as s:
+        pid = (await store.list_packages(s, application="jdedwards"))[0].id
+    async with db.session() as s:
+        assert await store.delete_package(s, pid) is True
+    async with db.session() as s:
+        assert await store.get_package(s, pid) is None
+        assert await store.list_packages(s, application="jdedwards") == []
+    async with db.session() as s:
+        assert await store.delete_package(s, pid) is False   # already gone
+
+
+@pytest.mark.asyncio
 async def test_capture_main_and_group_writes_stay_distinct_ops() -> None:
     """A user Save writes the main F0092 row AND the 1:1 F00921 prefs row — both keyed on ULUSER.
     Capture records two entries; compaction must NOT collapse them into one just because they share

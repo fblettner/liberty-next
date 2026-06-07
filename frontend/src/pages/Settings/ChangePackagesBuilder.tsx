@@ -5,15 +5,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown } from 'lucide-react'
-import { Banner, Button } from '../../common'
+import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown, RefreshCw, Trash2, Search } from 'lucide-react'
+import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ApplyBundleModal } from './ApplyBundleModal'
 
 type Pkg = {
   id: string; application: string; name: string; status: string; description: string | null
-  created_by: string | null; created_at: string | null; approved_by: string | null; approved_at: string | null
+  created_by: string | null; created_at: string | null
+  submitted_by: string | null; submitted_at: string | null
+  approved_by: string | null; approved_at: string | null
   entry_count: number
 }
 type Entry = {
@@ -26,6 +28,16 @@ type PkgDetail = Pkg & { entries: Entry[] }
 
 const Wrap = styled.div`display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start;`
 const List = styled.div`display: flex; flex-direction: column; gap: 6px;`
+const FilterBox = styled.div`
+  display: flex; align-items: center; gap: 6px; padding: 5px 9px; margin-bottom: 4px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+  color: ${colors.text.muted};
+  & input { flex: 1; background: none; border: none; outline: none; color: ${colors.text.primary};
+    font-family: ${fonts.sans}; font-size: ${fontSize.sm}; }
+  & input::placeholder { color: ${colors.text.muted}; }
+  & .clear { background: none; border: none; cursor: pointer; color: ${colors.text.muted}; display: inline-flex; padding: 0; }
+  & .clear:hover { color: ${colors.text.secondary}; }
+`
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; margin-bottom: 12px; line-height: 1.5;`
 const Item = styled.button<{ $active: boolean }>`
   text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; cursor: pointer;
@@ -92,6 +104,24 @@ const OP_TONE: Record<string, string> = { INSERT: colors.green.main, UPDATE: col
 
 function fmt(v: unknown): string { return v === null || v === undefined || v === '' ? '∅' : String(v) }
 
+// Short local date+time for the package list (no seconds). Returns '' for a missing timestamp.
+function fmtDate(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+// The lifecycle date worth showing on a package: approved (also covers exported, since exported
+// keeps approved_at) → submitted → created. Returns a {label, when} or null. Exported time is
+// intentionally not surfaced.
+function pkgDate(p: Pkg): { label: string; when: string } | null {
+  if (p.approved_at) return { label: p.status === 'rejected' ? 'rejected' : 'approved', when: fmtDate(p.approved_at) }
+  if (p.submitted_at) return { label: 'submitted', when: fmtDate(p.submitted_at) }
+  if (p.created_at) return { label: 'created', when: fmtDate(p.created_at) }
+  return null
+}
+
 // Split an entry's fields into changed (incl. insert-added / delete-removed) vs unchanged, so the
 // collapsed view can show a count and the expanded view can hide the noise of untouched columns.
 function classifyFields(oldV: Record<string, unknown>, newV: Record<string, unknown>) {
@@ -107,12 +137,14 @@ function classifyFields(oldV: Record<string, unknown>, newV: Record<string, unkn
 
 export default function ChangePackagesBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const [packages, setPackages] = useState<Pkg[] | null>(null)
   const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<PkgDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [applyOpen, setApplyOpen] = useState(false)
+  const [filter, setFilter] = useState('')
   // Collapsible UI state — a package can hold hundreds of entries, so default to collapsed diffs
   // (just the summary row) and let the operator drill into the ones they care about. Group + entry
   // expansion are remembered per package id while it stays selected.
@@ -177,6 +209,53 @@ export default function ChangePackagesBuilder() {
     } finally { setBusy(false) }
   }, [selId, loadList, loadDetail])
 
+  // Manual refresh — the panel doesn't live-update, so a write captured in another tab won't show
+  // until this is hit (or the tab is re-opened). Reloads the list + the open package.
+  const refresh = useCallback(async () => {
+    setBusy(true); setError(null)
+    try { await Promise.all([loadList(), selId ? loadDetail(selId) : Promise.resolve()]) }
+    catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }, [selId, loadList, loadDetail])
+
+  // Delete a package (any status) — only the package log goes; the captured rows already live in
+  // their tables. Confirm via the themed dialog (never window.confirm). Re-point the selection.
+  const deletePkg = useCallback(async (p: Pkg) => {
+    const ok = await modals.confirm({
+      title: t('settings.changes.deleteTitle', 'Delete package?'),
+      message: t('settings.changes.deleteMsg',
+        'Delete "{{name}}" and its {{n}} captured change(s)? The rows already written to the database are not affected — only this package log is removed.',
+        { name: p.name, n: p.entry_count }),
+      variant: 'danger',
+      confirmLabel: t('common.delete', 'Delete'),
+    })
+    if (!ok) return
+    setBusy(true); setError(null)
+    try {
+      await api.del(`/admin/changesets/${encodeURIComponent(p.id)}`)
+      if (selId === p.id) { setSelId(null); setDetail(null) }
+      await loadList()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }, [modals, t, selId, loadList])
+
+  // Left-panel filter — names are just "Package N" (not useful), so match the typed text against
+  // status, application AND the displayed lifecycle dates (the label + the formatted timestamps),
+  // so e.g. "approved", "2026-06" or a day all narrow the list.
+  const visiblePackages = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return packages ?? []
+    return (packages ?? []).filter((p) => {
+      const d = pkgDate(p)
+      const hay = [
+        p.name, p.status, p.application, d?.label, d?.when,
+        fmtDate(p.created_at), fmtDate(p.submitted_at), fmtDate(p.approved_at),
+      ].filter(Boolean).join(' ').toLowerCase()
+      return hay.includes(q)
+    })
+  }, [packages, filter])
+
   // Group the detail's entries by entity (Users / Roles / …); fall back to the query name.
   const grouped = useMemo(() => {
     const m = new Map<string, Entry[]>()
@@ -195,6 +274,9 @@ export default function ChangePackagesBuilder() {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
         <Sub style={{ flex: 1, margin: 0 }}>{t('settings.changes.hint',
           'Every tracked data change is captured into the active package for its connector. Review the diffs here; approval + promotion to another environment come next.')}</Sub>
+        <Button $size="sm" $variant="ghost" disabled={busy} onClick={() => void refresh()}>
+          <RefreshCw size={13} /> {t('common.refresh', 'Refresh')}
+        </Button>
         <Button $size="sm" $variant="ghost" onClick={() => setApplyOpen(true)}>
           <Upload size={13} /> {t('settings.changes.applyBundle', 'Apply bundle…')}
         </Button>
@@ -206,15 +288,30 @@ export default function ChangePackagesBuilder() {
       ) : (
         <Wrap>
           <List>
-            {packages.map((p) => (
+            <FilterBox>
+              <Search size={13} />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={t('settings.changes.filter', 'Filter by name / status…')}
+              />
+              {filter && <button type="button" className="clear" onClick={() => setFilter('')}><X size={12} /></button>}
+            </FilterBox>
+            {visiblePackages.length === 0 ? (
+              <Sub style={{ margin: '4px 2px' }}>{t('settings.changes.noMatch', 'No packages match.')}</Sub>
+            ) : visiblePackages.map((p) => {
+              const d = pkgDate(p)
+              return (
               <Item key={p.id} $active={p.id === selId} onClick={() => setSelId(p.id)}>
                 <span className="name">{p.name}</span>
                 <span className="meta">
                   <Badge $tone={STATUS_TONE[p.status] ?? colors.text.muted}>{p.status}</Badge>
                   {' '}{p.application} · {t('settings.changes.nChanges', '{{n}} change(s)', { n: p.entry_count })}
                 </span>
+                {d && <span className="meta">{d.label} · {d.when}</span>}
               </Item>
-            ))}
+              )
+            })}
           </List>
           <div>
             {detail && (
@@ -251,6 +348,10 @@ export default function ChangePackagesBuilder() {
                       <Download size={13} /> {t('settings.changes.export', 'Export bundle')}
                     </Button>
                   )}
+                  <Button $size="sm" $variant="ghost" disabled={busy} style={{ color: colors.red.main }}
+                    onClick={() => { const p = packages.find((x) => x.id === detail.id); if (p) void deletePkg(p) }}>
+                    <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                  </Button>
                 </span>
               </DetailHead>
             )}

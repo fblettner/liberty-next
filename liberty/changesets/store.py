@@ -210,6 +210,19 @@ async def mark_exported(session: AsyncSession, package_id: str) -> ChangePackage
     return pkg
 
 
+async def delete_package(session: AsyncSession, package_id: str) -> bool:
+    """Delete a package and its entries (ORM cascade). Returns True if deleted, False if not found.
+    Allowed in any status — the operator may discard a draft they no longer want or prune old
+    rejected/exported records. This only drops the package log; the captured rows already committed
+    to their own tables and are untouched. If the deleted package was the application's active draft,
+    the next tracked write simply opens a fresh one."""
+    pkg = await session.get(ChangePackage, package_id)
+    if pkg is None:
+        return False
+    await session.delete(pkg)
+    return True
+
+
 async def set_entry_excluded(session: AsyncSession, entry_id: str, *, excluded: bool) -> ChangeEntry | None:
     """Cherry-pick: mark an entry excluded (skipped on submit/export) or back to captured. Returns
     None if not found; raises :class:`LifecycleError` if the entry was already applied/conflicted, or

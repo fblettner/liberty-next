@@ -31,6 +31,7 @@ const fr: Resources = {
     calling: 'Appel…',
     save: 'Enregistrer',
     reload: 'Recharger',
+    refresh: 'Actualiser',
     working: '…',
     done: 'Terminé',
     cancel: 'Annuler',
@@ -484,6 +485,10 @@ const fr: Resources = {
       nChanged: '{{n}} modifié(s)',
       showUnchanged: '+ {{n}} inchangé(s)',
       hideUnchanged: 'masquer {{n}} inchangé(s)',
+      filter: 'Filtrer par statut / date…',
+      noMatch: 'Aucun package correspondant.',
+      deleteTitle: 'Supprimer le package ?',
+      deleteMsg: 'Supprimer « {{name}} » et ses {{n}} changement(s) capturé(s) ? Les lignes déjà écrites en base ne sont pas affectées — seul ce journal de package est supprimé.',
     },
     integrity: {
       errors: 'erreurs', warnings: 'avertissements', errorsOnly: 'Erreurs', warningsOnly: 'Avertissements',

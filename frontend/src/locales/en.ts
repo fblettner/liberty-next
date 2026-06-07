@@ -29,6 +29,7 @@ const en = {
     calling: 'Calling…',
     save: 'Save',
     reload: 'Reload',
+    refresh: 'Refresh',
     working: '…',
     done: 'Done',
     cancel: 'Cancel',
@@ -482,6 +483,10 @@ const en = {
       nChanged: '{{n}} changed',
       showUnchanged: '+ {{n}} unchanged',
       hideUnchanged: 'hide {{n}} unchanged',
+      filter: 'Filter by status / date…',
+      noMatch: 'No packages match.',
+      deleteTitle: 'Delete package?',
+      deleteMsg: 'Delete "{{name}}" and its {{n}} captured change(s)? The rows already written to the database are not affected — only this package log is removed.',
     },
     integrity: {
       errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',

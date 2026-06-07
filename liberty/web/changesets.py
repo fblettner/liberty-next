@@ -132,6 +132,19 @@ async def get_changeset(package_id: str, request: Request, _: Superuser) -> dict
         return {**_pkg_summary(pkg, len(pkg.entries)), "entries": [_entry_dict(e) for e in pkg.entries]}
 
 
+@router.delete("/{package_id}", summary="Delete a change package")
+async def delete_changeset(package_id: str, request: Request, _: Superuser) -> dict[str, Any]:
+    """Delete a package + its entries. Any status — discard a draft or prune old records. Only the
+    package log is removed; the captured rows already live in their own tables. 404 if not found."""
+    db = _db(request)
+    async with db.session() as session:
+        deleted = await store.delete_package(session, package_id)
+        if not deleted:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change package {package_id!r} not found")
+        await session.flush()
+    return {"deleted": package_id}
+
+
 # ── lifecycle (Phase 2) ──────────────────────────────────────────────────────────────────────
 
 
