@@ -477,6 +477,13 @@ const fr: Resources = {
       apply: 'Appliquer',
       applyAnyway: 'Appliquer (ignorer les conflits)',
       force: 'forcer',
+      expandAll: 'Tout déplier',
+      collapseAll: 'Tout replier',
+      rowRemoved: 'ligne supprimée',
+      nFields: '{{n}} champ(s)',
+      nChanged: '{{n}} modifié(s)',
+      showUnchanged: '+ {{n}} inchangé(s)',
+      hideUnchanged: 'masquer {{n}} inchangé(s)',
     },
     integrity: {
       errors: 'erreurs', warnings: 'avertissements', errorsOnly: 'Erreurs', warningsOnly: 'Avertissements',

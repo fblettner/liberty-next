@@ -475,6 +475,13 @@ const en = {
       apply: 'Apply',
       applyAnyway: 'Apply (skip conflicts)',
       force: 'force',
+      expandAll: 'Expand all',
+      collapseAll: 'Collapse all',
+      rowRemoved: 'row removed',
+      nFields: '{{n}} field(s)',
+      nChanged: '{{n}} changed',
+      showUnchanged: '+ {{n}} unchanged',
+      hideUnchanged: 'hide {{n}} unchanged',
     },
     integrity: {
       errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',
