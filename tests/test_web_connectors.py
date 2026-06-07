@@ -445,3 +445,25 @@ def test_public_connector_keeps_empty_switcher_app_hides_permission_filtered() -
              "show_in_switcher": True}
     assert public_connector(has_q, _P(False)) is None
     assert public_connector(has_q, _P(True)) is not None
+
+
+def test_find_screen_resolves_column_group_write_query() -> None:
+    """A column-group write query resolves to its screen so the group write inherits the screen's
+    column hints (a group column's ``dd`` rule fires) — marked ``group`` so the route does NOT also
+    apply the screen's main audit table / change-capture to the related-table write."""
+    from liberty.web.connectors import _find_screen_for_query, _column_hints_for
+    from liberty.screens.config import parse_screens
+
+    sf = parse_screens({"screens": {"nomajde": {"f0092": {
+        "connector": "jdedwards",
+        "read_query": "f0092_get", "update_query": "f0092_put", "insert_query": "f0092_post",
+        "column_groups": [{"id": "f00921", "connector": "jdedwards",
+                           "update_query": "f00921_put", "insert_query": "f00921_post",
+                           "delete_query": "f00921_delete", "key_columns": ["ULUSER"]}],
+        "columns": [{"name": "ULMUSE", "dd": "MUSE", "group": "f00921"}],
+    }}}})
+    s, slot, app = _find_screen_for_query(sf, "jdedwards", "f0092_put")
+    assert s is not None and slot == "update" and app == "nomajde"
+    s, slot, app = _find_screen_for_query(sf, "jdedwards", "f00921_post")
+    assert s is not None and slot == "group" and app == "nomajde"
+    assert "ULMUSE" in {c.name for c in (_column_hints_for(s) or [])}   # group column's dd is available

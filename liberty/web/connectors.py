@@ -126,14 +126,29 @@ def _find_screen_for_query(
     ``(None, None, None)`` when nothing matches."""
     slots = (("read_query", "read"), ("update_query", "update"),
              ("insert_query", "insert"), ("delete_query", "delete"))
+    group_slots = (("update_query", "update"), ("insert_query", "insert"), ("delete_query", "delete"))
     for app, app_screens in screens.screens.items():
         for s in app_screens.values():
             eff = s.connector or app
-            if eff != connector:
-                continue
-            for attr, slot in slots:
-                if getattr(s, attr) == query:
-                    return s, slot, app
+            if eff == connector:
+                for attr, slot in slots:
+                    if getattr(s, attr) == query:
+                        return s, slot, app
+            # Column-group write queries (the 1:1 related-table CRUD) also resolve to this screen —
+            # so the group write inherits the screen's column hints and dictionary scope, and a group
+            # column's ``dd`` mapping (e.g. ULMUSE → MUSE) fires its LOGIN/SYSDATE/etc. rule just like
+            # the main write. A group may target a DIFFERENT connector than the screen, so match on
+            # the group's own connector, not the screen's.
+            for grp in getattr(s, "column_groups", None) or []:
+                g_conn = getattr(grp, "connector", None) or eff
+                if g_conn != connector:
+                    continue
+                for attr, _slot in group_slots:
+                    if getattr(grp, attr, None) == query:
+                        # Marked ``group`` (not the CRUD slot) so the route knows to take only the
+                        # screen's column hints + dict scope from this match — NOT its audit_table
+                        # (which is the MAIN table's) or its change-tracking (keyed on the main row).
+                        return s, "group", app
     return None, None, None
 
 
@@ -157,11 +172,16 @@ async def _run_sql(
     scope = the screen's app) into the SQL connector. A query with no screen runs unadorned
     — no audit, no filter wrap, no per-screen rule resolution; dictionary lookup by bind name
     still applies for write-side rule coercion using the connector's own name as scope."""
-    screen, _slot, screen_app = (
+    screen, slot, screen_app = (
         _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
     )
+    # A column-group write resolves to its screen for the COLUMN HINTS + dict scope (so a group
+    # column's ``dd`` rule — e.g. ULMUSE → MUSE → LOGIN — fires like the main write). But its audit
+    # + change-capture belong to a DIFFERENT table than the screen's main one, so don't inherit
+    # those here (the main audit table / main-row key would be wrong for the related row).
+    is_group = slot == "group"
     column_hints = _column_hints_for(screen)
-    audit_table = screen.audit_table if screen else None
+    audit_table = None if is_group else (screen.audit_table if screen else None)
     screen_max_rows = screen.max_rows if screen else None
     # Dictionary scope follows the screen's app (where operator metadata lives), not the
     # data-pool connector. Falls back to the connector's own name when there's no matching
@@ -185,7 +205,7 @@ async def _run_sql(
     # connector, so it can't share the write's transaction). Best-effort: a capture failure is
     # logged but never undoes the already-committed write — the audit table stays the immutable
     # trail. No-op for SELECTs / untracked screens (capture_write guards both).
-    if changesets is not None and screen is not None and getattr(screen, "change_tracked", False):
+    if changesets is not None and screen is not None and not is_group and getattr(screen, "change_tracked", False):
         from liberty.changesets.capture import capture_write
         try:
             await capture_write(
