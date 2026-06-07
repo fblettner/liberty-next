@@ -67,6 +67,7 @@ async def record_entry(
     entity_key: dict[str, Any] | None = None,
     new_values: dict[str, Any] | None = None,
     old_values: dict[str, Any] | None = None,
+    read_query: str | None = None,
     user: str | None = None,
 ) -> ChangeEntry:
     """Append a captured entry to *package* with the next per-package ``seq`` (capture order, which
@@ -79,6 +80,7 @@ async def record_entry(
         seq=int(next_seq or 1),
         connector=connector,
         query=query,
+        read_query=read_query,
         operation=operation.value if isinstance(operation, Operation) else str(operation),
         entity=entity,
         entity_key=entity_key,
@@ -102,6 +104,7 @@ async def capture(
     entity_key: dict[str, Any] | None = None,
     new_values: dict[str, Any] | None = None,
     old_values: dict[str, Any] | None = None,
+    read_query: str | None = None,
     user: str | None = None,
 ) -> str:
     """One-call capture: resolve/create the application's draft and append an entry, in a single
@@ -112,7 +115,8 @@ async def capture(
         pkg = await get_or_create_active_package(session, application, user=user)
         entry = await record_entry(
             session, pkg, connector=connector, query=query, operation=operation,
-            entity=entity, entity_key=entity_key, new_values=new_values, old_values=old_values, user=user,
+            entity=entity, entity_key=entity_key, new_values=new_values, old_values=old_values,
+            read_query=read_query, user=user,
         )
         await session.flush()
         return entry.id

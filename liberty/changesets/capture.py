@@ -82,5 +82,7 @@ async def capture_write(
         entity_key=ekey or None,
         new_values=new_values or None,
         old_values=old_values or None,
+        # Read query for the written table — drives full pre-image drift detection on apply.
+        read_query=getattr(screen, "read_query", None) or None,
         user=user,
     )

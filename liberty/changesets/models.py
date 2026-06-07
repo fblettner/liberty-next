@@ -109,6 +109,10 @@ class ChangeEntry(Base):
 
     connector: Mapped[str] = mapped_column(String(128), nullable=False)
     query: Mapped[str] = mapped_column(String(256), nullable=False)
+    # The screen's read query for the written table — lets the apply side fetch the current prod row
+    # by its key and compare to ``old_values`` for full pre-image drift detection. Nullable: a
+    # capture without a known read query falls back to existence-only drift on apply.
+    read_query: Mapped[str | None] = mapped_column(String(256), nullable=True)
     operation: Mapped[str] = mapped_column(String(8), nullable=False)
     # Logical classification for the UI (user / role / relationship / security) — from the screen's
     # ``change_entity``. Nullable so a tracked write without a declared entity still records.

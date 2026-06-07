@@ -13,11 +13,13 @@ import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.changesets import store
+from liberty.changesets.apply import apply_bundle
 from liberty.changesets.compaction import compact
 from liberty.changesets.models import ChangeEntry
 
@@ -208,3 +210,35 @@ async def export_changeset(package_id: str, request: Request, _: Superuser) -> d
         except store.LifecycleError as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         return _bundle(pkg, ops)
+
+
+# ── apply (Phase 3) — run on the TARGET (prod) Liberty ──────────────────────────────────────
+
+
+class ApplyBody(BaseModel):
+    """Payload for ``POST /admin/changesets/apply``. ``bundle`` is a promotion bundle exported from
+    another environment. ``dry_run`` checks drift + reports without writing. ``force`` lists op
+    indices to apply despite a drift conflict."""
+
+    bundle: dict[str, Any]
+    dry_run: bool = True
+    force: list[int] = []
+
+
+@router.post("/apply", summary="Apply a promotion bundle to this environment")
+async def apply_changeset(body: ApplyBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Replay a bundle's ops against THIS Liberty's connectors with full pre-image drift detection.
+    Defaults to a dry run (drift report only). Validates the bundle format + checksum first."""
+    bundle = body.bundle
+    if bundle.get("format") != BUNDLE_FORMAT:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"unsupported bundle format {bundle.get('format')!r}")
+    ops = bundle.get("ops")
+    if not isinstance(ops, list):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="bundle has no ops")
+    expected = hashlib.sha256(json.dumps(ops, sort_keys=True, default=str).encode()).hexdigest()
+    if bundle.get("checksum") and bundle["checksum"] != expected:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="bundle checksum mismatch — file is corrupt or tampered")
+    connectors = getattr(request.app.state, "connectors", None)
+    if connectors is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="connectors not available")
+    return await apply_bundle(connectors, bundle, dry_run=body.dry_run, forced={str(i) for i in body.force})

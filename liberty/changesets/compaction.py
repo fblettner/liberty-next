@@ -58,11 +58,15 @@ def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:
         def _pick(op: str) -> ChangeEntry | None:
             return next((e for e in ops if e.operation == op), None)
 
+        # read_query is the same across a row's entries (same screen); take the first non-null.
+        read_query = next((e.read_query for e in ops if e.read_query), None)
+
         if deleted:
             d = _pick(Operation.DELETE.value) or ops[-1]
             first = ops[0]
             out.append({
-                "connector": d.connector, "query": d.query, "operation": Operation.DELETE.value,
+                "connector": d.connector, "query": d.query, "read_query": read_query,
+                "operation": Operation.DELETE.value,
                 "entity": d.entity, "entity_key": d.entity_key,
                 "new_values": None, "old_values": first.old_values,
                 "source_ids": [e.id for e in ops],
@@ -74,7 +78,8 @@ def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:
         if created:
             ins = _pick(Operation.INSERT.value) or ops[0]
             out.append({
-                "connector": ins.connector, "query": ins.query, "operation": Operation.INSERT.value,
+                "connector": ins.connector, "query": ins.query, "read_query": read_query,
+                "operation": Operation.INSERT.value,
                 "entity": ins.entity, "entity_key": last_write.entity_key,
                 "new_values": last_write.new_values, "old_values": None,
                 "source_ids": [e.id for e in ops],
@@ -83,7 +88,8 @@ def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:
             upd = _pick(Operation.UPDATE.value) or last_write
             first = ops[0]
             out.append({
-                "connector": upd.connector, "query": upd.query, "operation": Operation.UPDATE.value,
+                "connector": upd.connector, "query": upd.query, "read_query": read_query,
+                "operation": Operation.UPDATE.value,
                 "entity": upd.entity, "entity_key": last_write.entity_key,
                 "new_values": last_write.new_values, "old_values": first.old_values,
                 "source_ids": [e.id for e in ops],
