@@ -64,3 +64,34 @@ def test_distinct_rows_and_excluded() -> None:
     out = compact(entries)
     keys = [o["entity_key"]["K"] for o in out]
     assert keys == ["1", "3"]   # K=2 excluded → omitted; order follows capture
+
+
+def test_invocation_entries_pass_through_verbatim_and_never_merge() -> None:
+    """CALL_API / CALL_PLUGIN entries are screen-action replays — not row diffs. Compaction emits
+    them one-for-one in capture order and never collapses them (no natural key)."""
+    entries = [
+        _e(1, Operation.INSERT.value, {"K": "1"}, new={"K": "1", "N": "a"}, query="f_post"),
+        ChangeEntry(id="e2", package_id="p", seq=2, connector="ldap", query="sync_user",
+                    operation=Operation.CALL_API.value, entity="user", entity_key=None,
+                    new_values={"USR_ID": "DEMO3"}, old_values=None, status="captured"),
+        ChangeEntry(id="e3", package_id="p", seq=3, connector="jde", query="nomajde.security:j_remerge",
+                    operation=Operation.CALL_PLUGIN.value, entity="user", entity_key=None,
+                    new_values={"app": "P0092"}, old_values=None, status="captured"),
+    ]
+    out = compact(entries)
+    assert [o["operation"] for o in out] == ["INSERT", "CALL_API", "CALL_PLUGIN"]   # order preserved
+    api_op = out[1]
+    assert api_op["connector"] == "ldap" and api_op["query"] == "sync_user"
+    assert api_op["new_values"] == {"USR_ID": "DEMO3"} and api_op["entity_key"] is None
+    assert out[2]["query"] == "nomajde.security:j_remerge" and out[2]["new_values"] == {"app": "P0092"}
+
+
+def test_main_and_group_writes_sharing_a_key_stay_distinct() -> None:
+    """Two physical tables written under one screen Save share the parent key (ULUSER) but must NOT
+    merge — the table token (query minus its op suffix) keeps them apart."""
+    entries = [
+        _e(1, Operation.INSERT.value, {"ULUSER": "DEMO3"}, new={"ULUSER": "DEMO3"}, query="f0092_post", entity="user"),
+        _e(2, Operation.INSERT.value, {"ULUSER": "DEMO3"}, new={"ULUSER": "DEMO3", "FMT": "DMY"}, query="f00921_post", entity="user"),
+    ]
+    out = compact(entries)
+    assert [o["query"] for o in out] == ["f0092_post", "f00921_post"]   # both kept, order preserved

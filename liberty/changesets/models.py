@@ -45,9 +45,20 @@ class PackageStatus(str, Enum):
 
 
 class Operation(str, Enum):
+    # Row operations — a captured SQL write, net-compacted per row on export.
     INSERT = "INSERT"
     UPDATE = "UPDATE"
     DELETE = "DELETE"
+    # Invocation operations — a screen action (on_save/insert/update/delete) that calls an API or a
+    # plugin and is opted into replay (``change_replay``). Not a row write: stored with the resolved
+    # call params in ``new_values`` and re-issued verbatim on apply (no drift check, no net-merge).
+    CALL_API = "CALL_API"
+    CALL_PLUGIN = "CALL_PLUGIN"
+
+
+#: Row-write operations, compacted per natural key. Invocation ops fall outside this set and are
+#: carried through compaction one-for-one.
+ROW_OPERATIONS = frozenset({Operation.INSERT.value, Operation.UPDATE.value, Operation.DELETE.value})
 
 
 class EntryStatus(str, Enum):

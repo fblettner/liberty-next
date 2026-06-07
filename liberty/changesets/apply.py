@@ -60,6 +60,10 @@ async def _read_current_row(connectors: Any, op: dict[str, Any]) -> dict[str, An
 
 async def check_drift(connectors: Any, op: dict[str, Any]) -> tuple[str, str]:
     """Return ``(verdict, detail)`` — verdict ∈ ``ok`` | ``conflict`` | ``unverified``."""
+    if (op.get("operation") or "").upper() in ("CALL_API", "CALL_PLUGIN"):
+        # An opted-in screen action (API/plugin). It's re-run verbatim on apply; its effects are
+        # opaque so there's nothing to pre-image. Always unverified — the operator sees it'll fire.
+        return ("unverified", "action replay — re-runs on apply; side effects can't be drift-checked")
     if not op.get("read_query") or not (op.get("entity_key")):
         return ("unverified", "no read query / natural key captured — drift can't be checked")
     try:
@@ -82,21 +86,49 @@ async def check_drift(connectors: Any, op: dict[str, Any]) -> tuple[str, str]:
     return ("ok", "")
 
 
-async def _execute_op(connectors: Any, op: dict[str, Any]) -> int:
-    """Run the op's write query. Binds a superset — the new values + the key + the key's
-    ``_ORIGINAL`` form (the migrated UPDATE/DELETE WHERE keys on ``:<col>_ORIGINAL``); the query
-    uses whichever binds it references."""
+async def _execute_op(connectors: Any, op: dict[str, Any], *, settings: Any = None) -> int:
+    """Run the op. For a row op (INSERT/UPDATE/DELETE) it runs the write query, binding a superset —
+    the new values + the key + the key's ``_ORIGINAL`` form (the migrated UPDATE/DELETE WHERE keys
+    on ``:<col>_ORIGINAL``); the query uses whichever binds it references. For an invocation op
+    (CALL_API / CALL_PLUGIN) it RE-RUNS the captured call against this environment's connector —
+    the same paths the screen action used (``APIConnector.call`` / ``invoke_callable``)."""
+    op_type = (op.get("operation") or "").upper()
+    new = op.get("new_values") or {}
+    if op_type == "CALL_API":
+        conn = connectors.api(op["connector"])
+        result = await conn.call(op["query"], dict(new))   # op["query"] is the endpoint name
+        if not getattr(result, "success", True):
+            raise RuntimeError(
+                f"API replay failed: {getattr(result, 'error', None) or getattr(result, 'status_code', '?')}"
+            )
+        return 1
+    if op_type == "CALL_PLUGIN":
+        from liberty.jobs.steps.base import RunContext
+        from liberty.jobs.triggers import ManualTrigger
+        from liberty.plugins.invoke import invoke_callable
+        ctx = RunContext(
+            run_id="changeset-apply", job_id="__changeset__",
+            trigger=ManualTrigger(triggered_by="changeset-apply"),
+        )
+        await invoke_callable(
+            op["query"], dict(new),       # op["query"] is the ``module:function`` callable
+            injections=(("connectors", connectors), ("ctx", ctx), ("settings", settings)),
+        )
+        return 1
+    # ── Row op (SQL) ──
     conn = connectors.sql(op["connector"])
     key = op.get("entity_key") or {}
-    new = op.get("new_values") or {}
     params = {**new, **key, **{f"{k}_ORIGINAL": v for k, v in key.items()}}
     res = await conn.execute(op["query"], params)
     return res.rowcount if res.rowcount is not None else -1
 
 
-async def apply_bundle(connectors: Any, bundle: dict[str, Any], *, dry_run: bool, forced: set[str]) -> dict[str, Any]:
+async def apply_bundle(
+    connectors: Any, bundle: dict[str, Any], *, dry_run: bool, forced: set[str], settings: Any = None,
+) -> dict[str, Any]:
     """Replay *bundle*'s ops in order with drift detection. ``forced`` holds the op indices (as
-    strings) the operator chose to apply despite a conflict. Returns a per-op report + summary."""
+    strings) the operator chose to apply despite a conflict. ``settings`` is injected into any
+    CALL_PLUGIN replay. Returns a per-op report + summary."""
     ops = bundle.get("ops") or []
     results: list[dict[str, Any]] = []
     for i, op in enumerate(ops):
@@ -110,7 +142,7 @@ async def apply_bundle(connectors: Any, bundle: dict[str, Any], *, dry_run: bool
             results.append({"index": i, "op": _op_summary(op), "status": status, "detail": detail})
             continue
         try:
-            rc = await _execute_op(connectors, op)
+            rc = await _execute_op(connectors, op, settings=settings)
             note = " (forced over conflict)" if (verdict == "conflict" and is_forced) else ""
             results.append({"index": i, "op": _op_summary(op), "status": "applied", "rowcount": rc, "detail": (detail + note).strip()})
         except Exception as exc:  # noqa: BLE001 — record + continue; the operator sees the per-op error

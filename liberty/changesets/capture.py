@@ -117,3 +117,34 @@ async def capture_write(
         read_query=read_query or None,
         user=user,
     )
+
+
+async def capture_invocation(
+    db: Any,  # ChangeSetDatabase
+    *,
+    application: str,
+    connector: str,
+    operation: str,            # Operation.CALL_API.value / Operation.CALL_PLUGIN.value
+    target: str,               # the endpoint name (API) or ``module:function`` (plugin)
+    params: dict[str, Any] | None,
+    entity: str | None,
+    user: str | None,
+) -> str:
+    """Capture a screen-action API/plugin call into *application*'s draft package, to be RE-RUN on
+    apply. Unlike :func:`capture_write` this isn't a row diff — there's no natural key, pre-image, or
+    read query (the call's effects are opaque), so it's stored with the resolved call ``params`` in
+    ``new_values`` and replayed one-for-one. ``application`` is the originating screen's connector
+    (the package scope), which may differ from the API/plugin ``connector`` the call targets."""
+    return await _store_capture(
+        db,
+        application,
+        connector=connector,
+        query=target,
+        operation=operation,
+        entity=entity,
+        entity_key=None,
+        new_values={k: _jsonable(v) for k, v in (params or {}).items()} or None,
+        old_values=None,
+        read_query=None,
+        user=user,
+    )

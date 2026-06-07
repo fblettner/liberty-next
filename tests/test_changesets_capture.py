@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from liberty.changesets import store
-from liberty.changesets.capture import capture_write, entity_key, split_params
+from liberty.changesets.capture import capture_invocation, capture_write, entity_key, split_params
 from liberty.changesets.db import ChangeSetDatabase
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
@@ -95,6 +95,25 @@ async def test_capture_write_records_tracked_write_only() -> None:
         assert e.new_values == {"FSOBNM": "P01013", "FSUSER": "DEMO"}
         assert e.old_values == {"FSOBNM": "P01012"}
         assert e.read_query == "f00950_get"
+
+
+@pytest.mark.asyncio
+async def test_capture_invocation_records_a_replayable_call() -> None:
+    """An opted-in API/plugin screen action is captured as an invocation entry: the resolved call
+    params in new_values, no key/pre-image/read-query (effects are opaque, replayed verbatim). The
+    package scope is the originating screen's connector, which may differ from the call's target."""
+    db = await _db()
+    eid = await capture_invocation(
+        db, application="jdedwards", connector="ldap", operation="CALL_API",
+        target="sync_user", params={"USR_ID": "DEMO3", "MAIL": "d@x"}, entity="user", user="franck",
+    )
+    assert eid is not None
+    async with db.session() as s:
+        pkg = await store.get_package(s, (await store.list_packages(s, application="jdedwards"))[0].id)
+        e = pkg.entries[0]
+        assert e.operation == "CALL_API" and e.connector == "ldap" and e.query == "sync_user"
+        assert e.new_values == {"USR_ID": "DEMO3", "MAIL": "d@x"}
+        assert e.entity == "user" and e.entity_key is None and e.old_values is None and e.read_query is None
 
 
 @pytest.mark.asyncio

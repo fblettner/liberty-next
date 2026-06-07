@@ -97,3 +97,53 @@ async def test_insert_new_and_delete_apply() -> None:
     dele = {"ops": [_op("DELETE", "item_delete", key={"code": "X1"}, old={"code": "X1", "name": "a"})]}
     assert (await apply_bundle(reg, dele, dry_run=False, forced=set()))["results"][0]["status"] == "applied"
     assert await _name(reg) == ["n"]
+
+
+@pytest.mark.asyncio
+async def test_apply_replays_call_api_invocation() -> None:
+    """A CALL_API op re-issues the captured call via the target's API connector — unverified (no
+    drift check) but applied. dry_run reports it without firing."""
+    reg = await _registry()
+    calls: list[tuple] = []
+
+    class _Result:
+        success = True
+
+    class _Api:
+        async def call(self, endpoint, params):
+            calls.append((endpoint, dict(params)))
+            return _Result()
+
+    reg.api = lambda name: _Api()   # type: ignore[attr-defined]
+    bundle = {"ops": [{
+        "connector": "ext", "query": "sync_user", "operation": "CALL_API",
+        "entity": "user", "entity_key": None, "new_values": {"USR_ID": "DEMO3"},
+    }]}
+    # dry run → reported unverified, nothing fired
+    rep = await apply_bundle(reg, bundle, dry_run=True, forced=set())
+    assert rep["results"][0]["status"] == "unverified" and calls == []
+    # real apply → the call fires verbatim
+    rep = await apply_bundle(reg, bundle, dry_run=False, forced=set())
+    assert calls == [("sync_user", {"USR_ID": "DEMO3"})]
+    assert rep["results"][0]["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_apply_call_api_failure_is_reported_not_raised() -> None:
+    """An upstream failure on replay surfaces as a per-op error, not a crash of the whole apply."""
+    reg = await _registry()
+
+    class _Result:
+        success = False
+        error = "boom"
+        status_code = 500
+
+    class _Api:
+        async def call(self, endpoint, params):
+            return _Result()
+
+    reg.api = lambda name: _Api()   # type: ignore[attr-defined]
+    bundle = {"ops": [{"connector": "ext", "query": "sync_user", "operation": "CALL_API",
+                       "entity": "user", "entity_key": None, "new_values": {}}]}
+    rep = await apply_bundle(reg, bundle, dry_run=False, forced=set())
+    assert rep["results"][0]["status"] == "error" and "boom" in rep["results"][0]["detail"]

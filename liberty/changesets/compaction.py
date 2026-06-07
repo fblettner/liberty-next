@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from liberty.changesets.models import ChangeEntry, EntryStatus, Operation
+from liberty.changesets.models import ROW_OPERATIONS, ChangeEntry, EntryStatus, Operation
 
 
 # A query's operation suffix — stripped so a row's INSERT (``f0092_post``) and UPDATE
@@ -41,7 +41,9 @@ def _row_key(e: ChangeEntry) -> str:
     """Stable identity for the affected row — ``connector | entity | table | sorted(natural key)``.
     The table token (query minus its op suffix) keeps two tables that share a natural key from
     merging. Falls back to the entry id when there's no natural key, so keyless entries never merge."""
-    if not e.entity_key:
+    if e.operation not in ROW_OPERATIONS or not e.entity_key:
+        # Invocation entries (CALL_API / CALL_PLUGIN) and keyless writes never merge — each stands
+        # alone, keyed by its own id, and replays one-for-one.
         return f"__nokey__:{e.id}"
     key = json.dumps({str(k).upper(): e.entity_key[k] for k in sorted(e.entity_key)}, default=str, sort_keys=True)
     return f"{e.connector}|{e.entity or ''}|{_table_token(e.query)}|{key}"
@@ -66,6 +68,18 @@ def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for k in order:
         ops = groups[k]
+        # Invocation entries (CALL_API / CALL_PLUGIN) are never merged — each stands alone in its
+        # own group and replays verbatim, in capture order. Emit as-is, skipping the row net-op
+        # logic below (which only understands INSERT/UPDATE/DELETE).
+        if ops[0].operation not in ROW_OPERATIONS:
+            for e in ops:
+                out.append({
+                    "connector": e.connector, "query": e.query, "read_query": None,
+                    "operation": e.operation, "entity": e.entity, "entity_key": None,
+                    "new_values": e.new_values, "old_values": None,
+                    "source_ids": [e.id],
+                })
+            continue
         created = ops[0].operation == Operation.INSERT.value
         deleted = ops[-1].operation == Operation.DELETE.value
         if created and deleted:

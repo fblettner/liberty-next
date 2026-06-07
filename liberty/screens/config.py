@@ -491,6 +491,16 @@ class CallApiAction(_PromptableMixin, _ActionBase):
         default=False,
         description="Capture the API response into the chain context so later steps can reference it.",
     )
+    change_replay: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Change tracking"},
+        description=(
+            "Record this call in the change package when it fires on a change-tracked screen, so a "
+            "promotion bundle RE-RUNS it on the target. Off by default: replay re-fires the call's "
+            "side effects (it may send mail, hit an external system, mint different numbers) and "
+            "can't be drift-checked. Turn on only for an idempotent data call you want reproduced."
+        ),
+    )
 
 
 class CallPluginAction(_PromptableMixin, _ActionBase):
@@ -518,6 +528,16 @@ class CallPluginAction(_PromptableMixin, _ActionBase):
         description=(
             "Capture the callable's return value into the chain context so later steps in the same "
             "Chain can reference it via ``source: '<step_id>.first_row.<col>'``."
+        ),
+    )
+    change_replay: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Change tracking"},
+        description=(
+            "Record this call in the change package when it fires on a change-tracked screen, so a "
+            "promotion bundle RE-RUNS it on the target. Off by default: replay re-fires the "
+            "callable's side effects and can't be drift-checked. Turn on only for an idempotent "
+            "data call you want reproduced on promote."
         ),
     )
 

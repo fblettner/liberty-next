@@ -254,4 +254,7 @@ async def apply_changeset(body: ApplyBody, request: Request, _: Superuser) -> di
     connectors = getattr(request.app.state, "connectors", None)
     if connectors is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="connectors not available")
-    return await apply_bundle(connectors, bundle, dry_run=body.dry_run, forced={str(i) for i in body.force})
+    settings = getattr(request.app.state, "settings", None)
+    return await apply_bundle(
+        connectors, bundle, dry_run=body.dry_run, forced={str(i) for i in body.force}, settings=settings,
+    )
