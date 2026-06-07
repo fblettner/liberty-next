@@ -483,8 +483,15 @@ def _pad_char_binds(
     coalesce step's domain). The migration's ``:<COL>_ORIGINAL`` UPDATE rebind strips the
     suffix to find the source column metadata.
 
-    Long-enough values pass through unchanged: ``len(v) >= length`` means the operator already
-    typed a fully-padded string (or a longer one — which would error at the DB layer anyway)."""
+    Over-WIDTH SET values are trimmed to fit. JDE stores a UDC code in F0005's 10-char ``DRKY``
+    (often right-justified, so it reads back ``"       DMY"``), but the *consuming* column is sized
+    by the data dictionary — ``F00921.ULFRMT`` is ``CHAR(3)``. Writing the padded 10-char value
+    there is ``ORA-12899: value too large``. So a non-``_ORIGINAL`` (write) value longer than the
+    column is stripped to its logical content; Oracle re-pads ``CHAR`` on storage, and right-
+    justified targets are re-justified by the query's own ``LPAD`` (e.g. F00950's MCU). ``_ORIGINAL``
+    (WHERE) binds are left alone — they must equal the stored padded value to match. A pure-blank
+    value is never stripped to ``""`` (that would become NULL on Oracle — the coalesce step's ``" "``
+    sentinel survives)."""
     if not col_types:
         return bound
     out = dict(bound)
@@ -492,7 +499,8 @@ def _pad_char_binds(
         if not isinstance(v, str) or not v:
             continue
         base = k.upper()
-        if base.endswith("_ORIGINAL"):
+        is_original = base.endswith("_ORIGINAL")
+        if is_original:
             base = base[: -len("_ORIGINAL")]
         meta = col_types.get(base)
         if not meta or meta.get("kind") != "char_fixed":
@@ -500,7 +508,17 @@ def _pad_char_binds(
         length = meta.get("length")
         if not isinstance(length, int) or length <= 0:
             continue
-        if len(v) >= length:
+        if len(v) > length:
+            # Too wide for the target — only fix SET values (a WHERE bind must keep the stored
+            # padded form). Strip the source padding so the logical code fits; keep a blank as a
+            # single space (NULL guard). If it's still too long after stripping, it's genuine
+            # over-length data — leave it and let the DB raise.
+            if not is_original:
+                trimmed = v.strip() or " "
+                if len(trimmed) <= length:
+                    out[k] = trimmed
+            continue
+        if len(v) == length:
             continue
         out[k] = v.ljust(length)
     return out

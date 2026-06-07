@@ -786,6 +786,33 @@ def test_pad_char_binds_right_pads_to_declared_char_width() -> None:
     # Empty col_types → no-op (introspection failed or no schema → skip silently).
     assert _pad_char_binds({"X": "val"}, {}) == {"X": "val"}
 
+
+def test_pad_char_binds_trims_over_wide_set_value_to_fit_column() -> None:
+    """A UDC code read from F0005's 10-char DRKY (right-justified, e.g. ``"       DMY"``) written to
+    a narrower DD-sized column (``F00921.ULFRMT`` CHAR(3)) is ORA-12899 unless trimmed. The write
+    (non-_ORIGINAL) value is stripped to its logical content so it fits; Oracle re-pads CHAR on
+    storage. A WHERE (_ORIGINAL) bind keeps its padded form, a blank stays a space (NULL guard),
+    and a genuinely-too-long value is left for the DB to reject."""
+    from liberty.connectors.sql import _pad_char_binds
+
+    col_types = {
+        "ULFRMT": {"kind": "char_fixed", "length": 3},
+        "CODE": {"kind": "char_fixed", "length": 3},
+    }
+    bound = {
+        "ULFRMT": "       DMY",          # 10-char right-justified UDC value → strip → "DMY"
+        "ULFRMT_ORIGINAL": "       DMY", # WHERE bind → left alone (must match stored form)
+        "BLANK": " " * 6,                # over-wide pure blank → kept as a single space, not ""
+        "CODE": "ABCDE",                 # 5 non-blank chars into CHAR(3) → can't fit → unchanged (DB errors)
+    }
+    # BLANK / CODE need a char_fixed entry to be considered
+    col_types["BLANK"] = {"kind": "char_fixed", "length": 3}
+    out = _pad_char_binds(bound, col_types)
+    assert out["ULFRMT"] == "DMY"                 # stripped to fit CHAR(3)
+    assert out["ULFRMT_ORIGINAL"] == "       DMY" # WHERE bind untouched
+    assert out["BLANK"] == " "                    # blank → single space (NULL guard), fits
+    assert out["CODE"] == "ABCDE"                 # too long even stripped → left for the DB
+
     # Length-missing or zero → skip (can't pad without a width).
     assert _pad_char_binds(
         {"X": "val"},
