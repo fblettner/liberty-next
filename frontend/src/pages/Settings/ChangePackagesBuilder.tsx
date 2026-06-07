@@ -5,10 +5,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye } from 'lucide-react'
+import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload } from 'lucide-react'
 import { Banner, Button } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { ApplyBundleModal } from './ApplyBundleModal'
 
 type Pkg = {
   id: string; application: string; name: string; status: string; description: string | null
@@ -83,6 +84,7 @@ export default function ChangePackagesBuilder() {
   const [detail, setDetail] = useState<PkgDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [applyOpen, setApplyOpen] = useState(false)
 
   const loadList = useCallback(() =>
     api.get<{ packages: Pkg[] }>('/admin/changesets')
@@ -108,6 +110,26 @@ export default function ChangePackagesBuilder() {
     } finally { setBusy(false) }
   }, [selId, loadList, loadDetail])
 
+  // Export the approved package → download the promotion bundle as a JSON file, then refresh
+  // (the package flips to "exported"). You then apply that file on the target (prod) Liberty.
+  const exportPkg = useCallback(async () => {
+    if (!selId) return
+    setBusy(true); setError(null)
+    try {
+      const bundle = await api.get<{ package?: { name?: string } }>(`/admin/changesets/${encodeURIComponent(selId)}/export`)
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(bundle.package?.name || 'package').replace(/[^\w.-]+/g, '_')}.changeset.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      await Promise.all([loadList(), loadDetail(selId)])
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }, [selId, loadList, loadDetail])
+
   // Group the detail's entries by entity (Users / Roles / …); fall back to the query name.
   const grouped = useMemo(() => {
     const m = new Map<string, Entry[]>()
@@ -123,9 +145,15 @@ export default function ChangePackagesBuilder() {
 
   return (
     <>
-      <Sub>{t('settings.changes.hint',
-        'Every tracked data change is captured into the active package for its connector. Review the diffs here; approval + promotion to another environment come next.')}</Sub>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+        <Sub style={{ flex: 1, margin: 0 }}>{t('settings.changes.hint',
+          'Every tracked data change is captured into the active package for its connector. Review the diffs here; approval + promotion to another environment come next.')}</Sub>
+        <Button $size="sm" $variant="ghost" onClick={() => setApplyOpen(true)}>
+          <Upload size={13} /> {t('settings.changes.applyBundle', 'Apply bundle…')}
+        </Button>
+      </div>
       {error && <Banner $tone="error">{error}</Banner>}
+      {applyOpen && <ApplyBundleModal onClose={() => setApplyOpen(false)} />}
       {packages.length === 0 ? (
         <Sub>{t('settings.changes.empty', 'No change packages yet — edit a record on a change-tracked screen to open one.')}</Sub>
       ) : (
@@ -162,6 +190,11 @@ export default function ChangePackagesBuilder() {
                         <X size={13} /> {t('settings.changes.reject', 'Reject')}
                       </Button>
                     </>
+                  )}
+                  {(detail.status === 'approved' || detail.status === 'exported') && (
+                    <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void exportPkg()}>
+                      <Download size={13} /> {t('settings.changes.export', 'Export bundle')}
+                    </Button>
                   )}
                 </span>
               </DetailHead>
