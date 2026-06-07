@@ -1310,10 +1310,11 @@ async def test_form_rule_password_hashes_value(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_form_rule_default_on_insert_only(pools: PoolRegistry) -> None:
-    """The dictionary entry's ``default`` value seeds an empty INSERT bind — but never an
-    UPDATE (UPDATE keeps the column's current value when not supplied), and never overwrites
-    an explicit user value."""
+async def test_form_rule_default_fills_empty_on_insert_and_update(pools: PoolRegistry) -> None:
+    """The dictionary entry's ``default`` seeds an empty bind on any SET-clause write
+    (INSERT/UPDATE/MERGE) — this is what re-stamps audit constants like PID/JOBN on UPDATE,
+    matching how LOGIN/SYSDATE already fire on every write. An explicit user value always wins,
+    so editable defaults (FSTP/OUTQ) keep the value the dialog sends."""
     from liberty.connectors.dictionary import DictionarySection
     d = DictionaryFile(connectors={"db": DictionarySection(entries={
         "STATUS": DictionaryEntry(default="active"),
@@ -1329,9 +1330,17 @@ async def test_form_rule_default_on_insert_only(pools: PoolRegistry) -> None:
     # INSERT + explicit value → keep it
     out = conn._apply_form_rules({"STATUS": "draft"}, cfg.queries[0], stmt_type="INSERT", user="x")
     assert out["STATUS"] == "draft"
-    # UPDATE + missing value → leave None (don't default — UPDATE preserves the current value)
+    # UPDATE + missing/blank value → now fills the default (the audit-field fix)
     out = conn._apply_form_rules({"STATUS": None, "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
-    assert out["STATUS"] is None
+    assert out["STATUS"] == "active"
+    out = conn._apply_form_rules({"STATUS": "", "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS"] == "active"
+    # UPDATE + explicit value → keep it (editable defaults aren't clobbered)
+    out = conn._apply_form_rules({"STATUS": "draft", "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS"] == "draft"
+    # The _ORIGINAL WHERE bind never gets a default — it carries the pre-edit key untouched
+    out = conn._apply_form_rules({"STATUS": "x", "STATUS_ORIGINAL": None}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS_ORIGINAL"] is None
 
 
 @pytest.mark.asyncio

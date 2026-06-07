@@ -241,6 +241,10 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
 _RULES_LOGIN = {"LOGIN"}
 _RULES_NOW = {"SYSDATE", "CURRENT_DATE"}
 _RULES_SEQUENCE = {"SEQUENCE", "NN"}
+# Statements with a SET/VALUES clause that a DEFAULT can fill — DELETE binds only a WHERE key,
+# so a default there would corrupt the predicate. (SEQUENCE/NN stays INSERT-only — see
+# ``_resolve_sequences`` — because a sequence on UPDATE would re-issue a new number every save.)
+_RULES_DEFAULTABLE = {"INSERT", "UPDATE", "MERGE"}
 _RULES_PASSWORD = {"PASSWORD"}
 _RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missing/empty
 # v1 parity: a column-hint-level ``rules = "DISABLED"`` opts out of an inherited dictionary
@@ -1095,8 +1099,10 @@ class SQLConnector:
            proper value on uncheck, but the migration / batch-edit grid may not yet — this is
            the safety net for the Y/N case where the DB doesn't accept NULL). ``true_value``
            passes through; only the empty/null side is substituted.
-        5. **DEFAULT** → on INSERT only, when the bind is missing/empty, use the entry's
-           ``default`` value.
+        5. **DEFAULT** → on any SET-clause write (INSERT/UPDATE/MERGE), when the bind is
+           missing/empty, use the entry's ``default`` value. This lets audit constants
+           (PID/JOBN) re-stamp on UPDATE; editable defaults are untouched because the form
+           sends their non-empty current value.
         6. **Type coercion** → strings to the matching Python type for ``format`` ∈
            {integer/number/decimal/currency/date/datetime/timestamp/boolean/jdedate}.
 
@@ -1164,9 +1170,15 @@ class SQLConnector:
                     if fv is not None:
                         out[k] = fv
                         continue  # don't also fall into DEFAULT — BOOLEAN's "false" *is* the default
-                # DEFAULT — only on INSERT, only when the user didn't supply a value.
+                # DEFAULT — on any SET-clause write (INSERT/UPDATE/MERGE), only when the caller
+                # didn't supply a value. This is what makes audit constants (e.g. PID="LIBERTY",
+                # JOBN) re-stamp on UPDATE the way LOGIN/SYSDATE already do — a blank bind on the
+                # update means the form didn't carry the audit value, so the DD default fills it.
+                # Editable defaults (FSTP="Y", OUTQ="QPRINT", …) are unaffected: the dialog sends
+                # their non-empty current value on update, so this only fires if one is cleared to
+                # blank — in which case the configured default is the right fallback anyway.
                 if (
-                    stmt_type == "INSERT" and (v is None or v == "")
+                    stmt_type in _RULES_DEFAULTABLE and (v is None or v == "")
                     and default is not None and rule not in _RULES_SEQUENCE
                 ):
                     out[k] = default
