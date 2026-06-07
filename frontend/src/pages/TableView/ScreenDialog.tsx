@@ -127,6 +127,23 @@ export function ScreenDialog({
   // intent as v1's ``col_rules = "DISABLED"`` for PKs, but auto-derived from ``key_columns``
   // so no per-field operator config is needed). Recomputed when the metadata changes.
   const keyColumnSet = useMemo(() => new Set((keyColumns ?? []).map((k) => k.toLowerCase())), [keyColumns])
+  // Key columns that arrived PRE-SEEDED from the parent — a nested sub-dialog binds the parent's
+  // PK into the FK key via ``param_binds`` (see NestedTab: the add row is ``{...bound}``). On add we
+  // suppress the lookup ONLY for these: the lookup's async options would otherwise clobber the
+  // seeded value and cause an FK violation, so the seed renders as a plain input. The OTHER key
+  // columns (user-picked FKs — e.g. license_csi_components' component / metric) are NOT seeded, so
+  // they keep their lookups. A top-level dialog seeds nothing → no suppression at all.
+  const seededKeySet = useMemo(() => {
+    const s = new Set<string>()
+    const r = row as Record<string, unknown> | null | undefined
+    if (!r) return s
+    const lc = new Map(Object.entries(r).map(([k, v]) => [k.toLowerCase(), v]))
+    for (const k of keyColumnSet) {
+      const v = lc.get(k)
+      if (v != null && v !== '') s.add(k)
+    }
+    return s
+  }, [row, keyColumnSet])
 
   const [tabIdx, setTabIdx] = useState(0)
   const [formValues, setFormValues] = useState<Row>({})
@@ -851,14 +868,12 @@ export function ScreenDialog({
                               // banner above the body explains why.
                               disabled={st.disabled || readOnly}
                               required={st.required}
-                              // Suppress a key column's lookup on add ONLY in a nested sub-dialog,
-                              // where the key is the parent's PK seeded via param_binds — there the
-                              // lookup's async options would clobber the seeded value and cause an
-                              // FK violation, so it renders as a plain input showing the seed.
-                              // In a TOP-LEVEL dialog we do NOT auto-suppress: a key can be a FK you
-                              // SELECT (e.g. license_csi_components — pick component + metric, set a
-                              // quantity). Per-column read-only stays the operator's call (``disabled``).
-                              suppressLookup={nested && effMode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
+                              // Suppress a key column's lookup on add ONLY when it was SEEDED from
+                              // the parent (nested sub-dialog FK) — the async lookup would clobber
+                              // the seed (FK violation). Non-seeded keys keep their lookups so a
+                              // user-picked composite key works (license_csi_components: CSI is
+                              // seeded → plain; component + metric are picked → lookups).
+                              suppressLookup={effMode === 'add' && seededKeySet.has(f.name.toLowerCase())}
                               onLookupPick={onLookupReturnValues}
                             />
                           )
