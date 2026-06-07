@@ -307,9 +307,14 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
   if (!vw) return true
   const conds = Array.isArray(vw) ? vw : [vw]
   return conds.every(({ field, value }) => {
-    const v = activeFilters[field]
-    if (v == null || v === '') return true
-    return Array.isArray(value) ? value.includes(v) : v === value
+    const raw = activeFilters[field]
+    if (raw == null || raw === '') return true
+    // Trim both sides: the active filter value can come from a JDE UDC lookup whose code reads
+    // back space-padded ("1         "), while the visible_when allowed values are clean config
+    // ("1"). Without trimming, a padded filter hides every conditional column (the bug after
+    // moving the security-type lookup to read JDE directly).
+    const v = String(raw).trim()
+    return Array.isArray(value) ? value.some((x) => String(x).trim() === v) : String(value).trim() === v
   })
 }
 

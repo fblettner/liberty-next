@@ -42,10 +42,12 @@ export function evalConditions(rules: FieldCondition[] | undefined, formValues: 
   for (const r of rules) {
     const key = Object.keys(formValues).find((k) => k.toLowerCase() === r.field.toLowerCase())
     const live = key != null ? formValues[key] : undefined
-    const liveStr = live == null ? '' : String(live)
+    // Trim both sides — a field value picked from a JDE UDC lookup can be space-padded while the
+    // condition's allowed values are clean config (matches the grid's columnVisibleNow).
+    const liveStr = (live == null ? '' : String(live)).trim()
     if (Array.isArray(r.value)) {
-      if (!r.value.includes(liveStr)) return false
-    } else if (liveStr !== r.value) {
+      if (!r.value.some((x) => String(x).trim() === liveStr)) return false
+    } else if (liveStr !== String(r.value).trim()) {
       return false
     }
   }
