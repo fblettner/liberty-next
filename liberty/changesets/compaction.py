@@ -22,13 +22,29 @@ from typing import Any
 from liberty.changesets.models import ChangeEntry, EntryStatus, Operation
 
 
+# A query's operation suffix — stripped so a row's INSERT (``f0092_post``) and UPDATE
+# (``f0092_put``) collapse to the same physical-table token and merge, while a DIFFERENT table
+# with the same natural key (e.g. the 1:1 column-group ``f00921`` writes, keyed on the same
+# ``ULUSER`` FK as the parent ``f0092``) gets a distinct token and stays a separate op.
+_OP_SUFFIXES = ("_get", "_post", "_put", "_patch", "_delete", "_insert", "_update", "_select")
+
+
+def _table_token(query: str | None) -> str:
+    ql = (query or "").lower()
+    for suf in _OP_SUFFIXES:
+        if ql.endswith(suf):
+            return ql[: -len(suf)]
+    return ql
+
+
 def _row_key(e: ChangeEntry) -> str:
-    """Stable identity for the affected row — ``connector | entity | sorted(natural key)``. Falls
-    back to the entry id when there's no natural key, so keyless entries never merge."""
+    """Stable identity for the affected row — ``connector | entity | table | sorted(natural key)``.
+    The table token (query minus its op suffix) keeps two tables that share a natural key from
+    merging. Falls back to the entry id when there's no natural key, so keyless entries never merge."""
     if not e.entity_key:
         return f"__nokey__:{e.id}"
     key = json.dumps({str(k).upper(): e.entity_key[k] for k in sorted(e.entity_key)}, default=str, sort_keys=True)
-    return f"{e.connector}|{e.entity or ''}|{key}"
+    return f"{e.connector}|{e.entity or ''}|{_table_token(e.query)}|{key}"
 
 
 def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:

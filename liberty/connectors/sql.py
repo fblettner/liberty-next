@@ -761,6 +761,13 @@ class QueryResult:
     # bound to the parent's new PK) without a separate read-back. Keys are uppercased column
     # names. Empty for SELECTs and for writes where the caller supplied every value explicitly.
     resolved_binds: dict[str, Any] = field(default_factory=dict)
+    # The FULL final bind set that actually hit the DB on a write — post filter-wrap,
+    # form-rule resolution (LOGIN / SYSDATE / DEFAULT / coercion), Oracle bind hygiene, and
+    # SEQUENCE/NN. This is what the audit mirror records, and what change-capture must record
+    # (so a DD default / audit value filled server-side on an empty bind is part of the package,
+    # not the empty value the form sent). Server-side only — NOT in :meth:`to_dict` (it can carry
+    # the whole row + resolved secrets; the client never needs it). Empty for SELECTs.
+    bound_params: dict[str, Any] = field(default_factory=dict)
 
     @property
     def row_count(self) -> int:
@@ -1672,6 +1679,7 @@ class SQLConnector:
             rowcount=rowcount,
             duration_ms=duration_ms,
             resolved_binds=seq_assigned,
+            bound_params=bound,
         )
 
     async def execute_stream(

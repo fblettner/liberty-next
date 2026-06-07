@@ -152,6 +152,26 @@ def _find_screen_for_query(
     return None, None, None
 
 
+def _find_group_for_query(screen: Screen, connector: str, query: str, app: str | None) -> Any | None:
+    """The :class:`ColumnGroup` on *screen* whose write query is *(connector, query)* — used to
+    capture a 1:1 related-table write into the change package with the GROUP's key (the related
+    table's key, e.g. the FK) rather than the main row's. The group's effective connector follows
+    the same fallback as :func:`_find_screen_for_query` (``group.connector`` → screen's →
+    ``app``). ``None`` when no group matches."""
+    eff = screen.connector or (app or "")
+    for grp in getattr(screen, "column_groups", None) or []:
+        g_conn = getattr(grp, "connector", None) or eff
+        if g_conn != connector:
+            continue
+        if query in (
+            getattr(grp, "update_query", None),
+            getattr(grp, "insert_query", None),
+            getattr(grp, "delete_query", None),
+        ):
+            return grp
+    return None
+
+
 def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
     """Phase 3 — the SQL connector's runtime helpers (filter wrap / write-time coercion /
     SEQUENCE / result-column hint application) read column metadata from the matching
@@ -204,13 +224,37 @@ async def _run_sql(
     # Change-package capture — AFTER the write has committed (cross-DB: control pool ≠ this
     # connector, so it can't share the write's transaction). Best-effort: a capture failure is
     # logged but never undoes the already-committed write — the audit table stays the immutable
-    # trail. No-op for SELECTs / untracked screens (capture_write guards both).
-    if changesets is not None and screen is not None and not is_group and getattr(screen, "change_tracked", False):
+    # trail. No-op for SELECTs / untracked screens (capture_write guards both). A column-group
+    # write (the 1:1 related table) is ALSO captured so the promotion bundle recreates the
+    # related row — but keyed on the GROUP's key (its FK), and with no standalone read query
+    # (the related table is only JOINed into the screen's read), so apply reports it
+    # ``unverified`` rather than skipping it. Same display ``entity`` as the main row so the two
+    # group together in the package view; compaction keys on the physical table so they stay
+    # distinct ops despite sharing the parent key.
+    if changesets is not None and screen is not None and getattr(screen, "change_tracked", False):
         from liberty.changesets.capture import capture_write
+        if is_group:
+            grp = _find_group_for_query(screen, connector, query, screen_app)
+            cap_keys = list(getattr(grp, "key_columns", None) or []) if grp else []
+            cap_read_query: str | None = None
+        else:
+            # ``effective_key_columns()`` — NOT the raw ``key_columns`` list, which is the legacy
+            # explicit field and is usually empty now: the row key is ticked per-column via
+            # ``ColumnHint.key`` in the Columns tab. Without this the main entry captures no natural
+            # key (the package shows it with no ULUSER=…), can't be drift-checked, and can't merge.
+            cap_keys = list(screen.effective_key_columns())
+            cap_read_query = screen.read_query
+        # Capture the FULL resolved binds (DD defaults + LOGIN/SYSDATE + sequences baked in), not
+        # the raw request params — otherwise a value the server filled on an empty bind (PID,
+        # JOBN, an editable default, an audit stamp) is missing from the package and never lands
+        # on apply. Falls back to the request params if the connector didn't surface them.
+        cap_params = result.bound_params or params
         try:
             await capture_write(
                 changesets, connector=connector, query=query,
-                statement_type=result.statement_type, params=params, screen=screen, user=user,
+                statement_type=result.statement_type, params=cap_params, user=user,
+                key_columns=cap_keys, read_query=cap_read_query,
+                entity=getattr(screen, "change_entity", None), change_tracked=True,
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
             _log.error(

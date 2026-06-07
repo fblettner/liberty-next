@@ -14,6 +14,8 @@ non-``_ORIGINAL`` binds are the new state.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from liberty.changesets.store import capture as _store_capture
@@ -22,19 +24,38 @@ _WRITE_OPS = {"INSERT", "UPDATE", "DELETE"}
 _ORIG = "_ORIGINAL"
 
 
+def _jsonable(v: Any) -> Any:
+    """Coerce a resolved bind value into something the JSON ``new_values`` / ``old_values`` columns
+    accept. The capture now records the FULL post-rule bind set, which can include Python
+    ``datetime`` (a SYSDATE stamp on a non-JDE column) or ``Decimal`` (a numeric column) — neither
+    is JSON-native. JDE audit dates/times are already ``jdedate``/``jdetime`` *ints*, so this is a
+    safety net for the general case. Binary values can't round-trip through a textual change entry,
+    so they're dropped to ``None``."""
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return int(v) if v == v.to_integral_value() else float(v)
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return None
+    return v
+
+
 def split_params(params: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split bound params into ``(new_values, old_values)`` — same convention the audit mirror uses:
     uppercase, non-``_ORIGINAL`` binds are the new row; ``:<COL>_ORIGINAL`` binds are the pre-image
-    (suffix stripped). Lowercase / internal binds (``_aud_*``, filter ``*_op``) are ignored."""
+    (suffix stripped). Lowercase / internal binds (``_aud_*``, filter ``*_op``) are ignored. Values
+    are JSON-normalised (the captured binds are the resolved ones, which may be datetime/Decimal)."""
     new_values: dict[str, Any] = {}
     old_values: dict[str, Any] = {}
     for k, v in (params or {}).items():
         if not k or not k.isupper():
             continue
         if k.endswith(_ORIG):
-            old_values[k[: -len(_ORIG)]] = v
+            old_values[k[: -len(_ORIG)]] = _jsonable(v)
         else:
-            new_values[k] = v
+            new_values[k] = _jsonable(v)
     return new_values, old_values
 
 
@@ -59,30 +80,40 @@ async def capture_write(
     query: str,
     statement_type: str | None,
     params: dict[str, Any] | None,
-    screen: Any,
     user: str | None,
+    key_columns: list[str] | None,
+    read_query: str | None,
+    entity: str | None,
+    change_tracked: bool = True,
 ) -> str | None:
-    """Capture a committed write into the connector's current package when the screen opts in
-    (``change_tracked``). Returns the entry id, or ``None`` when it's not a write / not tracked.
-    Raises on capture failure — the caller logs + swallows so the committed write isn't undone."""
+    """Capture a committed write into the connector's current package. The caller supplies the
+    write target's ``key_columns`` (for the natural key + drift pre-image), its ``read_query``
+    (full-pre-image drift on apply; ``None`` when the target has no standalone read — e.g. a 1:1
+    column-group table that's only JOINed into the screen's read), and the display ``entity``.
+
+    A SINGLE screen Save can produce several captures: the main table plus each 1:1 column-group
+    table it writes — each lands as its own entry with its own key, so compaction nets them per
+    physical table (not collapsed together just because they share the parent row's key).
+
+    Returns the entry id, or ``None`` when it's not a write / not tracked. Raises on capture
+    failure — the caller logs + swallows so the committed write isn't undone."""
     op = (statement_type or "").upper()
     if op not in _WRITE_OPS:
         return None
-    if not getattr(screen, "change_tracked", False):
+    if not change_tracked:
         return None
     new_values, old_values = split_params(params)
-    ekey = entity_key(new_values, old_values, getattr(screen, "key_columns", None) or [])
+    ekey = entity_key(new_values, old_values, key_columns or [])
     return await _store_capture(
         db,
         connector,  # application = connector name
         connector=connector,
         query=query,
         operation=op,
-        entity=getattr(screen, "change_entity", None),
+        entity=entity,
         entity_key=ekey or None,
         new_values=new_values or None,
         old_values=old_values or None,
-        # Read query for the written table — drives full pre-image drift detection on apply.
-        read_query=getattr(screen, "read_query", None) or None,
+        read_query=read_query or None,
         user=user,
     )

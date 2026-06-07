@@ -970,6 +970,31 @@ async def test_write_coerces_empty_string_to_null(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_surfaces_resolved_bound_params_for_capture(pools: PoolRegistry) -> None:
+    """A write's result carries the FULL resolved bind set on ``bound_params`` — what actually hit
+    the DB, with DD defaults / audit stamps filled server-side. Change-capture records THIS (not the
+    empty binds the form sent), so a default set on save lands in the package and on apply. Never
+    leaked to the client via to_dict()."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "STATUS": DictionaryEntry(default="active"),     # filled when the form sends empty
+        "WHO": DictionaryEntry(rules="LOGIN"),            # audit stamp
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, status, name) VALUES (:ID, :STATUS, :WHO)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    res = await conn.execute(
+        "ins", {"ID": 9101, "STATUS": "", "WHO": None}, user="franck",
+        column_hints=[ColumnHint(name="ID"), ColumnHint(name="STATUS"), ColumnHint(name="WHO")],
+    )
+    assert res.bound_params.get("STATUS") == "active"    # DD default filled — and surfaced for capture
+    assert res.bound_params.get("WHO") == "FRANCK"       # LOGIN stamp filled
+    assert res.bound_params.get("ID") == 9101
+    assert "bound_params" not in res.to_dict()           # server-only — never sent to the client
+
+
+@pytest.mark.asyncio
 async def test_form_rule_login_stamps_user_uppercase(pools: PoolRegistry) -> None:
     """``rules = "LOGIN"`` substitutes the caller's username on INSERT and UPDATE — used by
     the v1 audit columns (e.g. TV_AUDIT_USER, ACL_AUDIT_USER). The value is **uppercased**
