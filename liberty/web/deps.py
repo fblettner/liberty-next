@@ -92,6 +92,22 @@ def public_connector(desc: dict, principal: Principal) -> dict | None:
             sections[key] = kept
             flat.extend(kept)
         if not flat:
+            # Distinguish "no queries at all" from "queries exist but all forbidden for this user".
+            # A truly-empty connector that still opts into the switcher (``show_in_switcher``) is an
+            # APP whose screens read from OTHER connectors — e.g. nomajde after its tables/lookups
+            # were moved to jdedwards. Keep it (with empty query lists) so the app switcher, which
+            # filters /api/connectors by menu app name, can still find it. A permission-hidden
+            # connector (it HAS queries, just none this caller may use) still returns None — no leak.
+            raw_total = (
+                sum(len(t.get("slots", [])) for t in desc.get("tables", []))
+                + len(desc.get("queries", [])) + len(desc.get("sequences", [])) + len(desc.get("lookups", []))
+            )
+            if raw_total == 0 and desc.get("show_in_switcher", True):
+                return {
+                    "name": name, "type": "sql", "queries": [], "tables": [],
+                    "customs": [], "sequences": [], "lookups": [],
+                    "show_in_switcher": desc.get("show_in_switcher", True),
+                }
             return None
         # Sort the flat list by name so every query-picker dropdown (screen designer, charts,
         # column groups, exports, actions…) lists queries alphabetically rather than in section

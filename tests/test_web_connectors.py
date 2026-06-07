@@ -414,3 +414,34 @@ def test_sql_stream_respects_limit(app) -> None:
         assert [e["kind"] for e in events] == ["meta", "rows", "done"]
         assert events[-1]["total"] == 1
         assert events[-1]["truncated"] is True
+
+
+def test_public_connector_keeps_empty_switcher_app_hides_permission_filtered() -> None:
+    """A connector with NO queries at all but ``show_in_switcher`` is an app whose screens read
+    from other connectors (e.g. nomajde after its tables/lookups moved to jdedwards) — keep it so
+    the app switcher (which filters /api/connectors by menu app name) can still find it. A
+    connector that HAS queries but none the caller may use stays hidden (permission filter, no
+    name leak)."""
+    from liberty.web.deps import public_connector
+
+    class _P:
+        def __init__(self, allow: bool) -> None:
+            self._allow = allow
+
+        def has_permission(self, _perm: str) -> bool:
+            return self._allow
+
+    empty = {"name": "nomajde", "type": "sql", "tables": [], "queries": [],
+             "sequences": [], "lookups": [], "show_in_switcher": True}
+    out = public_connector(empty, _P(True))
+    assert out is not None and out["name"] == "nomajde" and out["queries"] == []
+
+    # opted OUT of the switcher → hidden when empty
+    assert public_connector({**empty, "show_in_switcher": False}, _P(True)) is None
+
+    # has queries but all forbidden → hidden (permission filter), even with show_in_switcher
+    has_q = {"name": "secret", "type": "sql", "tables": [],
+             "queries": [{"name": "q1", "sql": "SELECT 1"}], "sequences": [], "lookups": [],
+             "show_in_switcher": True}
+    assert public_connector(has_q, _P(False)) is None
+    assert public_connector(has_q, _P(True)) is not None
