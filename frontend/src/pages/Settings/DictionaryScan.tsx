@@ -34,6 +34,7 @@ const FORMAT_OPTS: SearchSelectOption[] = [
   { value: 'number', label: 'number' },
   { value: 'date', label: 'date' },
   { value: 'jdedate', label: 'jdedate' },
+  { value: 'jdetime', label: 'jdetime' },
   { value: 'boolean', label: 'boolean' },
 ]
 

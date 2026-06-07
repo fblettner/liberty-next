@@ -445,14 +445,14 @@ async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None
 
 
 @pytest.mark.asyncio
-async def test_audit_date_is_naive_utc_for_tz_naive_columns(pools: PoolRegistry) -> None:
-    """Regression — the ``AUD_DATE`` bind must be a **naive** UTC datetime. The auto-create
-    DDL emits ``CAST(NULL AS TIMESTAMP) AS AUD_DATE`` (TIMESTAMP without time zone on
-    Postgres); a tz-aware ``datetime.now(UTC)`` against that column trips asyncpg with
+async def test_audit_date_is_naive_for_tz_naive_columns(pools: PoolRegistry) -> None:
+    """Regression — the ``AUD_DATE`` bind must be a **naive** datetime (local server time).
+    The auto-create DDL emits ``CAST(NULL AS TIMESTAMP) AS AUD_DATE`` (TIMESTAMP without time
+    zone on Postgres); a tz-aware ``now`` against that column trips asyncpg with
     ``can't subtract offset-naive and offset-aware datetimes`` and rolls the *entire*
     audited write back — main statement + auto-create + audit INSERT all gone, leaving the
     operator with no audit table created and the same error on retry. Matches the same
-    naive-UTC convention SYSDATE uses in ``_apply_form_rules``."""
+    naive local-time convention SYSDATE uses in ``_apply_form_rules``."""
     from datetime import datetime as dt
     from liberty.connectors.sql import reset_audit_table_cache
     reset_audit_table_cache()
@@ -1007,6 +1007,7 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
         "CREATED_AT": DictionaryEntry(format="datetime", rules="SYSDATE"),
         "CREATED_ON": DictionaryEntry(format="date", rules="SYSDATE"),
         "JDE_DATE": DictionaryEntry(format="jdedate", rules="SYSDATE"),
+        "JDE_TIME": DictionaryEntry(format="jdetime", rules="SYSDATE"),
         "PLAIN": DictionaryEntry(rules="SYSDATE"),  # no format — fall through to bare datetime
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
@@ -1015,22 +1016,26 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules(
-        {"CREATED_AT": None, "CREATED_ON": None, "JDE_DATE": None, "PLAIN": None},
+        {"CREATED_AT": None, "CREATED_ON": None, "JDE_DATE": None, "JDE_TIME": None, "PLAIN": None},
         cfg.queries[0], stmt_type="INSERT", user="x",
         column_hints=[ColumnHint(name="CREATED_AT"), ColumnHint(name="CREATED_ON"),
-                      ColumnHint(name="JDE_DATE"), ColumnHint(name="PLAIN")],
+                      ColumnHint(name="JDE_DATE"), ColumnHint(name="JDE_TIME"), ColumnHint(name="PLAIN")],
     )
     # datetime column → datetime, date column → date (no time), jdedate → CYYDDD int.
     assert isinstance(out["CREATED_AT"], dt) and not isinstance(out["CREATED_AT"], date.__class__)
     assert isinstance(out["CREATED_ON"], date) and not isinstance(out["CREATED_ON"], dt)
     assert isinstance(out["JDE_DATE"], int)
-    # The SYSDATE rule stamps ``datetime.now(UTC)`` — compare against the UTC date, not the
-    # local one, otherwise the test flakes across midnight UTC in non-UTC timezones.
-    from datetime import timezone
-    today_utc = dt.now(timezone.utc).date()
-    assert out["JDE_DATE"] == (today_utc.year - 1900) * 1000 + today_utc.timetuple().tm_yday
-    # All three resolve to the same instant (the same ``now()`` per call).
-    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today_utc
+    # The SYSDATE rule stamps **local** ``datetime.now()`` (JDE/Oracle SYSDATE semantics) —
+    # compare against the local date. ``today`` is captured around the call; the only flake
+    # window is the rare sub-call tick across local midnight, accepted as negligible.
+    today = dt.now().date()
+    assert out["JDE_DATE"] == (today.year - 1900) * 1000 + today.timetuple().tm_yday
+    # jdetime column → a valid HHMMSS int from the same instant that decodes cleanly.
+    from liberty.connectors.sql import _from_jde_time
+    assert isinstance(out["JDE_TIME"], int) and 0 <= out["JDE_TIME"] <= 235959
+    assert isinstance(_from_jde_time(out["JDE_TIME"]), str)   # in range → "HH:MM:SS", not raw
+    # All resolve to the same instant (the same ``now()`` per call).
+    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today
     # No format → bare datetime (the pre-coercion fallback).
     assert isinstance(out["PLAIN"], dt)
 
@@ -1058,6 +1063,35 @@ def test_jdedate_coercion() -> None:
     # First and last days of a JDE year.
     assert _to_jde_julian(date(2000, 1, 1)) == 100001    # century 1, year 0, day 1
     assert _to_jde_julian(date(2024, 12, 31)) == 124366  # 2024 is a leap year
+
+
+def test_jdetime_coercion_roundtrip() -> None:
+    """``_coerce_value(x, "jdetime")`` collapses time / datetime / "HH:MM:SS" / HHMMSS-int to the
+    JDE HHMMSS integer, and ``_from_jde_time`` decodes it back to "HH:MM:SS" on read — symmetric
+    with jdedate. This is what lets an audit time column (UPMT) stamp the current time via
+    SYSDATE + format=jdetime and render readably in the grid."""
+    from datetime import time, datetime as dt
+    from liberty.connectors.sql import _coerce_value, _to_jde_time, _from_jde_time
+    # 14:30:52 → 143052
+    assert _coerce_value(time(14, 30, 52), "jdetime") == 143052
+    assert _coerce_value(dt(2026, 5, 18, 14, 30, 52), "jdetime") == 143052
+    assert _coerce_value("14:30:52", "jdetime") == 143052
+    assert _coerce_value("14:30", "jdetime") == 143000           # bare HH:MM → seconds 0
+    assert _coerce_value("2026-05-18 14:30:52", "jdetime") == 143052
+    assert _coerce_value(143052, "jdetime") == 143052            # already HHMMSS
+    assert _coerce_value("143052", "jdetime") == 143052
+    assert _coerce_value(time(0, 0, 0), "jdetime") == 0          # midnight
+    # Empty / unparseable / out-of-range → None.
+    assert _coerce_value("", "jdetime") is None
+    assert _coerce_value(None, "jdetime") is None
+    assert _coerce_value("not-a-time", "jdetime") is None
+    assert _to_jde_time(995959) is None                          # hour 99 out of range
+    # Read-side decode is the exact inverse.
+    assert _from_jde_time(143052) == "14:30:52"
+    assert _from_jde_time(0) == "00:00:00"
+    assert _from_jde_time("143052") == "14:30:52"
+    assert _from_jde_time(None) is None
+    assert _from_jde_time(146099) == 146099                      # minute 60 invalid → raw value back
 
 
 def test_infer_false_value_pairs() -> None:
@@ -1268,7 +1302,7 @@ async def test_form_rule_disabled_opts_out_of_inherited_rule(pools: PoolRegistry
 
 @pytest.mark.asyncio
 async def test_form_rule_sysdate_stamps_now(pools: PoolRegistry) -> None:
-    """``rules = "SYSDATE"`` / ``"CURRENT_DATE"`` stamps ``datetime.now(UTC)`` (one value per
+    """``rules = "SYSDATE"`` / ``"CURRENT_DATE"`` stamps local ``datetime.now()`` (one value per
     call, so every audit column in the same write lands on the same instant)."""
     from datetime import datetime
     from liberty.connectors.dictionary import DictionarySection

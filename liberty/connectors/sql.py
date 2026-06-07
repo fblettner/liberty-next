@@ -24,7 +24,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, AsyncIterator
 
@@ -122,6 +122,72 @@ _BOOLEAN_FORMATS = {"boolean"}
 # `DynamicResultMapper` parity) and on write (this module): a Python date/datetime / ISO string
 # / already-Julian int all collapse to the integer CYYDDD form before binding.
 _JDEDATE_FORMATS = {"jdedate"}
+# JDE times — stored as integers ``HHMMSS`` in JD Edwards (14:30:52 → 143052, midnight → 0).
+# Symmetric with jdedate: a Python time/datetime / "HH:MM:SS" string / already-HHMMSS int all
+# collapse to the integer form on write, and decode back to "HH:MM:SS" on read.
+_JDETIME_FORMATS = {"jdetime"}
+
+
+def _to_jde_time(t: Any) -> int | None:
+    """``time | datetime | "HH:MM:SS" string | HHMMSS int`` → JDE ``HHMMSS`` integer; ``None``
+    when the input can't be parsed. ``int`` passes through (already in HHMMSS form); a string of
+    digits is treated as a pre-converted HHMMSS integer. A "HH:MM:SS" (or "HH:MM") string is
+    parsed to its components. Out-of-range components return ``None``."""
+    from datetime import time as _time
+    if isinstance(t, bool):
+        return None
+    if isinstance(t, int):
+        return t if 0 <= t <= 235959 else None
+    if isinstance(t, datetime):
+        t = t.time()
+    if isinstance(t, str):
+        s = t.strip()
+        if s.isdigit():
+            n = int(s)
+            return n if 0 <= n <= 235959 else None
+        # "HH:MM[:SS]" — accept a bare HH:MM (seconds default to 0).
+        parts = s.split(":")
+        if 2 <= len(parts) <= 3 and all(p.isdigit() for p in parts):
+            hh, mm = int(parts[0]), int(parts[1])
+            ss = int(parts[2]) if len(parts) == 3 else 0
+            if 0 <= hh < 24 and 0 <= mm < 60 and 0 <= ss < 60:
+                return hh * 10000 + mm * 100 + ss
+        # An ISO datetime string ("YYYY-MM-DD HH:MM:SS") — pull the time off the back.
+        try:
+            return _to_jde_time(datetime.fromisoformat(s.replace("T", " ")).time())
+        except ValueError:
+            return None
+    if isinstance(t, _time):
+        return t.hour * 10000 + t.minute * 100 + t.second
+    return None
+
+
+def _from_jde_time(v: Any) -> str | int | None:
+    """Inverse of :func:`_to_jde_time` — JDE ``HHMMSS`` integer → ``"HH:MM:SS"`` string. The
+    frontend renders/edits the string; the write path re-encodes via ``_coerce_value(.., "jdetime")``.
+    Pass-through on ``None``; out-of-range components return the raw value so bad data stays visible."""
+    if v is None:
+        return None
+    try:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            n = int(v)
+        elif isinstance(v, str):
+            s = v.strip()
+            if not s.isdigit():
+                return v
+            n = int(s)
+        else:
+            n = int(str(v))
+    except (TypeError, ValueError):
+        return v
+    if not (0 <= n <= 235959):
+        return v
+    hh, mm, ss = n // 10000, (n // 100) % 100, n % 100
+    if mm >= 60 or ss >= 60:
+        return v
+    return f"{hh:02d}:{mm:02d}:{ss:02d}"
 
 
 def _to_jde_julian(d: Any) -> int | None:
@@ -175,6 +241,10 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
             # Always convert — JDE stores integers, never dates/strings. None on a parse
             # failure surfaces as SQL NULL, matching the "empty string → None" convention.
             return _to_jde_julian(value)
+        if f in _JDETIME_FORMATS:
+            # Same contract as jdedate: JDE stores HHMMSS integers. A SYSDATE-stamped ``now``
+            # (datetime) lands here for a ``format = "jdetime"`` audit column and becomes HHMMSS.
+            return _to_jde_time(value)
         if f in _INTEGER_FORMATS:
             if isinstance(value, bool):
                 return int(value)  # True/False → 1/0
@@ -351,7 +421,7 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     can use a btree index on the column. Falls back to a wide VARCHAR when the format is
     unknown (matches the historic v1 behaviour but only for one bind, not every column)."""
     f = (fmt or "").strip().lower()
-    if f in ("integer", "number", "jdedate"):
+    if f in ("integer", "number", "jdedate", "jdetime"):
         return "NUMBER" if dialect == "oracle" else "INTEGER"
     if f in ("decimal", "currency"):
         return "NUMBER" if dialect == "oracle" else "NUMERIC"
@@ -1090,8 +1160,10 @@ class SQLConnector:
         Steps, in order:
 
         1. **LOGIN** → stamp the caller's username (``"anonymous"`` when unauthenticated).
-        2. **SYSDATE / CURRENT_DATE** → stamp ``datetime.now(UTC)`` (one value per call so
-           every audit column in the same write lands on the same instant).
+        2. **SYSDATE / CURRENT_DATE** → stamp ``datetime.now()`` in **local server time**
+           (one value per call so every audit column in the same write lands on the same
+           instant; local because JDE/Oracle SYSDATE is local — UTC would write the wrong
+           day/time near midnight on a non-UTC server).
         3. **PASSWORD** → Argon2-hash a non-empty value; blank/missing pass through as NULL
            (the dialog already strips blank password fields from the submit body for UPDATE
            — keeping the existing hash; INSERT with an empty password lands as NULL).
@@ -1104,7 +1176,7 @@ class SQLConnector:
            (PID/JOBN) re-stamp on UPDATE; editable defaults are untouched because the form
            sends their non-empty current value.
         6. **Type coercion** → strings to the matching Python type for ``format`` ∈
-           {integer/number/decimal/currency/date/datetime/timestamp/boolean/jdedate}.
+           {integer/number/decimal/currency/date/datetime/timestamp/boolean/jdedate/jdetime}.
 
         ``SEQUENCE`` / ``NN`` is handled separately by :meth:`_resolve_sequences` because it
         needs a DB connection (and must run inside the same write transaction).
@@ -1146,9 +1218,13 @@ class SQLConnector:
                 if rule in _RULES_NOW:
                     # One ``now()`` per call, so every audit column in the same write lands on
                     # the same instant. Coerce to the matching Python type for the column's
-                    # format (date / datetime / jdedate) so the driver picks the right SQL type.
+                    # format (date / datetime / jdedate / jdetime) so the driver picks the right
+                    # SQL type. **Local server time**, not UTC: "today" means the server's day —
+                    # JDE (like Oracle's SYSDATE) stamps local time, and a UTC ``now`` would write
+                    # the wrong CYYDDD date / HHMMSS time for the hours either side of midnight
+                    # when the server isn't on UTC.
                     if now is None:
-                        now = datetime.now(timezone.utc).replace(tzinfo=None)
+                        now = datetime.now()
                     out[k] = _coerce_value(now, fmt) if fmt else now
                     continue
                 if rule in _RULES_PASSWORD:
@@ -1444,6 +1520,13 @@ class SQLConnector:
                     for cn in _jdedate_cols:
                         if cn in row:
                             row[cn] = _from_jde_julian(row[cn])
+            # JDE HHMMSS times → "HH:MM:SS" strings on read — symmetric with jdedate above.
+            _jdetime_cols = [c.name for c in columns if (c.format or "").lower() == "jdetime"]
+            if _jdetime_cols:
+                for row in rows:
+                    for cn in _jdetime_cols:
+                        if cn in row:
+                            row[cn] = _from_jde_time(row[cn])
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name,
@@ -1683,6 +1766,7 @@ class SQLConnector:
             )
             # JDE Julian date columns — same case-insensitive convention as execute().
             _jdedate_cols = {c.name for c in columns if (c.format or "").lower() == "jdedate"}
+            _jdetime_cols = {c.name for c in columns if (c.format or "").lower() == "jdetime"}
             yield StreamMeta(columns=columns, cap=cap, chunk_size=chunk)
 
             sent = 0
@@ -1708,6 +1792,10 @@ class SQLConnector:
                         for cn in _jdedate_cols:
                             if cn in row:
                                 row[cn] = _from_jde_julian(row[cn])
+                    if _jdetime_cols:
+                        for cn in _jdetime_cols:
+                            if cn in row:
+                                row[cn] = _from_jde_time(row[cn])
                     out.append(row)
                 if out:
                     sent += len(out)
@@ -1939,7 +2027,7 @@ class SQLConnector:
 
         * ``AUD_ACTION`` — the statement type (``INSERT`` / ``UPDATE`` / ``DELETE``)
         * ``AUD_USER`` — the caller's username (or ``"anonymous"`` if the call wasn't authenticated)
-        * ``AUD_DATE`` — UTC timestamp captured server-side
+        * ``AUD_DATE`` — local server-time timestamp captured server-side
 
         Columns are taken from ``params`` (uppercase keys, not ending in ``_ORIGINAL`` — those are
         only WHERE rebinds for the main UPDATE). The AUD table is auto-created from the source
@@ -1966,18 +2054,18 @@ class SQLConnector:
         #                    VALUES (:col1, :col2, …, :_AUD_ACTION, :_AUD_USER, :_AUD_DATE)`
         # Reserved bind names start with `_aud_` so they can't collide with the row's columns.
         col_list = list(cols)
-        # ``_aud_date`` is naive UTC: the audit column is ``TIMESTAMP`` (without time zone)
-        # — matches the auto-create DDL above and what v1's AUD_<table>s used. Binding a
-        # tz-aware ``datetime.now(UTC)`` against a tz-naive column trips asyncpg with
-        # "can't subtract offset-naive and offset-aware datetimes" and rolls the whole
-        # audited write back (auto-create + main + audit are one transaction). The same
-        # naive-UTC convention runs for SYSDATE in ``_apply_form_rules``, so the two
-        # paths stay consistent.
+        # ``_aud_date`` is naive **local** server time: the audit column is ``TIMESTAMP``
+        # (without time zone) — matches the auto-create DDL above and what v1's AUD_<table>s
+        # used. ``datetime.now()`` is naive (no tzinfo) so it binds cleanly against the
+        # tz-naive column (a tz-aware ``now`` trips asyncpg with "can't subtract offset-naive
+        # and offset-aware datetimes" and rolls the whole audited write back — auto-create +
+        # main + audit are one transaction). Local, not UTC, so it agrees with the SYSDATE
+        # rule in ``_apply_form_rules`` and reads consistently next to UPMJ/UPMT in the DB.
         bind_params = {
             **cols,
             "_aud_action": stmt_type,
             "_aud_user": user or "anonymous",
-            "_aud_date": datetime.now(timezone.utc).replace(tzinfo=None),
+            "_aud_date": datetime.now(),
         }
         col_sql = ", ".join([*col_list, "AUD_ACTION", "AUD_USER", "AUD_DATE"])
         val_sql = ", ".join([f":{c}" for c in col_list] + [":_aud_action", ":_aud_user", ":_aud_date"])

@@ -195,7 +195,7 @@ def build_scaffold_tools(
         fields:
           - label: human-facing column title (e.g. "Customer Number")
           - format: how to render the cell — one of "boolean", "date", "datetime", "timestamp",
-            "jdedate", "number", "integer", "decimal", "currency", "text", "textarea",
+            "jdedate", "jdetime", "number", "integer", "decimal", "currency", "text", "textarea",
             "password", "email", "url". (NOT "type" — the field is "format".)
           - rules: optional display rule (BOOLEAN / ENUM / LOOKUP / SEQUENCE / NN / PASSWORD)
           - rules_values: the rule's argument when rules is set
