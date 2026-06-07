@@ -71,3 +71,59 @@ async def test_entries_belong_to_one_active_draft() -> None:
         assert len(pkgs) == 1                                       # both attached to the same draft
         pkg = await store.get_package(s, pkgs[0].id)
         assert len(pkg.entries) == 2
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_submit_then_approve_opens_fresh_draft() -> None:
+    db = await _db()
+    # an empty draft can't be submitted
+    async with db.session() as s:
+        pkg = await store.get_or_create_active_package(s, "jde", user="u")
+    async with db.session() as s:
+        with pytest.raises(store.LifecycleError):
+            await store.submit_package(s, pkg.id, user="u")
+    # add a change, then submit → pending
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT")
+    async with db.session() as s:
+        active = await store.get_active_package(s, "jde")
+        p = await store.submit_package(s, active.id, user="op")
+        assert p.status == PackageStatus.PENDING.value and p.submitted_by == "op"
+        pkg_id = active.id
+    # re-submit fails (not a draft anymore)
+    async with db.session() as s:
+        with pytest.raises(store.LifecycleError):
+            await store.submit_package(s, pkg_id, user="op")
+    # approve → approved
+    async with db.session() as s:
+        p = await store.approve_package(s, pkg_id, user="boss")
+        assert p.status == PackageStatus.APPROVED.value and p.approved_by == "boss"
+    # the next change opens a NEW draft (the approved one is closed)
+    await store.capture(db, "jde", connector="jde", query="f_put", operation="UPDATE")
+    async with db.session() as s:
+        fresh = await store.get_active_package(s, "jde")
+        assert fresh is not None and fresh.id != pkg_id
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_exclude_entry_and_reject() -> None:
+    db = await _db()
+    eid = await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT")
+    async with db.session() as s:
+        pkg_id = (await store.get_active_package(s, "jde")).id
+    async with db.session() as s:
+        e = await store.set_entry_excluded(s, eid, excluded=True)
+        assert e.status == EntryStatus.EXCLUDED.value
+    # all entries excluded → nothing to submit
+    async with db.session() as s:
+        with pytest.raises(store.LifecycleError):
+            await store.submit_package(s, pkg_id, user="u")
+    async with db.session() as s:
+        await store.set_entry_excluded(s, eid, excluded=False)
+    async with db.session() as s:
+        assert (await store.submit_package(s, pkg_id, user="u")).status == PackageStatus.PENDING.value
+    async with db.session() as s:
+        assert (await store.reject_package(s, pkg_id, user="boss")).status == PackageStatus.REJECTED.value
+    # entries of a non-draft package can't be toggled
+    async with db.session() as s:
+        with pytest.raises(store.LifecycleError):
+            await store.set_entry_excluded(s, eid, excluded=True)

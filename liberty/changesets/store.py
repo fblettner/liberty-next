@@ -132,3 +132,77 @@ async def get_package(session: AsyncSession, package_id: str) -> ChangePackage |
         select(ChangePackage).where(ChangePackage.id == package_id).options(selectinload(ChangePackage.entries))
     )
     return res.scalar_one_or_none()
+
+
+# ── lifecycle (Phase 2) ──────────────────────────────────────────────────────────────────────
+
+
+class LifecycleError(ValueError):
+    """An invalid package/entry transition (wrong current state, nothing to submit). The route maps
+    it to 409 Conflict."""
+
+
+async def submit_package(session: AsyncSession, package_id: str, *, user: str | None = None) -> ChangePackage | None:
+    """Draft → pending (submitted for approval). Returns None if not found; raises
+    :class:`LifecycleError` if it isn't a draft or has no included changes. Once submitted the draft
+    slot frees up, so the next tracked write opens a fresh draft for the application."""
+    pkg = await session.get(ChangePackage, package_id)
+    if pkg is None:
+        return None
+    if pkg.status != PackageStatus.DRAFT.value:
+        raise LifecycleError(f"only a draft package can be submitted (this one is {pkg.status!r})")
+    included = await session.scalar(
+        select(func.count()).select_from(ChangeEntry).where(
+            ChangeEntry.package_id == package_id, ChangeEntry.status != EntryStatus.EXCLUDED.value,
+        )
+    )
+    if not included:
+        raise LifecycleError("package has no included changes to submit")
+    pkg.status = PackageStatus.PENDING.value
+    pkg.submitted_by = user
+    pkg.submitted_at = _utcnow()
+    return pkg
+
+
+async def approve_package(session: AsyncSession, package_id: str, *, user: str | None = None) -> ChangePackage | None:
+    """Pending → approved. Returns None if not found; raises :class:`LifecycleError` if not pending."""
+    pkg = await session.get(ChangePackage, package_id)
+    if pkg is None:
+        return None
+    if pkg.status != PackageStatus.PENDING.value:
+        raise LifecycleError(f"only a pending package can be approved (this one is {pkg.status!r})")
+    pkg.status = PackageStatus.APPROVED.value
+    pkg.approved_by = user
+    pkg.approved_at = _utcnow()
+    return pkg
+
+
+async def reject_package(session: AsyncSession, package_id: str, *, user: str | None = None) -> ChangePackage | None:
+    """Pending → rejected (terminal). Returns None if not found; raises :class:`LifecycleError` if
+    not pending. The operator's later work lives in the new draft; a rejected package is kept for the
+    record rather than merged back (avoids two open drafts for one application)."""
+    pkg = await session.get(ChangePackage, package_id)
+    if pkg is None:
+        return None
+    if pkg.status != PackageStatus.PENDING.value:
+        raise LifecycleError(f"only a pending package can be rejected (this one is {pkg.status!r})")
+    pkg.status = PackageStatus.REJECTED.value
+    pkg.approved_by = user  # records who actioned it
+    pkg.approved_at = _utcnow()
+    return pkg
+
+
+async def set_entry_excluded(session: AsyncSession, entry_id: str, *, excluded: bool) -> ChangeEntry | None:
+    """Cherry-pick: mark an entry excluded (skipped on submit/export) or back to captured. Returns
+    None if not found; raises :class:`LifecycleError` if the entry was already applied/conflicted, or
+    its package is no longer a draft (can't edit a submitted/approved package)."""
+    entry = await session.get(ChangeEntry, entry_id)
+    if entry is None:
+        return None
+    if entry.status in (EntryStatus.APPLIED.value, EntryStatus.CONFLICT.value):
+        raise LifecycleError(f"cannot change an entry that is {entry.status!r}")
+    pkg = await session.get(ChangePackage, entry.package_id)
+    if pkg is not None and pkg.status != PackageStatus.DRAFT.value:
+        raise LifecycleError(f"can only edit entries of a draft package (this one is {pkg.status!r})")
+    entry.status = EntryStatus.EXCLUDED.value if excluded else EntryStatus.CAPTURED.value
+    return entry

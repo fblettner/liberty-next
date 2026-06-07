@@ -105,3 +105,62 @@ async def get_changeset(package_id: str, request: Request, _: Superuser) -> dict
         if pkg is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change package {package_id!r} not found")
         return {**_pkg_summary(pkg, len(pkg.entries)), "entries": [_entry_dict(e) for e in pkg.entries]}
+
+
+# ── lifecycle (Phase 2) ──────────────────────────────────────────────────────────────────────
+
+
+async def _transition(request: Request, package_id: str, fn, *, user: str | None) -> dict[str, Any]:
+    """Run a package lifecycle transition (submit/approve/reject) + return the package detail.
+    404 if the package is gone; 409 on an invalid transition (:class:`store.LifecycleError`)."""
+    db = _db(request)
+    async with db.session() as session:
+        try:
+            pkg = await fn(session, package_id, user=user)
+        except store.LifecycleError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if pkg is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change package {package_id!r} not found")
+        await session.flush()
+        full = await store.get_package(session, package_id)
+        return {**_pkg_summary(full, len(full.entries)), "entries": [_entry_dict(e) for e in full.entries]}
+
+
+@router.post("/{package_id}/submit", summary="Submit a draft package for approval")
+async def submit_changeset(package_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+    return await _transition(request, package_id, store.submit_package, user=principal.username)
+
+
+@router.post("/{package_id}/approve", summary="Approve a pending package")
+async def approve_changeset(package_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+    return await _transition(request, package_id, store.approve_package, user=principal.username)
+
+
+@router.post("/{package_id}/reject", summary="Reject a pending package")
+async def reject_changeset(package_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+    return await _transition(request, package_id, store.reject_package, user=principal.username)
+
+
+async def _set_excluded(request: Request, entry_id: str, *, excluded: bool) -> dict[str, Any]:
+    db = _db(request)
+    async with db.session() as session:
+        try:
+            entry = await store.set_entry_excluded(session, entry_id, excluded=excluded)
+        except store.LifecycleError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if entry is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change entry {entry_id!r} not found")
+        await session.flush()
+        return _entry_dict(entry)
+
+
+@router.post("/{package_id}/entries/{entry_id}/exclude", summary="Exclude an entry from its package")
+async def exclude_entry(package_id: str, entry_id: str, request: Request, _: Superuser) -> dict[str, Any]:
+    """Cherry-pick an entry OUT of its (draft) package — skipped on submit/export. ``package_id`` is
+    path context; the entry is addressed by its own id."""
+    return await _set_excluded(request, entry_id, excluded=True)
+
+
+@router.post("/{package_id}/entries/{entry_id}/include", summary="Re-include a previously excluded entry")
+async def include_entry(package_id: str, entry_id: str, request: Request, _: Superuser) -> dict[str, Any]:
+    return await _set_excluded(request, entry_id, excluded=False)
