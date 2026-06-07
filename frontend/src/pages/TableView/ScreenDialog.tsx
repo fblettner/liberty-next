@@ -851,7 +851,14 @@ export function ScreenDialog({
                               // banner above the body explains why.
                               disabled={st.disabled || readOnly}
                               required={st.required}
-                              suppressLookup={effMode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
+                              // Suppress a key column's lookup on add ONLY in a nested sub-dialog,
+                              // where the key is the parent's PK seeded via param_binds — there the
+                              // lookup's async options would clobber the seeded value and cause an
+                              // FK violation, so it renders as a plain input showing the seed.
+                              // In a TOP-LEVEL dialog we do NOT auto-suppress: a key can be a FK you
+                              // SELECT (e.g. license_csi_components — pick component + metric, set a
+                              // quantity). Per-column read-only stays the operator's call (``disabled``).
+                              suppressLookup={nested && effMode === 'add' && keyColumnSet.has(f.name.toLowerCase())}
                               onLookupPick={onLookupReturnValues}
                             />
                           )
