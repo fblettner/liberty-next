@@ -1106,7 +1106,11 @@ class Screen(BaseModel):
             "Result columns that uniquely identify a row — also derivable per-column by ticking "
             "``key`` on the column hint (the visual designer's Columns tab uses that). When this "
             "list is empty, the runtime falls back to the column hints whose ``key`` is true. "
-            "Set this explicitly only when you want to override the column-derived list."
+            "Set this explicitly only when you want to override the column-derived list. "
+            # FOOTGUN: this is the LEGACY/override field and is empty on every screen whose key is
+            # set the modern per-column way (the UI no longer exposes it). Runtime code that needs
+            # the row key MUST call ``effective_key_columns()`` — reading this attribute directly
+            # silently sees [] and breaks (e.g. change-capture once recorded no natural key here).
         ),
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
