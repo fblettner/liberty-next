@@ -461,6 +461,11 @@ const fr: Resources = {
       empty: 'Aucun package de modifications pour l’instant — modifiez un enregistrement sur un écran suivi pour en ouvrir un.',
       noEntries: 'Aucune modification capturée dans ce package pour l’instant.',
       nChanges: '{{n}} modification(s)',
+      submit: 'Soumettre',
+      approve: 'Approuver',
+      reject: 'Rejeter',
+      exclude: 'Exclure',
+      include: 'Inclure',
     },
     integrity: {
       errors: 'erreurs', warnings: 'avertissements', errorsOnly: 'Erreurs', warningsOnly: 'Avertissements',

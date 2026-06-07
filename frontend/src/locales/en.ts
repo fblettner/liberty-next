@@ -459,6 +459,11 @@ const en = {
       empty: 'No change packages yet — edit a record on a change-tracked screen to open one.',
       noEntries: 'No changes captured in this package yet.',
       nChanges: '{{n}} change(s)',
+      submit: 'Submit',
+      approve: 'Approve',
+      reject: 'Reject',
+      exclude: 'Exclude',
+      include: 'Include',
     },
     integrity: {
       errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',

@@ -1,11 +1,12 @@
-// Change packages (read-only, Phase 1) — every tracked data modification captured into the
-// active package for its connector, ready to review and (later phases) approve + promote. Master
-// list on the left, per-package detail on the right: entries grouped by entity with old→new diffs.
-import { useEffect, useMemo, useState } from 'react'
+// Change packages — every tracked data modification captured into the active package for its
+// connector. Master list on the left, per-package detail on the right: entries grouped by entity
+// with old→new diffs. The detail header carries the lifecycle actions (submit / approve / reject)
+// and each draft entry can be excluded / re-included (cherry-pick).
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Layers, ArrowRight } from 'lucide-react'
-import { Banner } from '../../common'
+import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye } from 'lucide-react'
+import { Banner, Button } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -54,6 +55,19 @@ const Diff = styled.div`
   & .same { color: ${colors.text.secondary}; }
 `
 
+const DetailHead = styled.div`
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  & .title { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
+  & .who { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  & .actions { display: flex; gap: 6px; margin-left: auto; }
+`
+const ExBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0;
+  background: none; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
+  color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 1px 7px; cursor: pointer;
+  &:hover { border-color: ${colors.blue.border}; color: ${colors.text.secondary}; }
+`
+
 const STATUS_TONE: Record<string, string> = {
   draft: colors.blue.main, pending: colors.orange.main, approved: colors.green.main,
   exported: colors.text.muted, promoted: colors.text.muted, rejected: colors.red.main,
@@ -68,19 +82,31 @@ export default function ChangePackagesBuilder() {
   const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<PkgDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
+  const loadList = useCallback(() =>
     api.get<{ packages: Pkg[] }>('/admin/changesets')
       .then((d) => { setPackages(d.packages); if (d.packages[0]) setSelId((s) => s ?? d.packages[0].id) })
-      .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
-  }, [])
-
-  useEffect(() => {
-    if (!selId) { setDetail(null); return }
-    api.get<PkgDetail>(`/admin/changesets/${encodeURIComponent(selId)}`)
+      .catch((e) => setError(e instanceof ApiError ? e.message : String(e))), [])
+  const loadDetail = useCallback((id: string) =>
+    api.get<PkgDetail>(`/admin/changesets/${encodeURIComponent(id)}`)
       .then(setDetail)
-      .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
-  }, [selId])
+      .catch((e) => setError(e instanceof ApiError ? e.message : String(e))), [])
+
+  useEffect(() => { void loadList() }, [loadList])
+  useEffect(() => { if (!selId) { setDetail(null); return } void loadDetail(selId) }, [selId, loadDetail])
+
+  // Lifecycle action (submit/approve/reject) or per-entry exclude/include, then refresh both panes.
+  const act = useCallback(async (path: string) => {
+    if (!selId) return
+    setBusy(true); setError(null)
+    try {
+      await api.post(`/admin/changesets/${encodeURIComponent(selId)}${path}`)
+      await Promise.all([loadList(), loadDetail(selId)])
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }, [selId, loadList, loadDetail])
 
   // Group the detail's entries by entity (Users / Roles / …); fall back to the query name.
   const grouped = useMemo(() => {
@@ -116,6 +142,30 @@ export default function ChangePackagesBuilder() {
             ))}
           </List>
           <div>
+            {detail && (
+              <DetailHead>
+                <span className="title">{detail.name}</span>
+                <Badge $tone={STATUS_TONE[detail.status] ?? colors.text.muted}>{detail.status}</Badge>
+                {detail.approved_by && <span className="who">{detail.status} · {detail.approved_by}</span>}
+                <span className="actions">
+                  {detail.status === 'draft' && (
+                    <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void act('/submit')}>
+                      <Send size={13} /> {t('settings.changes.submit', 'Submit')}
+                    </Button>
+                  )}
+                  {detail.status === 'pending' && (
+                    <>
+                      <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void act('/approve')}>
+                        <Check size={13} /> {t('settings.changes.approve', 'Approve')}
+                      </Button>
+                      <Button $size="sm" $variant="ghost" disabled={busy} style={{ color: colors.red.main }} onClick={() => void act('/reject')}>
+                        <X size={13} /> {t('settings.changes.reject', 'Reject')}
+                      </Button>
+                    </>
+                  )}
+                </span>
+              </DetailHead>
+            )}
             {!detail ? <Sub>{t('common.loading', 'Loading…')}</Sub> : detail.entries.length === 0 ? (
               <Sub>{t('settings.changes.noEntries', 'No changes captured in this package yet.')}</Sub>
             ) : grouped.map(([entity, entries]) => (
@@ -124,12 +174,19 @@ export default function ChangePackagesBuilder() {
                 {entries.map((e) => {
                   const oldV = e.old_values ?? {}; const newV = e.new_values ?? {}
                   const fields = [...new Set([...Object.keys(oldV), ...Object.keys(newV)])].sort()
+                  const excluded = e.status === 'excluded'
+                  const draft = detail?.status === 'draft'
                   return (
-                    <Row key={e.id}>
+                    <Row key={e.id} style={excluded ? { opacity: 0.5 } : undefined}>
                       <div className="head">
                         <Badge $tone={OP_TONE[e.operation] ?? colors.text.muted}>{e.operation}</Badge>
-                        <span className="key">{e.entity_key ? Object.entries(e.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : '—'}</span>
+                        <span className="key" style={excluded ? { textDecoration: 'line-through' } : undefined}>{e.entity_key ? Object.entries(e.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : '—'}</span>
                         <span className="q">{e.connector}.{e.query}</span>
+                        {draft && (
+                          <ExBtn disabled={busy} onClick={() => void act(`/entries/${encodeURIComponent(e.id)}/${excluded ? 'include' : 'exclude'}`)}>
+                            {excluded ? <><Eye size={11} /> {t('settings.changes.include', 'Include')}</> : <><EyeOff size={11} /> {t('settings.changes.exclude', 'Exclude')}</>}
+                          </ExBtn>
+                        )}
                       </div>
                       <Diff>
                         {fields.map((f) => {
