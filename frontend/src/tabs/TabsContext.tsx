@@ -15,7 +15,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 // 'screen' opens a designed screen by id (``/screen/<app>/<screen_id>``); the tab's ``connector``
 // segment carries the screen's APP and ``target`` its id, so two screens sharing a read query get
 // distinct tabs (a plain 'sql' tab keys on connector+query and would collide).
-export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring'
+// 'page' wraps a framework page (a menus.toml ``type = "page"`` target — nomaflow Jobs / Schedule /
+// Package / Changes / Integrity, the Reports list) as a tab, so clicking a page menu item opens a
+// tab instead of replacing the active tab's content. The tab's ``target`` IS the route path; the
+// path → component map lives in TabHost (see src/tabs/pageTabs.ts for the shared path set).
+export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring' | 'page'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind
@@ -32,6 +36,8 @@ export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
   // Settings / Monitoring are singleton framework tabs with no connector/target segment.
   if (t.kind === 'settings') return '/settings'
   if (t.kind === 'monitoring') return '/monitoring'
+  // A page tab's target IS its route path (e.g. /nomaflow/changes).
+  if (t.kind === 'page') return t.target
   // Dashboards / nomaflow_run have no connector segment in the URL — just /<base>/<id>.
   if (t.kind === 'dashboard') return `/dashboard/${encodeURIComponent(t.target)}`
   if (t.kind === 'nomaflow_run') return `/nomaflow/runs/${encodeURIComponent(t.target)}`

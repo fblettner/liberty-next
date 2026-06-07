@@ -2,7 +2,8 @@
 // (EN/FR, dark/light, profile, sign-out). Page content renders through <Outlet/>
 // inside a <Suspense> boundary (routes are code-split). Adapted from nomaubl.
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { Outlet, useMatch, useNavigate } from 'react-router-dom'
+import { Outlet, useMatch, useNavigate, useLocation } from 'react-router-dom'
+import { isPageTabPath } from '../tabs/pageTabs'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Sun, Moon, LogOut, User, Sparkles, X } from 'lucide-react'
@@ -209,6 +210,7 @@ export default function Layout() {
   // <Outlet/>, with the tab host hidden underneath. (all useMatch calls must run unconditionally —
   // Rules of Hooks). nomaflow run detail + Settings are hosted as workspace tabs so they sit in the
   // tab strip alongside the screens instead of replacing the workspace view.
+  const { pathname } = useLocation()
   const sqlMatch = useMatch('/sql/:connector/:target')
   const screenMatch = useMatch('/screen/:connector/:target')
   const httpMatch = useMatch('/http/:connector/:target')
@@ -216,7 +218,10 @@ export default function Layout() {
   const nomaflowRunMatch = useMatch('/nomaflow/runs/:runId')
   const settingsMatch = useMatch('/settings')
   const monitoringMatch = useMatch('/monitoring')
-  const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch)
+  // `page` tabs (nomaflow Jobs/Schedule/Package/Changes/Integrity, Reports) render through TabHost
+  // too — so their routes count as "on a tab route" and the Outlet stays empty.
+  const pageTabMatch = isPageTabPath(pathname)
+  const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch || pageTabMatch)
 
   return (
     <Shell>
