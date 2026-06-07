@@ -3,6 +3,7 @@ from __future__ import annotations
 from liberty.web.access import router as access_router
 from liberty.web.actions import router as actions_router
 from liberty.web.admin import router as admin_router
+from liberty.web.changesets import router as changesets_router
 from liberty.web.charts import router as charts_router
 from liberty.web.dictgen import router as dictgen_router
 from liberty.web.connectors import router as connectors_router
@@ -20,6 +21,7 @@ __all__ = [
     "access_router",
     "actions_router",
     "admin_router",
+    "changesets_router",
     "charts_router",
     "dictgen_router",
     "connectors_router",

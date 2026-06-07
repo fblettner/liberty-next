@@ -455,7 +455,13 @@ const fr: Resources = {
       invalidIdentifier: 'Utilisez des lettres minuscules, des chiffres et des underscores ; commencez par une lettre (compatible avec les clés TOML, les permissions et les segments d\'URL).',
       unsavedFirst: 'Vous avez des modifications non enregistrées. Enregistrez-les d\'abord — le renommage réécrit chaque fichier référencé sur disque puis recharge, ce qui écraserait les changements en attente.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App', reports: 'Rapports', integrity: 'Intégrité' },
+    tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', theme: 'Thème', app: 'App', reports: 'Rapports', changes: 'Modifications', integrity: 'Intégrité' },
+    changes: {
+      hint: 'Chaque modification suivie est capturée dans le package actif de son connecteur. Examinez les différences ici ; l’approbation et la promotion vers un autre environnement viendront ensuite.',
+      empty: 'Aucun package de modifications pour l’instant — modifiez un enregistrement sur un écran suivi pour en ouvrir un.',
+      noEntries: 'Aucune modification capturée dans ce package pour l’instant.',
+      nChanges: '{{n}} modification(s)',
+    },
     integrity: {
       errors: 'erreurs', warnings: 'avertissements', errorsOnly: 'Erreurs', warningsOnly: 'Avertissements',
       filter: 'Filtrer…', recheck: 'Revérifier', goto: 'Ouvrir',

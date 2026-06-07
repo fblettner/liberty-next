@@ -318,6 +318,17 @@ class JobsSettings(BaseModel):
     enabled: bool = True
 
 
+class ChangeSetsSettings(BaseModel):
+    """Change packages — capture tracked writes into reviewable, promotable change-sets (see
+    ``project_nomajde_change_packages``). ``pool`` defaults to ``"default"`` so the ``ly_change_*``
+    *control* tables land on the same pool as auth / nomaflow; point it at the framework Postgres
+    (e.g. ``nomasx1``) when the default pool is a connector you don't want control tables on.
+    ``enabled`` off → no capture (the screens' ``change_tracked`` flags become no-ops)."""
+
+    pool: str = "default"
+    enabled: bool = True
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
@@ -334,6 +345,7 @@ class Settings(BaseModel):
     license: LicenseSettings = Field(default_factory=LicenseSettings)
     jobs: JobsSettings = Field(default_factory=JobsSettings)
     reports: ReportsSettings = Field(default_factory=ReportsSettings)
+    changesets: ChangeSetsSettings = Field(default_factory=ChangeSetsSettings)
 
 
 def load_settings(

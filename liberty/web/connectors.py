@@ -16,6 +16,7 @@ and the caller's permission. (The OpenAPI docs at ``/docs`` describe all of this
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Annotated, Any, AsyncIterator
@@ -149,7 +150,7 @@ def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
 async def _run_sql(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
-    screens: ScreensFile | None = None,
+    screens: ScreensFile | None = None, changesets: Any = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -180,6 +181,22 @@ async def _run_sql(
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=f"query failed: {type(exc).__name__}: {exc}") from exc
+    # Change-package capture — AFTER the write has committed (cross-DB: control pool ≠ this
+    # connector, so it can't share the write's transaction). Best-effort: a capture failure is
+    # logged but never undoes the already-committed write — the audit table stays the immutable
+    # trail. No-op for SELECTs / untracked screens (capture_write guards both).
+    if changesets is not None and screen is not None and getattr(screen, "change_tracked", False):
+        from liberty.changesets.capture import capture_write
+        try:
+            await capture_write(
+                changesets, connector=connector, query=query,
+                statement_type=result.statement_type, params=params, screen=screen, user=user,
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
+            _log.error(
+                "change capture failed for %s.%s (write committed but NOT packaged): %s",
+                connector, query, exc,
+            )
     return result.to_dict()
 
 
@@ -309,6 +326,9 @@ async def sql_pool_schemas(
         raise http_for_connector_error(exc) from exc
     try:
         return await list_pool_schemas(connectors.pools, conn.pool_name)
+    except asyncio.CancelledError:
+        _log.info("schema list on %r cancelled (client disconnect / shutdown)", connector)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="schema list cancelled") from None
     except SQLAlchemyError as exc:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, detail=f"schema list failed: {type(exc).__name__}: {exc}",
@@ -352,6 +372,13 @@ async def sql_pool_schema(
             connectors.pools, conn.pool_name,
             only_schema=only_schema, name_like=name_like,
         )
+    except asyncio.CancelledError:
+        # The full-catalog Oracle/JDE introspection is slow (5+s); a client navigating away or a
+        # server shutdown cancels it mid-fetch. That's expected, not an app error — convert to a
+        # quiet 503 so uvicorn doesn't dump a CancelledError traceback ("Exception in ASGI
+        # application"). The slow walk itself is a separate perf follow-up (cache it).
+        _log.info("schema introspection on %r cancelled (client disconnect / shutdown)", connector)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="introspection cancelled") from None
     except SQLAlchemyError as exc:
         # Don't 500 — the editor calls this on focus and gracefully degrades without suggestions.
         raise HTTPException(
@@ -474,7 +501,7 @@ async def sql_query_post(
     return await _run_sql(
         connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
-        screens=screens,
+        screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
     )
 
 

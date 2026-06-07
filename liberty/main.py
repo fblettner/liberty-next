@@ -33,6 +33,7 @@ from liberty.web import (
     access_router,
     actions_router,
     admin_router,
+    changesets_router,
     charts_router,
     dictgen_router,
     connectors_router,
@@ -154,6 +155,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
+        # Change packages — control tables on the configured pool. None when disabled so the route
+        # capture hook short-circuits. Schema is created lazily here (idempotent), like nomaflow.
+        app.state.changesets_db = None
+        if settings.changesets.enabled:
+            from liberty.changesets.db import ChangeSetDatabase
+            cs_db = ChangeSetDatabase(app.state.connectors.pools, settings.changesets.pool)
+            try:
+                # Self-bootstrap the control tables (idempotent). Guarded like nomaflow: an
+                # unreachable pool skips change-package capture rather than failing app boot.
+                await cs_db.create_schema()
+                app.state.changesets_db = cs_db
+            except Exception as exc:  # noqa: BLE001 — never let a bad control pool take down boot
+                _log.warning(
+                    "changesets pool %r unusable (%s) — change-package capture disabled this run",
+                    settings.changesets.pool, exc,
+                )
         app.state.token_service = token_service
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
@@ -531,6 +548,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(plugins_router)
     app.include_router(reports_router)
+    app.include_router(changesets_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:

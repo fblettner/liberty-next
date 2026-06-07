@@ -1077,6 +1077,25 @@ class Screen(BaseModel):
         ),
         json_schema_extra={"x_placeholder": "e.g. AUD_USERS — leave blank to disable"},
     )
+    change_tracked: bool = Field(
+        default=False,
+        description=(
+            "Capture every successful write on this screen into the application's current change "
+            "package (Settings → Packages) so it can be reviewed and promoted to another "
+            "environment. The natural key comes from this screen's ``key_columns``; the pre-image "
+            "from the write's ``:_ORIGINAL`` binds drives drift detection on promotion. Off = not "
+            "packaged. Requires ``[changesets] enabled``."
+        ),
+    )
+    change_entity: str | None = Field(
+        default=None,
+        description=(
+            "Logical label for what this screen edits (e.g. ``user`` / ``role`` / ``relationship`` "
+            "/ ``security``), used to group changes in the package view. Blank → grouped under the "
+            "screen id. Only meaningful when ``change_tracked`` is on."
+        ),
+        json_schema_extra={"x_placeholder": "e.g. user, role, security"},
+    )
     max_rows: int | None = Field(
         default=None,
         description="Cap how many rows this screen's read query returns. Blank = use the connector's / pool's default.",

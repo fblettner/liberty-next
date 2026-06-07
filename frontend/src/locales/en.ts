@@ -453,7 +453,13 @@ const en = {
       invalidIdentifier: 'Use lowercase letters, digits and underscores; start with a letter (matches what TOML keys, permission strings and URL segments accept).',
       unsavedFirst: 'You have unsaved changes. Save them first — the rename rewrites every referenced file on disk and then reloads, which would discard pending edits.',
     },
-    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports', integrity: 'Integrity' },
+    tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', theme: 'Theme', app: 'App', reports: 'Reports', changes: 'Changes', integrity: 'Integrity' },
+    changes: {
+      hint: 'Every tracked data change is captured into the active package for its connector. Review the diffs here; approval + promotion to another environment come next.',
+      empty: 'No change packages yet — edit a record on a change-tracked screen to open one.',
+      noEntries: 'No changes captured in this package yet.',
+      nChanges: '{{n}} change(s)',
+    },
     integrity: {
       errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',
       filter: 'Filter…', recheck: 'Re-check', goto: 'Go to',
