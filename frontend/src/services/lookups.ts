@@ -46,12 +46,17 @@ export interface LookupData {
  *  follows the query. */
 export function lookupOptions(data: LookupData, filter?: { column: string; value: string }): { value: string; label: string }[] {
   const colKey = filter ? (data.byColLower.get(filter.column.toLowerCase()) ?? filter.column) : undefined
+  // Trim-tolerant cascade match: JDE pads / right-justifies UDC codes, so the dependent column
+  // reads back e.g. "98  " / "      98" while the parent's selected value is "98". Compare both
+  // sides trimmed — else selecting a parent narrows the child to zero rows. Display-only (the
+  // option values below stay as-is; this only decides which rows show).
+  const want = filter ? String(filter.value ?? '').trim() : undefined
   const out: { value: string; label: string }[] = []
   const seen = new Set<string>()
   for (const row of data.rows) {
     const v = row[data.vKey]
     if (v === null || v === undefined) continue
-    if (filter && String(row[colKey as string] ?? '') !== filter.value) continue
+    if (filter && String(row[colKey as string] ?? '').trim() !== want) continue
     const sv = String(v)
     if (seen.has(sv)) continue
     seen.add(sv)

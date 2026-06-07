@@ -213,7 +213,10 @@ function EditCell({
       const labKey = rule.label
       const matches = lookupRows.filter((r) => active.every(({ column: col, value }) => {
         const rv = r[col] ?? r[col.toLowerCase()] ?? r[col.toUpperCase()]
-        return rv != null && String(rv) === String(value)
+        // Trim-tolerant: JDE pads / right-justifies UDC codes, so the dependent column and the
+        // sibling cell value can differ in padding for the same logical code (matches the
+        // filter-panel cascade fix in services/lookups.ts).
+        return rv != null && String(rv).trim() === String(value).trim()
       }))
       opts = matches
         .map((r) => {

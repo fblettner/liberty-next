@@ -167,7 +167,12 @@ export function SearchSelect({
     }
   }, [open])
 
+  // Exact match drives the trigger label; fall back to a trim-tolerant match so a JDE-padded
+  // lookup value (option ``"      01"``) still shows its label when the stored value reads back
+  // as ``"01"`` (or vice versa) — common after a UDC lookup moved to read JDE directly. Display
+  // only: the stored ``value`` passed to ``onChange`` is never rewritten, so save keeps its form.
   const current = options.find((o) => o.value === value)
+    ?? (value ? options.find((o) => o.value.trim() === String(value).trim()) : undefined)
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     if (!needle) return options
