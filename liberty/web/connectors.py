@@ -97,7 +97,7 @@ async def describe_connector(connector: str, principal: CurrentPrincipal, connec
 
 
 # `_limit` (query string) / `max_rows` (POST body) aren't query params — they override the row cap.
-_RESERVED_BODY_KEYS = {"params", "max_rows"}
+_RESERVED_BODY_KEYS = {"params", "max_rows", "_change_context"}
 
 
 def _params_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
@@ -152,6 +152,20 @@ def _find_screen_for_query(
     return None, None, None
 
 
+def _resolve_action_screen(screens: ScreensFile | None, action_context: dict[str, Any] | None) -> Screen | None:
+    """The originating :class:`Screen` for a tagged screen-action call. The frontend tags each
+    action backend call (run_query / call_api / call_plugin) fired from a change-tracked screen's
+    lifecycle hook with ``{app, screen}`` so the write/invocation is captured into THAT screen's
+    package (the action's own query/endpoint isn't a screen). ``None`` when untagged or not found."""
+    if not screens or not action_context:
+        return None
+    app = action_context.get("app")
+    sid = action_context.get("screen")
+    if not app or not sid:
+        return None
+    return (screens.screens.get(app) or {}).get(sid)
+
+
 def _find_group_for_query(screen: Screen, connector: str, query: str, app: str | None) -> Any | None:
     """The :class:`ColumnGroup` on *screen* whose write query is *(connector, query)* — used to
     capture a 1:1 related-table write into the change package with the GROUP's key (the related
@@ -186,6 +200,7 @@ async def _run_sql(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None, changesets: Any = None,
+    action_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -231,7 +246,29 @@ async def _run_sql(
     # ``unverified`` rather than skipping it. Same display ``entity`` as the main row so the two
     # group together in the package view; compaction keys on the physical table so they stay
     # distinct ops despite sharing the parent key.
-    if changesets is not None and screen is not None and getattr(screen, "change_tracked", False):
+    # A screen ACTION's run_query write (fired from on_save/on_insert/on_update/on_delete). The
+    # frontend tags it with the originating change-tracked screen (``action_context``) so it lands in
+    # the SAME package as that screen's main write. It targets an arbitrary table (not the screen's
+    # own), so there's no natural key / read query — captured with the resolved binds and replayed
+    # verbatim (``unverified`` drift) on apply. This path takes precedence over the screen-match
+    # capture below so an action query that happens to match some other screen isn't double-captured.
+    action_screen = _resolve_action_screen(screens, action_context) if (changesets is not None) else None
+    if action_screen is not None and getattr(action_screen, "change_tracked", False):
+        from liberty.changesets.capture import capture_write
+        # Package scope = the originating screen's connector, so the action write groups with that
+        # screen's main write (one bundle for the whole Save) even when it targets another connector.
+        app_scope = getattr(action_screen, "connector", None) or (action_context or {}).get("app")
+        try:
+            await capture_write(
+                changesets, connector=connector, query=query,
+                statement_type=result.statement_type, params=(result.bound_params or params), user=user,
+                key_columns=[], read_query=None,
+                entity=getattr(action_screen, "change_entity", None), change_tracked=True,
+                application=app_scope,
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
+            _log.error("action change capture failed for %s.%s: %s", connector, query, exc)
+    elif changesets is not None and action_context is None and screen is not None and getattr(screen, "change_tracked", False):
         from liberty.changesets.capture import capture_write
         if is_group:
             grp = _find_group_for_query(screen, connector, query, screen_app)
@@ -556,6 +593,9 @@ async def sql_query_post(
     chunk_size = _as_int(qp.get("_chunk_size"))
     limit = _as_int(body.get("max_rows")) if body else None  # body {"params": …, "max_rows": N}
     params = _params_from_body(body)
+    # ``_change_context`` (when present) marks this as a screen-action run_query fired from a
+    # change-tracked screen's lifecycle hook — captured into that screen's package (see _run_sql).
+    action_context = body.get("_change_context") if isinstance(body, dict) else None
     if stream:
         return _stream_sql_ndjson(
             connectors, connector, query, params,
@@ -566,6 +606,7 @@ async def sql_query_post(
         connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
         screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
+        action_context=action_context if isinstance(action_context, dict) else None,
     )
 
 
@@ -585,7 +626,8 @@ async def sql_query_post(
     },
 )
 async def http_call(
-    connector: str, endpoint: str, principal: CurrentPrincipal, connectors: Connectors, body: dict[str, Any] | None = None
+    connector: str, endpoint: str, request: Request, principal: CurrentPrincipal,
+    connectors: Connectors, screens: Screens, body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Forward a call to one of *connector*'s configured HTTP endpoints. The connector
     applies its base URL + auth + retry policy + per-endpoint method / path; the body
@@ -605,5 +647,27 @@ async def http_call(
         raise http_for_connector_error(exc) from exc
     # APIConnector.call never raises — a failed upstream call comes back as a
     # structured ApiResult with success=False; surface it as-is (HTTP 200).
-    result = await conn.call(endpoint, _params_from_body(body))
+    call_params = _params_from_body(body)
+    result = await conn.call(endpoint, call_params)
+    # Change-package capture for an opted-in (change_replay) call_api action fired from a
+    # change-tracked screen: record the invocation so the promotion bundle RE-RUNS it on the target.
+    # The frontend only tags when change_replay is on, so the tag's presence is the opt-in. Only a
+    # SUCCESSFUL upstream call is captured (a failed one didn't change anything). Best-effort.
+    action_context = body.get("_change_context") if isinstance(body, dict) else None
+    changesets = getattr(request.app.state, "changesets_db", None)
+    action_screen = _resolve_action_screen(screens, action_context) if changesets is not None else None
+    if action_screen is not None and getattr(action_screen, "change_tracked", False) and getattr(result, "success", True):
+        from liberty.changesets.capture import capture_invocation
+        from liberty.changesets.models import Operation
+        # Package scope = the originating screen's connector (groups with its main write); the call's
+        # own ``connector`` is the API target re-invoked on apply.
+        app_scope = getattr(action_screen, "connector", None) or (action_context or {}).get("app")
+        try:
+            await capture_invocation(
+                changesets, application=app_scope, connector=connector,
+                operation=Operation.CALL_API.value, target=endpoint, params=call_params,
+                entity=getattr(action_screen, "change_entity", None), user=principal.username,
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) call
+            _log.error("call_api change capture failed for %s.%s: %s", connector, endpoint, exc)
     return result.to_dict()

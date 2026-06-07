@@ -487,6 +487,8 @@ const en = {
       noMatch: 'No packages match.',
       deleteTitle: 'Delete package?',
       deleteMsg: 'Delete "{{name}}" and its {{n}} captured change(s)? The rows already written to the database are not affected — only this package log is removed.',
+      replaysOnApply: 'replays on apply',
+      replayNote: 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:',
     },
     integrity: {
       errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',

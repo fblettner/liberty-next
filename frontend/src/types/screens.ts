@@ -226,6 +226,10 @@ export type Action =
       endpoint: string
       param_binds?: ParamBind[]
       bind_result?: boolean
+      /** When true AND fired from a change-tracked screen, record this call in the change package
+       *  so a promotion bundle re-runs it on the target. Off by default (replay re-fires side
+       *  effects + can't be drift-checked). */
+      change_replay?: boolean
     })
   | (ActionCommon & PromptableAction & {
       /** Invoke a server-side plugin callable (`module:function` — the same entry points nomaflow
@@ -236,6 +240,9 @@ export type Action =
       callable: string
       param_binds?: ParamBind[]
       bind_result?: boolean
+      /** When true AND fired from a change-tracked screen, record this call in the change package
+       *  so a promotion bundle re-runs the callable on the target. Off by default. */
+      change_replay?: boolean
     })
   | (ActionCommon & {
       /** Run a SHARED action (defined once in actions.toml) by id. The runner inlines its steps
@@ -446,6 +453,11 @@ export interface ScreenDetail extends ScreenListItem {
   on_insert?: Action[]
   on_update?: Action[]
   on_delete?: Action[]
+  /** Capture every write on this screen into the connector's change package (Settings → Changes).
+   *  Drives whether the dialog tags its write-hook action calls for change capture. */
+  change_tracked?: boolean
+  /** Display label grouping the screen's changes in the package view (e.g. user / role). */
+  change_entity?: string | null
   /** Phase 1 — per-screen resolved column hints (label / format / hidden / filter / filter_from /
    *  visible_when / rule / width / align / dd). Same shape :class:`Column` carries on the SQL
    *  endpoint's ``result.columns``, so the TableView can swap this list in transparently. Only

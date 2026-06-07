@@ -467,3 +467,20 @@ def test_find_screen_resolves_column_group_write_query() -> None:
     s, slot, app = _find_screen_for_query(sf, "jdedwards", "f00921_post")
     assert s is not None and slot == "group" and app == "nomajde"
     assert "ULMUSE" in {c.name for c in (_column_hints_for(s) or [])}   # group column's dd is available
+
+
+def test_resolve_action_screen_for_change_capture() -> None:
+    """A tagged screen-action call (``_change_context`` {app, screen}) resolves to the originating
+    screen so its run_query write / call_api / call_plugin lands in THAT screen's package."""
+    from liberty.web.connectors import _resolve_action_screen
+    from liberty.screens.config import parse_screens
+    sf = parse_screens({"screens": {"nomajde": {"f0092": {
+        "read_query": "f0092_get", "change_tracked": True, "change_entity": "user",
+    }}}})
+    s = _resolve_action_screen(sf, {"app": "nomajde", "screen": "f0092"})
+    assert s is not None and s.change_tracked is True and s.change_entity == "user"
+    # Missing context / unknown screen / no screens → None (no capture).
+    assert _resolve_action_screen(sf, None) is None
+    assert _resolve_action_screen(sf, {"app": "nomajde", "screen": "nope"}) is None
+    assert _resolve_action_screen(sf, {"app": "x", "screen": "f0092"}) is None
+    assert _resolve_action_screen(None, {"app": "nomajde", "screen": "f0092"}) is None

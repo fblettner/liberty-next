@@ -100,7 +100,11 @@ const STATUS_TONE: Record<string, string> = {
   draft: colors.blue.main, pending: colors.orange.main, approved: colors.green.main,
   exported: colors.text.muted, promoted: colors.text.muted, rejected: colors.red.main,
 }
-const OP_TONE: Record<string, string> = { INSERT: colors.green.main, UPDATE: colors.blue.main, DELETE: colors.red.main }
+const OP_TONE: Record<string, string> = {
+  INSERT: colors.green.main, UPDATE: colors.blue.main, DELETE: colors.red.main,
+  CALL_API: colors.orange.main, CALL_PLUGIN: colors.orange.main,
+}
+const INVOCATION_OPS = new Set(['CALL_API', 'CALL_PLUGIN'])
 
 function fmt(v: unknown): string { return v === null || v === undefined || v === '' ? '∅' : String(v) }
 
@@ -380,17 +384,20 @@ export default function ChangePackagesBuilder() {
                   const draft = detail?.status === 'draft'
                   const open = openEntries.has(e.id)
                   const showUnch = showUnchanged.has(e.id)
+                  const isInvocation = INVOCATION_OPS.has(e.operation)
                   const visibleFields = showUnch ? fields : changed
-                  const summary = e.operation === 'DELETE'
-                    ? t('settings.changes.rowRemoved', 'row removed')
-                    : e.operation === 'INSERT'
-                      ? t('settings.changes.nFields', '{{n}} field(s)', { n: changed.length })
-                      : t('settings.changes.nChanged', '{{n}} changed', { n: changed.length })
+                  const summary = isInvocation
+                    ? t('settings.changes.replaysOnApply', 'replays on apply')
+                    : e.operation === 'DELETE'
+                      ? t('settings.changes.rowRemoved', 'row removed')
+                      : e.operation === 'INSERT'
+                        ? t('settings.changes.nFields', '{{n}} field(s)', { n: changed.length })
+                        : t('settings.changes.nChanged', '{{n}} changed', { n: changed.length })
                   return (
                     <Row key={e.id} style={excluded ? { opacity: 0.5 } : undefined}>
                       <div className="head clickable" onClick={() => toggle(openEntries, setOpenEntries, e.id)}>
                         {open ? <ChevronDown size={13} className="chev" /> : <ChevronRight size={13} className="chev" />}
-                        <Badge $tone={OP_TONE[e.operation] ?? colors.text.muted}>{e.operation}</Badge>
+                        <Badge $tone={OP_TONE[e.operation] ?? colors.text.muted}>{e.operation.replace('_', ' ')}</Badge>
                         <span className="key" style={excluded ? { textDecoration: 'line-through' } : undefined}>{e.entity_key ? Object.entries(e.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : '—'}</span>
                         <span className="count">{summary}</span>
                         <span className="q">{e.connector}.{e.query}</span>
@@ -402,6 +409,11 @@ export default function ChangePackagesBuilder() {
                       </div>
                       {open && (
                       <Diff style={{ marginTop: 6 }}>
+                        {isInvocation && (
+                          <div style={{ gridColumn: '1 / -1', color: colors.orange.main, fontSize: fontSize.micro, marginBottom: 2 }}>
+                            {t('settings.changes.replayNote', 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:')}
+                          </div>
+                        )}
                         {visibleFields.map((f) => {
                           const o = oldV[f]; const n = newV[f]
                           const hasOld = f in oldV; const hasNew = f in newV

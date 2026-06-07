@@ -400,11 +400,19 @@ export function ScreenDialog({
   const runOnSaveActions = useCallback(async (
     actions: Action[],
     baseCtx: Row,
+    opts?: { track?: boolean },
   ): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
+    // Only the write hooks (on_save/insert/update, on_delete) tag their action calls for change
+    // capture — on_load / on_cancel are read/UI and must not land in the package. Gated on the
+    // screen actually being change-tracked.
+    const changeContext = opts?.track && screen.change_tracked
+      ? { app: screen.app, screen: screen.id }
+      : undefined
     const result = await runChain(actions, baseCtx, baseCtx, {
       defaultConnector: connector,
       requestPrompt,
       sharedActions: sharedActions ?? undefined,
+      changeContext,
     })
     // :class:`ReturnAction` / :class:`SetFieldAction` write into the caller's form — apply
     // those before returning so the dialog reflects the workflow's output. Match by
@@ -428,7 +436,7 @@ export function ScreenDialog({
       refresh: result.refresh,
       error: result.error,
     }
-  }, [connector, requestPrompt, sharedActions])
+  }, [connector, requestPrompt, sharedActions, screen.change_tracked, screen.app, screen.id])
 
   // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —
   // the v1 model attaches actions either to *events* (``ly_evt_cpt`` → ``dialog.on_save``,
@@ -592,7 +600,7 @@ export function ScreenDialog({
       // Row-level on_delete hook — fires once with the deleted row's values as context.
       const onDelete = (screen.on_delete ?? []) as Action[]
       if (onDelete.length > 0) {
-        const result = await runOnSaveActions(onDelete, savedRow)
+        const result = await runOnSaveActions(onDelete, savedRow, { track: true })
         if (!result.ok) {
           // Row was deleted; the chain failed. Surface clearly and still refresh so the user
           // sees the new state. Same convention as on_save failure.
@@ -718,7 +726,7 @@ export function ScreenDialog({
         : ((screen.on_update ?? []) as Action[])
       const actions = [...dialogActions, ...screenRowActions]
       const result = actions.length > 0
-        ? await runOnSaveActions(actions, ctx)
+        ? await runOnSaveActions(actions, ctx, { track: true })
         : { ok: true, warnings: [], refresh: false }
       setSaving(false)
       if (!result.ok) {

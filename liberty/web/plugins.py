@@ -107,6 +107,30 @@ async def run_plugin(
         _log.exception("plugin run failed: callable=%s user=%s", ref, principal.username)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{ref}: {exc}") from exc
 
+    # Change-package capture for an opted-in (change_replay) call_plugin action fired from a
+    # change-tracked screen: record the invocation so the promotion bundle RE-RUNS the callable on
+    # the target. The frontend only tags when change_replay is on. Best-effort — never fails the call.
+    action_ctx = body.get("_change_context")
+    changesets = getattr(request.app.state, "changesets_db", None)
+    screens = getattr(request.app.state, "screens", None)
+    a_screen = None
+    if changesets is not None and isinstance(action_ctx, dict) and screens is not None:
+        a_app, a_id = action_ctx.get("app"), action_ctx.get("screen")
+        if a_app and a_id:
+            a_screen = (screens.screens.get(a_app) or {}).get(a_id)
+    if a_screen is not None and getattr(a_screen, "change_tracked", False):
+        from liberty.changesets.capture import capture_invocation
+        from liberty.changesets.models import Operation
+        app_scope = getattr(a_screen, "connector", None) or action_ctx.get("app")
+        try:
+            await capture_invocation(
+                changesets, application=app_scope, connector=app_scope,
+                operation=Operation.CALL_PLUGIN.value, target=ref, params=params,
+                entity=getattr(a_screen, "change_entity", None), user=principal.username,
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) plugin run
+            _log.error("call_plugin change capture failed for %s: %s", ref, exc)
+
     extras = result.extras or {}
     rows = [extras] if extras else []
     return {

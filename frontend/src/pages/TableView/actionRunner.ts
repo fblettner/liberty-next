@@ -73,6 +73,12 @@ export interface ActionRunnerDeps {
   /** Shared-action catalog (actions.toml, via ``GET /api/actions``), keyed by id — the runner
    *  resolves a ``call_action`` against this and inlines the referenced action's steps. */
   sharedActions?: Record<string, SharedAction>
+  /** When the chain fires from a CHANGE-TRACKED screen's lifecycle hook, this carries the
+   *  originating screen so the runner can tag each backend call with ``_change_context``. The
+   *  backend then captures the action into that screen's change package: run_query writes are
+   *  captured physically; call_api / call_plugin are captured as replayable invocations but only
+   *  when the action opts in via ``change_replay``. Unset (most call sites) → no tagging. */
+  changeContext?: { app: string; screen: string }
   /** Internal — the chain of shared-action ids currently being inlined, for cycle detection.
    *  Callers leave this unset; the runner threads it through nested ``call_action`` runs. */
   _actionStack?: string[]
@@ -454,7 +460,9 @@ async function runOneAction(
           statement_type?: string;
         }>(
           `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
-          { params: withUpper(bound) },
+          // Tag with the originating change-tracked screen so the backend captures this action
+          // write into its package (physical capture — run_query writes are always captured).
+          { params: withUpper(bound), ...(deps.changeContext ? { _change_context: deps.changeContext } : {}) },
         )
         // 0-row write surface — a write that affected zero rows is almost always a config
         // bug (CHAR-padding mismatch, wrong query variant ``_put`` vs ``_post``, etc.).
@@ -491,7 +499,9 @@ async function runOneAction(
           extracted?: unknown
         }>(
           `/api/http/${encodeURIComponent(a.connector)}/${encodeURIComponent(a.endpoint)}`,
-          bound,
+          // Tag for invocation capture only when the action opts in (change_replay) AND fired from a
+          // change-tracked screen — replaying an API call re-fires its side effects.
+          (deps.changeContext && a.change_replay) ? { ...bound, _change_context: deps.changeContext } : bound,
         )
         if (resp?.success === false) {
           const msg = `${a.label || a.id}: API ${resp?.status_code ?? ''} ${resp?.error ?? ''}`.trim()
@@ -530,7 +540,9 @@ async function runOneAction(
           first_row?: Row
         }>(
           '/api/plugins/run',
-          { callable: a.callable, params: bound },
+          // Tag for invocation capture only when the action opts in (change_replay) AND fired from
+          // a change-tracked screen.
+          { callable: a.callable, params: bound, ...((deps.changeContext && a.change_replay) ? { _change_context: deps.changeContext } : {}) },
         )
         if (a.bind_result) {
           const rows = Array.isArray(resp?.rows) ? resp.rows : []

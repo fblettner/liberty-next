@@ -85,6 +85,7 @@ async def capture_write(
     read_query: str | None,
     entity: str | None,
     change_tracked: bool = True,
+    application: str | None = None,
 ) -> str | None:
     """Capture a committed write into the connector's current package. The caller supplies the
     write target's ``key_columns`` (for the natural key + drift pre-image), its ``read_query``
@@ -106,8 +107,8 @@ async def capture_write(
     ekey = entity_key(new_values, old_values, key_columns or [])
     return await _store_capture(
         db,
-        connector,  # application = connector name
-        connector=connector,
+        application or connector,  # package scope — the originating screen's connector for an action
+        connector=connector,      # the data target (for replay); usually == application
         query=query,
         operation=op,
         entity=entity,
