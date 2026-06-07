@@ -350,9 +350,25 @@ export function DataTable<T extends object>({
   )
   const tableColumnOrder = useMemo(() => [...internalIds, ...dataOrder], [internalIds, dataOrder])
 
+  // Stable per-row identity. Without it TanStack falls back to index-based row ids, which SHIFT
+  // when a row is prepended/removed (bulk-edit "Add row" / paste insert at the top) — that
+  // invalidates the row virtualizer's measurement cache (keyed by index via ``data-index``), so
+  // the new top row renders stale/offset until a scroll forces a re-measure. A WeakMap keyed by the
+  // row object hands out a stable id that follows the object across reorders (data objects keep
+  // their references across renders; only the surrounding array is rebuilt). Non-object rows fall
+  // back to the index.
+  const rowIdMap = useRef(new WeakMap<object, string>())
+  const rowIdSeq = useRef(0)
+  const stableRowId = useCallback((row: T, index: number): string => {
+    if (row == null || typeof row !== 'object') return String(index)
+    let id = rowIdMap.current.get(row)
+    if (id === undefined) { id = `row-${rowIdSeq.current++}`; rowIdMap.current.set(row, id) }
+    return id
+  }, [])
   const table = useReactTable({
     data,
     columns,
+    getRowId: stableRowId,
     state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnFilters, globalFilter, grouping, expanded, pagination },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
@@ -431,6 +447,9 @@ export function DataTable<T extends object>({
     getScrollElement: () => tableScrollRef.current,
     estimateSize: () => 26,
     overscan: 10,
+    // Track measurements by the stable row id (not the index) so a prepend/remove shifts the cache
+    // WITH the rows — fixes the "added top row renders stale until you scroll" glitch.
+    getItemKey: (index) => visibleRows[index]?.id ?? String(index),
     // The default `measureElement` reads each row's true height via getBoundingClientRect +
     // correlates by `data-index`. We pass `ref={rowVirtualizer.measureElement}` on each row
     // (below) so a group row, edit-mode row, or wrapped cell that's taller than the estimate
