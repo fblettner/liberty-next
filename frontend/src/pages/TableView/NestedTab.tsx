@@ -31,6 +31,7 @@ import type { NestedFormTab, NestedTableTab, ScreenDetail } from '../../types/sc
 import { evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
 import { enumMap } from '../../services/cells'
 import { lookupKey, useLookupTables, type LookupSpec } from '../../services/lookups'
+import { CellSpan } from './styled'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { colors, fontSize } from '../../theme'
 // Circular import: ScreenDialog also imports NestedFormView/NestedTableView. ESM resolves
@@ -506,7 +507,10 @@ export function NestedTableView({
           const rule = c.rule
           if (rule?.kind === 'lookup') return lookupLabelMaps.get(c.name)?.get(raw.trim()) ?? raw
           if (rule?.kind === 'enum') return enumMaps.get(c.name)?.get(raw) ?? raw
-          if (rule?.kind === 'boolean') return raw === rule.true_value ? '✓' : raw
+          // Match the standalone grid: a colored status dot (green = true / red = false), not a bare
+          // ✓ and the raw code — ``CellSpan`` carries the .boolean-true / .boolean-false colors.
+          if (rule?.kind === 'boolean')
+            return <CellSpan className={raw === rule.true_value ? 'boolean-true' : 'boolean-false'}>●</CellSpan>
           return raw
         },
       }))
