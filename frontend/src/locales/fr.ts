@@ -491,6 +491,8 @@ const fr: Resources = {
       deleteMsg: 'Supprimer « {{name}} » et ses {{n}} changement(s) capturé(s) ? Les lignes déjà écrites en base ne sont pas affectées — seul ce journal de package est supprimé.',
       replaysOnApply: 'rejoué à l’application',
       replayNote: 'Rejoue cet appel à l’application — ses effets ne peuvent pas être vérifiés. Arguments :',
+      captureOnly: 'capturé · non rejoué',
+      captureOnlyNote: 'Capturé pour revue — NON rejoué à l’application (change_replay désactivé). Arguments :',
       appliedTitle: 'Bundles appliqués',
       opsCount: '{{n}} op(s)',
       alreadyApplied: 'Ce bundle a déjà été appliqué le {{date}}{{by}}.',

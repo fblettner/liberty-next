@@ -107,9 +107,10 @@ async def run_plugin(
         _log.exception("plugin run failed: callable=%s user=%s", ref, principal.username)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{ref}: {exc}") from exc
 
-    # Change-package capture for an opted-in (change_replay) call_plugin action fired from a
-    # change-tracked screen: record the invocation so the promotion bundle RE-RUNS the callable on
-    # the target. The frontend only tags when change_replay is on. Best-effort — never fails the call.
+    # Change-package capture for a call_plugin action fired from a change-tracked screen. A tracked
+    # screen CAPTURES every call (so the package shows it for review); the action's ``change_replay``
+    # opt-in — threaded in the tag as ``replay`` — decides whether APPLY re-runs the callable on the
+    # target (a plugin's side effects can't be drift-checked). Best-effort — never fails the call.
     action_ctx = body.get("_change_context")
     changesets = getattr(request.app.state, "changesets_db", None)
     screens = getattr(request.app.state, "screens", None)
@@ -128,6 +129,7 @@ async def run_plugin(
                 operation=Operation.CALL_PLUGIN.value, target=ref, params=params,
                 entity=getattr(a_screen, "change_entity", None), user=principal.username,
                 post_apply_ids=list(getattr(a_screen, "post_apply", None) or []),
+                replay=bool(action_ctx.get("replay", True)),
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) plugin run
             _log.error("call_plugin change capture failed for %s: %s", ref, exc)

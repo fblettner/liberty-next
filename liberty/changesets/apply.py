@@ -136,6 +136,14 @@ async def apply_bundle(
     ops = bundle.get("ops") or []
     results: list[dict[str, Any]] = []
     for i, op in enumerate(ops):
+        # A captured-but-not-replayed invocation (change_replay off): it's in the bundle for review /
+        # audit, but apply must NOT re-fire it. Skip before drift/exec, in both dry-run and real runs.
+        if (op.get("operation") or "").upper() in ("CALL_API", "CALL_PLUGIN") and not op.get("replay", True):
+            results.append({
+                "index": i, "op": _op_summary(op), "status": "skipped",
+                "detail": "captured for review — not replayed (change_replay off)",
+            })
+            continue
         verdict, detail = await check_drift(connectors, op)
         is_forced = str(i) in forced
         if verdict == "conflict" and not is_forced:

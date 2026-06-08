@@ -133,12 +133,15 @@ async def capture_invocation(
     entity: str | None,
     user: str | None,
     post_apply_ids: list[str] | None = None,
+    replay: bool = True,
 ) -> str:
-    """Capture a screen-action API/plugin call into *application*'s draft package, to be RE-RUN on
-    apply. Unlike :func:`capture_write` this isn't a row diff — there's no natural key, pre-image, or
-    read query (the call's effects are opaque), so it's stored with the resolved call ``params`` in
-    ``new_values`` and replayed one-for-one. ``application`` is the originating screen's connector
-    (the package scope), which may differ from the API/plugin ``connector`` the call targets."""
+    """Capture a screen-action API/plugin call into *application*'s draft package. A change-tracked
+    screen captures EVERY call it fires (so the package shows it for review); ``replay`` — the
+    action's ``change_replay`` opt-in — records whether apply actually RE-RUNS it on the target.
+    Unlike :func:`capture_write` this isn't a row diff — there's no natural key, pre-image, or read
+    query (the call's effects are opaque), so it's stored with the resolved call ``params`` in
+    ``new_values``. ``application`` is the originating screen's connector (the package scope), which
+    may differ from the API/plugin ``connector`` the call targets."""
     return await _store_capture(
         db,
         application,
@@ -152,4 +155,5 @@ async def capture_invocation(
         read_query=None,
         user=user,
         post_apply_ids=post_apply_ids,
+        replay=replay,
     )

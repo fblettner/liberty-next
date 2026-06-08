@@ -489,6 +489,8 @@ const en = {
       deleteMsg: 'Delete "{{name}}" and its {{n}} captured change(s)? The rows already written to the database are not affected — only this package log is removed.',
       replaysOnApply: 'replays on apply',
       replayNote: 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:',
+      captureOnly: 'captured · won’t replay',
+      captureOnlyNote: 'Captured for review — NOT re-run on apply (change_replay off). Arguments:',
       appliedTitle: 'Applied bundles',
       opsCount: '{{n}} op(s)',
       alreadyApplied: 'This bundle was already applied on {{date}}{{by}}.',

@@ -655,10 +655,11 @@ async def http_call(
     # structured ApiResult with success=False; surface it as-is (HTTP 200).
     call_params = _params_from_body(body)
     result = await conn.call(endpoint, call_params)
-    # Change-package capture for an opted-in (change_replay) call_api action fired from a
-    # change-tracked screen: record the invocation so the promotion bundle RE-RUNS it on the target.
-    # The frontend only tags when change_replay is on, so the tag's presence is the opt-in. Only a
-    # SUCCESSFUL upstream call is captured (a failed one didn't change anything). Best-effort.
+    # Change-package capture for a call_api action fired from a change-tracked screen. A tracked
+    # screen CAPTURES every call (so the package shows it for review); the action's ``change_replay``
+    # opt-in — threaded in the tag as ``replay`` — decides whether APPLY actually re-fires it (an
+    # external call's side effects can't be drift-checked). Only a SUCCESSFUL upstream call is
+    # captured (a failed one didn't change anything). Best-effort.
     action_context = body.get("_change_context") if isinstance(body, dict) else None
     changesets = getattr(request.app.state, "changesets_db", None)
     action_screen = _resolve_action_screen(screens, action_context) if changesets is not None else None
@@ -674,6 +675,7 @@ async def http_call(
                 operation=Operation.CALL_API.value, target=endpoint, params=call_params,
                 entity=getattr(action_screen, "change_entity", None), user=principal.username,
                 post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
+                replay=bool((action_context or {}).get("replay", True)),
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) call
             _log.error("call_api change capture failed for %s.%s: %s", connector, endpoint, exc)

@@ -77,6 +77,8 @@ def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:
                     "connector": e.connector, "query": e.query, "read_query": None,
                     "operation": e.operation, "entity": e.entity, "entity_key": None,
                     "new_values": e.new_values, "old_values": None,
+                    # NULL on legacy rows reads as replay=True (those were only captured when opted in).
+                    "replay": e.replay if e.replay is not None else True,
                     "source_ids": [e.id],
                 })
             continue

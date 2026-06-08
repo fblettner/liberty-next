@@ -9,7 +9,7 @@ into the control DB, not back into JDE. The engine + sessionmaker are built lazi
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -51,6 +51,24 @@ class ChangeSetDatabase:
         engine = self._pools.engine(self._pool_name)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(self._add_missing_columns)
+
+    @staticmethod
+    def _add_missing_columns(sync_conn: Any) -> None:
+        """Forward-add columns introduced after a table was first created — ``create_all`` never
+        ALTERs an existing table, so without this an operator would have to DROP the table to pick
+        up a new field. Idempotent: ADDs only what's absent. Both SQLite and Postgres accept the
+        plain ``ALTER TABLE … ADD COLUMN`` forms used here."""
+        from sqlalchemy import inspect as sa_inspect
+        insp = sa_inspect(sync_conn)
+        wanted = (
+            ("ly_change_entries", "replay", "BOOLEAN"),
+        )
+        for table, col, ddl in wanted:
+            if not insp.has_table(table):
+                continue
+            if col not in {c["name"] for c in insp.get_columns(table)}:
+                sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     async def drop_schema(self) -> None:  # pragma: no cover - destructive helper
         engine = self._pools.engine(self._pool_name)

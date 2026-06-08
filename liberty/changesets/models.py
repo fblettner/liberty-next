@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -139,6 +139,12 @@ class ChangeEntry(Base):
     # DELETE) — drift detection on promotion compares the pre-image to prod's current row.
     new_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     old_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # CALL_API / CALL_PLUGIN only: whether APPLY re-runs this call on the target. A change-tracked
+    # screen CAPTURES every API/plugin call it fires (so the package shows it for review); ``replay``
+    # — the action's ``change_replay`` opt-in — gates whether it's actually re-fired on promotion,
+    # since an external call's side effects can't be drift-checked. Irrelevant for row ops (always
+    # replayed). NULL on legacy rows reads as True (they were only captured when opted in).
+    replay: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
 
     status: Mapped[str] = mapped_column(_STATUS_COL, nullable=False, default=EntryStatus.CAPTURED.value)
     captured_by: Mapped[str | None] = mapped_column(String(128), nullable=True)

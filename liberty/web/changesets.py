@@ -93,6 +93,7 @@ def _entry_dict(e: ChangeEntry) -> dict[str, Any]:
         "entity_key": e.entity_key,
         "new_values": e.new_values,
         "old_values": e.old_values,
+        "replay": e.replay if e.replay is not None else True,
         "status": e.status,
         "captured_by": e.captured_by,
         "captured_at": _iso(e.captured_at),

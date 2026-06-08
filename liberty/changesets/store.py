@@ -69,9 +69,11 @@ async def record_entry(
     old_values: dict[str, Any] | None = None,
     read_query: str | None = None,
     user: str | None = None,
+    replay: bool = True,
 ) -> ChangeEntry:
     """Append a captured entry to *package* with the next per-package ``seq`` (capture order, which
-    replay must preserve)."""
+    replay must preserve). ``replay`` (CALL_API / CALL_PLUGIN only) records the action's
+    ``change_replay`` opt-in — whether apply re-fires the call; row ops ignore it (always replayed)."""
     next_seq = await session.scalar(
         select(func.coalesce(func.max(ChangeEntry.seq), 0) + 1).where(ChangeEntry.package_id == package.id)
     )
@@ -86,6 +88,7 @@ async def record_entry(
         entity_key=entity_key,
         new_values=new_values,
         old_values=old_values,
+        replay=replay,
         status=EntryStatus.CAPTURED.value,
         captured_by=user,
     )
@@ -107,6 +110,7 @@ async def capture(
     read_query: str | None = None,
     user: str | None = None,
     post_apply_ids: list[str] | None = None,
+    replay: bool = True,
 ) -> str:
     """One-call capture: resolve/create the application's draft and append an entry, in a single
     control-DB transaction. Returns the entry id. This is what the write-path hook calls AFTER the
@@ -125,7 +129,7 @@ async def capture(
         entry = await record_entry(
             session, pkg, connector=connector, query=query, operation=operation,
             entity=entity, entity_key=entity_key, new_values=new_values, old_values=old_values,
-            read_query=read_query, user=user,
+            read_query=read_query, user=user, replay=replay,
         )
         await session.flush()
         return entry.id

@@ -499,9 +499,12 @@ async function runOneAction(
           extracted?: unknown
         }>(
           `/api/http/${encodeURIComponent(a.connector)}/${encodeURIComponent(a.endpoint)}`,
-          // Tag for invocation capture only when the action opts in (change_replay) AND fired from a
-          // change-tracked screen — replaying an API call re-fires its side effects.
-          (deps.changeContext && a.change_replay) ? { ...bound, _change_context: deps.changeContext } : bound,
+          // A change-tracked screen CAPTURES every call (so the package shows it for review); the
+          // action's ``change_replay`` opt-in rides along as ``replay`` and decides whether APPLY
+          // re-fires it on the target (an API call's side effects can't be drift-checked).
+          deps.changeContext
+            ? { ...bound, _change_context: { ...deps.changeContext, replay: !!a.change_replay } }
+            : bound,
         )
         if (resp?.success === false) {
           const msg = `${a.label || a.id}: API ${resp?.status_code ?? ''} ${resp?.error ?? ''}`.trim()
@@ -540,9 +543,9 @@ async function runOneAction(
           first_row?: Row
         }>(
           '/api/plugins/run',
-          // Tag for invocation capture only when the action opts in (change_replay) AND fired from
-          // a change-tracked screen.
-          { callable: a.callable, params: bound, ...((deps.changeContext && a.change_replay) ? { _change_context: deps.changeContext } : {}) },
+          // Captured on any change-tracked screen (visible in the package); ``replay`` carries the
+          // change_replay opt-in that gates whether APPLY re-runs the callable on the target.
+          { callable: a.callable, params: bound, ...(deps.changeContext ? { _change_context: { ...deps.changeContext, replay: !!a.change_replay } } : {}) },
         )
         if (a.bind_result) {
           const rows = Array.isArray(resp?.rows) ? resp.rows : []

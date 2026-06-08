@@ -24,6 +24,7 @@ type Entry = {
   id: string; seq: number; connector: string; query: string; operation: string
   entity: string | null; entity_key: Record<string, unknown> | null
   new_values: Record<string, unknown> | null; old_values: Record<string, unknown> | null
+  replay?: boolean
   status: string; captured_by: string | null; captured_at: string | null
 }
 type PkgDetail = Pkg & { entries: Entry[] }
@@ -49,6 +50,7 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 const APPLIED_OP_TONE: Record<string, string> = {
   applied: colors.green.main, would_apply: colors.green.main, would_force: colors.orange.main,
   unverified: colors.orange.main, conflict: colors.red.main, error: colors.red.main,
+  skipped: colors.text.muted,
 }
 const Wrap = styled.div`display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start;`
 const List = styled.div`display: flex; flex-direction: column; gap: 6px;`
@@ -496,8 +498,11 @@ export default function ChangePackagesBuilder() {
                   const showUnch = showUnchanged.has(e.id)
                   const isInvocation = INVOCATION_OPS.has(e.operation)
                   const visibleFields = showUnch ? fields : changed
+                  const willReplay = e.replay !== false
                   const summary = isInvocation
-                    ? t('settings.changes.replaysOnApply', 'replays on apply')
+                    ? (willReplay
+                        ? t('settings.changes.replaysOnApply', 'replays on apply')
+                        : t('settings.changes.captureOnly', 'captured · won’t replay'))
                     : e.operation === 'DELETE'
                       ? t('settings.changes.rowRemoved', 'row removed')
                       : e.operation === 'INSERT'
@@ -520,8 +525,10 @@ export default function ChangePackagesBuilder() {
                       {open && (
                       <Diff style={{ marginTop: 6 }}>
                         {isInvocation && (
-                          <div style={{ gridColumn: '1 / -1', color: colors.orange.main, fontSize: fontSize.micro, marginBottom: 2 }}>
-                            {t('settings.changes.replayNote', 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:')}
+                          <div style={{ gridColumn: '1 / -1', color: willReplay ? colors.orange.main : colors.text.muted, fontSize: fontSize.micro, marginBottom: 2 }}>
+                            {willReplay
+                              ? t('settings.changes.replayNote', 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:')
+                              : t('settings.changes.captureOnlyNote', 'Captured for review — NOT re-run on apply (change_replay off). Arguments:')}
                           </div>
                         )}
                         {visibleFields.map((f) => {

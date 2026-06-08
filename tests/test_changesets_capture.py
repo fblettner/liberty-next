@@ -114,6 +114,36 @@ async def test_capture_invocation_records_a_replayable_call() -> None:
         assert e.operation == "CALL_API" and e.connector == "ldap" and e.query == "sync_user"
         assert e.new_values == {"USR_ID": "DEMO3", "MAIL": "d@x"}
         assert e.entity == "user" and e.entity_key is None and e.old_values is None and e.read_query is None
+        assert e.replay is True   # default — opted in
+
+
+@pytest.mark.asyncio
+async def test_capture_only_invocation_is_recorded_but_not_replayed() -> None:
+    """A change-tracked screen captures EVERY call_api/plugin (so the package shows it), but a call
+    with ``change_replay`` off is stored with ``replay=False`` and apply SKIPS it (doesn't re-fire)."""
+    from liberty.changesets.apply import apply_bundle
+    from liberty.changesets.compaction import compact
+    db = await _db()
+    await capture_invocation(
+        db, application="jdedwards", connector="ldap", operation="CALL_API",
+        target="notify_admin", params={"MAIL": "a@x"}, entity="user", user="franck", replay=False,
+    )
+    async with db.session() as s:
+        pkg = await store.get_package(s, (await store.list_packages(s, application="jdedwards"))[0].id)
+        assert pkg.entries[0].replay is False
+        ops = compact(pkg.entries)
+    assert ops[0]["replay"] is False
+    rep = await apply_bundle(_NoConns(), {"ops": ops}, dry_run=False, forced=set())
+    assert rep["results"][0]["status"] == "skipped"
+    assert rep["summary"] == {"skipped": 1}
+
+
+class _NoConns:
+    """Connector registry that fails if any API/SQL is touched — proves a skipped op never executes."""
+    def api(self, name):  # noqa: ANN001
+        raise AssertionError("apply must NOT re-fire a capture-only invocation")
+    def sql(self, name):  # noqa: ANN001
+        raise AssertionError("apply must NOT touch SQL for a capture-only invocation")
 
 
 @pytest.mark.asyncio
