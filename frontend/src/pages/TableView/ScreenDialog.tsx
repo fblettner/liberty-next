@@ -456,7 +456,11 @@ export function ScreenDialog({
     setActionBusy(a.id); setActionStatus(null)
     // Action ParamBinds resolve against the live form state — same context as on_save.
     const ctx: Row = { ...savedRow, ...formValues }
-    const result = await runOnSaveActions([a], ctx)
+    // A tab button is an operator-initiated write (e.g. "import security" / "merge security"), so
+    // track it like on_save/on_insert: ``track: true`` tags its calls so a change-tracked screen
+    // captures them into the package. Read-only tab actions (refresh / navigate) tag nothing —
+    // capture is gated by an actual write / change_replay on the backend, so this is safe for all.
+    const result = await runOnSaveActions([a], ctx, { track: true })
     setActionBusy(null)
     if (!result.ok) {
       setActionStatus({ message: result.error || a.label || a.id, tone: 'error' })
