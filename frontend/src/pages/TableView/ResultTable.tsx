@@ -50,7 +50,9 @@ function cellAlign(c: Column): 'left' | 'right' | 'center' | undefined {
   return undefined
 }
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
-function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
+// jdedate = JDE Julian date: integer SQL type, but read as ISO YYYY-MM-DD and re-encoded to Julian
+// on Save — so it edits with a calendar, not as a number. Keep in sync with FieldRow.isDateish.
+function isDateish(fmt: string, typ: string) { return fmt === 'date' || fmt === 'jdedate' || /date|timestamp/.test(typ) }
 function filterKindOf(c: Column): FilterKind {
   if (c.rule?.kind === 'boolean') return 'boolean'
   if (c.rule?.kind === 'enum') return 'enum'
