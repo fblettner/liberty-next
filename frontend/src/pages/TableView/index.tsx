@@ -240,7 +240,14 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
         // rows appear live without React stuttering on per-chunk re-renders. On a 15K-row
         // query that took ~6s end-to-end before, the first rows land in ~100ms and the grid
         // is responsive throughout.
-        const qs = new URLSearchParams({ ...sent, _stream: '1', ...(limit ? { _limit: limit } : {}) }).toString()
+        // ``_screen`` / ``_app`` pin THIS screen's hints when several screens share one read_query
+        // (a copied screen with different hidden columns) — else the backend applies the first
+        // match's hints (the original).
+        const qs = new URLSearchParams({
+          ...sent, _stream: '1',
+          ...(limit ? { _limit: limit } : {}),
+          ...(screenId ? { _screen: screenId, _app: screenApp ?? connector } : {}),
+        }).toString()
         const path = `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${qs}`
         const ctrl = new AbortController()
         streamAbortRef.current = ctrl

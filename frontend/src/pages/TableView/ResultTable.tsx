@@ -321,7 +321,7 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog,
 }: {
   result: QueryResult
   connector: string
@@ -338,6 +338,12 @@ export function ResultTable({
    *  shows Add Row / Edit Row buttons that open the ScreenDialog form instead of the inline
    *  grid editor. When null/missing the existing inline batch-edit flow is the only path. */
   screen?: ScreenDetail | null
+  /** Default values to pre-fill the Add dialog with — used by a nested table to seed the parent's
+   *  FK (e.g. {APPS_ID: 7}) so a new child row opens already tied to its parent. */
+  addSeed?: Record<string, unknown>
+  /** Render this grid's Add/Edit ScreenDialog as a NESTED sub-dialog (smaller, raised z-index) —
+   *  set when ResultTable is embedded inside a parent dialog's nested-table tab. */
+  nestedDialog?: boolean
 }) {
   const { t } = useTranslation()
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
@@ -360,8 +366,10 @@ export function ResultTable({
     setDlgRow(row); setDlgMode('edit'); setDlgOpen(true)
   }, [])
   const openDialogForAdd = useCallback(() => {
-    setDlgRow({}); setDlgMode('add'); setDlgOpen(true)
-  }, [])
+    // Seed the Add dialog with any defaults (a nested table passes the parent FK so the new child
+    // row opens already linked to its parent); empty for a normal screen.
+    setDlgRow({ ...(addSeed ?? {}) }); setDlgMode('add'); setDlgOpen(true)
+  }, [addSeed])
 
   // Row-click → sibling-screen dialog (v1's "Display Properties" pattern, promoted at migration
   // time on screens without their own dialog). When ``screen.row_click_screen`` is set and the
@@ -732,7 +740,7 @@ export function ResultTable({
     setNewRows((p) => [...fresh, ...p])
     if (!editMode) setEditMode(true)
   }, [editMode])
-  const addRow = useCallback(() => prependNewRows([{}]), [prependNewRows])
+  const addRow = useCallback(() => prependNewRows([{ ...(addSeed ?? {}) }]), [prependNewRows, addSeed])
   // Copy/duplicate a row → a new row seeded from it, with the original recorded as its duplicate source.
   const duplicateRow = useCallback((row: DataRow) => { const v = valuesOf(row); prependNewRows([v], [v]) }, [prependNewRows, valuesOf])
   const toggleDelete = useCallback((row: DataRow, isNew: boolean) => {
@@ -1285,7 +1293,11 @@ export function ResultTable({
       <DataTable<DataRow>
         columns={columns}
         data={data}
-        tableId={`sql:${connector}:${query}`}
+        // Persist column visibility/order PER SCREEN, not per query: several screens can share one
+        // read_query (a copy with different hidden columns), so a query-only key made them collide
+        // — hiding a column on one bled into the others. Fall back to the query when there's no
+        // screen (an ad-hoc query run).
+        tableId={screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`}
         exportFilename={query}
         toolbarAfterSearch={runControl}
         toolbarRight={maxRowsControl}
@@ -1408,6 +1420,7 @@ export function ResultTable({
       {hasDialog && screen && dlgOpen && (
         <ScreenDialog
           open={dlgOpen}
+          nested={nestedDialog}
           mode={dlgMode}
           screen={screen}
           columns={result.columns}

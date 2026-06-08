@@ -22,24 +22,19 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Plus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, SpinnerRing } from '../../common'
-import { DataTable } from '../../common/DataTable'
+import { Banner, SpinnerRing } from '../../common'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { NestedFormTab, NestedTableTab, ScreenDetail } from '../../types/screens'
 import { evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
-import { enumMap } from '../../services/cells'
-import { lookupKey, useLookupTables, type LookupSpec } from '../../services/lookups'
-import { CellSpan } from './styled'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { colors, fontSize } from '../../theme'
-// Circular import: ScreenDialog also imports NestedFormView/NestedTableView. ESM resolves
-// these at module-evaluation time but the binding is only *used* at render time (inside
-// JSX), so by the time React calls the sub-dialog the import has fully resolved. Same
-// pattern ResultTable uses to render ScreenDialog without a circle (ResultTable → ScreenDialog
-// is one-way, this one's two-way but both consume the binding lazily through JSX).
-import { NestedSaversContext, ScreenDialog, type DialogMode } from './ScreenDialog'
+// Circular import: ResultTable → ScreenDialog → (this module's) NestedFormView/NestedTableView,
+// and NestedTableView → ResultTable. ESM resolves the bindings at module-eval; they're only *used*
+// at render time (inside JSX), so the cycle resolves fully before React renders — the same lazy-
+// binding pattern the ScreenDialog ↔ nested-tab cycle already relied on.
+import { ResultTable } from './ResultTable'
+import { NestedSaversContext, type DialogMode } from './ScreenDialog'
 
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
@@ -426,10 +421,7 @@ export function NestedTableView({
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Sub-dialog state — set by row click (edit mode) or by the "Add" button (add mode with the
-  // bind values pre-filled on the FK columns so the dialog opens already tied to this parent).
-  const [subDialog, setSubDialog] = useState<{ mode: DialogMode; row: Row } | null>(null)
-  // A simple counter to force a refetch after the sub-dialog saves.
+  // Bumped after the embedded grid saves a row → refetch the narrowed result.
   const [refreshTick, setRefreshTick] = useState(0)
 
   // Fetch the nested screen's detail once — we need its read_query name, columns hints, and
@@ -445,141 +437,45 @@ export function NestedTableView({
     if (!nestedScreen || !hasBinds) { setResult(null); return }
     setLoading(true); setError(null)
     const q = nestedScreen.read_query
-    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}${bindsToQuery(bound)}`)
+    // ``_screen`` / ``_app`` pin THIS screen's hints — several screens can share one read_query
+    // (a copy with different hidden columns), and without this the backend would apply the first
+    // matching screen's hints (the original), so the copy's hide/show wouldn't take effect.
+    const qs = bindsToQuery(bound)
+    const pin = `_screen=${encodeURIComponent(tab.screen)}&_app=${encodeURIComponent(app)}`
+    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}${qs ? `${qs}&` : '?'}${pin}`)
       .then((r) => setResult(r))
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boundKey serializes bound
   }, [nestedScreen, connector, boundKey, hasBinds, refreshTick])
 
-  // Rule resolution for the grid — same as the main result table so a LOOKUP / ENUM column shows
-  // its label, not the raw code (the cell was previously raw ``String(v)``, so a nested grid showed
-  // e.g. component "1309" while the edit dialog resolved it). enum → static enumMap; lookup → a
-  // trim-tolerant value→label map built from the fetched lookup rows (JDE codes can read back
-  // padded, so key by the trimmed value, matching the main grid).
-  const enumMaps = useMemo(() => {
-    const m = new Map<string, Map<string, string>>()
-    for (const c of result?.columns ?? []) if (c.rule?.kind === 'enum') m.set(c.name, enumMap(c.rule))
-    return m
-  }, [result])
-  const lookupSpecs = useMemo<LookupSpec[]>(
-    () => (result?.columns ?? []).filter((c) => c.rule?.kind === 'lookup').map((c) => {
-      const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
-    }),
-    [result],
-  )
-  const lookupMaps = useLookupTables(lookupSpecs)
-  const lookupLabelMaps = useMemo(() => {
-    const m = new Map<string, Map<string, string>>()
-    for (const c of result?.columns ?? []) {
-      if (c.rule?.kind !== 'lookup') continue
-      const r = c.rule
-      const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
-      if (!data?.rows) continue
-      const tm = new Map<string, string>()
-      for (const lr of data.rows) {
-        const v = lr[data.vKey]
-        if (v == null) continue
-        tm.set(String(v).trim(), data.lKey != null && lr[data.lKey] != null ? String(lr[data.lKey]) : String(v))
-      }
-      m.set(c.name, tm)
-    }
-    return m
-  }, [result, lookupMaps])
-
-  // One TanStack column per result column. Resolves BOOLEAN / ENUM / LOOKUP to a label (falls back
-  // to the raw value when a lookup hasn't loaded / doesn't match). Password-typed columns are
-  // dropped entirely — never display a stored hash / ENC: blob in a grid cell, regardless of
-  // whether the migration flagged it ``hidden``. Clicking a row opens the full ScreenDialog.
-  const columns = useMemo(() => {
-    const cols = result?.columns ?? []
-    return cols
-      .filter((c) => !c.hidden && (c.format ?? '').toLowerCase() !== 'password')
-      .map((c) => ({
-        id: c.name,
-        accessorFn: (r: Row) => r[c.name] ?? r[c.name.toLowerCase()],
-        header: c.label ?? c.name,
-        cell: ({ getValue }: { getValue: () => unknown }) => {
-          const v = getValue()
-          if (v === null || v === undefined || v === '') return ''
-          const raw = String(v)
-          const rule = c.rule
-          if (rule?.kind === 'lookup') return lookupLabelMaps.get(c.name)?.get(raw.trim()) ?? raw
-          if (rule?.kind === 'enum') return enumMaps.get(c.name)?.get(raw) ?? raw
-          // Match the standalone grid: a colored status dot (green = true / red = false), not a bare
-          // ✓ and the raw code — ``CellSpan`` carries the .boolean-true / .boolean-false colors.
-          if (rule?.kind === 'boolean')
-            return <CellSpan className={raw === rule.true_value ? 'boolean-true' : 'boolean-false'}>●</CellSpan>
-          return raw
-        },
-      }))
-  }, [result, enumMaps, lookupLabelMaps])
-
-  // Open the sub-dialog in "add" mode with the FK columns pre-filled from the bind values
-  // (e.g. parent's APPS_ID = 7 → ACL_APPS_ID = 7 on the activity-log row). The dialog's
-  // valueFor() lookup is case-insensitive, so binds named `ACL_APPS_ID` will still be picked
-  // up if the read result column comes back lowercased.
-  const handleAdd = useCallback(() => {
-    if (!nestedScreen?.dialog) return
-    const seed: Row = { ...bound }   // bind keys are the v1 uppercase column names
-    setSubDialog({ mode: 'add', row: seed })
-  }, [nestedScreen, bound])
-
-  const handleRowClick = useCallback((r: Row) => {
-    if (!nestedScreen?.dialog) return
-    setSubDialog({ mode: 'edit', row: r })
-  }, [nestedScreen])
-
-  // The nested screen's connector — falls back to the explicit `tab.connector` and then to
-  // the parent's. (The nested screen's own `connector` is sourced from the catalog response.)
   const nestedConnector = nestedScreen?.connector || connector
 
   if (!hasBinds) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (error) return <Banner $tone="error">{error}</Banner>
   if (loading && !result) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
-  if (!result) return null
+  if (!result || !nestedScreen) return null
 
-  const canAdd = !!(nestedScreen?.dialog && nestedScreen?.insert_query)
-  const canEdit = !!(nestedScreen?.dialog && nestedScreen?.update_query)
-
+  // Reuse the FULL grid (ResultTable) — one source of truth for columns/cells (LOOKUP id+label,
+  // BOOLEAN dots, ENUM labels), edit, row-click dialog, filters/group/columns/export. The only
+  // nested-specific bit is the parent FK: ``addSeed`` pre-fills it on Add, and a save refetches the
+  // narrowed result. ``key`` resets the grid's internal state when the target screen changes.
   return (
     <TableWrap>
-      <DataTable
-        tableId={`nested-${app}-${tab.screen}`}
-        data={(result.rows as Row[]) ?? []}
-        columns={columns}
-        toolbar={canAdd ? (
-          <Button $size="sm" $variant="primary" onClick={handleAdd}>
-            <Plus size={13} /> {t('table.addRow')}
-          </Button>
-        ) : undefined}
-        onRowClick={canEdit ? handleRowClick : undefined}
+      <ResultTable
+        key={`nested-${app}-${tab.screen}`}
+        result={result}
+        connector={nestedConnector}
+        query={nestedScreen.read_query}
+        screen={nestedScreen}
+        updateQuery={nestedScreen.update_query}
+        insertQuery={nestedScreen.insert_query}
+        deleteQuery={nestedScreen.delete_query}
+        keyColumns={nestedScreen.key_columns}
+        addSeed={bound}
+        nestedDialog
+        onSaved={() => setRefreshTick((n) => n + 1)}
       />
-      {subDialog && nestedScreen && (
-        // ``keyColumns`` is the missing prop that made nested-table inserts fail with an FK
-        // violation: without it, every field on the sub-dialog renders any inherited LOOKUP
-        // rule (e.g. settings_jde_tv.TV_APPS_ID's ``dd = "APPS_ID"`` inherits the LOOKUP from
-        // the dictionary), and the SearchSelect's async options arriving AFTER the seed lands
-        // clobbers the bound parent-PK value (`{ TV_APPS_ID: "10" }`) — the form ended up
-        // POSTing whatever the SearchSelect picked as fallback, which was usually not the
-        // parent's PK and almost always a FK violation. Passing the nested screen's
-        // key_columns lets ScreenDialog short-circuit the LOOKUP on add (via suppressLookup)
-        // and render the FK column as a plain disabled Input showing the seeded value, which
-        // the form then POSTs unchanged — same pattern v1 used.
-        <ScreenDialog
-          open
-          nested
-          mode={subDialog.mode}
-          screen={nestedScreen}
-          columns={result.columns}
-          row={subDialog.row}
-          connector={nestedConnector}
-          keyColumns={nestedScreen.key_columns}
-          onClose={() => setSubDialog(null)}
-          onSaved={() => { setSubDialog(null); setRefreshTick((n) => n + 1) }}
-        />
-      )}
     </TableWrap>
   )
 }

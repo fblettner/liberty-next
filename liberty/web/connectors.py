@@ -201,15 +201,28 @@ async def _run_sql(
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None, changesets: Any = None,
     action_context: dict[str, Any] | None = None,
+    screen_hint: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
     scope = the screen's app) into the SQL connector. A query with no screen runs unadorned
     — no audit, no filter wrap, no per-screen rule resolution; dictionary lookup by bind name
-    still applies for write-side rule coercion using the connector's own name as scope."""
-    screen, slot, screen_app = (
-        _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
-    )
+    still applies for write-side rule coercion using the connector's own name as scope.
+
+    ``screen_hint`` (``(app, screen_id)``) pins the EXACT screen whose hints to apply, for when
+    several screens share one ``read_query`` (e.g. a copied F95921 screen with hidden columns
+    tweaked): without it, ``_find_screen_for_query`` returns the FIRST match and the copy's hints
+    are ignored. The caller (a screen TableView / a nested-table tab) knows its own screen id."""
+    screen, slot, screen_app = (None, None, None)
+    if screen_hint and screens:
+        app_h, sid_h = screen_hint
+        screen = (screens.screens.get(app_h) or {}).get(sid_h)
+        if screen is not None:
+            slot, screen_app = "read", app_h
+    if screen is None:
+        screen, slot, screen_app = (
+            _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+        )
     # A column-group write resolves to its screen for the COLUMN HINTS + dict scope (so a group
     # column's ``dd`` rule — e.g. ULMUSE → MUSE → LOGIN — fires like the main write). But its audit
     # + change-capture belong to a DIFFERENT table than the screen's main one, so don't inherit
@@ -315,6 +328,7 @@ def _stream_sql_ndjson(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None, chunk_size: int | None = None,
+    screen_hint: tuple[str, str] | None = None,
 ) -> StreamingResponse:
     """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
     :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
@@ -335,9 +349,16 @@ def _stream_sql_ndjson(
     # ── prep (mirrors _run_sql) — done synchronously so any failure raises before we start
     # streaming. Once the generator below begins yielding, headers have been sent and we
     # can't change the status code; preflight everything we can up here.
-    screen, _slot, screen_app = (
-        _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
-    )
+    screen, _slot, screen_app = (None, None, None)
+    if screen_hint and screens:
+        app_h, sid_h = screen_hint
+        screen = (screens.screens.get(app_h) or {}).get(sid_h)
+        if screen is not None:
+            screen_app = app_h
+    if screen is None:
+        screen, _slot, screen_app = (
+            _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+        )
     column_hints = _column_hints_for(screen)
     screen_max_rows = screen.max_rows if screen else None
     dict_scope = screen_app if screen is not None else None
@@ -552,16 +573,21 @@ async def sql_query_get(
     stream = _streaming_requested(qp); qp.pop("_stream", None)
     limit = _as_int(qp.pop("_limit", None))
     chunk_size = _as_int(qp.pop("_chunk_size", None))
+    # ``_screen`` / ``_app`` pin the EXACT screen whose hints to apply when several screens share
+    # this read_query (a copied screen with different hidden columns). The TableView / nested-table
+    # caller passes its own ids; absent → first-match (the historical behaviour).
+    sid = qp.pop("_screen", None); sapp = qp.pop("_app", None)
+    screen_hint = (sapp, sid) if (sid and sapp) else None
     if stream:
         return _stream_sql_ndjson(
             connectors, connector, query, qp,
             language=request_language(request), max_rows=limit, user=principal.username,
-            screens=screens, chunk_size=chunk_size,
+            screens=screens, chunk_size=chunk_size, screen_hint=screen_hint,
         )
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
-        screens=screens,
+        screens=screens, screen_hint=screen_hint,
     )
 
 
