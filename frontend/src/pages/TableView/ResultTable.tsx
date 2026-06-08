@@ -665,6 +665,11 @@ export function ResultTable({
   const [saving, setSaving] = useState(false)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const editsRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())  // row → edited fields (uncontrolled inputs write here)
+  // New rows born from a Copy/duplicate or Paste carry the ORIGINAL row's values here. On Save such
+  // a row fires ``on_duplicate`` (with the source exposed as ``SOURCE_<col>``) instead of
+  // ``on_insert`` — a copy/paste in the grid IS a duplicate, same as the dialog's Duplicate button.
+  // A blank "+ Add row" / imported row has no entry → plain ``on_insert``.
+  const newRowSourceRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())
   // ``editTick`` increments on every edit to force a parent re-render — needed for *new* rows
   // where ``setDirtyRows`` doesn't fire (new rows aren't in the dirty set, they're tracked
   // separately as inserts). The cell functions read live values via ``cur(row, …)``, so a
@@ -680,6 +685,7 @@ export function ResultTable({
   const resetEdit = useCallback(() => {
     setEditMode(false); setDirtyRows(new Set()); setNewRows([]); setDeleted(new Set()); setSelected(new Set()); setSaveErrors([])
     editsRef.current = new Map()
+    newRowSourceRef.current = new Map()
     setEditTick(0)
   }, [])
   // a refetch (or a query change) ends any in-progress batch edit (the clipboard survives — it's just data)
@@ -707,19 +713,25 @@ export function ResultTable({
     setEditTick((t) => t + 1)
     if (!newRowsRef.current.includes(row)) setDirtyRows((s) => new Set(s).add(row))
   }, [])
-  // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values
-  const prependNewRows = useCallback((seeds: Record<string, unknown>[]) => {
+  // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values.
+  // `sources` (parallel to `seeds`, optional) marks a row as a DUPLICATE of an existing one — its
+  // source values, recorded so Save can fire ``on_duplicate`` with ``SOURCE_<col>`` instead of
+  // ``on_insert``. Omit it (Add row / import) for a plain insert.
+  const prependNewRows = useCallback((seeds: Record<string, unknown>[], sources?: Record<string, unknown>[]) => {
     if (seeds.length === 0) return
-    const fresh = seeds.map((s) => {
+    const fresh = seeds.map((s, i) => {
       const row: DataRow = {}
       editsRef.current.set(row, { ...s })
+      const src = sources?.[i]
+      if (src) newRowSourceRef.current.set(row, { ...src })
       return row
     })
     setNewRows((p) => [...fresh, ...p])
     if (!editMode) setEditMode(true)
   }, [editMode])
   const addRow = useCallback(() => prependNewRows([{}]), [prependNewRows])
-  const duplicateRow = useCallback((row: DataRow) => prependNewRows([valuesOf(row)]), [prependNewRows, valuesOf])
+  // Copy/duplicate a row → a new row seeded from it, with the original recorded as its duplicate source.
+  const duplicateRow = useCallback((row: DataRow) => { const v = valuesOf(row); prependNewRows([v], [v]) }, [prependNewRows, valuesOf])
   const toggleDelete = useCallback((row: DataRow, isNew: boolean) => {
     if (isNew) {
       setNewRows((p) => p.filter((r) => r !== row)); editsRef.current.delete(row)
@@ -732,7 +744,9 @@ export function ResultTable({
     setSelected((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
   }, [])
   const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
-  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
+  // Paste copied rows as new rows — each is a duplicate of the row it was copied from (the clipboard
+  // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
+  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
@@ -844,12 +858,18 @@ export function ResultTable({
     // ``ParamBind.source`` resolution. ``notify`` messages collect on the result's warnings.
     // Failures append to ``saveErrors`` so the operator sees what went wrong; the row mutation
     // itself already succeeded (the chains run *after*).
+    // Tag hook action calls for change capture on a change-tracked screen — same as the dialog's
+    // Save (a grid edit/insert/duplicate must land in the package identically to a form one). The
+    // main row write is already captured via screen-match in _run_sql; this carries the HOOK
+    // actions (run_query auto, call_api/plugin on their change_replay opt-in) into the same package.
+    const changeContext = screen?.change_tracked ? { app: screen.app, screen: screen.id } : undefined
     const fireChain = async (actions: Action[] | undefined, ctx: DataRow): Promise<string | null> => {
       if (!actions?.length) return null
       const result = await runChain(actions, {}, ctx, {
         defaultConnector: connector,
         requestPrompt,   // batch-save hooks rarely prompt, but a migrated chain might carry one
         sharedActions: sharedActions ?? undefined,
+        changeContext,
       })
       if (result.warnings.length > 0) {
         // eslint-disable-next-line no-console
@@ -866,8 +886,20 @@ export function ResultTable({
     }
     for (const row of newRows) {
       if (deleted.has(row)) continue
-      const err = await fireChain(screen?.on_insert, { ...editsRef.current.get(row), ...newBinds.get(row) })
-      if (err) hookErrs.push(err)
+      const base = { ...editsRef.current.get(row), ...newBinds.get(row) }
+      // A copy/paste/duplicate row fires on_duplicate (instead of on_insert), with the original
+      // exposed as SOURCE_<col> — identical to the dialog's Duplicate path so a chain that copies
+      // related-table rows works the same whether duplicated in the form or in the grid.
+      const src = newRowSourceRef.current.get(row)
+      if (src) {
+        const ctx: DataRow = { ...base }
+        for (const [k, v] of Object.entries(src)) ctx[`SOURCE_${k}`] = v
+        const err = await fireChain(screen?.on_duplicate, ctx)
+        if (err) hookErrs.push(err)
+      } else {
+        const err = await fireChain(screen?.on_insert, base)
+        if (err) hookErrs.push(err)
+      }
     }
     for (const row of deleted) {
       if (newRows.includes(row)) continue
