@@ -219,10 +219,15 @@ async def _run_sql(
     audit_table = None if is_group else (screen.audit_table if screen else None)
     screen_max_rows = screen.max_rows if screen else None
     # Dictionary scope follows the screen's app (where operator metadata lives), not the
-    # data-pool connector. Falls back to the connector's own name when there's no matching
-    # screen (a query opened by an AI tool / external caller / dashboard widget — those don't
-    # have a screen and the connector resolves rules against its own scope).
-    dict_scope = screen_app if screen is not None else None
+    # data-pool connector. When the query has no screen of its OWN but was fired as a screen
+    # ACTION (tagged with the originating screen via ``action_context``), resolve the dictionary
+    # under THAT screen's app — the same scope its main write uses. So an audit bind named by its
+    # dd_id (``:USER`` / ``:PID`` / ``:UPMJ`` …) in a shared-action query gets the LOGIN / DEFAULT
+    # / SYSDATE rule + JDE format applied exactly like the source screen's own write, instead of
+    # silently no-op'ing because the data-pool connector's scope holds no dictionary. Falls back
+    # to the connector's own name when there's no screen AND no action context (a query opened by
+    # an AI tool / external caller / dashboard widget — those resolve against the connector scope).
+    dict_scope = screen_app if screen is not None else ((action_context or {}).get("app") or None)
     try:
         conn = connectors.sql(connector)
         # `user` is recorded on the audit row when the screen carries `audit_table`; otherwise
