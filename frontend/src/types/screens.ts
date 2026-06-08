@@ -453,6 +453,10 @@ export interface ScreenDetail extends ScreenListItem {
   on_insert?: Action[]
   on_update?: Action[]
   on_delete?: Action[]
+  /** Fires when a row is DUPLICATED (the dialog's Duplicate button → Save). Runs instead of
+   *  on_insert for the clone; the firing context exposes the source record under ``SOURCE_<col>``
+   *  keys so actions can copy related-table rows (roles, menus…) from the original to the new row. */
+  on_duplicate?: Action[]
   /** Capture every write on this screen into the connector's change package (Settings → Changes).
    *  Drives whether the dialog tags its write-hook action calls for change capture. */
   change_tracked?: boolean

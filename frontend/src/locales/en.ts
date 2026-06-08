@@ -1139,6 +1139,11 @@ const en = {
         hint: 'Runs after a row is deleted — via the dialog\'s Delete button, or via the inline grid. ParamBinds resolve against the deleted row.',
         empty: 'No on-delete actions yet — deletes just drop the row.',
       },
+      onDuplicate: {
+        heading: 'On duplicate (row hook)',
+        hint: 'Runs when a row is duplicated (Duplicate → Save), instead of on_insert. The source record is exposed as SOURCE_<col> so actions can copy related-table rows (roles, menus…) from the original to the new row.',
+        empty: 'No on-duplicate actions yet — duplicating just writes the cloned row.',
+      },
       prompt: {
         heading: 'Prompt fields',
         hint: 'Inputs collected from the operator before this action fires. Values land under ``INPUT.<name>`` in the chain context, so later ParamBinds with ``source: "INPUT.<name>"`` read them.',

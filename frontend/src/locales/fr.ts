@@ -1135,6 +1135,11 @@ const fr: Resources = {
         hint: "S'exécute après la suppression d'une ligne — via le bouton Supprimer du dialogue, ou via le tableau. Les ParamBind se résolvent contre la ligne supprimée.",
         empty: 'Aucune action à la suppression — les suppressions retirent simplement la ligne.',
       },
+      onDuplicate: {
+        heading: 'À la duplication (hook de ligne)',
+        hint: "S'exécute quand une ligne est dupliquée (Dupliquer → Enregistrer), au lieu de on_insert. L'enregistrement source est exposé sous SOURCE_<col> pour copier des lignes liées (rôles, menus…) de l'original vers la nouvelle ligne.",
+        empty: 'Aucune action à la duplication — la duplication écrit simplement la ligne clonée.',
+      },
       prompt: {
         heading: 'Champs d’invite',
         hint: "Entrées demandées à l'opérateur avant le déclenchement de cette action. Les valeurs atterrissent sous ``INPUT.<nom>`` dans le contexte de chaîne ; les ParamBind avec ``source: \"INPUT.<nom>\"`` les y lisent.",

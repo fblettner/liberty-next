@@ -1221,6 +1221,15 @@ class Screen(BaseModel):
         default_factory=list,
         description="Runs after a row is deleted — via the dialog's Delete button, or via the inline grid.",
     )
+    on_duplicate: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs when a row is DUPLICATED (the dialog's Duplicate button → Save), instead of "
+            "on_insert. The firing context exposes the SOURCE record under ``SOURCE_<col>`` keys "
+            "(the new row drops the key) so actions can copy related-table rows — e.g. duplicate a "
+            "user's role relationships / menu filtering from the original to the new user."
+        ),
+    )
     # Row-click → sibling-screen dialog. v2's port of v1's "FormsDialog inside a ly_ctxmenus"
     # pattern: a screen that itself has no ``tbl_frm_id`` but whose context menu carried a single
     # FormsDialog entry (the conventional "Display Properties" / "Edit details" action). The

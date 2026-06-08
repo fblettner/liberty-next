@@ -164,6 +164,9 @@ export function ScreenDialog({
   // reset whenever the dialog (re-)opens or the underlying row changes so reopening an existing row
   // is a normal edit again.
   const [duplicating, setDuplicating] = useState(false)
+  // The ORIGINAL record at the moment Duplicate was clicked — surfaced to on_duplicate actions under
+  // ``SOURCE_<col>`` keys so they can read the source's key (which the new row drops).
+  const duplicateSourceRef = useRef<Row>({})
   useEffect(() => { setDuplicating(false) }, [open, row])
   const effMode: DialogMode = duplicating ? 'add' : mode
 
@@ -552,6 +555,7 @@ export function ScreenDialog({
   // is cleared so no ``:_ORIGINAL`` WHERE binds carry over from the source record.
   const handleDuplicate = useCallback(() => {
     setFormValues((prev) => {
+      duplicateSourceRef.current = { ...prev }   // full original incl. key — for on_duplicate
       const next = { ...prev }
       for (const k of Object.keys(next)) {
         if (keyColumnSet.has(k.toLowerCase())) delete next[k]
@@ -720,10 +724,18 @@ export function ScreenDialog({
       // Both chains see the same context. on_insert / on_update are independent of dialog.on_save
       // so an operator can wire e.g. v1 FormsTable evt 2 actions there without polluting on_save.
       const ctx: Row = { ...savedRow, ...sent }
+      // Duplicate: expose the ORIGINAL record under ``SOURCE_<col>`` keys so on_duplicate actions can
+      // read the source row's key (dropped on the new row) — e.g. copy F95921 role rows from
+      // SOURCE_RLUSER to the new RLUSER. The duplicate fires on_duplicate INSTEAD of on_insert.
+      if (duplicating) {
+        for (const [k, v] of Object.entries(duplicateSourceRef.current)) ctx[`SOURCE_${k}`] = v
+      }
       const dialogActions = (screen.dialog?.on_save ?? []) as Action[]
-      const screenRowActions = effMode === 'add'
-        ? ((screen.on_insert ?? []) as Action[])
-        : ((screen.on_update ?? []) as Action[])
+      const screenRowActions = duplicating
+        ? ((screen.on_duplicate ?? []) as Action[])
+        : effMode === 'add'
+          ? ((screen.on_insert ?? []) as Action[])
+          : ((screen.on_update ?? []) as Action[])
       const actions = [...dialogActions, ...screenRowActions]
       const result = actions.length > 0
         ? await runOnSaveActions(actions, ctx, { track: true })

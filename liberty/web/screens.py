@@ -471,7 +471,7 @@ def _full_view(
         body.pop("columns", None)
     # Resolve prompts on every attachment point that can carry actions: screen-level actions /
     # row_menu / on_insert / on_update / on_delete, and the dialog's hooks + per-tab buttons.
-    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
+    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete", "on_duplicate"):
         if hook in body:
             body[hook] = _resolve_prompts_in_actions(
                 body.get(hook), connector=dict_scope, language=language, dictionary=dictionary,

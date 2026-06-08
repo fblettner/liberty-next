@@ -17,7 +17,7 @@
 import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react'
 import {
   Banner, Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
   type FrameworkEnums, type JsonSchema, type SearchSelectOption,
@@ -27,7 +27,7 @@ import {
   builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
 } from './actionCandidates'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { colors, fontSize, fonts } from '../../theme'
+import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import { EditQueryModal } from './EditQueryModal'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
@@ -104,6 +104,18 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
 const GroupsHr = styled.div`border-top: 1px solid ${colors.border}; margin: 18px 0 14px;`
+// Collapsible hook section on the Actions tab — header (chevron · heading · count) + body.
+const HookSection = styled.div`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; margin-bottom: 8px; background: ${colors.bg.input};
+  & > .head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+    background: none; border: none; padding: 10px 12px; color: ${colors.text.primary};
+    font-size: ${fontSize.sm}; font-weight: 600; font-family: ${fonts.sans}; }
+  & > .head:hover { background: var(--hover-subtle); }
+  & > .head .title { flex: 1; }
+  & > .head .count { font-size: ${fontSize.micro}; color: ${colors.text.muted}; min-width: 18px; text-align: center; }
+  & > .head .count.has { color: ${colors.blue.main}; font-weight: 700; }
+  & > .body { padding: 4px 12px 12px; border-top: 1px solid ${colors.border}; }
+`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 // Section divider for the row-click block in General — visually separates it from the schema-form
 // fields above so the mode picker reads as "a different decision", not "yet another field".
@@ -808,8 +820,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // mounts when this is non-null and reads / writes through the matching list's accessors.
   // A ``listKey`` of ``'on_load'`` / ``'on_save'`` / ``'on_cancel'`` targets the dialog's hook;
   // anything else targets the screen's top-level slot.
-  type ListKey = 'on_load' | 'on_save' | 'on_cancel' | 'actions' | 'on_insert' | 'on_update' | 'on_delete' | 'row_menu'
+  type ListKey = 'on_load' | 'on_save' | 'on_cancel' | 'actions' | 'on_insert' | 'on_update' | 'on_delete' | 'on_duplicate' | 'row_menu'
   const [openEditor, setOpenEditor] = useState<{ listKey: ListKey; path: ActionPath } | null>(null)
+  // The Actions tab stacks several hook sections (on_save / on_cancel / screen actions / on_insert /
+  // on_update / on_delete); most are empty on a given screen, so each is COLLAPSIBLE and collapsed
+  // by default — the header shows the action count so a non-empty hook stands out. (row_menu has its
+  // own single-section tab and stays expanded.) Toggle state keyed by listKey.
+  const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
+  const toggleHook = (k: string) => setExpandedHooks((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
 
 
   // Dialog lifecycle hook accessors — same pattern for each. ``setDialog`` strips empty hook
@@ -842,23 +860,39 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     heading: string,
     hint: string,
     emptyMessage: string,
-  ): ReactNode => (
-    <ActionTreeView
-      actions={actions}
-      onChange={onChange}
-      path={null}
-      onPathChange={(p) => p && p.length > 0 && setOpenEditor({ listKey, path: p })}
-      selectedPath={openEditor?.listKey === listKey ? openEditor.path : null}
-      defs={defs}
-      effectiveConnector={effectiveConnector}
-      onEditQuery={onEditQueryRaise}
-      rootLabel={heading}
-      heading={heading}
-      hint={hint}
-      emptyMessage={emptyMessage}
-      screenReadColumns={screenReadColumns}
-    />
-  )
+  ): ReactNode => {
+    const tree = (
+      <ActionTreeView
+        actions={actions}
+        onChange={onChange}
+        path={null}
+        onPathChange={(p) => p && p.length > 0 && setOpenEditor({ listKey, path: p })}
+        selectedPath={openEditor?.listKey === listKey ? openEditor.path : null}
+        defs={defs}
+        effectiveConnector={effectiveConnector}
+        onEditQuery={onEditQueryRaise}
+        rootLabel={heading}
+        // Collapsible sections render the heading in their own header (below); a single-section tab
+        // (row_menu) keeps ActionTreeView's internal heading.
+        heading={listKey === 'row_menu' ? heading : undefined}
+        hint={hint}
+        emptyMessage={emptyMessage}
+        screenReadColumns={screenReadColumns}
+      />
+    )
+    if (listKey === 'row_menu') return tree
+    const expanded = expandedHooks.has(listKey)
+    return (
+      <HookSection>
+        <button type="button" className="head" onClick={() => toggleHook(listKey)}>
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span className="title">{heading}</span>
+          <span className={actions.length ? 'count has' : 'count'}>{actions.length}</span>
+        </button>
+        {expanded && <div className="body">{tree}</div>}
+      </HookSection>
+    )
+  }
   const renderOnLoad = (): ReactNode => renderHookList(
     'on_load', onLoad, (n) => setDialogList('on_load', n),
     t('settings.screens.onLoad.heading'),
@@ -908,9 +942,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // ParamBinds resolve against the *new row's* values (insert/update) or the deleted row's
   // values (delete). Edit them in the same "Actions" tab alongside the toolbar buttons —
   // related concept, same Action shape.
-  const screenHookList = (key: 'on_insert' | 'on_update' | 'on_delete'): Row[] =>
+  const screenHookList = (key: 'on_insert' | 'on_update' | 'on_delete' | 'on_duplicate'): Row[] =>
     Array.isArray((value as Row)[key]) ? ((value as Row)[key] as Row[]) : []
-  const setScreenHook = (key: 'on_insert' | 'on_update' | 'on_delete', next: Row[]) => {
+  const setScreenHook = (key: 'on_insert' | 'on_update' | 'on_delete' | 'on_duplicate', next: Row[]) => {
     const v = { ...value }
     if (next.length === 0) delete v[key]
     else v[key] = next
@@ -935,6 +969,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         t('settings.screens.onDelete.heading'),
         t('settings.screens.onDelete.hint'),
         t('settings.screens.onDelete.empty'),
+      )}
+      {renderHookList(
+        'on_duplicate', screenHookList('on_duplicate'), (n) => setScreenHook('on_duplicate', n),
+        t('settings.screens.onDuplicate.heading', 'On duplicate (row hook)'),
+        t('settings.screens.onDuplicate.hint', 'Runs when a row is duplicated (Duplicate → Save), instead of on_insert. The source record is exposed as SOURCE_<col> so actions can copy related-table rows (roles, menus…) from the original to the new row.'),
+        t('settings.screens.onDuplicate.empty', 'No on-duplicate actions yet — duplicating just writes the cloned row.'),
       )}
     </>
   )
@@ -1156,6 +1196,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           on_insert: { list: screenHookList('on_insert'), setList: (n) => setScreenHook('on_insert', n), label: t('settings.screens.onInsert.heading') },
           on_update: { list: screenHookList('on_update'), setList: (n) => setScreenHook('on_update', n), label: t('settings.screens.onUpdate.heading') },
           on_delete: { list: screenHookList('on_delete'), setList: (n) => setScreenHook('on_delete', n), label: t('settings.screens.onDelete.heading') },
+          on_duplicate: { list: screenHookList('on_duplicate'), setList: (n) => setScreenHook('on_duplicate', n), label: t('settings.screens.onDuplicate.heading', 'On duplicate (row hook)') },
           row_menu:  { list: rowMenu,   setList: setRowMenu,                          label: t('settings.screens.rowmenu.heading') },
         }
         const cfg = lookup[openEditor.listKey]
