@@ -25,6 +25,7 @@ type Entry = {
   entity: string | null; entity_key: Record<string, unknown> | null
   new_values: Record<string, unknown> | null; old_values: Record<string, unknown> | null
   replay?: boolean
+  source_action?: string | null
   status: string; captured_by: string | null; captured_at: string | null
 }
 type PkgDetail = Pkg & { entries: Entry[] }
@@ -320,10 +321,16 @@ export default function ChangePackagesBuilder() {
   }, [packages, filter])
 
   // Group the detail's entries by entity (Users / Roles / …); fall back to the query name.
+  // Group by RECORD — the entity plus its natural key (entity_key) — so every op for one role
+  // (the main write + all the action writes it fired: delete/insert/merge across workbench, UDO,
+  // menu filtering) nests under that one record instead of a flat list per entity. Entries with
+  // no key fall back to grouping by entity alone.
   const grouped = useMemo(() => {
     const m = new Map<string, Entry[]>()
     for (const e of detail?.entries ?? []) {
-      const k = e.entity || e.query
+      const entity = e.entity || e.query
+      const keyLabel = e.entity_key ? Object.values(e.entity_key).map(fmt).join('·') : ''
+      const k = `${entity} ${keyLabel} ${e.source_action ?? ''}`
       ;(m.get(k) ?? m.set(k, []).get(k)!).push(e)
     }
     return [...m.entries()]
@@ -473,21 +480,28 @@ export default function ChangePackagesBuilder() {
             )}
             {!detail ? <Sub>{t('common.loading', 'Loading…')}</Sub> : detail.entries.length === 0 ? (
               <Sub>{t('settings.changes.noEntries', 'No changes captured in this package yet.')}</Sub>
-            ) : grouped.map(([entity, entries]) => {
-              const groupOpen = openGroups.has(entity)
-              // Distinct affected rows (the screen's key columns) — surfaced on the group head so a
-              // COLLAPSED group still tells you which records it touches without expanding.
-              const keys = [...new Set(entries.map((e) =>
-                e.entity_key ? Object.values(e.entity_key).map(fmt).join('·') : '—'))]
-              const keysLabel = keys.slice(0, 5).join(', ') + (keys.length > 5 ? ` +${keys.length - 5}` : '')
+            ) : grouped.map(([gkey, entries]) => {
+              const groupOpen = openGroups.has(gkey)
+              // This group is ONE record: show its entity + natural key (e.g. AUUSER=DEMOROLE) on
+              // the head, so the whole set of ops for that record reads as a unit.
+              const entity = entries[0]?.entity || entries[0]?.query || ''
+              const keyLabel = entries[0]?.entity_key
+                ? Object.entries(entries[0].entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ')
+                : ''
+              // The action that produced this batch (e.g. "import security") — shown in place of a
+              // bare count so the group reads as "what happened", not "how many rows".
+              const action = entries[0]?.source_action ?? ''
               return (
-              <Group key={entity}>
-                <GroupToggleHead onClick={() => toggle(openGroups, setOpenGroups, entity)}>
+              <Group key={gkey}>
+                <GroupToggleHead onClick={() => toggle(openGroups, setOpenGroups, gkey)}>
                   {groupOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                   <Layers size={13} style={{ verticalAlign: -2 }} />
                   <span style={{ textTransform: 'capitalize' }}>{entity}</span>
-                  <span className="count">{entries.length}</span>
-                  {!groupOpen && <span className="keys">{keysLabel}</span>}
+                  {keyLabel && <span className="keys">· {keyLabel}</span>}
+                  {action && <Badge $tone={colors.blue.main} style={{ marginLeft: 6 }}>{action}</Badge>}
+                  <Badge $tone={colors.text.muted} style={{ marginLeft: 'auto' }}>
+                    {t('settings.changes.nChanges', '{{n}} change(s)', { n: entries.length })}
+                  </Badge>
                 </GroupToggleHead>
                 {groupOpen && entries.map((e) => {
                   const oldV = e.old_values ?? {}; const newV = e.new_values ?? {}
@@ -513,7 +527,8 @@ export default function ChangePackagesBuilder() {
                       <div className="head clickable" onClick={() => toggle(openEntries, setOpenEntries, e.id)}>
                         {open ? <ChevronDown size={13} className="chev" /> : <ChevronRight size={13} className="chev" />}
                         <Badge $tone={OP_TONE[e.operation] ?? colors.text.muted}>{e.operation.replace('_', ' ')}</Badge>
-                        <span className="key" style={excluded ? { textDecoration: 'line-through' } : undefined}>{e.entity_key ? Object.entries(e.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : '—'}</span>
+                        {/* The record's key is on the GROUP head (entries are grouped by record), so
+                            the per-entry row shows only what differs: the operation + its target query. */}
                         <span className="count">{summary}</span>
                         <span className="q">{e.connector}.{e.query}</span>
                         {draft && (
