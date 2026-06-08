@@ -161,15 +161,17 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
   }
 
   const modalNode = (
-    // z-index 600 — this modal is frequently opened from INSIDE another modal (the Screen
-    // Designer / Action editor, both at the base Overlay's 400), so it must paint above them.
-    // Sits below SearchSelect dropdowns (1000) and the global confirm TopOverlay (2000) so its
-    // own pickers + the unsaved-changes prompt still appear on top.
+    // z-index 900 — this modal is frequently opened from INSIDE another modal: the Screen
+    // Designer (400) and the shared-action designer (400), but ALSO the screen's Action editor,
+    // which is itself a RAISED overlay at 800. So 600 (the old value) painted behind the action
+    // editor — the pencil opened the modal under it. 900 sits above all of them while staying
+    // below SearchSelect dropdowns (1000) and the global confirm TopOverlay (2000) so its own
+    // pickers + the unsaved-changes prompt still appear on top.
     //
     // No backdrop-click-to-close: an editor modal must not discard in-progress edits because
     // the operator clicked outside it. Closing is via Cancel / Escape only (Escape still routes
     // through ``cancel`` → the unsaved-changes prompt when dirty).
-    <Overlay style={{ zIndex: 600 }}>
+    <Overlay style={{ zIndex: 900 }}>
       <Modal style={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
