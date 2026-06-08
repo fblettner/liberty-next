@@ -1056,6 +1056,17 @@ class ColumnGroup(BaseModel):
         default_factory=list,
         description="Link the parent row into the related write: ``source`` reads a main column, ``param`` is the related query's :placeholder (the FK).",
     )
+    insert_on_add: bool = Field(
+        default=False,
+        description=(
+            "Insert this related row on EVERY Add, even when none of its fields were filled — the "
+            "FK bind + server-side dictionary defaults populate it. For a mandatory 1:1 companion "
+            "that must exist for each main row (e.g. F0092 → F00921). When off (default), the "
+            "related row is inserted only if at least one of its fields was given a value, so an "
+            "optional companion isn't created blank. Has no effect on Edit (an untouched related "
+            "row is never rewritten)."
+        ),
+    )
 
 
 class Screen(BaseModel):

@@ -88,8 +88,12 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
 
   // ── related groups ──
   for (const grp of a.columnGroups) {
-    const gvals = byGroup[grp.id]
-    if (!gvals || Object.keys(gvals).length === 0) continue   // nothing changed for this group
+    const gvals = byGroup[grp.id] ?? {}
+    // Skip an untouched group — UNLESS this is an Add and the group is a mandatory 1:1 companion
+    // (``insert_on_add``): then insert it even with no filled fields, so the FK bind + server-side
+    // dictionary defaults populate the related row. On Edit an untouched group is always skipped.
+    const empty = Object.keys(gvals).length === 0
+    if (empty && !(a.mode === 'add' && grp.insert_on_add)) continue
     const gConn = grp.connector || a.connector
     // The related row exists iff its key columns came back non-null from the JOIN.
     const keyCols = grp.key_columns ?? []

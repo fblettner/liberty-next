@@ -491,6 +491,9 @@ export interface ColumnGroup {
   delete_query?: string | null
   key_columns?: string[]
   param_binds?: ParamBind[]
+  /** Insert the related row on every Add even when no field was filled (FK + server defaults
+   *  populate it) — for a mandatory 1:1 companion. Off → only insert when a field has a value. */
+  insert_on_add?: boolean
 }
 
 /** One reusable shared action (actions.toml `[actions.<id>]`) — a named chain referenced by a

@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Plus, Trash2, X } from 'lucide-react'
-import { Button, Input, SearchSelect, type SearchSelectOption } from '../../common'
+import { Button, Checkbox, Input, SearchSelect, type SearchSelectOption } from '../../common'
 import ParamBindList, { type ParamBind } from './ParamBindList'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
 import { targetParamOptions } from './actionCandidates'
@@ -298,6 +298,16 @@ function GroupCard({
               sourceOptions={columnOptions}
               paramOptions={paramOptions}
             />
+          </div>
+
+          <div>
+            <Checkbox
+              checked={group.insert_on_add === true}
+              onChange={(v) => onPatch({ insert_on_add: v })}
+              label={t('settings.screens.editor.columnGroupInsertOnAdd', 'Always insert on Add (mandatory 1:1 companion)')}
+            />
+            <Hint>{t('settings.screens.editor.columnGroupInsertOnAddHint',
+              'Insert the related row on every Add even if none of its fields were filled — the FK bind + server-side dictionary defaults populate it. Off: only inserted when a field has a value (so an optional companion isn’t created blank). No effect on Edit.')}</Hint>
           </div>
 
           <div>
