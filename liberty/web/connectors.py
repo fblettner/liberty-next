@@ -264,7 +264,7 @@ async def _run_sql(
                 statement_type=result.statement_type, params=(result.bound_params or params), user=user,
                 key_columns=[], read_query=None,
                 entity=getattr(action_screen, "change_entity", None), change_tracked=True,
-                application=app_scope,
+                application=app_scope, post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
             _log.error("action change capture failed for %s.%s: %s", connector, query, exc)
@@ -292,6 +292,7 @@ async def _run_sql(
                 statement_type=result.statement_type, params=cap_params, user=user,
                 key_columns=cap_keys, read_query=cap_read_query,
                 entity=getattr(screen, "change_entity", None), change_tracked=True,
+                post_apply_ids=list(getattr(screen, "post_apply", None) or []),
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
             _log.error(
@@ -667,6 +668,7 @@ async def http_call(
                 changesets, application=app_scope, connector=connector,
                 operation=Operation.CALL_API.value, target=endpoint, params=call_params,
                 entity=getattr(action_screen, "change_entity", None), user=principal.username,
+                post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) call
             _log.error("call_api change capture failed for %s.%s: %s", connector, endpoint, exc)

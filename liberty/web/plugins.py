@@ -127,6 +127,7 @@ async def run_plugin(
                 changesets, application=app_scope, connector=app_scope,
                 operation=Operation.CALL_PLUGIN.value, target=ref, params=params,
                 entity=getattr(a_screen, "change_entity", None), user=principal.username,
+                post_apply_ids=list(getattr(a_screen, "post_apply", None) or []),
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) plugin run
             _log.error("call_plugin change capture failed for %s: %s", ref, exc)

@@ -60,8 +60,9 @@ type Row = Record<string, unknown>
 const GENERAL_FORM_KEYS = [
   'label', 'description', 'audit_table',
   // Change-package capture (Settings → Packages): toggle on to record every write on this
-  // screen into the app's active change package, with ``change_entity`` as its grouping label.
-  'change_tracked', 'change_entity',
+  // screen into the app's active change package, with ``change_entity`` as its grouping label
+  // and ``post_apply`` selecting the run-once steps this screen's changes need on promotion.
+  'change_tracked', 'change_entity', 'post_apply',
   'max_rows', 'auto_load', 'editable', 'uploadable',
   // Default tanstack-table grouping — column(s) the grid groups by on first open. Surfaces
   // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
@@ -250,6 +251,17 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     return () => { cancelled = true }
   }, [])
 
+  // Fetch the post-apply step library ([changesets] post_apply) — powers the POST_APPLY_STEPS enum
+  // for Screen.post_apply (which run-once steps this change-tracked screen's changes require).
+  const [postApplySteps, setPostApplySteps] = useState<Array<{ id: string; label?: string | null }>>([])
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ post_apply: Array<{ id: string; label?: string | null }> }>('/admin/changesets/config/post-apply')
+      .then((r) => { if (!cancelled) setPostApplySteps(r.post_apply ?? []) })
+      .catch(() => { /* silent — empty dropdown (changesets off / none configured) */ })
+    return () => { cancelled = true }
+  }, [])
+
   // Augment the parent's framework enums with SCREEN_COLUMNS — the read query's column names.
   // Consumed by Screen fields that declare ``x_enum_ref: "SCREEN_COLUMNS"`` (currently:
   // ``initial_group_by``, ``treeview.parent/child/label/order_by``). Also adds CHART_IDS for
@@ -321,8 +333,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         .filter((g) => typeof g?.id === 'string' && g.id)
         .map((g) => ({ value: g.id as string, label: g.label ? `${g.label} (${g.id})` : (g.id as string), mono: g.id as string })),
     }
+    // POST_APPLY_STEPS — the configured run-once step ids ([changesets] post_apply), for the
+    // Screen.post_apply multi-select (General tab, next to change_tracked).
+    base.POST_APPLY_STEPS = {
+      label: 'Post-apply steps',
+      values: postApplySteps.map((s) => ({ value: s.id, label: s.label ? `${s.label} (${s.id})` : s.id, mono: s.id })),
+    }
     return base
-  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector, selectedConnectorMeta, value.column_groups])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector, selectedConnectorMeta, value.column_groups, postApplySteps])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so

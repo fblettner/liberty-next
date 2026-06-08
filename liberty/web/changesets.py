@@ -77,6 +77,7 @@ def _pkg_summary(p: Any, entry_count: int) -> dict[str, Any]:
         "submitted_at": _iso(p.submitted_at),
         "approved_by": p.approved_by,
         "approved_at": _iso(p.approved_at),
+        "post_apply_ids": p.post_apply_ids or [],
         "entry_count": entry_count,
     }
 
@@ -138,6 +139,55 @@ async def list_applied(request: Request, _: Superuser, application: str | None =
     db = _db(request)
     async with db.session() as session:
         return {"applied": [_applied_dict(a) for a in await store.list_applied_bundles(session, application=application)]}
+
+
+class PostApplyBody(BaseModel):
+    """The full set of post-apply steps to persist (replaces the existing ``[changesets] post_apply``)."""
+
+    post_apply: list[dict[str, Any]] = []
+
+
+@router.get("/config/post-apply", summary="Get the configured post-apply steps")
+async def get_post_apply(request: Request, _: Superuser) -> dict[str, Any]:
+    """The run-once post-apply steps (``[changesets] post_apply``) + the connector names for the
+    editor's dropdowns. Static path — defined before ``/{package_id}``."""
+    settings = getattr(request.app.state, "settings", None)
+    steps = getattr(getattr(settings, "changesets", None), "post_apply", None) or []
+    connectors = sorted(request.app.state.connectors.names()) if hasattr(request.app.state, "connectors") else []
+    return {
+        "post_apply": [s.model_dump(exclude_none=True) for s in steps],
+        "connectors": connectors,
+        "types": ["call_plugin", "call_api", "run_query"],
+    }
+
+
+@router.put("/config/post-apply", summary="Set the post-apply steps")
+async def put_post_apply(body: PostApplyBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Validate + persist the post-apply steps to ``[changesets] post_apply`` in app.toml (tomlkit —
+    other sections untouched), and live-update the in-memory settings so export picks them up without
+    a restart."""
+    import tomlkit
+    from pydantic import ValidationError
+    from liberty.config import PostApplyStep
+    from liberty.web.admin import _app_config_path
+    try:
+        steps = [PostApplyStep.model_validate(s) for s in body.post_apply]
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid post-apply steps: {exc}") from exc
+
+    path = _app_config_path()
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
+    if "changesets" not in doc:
+        doc["changesets"] = tomlkit.table()
+    doc["changesets"]["post_apply"] = [s.model_dump(exclude_none=True) for s in steps]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    # Live-apply so the next export sees the new steps without a restart.
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None and getattr(settings, "changesets", None) is not None:
+        settings.changesets.post_apply = steps
+    return {"saved": True, "post_apply": [s.model_dump(exclude_none=True) for s in steps]}
 
 
 @router.get("/{package_id}", summary="Get a change package + its entries")
@@ -226,17 +276,50 @@ async def include_entry(package_id: str, entry_id: str, request: Request, _: Sup
 # ── export (Phase 3) ─────────────────────────────────────────────────────────────────────────
 
 
+_POST_APPLY_OP = {"call_plugin": "CALL_PLUGIN", "call_api": "CALL_API", "run_query": "RUN_QUERY"}
+
+
+def _post_apply_ops(settings: Any, post_apply_ids: list[str] | None, application: str | None) -> list[dict[str, Any]]:
+    """Resolve the package's accumulated ``post_apply_ids`` (the union of the contributing screens'
+    ``Screen.post_apply``) against the ``[changesets] post_apply`` library → apply-ops appended to
+    the bundle tail, in id order, deduped. Each carries ``post_apply: true`` so the apply engine + UI
+    mark them apart from captured change ops. Always ``unverified`` on apply (no key / read query) —
+    they run once after every change op has landed. Unknown ids are skipped."""
+    if not post_apply_ids:
+        return []
+    library = {s.id: s for s in (getattr(getattr(settings, "changesets", None), "post_apply", None) or [])}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for pid in post_apply_ids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        s = library.get(pid)
+        if s is None:
+            continue
+        out.append({
+            "connector": s.connector or application, "query": s.target, "read_query": None,
+            "operation": _POST_APPLY_OP.get(s.type, "RUN_QUERY"),
+            "entity": "post_apply", "entity_key": None,
+            "new_values": dict(s.params) or None, "old_values": None,
+            "post_apply": True, "label": s.label or s.id,
+        })
+    return out
+
+
 @router.get("/{package_id}/export", summary="Export an approved package as a promotion bundle")
 async def export_changeset(package_id: str, request: Request, _: Superuser) -> dict[str, Any]:
     """Compact the (approved) package's entries to the net change per row and return a portable
-    bundle for promotion to another environment. Marks the package ``exported``. 409 if it isn't
-    approved/exported."""
+    bundle for promotion to another environment. Appends the connector's configured run-once
+    ``post_apply`` steps (e.g. a JDE remerge) to the bundle tail. Marks the package ``exported``.
+    409 if it isn't approved/exported."""
     db = _db(request)
+    settings = getattr(request.app.state, "settings", None)
     async with db.session() as session:
         pkg = await store.get_package(session, package_id)
         if pkg is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change package {package_id!r} not found")
-        ops = compact(pkg.entries)
+        ops = compact(pkg.entries) + _post_apply_ops(settings, pkg.post_apply_ids, pkg.application)
         try:
             await store.mark_exported(session, package_id)
         except store.LifecycleError as exc:

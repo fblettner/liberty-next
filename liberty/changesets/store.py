@@ -106,13 +106,22 @@ async def capture(
     old_values: dict[str, Any] | None = None,
     read_query: str | None = None,
     user: str | None = None,
+    post_apply_ids: list[str] | None = None,
 ) -> str:
     """One-call capture: resolve/create the application's draft and append an entry, in a single
     control-DB transaction. Returns the entry id. This is what the write-path hook calls AFTER the
     tracked write has committed (the control DB is separate from the tracked connector, so capture
-    can't share the write's transaction — see the design notes)."""
+    can't share the write's transaction — see the design notes). ``post_apply_ids`` (the capturing
+    screen's ``Screen.post_apply``) are unioned into the package so export knows which run-once steps
+    this package's changes require."""
     async with db.session() as session:
         pkg = await get_or_create_active_package(session, application, user=user)
+        if post_apply_ids:
+            merged = list(pkg.post_apply_ids or [])
+            for pid in post_apply_ids:
+                if pid not in merged:
+                    merged.append(pid)
+            pkg.post_apply_ids = merged
         entry = await record_entry(
             session, pkg, connector=connector, query=query, operation=operation,
             entity=entity, entity_key=entity_key, new_values=new_values, old_values=old_values,

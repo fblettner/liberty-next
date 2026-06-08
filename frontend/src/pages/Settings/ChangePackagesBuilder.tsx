@@ -10,12 +10,14 @@ import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ApplyBundlePanel } from './ApplyBundleModal'
+import { PostApplyEditor } from './PostApplyEditor'
 
 type Pkg = {
   id: string; application: string; name: string; status: string; description: string | null
   created_by: string | null; created_at: string | null
   submitted_by: string | null; submitted_at: string | null
   approved_by: string | null; approved_at: string | null
+  post_apply_ids: string[]
   entry_count: number
 }
 type Entry = {
@@ -25,7 +27,7 @@ type Entry = {
   status: string; captured_by: string | null; captured_at: string | null
 }
 type PkgDetail = Pkg & { entries: Entry[] }
-type AppliedOp = { connector?: string; query?: string; operation?: string; entity_key?: Record<string, unknown> | null }
+type AppliedOp = { connector?: string; query?: string; operation?: string; entity_key?: Record<string, unknown> | null; post_apply?: boolean; label?: string | null }
 type AppliedResult = { index?: number; op?: AppliedOp; status: string; detail?: string; rowcount?: number }
 type Applied = {
   id: string; source_package_id: string | null; name: string; application: string | null
@@ -371,7 +373,8 @@ export default function ChangePackagesBuilder() {
                         {a.details.map((r, i) => (
                           <div className="op" key={i}>
                             <Badge $tone={APPLIED_OP_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
-                            <span className="key">{r.op?.operation} {r.op?.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : ''}</span>
+                            {r.op?.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply', 'post-apply')}</Badge>}
+                            <span className="key">{r.op?.post_apply ? (r.op?.label || r.op?.operation) : `${r.op?.operation} ${r.op?.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : ''}`}</span>
                             <span className="q">{r.op?.connector}.{r.op?.query}</span>
                             {r.detail && <span className="dt">— {r.detail}</span>}
                           </div>
@@ -384,7 +387,9 @@ export default function ChangePackagesBuilder() {
             </AppliedPanel>
           )}
         </>
-      ) : packages.length === 0 ? (
+      ) : (
+        <>
+        {packages.length === 0 ? (
         <Sub>{t('settings.changes.empty', 'No change packages yet — edit a record on a change-tracked screen to open one.')}</Sub>
       ) : (
         <Wrap>
@@ -445,9 +450,17 @@ export default function ChangePackagesBuilder() {
                     </>
                   )}
                   {(detail.status === 'approved' || detail.status === 'exported') && (
-                    <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void exportPkg()}>
-                      <Download size={13} /> {t('settings.changes.export', 'Export bundle')}
-                    </Button>
+                    <>
+                      {(detail.post_apply_ids?.length ?? 0) > 0 && (
+                        <span style={{ fontSize: fontSize.micro, color: colors.text.muted, alignSelf: 'center' }}
+                          title={t('settings.changes.bundleIncludesTip', 'These run-once post-apply steps — from the screens that contributed to this package — are appended to the exported bundle: {{ids}}', { ids: detail.post_apply_ids.join(', ') })}>
+                          {t('settings.changes.bundleIncludes', '+ {{n}} post-apply', { n: detail.post_apply_ids.length })}
+                        </span>
+                      )}
+                      <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void exportPkg()}>
+                        <Download size={13} /> {t('settings.changes.export', 'Export bundle')}
+                      </Button>
+                    </>
                   )}
                   <Button $size="sm" $variant="ghost" disabled={busy} style={{ color: colors.red.main }}
                     onClick={() => { const p = packages.find((x) => x.id === detail.id); if (p) void deletePkg(p) }}>
@@ -544,6 +557,9 @@ export default function ChangePackagesBuilder() {
             })}
           </div>
         </Wrap>
+      )}
+        <PostApplyEditor />
+        </>
       )}
     </>
   )

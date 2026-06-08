@@ -84,6 +84,11 @@ class ChangePackage(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(_STATUS_COL, nullable=False, default=PackageStatus.DRAFT.value)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Union of the ``Screen.post_apply`` step-ids of the screens that contributed to this package —
+    # accumulated as changes are captured. On export these ids resolve to ``[changesets] post_apply``
+    # steps appended to the bundle (run once on the target). Keeps a UDC change from pulling in a
+    # security screen's remerge just because they share a connector.
+    post_apply_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)

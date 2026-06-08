@@ -10,7 +10,7 @@ import { Button, Banner } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-type OpSummary = { connector: string; query: string; operation: string; entity: string | null; entity_key: Record<string, unknown> | null }
+type OpSummary = { connector: string; query: string; operation: string; entity: string | null; entity_key: Record<string, unknown> | null; post_apply?: boolean; label?: string | null }
 type Result = { index: number; op: OpSummary; status: string; detail?: string; rowcount?: number }
 type AlreadyApplied = { name: string; applied_at: string | null; applied_by: string | null }
 type Report = { dry_run: boolean; op_count: number; summary: Record<string, number>; results: Result[]; already_applied?: AlreadyApplied | null }
@@ -115,7 +115,8 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
             <Op key={r.index}>
               <div className="top">
                 <Badge $tone={STATUS_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
-                <span className="key">{r.op.operation} {r.op.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${v}`).join(' · ') : ''}</span>
+                {r.op.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply', 'post-apply')}</Badge>}
+                <span className="key">{r.op.post_apply ? (r.op.label || r.op.operation) : `${r.op.operation} ${r.op.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${v}`).join(' · ') : ''}`}</span>
                 <span className="q">{r.op.connector}.{r.op.query}</span>
                 {r.status === 'conflict' && report.dry_run && (
                   <label><input type="checkbox" checked={force.has(r.index)} onChange={() => toggleForce(r.index)} /> {t('settings.changes.force', 'force')}</label>

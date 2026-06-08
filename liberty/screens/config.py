@@ -1116,6 +1116,17 @@ class Screen(BaseModel):
         ),
         json_schema_extra={"x_placeholder": "e.g. user, role, security"},
     )
+    post_apply: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"x_enum_ref": "POST_APPLY_STEPS"},
+        description=(
+            "Run-once post-apply step ids (from ``[changesets] post_apply``) this screen's changes "
+            "require after promotion — e.g. a security screen selects the ``remerge`` step. On export, "
+            "a package carries the UNION of the steps of the screens that contributed to it, so an "
+            "unrelated change (a UDC record) doesn't trigger another screen's remerge. Only meaningful "
+            "when ``change_tracked`` is on."
+        ),
+    )
     max_rows: int | None = Field(
         default=None,
         description="Cap how many rows this screen's read query returns. Blank = use the connector's / pool's default.",

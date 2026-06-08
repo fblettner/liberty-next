@@ -147,3 +147,50 @@ async def test_apply_call_api_failure_is_reported_not_raised() -> None:
                        "entity": "user", "entity_key": None, "new_values": {}}]}
     rep = await apply_bundle(reg, bundle, dry_run=False, forced=set())
     assert rep["results"][0]["status"] == "error" and "boom" in rep["results"][0]["detail"]
+
+
+def test_post_apply_ops_resolves_package_step_ids() -> None:
+    """A package's accumulated ``post_apply_ids`` resolve against the ``[changesets] post_apply``
+    library to bundle-tail ops (marked post_apply), in id order, deduped, unknown ids skipped."""
+    from types import SimpleNamespace
+    from liberty.web.changesets import _post_apply_ops
+    from liberty.config import ChangeSetsSettings, PostApplyStep
+    cs = ChangeSetsSettings(post_apply=[
+        PostApplyStep(id="remerge", type="call_plugin", target="nomajde.security:j_remerge", params={"app": "P0092"}),
+        PostApplyStep(id="ldap_sync", type="call_api", connector="ldap", target="sync"),
+    ])
+    settings = SimpleNamespace(changesets=cs)
+    # package carries only "remerge" → only that step (its connector defaults to the package's)
+    ops = _post_apply_ops(settings, ["remerge"], "jdedwards")
+    assert len(ops) == 1
+    o = ops[0]
+    assert o["operation"] == "CALL_PLUGIN" and o["query"] == "nomajde.security:j_remerge"
+    assert o["connector"] == "jdedwards" and o["post_apply"] is True and o["entity_key"] is None
+    assert o["new_values"] == {"app": "P0092"}
+    # call_api step keeps its own target connector; duplicate id deduped; unknown id skipped
+    ops2 = _post_apply_ops(settings, ["ldap_sync", "ldap_sync", "nope"], "jdedwards")
+    assert len(ops2) == 1 and ops2[0]["connector"] == "ldap" and ops2[0]["operation"] == "CALL_API"
+    assert _post_apply_ops(settings, [], "jdedwards") == []   # no ids → none
+    assert _post_apply_ops(settings, None, "jdedwards") == []
+    assert _post_apply_ops(None, ["remerge"], "jdedwards") == []  # no settings → none
+
+
+@pytest.mark.asyncio
+async def test_apply_runs_post_apply_step_once() -> None:
+    """A run_query post-apply op (bundle tail) is unverified-but-applied, runs after the change ops,
+    and is reported as post_apply."""
+    reg = await _registry()
+    bundle = {"ops": [
+        _op("INSERT", "item_post", key={"code": "NEW1"}, new={"code": "NEW1", "name": "x"}),
+        {"connector": "c", "query": "item_post", "read_query": None, "operation": "RUN_QUERY",
+         "entity": "post_apply", "entity_key": None, "new_values": {"code": "PA1", "name": "remerge"},
+         "old_values": None, "post_apply": True},
+    ]}
+    # dry run → the post-apply op is reported unverified, not executed
+    dry = await apply_bundle(reg, bundle, dry_run=True, forced=set())
+    assert dry["results"][1]["op"]["post_apply"] is True and dry["results"][1]["status"] == "unverified"
+    assert "remerge" not in await _name(reg)
+    # real apply → both land; the post-apply row is written
+    rep = await apply_bundle(reg, bundle, dry_run=False, forced=set())
+    assert "remerge" in await _name(reg)
+    assert rep["results"][1]["op"]["post_apply"] is True and rep["results"][1]["status"] == "applied"

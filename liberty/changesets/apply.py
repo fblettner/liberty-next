@@ -38,6 +38,7 @@ def _op_summary(op: dict[str, Any]) -> dict[str, Any]:
     return {
         "connector": op.get("connector"), "query": op.get("query"), "operation": op.get("operation"),
         "entity": op.get("entity"), "entity_key": op.get("entity_key"),
+        "post_apply": bool(op.get("post_apply")), "label": op.get("label"),
     }
 
 
@@ -60,6 +61,9 @@ async def _read_current_row(connectors: Any, op: dict[str, Any]) -> dict[str, An
 
 async def check_drift(connectors: Any, op: dict[str, Any]) -> tuple[str, str]:
     """Return ``(verdict, detail)`` — verdict ∈ ``ok`` | ``conflict`` | ``unverified``."""
+    if op.get("post_apply"):
+        # A run-once post-apply step (e.g. a remerge) appended to the bundle tail — always runs.
+        return ("unverified", "post-apply step — runs once after the change ops")
     if (op.get("operation") or "").upper() in ("CALL_API", "CALL_PLUGIN"):
         # An opted-in screen action (API/plugin). It's re-run verbatim on apply; its effects are
         # opaque so there's nothing to pre-image. Always unverified — the operator sees it'll fire.

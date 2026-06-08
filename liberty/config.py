@@ -318,15 +318,37 @@ class JobsSettings(BaseModel):
     enabled: bool = True
 
 
+class PostApplyStep(BaseModel):
+    """A reusable run-ONCE step (a library entry, keyed by ``id``) that a change-tracked screen can
+    reference via ``Screen.post_apply``. When a package is exported, the union of the step-ids of the
+    screens that CONTRIBUTED to it is resolved here and appended to the bundle — so a UDC change and a
+    security change on the same connector pull in different post-apply steps (the security screen's
+    remerge, not both). Executed once on the target after every change op applies. Mirrors the
+    apply-op shape so it reuses the apply engine's replay paths."""
+
+    id: str = Field(description="Unique id, referenced by ``Screen.post_apply``.")
+    type: Literal["call_plugin", "call_api", "run_query"] = Field(
+        default="call_plugin", description="How to run: a server plugin, an API endpoint, or a SQL query.",
+    )
+    connector: str | None = Field(
+        default=None, description="Target connector for call_api / run_query. Blank → the package's connector.",
+    )
+    target: str = Field(description="The callable (``module:function``), endpoint name, or query name to run.")
+    params: dict[str, Any] = Field(default_factory=dict, description="Static params passed to the call.")
+    label: str | None = Field(default=None, description="Display label in the apply report.")
+
+
 class ChangeSetsSettings(BaseModel):
     """Change packages — capture tracked writes into reviewable, promotable change-sets (see
     ``project_nomajde_change_packages``). ``pool`` defaults to ``"default"`` so the ``ly_change_*``
     *control* tables land on the same pool as auth / nomaflow; point it at the framework Postgres
     (e.g. ``nomasx1``) when the default pool is a connector you don't want control tables on.
-    ``enabled`` off → no capture (the screens' ``change_tracked`` flags become no-ops)."""
+    ``enabled`` off → no capture (the screens' ``change_tracked`` flags become no-ops).
+    ``post_apply`` runs once on the target after a bundle of the matching ``application`` applies."""
 
     pool: str = "default"
     enabled: bool = True
+    post_apply: list[PostApplyStep] = Field(default_factory=list)
 
 
 class Settings(BaseModel):

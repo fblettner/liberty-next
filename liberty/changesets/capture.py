@@ -86,6 +86,7 @@ async def capture_write(
     entity: str | None,
     change_tracked: bool = True,
     application: str | None = None,
+    post_apply_ids: list[str] | None = None,
 ) -> str | None:
     """Capture a committed write into the connector's current package. The caller supplies the
     write target's ``key_columns`` (for the natural key + drift pre-image), its ``read_query``
@@ -117,6 +118,7 @@ async def capture_write(
         old_values=old_values or None,
         read_query=read_query or None,
         user=user,
+        post_apply_ids=post_apply_ids,
     )
 
 
@@ -130,6 +132,7 @@ async def capture_invocation(
     params: dict[str, Any] | None,
     entity: str | None,
     user: str | None,
+    post_apply_ids: list[str] | None = None,
 ) -> str:
     """Capture a screen-action API/plugin call into *application*'s draft package, to be RE-RUN on
     apply. Unlike :func:`capture_write` this isn't a row diff — there's no natural key, pre-image, or
@@ -148,4 +151,5 @@ async def capture_invocation(
         old_values=None,
         read_query=None,
         user=user,
+        post_apply_ids=post_apply_ids,
     )

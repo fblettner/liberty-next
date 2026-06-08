@@ -117,6 +117,27 @@ async def test_capture_invocation_records_a_replayable_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capture_accumulates_screen_post_apply_ids_on_package() -> None:
+    """A screen's ``post_apply`` ids are unioned onto its package as changes are captured — so export
+    carries only the steps the contributing screens require (a UDC change won't pull in a remerge)."""
+    from liberty.changesets import store
+    db = await _db()
+    # security screen change → carries the remerge step
+    await capture_write(db, connector="jdedwards", query="f00950_put", statement_type="UPDATE",
+                        params={"FSOBNM": "P01013", "FSOBNM_ORIGINAL": "P01012"}, user="admin",
+                        key_columns=["FSOBNM"], read_query="f00950_get", entity="security",
+                        post_apply_ids=["remerge"])
+    # a second security change with the same step → no duplicate
+    await capture_write(db, connector="jdedwards", query="f00950_put", statement_type="UPDATE",
+                        params={"FSOBNM": "P9", "FSOBNM_ORIGINAL": "P8"}, user="admin",
+                        key_columns=["FSOBNM"], read_query="f00950_get", entity="security",
+                        post_apply_ids=["remerge"])
+    async with db.session() as s:
+        pkg = (await store.list_packages(s, application="jdedwards"))[0]
+        assert pkg.post_apply_ids == ["remerge"]   # union, deduped
+
+
+@pytest.mark.asyncio
 async def test_delete_package_removes_it_and_its_entries() -> None:
     """delete_package drops the package + cascades its entries; returns False when already gone."""
     db = await _db()
