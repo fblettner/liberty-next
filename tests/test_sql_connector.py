@@ -824,6 +824,25 @@ def test_pad_char_binds_trims_over_wide_set_value_to_fit_column() -> None:
     ) == {"X": "val"}
 
 
+def test_pad_char_binds_pads_where_bind_compared_to_char_column() -> None:
+    """A WHERE/JOIN bind whose NAME differs from the column it's compared to (an operator-authored
+    ``RLTOROLE = :FROMUSER`` in a duplicate-relationship INSERT…SELECT) is padded to that CHAR
+    column's width — otherwise the blank-padded JDE value never matches and the write affects 0 rows."""
+    from liberty.connectors.sql import _where_bind_columns, _pad_char_binds
+    sql = "INSERT INTO F95921 SELECT RLFRROLE, :TOUSER, :RLUSER FROM F95921 WHERE RLTOROLE = :FROMUSER"
+    mp = _where_bind_columns(sql)
+    assert mp == {"FROMUSER": "RLTOROLE"}
+    ct = {"RLTOROLE": {"kind": "char_fixed", "length": 10}, "RLUSER": {"kind": "char_fixed", "length": 10}}
+    out = _pad_char_binds({"FROMUSER": "DEMO", "TOUSER": "DEMO2", "RLUSER": "admin"}, ct, where_col_map=mp)
+    assert out["FROMUSER"] == "DEMO      "   # padded to RLTOROLE(10) via the comparison
+    assert out["RLUSER"] == "admin     "     # direct name match still pads
+    assert out["TOUSER"] == "DEMO2"          # not compared to a column → untouched (Oracle pads on store)
+    # A compared bind is a WHERE bind — over-wide is NOT trimmed (must equal the stored padded form)
+    assert _pad_char_binds({"FROMUSER": "TOOLONGVALUE"}, ct, where_col_map=mp)["FROMUSER"] == "TOOLONGVALUE"
+    # reversed order + qualified column both map
+    assert _where_bind_columns("WHERE A.RLTOROLE = :X AND :Y = B.RLFRROLE") == {"X": "RLTOROLE", "Y": "RLFRROLE"}
+
+
 def test_trim_strings_and_coalesce_nulls_are_explicit_per_pool() -> None:
     """``trim_strings`` / ``coalesce_nulls`` are plain bool flags on the pool — no dialect-based
     auto-enable. Off by default; the operator opts in per pool (typically Oracle pools whose

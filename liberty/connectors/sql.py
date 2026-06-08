@@ -537,8 +537,36 @@ def _jsonable_number(v: Any) -> Any:
     return v
 
 
+_WHERE_BIND_RE = re.compile(
+    r"(?:"
+    r"(\w+(?:\.\w+)?)\s*(?:=|<=|>=|<>|!=|<|>)\s*:(\w+)"     # COL <op> :BIND
+    r"|:(\w+)\s*(?:=|<=|>=|<>|!=|<|>)\s*(\w+(?:\.\w+)?)"     # :BIND <op> COL
+    r"|(\w+(?:\.\w+)?)\s+LIKE\s+:(\w+)"                       # COL LIKE :BIND
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _where_bind_columns(sql: str) -> dict[str, str]:
+    """Map a bind name → the column it's COMPARED to in *sql* (``RLTOROLE = :FROMUSER`` →
+    ``{"FROMUSER": "RLTOROLE"}``). Lets :func:`_pad_char_binds` pad a WHERE/JOIN bind to the
+    compared CHAR column's width even when the bind name differs from the column — the common case
+    for an operator-authored query (a duplicate-relationship INSERT…SELECT WHERE ``RLTOROLE =
+    :FROMUSER``) where ``_pad_char_binds``'s name-match can't reach it. Column qualifier
+    (``A.RLTOROLE``) is dropped; bind names upper-cased to match the bound dict."""
+    out: dict[str, str] = {}
+    for m in _WHERE_BIND_RE.finditer(sql or ""):
+        col, bind = (m.group(1), m.group(2)) if m.group(2) else \
+                    (m.group(4), m.group(3)) if m.group(3) else (m.group(5), m.group(6))
+        if not col or not bind:
+            continue
+        out.setdefault(bind.upper(), col.split(".")[-1].upper())
+    return out
+
+
 def _pad_char_binds(
     bound: dict[str, Any], col_types: dict[str, dict[str, Any]],
+    where_col_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Right-pad non-empty string binds with spaces to the column's declared width when the
     target is a fixed-width ``CHAR(N)`` / ``NCHAR(N)``. Powers the symmetric round-trip the
@@ -577,6 +605,14 @@ def _pad_char_binds(
         if is_original:
             base = base[: -len("_ORIGINAL")]
         meta = col_types.get(base)
+        if meta is None and where_col_map:
+            # The bind name isn't a column, but the SQL compares it to one (``RLTOROLE = :FROMUSER``)
+            # — pad to THAT column's width. A compared bind must equal the stored padded value, so
+            # treat it like an ``_ORIGINAL`` WHERE bind (pad only, never trim over-wide).
+            mapped = where_col_map.get(base)
+            if mapped is not None:
+                meta = col_types.get(mapped)
+                is_original = True
         if not meta or meta.get("kind") != "char_fixed":
             continue
         length = meta.get("length")
@@ -1624,7 +1660,9 @@ class SQLConnector:
             if wants_coalesce:
                 bound = _coalesce_oracle_nulls(bound, col_types)
             if wants_pad:
-                bound = _pad_char_binds(bound, col_types)
+                # ``where_col_map`` lets a WHERE/JOIN bind whose NAME differs from the column it's
+                # compared to (``RLTOROLE = :FROMUSER``) still pad to that CHAR column's width.
+                bound = _pad_char_binds(bound, col_types, where_col_map=_where_bind_columns(sql_text))
 
         async with engine.begin() as conn:
             # SEQUENCE / NN — run the named "next number" query in the *same* transaction as
