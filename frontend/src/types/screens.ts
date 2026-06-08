@@ -244,10 +244,11 @@ export type Action =
        *  so a promotion bundle re-runs the callable on the target. Off by default. */
       change_replay?: boolean
     })
-  | (ActionCommon & {
+  | (ActionCommon & PromptableAction & {
       /** Run a SHARED action (defined once in actions.toml) by id. The runner inlines its steps
        *  and runs them against the firing context; `param_binds` seed the shared action's
-       *  `INPUT.<param>` so its steps can read caller-provided values. */
+       *  `INPUT.<param>` so its steps can read caller-provided values. A `prompt_fields` prompt
+       *  (like chain/call_api) fires first → its values merge into INPUT for the shared steps. */
       type: 'call_action'
       ref: string
       param_binds?: ParamBind[]

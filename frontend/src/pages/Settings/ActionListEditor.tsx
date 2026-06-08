@@ -114,7 +114,7 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
 // open a single pre-fire prompt for the operator's inputs. For the rest (set_field / confirm
 // / notify / refresh / if / loop / return) the PromptField editor stays hidden — these are
 // internal steps that don't fire their own prompt sub-dialogs.
-export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'call_plugin', 'navigate', 'chain'])
+export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'call_plugin', 'navigate', 'chain', 'call_action'])
 export const PROMPT_FIELDS_KEY = 'prompt_fields'
 // PromptField has 11+ properties; split into Basic / Advanced / Lookup binds / Conditions so
 // each per-field expander reads like the visual builder's field inspector instead of a wall of

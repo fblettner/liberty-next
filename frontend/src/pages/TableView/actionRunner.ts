@@ -320,8 +320,10 @@ function withUpper(o: Row): Row {
 /** Pull the prompt spec off any promptable action variant. Returns null for non-promptable
  *  variants or when ``prompt_fields`` is empty. */
 function actionPrompt(a: Action): { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null } | null {
-  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'call_plugin' && a.type !== 'navigate' && a.type !== 'chain') return null
-  // The four promptable variants share the ``_PromptableMixin`` shape via the Pydantic union.
+  if (a.type !== 'run_query' && a.type !== 'call_api' && a.type !== 'call_plugin' && a.type !== 'navigate' && a.type !== 'chain' && a.type !== 'call_action') return null
+  // The promptable variants share the ``_PromptableMixin`` shape via the Pydantic union. For
+  // call_action the prompt fires first → its values merge into ctx.INPUT, which the shared action's
+  // steps read as INPUT.<field> (and the call_action's param_binds can map them onto params too).
   const r = a as Action & {
     prompt_fields?: PromptField[]; prompt_title?: string | null;
     prompt_cols?: number | null; prompt_submit_label?: string | null

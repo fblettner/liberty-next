@@ -542,7 +542,7 @@ class CallPluginAction(_PromptableMixin, _ActionBase):
     )
 
 
-class CallActionAction(_ActionBase):
+class CallActionAction(_PromptableMixin, _ActionBase):
     """Run a SHARED action by id — v1's reusable named action (``ly_actions``). The action is
     defined once in ``actions.toml`` (``[actions.<ref>]``) and referenced from any screen hook /
     button / row-menu. The referenced action's steps run against the firing context; ``param_binds``
