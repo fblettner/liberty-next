@@ -1,4 +1,5 @@
 // Centered overlay modal + a ready-made ConfirmModal. (See nomaubl's styled/modal.ts.)
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { colors, radius, fontSize, shadow } from '../theme'
@@ -151,8 +152,12 @@ export function ConfirmModal({
   onCancel: () => void
 }) {
   const { t } = useTranslation()
-  return (
-    <Overlay onClick={onCancel}>
+  // Portal to document.body at the top z-index (2000, same as the useModals confirm) — a confirm is
+  // a top-level interrupt and must never be trapped beneath whatever opened it. Rendered inline at
+  // the base Overlay (400), it got buried under a nested dialog (NestedOverlay 500, a backdrop-filter
+  // stacking context) — e.g. deleting a row in a nested-table edit dialog.
+  return createPortal(
+    <Overlay onClick={onCancel} style={{ zIndex: 2000 }}>
       <Modal style={{ width: 440 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{title}</ModalHeader>
         <ModalBody>{message}</ModalBody>
@@ -165,6 +170,7 @@ export function ConfirmModal({
           </Button>
         </ModalFooter>
       </Modal>
-    </Overlay>
+    </Overlay>,
+    document.body,
   )
 }
