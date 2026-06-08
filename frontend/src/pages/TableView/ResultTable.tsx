@@ -621,8 +621,9 @@ export function ResultTable({
       return
     }
     if (result.cancelled) return   // soft cancel — no banner
-    // Notify messages → status banner; otherwise generic "<label> · OK".
-    const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : (a.label || a.id)
+    // Intentional notify messages → status banner. Otherwise a clean "<label> · done" — a
+    // successful run reports success, NOT a per-step dump (0-row notices are console diagnostics).
+    const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : `${a.label || a.id} · ${t('common.done')}`
     setActionStatus({ message: msg, tone: 'ok' })
     onSaved?.()
   }, [connector, onSaved, navigate, requestPrompt, sharedActions])

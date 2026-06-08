@@ -473,14 +473,15 @@ async function runOneAction(
           // write into its package (physical capture — run_query writes are always captured).
           { params: withUpper(bound), ...(deps.changeContext ? { _change_context: deps.changeContext } : {}) },
         )
-        // 0-row write surface — a write that affected zero rows is almost always a config
-        // bug (CHAR-padding mismatch, wrong query variant ``_put`` vs ``_post``, etc.).
-        // Surface as a warning on the chain result so the dialog can show it; the backend
-        // logs the same case to the server console for the operator's logs.
+        // 0-row write — CAN signal a config bug (CHAR-padding mismatch, wrong query variant), but
+        // is also perfectly normal in a multi-step chain (an idempotent DELETE with nothing to
+        // remove, an INSERT…SELECT whose source is empty for this key). It is NOT an error, so it
+        // must not clutter a successful run's status — the user wants "successful", details only on
+        // failure. Keep it as a console diagnostic (and the backend still logs the same case to the
+        // server console with the "check the WHERE clause" hint); don't push it onto result.warnings.
         if (resp?.statement_type && resp.statement_type !== 'SELECT' && resp.rowcount === 0) {
-          result.warnings.push(
-            `${a.label || a.id}: ${resp.statement_type} affected 0 rows on ${target}.${a.query}.`,
-          )
+          // eslint-disable-next-line no-console
+          console.info(`action ${a.label || a.id}: ${resp.statement_type} affected 0 rows on ${target}.${a.query}`)
         }
         if (a.bind_result) {
           const rows = Array.isArray(resp?.rows) ? resp.rows : []
