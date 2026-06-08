@@ -87,6 +87,8 @@ async def capture_write(
     change_tracked: bool = True,
     application: str | None = None,
     post_apply_ids: list[str] | None = None,
+    key_override: dict[str, Any] | None = None,
+    source_action: str | None = None,
 ) -> str | None:
     """Capture a committed write into the connector's current package. The caller supplies the
     write target's ``key_columns`` (for the natural key + drift pre-image), its ``read_query``
@@ -105,7 +107,13 @@ async def capture_write(
     if not change_tracked:
         return None
     new_values, old_values = split_params(params)
-    ekey = entity_key(new_values, old_values, key_columns or [])
+    # ``key_override`` — the FIRING ROW's natural key, supplied by the caller when the write's own
+    # binds don't carry it. An ACTION write (e.g. import_security's duplicate_* INSERT) targets an
+    # arbitrary table whose params don't include the screen's key (AUUSER), so without this the
+    # entry has no entity_key and the package can't attribute it to the role it was fired for — it
+    # shows as an anonymous "INSERT on duplicate_security_workbench". The frontend resolves the
+    # originating row's key (the ``key = true`` column) and threads it through ``_change_context``.
+    ekey = key_override if key_override is not None else entity_key(new_values, old_values, key_columns or [])
     return await _store_capture(
         db,
         application or connector,  # package scope — the originating screen's connector for an action
@@ -119,6 +127,7 @@ async def capture_write(
         read_query=read_query or None,
         user=user,
         post_apply_ids=post_apply_ids,
+        source_action=source_action,
     )
 
 
@@ -134,6 +143,8 @@ async def capture_invocation(
     user: str | None,
     post_apply_ids: list[str] | None = None,
     replay: bool = True,
+    key_override: dict[str, Any] | None = None,
+    source_action: str | None = None,
 ) -> str:
     """Capture a screen-action API/plugin call into *application*'s draft package. A change-tracked
     screen captures EVERY call it fires (so the package shows it for review); ``replay`` — the
@@ -149,11 +160,14 @@ async def capture_invocation(
         query=target,
         operation=operation,
         entity=entity,
-        entity_key=None,
+        # Same as capture_write: stamp the firing row's key (the role) when supplied so a call_api /
+        # call_plugin fired from a row groups under that role instead of showing keyless.
+        entity_key=key_override or None,
         new_values={k: _jsonable(v) for k, v in (params or {}).items()} or None,
         old_values=None,
         read_query=None,
         user=user,
         post_apply_ids=post_apply_ids,
         replay=replay,
+        source_action=source_action,
     )

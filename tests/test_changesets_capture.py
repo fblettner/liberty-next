@@ -210,3 +210,26 @@ async def test_capture_main_and_group_writes_stay_distinct_ops() -> None:
         assert [o["query"] for o in ops] == ["f0092_post", "f00921_post"]
         assert all(o["operation"] == "INSERT" for o in ops)
         assert ops[1]["read_query"] is None   # group write → unverified drift, still applied
+
+
+@pytest.mark.asyncio
+async def test_action_write_stamps_firing_row_key_via_override() -> None:
+    """An action write targets an arbitrary table whose binds don't carry the screen's key
+    (AUUSER), so it's captured with key_columns=[]. The frontend resolves the FIRING ROW's key
+    and passes it as key_override → the entry's entity_key is the role, so the package groups the
+    action's writes under the record they fired for instead of showing keyless."""
+    db = await _db()
+    eid = await capture_write(
+        db, connector="jdedwards", query="duplicate_security_workbench", statement_type="INSERT",
+        params={"SOME_COL": "x"},          # the action query's own binds — no AUUSER here
+        user="franck", key_columns=[], read_query=None, entity="roles",
+        key_override={"AUUSER": "DEMO"},   # the firing row's key, threaded from _change_context
+        source_action="import security",   # the action that triggered it
+    )
+    assert eid is not None
+    async with db.session() as s:
+        pkg = await store.get_package(s, (await store.list_packages(s, application="jdedwards"))[0].id)
+        e = pkg.entries[0]
+        assert e.entity == "roles" and e.entity_key == {"AUUSER": "DEMO"}
+        assert e.new_values == {"SOME_COL": "x"}
+        assert e.source_action == "import security"   # → the change view groups/names by it

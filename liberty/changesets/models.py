@@ -145,6 +145,10 @@ class ChangeEntry(Base):
     # since an external call's side effects can't be drift-checked. Irrelevant for row ops (always
     # replayed). NULL on legacy rows reads as True (they were only captured when opted in).
     replay: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    # The label of the action that triggered this write (a screen/tab button → ``import security``),
+    # threaded from the firing context. Lets the change view group + name a batch by the action that
+    # produced it instead of a bare op count. NULL for a plain dialog/grid save (no action fired it).
+    source_action: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     status: Mapped[str] = mapped_column(_STATUS_COL, nullable=False, default=EntryStatus.CAPTURED.value)
     captured_by: Mapped[str | None] = mapped_column(String(128), nullable=True)

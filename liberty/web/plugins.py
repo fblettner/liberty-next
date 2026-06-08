@@ -130,6 +130,8 @@ async def run_plugin(
                 entity=getattr(a_screen, "change_entity", None), user=principal.username,
                 post_apply_ids=list(getattr(a_screen, "post_apply", None) or []),
                 replay=bool(action_ctx.get("replay", True)),
+                key_override=action_ctx.get("entity_key") or None,
+                source_action=action_ctx.get("action") or None,
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) plugin run
             _log.error("call_plugin change capture failed for %s: %s", ref, exc)

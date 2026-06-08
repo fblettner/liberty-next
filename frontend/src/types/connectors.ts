@@ -140,6 +140,10 @@ export interface Column {
    *  set, the column comes from the read query's JOIN and is written back to the related table on
    *  Save (not the main update query). Absent ⇒ writes to the main table. */
   group?: string | null
+  /** Part of the row's natural key (the Columns-tab ``key`` flag; legacy ``key_columns`` is
+   *  folded into this server-side). Used to stamp an action's writes with the firing row's
+   *  identity so the change package groups them under that record. */
+  key?: boolean
 }
 
 export interface QueryResult {

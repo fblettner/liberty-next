@@ -63,6 +63,7 @@ class ChangeSetDatabase:
         insp = sa_inspect(sync_conn)
         wanted = (
             ("ly_change_entries", "replay", "BOOLEAN"),
+            ("ly_change_entries", "source_action", "VARCHAR(256)"),
         )
         for table, col, ddl in wanted:
             if not insp.has_table(table):

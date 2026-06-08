@@ -78,12 +78,16 @@ export interface ActionRunnerDeps {
    *  backend then captures the action into that screen's change package: run_query writes are
    *  captured physically; call_api / call_plugin are captured as replayable invocations but only
    *  when the action opts in via ``change_replay``. Unset (most call sites) → no tagging. */
-  changeContext?: { app: string; screen: string }
+  changeContext?: { app: string; screen: string; entity_key?: Record<string, unknown> }
   /** Internal — when running INSIDE a ``call_action``, this carries that call_action's
    *  ``change_replay`` so the shared action's call_api/call_plugin steps inherit the replay
    *  decision the operator made on the SCREEN action (they don't edit the shared steps). Unset at
    *  the top level → a direct call_api/call_plugin uses its own ``change_replay``. */
   _replayOverride?: boolean
+  /** Internal — the LABEL of the top-level action currently running (set per top-level action in
+   *  runChain, inherited by nested call_action steps). Threaded into ``_change_context`` so a
+   *  captured write records which action fired it, for grouping/naming in the change package. */
+  _originAction?: string
   /** Internal — the chain of shared-action ids currently being inlined, for cycle detection.
    *  Callers leave this unset; the runner threads it through nested ``call_action`` runs. */
   _actionStack?: string[]
@@ -471,7 +475,7 @@ async function runOneAction(
           `/api/sql/${encodeURIComponent(target)}/${encodeURIComponent(a.query)}`,
           // Tag with the originating change-tracked screen so the backend captures this action
           // write into its package (physical capture — run_query writes are always captured).
-          { params: withUpper(bound), ...(deps.changeContext ? { _change_context: deps.changeContext } : {}) },
+          { params: withUpper(bound), ...(deps.changeContext ? { _change_context: { ...deps.changeContext, action: deps._originAction } } : {}) },
         )
         // 0-row write — CAN signal a config bug (CHAR-padding mismatch, wrong query variant), but
         // is also perfectly normal in a multi-step chain (an idempotent DELETE with nothing to
@@ -514,7 +518,7 @@ async function runOneAction(
           // effects can't be drift-checked). When this step runs inside a call_action, the screen's
           // call_action.change_replay (``_replayOverride``) governs; a direct call uses its own.
           deps.changeContext
-            ? { ...bound, _change_context: { ...deps.changeContext, replay: deps._replayOverride ?? !!a.change_replay } }
+            ? { ...bound, _change_context: { ...deps.changeContext, replay: deps._replayOverride ?? !!a.change_replay, action: deps._originAction } }
             : bound,
         )
         if (resp?.success === false) {
@@ -557,7 +561,7 @@ async function runOneAction(
           // Captured on any change-tracked screen (visible in the package); ``replay`` gates whether
           // APPLY re-runs the callable. Inside a call_action the screen's call_action.change_replay
           // (``_replayOverride``) governs; a direct call_plugin uses its own change_replay.
-          { callable: a.callable, params: bound, ...(deps.changeContext ? { _change_context: { ...deps.changeContext, replay: deps._replayOverride ?? !!a.change_replay } } : {}) },
+          { callable: a.callable, params: bound, ...(deps.changeContext ? { _change_context: { ...deps.changeContext, replay: deps._replayOverride ?? !!a.change_replay, action: deps._originAction } } : {}) },
         )
         if (a.bind_result) {
           const rows = Array.isArray(resp?.rows) ? resp.rows : []
@@ -639,7 +643,11 @@ export async function runChain(
     returnedValues: {},
   }
   for (const a of actions) {
-    const { abort } = await runOneAction(a, ctx, formCtx, deps, result)
+    // Tag this top-level action's whole subtree (incl. nested call_action steps) with its label,
+    // so captured writes record which action triggered them ("import security") and the change
+    // package can group + name the batch by action rather than showing a bare count.
+    const subDeps = { ...deps, _originAction: deps._originAction ?? (a.label || a.id) }
+    const { abort } = await runOneAction(a, ctx, formCtx, subDeps, result)
     if (abort) break
   }
   return result

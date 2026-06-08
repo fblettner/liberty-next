@@ -270,6 +270,10 @@ async def _run_sql(
                 key_columns=[], read_query=None,
                 entity=getattr(action_screen, "change_entity", None), change_tracked=True,
                 application=app_scope, post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
+                # Attribute this action write to the role/row it was fired for (the originating
+                # screen's key, resolved client-side) so the package groups it under that record.
+                key_override=(action_context or {}).get("entity_key") or None,
+                source_action=(action_context or {}).get("action") or None,
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
             _log.error("action change capture failed for %s.%s: %s", connector, query, exc)
@@ -676,6 +680,8 @@ async def http_call(
                 entity=getattr(action_screen, "change_entity", None), user=principal.username,
                 post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
                 replay=bool((action_context or {}).get("replay", True)),
+                key_override=(action_context or {}).get("entity_key") or None,
+                source_action=(action_context or {}).get("action") or None,
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) call
             _log.error("call_api change capture failed for %s.%s: %s", connector, endpoint, exc)

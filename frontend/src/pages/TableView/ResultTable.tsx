@@ -32,7 +32,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { resolveBindList, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -865,9 +865,14 @@ export function ResultTable({
     // Save (a grid edit/insert/duplicate must land in the package identically to a form one). The
     // main row write is already captured via screen-match in _run_sql; this carries the HOOK
     // actions (run_query auto, call_api/plugin on their change_replay opt-in) into the same package.
-    const changeContext = screen?.change_tracked ? { app: screen.app, screen: screen.id } : undefined
     const fireChain = async (actions: Action[] | undefined, ctx: DataRow): Promise<string | null> => {
       if (!actions?.length) return null
+      // Per-ROW changeContext: stamp THIS row's natural key (entity_key) so each row's action
+      // writes group under that record — fireChain runs once per affected row, so it can't share
+      // a single context the way the dialog (one row) does.
+      const changeContext = screen?.change_tracked
+        ? { app: screen.app, screen: screen.id, entity_key: entityKeyOf(screen.columns, ctx) }
+        : undefined
       const result = await runChain(actions, {}, ctx, {
         defaultConnector: connector,
         requestPrompt,   // batch-save hooks rarely prompt, but a migrated chain might carry one

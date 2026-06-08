@@ -24,7 +24,7 @@ import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
 import type { Action, ColumnGroup, FormTab, NestedFormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { evalConditions, type Row } from './dialogHelpers'
+import { entityKeyOf, evalConditions, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
@@ -408,8 +408,10 @@ export function ScreenDialog({
     // Only the write hooks (on_save/insert/update, on_delete) tag their action calls for change
     // capture — on_load / on_cancel are read/UI and must not land in the package. Gated on the
     // screen actually being change-tracked.
+    // entity_key = the firing row's natural key (e.g. AUUSER=DEMO), so an action's writes/calls
+    // group under the record they fired for instead of showing keyless in the package.
     const changeContext = opts?.track && screen.change_tracked
-      ? { app: screen.app, screen: screen.id }
+      ? { app: screen.app, screen: screen.id, entity_key: entityKeyOf(screen.columns, baseCtx) }
       : undefined
     const result = await runChain(actions, baseCtx, baseCtx, {
       defaultConnector: connector,
