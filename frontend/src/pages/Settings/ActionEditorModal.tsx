@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import {
   Button, ModalBody, ModalFooter, ModalHeader, Overlay, ScreenDialogModal, Row,
-  type JsonSchema,
+  type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import ActionTreeView from './ActionTreeView'
 import type { ActionPath } from './actionPath'
@@ -57,6 +57,8 @@ export interface ActionEditorModalProps {
    *  source dropdown surfaces the firing row's column names alongside the chain-context
    *  candidates. Pass ``screen.columns`` from the parent. */
   screenReadColumns?: RowDict[]
+  /** Extra ``source`` autocomplete options for this hook (e.g. on_duplicate's SOURCE_<col>). */
+  extraSourceOptions?: SearchSelectOption[]
   /** Fired when the modal should close (click outside / Esc / X / Close button / breadcrumb
    *  to root). */
   onClose: () => void
@@ -64,7 +66,7 @@ export interface ActionEditorModalProps {
 
 export default function ActionEditorModal({
   actions, onChange, path, onPathChange, defs, effectiveConnector, onEditQuery, rootLabel,
-  screenReadColumns, onClose,
+  screenReadColumns, extraSourceOptions, onClose,
 }: ActionEditorModalProps) {
   const { t } = useTranslation()
 
@@ -110,6 +112,7 @@ export default function ActionEditorModal({
             onEditQuery={onEditQuery}
             rootLabel={rootLabel}
             screenReadColumns={screenReadColumns}
+            extraSourceOptions={extraSourceOptions}
           />
         </ModalBody>
         <ModalFooter>

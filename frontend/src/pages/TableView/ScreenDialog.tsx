@@ -723,7 +723,9 @@ export function ScreenDialog({
       // Then run the matching row-level hook on the screen — on_insert (add) or on_update (edit).
       // Both chains see the same context. on_insert / on_update are independent of dialog.on_save
       // so an operator can wire e.g. v1 FormsTable evt 2 actions there without polluting on_save.
-      const ctx: Row = { ...savedRow, ...sent }
+      // Include the server-assigned binds (a SEQUENCE/auto-ID PK filled on insert) so a hook can
+      // bind the NEW row's key even when it wasn't typed in the form.
+      const ctx: Row = { ...savedRow, ...sent, ...resolvedBinds }
       // Duplicate: expose the ORIGINAL record under ``SOURCE_<col>`` keys so on_duplicate actions can
       // read the source row's key (dropped on the new row) — e.g. copy F95921 role rows from
       // SOURCE_RLUSER to the new RLUSER. The duplicate fires on_duplicate INSTEAD of on_insert.

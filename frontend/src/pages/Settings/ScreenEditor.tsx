@@ -853,6 +853,11 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   const screenReadColumns: Row[] = Array.isArray((value as Row).columns)
     ? ((value as Row).columns as Row[])
     : []
+  // on_duplicate exposes the ORIGINAL record under SOURCE_<col> keys at runtime — surface them as
+  // pickable ``source`` options (otherwise the operator has to know the prefix + type it).
+  const duplicateSourceOptions: SearchSelectOption[] = screenReadColumns
+    .filter((c) => typeof c.name === 'string' && c.name)
+    .map((c) => ({ value: `SOURCE_${c.name as string}`, label: `SOURCE_${c.name as string} (original row)`, mono: `SOURCE_${c.name as string}`, group: 'Duplicate source' }))
   const renderHookList = (
     listKey: ListKey,
     actions: Row[],
@@ -878,6 +883,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         hint={hint}
         emptyMessage={emptyMessage}
         screenReadColumns={screenReadColumns}
+        extraSourceOptions={listKey === 'on_duplicate' ? duplicateSourceOptions : undefined}
       />
     )
     if (listKey === 'row_menu') return tree
@@ -1211,6 +1217,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
             onEditQuery={onEditQueryRaise}
             rootLabel={cfg.label}
             screenReadColumns={screenReadColumns}
+            extraSourceOptions={openEditor.listKey === 'on_duplicate' ? duplicateSourceOptions : undefined}
             onClose={() => setOpenEditor(null)}
           />
         )

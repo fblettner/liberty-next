@@ -245,11 +245,15 @@ export interface ActionTreeViewProps {
    *  columns gives the operator the names without remembering them. Pass ``screen.columns``
    *  from the parent (ScreenVisualBuilder / ScreenEditor). */
   screenReadColumns?: Row[]
+  /** Extra ``source`` autocomplete options injected for this hook — e.g. the on_duplicate hook
+   *  passes ``SOURCE_<col>`` entries (the original record, exposed at runtime) so they're pickable,
+   *  not just typeable. Merged into the source dropdown after the chain + column candidates. */
+  extraSourceOptions?: SearchSelectOption[]
 }
 
 export default function ActionTreeView({
   actions, onChange, path, onPathChange, defs, effectiveConnector, onEditQuery, rootLabel,
-  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true, screenReadColumns,
+  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true, screenReadColumns, extraSourceOptions,
 }: ActionTreeViewProps) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -405,10 +409,11 @@ export default function ActionTreeView({
   const sourceOptions = useMemo<SearchSelectOption[]>(
     () => mergeCandidates(
       sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value, group: c.group })),
+      extraSourceOptions ?? [],
       screenColumnOptions,
       builtinSourceOptions(),
     ),
-    [sourceCandidates, screenColumnOptions],
+    [sourceCandidates, screenColumnOptions, extraSourceOptions],
   )
 
   // ── target-screen column lookup (paramOptions enrichment) ──────────────────────────────
