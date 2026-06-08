@@ -56,9 +56,17 @@ const TableWrap = styled.div`
 /** Build the query-string for a bound GET — same convention the TableView uses. Empty when
  *  there are no resolved binds (the param form expects narrowing; no narrowing → the URL
  *  carries no params, which we treat as "skip fetch" so a not-yet-saved parent doesn't
- *  trigger a giant SELECT). */
+ *  trigger a giant SELECT).
+ *
+ *  A nested bind is a foreign-KEY relationship (parent column → child param), so it must match
+ *  EXACTLY. We send a ``<param>_op=equals`` companion for each: without it a text/CHAR column
+ *  filter defaults to ``contains`` (LIKE ``%value%``), so binding ``RLTOROLE=DEMO`` would wrongly
+ *  pull DEMO **and** DEMO2 into the child table. */
 function bindsToQuery(bound: Record<string, string>): string {
-  const parts = Object.entries(bound).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+  const parts = Object.entries(bound).flatMap(([k, v]) => [
+    `${encodeURIComponent(k)}=${encodeURIComponent(v)}`,
+    `${encodeURIComponent(`${k}_op`)}=equals`,
+  ])
   return parts.length ? `?${parts.join('&')}` : ''
 }
 
