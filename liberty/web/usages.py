@@ -367,6 +367,7 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                             ("read_query", "nested_form_read_query"),
                             ("update_query", "nested_form_update_query"),
                             ("insert_query", "nested_form_insert_query"),
+                            ("delete_query", "nested_form_delete_query"),
                         ):
                             v = getattr(tab, attr, None)
                             if v == query and tab_conn == connector:

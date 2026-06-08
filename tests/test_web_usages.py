@@ -147,3 +147,23 @@ def test_query_and_api_usages_descend_into_shared_actions() -> None:
     assert any("sync_user" in u.label and u.type == "action_run_query" for u in q)
     api = find_usages(state, kind="api_endpoint", name="push_user", scope="ais")
     assert any("sync_user" in u.label and u.type == "action_api_call" for u in api)
+
+
+def test_query_usages_finds_dialog_tab_nested_form_delete_query() -> None:
+    """A dialog tab that IS a nested_form references its queries directly on the tab (read/update/
+    insert/DELETE) — the delete_query was missing from the scan, so a nested-form tab's delete query
+    (e.g. settings_jdedwards_delete) read as unused. Regression for that omission."""
+    screens = {"nomasx1": {"settings_applications": {
+        "connector": "nomasx1", "read_query": "settings_applications_get",
+        "dialog": {"tabs": [
+            {"id": "jde", "type": "nested_form", "connector": "jdedwards",
+             "read_query": "settings_jdedwards_get", "update_query": "settings_jdedwards_put",
+             "insert_query": "settings_jdedwards_post", "delete_query": "settings_jdedwards_delete"},
+        ]},
+    }}}
+    state = _state(screens=screens)
+    assert any(u.type == "nested_form_delete_query"
+               for u in find_usages(state, kind="query", name="settings_jdedwards_delete", scope="jdedwards"))
+    # and the read/update/insert still resolve (regression guard for the whole set)
+    assert find_usages(state, kind="query", name="settings_jdedwards_get", scope="jdedwards")
+    assert find_usages(state, kind="query", name="settings_jdedwards_post", scope="jdedwards")
