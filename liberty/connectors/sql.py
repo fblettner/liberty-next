@@ -1350,8 +1350,15 @@ class SQLConnector:
         for k, v in list(out.items()):
             if k.upper().endswith("_ORIGINAL"):
                 continue
-            if v not in (None, ""):
-                continue  # caller supplied an explicit value — never overwrite
+            # "An explicit value from the caller wins — never overwrite." But a SEQUENCE column is
+            # numeric and JDE has no NULLs, so the form posts an unassigned key as ``0`` (e.g.
+            # AUSEQNO=0), not NULL/"". A sequence number is never legitimately 0 (they start at 1),
+            # so treat 0 / "0" as UNASSIGNED here too — otherwise the posted 0 blocks the sequence
+            # from firing and the row lands with seq 0. Only a real, non-zero value short-circuits.
+            zero_numeric = isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0
+            zero_string = isinstance(v, str) and v.strip() == "0"
+            if v not in (None, "") and not zero_numeric and not zero_string:
+                continue
 
             # Two lookup paths to find a sequence for this bind:
             #   1. via the dd_id (v1 ``ly_sequence.seq_dd_id`` — fires for any column whose dd

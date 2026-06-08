@@ -1497,6 +1497,32 @@ async def test_form_rule_sequence_resolves_in_same_transaction(pools: PoolRegist
 
 
 @pytest.mark.asyncio
+async def test_sequence_fires_when_numeric_bind_is_zero(pools: PoolRegistry) -> None:
+    """JDE has no NULLs — the form posts an unassigned numeric key as ``0`` (e.g. AUSEQNO=0), not
+    NULL. A sequence number is never legitimately 0, so a posted 0 (int / float / "0") must still
+    fire the SEQUENCE; only a real, non-zero value short-circuits it."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="item_next_id"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="item_next_id", sql="SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM item"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+        QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="ID"), ColumnHint(name="NAME")]
+    # fixture has 1,2,3 → 0-bind should be reassigned to 4 (not kept as 0)
+    await conn.execute("ins", {"ID": 0, "NAME": "zero-int"}, column_hints=hints)
+    await conn.execute("ins", {"ID": "0", "NAME": "zero-str"}, column_hints=hints)
+    rows = (await conn.execute("all", column_hints=hints)).rows
+    seq = {r["name"]: r["id"] for r in rows}
+    assert seq["zero-int"] == 4 and seq["zero-str"] == 5   # both got fresh sequence numbers
+    assert 0 not in (seq["zero-int"], seq["zero-str"])
+
+
+@pytest.mark.asyncio
 async def test_resolved_binds_surfaces_sequence_assigned_pk(pools: PoolRegistry) -> None:
     """An INSERT whose PK the server fills from a SEQUENCE returns that value in
     ``resolved_binds`` (uppercased key) so a caller can chain a dependent child write to the
