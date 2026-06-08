@@ -152,6 +152,19 @@ def _iter_prompt_fields(action: Any) -> Any:
         yield pf
 
 
+def _iter_shared_action_steps(state: Any) -> Any:
+    """Yield ``(action_id, step)`` for every step of every SHARED action (actions.toml),
+    recursively (chain / if / loop branches). Shared actions are reusable orchestration that
+    screens call via ``call_action`` — their steps reference queries / endpoints / plugins just
+    like a screen action, so usage + integrity scans must walk them too, not only screen hooks."""
+    actions = getattr(state, "actions", None)
+    if actions is None:
+        return
+    for aid, a in (getattr(actions, "actions", None) or {}).items():
+        for step in _iter_actions(getattr(a, "steps", None) or []):
+            yield (aid, step)
+
+
 def _screen_deep_link(app: str, screen_id: str) -> dict[str, Any]:
     return {"editor": "screens", "app": app, "screen": screen_id}
 
@@ -430,6 +443,24 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                                 deep_link=_screen_deep_link(app, sid),
                             ))
 
+    # Shared actions (actions.toml) — a run_query / navigate step inside a reusable action.
+    for aid, step in _iter_shared_action_steps(state):
+        s_type = getattr(step, "type", None)
+        s_conn = getattr(step, "connector", None)
+        # A shared-action step pins its own connector (it isn't tied to a screen); a None connector
+        # is treated as a match so an unpinned step still surfaces rather than hiding silently.
+        conn_ok = s_conn == connector or s_conn is None
+        if s_type == "run_query" and getattr(step, "query", None) == query and conn_ok:
+            out.append(Usage(
+                type="action_run_query", label=f"action {aid} · run_query",
+                deep_link={"editor": "actions", "action": aid},
+            ))
+        if s_type == "navigate" and getattr(step, "to", None) == query and conn_ok:
+            out.append(Usage(
+                type="action_navigate_to", label=f"action {aid} · navigate to",
+                deep_link={"editor": "actions", "action": aid},
+            ))
+
     # Menus pointing at this query — a ``query`` leaf's ``target`` is a query name on the item's
     # connector (defaults to the menu app). This is how a menu opens a table view / screen, so a
     # query that nothing else references is still "in use" if a menu links to it.
@@ -610,19 +641,27 @@ def _find_connector_usages(state: Any, name: str) -> list[Usage]:
 def _find_api_endpoint_usages(state: Any, connector: str, endpoint: str) -> list[Usage]:
     out: list[Usage] = []
     screens = getattr(state, "screens", None)
-    if screens is None:
-        return out
-    for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
-        for sid, screen in screen_map.items():
-            for where, action in _iter_screen_actions(screen):
-                if (getattr(action, "type", None) == "call_api"
-                        and getattr(action, "connector", None) == connector
-                        and getattr(action, "endpoint", None) == endpoint):
-                    out.append(Usage(
-                        type="action_api_call",
-                        label=f"{app}.{sid} · {where} · call_api",
-                        deep_link=_screen_deep_link(app, sid),
-                    ))
+    if screens is not None:
+        for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
+            for sid, screen in screen_map.items():
+                for where, action in _iter_screen_actions(screen):
+                    if (getattr(action, "type", None) == "call_api"
+                            and getattr(action, "connector", None) == connector
+                            and getattr(action, "endpoint", None) == endpoint):
+                        out.append(Usage(
+                            type="action_api_call",
+                            label=f"{app}.{sid} · {where} · call_api",
+                            deep_link=_screen_deep_link(app, sid),
+                        ))
+    # Shared actions (actions.toml) — a call_api step inside a reusable action.
+    for aid, step in _iter_shared_action_steps(state):
+        if (getattr(step, "type", None) == "call_api"
+                and getattr(step, "connector", None) == connector
+                and getattr(step, "endpoint", None) == endpoint):
+            out.append(Usage(
+                type="action_api_call", label=f"action {aid} · call_api",
+                deep_link={"editor": "actions", "action": aid},
+            ))
     return out
 
 

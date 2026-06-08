@@ -24,6 +24,7 @@ from liberty.web.usages import (
     _get_dictionary,
     _iter_dict_sections,
     _iter_screen_actions,
+    _iter_shared_action_steps,
     _menu_deep_link,
     _screen_deep_link,
 )
@@ -293,6 +294,33 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                                          f"{app}.{sid} · {where} call_action → shared action '{ref}' is not defined", link))
 
 
+def _check_shared_actions(state: Any, idx: _Index, out: list[Issue]) -> None:
+    """Validate every SHARED action's steps (actions.toml) — the same run_query / call_api /
+    call_action reference checks ``_check_screens`` runs on a screen's actions. A shared action is
+    reused across screens, so a broken ref here silently breaks every caller; the per-screen scan
+    never reaches it (it only walks screen hooks). A step pins its own connector — when it's unset
+    we can't resolve the query/endpoint's owner, so that step is skipped rather than mis-flagged."""
+    for aid, step in _iter_shared_action_steps(state):
+        atype = getattr(step, "type", None)
+        aconn = getattr(step, "connector", None)
+        link = {"editor": "actions", "action": aid}
+        if atype == "run_query":
+            q = getattr(step, "query", None)
+            if q and aconn in idx.conn_names and q not in idx.sql_by_conn.get(aconn, set()):
+                out.append(Issue("error", "Missing query",
+                                 f"action {aid} · run_query '{aconn}.{q}' does not exist", link))
+        elif atype == "call_api":
+            ep = getattr(step, "endpoint", None)
+            if ep and aconn in idx.conn_names and ep not in idx.api_by_conn.get(aconn, set()):
+                out.append(Issue("error", "Missing endpoint",
+                                 f"action {aid} · call_api '{aconn}.{ep}' does not exist", link))
+        elif atype == "call_action":
+            ref = getattr(step, "ref", None)
+            if ref and ref not in idx.shared_action_ids:
+                out.append(Issue("error", "Broken action reference",
+                                 f"action {aid} · call_action → shared action '{ref}' is not defined", link))
+
+
 def _check_dictionary(state: Any, idx: _Index, out: list[Issue]) -> None:
     dictionary = _get_dictionary(state)
     if dictionary is None:
@@ -369,6 +397,10 @@ def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
                 for sheet in (getattr(export, "sheets", None) or []) if export is not None else []:
                     if getattr(sheet, "connector", None):
                         referenced.add(sheet.connector)
+    # shared actions — a connector targeted only by a reusable action's run_query / call_api step
+    for _aid, step in _iter_shared_action_steps(state):
+        if getattr(step, "connector", None):
+            referenced.add(step.connector)
     # menus
     menus = getattr(state, "menus", None)
     if menus is not None:
@@ -496,6 +528,7 @@ def check_integrity(state: Any) -> list[Issue]:
     out: list[Issue] = []
     _check_menus(state, idx, out)
     _check_screens(state, idx, out)
+    _check_shared_actions(state, idx, out)
     _check_dictionary(state, idx, out)
     _check_dashboards_charts(state, idx, out)
     _check_homes(state, idx, out)

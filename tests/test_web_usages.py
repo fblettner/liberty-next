@@ -134,3 +134,16 @@ def test_action_usages_finds_screen_call_action_and_composing_action() -> None:
     assert any("wrapper" in lbl for lbl in labels)
     # an unreferenced action has no usages (safe to delete)
     assert find_usages(state, kind="action", name="wrapper") == []
+
+
+def test_query_and_api_usages_descend_into_shared_actions() -> None:
+    """find-usages walks shared actions (actions.toml) — a query / endpoint referenced only by a
+    shared action's step is reported, so it's not mistaken for unused."""
+    state = _state(actions={"sync_user": {"steps": [
+        {"type": "run_query", "id": "s1", "connector": "jde", "query": "helper_q"},
+        {"type": "call_api", "id": "s2", "connector": "ais", "endpoint": "push_user"},
+    ]}})
+    q = find_usages(state, kind="query", name="helper_q", scope="jde")
+    assert any("sync_user" in u.label and u.type == "action_run_query" for u in q)
+    api = find_usages(state, kind="api_endpoint", name="push_user", scope="ais")
+    assert any("sync_user" in u.label and u.type == "action_api_call" for u in api)

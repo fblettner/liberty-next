@@ -267,3 +267,33 @@ def test_broken_home_detected() -> None:
     )
     issues = check_integrity(state)
     assert any(i.category == "Broken home" and "no_such_item" in i.message for i in issues)
+
+
+def test_detects_broken_refs_inside_shared_actions() -> None:
+    """A shared action's own steps (run_query / call_api / call_action) are validated like a
+    screen's — a dangling query / endpoint / nested-action ref is flagged even though no screen
+    hook reaches it directly. Regression: previously only screen actions were scanned."""
+    state = _state(
+        conns={"jde": ["f0004_get"]},
+        screens={"jde": {"f0004": {"connector": "jde", "read_query": "f0004_get"}}},
+        actions={"sync_user": {"steps": [
+            {"type": "run_query", "id": "s1", "connector": "jde", "query": "ghost_q"},
+            {"type": "call_action", "id": "s2", "ref": "no_such_action"},
+        ]}},
+    )
+    cats = _cats(check_integrity(state))
+    assert any(c[1] == "Missing query" and "ghost_q" in c[2] and "sync_user" in c[2] for c in cats)
+    assert any(c[1] == "Broken action reference" and "no_such_action" in c[2] for c in cats)
+
+
+def test_query_used_only_by_a_shared_action_is_not_flagged_unused() -> None:
+    """A query referenced only from a shared action's step counts as used — find-usages walks
+    shared actions now, so the unused-query check (which reuses it) won't false-flag it."""
+    state = _state(
+        conns={"jde": ["f0004_get", "helper_q"]},
+        screens={"jde": {"f0004": {"connector": "jde", "read_query": "f0004_get"}}},
+        actions={"helper": {"steps": [{"type": "run_query", "id": "s1", "connector": "jde", "query": "helper_q"}]}},
+    )
+    unused = [i.message for i in check_integrity(state) if i.category == "Unused query"]
+    assert not any("helper_q" in m for m in unused)
+    assert any("f0004_get" not in m for m in unused) or not unused  # f0004_get is the screen read query → used
