@@ -489,6 +489,13 @@ const en = {
       deleteMsg: 'Delete "{{name}}" and its {{n}} captured change(s)? The rows already written to the database are not affected — only this package log is removed.',
       replaysOnApply: 'replays on apply',
       replayNote: 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:',
+      appliedTitle: 'Applied bundles',
+      opsCount: '{{n}} op(s)',
+      alreadyApplied: 'This bundle was already applied on {{date}}{{by}}.',
+      changesTab: 'Changes',
+      applyTab: 'Apply',
+      applyIntro: 'Apply a promotion bundle exported from another install (or this one) to THIS environment. Dry-run first to see the per-op drift report; tick “force” on any conflict you want to override.',
+      pickBundle: 'Click to pick a bundle.json',
     },
     integrity: {
       errors: 'errors', warnings: 'warnings', errorsOnly: 'Errors', warningsOnly: 'Warnings',

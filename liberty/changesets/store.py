@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from liberty.changesets.models import ChangeEntry, ChangePackage, EntryStatus, Operation, PackageStatus
+from liberty.changesets.models import AppliedBundle, ChangeEntry, ChangePackage, EntryStatus, Operation, PackageStatus
 
 
 def _utcnow() -> datetime:
@@ -237,3 +237,39 @@ async def set_entry_excluded(session: AsyncSession, entry_id: str, *, excluded: 
         raise LifecycleError(f"can only edit entries of a draft package (this one is {pkg.status!r})")
     entry.status = EntryStatus.EXCLUDED.value if excluded else EntryStatus.CAPTURED.value
     return entry
+
+
+# ── applied-bundle log (target side) ─────────────────────────────────────────────────────────
+
+
+async def find_applied_by_checksum(session: AsyncSession, checksum: str | None) -> AppliedBundle | None:
+    """The most recent prior apply of a bundle with this checksum on THIS target, or None. Drives
+    the "already applied on … by …" warning so a double-apply isn't silent."""
+    if not checksum:
+        return None
+    stmt = select(AppliedBundle).where(AppliedBundle.checksum == checksum).order_by(AppliedBundle.applied_at.desc())
+    return (await session.execute(stmt)).scalars().first()
+
+
+async def record_applied_bundle(
+    session: AsyncSession, *, source_package_id: str | None, name: str, application: str | None,
+    checksum: str | None, op_count: int, status: str, summary: dict[str, Any] | None,
+    details: list[Any] | None, user: str | None,
+) -> AppliedBundle:
+    """Append an import-log row after a (non-dry-run) apply. Best-effort caller — a logging failure
+    must never undo the already-applied writes."""
+    row = AppliedBundle(
+        source_package_id=source_package_id, name=name, application=application, checksum=checksum,
+        op_count=op_count, status=status, summary=summary, details=details, applied_by=user,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_applied_bundles(session: AsyncSession, *, application: str | None = None) -> list[AppliedBundle]:
+    """The target's import log (newest first), optionally filtered to one application/connector."""
+    stmt = select(AppliedBundle).order_by(AppliedBundle.applied_at.desc())
+    if application:
+        stmt = stmt.where(AppliedBundle.application == application)
+    return list((await session.execute(stmt)).scalars().all())

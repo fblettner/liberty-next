@@ -491,6 +491,13 @@ const fr: Resources = {
       deleteMsg: 'Supprimer « {{name}} » et ses {{n}} changement(s) capturé(s) ? Les lignes déjà écrites en base ne sont pas affectées — seul ce journal de package est supprimé.',
       replaysOnApply: 'rejoué à l’application',
       replayNote: 'Rejoue cet appel à l’application — ses effets ne peuvent pas être vérifiés. Arguments :',
+      appliedTitle: 'Bundles appliqués',
+      opsCount: '{{n}} op(s)',
+      alreadyApplied: 'Ce bundle a déjà été appliqué le {{date}}{{by}}.',
+      changesTab: 'Changements',
+      applyTab: 'Appliquer',
+      applyIntro: 'Appliquez à CET environnement un bundle de promotion exporté depuis une autre installation (ou celle-ci). Faites d’abord un test pour voir le rapport de dérive par opération ; cochez « forcer » sur chaque conflit à écraser.',
+      pickBundle: 'Cliquez pour choisir un bundle.json',
     },
     integrity: {
       errors: 'erreurs', warnings: 'avertissements', errorsOnly: 'Erreurs', warningsOnly: 'Avertissements',

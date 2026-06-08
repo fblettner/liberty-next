@@ -121,6 +121,25 @@ async def list_changesets(request: Request, _: Superuser, application: str | Non
         return {"packages": [_pkg_summary(p, counts.get(p.id, 0)) for p in pkgs]}
 
 
+def _applied_dict(a: Any) -> dict[str, Any]:
+    return {
+        "id": a.id, "source_package_id": a.source_package_id, "name": a.name,
+        "application": a.application, "checksum": a.checksum, "op_count": a.op_count,
+        "status": a.status, "summary": a.summary, "details": a.details,
+        "applied_by": a.applied_by, "applied_at": _iso(a.applied_at),
+    }
+
+
+@router.get("/applied", summary="List bundles applied to this environment")
+async def list_applied(request: Request, _: Superuser, application: str | None = None) -> dict[str, Any]:
+    """The target-side import log — every promotion bundle applied to THIS environment (newest
+    first), optionally filtered to one ``application``. Defined before ``/{package_id}`` so the
+    static path wins over the path param."""
+    db = _db(request)
+    async with db.session() as session:
+        return {"applied": [_applied_dict(a) for a in await store.list_applied_bundles(session, application=application)]}
+
+
 @router.get("/{package_id}", summary="Get a change package + its entries")
 async def get_changeset(package_id: str, request: Request, _: Superuser) -> dict[str, Any]:
     """One package with its captured entries, in capture order."""
@@ -239,9 +258,13 @@ class ApplyBody(BaseModel):
 
 
 @router.post("/apply", summary="Apply a promotion bundle to this environment")
-async def apply_changeset(body: ApplyBody, request: Request, _: Superuser) -> dict[str, Any]:
+async def apply_changeset(body: ApplyBody, request: Request, principal: Superuser) -> dict[str, Any]:
     """Replay a bundle's ops against THIS Liberty's connectors with full pre-image drift detection.
-    Defaults to a dry run (drift report only). Validates the bundle format + checksum first."""
+    Defaults to a dry run (drift report only). Validates the bundle format + checksum first.
+
+    The report carries ``already_applied`` (a prior apply of the same checksum, or null) so the UI
+    can warn before a duplicate apply — non-blocking. A non-dry-run apply is recorded in the
+    target's import log (``ly_applied_bundles``) so this environment knows what's been promoted here."""
     bundle = body.bundle
     if bundle.get("format") != BUNDLE_FORMAT:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"unsupported bundle format {bundle.get('format')!r}")
@@ -249,12 +272,46 @@ async def apply_changeset(body: ApplyBody, request: Request, _: Superuser) -> di
     if not isinstance(ops, list):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="bundle has no ops")
     expected = hashlib.sha256(json.dumps(ops, sort_keys=True, default=str).encode()).hexdigest()
-    if bundle.get("checksum") and bundle["checksum"] != expected:
+    checksum = bundle.get("checksum")
+    if checksum and checksum != expected:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="bundle checksum mismatch — file is corrupt or tampered")
     connectors = getattr(request.app.state, "connectors", None)
     if connectors is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="connectors not available")
     settings = getattr(request.app.state, "settings", None)
-    return await apply_bundle(
+
+    # Import-log lookup + recording is best-effort: the control DB may be disabled (changesets off),
+    # but applying a bundle to the target must still work. The bundle's own checksum is its identity.
+    db = getattr(request.app.state, "changesets_db", None)
+    pkg_meta = bundle.get("package") or {}
+    already = None
+    if db is not None and checksum:
+        try:
+            async with db.session() as s:
+                prev = await store.find_applied_by_checksum(s, checksum)
+                if prev is not None:
+                    already = {"name": prev.name, "applied_at": _iso(prev.applied_at), "applied_by": prev.applied_by}
+        except Exception:  # noqa: BLE001 — never block an apply on the log lookup
+            already = None
+
+    report = await apply_bundle(
         connectors, bundle, dry_run=body.dry_run, forced={str(i) for i in body.force}, settings=settings,
     )
+    report["already_applied"] = already
+
+    if not body.dry_run and db is not None:
+        summ = report.get("summary") or {}
+        status_str = "partial" if (summ.get("conflict") or summ.get("error")) else "applied"
+        try:
+            async with db.session() as s:
+                await store.record_applied_bundle(
+                    s, source_package_id=pkg_meta.get("id"),
+                    name=pkg_meta.get("name") or "bundle", application=pkg_meta.get("application"),
+                    checksum=checksum, op_count=int(bundle.get("op_count") or len(ops)),
+                    status=status_str, summary=summ, details=report.get("results") or None,
+                    user=principal.username,
+                )
+        except Exception as exc:  # noqa: BLE001 — log failure must not undo the applied writes
+            import logging
+            logging.getLogger(__name__).error("failed to record applied bundle: %s", exc)
+    return report

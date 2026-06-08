@@ -147,3 +147,32 @@ async def test_mark_exported_requires_approved() -> None:
         assert p.status == PackageStatus.EXPORTED.value and p.exported_at is not None
     async with db.session() as s:                       # re-export allowed
         assert (await store.mark_exported(s, pid)).status == PackageStatus.EXPORTED.value
+
+
+@pytest.mark.asyncio
+async def test_applied_bundle_log_record_find_list() -> None:
+    """The target-side import log: record an apply, find a prior apply by checksum (the re-apply
+    warning), and list newest-first."""
+    db = await _db()
+    async with db.session() as s:
+        await store.record_applied_bundle(
+            s, source_package_id="p1", name="Package 1 · jdedwards", application="jdedwards",
+            checksum="abc123", op_count=3, status="applied", summary={"applied": 3}, details=[{"status": "applied"}], user="admin",
+        )
+    # find by checksum → the recorded apply; unknown checksum → None
+    async with db.session() as s:
+        prev = await store.find_applied_by_checksum(s, "abc123")
+        assert prev is not None and prev.name == "Package 1 · jdedwards" and prev.applied_by == "admin"
+        assert await store.find_applied_by_checksum(s, "nope") is None
+        assert await store.find_applied_by_checksum(s, None) is None
+    # a second apply (partial) then list newest-first, filtered by application
+    async with db.session() as s:
+        await store.record_applied_bundle(
+            s, source_package_id="p2", name="Package 2 · jdedwards", application="jdedwards",
+            checksum="def456", op_count=5, status="partial", summary={"applied": 4, "conflict": 1}, details=None, user="admin",
+        )
+    async with db.session() as s:
+        rows = await store.list_applied_bundles(s, application="jdedwards")
+        assert [r.name for r in rows] == ["Package 2 · jdedwards", "Package 1 · jdedwards"]
+        assert rows[0].status == "partial"
+        assert await store.list_applied_bundles(s, application="other") == []

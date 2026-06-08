@@ -5,11 +5,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown, RefreshCw, Trash2, Search } from 'lucide-react'
+import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown, RefreshCw, Trash2, Search, Inbox } from 'lucide-react'
 import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { ApplyBundleModal } from './ApplyBundleModal'
+import { ApplyBundlePanel } from './ApplyBundleModal'
 
 type Pkg = {
   id: string; application: string; name: string; status: string; description: string | null
@@ -25,7 +25,29 @@ type Entry = {
   status: string; captured_by: string | null; captured_at: string | null
 }
 type PkgDetail = Pkg & { entries: Entry[] }
+type AppliedOp = { connector?: string; query?: string; operation?: string; entity_key?: Record<string, unknown> | null }
+type AppliedResult = { index?: number; op?: AppliedOp; status: string; detail?: string; rowcount?: number }
+type Applied = {
+  id: string; source_package_id: string | null; name: string; application: string | null
+  checksum: string | null; op_count: number; status: string
+  summary: Record<string, number> | null; details: AppliedResult[] | null
+  applied_by: string | null; applied_at: string | null
+}
 
+const Tabs = styled.div`display: flex; align-items: center; gap: 4px; margin-bottom: 14px;`
+const TabBtn = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px; border-radius: ${radius.md}; cursor: pointer;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.input)};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
+const APPLIED_OP_TONE: Record<string, string> = {
+  applied: colors.green.main, would_apply: colors.green.main, would_force: colors.orange.main,
+  unverified: colors.orange.main, conflict: colors.red.main, error: colors.red.main,
+}
 const Wrap = styled.div`display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start;`
 const List = styled.div`display: flex; flex-direction: column; gap: 6px;`
 const FilterBox = styled.div`
@@ -51,6 +73,24 @@ const Badge = styled.span<{ $tone: string }>`
   display: inline-block; font-size: ${fontSize.micro}; font-weight: 600; padding: 1px 7px; border-radius: 999px;
   text-transform: uppercase; letter-spacing: .03em;
   color: ${(p) => p.$tone}; border: 1px solid ${(p) => p.$tone}; background: transparent;
+`
+const AppliedPanel = styled.div`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; margin-top: 14px; background: ${colors.bg.input};
+  & > .head { display: flex; align-items: center; gap: 8px; padding: 9px 11px; color: ${colors.text.secondary};
+    font-size: ${fontSize.sm}; font-weight: 600; font-family: ${fonts.sans}; border-bottom: 1px solid ${colors.border}; }
+  & > .head .count { color: ${colors.text.muted}; font-weight: 400; }
+  & .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 11px; cursor: pointer;
+    border-top: 1px solid ${colors.border}; }
+  & .row:first-of-type { border-top: none; }
+  & .row:hover { background: var(--hover-subtle); }
+  & .row .name { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
+  & .row .meta { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  & .row .when { margin-left: auto; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  & .det { display: flex; flex-direction: column; gap: 3px; padding: 4px 11px 10px 30px; }
+  & .det .op { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: ${fontSize.micro}; }
+  & .det .op .key { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
+  & .det .op .q { font-family: ${fonts.mono}; color: ${colors.text.muted}; }
+  & .det .op .dt { color: ${colors.text.secondary}; }
 `
 const Group = styled.div`margin-bottom: 14px;`
 const Row = styled.div`
@@ -147,8 +187,13 @@ export default function ChangePackagesBuilder() {
   const [detail, setDetail] = useState<PkgDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [applyOpen, setApplyOpen] = useState(false)
+  // Two tabs, like the Package page: review/manage change packages, or apply an imported bundle.
+  const [mode, setMode] = useState<'changes' | 'apply'>('changes')
   const [filter, setFilter] = useState('')
+  // Target-side import log — bundles applied to THIS environment (shown in the Apply tab). Each row
+  // expands to its per-op detail.
+  const [applied, setApplied] = useState<Applied[] | null>(null)
+  const [openApplied, setOpenApplied] = useState<Set<string>>(new Set())
   // Collapsible UI state — a package can hold hundreds of entries, so default to collapsed diffs
   // (just the summary row) and let the operator drill into the ones they care about. Group + entry
   // expansion are remembered per package id while it stays selected.
@@ -167,8 +212,18 @@ export default function ChangePackagesBuilder() {
     api.get<PkgDetail>(`/admin/changesets/${encodeURIComponent(id)}`)
       .then(setDetail)
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e))), [])
+  const loadApplied = useCallback(() =>
+    api.get<{ applied: Applied[] }>('/admin/changesets/applied')
+      .then((d) => setApplied(d.applied))
+      // The import log is secondary — a failure (endpoint missing on an un-restarted backend,
+      // changesets disabled) shouldn't error the whole page. Surface in the console for diagnosis
+      // and leave the list empty.
+      .catch((e) => { console.warn('applied-bundles load failed', e); setApplied([]) }), [])  // eslint-disable-line no-console
 
   useEffect(() => { void loadList() }, [loadList])
+  // Reload the import log on mount AND whenever the Apply tab is (re)opened — so it's fresh when you
+  // come back to it, not stale from the initial mount.
+  useEffect(() => { if (mode === 'apply') void loadApplied() }, [mode, loadApplied])
   useEffect(() => { if (!selId) { setDetail(null); return } void loadDetail(selId) }, [selId, loadDetail])
   // Initialise collapse state when SWITCHING package (keyed on id, so a refresh after
   // exclude/include doesn't reset what the operator expanded). Groups open; entry diffs collapsed
@@ -217,10 +272,10 @@ export default function ChangePackagesBuilder() {
   // until this is hit (or the tab is re-opened). Reloads the list + the open package.
   const refresh = useCallback(async () => {
     setBusy(true); setError(null)
-    try { await Promise.all([loadList(), selId ? loadDetail(selId) : Promise.resolve()]) }
+    try { await Promise.all([loadList(), loadApplied(), selId ? loadDetail(selId) : Promise.resolve()]) }
     catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
     finally { setBusy(false) }
-  }, [selId, loadList, loadDetail])
+  }, [selId, loadList, loadApplied, loadDetail])
 
   // Delete a package (any status) — only the package log goes; the captured rows already live in
   // their tables. Confirm via the themed dialog (never window.confirm). Re-point the selection.
@@ -275,19 +330,61 @@ export default function ChangePackagesBuilder() {
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-        <Sub style={{ flex: 1, margin: 0 }}>{t('settings.changes.hint',
-          'Every tracked data change is captured into the active package for its connector. Review the diffs here; approval + promotion to another environment come next.')}</Sub>
+      <Tabs>
+        <TabBtn $active={mode === 'changes'} onClick={() => setMode('changes')}>
+          <Layers size={13} /> {t('settings.changes.changesTab', 'Changes')}
+        </TabBtn>
+        <TabBtn $active={mode === 'apply'} onClick={() => setMode('apply')}>
+          <Upload size={13} /> {t('settings.changes.applyTab', 'Apply')}
+        </TabBtn>
+        <div style={{ flex: 1 }} />
         <Button $size="sm" $variant="ghost" disabled={busy} onClick={() => void refresh()}>
           <RefreshCw size={13} /> {t('common.refresh', 'Refresh')}
         </Button>
-        <Button $size="sm" $variant="ghost" onClick={() => setApplyOpen(true)}>
-          <Upload size={13} /> {t('settings.changes.applyBundle', 'Apply bundle…')}
-        </Button>
-      </div>
+      </Tabs>
       {error && <Banner $tone="error">{error}</Banner>}
-      {applyOpen && <ApplyBundleModal onClose={() => setApplyOpen(false)} />}
-      {packages.length === 0 ? (
+
+      {mode === 'apply' ? (
+        <>
+          <ApplyBundlePanel onApplied={loadApplied} />
+          {applied && applied.length > 0 && (
+            <AppliedPanel>
+              <div className="head">
+                <Inbox size={14} />
+                <span>{t('settings.changes.appliedTitle', 'Applied bundles')}</span>
+                <span className="count">{applied.length}</span>
+              </div>
+              {applied.map((a) => {
+                const summary = a.summary ? Object.entries(a.summary).map(([k, v]) => `${v} ${k}`).join(' · ') : ''
+                const open = openApplied.has(a.id)
+                return (
+                  <div key={a.id}>
+                    <div className="row" onClick={() => toggle(openApplied, setOpenApplied, a.id)}>
+                      {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      <Badge $tone={a.status === 'partial' ? colors.orange.main : colors.green.main}>{a.status}</Badge>
+                      <span className="name">{a.name}</span>
+                      <span className="meta">{a.application} · {t('settings.changes.opsCount', '{{n}} op(s)', { n: a.op_count })}{summary ? ` · ${summary}` : ''}</span>
+                      <span className="when">{fmtDate(a.applied_at)}{a.applied_by ? ` · ${a.applied_by}` : ''}</span>
+                    </div>
+                    {open && a.details && a.details.length > 0 && (
+                      <div className="det">
+                        {a.details.map((r, i) => (
+                          <div className="op" key={i}>
+                            <Badge $tone={APPLIED_OP_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
+                            <span className="key">{r.op?.operation} {r.op?.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : ''}</span>
+                            <span className="q">{r.op?.connector}.{r.op?.query}</span>
+                            {r.detail && <span className="dt">— {r.detail}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </AppliedPanel>
+          )}
+        </>
+      ) : packages.length === 0 ? (
         <Sub>{t('settings.changes.empty', 'No change packages yet — edit a record on a change-tracked screen to open one.')}</Sub>
       ) : (
         <Wrap>

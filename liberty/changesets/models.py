@@ -144,3 +144,32 @@ class ChangeEntry(Base):
     __table_args__ = (
         Index("ix_ly_change_ent_pkg", "package_id"),
     )
+
+
+class AppliedBundle(Base):
+    """A promotion bundle imported + applied to THIS environment — the target-side import log.
+
+    Lets the operator see what's been promoted *here* (what / when / by whom / with what result) and
+    warns on a duplicate apply: a bundle's ``checksum`` is its identity, so the apply path can flag
+    "already applied on …". Separate from :class:`ChangePackage` (which is the SOURCE-side authoring
+    record) — the target usually doesn't hold the source packages, only this log of what arrived."""
+
+    __tablename__ = "ly_applied_bundles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    # The source package's id / name / application (connector), copied from the bundle metadata.
+    source_package_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    application: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # sha256 over the bundle's ops — the bundle's identity, used to detect a re-apply.
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    op_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # ``applied`` = clean; ``partial`` = some ops hit a conflict / error.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="applied")
+    # The apply report's per-status counts ({applied: n, conflict: n, error: n, …}).
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Per-op results (op summary + status + detail) — the "what was applied" detail the import-log
+    # entry expands to show. No row values, just op identity + outcome, so it stays compact.
+    details: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    applied_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
