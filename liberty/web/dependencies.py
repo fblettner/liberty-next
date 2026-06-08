@@ -266,7 +266,7 @@ def _resolve_screen(state: Any, seed: Seed) -> tuple[Dependency | None, list[tup
             for action in _iter_actions(getattr(dialog, hook, None) or []):
                 refs.extend(_refs_from_action(action, state, eff_conn, where=f"{seed.scope}.{seed.name} dialog.{hook}"))
     # Top-level screen action hooks.
-    for hook in ("actions", "on_insert", "on_update", "on_delete", "row_menu"):
+    for hook in ("actions", "on_insert", "on_update", "on_delete", "on_duplicate", "row_menu"):
         for action in _iter_actions(getattr(screen, hook, None) or []):
             refs.extend(_refs_from_action(action, state, eff_conn, where=f"{seed.scope}.{seed.name} {hook}"))
     # Excel export sheets.

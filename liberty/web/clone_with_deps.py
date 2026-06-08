@@ -287,7 +287,7 @@ def _rewrite_screen(
         for hook in ("on_load", "on_save", "on_cancel"):
             for action in _iter_actions(dialog.get(hook)):
                 _rewrite_action(action, rename_map, default_conn=eff_conn)
-    for hook in ("actions", "on_insert", "on_update", "on_delete", "row_menu"):
+    for hook in ("actions", "on_insert", "on_update", "on_delete", "on_duplicate", "row_menu"):
         for action in _iter_actions(out.get(hook)):
             _rewrite_action(action, rename_map, default_conn=eff_conn)
     export = out.get("export")

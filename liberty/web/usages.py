@@ -132,7 +132,7 @@ def _iter_screen_actions(screen: Any) -> Any:
     (where_label, action) so the resulting usage label can describe the location."""
     for action in _iter_actions(getattr(screen, "actions", None) or []):
         yield ("screen.actions", action)
-    for hook in ("on_insert", "on_update", "on_delete", "row_menu"):
+    for hook in ("on_insert", "on_update", "on_delete", "on_duplicate", "row_menu"):
         for action in _iter_actions(getattr(screen, hook, None) or []):
             yield (f"screen.{hook}", action)
     dialog = getattr(screen, "dialog", None)

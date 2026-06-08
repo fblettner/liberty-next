@@ -593,7 +593,7 @@ def _dump_screen(s: Screen) -> dict[str, Any]:
             for a_dict, a_model in zip(d.get("dialog", {}).get(hook, []), getattr(s.dialog, hook, [])):
                 _reinject_action_type(a_dict, a_model)
     # Screen-level action lists.
-    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
+    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete", "on_duplicate"):
         for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, [])):
             _reinject_action_type(a_dict, a_model)
     # Fold ``screen.key_columns`` (the old flat list — what pre-Phase-3 migration emitted
