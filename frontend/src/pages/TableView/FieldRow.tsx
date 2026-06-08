@@ -108,7 +108,9 @@ export function FieldRow({
       <Checkbox
         checked={checked}
         onChange={(v) => onChange(field.name, v ? trueV : falseV)}
-        label={checked ? trueV : (falseV ?? t('common.no'))}
+        // Label the STATE, not the raw stored code: a user sees "enabled / disabled", not "1 / 0"
+        // (the true/false values like Y/1/01 are storage detail, meaningless on a checkbox).
+        label={checked ? t('common.enabled') : t('common.disabled')}
       />
     )
   } else if (effectiveRule?.kind === 'enum') {

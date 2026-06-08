@@ -42,6 +42,8 @@ const en = {
     send: 'Send',
     none: 'none',
     no: 'no',
+    enabled: 'enabled',
+    disabled: 'disabled',
     pick: 'Pick…',
     signIn: 'Sign in',
     signingIn: 'Signing in…',

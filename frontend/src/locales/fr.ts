@@ -44,6 +44,8 @@ const fr: Resources = {
     send: 'Envoyer',
     none: 'aucun',
     no: 'non',
+    enabled: 'activé',
+    disabled: 'désactivé',
     pick: 'Choisir…',
     signIn: 'Se connecter',
     signingIn: 'Connexion…',
