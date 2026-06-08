@@ -14,6 +14,7 @@ import {
 } from '../../common'
 import styled from '@emotion/styled'
 import ActionTreeView from './ActionTreeView'
+import { EditQueryModal } from './EditQueryModal'
 import { builtinSourceOptions } from './actionCandidates'
 import type { ActionPath } from './actionPath'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -54,6 +55,9 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(true)
+  // Edit-query raised from a run_query step's pencil — opens EditQueryModal (z-index 600, above this
+  // editor's Overlay at 400). Previously a no-op, so the pencil appeared dead.
+  const [editQuery, setEditQuery] = useState<{ connector: string; queryName: string } | null>(null)
   const closedRef = useRef(false)
 
   useEffect(() => {
@@ -178,9 +182,10 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
             onPathChange={setPath}
             defs={defs}
             effectiveConnector=""
-            onEditQuery={() => { /* edit queries in the Connectors tab */ }}
+            onEditQuery={(connector, queryName) => setEditQuery({ connector, queryName })}
             rootLabel={actionId}
-            heading={t('settings.actions.steps', 'Steps')}
+            // Heading rendered by the outer <SubHead> above — don't let ActionTreeView paint a
+            // second "Steps". Keep the hint (it has no outer equivalent).
             hint={t('settings.actions.stepsHint', 'The ordered steps this action runs. Pin each query/plugin step’s connector explicitly (shared actions aren’t tied to one app).')}
           />
         </div>
@@ -222,6 +227,13 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
           </ModalFooter>
         </VisualBuilderModal>
       </Overlay>
+      {editQuery && (
+        <EditQueryModal
+          connector={editQuery.connector}
+          queryName={editQuery.queryName}
+          onClose={() => setEditQuery(null)}
+        />
+      )}
     </FrameworkEnumsContext.Provider>,
     document.body,
   )
