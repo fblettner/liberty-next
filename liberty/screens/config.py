@@ -562,6 +562,19 @@ class CallActionAction(_ActionBase):
         default_factory=list,
         description="Seed the shared action's ``INPUT.<param>`` from the firing context before it runs.",
     )
+    change_replay: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Change tracking"},
+        description=(
+            "Record the API / plugin calls this shared action makes in the change package so a "
+            "promotion bundle RE-RUNS them on the target. (The action's SQL writes are always "
+            "captured + replayed + drift-checked, like any row write — this only governs its "
+            "call_api / call_plugin steps, whose external side effects can't be drift-checked.) "
+            "Off by default; set it on the screen's action — you don't have to edit the shared "
+            "action's steps. Turn on only when the calls are idempotent data writes you want "
+            "reproduced (e.g. a JD Edwards security insert via AIS), not one-off side effects."
+        ),
+    )
 
 
 class NavigateAction(_PromptableMixin, _ActionBase):

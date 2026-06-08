@@ -251,6 +251,9 @@ export type Action =
       type: 'call_action'
       ref: string
       param_binds?: ParamBind[]
+      /** Replay the shared action's call_api/call_plugin steps on apply (its SQL writes always
+       *  replay). Set here on the screen action — no need to edit the shared action's steps. */
+      change_replay?: boolean
     })
   | (ActionCommon & PromptableAction & {
       type: 'navigate'

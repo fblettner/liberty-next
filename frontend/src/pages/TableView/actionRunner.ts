@@ -79,6 +79,11 @@ export interface ActionRunnerDeps {
    *  captured physically; call_api / call_plugin are captured as replayable invocations but only
    *  when the action opts in via ``change_replay``. Unset (most call sites) → no tagging. */
   changeContext?: { app: string; screen: string }
+  /** Internal — when running INSIDE a ``call_action``, this carries that call_action's
+   *  ``change_replay`` so the shared action's call_api/call_plugin steps inherit the replay
+   *  decision the operator made on the SCREEN action (they don't edit the shared steps). Unset at
+   *  the top level → a direct call_api/call_plugin uses its own ``change_replay``. */
+  _replayOverride?: boolean
   /** Internal — the chain of shared-action ids currently being inlined, for cycle detection.
    *  Callers leave this unset; the runner threads it through nested ``call_action`` runs. */
   _actionStack?: string[]
@@ -401,7 +406,9 @@ async function runOneAction(
           if (v == null) { result.cancelled = true; return { abort: true } }
           ctx.INPUT = { ...ctx.INPUT, ...v, ...seed }
         }
-        const childDeps: ActionRunnerDeps = { ...deps, _actionStack: [...stack, a.ref] }
+        // The shared action's call_api/call_plugin steps inherit THIS call_action's change_replay —
+        // the operator decides replay on the screen action, not by editing the shared steps.
+        const childDeps: ActionRunnerDeps = { ...deps, _actionStack: [...stack, a.ref], _replayOverride: deps._replayOverride ?? !!a.change_replay }
         for (const step of shared.steps ?? []) {
           const r = await runOneAction(step, ctx, formCtx, childDeps, result)
           if (r.abort) return r
@@ -500,10 +507,11 @@ async function runOneAction(
         }>(
           `/api/http/${encodeURIComponent(a.connector)}/${encodeURIComponent(a.endpoint)}`,
           // A change-tracked screen CAPTURES every call (so the package shows it for review); the
-          // action's ``change_replay`` opt-in rides along as ``replay`` and decides whether APPLY
-          // re-fires it on the target (an API call's side effects can't be drift-checked).
+          // ``replay`` opt-in rides along and decides whether APPLY re-fires it (an API call's side
+          // effects can't be drift-checked). When this step runs inside a call_action, the screen's
+          // call_action.change_replay (``_replayOverride``) governs; a direct call uses its own.
           deps.changeContext
-            ? { ...bound, _change_context: { ...deps.changeContext, replay: !!a.change_replay } }
+            ? { ...bound, _change_context: { ...deps.changeContext, replay: deps._replayOverride ?? !!a.change_replay } }
             : bound,
         )
         if (resp?.success === false) {
@@ -543,9 +551,10 @@ async function runOneAction(
           first_row?: Row
         }>(
           '/api/plugins/run',
-          // Captured on any change-tracked screen (visible in the package); ``replay`` carries the
-          // change_replay opt-in that gates whether APPLY re-runs the callable on the target.
-          { callable: a.callable, params: bound, ...(deps.changeContext ? { _change_context: { ...deps.changeContext, replay: !!a.change_replay } } : {}) },
+          // Captured on any change-tracked screen (visible in the package); ``replay`` gates whether
+          // APPLY re-runs the callable. Inside a call_action the screen's call_action.change_replay
+          // (``_replayOverride``) governs; a direct call_plugin uses its own change_replay.
+          { callable: a.callable, params: bound, ...(deps.changeContext ? { _change_context: { ...deps.changeContext, replay: deps._replayOverride ?? !!a.change_replay } } : {}) },
         )
         if (a.bind_result) {
           const rows = Array.isArray(resp?.rows) ? resp.rows : []
