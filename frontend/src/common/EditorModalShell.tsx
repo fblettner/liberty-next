@@ -11,7 +11,7 @@
 // the footer, right; header + tabs + footer are fixed, only the body scrolls. Escape calls onClose
 // (the caller's onClose may prompt for unsaved changes). No backdrop-click-to-close by default — an
 // editor must not discard in-progress edits on a stray click.
-import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
@@ -54,7 +54,12 @@ export interface EditorModalShellProps {
   onClose: () => void
   /** Which frame preset to use — visual builder, screen dialog, or the plain modal. */
   variant?: keyof typeof FRAMES
-  /** Maximize/restore toggle — rendered in the header only when both are provided. */
+  /** Show the maximize/restore toggle (default true). The shell owns the fullscreen state unless
+   *  the caller controls it via ``fullscreen`` + ``onToggleFullscreen``. */
+  fullscreenable?: boolean
+  /** Initial fullscreen state for the shell-managed (uncontrolled) case. */
+  defaultFullscreen?: boolean
+  /** Controlled fullscreen — pass BOTH to drive it yourself; otherwise the shell manages it. */
   fullscreen?: boolean
   onToggleFullscreen?: () => void
   /** Marks the title with an "unsaved" badge. */
@@ -82,12 +87,26 @@ export interface EditorModalShellProps {
 }
 
 export function EditorModalShell({
-  title, onClose, variant = 'default', fullscreen, onToggleFullscreen, dirty, onSave,
+  title, onClose, variant = 'default', fullscreenable = true, defaultFullscreen = false,
+  fullscreen, onToggleFullscreen, dirty, onSave,
   saveDisabled, busy, tabs, footer, footerLeft, dismissOnBackdrop = false, scrollBody = true,
   overlayZIndex, frameStyle, children,
 }: EditorModalShellProps) {
   const { t } = useTranslation()
   const Frame = FRAMES[variant]
+
+  // Fullscreen: controlled when the caller passes onToggleFullscreen, else shell-managed. Either
+  // way the toggle is shown by default — so every modal is maximizable, consistently.
+  const [internalFs, setInternalFs] = useState(defaultFullscreen)
+  const controlled = onToggleFullscreen != null
+  const fs = controlled ? !!fullscreen : internalFs
+  const toggleFs = controlled ? onToggleFullscreen : () => setInternalFs((v) => !v)
+  // Fullscreen wins over any preset / frameStyle size via an inline override (works for every frame,
+  // including the plain Modal which has no ``$fullscreen`` variant). Windowed → the frameStyle / the
+  // preset's own dimensions.
+  const effFrameStyle: CSSProperties | undefined = fs
+    ? { ...(frameStyle ?? {}), width: '100vw', height: '100vh', maxWidth: '100vw', maxHeight: '100vh', borderRadius: 0 }
+    : frameStyle
 
   // Escape closes (routes through the caller's onClose, which may prompt).
   useEffect(() => {
@@ -112,16 +131,16 @@ export function EditorModalShell({
 
   return createPortal(
     <Overlay onClick={dismissOnBackdrop ? onClose : undefined} style={overlayZIndex != null ? { zIndex: overlayZIndex } : undefined}>
-      <Frame $fullscreen={fullscreen} style={frameStyle} onClick={(e) => e.stopPropagation()}>
+      <Frame style={effFrameStyle} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <HeaderRow>
             <span className="title">{title}</span>
             <span className="right">
               {dirty && <span className="dirty">{t('settings.unsaved')}</span>}
-              {onToggleFullscreen && (
-                <IconBtn type="button" onClick={onToggleFullscreen}
-                  title={fullscreen ? t('common.restore') : t('common.maximize')} aria-pressed={fullscreen}>
-                  {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              {fullscreenable && (
+                <IconBtn type="button" onClick={toggleFs}
+                  title={fs ? t('common.restore') : t('common.maximize')} aria-pressed={fs}>
+                  {fs ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                 </IconBtn>
               )}
               <IconBtn type="button" onClick={onClose} title={t('common.close', 'Close')} aria-label={t('common.close', 'Close')}>
