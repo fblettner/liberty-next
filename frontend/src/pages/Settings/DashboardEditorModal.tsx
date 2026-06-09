@@ -6,8 +6,9 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard } from 'lucide-react'
-import { Overlay, Modal, Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard } from 'lucide-react'
+import { Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartWidget } from '../DashboardView/ChartWidget'
 import { KpiWidget } from '../DashboardView/KpiWidget'
@@ -20,17 +21,11 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 type Raw = Record<string, unknown>
 const ROW_PX = 150
 
-const Box = styled(Modal)`width: 98vw; height: 96vh; max-width: 98vw;`
-const Header = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
-  & .id { font-family: ${fonts.mono}; font-size: ${fontSize.md}; color: ${colors.text.muted}; }
-`
 const CloseBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
   border-radius: ${radius.md}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
-const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px;`
 const MetaRow = styled.div`display: grid; grid-template-columns: 1fr 2fr; gap: 12px;`
 const AddBar = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap;`
 const Grid = styled.div`
@@ -60,7 +55,6 @@ const Placeholder = styled.div`
 `
 const FiltersPanel = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; padding: 12px; display: flex; flex-direction: column; gap: 10px;`
 const FilterRow = styled.div`display: grid; grid-template-columns: repeat(7, 1fr) auto; gap: 8px; align-items: end;`
-const Footer = styled.div`display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid ${colors.border}; flex-shrink: 0;`
 
 const snum = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
 const sstr = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -197,19 +191,21 @@ export function DashboardEditorModal({
 
   const editingInitial = editIdx != null ? widgets[editIdx] : null
 
-  // No backdrop-click-to-close — outside clicks must not discard edits (Cancel / Escape).
   return (
-    <Overlay>
-      <Box onClick={(e) => e.stopPropagation()}>
-        <Header>
-          <LayoutDashboard size={17} color={colors.blue.main} />
-          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.dash.title', 'Dashboard title')} style={{ maxWidth: 320 }} />
-          <span className="id">[dashboards.{scope}.{id}]</span>
-          <div style={{ flex: 1 }} />
-          <CloseBtn onClick={() => void requestClose()} title={t('common.close')}><X size={16} /></CloseBtn>
-        </Header>
-
-        <Body>
+    <>
+      <EditorModalShell
+        title={(
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <LayoutDashboard size={16} color={colors.blue.main} />
+            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[dashboards.{scope}.{id}]</span>
+          </span>
+        )}
+        onClose={() => void requestClose()}
+        onSave={save}
+        dirty={dirty}
+        frameStyle={{ width: '98vw', height: '96vh', maxWidth: '98vw' }}
+        footerLeft={<span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.widgetCount', '{{n}} widget(s)', { n: widgets.length })}</span>}
+      >
           {error && <Banner $tone="error">{error}</Banner>}
           <MetaRow>
             <Field label={t('settings.dash.dLabel', 'Title')}>
@@ -308,15 +304,7 @@ export function DashboardEditorModal({
               )
             })}
           </FiltersPanel>
-        </Body>
-
-        <Footer>
-          <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.widgetCount', '{{n}} widget(s)', { n: widgets.length })}</span>
-          <div style={{ flex: 1 }} />
-          <Button $size="sm" $variant="ghost" onClick={() => void requestClose()}>{t('common.cancel', 'Cancel')}</Button>
-          <Button $size="sm" $variant="primary" onClick={save}>{t('common.save')}</Button>
-        </Footer>
-      </Box>
+      </EditorModalShell>
 
       {editingInitial && (
         <WidgetEditorModal
@@ -326,7 +314,7 @@ export function DashboardEditorModal({
           onClose={onWidgetCancel}
         />
       )}
-    </Overlay>
+    </>
   )
 }
 

@@ -16,24 +16,13 @@
 // the designer's stacking context entirely. The z-index sits at 800 so we paint above the
 // designer (z-index 400) but below the global ``useModals`` confirm/prompt overlay
 // (z-index 2000) — a confirm-delete from inside the action editor still surfaces correctly.
-import { useEffect } from 'react'
-import { createPortal } from 'react-dom'
-import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { X } from 'lucide-react'
-import {
-  Button, ModalBody, ModalFooter, ModalHeader, Overlay, ScreenDialogModal, Row,
-  type JsonSchema, type SearchSelectOption,
-} from '../../common'
+import { Button, type JsonSchema, type SearchSelectOption } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import ActionTreeView from './ActionTreeView'
 import type { ActionPath } from './actionPath'
 
 type RowDict = Record<string, unknown>
-
-// The action editor sits above the Screen Designer (z-index 400) but below the global
-// confirm/prompt modal (z-index 2000) so a confirm-delete fired from inside the editor still
-// surfaces correctly. Same Overlay tile as everywhere else, just bumped up.
-const RaisedOverlay = styled(Overlay)`z-index: 800;`
 
 export interface ActionEditorModalProps {
   /** The list this modal is editing — the root for ``ActionTreeView`` to walk. */
@@ -70,60 +59,34 @@ export default function ActionEditorModal({
 }: ActionEditorModalProps) {
   const { t } = useTranslation()
 
-  // Escape closes — same convention every modal in the app uses.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  return createPortal(
-    // No backdrop-click-to-close — an outside click must not discard in-progress action edits.
-    // Close via the header X / Cancel only. The modal still stops propagation so clicks on its
-    // content don't bubble up to the surrounding designer's overlay (which would close the
-    // designer entirely — that was the bug in the first cut of this component).
-    <RaisedOverlay>
-      <ScreenDialogModal onClick={(e) => e.stopPropagation()}>
-        <ModalHeader>
-          <Row gap={10} style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>{rootLabel}</span>
-            <Button $variant="ghost" $size="sm" onClick={onClose} title={t('common.close')}>
-              <X size={14} />
-            </Button>
-          </Row>
-        </ModalHeader>
-        <ModalBody>
-          {/* ActionTreeView in editor mode — same component the Visual Designer's Inspector
-              uses, just hosted in a focused modal instead of the right column. ``showBreadcrumb``
-              defaults to true; the operator pops back to the modal's root via the topmost crumb
-              (clicking ``rootLabel`` clears the path → ``onPathChange(null)`` triggers ``onClose``). */}
-          <ActionTreeView
-            actions={actions}
-            onChange={onChange}
-            path={path}
-            onPathChange={(next) => {
-              // ``null`` (or empty path) means the operator clicked the root crumb — close the
-              // modal entirely since the parent's tab already shows the same list.
-              if (next == null || next.length === 0) onClose()
-              else onPathChange(next)
-            }}
-            defs={defs}
-            effectiveConnector={effectiveConnector}
-            onEditQuery={onEditQuery}
-            rootLabel={rootLabel}
-            screenReadColumns={screenReadColumns}
-            extraSourceOptions={extraSourceOptions}
-          />
-        </ModalBody>
-        <ModalFooter>
-          <Row gap={8}>
-            <Button $variant="primary" $size="sm" onClick={onClose}>
-              {t('common.close')}
-            </Button>
-          </Row>
-        </ModalFooter>
-      </ScreenDialogModal>
-    </RaisedOverlay>,
-    document.body,
+  // Sits above the Screen Designer (400) but below the global confirm/prompt overlay (2000), so a
+  // confirm-delete fired from inside still surfaces. No Save — edits are live via onChange; the
+  // footer is a single Close.
+  return (
+    <EditorModalShell
+      variant="screen"
+      overlayZIndex={800}
+      title={rootLabel}
+      onClose={onClose}
+      footer={<Button $variant="primary" $size="sm" onClick={onClose}>{t('common.close')}</Button>}
+    >
+      {/* ActionTreeView in editor mode — same component the Visual Designer's Inspector uses. The
+          operator pops back to the root via the topmost crumb (clearing the path → onClose). */}
+      <ActionTreeView
+        actions={actions}
+        onChange={onChange}
+        path={path}
+        onPathChange={(next) => {
+          if (next == null || next.length === 0) onClose()
+          else onPathChange(next)
+        }}
+        defs={defs}
+        effectiveConnector={effectiveConnector}
+        onEditQuery={onEditQuery}
+        rootLabel={rootLabel}
+        screenReadColumns={screenReadColumns}
+        extraSourceOptions={extraSourceOptions}
+      />
+    </EditorModalShell>
   )
 }
