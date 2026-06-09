@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from liberty.ai.tools import Tool, tool
-from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector
+from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, flatten_query_metas
 from liberty.connectors.base import ConnectorError
 
 
@@ -77,7 +77,7 @@ def build_connector_tools(
                         "bind_params": q.get("bind_params", []),
                         "read_only": not q.get("writable", False),
                     }
-                    for q in desc["queries"]
+                    for q in flatten_query_metas(desc)
                 ]
                 out.append({"name": desc["name"], "type": "sql", "queries": queries})
             elif include_api and desc["type"] == "api":

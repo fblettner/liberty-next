@@ -112,6 +112,45 @@ class ScreenField(BaseModel):
         description="Require a value on this dialog. Leave blank to inherit from the column.",
     )
     colspan: int | None = Field(default=None, description="How many tab-grid columns this field spans.")
+    # ── self-contained field metadata (dd / label / format / rule) ──────────────────────────────
+    # The MAIN screen's dialog fields inherit these from the matching ``Screen.columns`` entry — set
+    # them on the column, not here. But a NESTED form's fields reference a different table that has
+    # no ``Screen.columns`` layer, so they carry their own ``dd`` (→ the dictionary resolves the
+    # field's BOOLEAN/ENUM/LOOKUP rule, label, format) and optional per-field rule overrides. All
+    # optional + blank by default, so existing screens are unchanged and the backend's field
+    # resolver (``_resolve_screen_field``) keys off ``dd`` when present, else the field ``name``.
+    dd: str | None = Field(
+        default=None,
+        description="Dictionary entry this field inherits its label / format / rule from. Blank → the field ``name`` is the key. Mainly for nested-form fields (the main screen sets ``dd`` on its columns).",
+        json_schema_extra={"x_enum_ref": "DD_ENTRIES", "x_case": "upper"},
+    )
+    label: str | None = Field(default=None, description="Display label override (blank → the dictionary / column label).")
+    format: str | None = Field(
+        default=None,
+        description="Render format override (date / number / boolean / …). Blank → inherit from the dd / column.",
+        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
+    )
+    default: str | None = Field(default=None, description="Default value pre-filled when adding a new record.")
+    rules: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
+        description="Per-field widget rule override (BOOLEAN / ENUM / LOOKUP / SEQUENCE). Blank → inherit from the dd.",
+    )
+    rules_values: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "x_group": "Rule",
+            "x_enum_ref_when": {
+                "field": "rules",
+                "map": {"BOOLEAN": "BOOLEAN_TRUE_VALUES", "ENUM": "ENUM_IDS", "LOOKUP": "LOOKUP_IDS", "SEQUENCE": "SEQUENCE_IDS", "NN": "SEQUENCE_IDS"},
+            },
+        },
+        description="The rule's value: ENUM → enum id; LOOKUP → lookup id; SEQUENCE / NN → sequence id; BOOLEAN → the true marker.",
+    )
+    lookup_param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Binds for this field's LOOKUP query (when its dd / rule resolves to LOOKUP). Same shape as elsewhere.",
+    )
     visible_when: list[FieldCondition] = Field(
         default_factory=list,
         description=(
@@ -166,6 +205,16 @@ class FormTab(_ScreenTabBase):
     type: Literal["form"] = "form"
     cols: int | None = Field(default=None, description="How many columns the tab's grid spans.")
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown on this tab, in display order.")
+    nested_forms: list["NestedFormTab"] = Field(
+        default_factory=list,
+        description=(
+            "Embedded child-record forms shown as labelled sections BELOW this tab's own fields — "
+            "so one tab edits the main table PLUS one or more related tables, all saved in a single "
+            "Save (no on_save action needed). Each is a full nested_form (own connector + "
+            "read/update/insert queries OR a ``form_screen`` reference, fields, and ``param_binds`` "
+            "binding the parent's PK in). Same save coordination as a stand-alone nested_form tab."
+        ),
+    )
 
 
 class NestedFormTab(_ScreenTabBase):
@@ -184,11 +233,35 @@ class NestedFormTab(_ScreenTabBase):
         default=None,
         description="Connector hosting the nested CRUD queries; blank → the parent screen's effective connector.",
     )
-    read_query: str = Field(description="Reads the linked row (typically returning 0 or 1 rows after the bind narrows it).")
-    update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists.")
-    insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed.")
+    form_screen: str | None = Field(
+        default=None,
+        description=(
+            "REFERENCE MODE — id of an existing v2 screen whose form this tab reuses (its "
+            "read/update/insert queries + fields), instead of configuring them inline below. When "
+            "set, ``read_query`` / ``update_query`` / ``insert_query`` / ``fields`` are inherited "
+            "from that screen and may be left blank here; ``param_binds`` still bind the parent's "
+            "values into the referenced read query. Blank → INLINE MODE (configure the queries + "
+            "fields on this tab — a self-contained form that can use queries the parent screen doesn't)."
+        ),
+    )
+    read_query: str = Field(
+        default="",
+        description="INLINE MODE: reads the linked row (0 or 1 rows after the bind narrows it). Ignored / inherited in reference mode.",
+    )
+    update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists. Inherited from ``form_screen`` in reference mode.")
+    insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed. Inherited from ``form_screen`` in reference mode.")
+    delete_query: str | None = Field(
+        default=None,
+        description=(
+            "Removes the linked child row when the PARENT row is deleted — the nested-form analogue "
+            "of ``ColumnGroup.delete_query``. Run before the parent delete (child first), bound by "
+            "``param_binds``. Blank → the child is left untouched (rely on a DB ``ON DELETE CASCADE`` "
+            "FK, or an ``on_delete`` action). Set it when there's no cascade, so deleting the parent "
+            "doesn't orphan the child."
+        ),
+    )
     cols: int | None = Field(default=None, description="How many columns the nested form's grid spans.")
-    fields: list[ScreenField] = Field(default_factory=list, description="Fields shown in the nested form, in display order.")
+    fields: list[ScreenField] = Field(default_factory=list, description="INLINE MODE: fields shown in the nested form, in display order. Inherited from ``form_screen`` in reference mode.")
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description=(
@@ -197,6 +270,17 @@ class NestedFormTab(_ScreenTabBase):
             "parent dialog's live form state (same shape as ``ScreenField.lookup_param_binds``)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _check_form_source(self) -> "NestedFormTab":
+        """A nested_form needs a source: either ``form_screen`` (reference an existing screen) OR
+        an inline ``read_query``. Reject a tab that gives neither (it would render empty)."""
+        if not self.form_screen and not self.read_query:
+            raise ValueError(
+                f"nested_form tab '{self.id}' needs either a 'form_screen' (reference an existing "
+                "screen) or a 'read_query' (inline form) — it has neither."
+            )
+        return self
 
 
 class NestedTableTab(_ScreenTabBase):
@@ -407,6 +491,90 @@ class CallApiAction(_PromptableMixin, _ActionBase):
         default=False,
         description="Capture the API response into the chain context so later steps can reference it.",
     )
+    change_replay: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Change tracking"},
+        description=(
+            "Record this call in the change package when it fires on a change-tracked screen, so a "
+            "promotion bundle RE-RUNS it on the target. Off by default: replay re-fires the call's "
+            "side effects (it may send mail, hit an external system, mint different numbers) and "
+            "can't be drift-checked. Turn on only for an idempotent data call you want reproduced."
+        ),
+    )
+
+
+class CallPluginAction(_PromptableMixin, _ActionBase):
+    """Invoke a server-side plugin callable — the same ``module:function`` entry points nomaflow
+    runs as ``python`` job steps, now callable inline from a screen action (the symmetric sibling
+    of :class:`RunQueryAction` / :class:`CallApiAction`: SQL, HTTP, and now Python).
+
+    The framework resolves the callable, coerces ``param_binds`` against its annotations, injects
+    ``connectors`` / ``settings`` when the callable declares them, awaits it, and (when
+    ``bind_result``) lands its return under this step's ``id`` so later chain steps can bind from
+    it. Runs synchronously — for long batch work, point the same callable at a nomaflow job and
+    fire that instead."""
+
+    type: Literal["call_plugin"] = "call_plugin"
+    callable: str = Field(
+        description="Plugin entry point as ``module:function`` (e.g. ``nomajde.security:j_remerge_security``).",
+        json_schema_extra={"x_enum_ref": "PLUGIN_CALLABLES"},
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Bind the callable's keyword arguments from the firing context (coerced to the param's annotated type).",
+    )
+    bind_result: bool = Field(
+        default=False,
+        description=(
+            "Capture the callable's return value into the chain context so later steps in the same "
+            "Chain can reference it via ``source: '<step_id>.first_row.<col>'``."
+        ),
+    )
+    change_replay: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Change tracking"},
+        description=(
+            "Record this call in the change package when it fires on a change-tracked screen, so a "
+            "promotion bundle RE-RUNS it on the target. Off by default: replay re-fires the "
+            "callable's side effects and can't be drift-checked. Turn on only for an idempotent "
+            "data call you want reproduced on promote."
+        ),
+    )
+
+
+class CallActionAction(_PromptableMixin, _ActionBase):
+    """Run a SHARED action by id — v1's reusable named action (``ly_actions``). The action is
+    defined once in ``actions.toml`` (``[actions.<ref>]``) and referenced from any screen hook /
+    button / row-menu. The referenced action's steps run against the firing context; ``param_binds``
+    seed its ``INPUT.<param>`` so the shared steps can read caller-supplied values (the same
+    ``INPUT.<name>`` slot a prompt fills) without re-prompting.
+
+    This is the reuse primitive that keeps orchestration in ONE place: ``create_role`` /
+    ``import_security`` / … are authored once in the Actions editor (as run_query / call_api /
+    call_plugin / if / chain steps) and every screen just references them."""
+
+    type: Literal["call_action"] = "call_action"
+    ref: str = Field(
+        description="Shared action id — an entry in ``actions.toml`` (``[actions.<ref>]``).",
+        json_schema_extra={"x_enum_ref": "SHARED_ACTIONS"},
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Seed the shared action's ``INPUT.<param>`` from the firing context before it runs.",
+    )
+    change_replay: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Change tracking"},
+        description=(
+            "Record the API / plugin calls this shared action makes in the change package so a "
+            "promotion bundle RE-RUNS them on the target. (The action's SQL writes are always "
+            "captured + replayed + drift-checked, like any row write — this only governs its "
+            "call_api / call_plugin steps, whose external side effects can't be drift-checked.) "
+            "Off by default; set it on the screen's action — you don't have to edit the shared "
+            "action's steps. Turn on only when the calls are idempotent data writes you want "
+            "reproduced (e.g. a JD Edwards security insert via AIS), not one-off side effects."
+        ),
+    )
 
 
 class NavigateAction(_PromptableMixin, _ActionBase):
@@ -419,15 +587,37 @@ class NavigateAction(_PromptableMixin, _ActionBase):
     "usr_id"}]}`` and ends up opening ``/sql/nomasx1/roles_get?USR_ID=<the-clicked-user-id>``."""
 
     type: Literal["navigate"] = "navigate"
-    to: str = Field(description="Target query name (the destination URL is ``/sql/<connector>/<to>``).")
+    to: str | None = Field(
+        default=None,
+        description=(
+            "Target query name (opens ``/sql/<connector>/<to>``). Required UNLESS ``screen`` is set "
+            "— a screen target carries its own read query, so ``to`` is unused there."
+        ),
+    )
     connector: str | None = Field(
         default=None,
-        description="Connector hosting the target query. Blank uses the firing screen's connector.",
+        description="Connector hosting the target. Blank uses the firing screen's connector.",
+    )
+    screen: str | None = Field(
+        default=None,
+        description=(
+            "Target screen id. When set, the drill opens that specific designed screen "
+            "(``/screen/<connector>/<screen>``) so ITS columns / filters / dialog apply — pick a "
+            "screen when several share the same read query. Set EITHER ``screen`` OR ``to``: a "
+            "bare ``to`` opens the query, where the runtime resolves a screen by read query "
+            "(ambiguous if more than one screen uses it, so none is applied)."
+        ),
     )
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description="Forwarded as ``?<param>=<value>`` query-string entries. The target's filter panel seeds from these.",
     )
+
+    @model_validator(mode="after")
+    def _check_target(self) -> NavigateAction:
+        if not self.to and not self.screen:
+            raise ValueError(f"navigate action {self.id!r}: needs a target — set `to` (a query) or `screen` (a screen id)")
+        return self
 
 
 class SetFieldAction(_ActionBase):
@@ -597,7 +787,7 @@ class ReturnAction(_ActionBase):
 # subclass when validating a raw dict (so screens.toml's `[[on_save]] type = "run_query"` validates).
 Action = Annotated[
     Union[
-        RunQueryAction, CallApiAction, NavigateAction, SetFieldAction,
+        RunQueryAction, CallApiAction, CallPluginAction, CallActionAction, NavigateAction, SetFieldAction,
         ConfirmAction, NotifyAction, RefreshAction,
         ChainAction, IfAction, LoopAction, ReturnAction,
     ],
@@ -827,6 +1017,58 @@ class ScreenTreeview(BaseModel):
     )
 
 
+class ColumnGroup(BaseModel):
+    """A 1:1 related table whose columns are edited INLINE on this screen (grid + dialog) and written
+    back to the related table on Save — the lightweight alternative to a nested form when it's a
+    one-to-one relationship.
+
+    The main ``read_query`` JOINs the related table, so its columns come back in the same result and
+    render like any other column (no per-row fetch — works in the grid). Each column assigned to this
+    group via ``ColumnHint.group`` is split out at Save time and written through this group's queries,
+    linked to the parent row by ``param_binds``. Update-vs-insert is decided per row by whether the
+    group's ``key_columns`` came back non-null from the JOIN (a LEFT-JOIN miss ⇒ no related row yet ⇒
+    INSERT, else UPDATE)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Stable id within the screen — referenced by ``ColumnHint.group``.")
+    label: str | None = Field(default=None, description="Display label for the group (editor only).")
+    connector: str | None = Field(default=None, description="Connector the write queries live on; blank → the screen's.")
+    # NOTE: the Columns-tab editor renders column groups via the dedicated ``ColumnGroupsEditor``
+    # (connector / query / key-column / FK-bind dropdowns), NOT the generic schema navigator — so
+    # these fields carry no ``x_enum_ref``. The one picker that IS schema-driven is the per-column
+    # ``ColumnHint.group`` dropdown (x_enum_ref COLUMN_GROUPS).
+    update_query: str = Field(description="Writes edits to the related row.")
+    insert_query: str | None = Field(default=None, description="Writes a new related row when the JOIN found none.")
+    delete_query: str | None = Field(
+        default=None,
+        description=(
+            "Removes the related row when the MAIN row is deleted (grid or dialog) — without it a "
+            "delete leaves the related 1:1 row orphaned. Run before the main delete (child first). "
+            "Blank → the related row is left untouched (use an ``on_delete`` action for custom cleanup)."
+        ),
+    )
+    key_columns: list[str] = Field(
+        default_factory=list,
+        description="The related table's key columns AS THEY APPEAR IN THE JOINED RESULT — non-null ⇒ the row exists ⇒ UPDATE, else INSERT.",
+    )
+    param_binds: list[ParamBind] = Field(
+        default_factory=list,
+        description="Link the parent row into the related write: ``source`` reads a main column, ``param`` is the related query's :placeholder (the FK).",
+    )
+    insert_on_add: bool = Field(
+        default=False,
+        description=(
+            "Insert this related row on EVERY Add, even when none of its fields were filled — the "
+            "FK bind + server-side dictionary defaults populate it. For a mandatory 1:1 companion "
+            "that must exist for each main row (e.g. F0092 → F00921). When off (default), the "
+            "related row is inserted only if at least one of its fields was given a value, so an "
+            "optional companion isn't created blank. Has no effect on Edit (an untouched related "
+            "row is never rewritten)."
+        ),
+    )
+
+
 class Screen(BaseModel):
     """A screen — list + dialog. Keyed by ``id`` within the app's screens map."""
 
@@ -858,6 +1100,15 @@ class Screen(BaseModel):
             "discovered name and the dictionary's defaults."
         ),
     )
+    column_groups: list[ColumnGroup] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Columns"},
+        description=(
+            "Related 1:1 tables whose columns are edited inline on this screen and written back on "
+            "Save. The read query JOINs them; a column joins a group via ``ColumnHint.group``. Use "
+            "this for one-to-one related tables (a nested form/table tab is the choice for 1:N)."
+        ),
+    )
     auto_load: bool = Field(default=False, description="Run the read query as soon as the screen opens, with no Run click.")
     audit_table: str | None = Field(
         default=None,
@@ -870,6 +1121,36 @@ class Screen(BaseModel):
         ),
         json_schema_extra={"x_placeholder": "e.g. AUD_USERS — leave blank to disable"},
     )
+    change_tracked: bool = Field(
+        default=False,
+        description=(
+            "Capture every successful write on this screen into the application's current change "
+            "package (Settings → Packages) so it can be reviewed and promoted to another "
+            "environment. The natural key comes from this screen's ``key_columns``; the pre-image "
+            "from the write's ``:_ORIGINAL`` binds drives drift detection on promotion. Off = not "
+            "packaged. Requires ``[changesets] enabled``."
+        ),
+    )
+    change_entity: str | None = Field(
+        default=None,
+        description=(
+            "Logical label for what this screen edits (e.g. ``user`` / ``role`` / ``relationship`` "
+            "/ ``security``), used to group changes in the package view. Blank → grouped under the "
+            "screen id. Only meaningful when ``change_tracked`` is on."
+        ),
+        json_schema_extra={"x_placeholder": "e.g. user, role, security"},
+    )
+    post_apply: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"x_enum_ref": "POST_APPLY_STEPS"},
+        description=(
+            "Run-once post-apply step ids (from ``[changesets] post_apply``) this screen's changes "
+            "require after promotion — e.g. a security screen selects the ``remerge`` step. On export, "
+            "a package carries the UNION of the steps of the screens that contributed to it, so an "
+            "unrelated change (a UDC record) doesn't trigger another screen's remerge. Only meaningful "
+            "when ``change_tracked`` is on."
+        ),
+    )
     max_rows: int | None = Field(
         default=None,
         description="Cap how many rows this screen's read query returns. Blank = use the connector's / pool's default.",
@@ -880,7 +1161,11 @@ class Screen(BaseModel):
             "Result columns that uniquely identify a row — also derivable per-column by ticking "
             "``key`` on the column hint (the visual designer's Columns tab uses that). When this "
             "list is empty, the runtime falls back to the column hints whose ``key`` is true. "
-            "Set this explicitly only when you want to override the column-derived list."
+            "Set this explicitly only when you want to override the column-derived list. "
+            # FOOTGUN: this is the LEGACY/override field and is empty on every screen whose key is
+            # set the modern per-column way (the UI no longer exposes it). Runtime code that needs
+            # the row key MUST call ``effective_key_columns()`` — reading this attribute directly
+            # silently sees [] and breaks (e.g. change-capture once recorded no natural key here).
         ),
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
@@ -959,6 +1244,15 @@ class Screen(BaseModel):
     on_delete: list[Action] = Field(
         default_factory=list,
         description="Runs after a row is deleted — via the dialog's Delete button, or via the inline grid.",
+    )
+    on_duplicate: list[Action] = Field(
+        default_factory=list,
+        description=(
+            "Runs when a row is DUPLICATED (the dialog's Duplicate button → Save), instead of "
+            "on_insert. The firing context exposes the SOURCE record under ``SOURCE_<col>`` keys "
+            "(the new row drops the key) so actions can copy related-table rows — e.g. duplicate a "
+            "user's role relationships / menu filtering from the original to the new user."
+        ),
     )
     # Row-click → sibling-screen dialog. v2's port of v1's "FormsDialog inside a ly_ctxmenus"
     # pattern: a screen that itself has no ``tbl_frm_id`` but whose context menu carried a single
@@ -1116,7 +1410,10 @@ def parse_screens(data: dict[str, Any]) -> ScreensFile:
                         if isinstance(tab, dict) and not tab.get("type"):
                             if isinstance(tab.get("screen"), str):
                                 tab["type"] = "nested_table"
-                            elif isinstance(tab.get("read_query"), str):
+                            elif isinstance(tab.get("form_screen"), str) or isinstance(tab.get("read_query"), str):
+                                # ``form_screen`` → reference-mode nested_form; ``read_query`` →
+                                # inline nested_form. (``screen`` above is table-only, so the two
+                                # screen-reference keys stay unambiguous across the round-trip.)
                                 tab["type"] = "nested_form"
                             else:
                                 tab["type"] = "form"

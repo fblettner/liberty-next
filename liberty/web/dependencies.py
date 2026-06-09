@@ -165,6 +165,8 @@ def _resolve(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed
         return _resolve_dict_target(state, seed, "enums")
     if seed.kind == "chart":
         return _resolve_chart(state, seed)
+    if seed.kind == "action":
+        return _resolve_action(state, seed)
     return None, []
 
 
@@ -264,7 +266,7 @@ def _resolve_screen(state: Any, seed: Seed) -> tuple[Dependency | None, list[tup
             for action in _iter_actions(getattr(dialog, hook, None) or []):
                 refs.extend(_refs_from_action(action, state, eff_conn, where=f"{seed.scope}.{seed.name} dialog.{hook}"))
     # Top-level screen action hooks.
-    for hook in ("actions", "on_insert", "on_update", "on_delete", "row_menu"):
+    for hook in ("actions", "on_insert", "on_update", "on_delete", "on_duplicate", "row_menu"):
         for action in _iter_actions(getattr(screen, hook, None) or []):
             refs.extend(_refs_from_action(action, state, eff_conn, where=f"{seed.scope}.{seed.name} {hook}"))
     # Excel export sheets.
@@ -283,7 +285,7 @@ def _iter_actions(actions: Any) -> Any:
         return
     for action in actions:
         yield action
-        for child_attr in ("steps", "if_true", "if_false", "body", "on_success", "on_error"):
+        for child_attr in ("steps", "then_steps", "else_steps", "if_true", "if_false", "body", "on_success", "on_error"):
             child = getattr(action, child_attr, None)
             if child:
                 yield from _iter_actions(child)
@@ -305,12 +307,32 @@ def _refs_from_action(action: Any, state: Any, default_conn: str | None, *, wher
         ep = getattr(action, "endpoint", None)
         if ep and a_conn:
             out.append((Seed("api_endpoint", ep, a_conn), f"{where} call_api"))
+    elif a_type == "call_action":
+        ref = getattr(action, "ref", None)
+        if ref:
+            out.append((Seed("action", ref), f"{where} call_action"))
     # Prompt fields reference DD entries.
     for pf in getattr(action, "prompt_fields", None) or []:
         dd_seed = _resolve_dd_via_column_name(state, getattr(pf, "dd", None) or getattr(pf, "name", ""), connector=a_conn)
         if dd_seed:
             out.append((dd_seed, f"{where} prompt {pf.name}"))
     return out
+
+
+def _resolve_action(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
+    """A shared action's dependencies — the queries / endpoints / sub-actions its steps reference
+    (call_plugin targets aren't graph nodes, so they're not enqueued)."""
+    actions = getattr(state, "actions", None)
+    if actions is None:
+        return None, []
+    action = (getattr(actions, "actions", None) or {}).get(seed.name)
+    if action is None:
+        return None, []
+    dep = Dependency(kind="action", name=seed.name, scope=None, config=_dump(action))
+    refs: list[tuple[Seed, str]] = []
+    for step in _iter_actions(getattr(action, "steps", None) or []):
+        refs.extend(_refs_from_action(step, state, None, where=f"action {seed.name}"))
+    return dep, refs
 
 
 def _resolve_menu_item(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
@@ -401,9 +423,13 @@ def _resolve_query(state: Any, seed: Seed) -> tuple[Dependency | None, list[tupl
         return None, []
     conn = cr.get(seed.scope)
     cfg = getattr(conn, "config", None)
-    if cfg is None:
+    if cfg is None or not hasattr(cfg, "iter_named_queries"):
         return None, []
-    q = next((q for q in (getattr(cfg, "queries", None) or []) if getattr(q, "name", None) == seed.name), None)
+    # A query name is the flat synthesised name — a table CRUD slot (``<base>_<crud>``), a
+    # custom query, a sequence or a lookup. ``iter_named_queries`` is the single index across
+    # all four sections, so a screen referencing ``f0092_get`` resolves whether it's a table
+    # slot or a hand-written custom query.
+    q = next((qd for name, qd in cfg.iter_named_queries() if name == seed.name), None)
     if q is None:
         return None, []
     dep = Dependency(kind="query", name=seed.name, scope=seed.scope, config=_dump(q))

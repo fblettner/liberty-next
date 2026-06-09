@@ -678,8 +678,9 @@ function TemplateEditDialog({
   const handleEditorChange: OnChange = (v) => update('template_inline', v ?? '')
   const showPreview = preview !== null || previewError !== null || previewBusy
 
+  // No backdrop-click-to-close — outside clicks must not discard report edits (Cancel / Escape).
   return (
-    <Overlay onClick={busy ? undefined : onCancel}>
+    <Overlay>
       <Modal
         style={{ width: 'min(1100px, 96vw)', height: 'min(820px, 94vh)' }}
         onClick={(e) => e.stopPropagation()}

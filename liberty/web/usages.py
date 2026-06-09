@@ -51,9 +51,13 @@ UsageType = Literal[
     "screen_update_query",      # Screen.update_query
     "screen_insert_query",      # Screen.insert_query
     "screen_delete_query",      # Screen.delete_query
-    "nested_form_read_query",   # NestedFormTab.read_query
+    "nested_form_read_query",   # NestedFormTab.read_query (dialog tab OR FormTab.nested_forms)
     "nested_form_update_query", # NestedFormTab.update_query
     "nested_form_insert_query", # NestedFormTab.insert_query
+    "nested_form_delete_query", # NestedFormTab.delete_query (child cleanup on parent delete)
+    "column_group_update_query",# ColumnGroup.update_query (1:1 related-table write-back)
+    "column_group_insert_query",# ColumnGroup.insert_query
+    "column_group_delete_query",# ColumnGroup.delete_query
     "action_run_query",         # RunQueryAction.query
     "action_navigate_to",       # NavigateAction.to
     "lookup_query",             # LookupDef.query
@@ -63,6 +67,7 @@ UsageType = Literal[
     "chart_query",              # ChartConfig.query
     "dashboard_widget_query",   # Widget.query (chart / kpi / table / select widgets)
     "nomaflow_step_query",      # nomaflow SQL step's query field
+    "menu_target_query",        # MenuItem.target (a query leaf) pointing at this query
     # connector references
     "screen_connector",         # Screen.connector
     "nested_tab_connector",     # NestedFormTab / NestedTableTab .connector
@@ -127,7 +132,7 @@ def _iter_screen_actions(screen: Any) -> Any:
     (where_label, action) so the resulting usage label can describe the location."""
     for action in _iter_actions(getattr(screen, "actions", None) or []):
         yield ("screen.actions", action)
-    for hook in ("on_insert", "on_update", "on_delete", "row_menu"):
+    for hook in ("on_insert", "on_update", "on_delete", "on_duplicate", "row_menu"):
         for action in _iter_actions(getattr(screen, hook, None) or []):
             yield (f"screen.{hook}", action)
     dialog = getattr(screen, "dialog", None)
@@ -145,6 +150,19 @@ def _iter_prompt_fields(action: Any) -> Any:
     """Yield every PromptField on an action (prompt_fields is on PromptableMixin actions)."""
     for pf in getattr(action, "prompt_fields", None) or []:
         yield pf
+
+
+def _iter_shared_action_steps(state: Any) -> Any:
+    """Yield ``(action_id, step)`` for every step of every SHARED action (actions.toml),
+    recursively (chain / if / loop branches). Shared actions are reusable orchestration that
+    screens call via ``call_action`` — their steps reference queries / endpoints / plugins just
+    like a screen action, so usage + integrity scans must walk them too, not only screen hooks."""
+    actions = getattr(state, "actions", None)
+    if actions is None:
+        return
+    for aid, a in (getattr(actions, "actions", None) or {}).items():
+        for step in _iter_actions(getattr(a, "steps", None) or []):
+            yield (aid, step)
 
 
 def _screen_deep_link(app: str, screen_id: str) -> dict[str, Any]:
@@ -349,6 +367,7 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                             ("read_query", "nested_form_read_query"),
                             ("update_query", "nested_form_update_query"),
                             ("insert_query", "nested_form_insert_query"),
+                            ("delete_query", "nested_form_delete_query"),
                         ):
                             v = getattr(tab, attr, None)
                             if v == query and tab_conn == connector:
@@ -357,6 +376,46 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                                     label=f"{app}.{sid} · tab[{tab.id}].{attr}",
                                     deep_link=_screen_deep_link(app, sid),
                                 ))
+                        # A FormTab can EMBED nested forms (``FormTab.nested_forms``) — each a
+                        # NestedFormTab with its own read/update/insert queries + connector. The
+                        # loop above only sees tabs that *are* nested forms; these are nested
+                        # *inside* a form tab, so they need an explicit walk (integrity validates
+                        # them too — see _check_screens). Without this a query referenced only by an
+                        # embedded form looks unused.
+                        for nf in getattr(tab, "nested_forms", None) or []:
+                            nf_conn = getattr(nf, "connector", None) or tab_conn
+                            for attr, kind in (
+                                ("read_query", "nested_form_read_query"),
+                                ("update_query", "nested_form_update_query"),
+                                ("insert_query", "nested_form_insert_query"),
+                                ("delete_query", "nested_form_delete_query"),
+                            ):
+                                if getattr(nf, attr, None) == query and nf_conn == connector:
+                                    out.append(Usage(
+                                        type=kind,
+                                        label=f"{app}.{sid} · tab[{tab.id}] · form[{getattr(nf, 'id', '?')}].{attr}",
+                                        deep_link=_screen_deep_link(app, sid),
+                                    ))
+                # Column groups — a 1:1 related table edited inline and written back through the
+                # group's own update / insert / delete queries (``ColumnGroup``). Effective connector
+                # is the group's own, else the screen's. Integrity validates these (``_check_screens``);
+                # usages must see them too — else a query referenced ONLY by a column group (e.g.
+                # ``f00921`` from ``f0092``'s columns) shows 0 references and looks safe to delete.
+                for grp in getattr(screen, "column_groups", None) or []:
+                    g_conn = getattr(grp, "connector", None) or screen_conn
+                    if g_conn != connector:
+                        continue
+                    for attr, kind in (
+                        ("update_query", "column_group_update_query"),
+                        ("insert_query", "column_group_insert_query"),
+                        ("delete_query", "column_group_delete_query"),
+                    ):
+                        if getattr(grp, attr, None) == query:
+                            out.append(Usage(
+                                type=kind,
+                                label=f"{app}.{sid} · group[{getattr(grp, 'id', '?')}].{attr}",
+                                deep_link=_screen_deep_link(app, sid),
+                            ))
                 # Actions — run_query (`query`) + navigate (`to`).
                 for where, action in _iter_screen_actions(screen):
                     a_type = getattr(action, "type", None)
@@ -384,6 +443,44 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                                 label=f"{app}.{sid} · export sheet",
                                 deep_link=_screen_deep_link(app, sid),
                             ))
+
+    # Shared actions (actions.toml) — a run_query / navigate step inside a reusable action.
+    for aid, step in _iter_shared_action_steps(state):
+        s_type = getattr(step, "type", None)
+        s_conn = getattr(step, "connector", None)
+        # A shared-action step pins its own connector (it isn't tied to a screen); a None connector
+        # is treated as a match so an unpinned step still surfaces rather than hiding silently.
+        conn_ok = s_conn == connector or s_conn is None
+        if s_type == "run_query" and getattr(step, "query", None) == query and conn_ok:
+            out.append(Usage(
+                type="action_run_query", label=f"action {aid} · run_query",
+                deep_link={"editor": "actions", "action": aid},
+            ))
+        if s_type == "navigate" and getattr(step, "to", None) == query and conn_ok:
+            out.append(Usage(
+                type="action_navigate_to", label=f"action {aid} · navigate to",
+                deep_link={"editor": "actions", "action": aid},
+            ))
+
+    # Menus pointing at this query — a ``query`` leaf's ``target`` is a query name on the item's
+    # connector (defaults to the menu app). This is how a menu opens a table view / screen, so a
+    # query that nothing else references is still "in use" if a menu links to it.
+    menus = getattr(state, "menus", None)
+    if menus is not None:
+        menu_map = menus.menus if hasattr(menus, "menus") else menus
+        for menu_app, app_menu in (menu_map or {}).items():
+            for item in getattr(app_menu, "items", None) or []:
+                # A ``query`` leaf targets a query name directly. (A ``screen`` leaf targets a
+                # screen id, not a query — those surface under the screen's usages instead.)
+                if getattr(item, "type", None) != "query":
+                    continue
+                item_conn = getattr(item, "connector", None) or menu_app
+                if getattr(item, "target", None) == query and item_conn == connector:
+                    out.append(Usage(
+                        type="menu_target_query",
+                        label=f"{menu_app} · {item.id} → {item.target}",
+                        deep_link=_menu_deep_link(menu_app, item.id),
+                    ))
 
     # Lookups + sequences (within the connector's scope OR shared).
     dictionary = _get_dictionary(state)
@@ -545,19 +642,27 @@ def _find_connector_usages(state: Any, name: str) -> list[Usage]:
 def _find_api_endpoint_usages(state: Any, connector: str, endpoint: str) -> list[Usage]:
     out: list[Usage] = []
     screens = getattr(state, "screens", None)
-    if screens is None:
-        return out
-    for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
-        for sid, screen in screen_map.items():
-            for where, action in _iter_screen_actions(screen):
-                if (getattr(action, "type", None) == "call_api"
-                        and getattr(action, "connector", None) == connector
-                        and getattr(action, "endpoint", None) == endpoint):
-                    out.append(Usage(
-                        type="action_api_call",
-                        label=f"{app}.{sid} · {where} · call_api",
-                        deep_link=_screen_deep_link(app, sid),
-                    ))
+    if screens is not None:
+        for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
+            for sid, screen in screen_map.items():
+                for where, action in _iter_screen_actions(screen):
+                    if (getattr(action, "type", None) == "call_api"
+                            and getattr(action, "connector", None) == connector
+                            and getattr(action, "endpoint", None) == endpoint):
+                        out.append(Usage(
+                            type="action_api_call",
+                            label=f"{app}.{sid} · {where} · call_api",
+                            deep_link=_screen_deep_link(app, sid),
+                        ))
+    # Shared actions (actions.toml) — a call_api step inside a reusable action.
+    for aid, step in _iter_shared_action_steps(state):
+        if (getattr(step, "type", None) == "call_api"
+                and getattr(step, "connector", None) == connector
+                and getattr(step, "endpoint", None) == endpoint):
+            out.append(Usage(
+                type="action_api_call", label=f"action {aid} · call_api",
+                deep_link={"editor": "actions", "action": aid},
+            ))
     return out
 
 
@@ -565,37 +670,63 @@ def _find_api_endpoint_usages(state: Any, connector: str, endpoint: str) -> list
 
 def _find_screen_usages(state: Any, app: str, screen_id: str) -> list[Usage]:
     out: list[Usage] = []
-    # Menus pointing at this screen (MenuItem.target with type ∈ table / form / chart).
+    # Resolve this screen's read query + effective connector. A menu opens a screen by linking to
+    # its read query (e.g. ``f0004_get``), NOT the screen id — so to find the menus that open THIS
+    # screen we match the menu target against the read query, on the screen's connector. We also
+    # keep the direct ``target == screen_id`` match for any future screen-id menu target.
+    screens = getattr(state, "screens", None)
+    all_screens = (screens.screens if hasattr(screens, "screens") else {}) if screens is not None else {}
+    app_screens = all_screens.get(app) if isinstance(all_screens, dict) else None
+    screen_obj = app_screens.get(screen_id) if isinstance(app_screens, dict) else None
+    read_query = getattr(screen_obj, "read_query", None)
+    screen_conn = getattr(screen_obj, "connector", None) or app
+    # Menus pointing at this screen — either directly by screen id, or (the common case) via the
+    # screen's read query on the screen's connector.
     menus = getattr(state, "menus", None)
     if menus is not None:
         menu_map = menus.menus if hasattr(menus, "menus") else menus
         for menu_app, app_menu in (menu_map or {}).items():
             for item in getattr(app_menu, "items", None) or []:
-                if (getattr(item, "target", None) == screen_id
-                        and (getattr(item, "connector", None) or menu_app) == app):
+                target = getattr(item, "target", None)
+                item_conn = getattr(item, "connector", None) or menu_app
+                direct = target == screen_id and item_conn == app
+                via_query = read_query is not None and target == read_query and item_conn == screen_conn
+                if direct or via_query:
                     out.append(Usage(
                         type="menu_target_screen",
-                        label=f"{menu_app} · {item.id} → {item.target}",
+                        label=f"{menu_app} · {item.id} → {target}",
                         deep_link=_menu_deep_link(menu_app, item.id),
                     ))
-    # NestedTableTab.screen — a parent screen embedding this one.
+    # NestedTableTab.screen — a parent screen embedding this one — and navigate actions that pin
+    # this screen (NavigateAction.screen) so a drill opens it specifically.
     screens = getattr(state, "screens", None)
     if screens is not None:
         for app_p, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
             for sid_p, screen in screen_map.items():
                 dialog = getattr(screen, "dialog", None)
-                if dialog is None:
-                    continue
-                for tab in getattr(dialog, "tabs", None) or []:
-                    if getattr(tab, "type", None) == "nested_table" and getattr(tab, "screen", None) == screen_id:
-                        # Nested-table screens are keyed by id only — they're resolved against the
-                        # parent screen's app. So a match in any app is a real reference.
-                        if app_p == app:
-                            out.append(Usage(
-                                type="nested_table_screen",
-                                label=f"{app_p}.{sid_p} · tab[{tab.id}]",
-                                deep_link=_screen_deep_link(app_p, sid_p),
-                            ))
+                if dialog is not None:
+                    for tab in getattr(dialog, "tabs", None) or []:
+                        if getattr(tab, "type", None) == "nested_table" and getattr(tab, "screen", None) == screen_id:
+                            # Nested-table screens are keyed by id only — they're resolved against
+                            # the parent screen's app. So a match in any app is a real reference.
+                            if app_p == app:
+                                out.append(Usage(
+                                    type="nested_table_screen",
+                                    label=f"{app_p}.{sid_p} · tab[{tab.id}]",
+                                    deep_link=_screen_deep_link(app_p, sid_p),
+                                ))
+                # NavigateAction.screen — a row-menu / toolbar drill that pins THIS screen.
+                firing_conn = getattr(screen, "connector", None) or app_p
+                for where, action in _iter_screen_actions(screen):
+                    if getattr(action, "type", None) != "navigate" or getattr(action, "screen", None) != screen_id:
+                        continue
+                    nav_conn = getattr(action, "connector", None) or firing_conn
+                    if nav_conn == screen_conn:
+                        out.append(Usage(
+                            type="action_navigate_screen",
+                            label=f"{app_p}.{sid_p} · {where} · navigate",
+                            deep_link=_screen_deep_link(app_p, sid_p),
+                        ))
     return out
 
 
@@ -732,6 +863,34 @@ def _iter_dict_sections(dictionary: Any) -> Any:
 # ── dispatcher ───────────────────────────────────────────────────────────────────────────
 
 
+def _find_action_usages(state: Any, name: str) -> list[Usage]:
+    """Every reference to shared action *name* — a screen's ``call_action`` (any hook / tab / row
+    menu) and another shared action whose steps call it (composition)."""
+    out: list[Usage] = []
+    screens = getattr(state, "screens", None)
+    if screens is not None:
+        for app, smap in (getattr(screens, "screens", None) or {}).items():
+            for sid, screen in (smap or {}).items():
+                for where, action in _iter_screen_actions(screen):
+                    if getattr(action, "type", None) == "call_action" and getattr(action, "ref", None) == name:
+                        out.append(Usage(
+                            type="action_ref",
+                            label=f"{app}.{sid} · {where}",
+                            deep_link=_screen_deep_link(app, sid),
+                        ))
+    actions = getattr(state, "actions", None)
+    if actions is not None:
+        for aid, a in (getattr(actions, "actions", None) or {}).items():
+            if aid == name:
+                continue
+            if any(
+                getattr(act, "type", None) == "call_action" and getattr(act, "ref", None) == name
+                for act in _iter_actions(getattr(a, "steps", None) or [])
+            ):
+                out.append(Usage(type="action_ref", label=f"action · {aid}", deep_link={"editor": "actions", "action": aid}))
+    return out
+
+
 def find_usages(state: Any, *, kind: str, name: str, scope: str | None = None) -> list[Usage]:
     """Main entry point. Returns every reference to ``(kind, name, scope)`` across the
     loaded configs. Empty list when nothing references it (useful: that means safe to
@@ -764,4 +923,6 @@ def find_usages(state: Any, *, kind: str, name: str, scope: str | None = None) -
         if not scope:
             raise ValueError("chart lookups require scope = the connector name")
         return _find_chart_usages(state, scope, name)
+    if kind == "action":
+        return _find_action_usages(state, name)
     raise ValueError(f"unknown kind: {kind!r}")

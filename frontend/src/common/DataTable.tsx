@@ -18,6 +18,7 @@
 // worse). Threshold = always — there's no behavioural cliff between small and large grids;
 // virtualization has no cost when there are only 25 rows on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import * as XLSX from 'xlsx'
 import {
   useReactTable,
@@ -128,13 +129,77 @@ const CtrlBtn = styled.button<{ $active?: boolean }>`
   &:disabled { opacity: 0.4; cursor: default; }
 `
 const MenuWrap = styled.div`position: relative;`
-const Dropdown = styled.div`
-  position: absolute; top: calc(100% + 4px); right: 0; z-index: 100;
+// Portaled to ``document.body`` with ``position: fixed`` (coords from the trigger) so the menu
+// escapes any ancestor ``overflow`` — without this a Columns / Group / Export menu opened from a
+// table inside a *non-maximised* dialog is clipped by the dialog body (visible only when the dialog
+// is full-screen). Same pattern as ``SearchSelect``'s dropdown. ``max-height`` is set inline from
+// the live space below/above the trigger so the inner list scrolls instead of running off-screen.
+const FloatingMenu = styled.div`
+  position: fixed; z-index: 1000;
   background: ${colors.bg.dropdown}; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
-  padding: 6px; box-shadow: ${shadow.lg};
+  padding: 6px; box-shadow: ${shadow.lg}; overflow-y: auto; scrollbar-width: thin;
 `
-const ColMenu = styled(Dropdown)`min-width: 230px; max-height: 60vh; overflow-y: auto;`
-const ExportMenu = styled(Dropdown)`min-width: 150px;`
+
+/** A dropdown that renders into ``document.body`` anchored to ``anchorRef``'s trigger, right-aligned
+ *  to it, flipping above when there isn't room below, and capping its own height to the available
+ *  viewport space. Closes on outside-click (ignoring the anchor, whose own onClick toggles), Escape,
+ *  and follows the trigger on scroll/resize. */
+function MenuPortal({
+  open, anchorRef, onClose, minWidth, children,
+}: {
+  open: boolean
+  anchorRef: React.RefObject<HTMLElement | null>
+  onClose: () => void
+  minWidth: number
+  children: React.ReactNode
+}) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; maxHeight: number } | null>(null)
+  useEffect(() => {
+    if (!open) { setPos(null); return }
+    const compute = () => {
+      const el = anchorRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const GAP = 4
+      const MIN = 160
+      const MAX = Math.round(vh * 0.6)
+      const spaceBelow = vh - r.bottom - GAP
+      const spaceAbove = r.top - GAP
+      const flipUp = spaceBelow < MIN && spaceAbove > spaceBelow
+      const right = Math.max(GAP, vw - r.right)
+      // Anchor the edge that stays put (top for below, bottom for above) so we don't need the
+      // panel's own height to position it; ``maxHeight`` caps the scroll either way.
+      setPos(flipUp
+        ? { bottom: vh - r.top + GAP, right, maxHeight: Math.min(MAX, Math.max(MIN, spaceAbove)) }
+        : { top: r.bottom + GAP, right, maxHeight: Math.min(MAX, Math.max(MIN, spaceBelow)) })
+    }
+    compute()
+    const onDoc = (e: MouseEvent) => {
+      const inAnchor = anchorRef.current?.contains(e.target as Node)
+      const inPanel = panelRef.current?.contains(e.target as Node)
+      if (!inAnchor && !inPanel) onClose()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', compute)
+    window.addEventListener('scroll', compute, true)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', compute)
+      window.removeEventListener('scroll', compute, true)
+    }
+  }, [open, anchorRef, onClose])
+  if (!open || !pos) return null
+  return createPortal(
+    <FloatingMenu ref={panelRef} style={{ ...pos, minWidth }}>{children}</FloatingMenu>,
+    document.body,
+  )
+}
 const DropdownItem = styled.button`
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
   border: none; background: transparent; border-radius: ${radius.md};
@@ -185,9 +250,13 @@ const TableScroll = styled.div`
 // content didn't suit and interfered with header drag-reorder, so it was dropped — columns aren't
 // user-resizable; hide the column or let the content breathe.)
 const Table = styled.table`border-collapse: collapse; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
+// ``STICKY_BG`` composites the (light-theme-translucent) dropdown tint over the opaque base, so a
+// sticky header / filter cell is FULLY opaque — a translucent sticky cell lets the scrolling data
+// rows bleed through (most visible in light mode, where ``--bg-dropdown`` is only 95% opaque).
+const STICKY_BG = `linear-gradient(${colors.bg.dropdown}, ${colors.bg.dropdown}), ${colors.bg.base}`
 const Th = styled.th<{ $sortable?: boolean; $dropTarget?: boolean }>`
   text-align: left; padding: 8px 18px 8px 12px; position: sticky; top: 0; z-index: 2;
-  background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
+  background: ${STICKY_BG}; border-bottom: 1px solid ${colors.border};
   border-left: 2px solid ${({ $dropTarget }) => ($dropTarget ? colors.blue.main : 'transparent')};
   font-size: ${fontSize.micro}; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
   color: ${colors.text.muted}; white-space: nowrap; user-select: none;
@@ -201,7 +270,12 @@ const ThInner = styled.div<{ $align?: FilterMeta['align'] }>`
 const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; align-items: center; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
 const SortIx = styled.sup`font-size: 8px; color: ${colors.blue.main}; margin-left: 1px;`
 const GroupBadge = styled.span`display: inline-flex; align-items: center; color: ${colors.blue.main};`
-const FilterTh = styled.th`padding: 4px 8px; background: ${colors.bg.input}; border-bottom: 1px solid ${colors.border};`
+// Filter row sits ABOVE the header row, both ``position: sticky`` so the filters stay on screen
+// while the body scrolls (before, the filter row scrolled out of view under the sticky header).
+// ``z-index: 3`` keeps it above the header (z-index 2) at the corners.
+// Background MUST be opaque (see ``STICKY_BG``) — a sticky row with a see-through background lets
+// the scrolling data rows bleed through it.
+const FilterTh = styled.th`padding: 4px 8px; background: ${STICKY_BG}; border-bottom: 1px solid ${colors.border}; position: sticky; top: 0; z-index: 3;`
 const Tr = styled.tr`
   &:hover td { background: var(--hover-subtle); }
   &:not(:last-child) td { border-bottom: 1px solid ${colors.border}; }
@@ -304,6 +378,20 @@ export function DataTable<T extends object>({
   const exportRef = useRef<HTMLDivElement>(null)
   const dragColRef = useRef<string | null>(null) // header drag-reorder: the column id being dragged
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  // Live height of the (sticky) filter row — drives the header row's sticky ``top`` offset so the
+  // header pins directly below the filter row instead of overlapping it. 0 when filters are hidden.
+  const [filterRowH, setFilterRowH] = useState(0)
+  const filterRowRef = useRef<HTMLTableRowElement>(null)
+  useEffect(() => {
+    if (!showFilters) { setFilterRowH(0); return }
+    const el = filterRowRef.current
+    if (!el) return
+    const update = () => setFilterRowH(el.offsetHeight)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [showFilters])
 
   useEffect(() => {
     if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder })
@@ -323,17 +411,6 @@ export function DataTable<T extends object>({
     setColumnOrder([])
   }, [tableId, initialColumnVisibility])
 
-  useEffect(() => {
-    if (!colOpen && !groupOpen && !exportOpen) return
-    const h = (e: MouseEvent) => {
-      if (colOpen && colRef.current && !colRef.current.contains(e.target as Node)) setColOpen(false)
-      if (groupOpen && groupRef.current && !groupRef.current.contains(e.target as Node)) setGroupOpen(false)
-      if (exportOpen && exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false)
-    }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [colOpen, groupOpen, exportOpen])
-
   // Internal columns (select / status) are always pinned to the front, regardless of the user's
   // saved (data-only) column order; `columnOrder` persists only the data columns.
   const internalIds = useMemo(
@@ -350,9 +427,25 @@ export function DataTable<T extends object>({
   )
   const tableColumnOrder = useMemo(() => [...internalIds, ...dataOrder], [internalIds, dataOrder])
 
+  // Stable per-row identity. Without it TanStack falls back to index-based row ids, which SHIFT
+  // when a row is prepended/removed (bulk-edit "Add row" / paste insert at the top) — that
+  // invalidates the row virtualizer's measurement cache (keyed by index via ``data-index``), so
+  // the new top row renders stale/offset until a scroll forces a re-measure. A WeakMap keyed by the
+  // row object hands out a stable id that follows the object across reorders (data objects keep
+  // their references across renders; only the surrounding array is rebuilt). Non-object rows fall
+  // back to the index.
+  const rowIdMap = useRef(new WeakMap<object, string>())
+  const rowIdSeq = useRef(0)
+  const stableRowId = useCallback((row: T, index: number): string => {
+    if (row == null || typeof row !== 'object') return String(index)
+    let id = rowIdMap.current.get(row)
+    if (id === undefined) { id = `row-${rowIdSeq.current++}`; rowIdMap.current.set(row, id) }
+    return id
+  }, [])
   const table = useReactTable({
     data,
     columns,
+    getRowId: stableRowId,
     state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnFilters, globalFilter, grouping, expanded, pagination },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
@@ -431,6 +524,9 @@ export function DataTable<T extends object>({
     getScrollElement: () => tableScrollRef.current,
     estimateSize: () => 26,
     overscan: 10,
+    // Track measurements by the stable row id (not the index) so a prepend/remove shifts the cache
+    // WITH the rows — fixes the "added top row renders stale until you scroll" glitch.
+    getItemKey: (index) => visibleRows[index]?.id ?? String(index),
     // The default `measureElement` reads each row's true height via getBoundingClientRect +
     // correlates by `data-index`. We pass `ref={rowVirtualizer.measureElement}` on each row
     // (below) so a group row, edit-mode row, or wrapped cell that's taller than the estimate
@@ -444,7 +540,7 @@ export function DataTable<T extends object>({
   const totalSize = rowVirtualizer.getTotalSize()
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0
   const paddingBottom = virtualItems.length > 0 ? totalSize - virtualItems[virtualItems.length - 1].end : 0
-  // The thead carries 1 sticky row (headers) + optionally 1 sticky row (column filters). The
+  // The thead carries 1 sticky header row + optionally 1 sticky filter row above it. The
   // virtualizer's body is everything below that. `colCount` is what each spacer row needs
   // to span — equal to the visible column count.
 
@@ -505,8 +601,7 @@ export function DataTable<T extends object>({
               <CtrlBtn $active={grouping.length > 0} onClick={() => setGroupOpen((v) => !v)} title={t('table.group')}>
                 <Group size={13} /> {t('table.group')}{grouping.length ? ` (${grouping.length})` : ''}
               </CtrlBtn>
-              {groupOpen && (
-                <ColMenu>
+              <MenuPortal open={groupOpen} anchorRef={groupRef} onClose={() => setGroupOpen(false)} minWidth={230}>
                   <MenuTitle>{t('table.groupBy')}</MenuTitle>
                   {/* "None" — clears every grouping in one click. Renders only when at least
                       one grouping is active; collapsing each grouped column individually was
@@ -528,16 +623,14 @@ export function DataTable<T extends object>({
                       </ColRow>
                     )
                   })}
-                </ColMenu>
-              )}
+              </MenuPortal>
             </MenuWrap>
           )}
           <MenuWrap ref={colRef}>
             <CtrlBtn onClick={() => setColOpen((v) => !v)} title={t('table.columns')}>
               <Columns3 size={13} /> {t('table.columns')}
             </CtrlBtn>
-            {colOpen && (
-              <ColMenu>
+            <MenuPortal open={colOpen} anchorRef={colRef} onClose={() => setColOpen(false)} minWidth={230}>
                 <MenuHead>
                   <MenuTitle>{t('table.columns')}</MenuTitle>
                   <Spacer />
@@ -564,19 +657,16 @@ export function DataTable<T extends object>({
                     </ColRow>
                   )
                 })}
-              </ColMenu>
-            )}
+              </MenuPortal>
           </MenuWrap>
           <MenuWrap ref={exportRef}>
             <CtrlBtn onClick={() => setExportOpen((v) => !v)} title={t('table.export')}>
               <Download size={13} /> {t('table.export')} <ChevronDown size={11} />
             </CtrlBtn>
-            {exportOpen && (
-              <ExportMenu>
+            <MenuPortal open={exportOpen} anchorRef={exportRef} onClose={() => setExportOpen(false)} minWidth={150}>
                 <DropdownItem onClick={exportCsv}><FileText size={13} /> CSV (.csv)</DropdownItem>
                 <DropdownItem onClick={exportExcel}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
-              </ExportMenu>
-            )}
+              </MenuPortal>
           </MenuWrap>
         </ActionGroup>
       </ToolbarRow>
@@ -590,6 +680,15 @@ export function DataTable<T extends object>({
             scrollbar. */}
         <Table style={{ minWidth: table.getTotalSize() }}>
           <thead>
+            {showFilters && (
+              <tr ref={filterRowRef}>
+                {table.getHeaderGroups()[0]?.headers.map((h) => (
+                  <FilterTh key={h.id}>
+                    <ColumnFilterControl column={h.column} />
+                  </FilterTh>
+                ))}
+              </tr>
+            )}
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hg.headers.map((h) => {
@@ -609,6 +708,11 @@ export function DataTable<T extends object>({
                       style={{
                         ...(h.column.columnDef.size != null ? { width: h.getSize(), minWidth: h.column.columnDef.minSize } : null),
                         textAlign: align,
+                        // Pin the header directly below the sticky filter row (0 when hidden).
+                        // Overlap by 1px: ``offsetHeight`` is integer-rounded, so without it a
+                        // sub-pixel seam between the two sticky rows lets scrolling data peek
+                        // through. The filter row's higher z-index hides the overlap.
+                        top: filterRowH ? filterRowH - 1 : undefined,
                       }}
                       onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
                       draggable={reorderable}
@@ -646,15 +750,6 @@ export function DataTable<T extends object>({
                 })}
               </tr>
             ))}
-            {showFilters && (
-              <tr>
-                {table.getHeaderGroups()[0]?.headers.map((h) => (
-                  <FilterTh key={h.id}>
-                    <ColumnFilterControl column={h.column} />
-                  </FilterTh>
-                ))}
-              </tr>
-            )}
           </thead>
           <tbody>
             {visibleRows.length === 0 ? (

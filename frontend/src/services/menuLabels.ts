@@ -8,19 +8,22 @@
 import type { MenuNode, MenusByApp } from '../types/menus'
 
 interface ScreenKey {
-  kind: 'sql' | 'http' | 'dashboard'
-  /** Empty for dashboard tabs. */
+  kind: 'sql' | 'screen' | 'http' | 'dashboard' | 'page'
+  /** Empty for dashboard / page tabs; the screen's APP for screen tabs (its `/screen/<app>/<id>` route). */
   connector: string
   target: string
 }
 
 function walk(nodes: MenuNode[], appName: string, key: ScreenKey): string | undefined {
-  const wantType = key.kind === 'sql' ? 'query' : key.kind === 'http' ? 'endpoint' : 'dashboard'
+  const wantType = key.kind === 'sql' ? 'query' : key.kind === 'http' ? 'endpoint' : key.kind === 'screen' ? 'screen' : key.kind === 'page' ? 'page' : 'dashboard'
   for (const n of nodes) {
     if (n.type === wantType && n.target === key.target) {
-      // Dashboard leaves have no connector — match on target alone. Others must agree on the
-      // resolved connector (the menu defaults `connector` to the app name when blank).
-      if (key.kind === 'dashboard' || (n.connector ?? appName) === key.connector) return n.label
+      // Dashboard + page leaves have no connector — match on target alone. A screen leaf is scoped
+      // to its menu app (the tab's `connector` carries that app). Others must agree on the resolved
+      // connector (the menu defaults `connector` to the app name when blank).
+      if (key.kind === 'dashboard' || key.kind === 'page') return n.label
+      if (key.kind === 'screen') { if (appName === key.connector) return n.label }
+      else if ((n.connector ?? appName) === key.connector) return n.label
     }
     if (n.items) {
       const found = walk(n.items, appName, key)

@@ -21,6 +21,8 @@ from __future__ import annotations
 from liberty.screens.config import (
     Action,
     CallApiAction,
+    CallActionAction,
+    CallPluginAction,
     ChainAction,
     Condition,
     ConfirmAction,
@@ -50,6 +52,8 @@ from liberty.screens.config import (
 __all__ = [
     "Action",
     "CallApiAction",
+    "CallActionAction",
+    "CallPluginAction",
     "ChainAction",
     "Condition",
     "ConfirmAction",

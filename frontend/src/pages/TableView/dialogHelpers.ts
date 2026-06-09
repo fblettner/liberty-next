@@ -2,9 +2,25 @@
 // of ScreenDialog so NestedFormTab / NestedTableTab can reuse the same param-bind resolution
 // and case-insensitive value lookup. The originals lived inline at the top of ScreenDialog
 // until the nested-tab slice; everything here stays type-light + side-effect-free.
+import type { Column } from '../../types/connectors'
 import type { FieldCondition, ParamBind } from '../../types/screens'
 
 export type Row = Record<string, unknown>
+
+/** The firing row's natural key — ``{KEYCOL: value}`` from the screen columns flagged ``key``,
+ *  read case-insensitively and upper-cased to match the capture's key convention. Threaded into
+ *  ``_change_context`` so an action's writes/invocations are stamped with the record they fired
+ *  for (e.g. AUUSER=DEMO) and group under it in the change package. ``undefined`` when the screen
+ *  declares no key columns or the row carries no value for them. */
+export function entityKeyOf(columns: readonly Column[] | undefined, row: Row): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {}
+  for (const c of columns ?? []) {
+    if (!c.key) continue
+    const v = valueFor(c.name, row)
+    if (v != null && v !== '') out[c.name.toUpperCase()] = v
+  }
+  return Object.keys(out).length ? out : undefined
+}
 
 /** Send both the as-is keys and UPPERCASE copies — same trick as the inline grid editor:
  *  the migrated `_put`/`_post`/`_delete` queries use v1's uppercase column names, while
@@ -42,10 +58,12 @@ export function evalConditions(rules: FieldCondition[] | undefined, formValues: 
   for (const r of rules) {
     const key = Object.keys(formValues).find((k) => k.toLowerCase() === r.field.toLowerCase())
     const live = key != null ? formValues[key] : undefined
-    const liveStr = live == null ? '' : String(live)
+    // Trim both sides — a field value picked from a JDE UDC lookup can be space-padded while the
+    // condition's allowed values are clean config (matches the grid's columnVisibleNow).
+    const liveStr = (live == null ? '' : String(live)).trim()
     if (Array.isArray(r.value)) {
-      if (!r.value.includes(liveStr)) return false
-    } else if (liveStr !== r.value) {
+      if (!r.value.some((x) => String(x).trim() === liveStr)) return false
+    } else if (liveStr !== String(r.value).trim()) {
       return false
     }
   }

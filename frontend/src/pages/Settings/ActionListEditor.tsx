@@ -31,6 +31,7 @@ import ParamBindList, { type ParamBind } from './ParamBindList'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import { NavigateTargetField } from './NavigateTargetField'
 import {
   builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
 } from './actionCandidates'
@@ -43,7 +44,7 @@ type Row = Record<string, unknown>
 // minimum-viable shape when the operator switches types so SchemaForm doesn't render a sea of
 // validation red on first paint.
 export const ACTION_TYPES = [
-  'run_query', 'call_api', 'navigate', 'set_field', 'confirm', 'notify', 'refresh',
+  'run_query', 'call_api', 'call_plugin', 'call_action', 'navigate', 'set_field', 'confirm', 'notify', 'refresh',
   // Slice 4d step variants (Phase 6) — workflow control flow.
   'chain', 'if', 'loop', 'return',
 ] as const
@@ -51,6 +52,8 @@ export type ActionType = typeof ACTION_TYPES[number]
 export const ACTION_DEF_NAME: Record<ActionType, string> = {
   run_query: 'RunQueryAction',
   call_api: 'CallApiAction',
+  call_plugin: 'CallPluginAction',
+  call_action: 'CallActionAction',
   navigate: 'NavigateAction',
   set_field: 'SetFieldAction',
   confirm: 'ConfirmAction',
@@ -65,6 +68,8 @@ export function blankActionOfType(t: ActionType, id: string): Row {
   const base: Row = { id, type: t }
   if (t === 'run_query') base.query = ''
   if (t === 'call_api') { base.connector = ''; base.endpoint = '' }
+  if (t === 'call_plugin') base.callable = ''
+  if (t === 'call_action') base.ref = ''
   if (t === 'navigate') base.to = ''
   if (t === 'set_field') base.target = ''
   if (t === 'confirm') base.message = ''
@@ -87,7 +92,9 @@ export function blankActionOfType(t: ActionType, id: string): Row {
 export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   run_query: ['connector', 'query', 'param_binds'],
   call_api: ['connector', 'endpoint', 'param_binds'],
-  navigate: ['connector', 'to', 'param_binds'],
+  call_plugin: ['callable', 'param_binds'],
+  call_action: ['ref', 'param_binds'],
+  navigate: ['connector', 'to', 'screen', 'param_binds'],
   set_field: [],
   confirm: [],
   notify: [],
@@ -107,7 +114,7 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
 // open a single pre-fire prompt for the operator's inputs. For the rest (set_field / confirm
 // / notify / refresh / if / loop / return) the PromptField editor stays hidden — these are
 // internal steps that don't fire their own prompt sub-dialogs.
-export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'navigate', 'chain'])
+export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'call_plugin', 'navigate', 'chain', 'call_action'])
 export const PROMPT_FIELDS_KEY = 'prompt_fields'
 // PromptField has 11+ properties; split into Basic / Advanced / Lookup binds / Conditions so
 // each per-field expander reads like the visual builder's field inspector instead of a wall of
@@ -186,7 +193,21 @@ export default function ActionListEditor({
 }: ActionListEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors: wsConnectors } = useWorkspace()
+  const { connectors: wsConnectors, screens: wsScreens, findScreenById } = useWorkspace()
+  // ``param`` (target placeholder) candidates for an action. ``targetParamOptions`` keys off ``to``
+  // (the query name) for navigate — a navigate-to-SCREEN has no ``to``, so resolve the target
+  // screen's read_query first and feed THAT as the query, otherwise the PARAM field falls back to a
+  // plain text input. (Mirrors ActionTreeView.selectedDeclaredParamOptions.)
+  const paramOptionsForAction = (a: Row): SearchSelectOption[] => {
+    if (String(a?.type) === 'navigate' && typeof a?.screen === 'string' && a.screen) {
+      const conn = (typeof a.connector === 'string' && a.connector.trim() ? a.connector : effectiveConnector) as string
+      const hit = findScreenById(conn, a.screen)
+      if (!hit?.read_query) return []
+      const tConn = hit.connector || conn
+      return targetParamOptions({ type: 'navigate', to: hit.read_query, connector: tConn }, wsConnectors, tConn)
+    }
+    return targetParamOptions(a, wsConnectors, effectiveConnector)
+  }
 
   // Per-row expansion: ``actionsExpanded`` for the outer action list, ``promptExpanded`` keyed
   // by ``<actionIdx>`` for the inner PromptField list (one per action).
@@ -320,29 +341,44 @@ export default function ActionListEditor({
             placeholder={effectiveConnector}
           />
         </Field>
-        <Field label={targetLabel + ' *'}>
-          <Row gap={6} style={{ alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <SearchSelect
-                value={(a[targetKey] as string | undefined) ?? ''}
-                options={targetOpts}
-                onChange={(v) => onPatch({ [targetKey]: v || '' })}
-                placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                loading={!targetConnMeta}
-              />
-            </div>
-            {(aType === 'run_query' || aType === 'navigate') && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
-              <Button
-                $variant="ghost"
-                $size="sm"
-                onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
-                title={t('settings.editQuery.edit', 'Edit query')}
-              >
-                <Edit3 size={13} />
-              </Button>
-            )}
-          </Row>
-        </Field>
+        {aType === 'navigate'
+          ? (
+            <NavigateTargetField
+              key={`${a.id ?? ''}:navtarget`}
+              action={a}
+              onPatch={onPatch}
+              actionConn={actionConn}
+              hasConnector={!!targetConnMeta}
+              queryOptions={targetOpts}
+              screenOptions={((wsScreens ?? {})[actionConn] ?? []).map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id })).sort((x, y) => String(x.mono).localeCompare(String(y.mono)))}
+              onEditQuery={onEditQuery}
+            />
+          )
+          : (
+            <Field label={targetLabel + ' *'}>
+              <Row gap={6} style={{ alignItems: 'center' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <SearchSelect
+                    value={(a[targetKey] as string | undefined) ?? ''}
+                    options={targetOpts}
+                    onChange={(v) => onPatch({ [targetKey]: v || '' })}
+                    placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+                    loading={!targetConnMeta}
+                  />
+                </div>
+                {aType === 'run_query' && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
+                  <Button
+                    $variant="ghost"
+                    $size="sm"
+                    onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
+                    title={t('settings.editQuery.edit', 'Edit query')}
+                  >
+                    <Edit3 size={13} />
+                  </Button>
+                )}
+              </Row>
+            </Field>
+          )}
       </>
     )
   }
@@ -681,7 +717,7 @@ export default function ActionListEditor({
                             screenReadColumnOptions(screenReadColumns),
                             builtinSourceOptions(),
                           )}
-                          paramOptions={targetParamOptions(a, wsConnectors, effectiveConnector)}
+                          paramOptions={paramOptionsForAction(a)}
                         />
                       </Stack>
                     )}

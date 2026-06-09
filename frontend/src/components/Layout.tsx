@@ -2,11 +2,13 @@
 // (EN/FR, dark/light, profile, sign-out). Page content renders through <Outlet/>
 // inside a <Suspense> boundary (routes are code-split). Adapted from nomaubl.
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { Outlet, useMatch } from 'react-router-dom'
+import { Outlet, useMatch, useNavigate, useLocation } from 'react-router-dom'
+import { isPageTabPath } from '../tabs/pageTabs'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut, User, Sparkles } from 'lucide-react'
+import { Sun, Moon, LogOut, User, Sparkles, X } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
+import { useTabs } from '../tabs/TabsContext'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
@@ -62,7 +64,7 @@ const UtilityBar = styled.div`
   ${glass.surface}
 `
 
-const UtilBtn = styled.button<{ $active?: boolean }>`
+const UtilBtn = styled.button<{ $active?: boolean; $danger?: boolean }>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -73,13 +75,17 @@ const UtilBtn = styled.button<{ $active?: boolean }>`
   border-radius: ${radius.md};
   border: none;
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  color: ${({ $active, $danger }) => ($danger ? colors.red.main : $active ? colors.text.primary : colors.text.muted)};
   font-size: ${fontSize.sm};
   font-family: ${fonts.sans};
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  & svg { display: block; }
+  &:hover {
+    background: ${({ $danger }) => ($danger ? colors.red.bg : 'var(--hover-subtle)')};
+    color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.primary)};
+  }
 `
 
 const Sep = styled.div`
@@ -123,6 +129,8 @@ export default function Layout() {
   const { t, i18n } = useTranslation()
   const { user, logout } = useAuth()
   const { license, refresh: refreshWorkspace } = useWorkspace()
+  const { tabs, closeAll } = useTabs()
+  const navigate = useNavigate()
   // a configured-but-broken key (expired / bad signature) is worth flagging; "no key" isn't (the open framework)
   const licenseBanner = license.mode === 'restricted' && license.error && !/no license key/i.test(license.error)
     ? license.error : null
@@ -202,13 +210,18 @@ export default function Layout() {
   // <Outlet/>, with the tab host hidden underneath. (all useMatch calls must run unconditionally —
   // Rules of Hooks). nomaflow run detail + Settings are hosted as workspace tabs so they sit in the
   // tab strip alongside the screens instead of replacing the workspace view.
+  const { pathname } = useLocation()
   const sqlMatch = useMatch('/sql/:connector/:target')
+  const screenMatch = useMatch('/screen/:connector/:target')
   const httpMatch = useMatch('/http/:connector/:target')
   const dashboardMatch = useMatch('/dashboard/:target')
   const nomaflowRunMatch = useMatch('/nomaflow/runs/:runId')
   const settingsMatch = useMatch('/settings')
   const monitoringMatch = useMatch('/monitoring')
-  const onTabRoute = !!(sqlMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch)
+  // `page` tabs (nomaflow Jobs/Schedule/Package/Changes/Integrity, Reports) render through TabHost
+  // too — so their routes count as "on a tab route" and the Outlet stays empty.
+  const pageTabMatch = isPageTabPath(pathname)
+  const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch || pageTabMatch)
 
   return (
     <Shell>
@@ -233,6 +246,16 @@ export default function Layout() {
       </MainArea>
 
       <UtilityBar ref={utilRef}>
+        {/* Close all tabs — lives in the pill (not floating beside it) so it's aligned and shares
+            the toolbar's look & feel. Only shown when there's more than one tab to close. */}
+        {tabs.length >= 2 && (
+          <>
+            <UtilBtn $danger onClick={() => { closeAll(); navigate('/') }} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
+              <X size={15} />
+            </UtilBtn>
+            <Sep />
+          </>
+        )}
         <UtilBtn $active={lang === 'en'} onClick={() => switchLang('en')} title="English">
           EN
         </UtilBtn>

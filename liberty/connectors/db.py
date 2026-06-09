@@ -81,6 +81,14 @@ class PoolRegistry:
         cfg = self._configs.get(name)
         return bool(cfg.coalesce_nulls) if cfg is not None else False
 
+    def debug_sql(self, name: str) -> bool:
+        """Whether the SQL connector should log the resolved statement + final binds for every
+        execution on this pool. Returns the pool's explicit ``debug_sql`` flag (off by default —
+        operator opts in per pool to debug e.g. writes that affect 0 rows). Unknown pools default
+        to off."""
+        cfg = self._configs.get(name)
+        return bool(cfg.debug_sql) if cfg is not None else False
+
 
     def _resolved_url(self, name: str, cfg: PoolConfig):
         """The pool's URL with its password resolved: a separate ``password`` (or an ``ENC:``
@@ -113,6 +121,12 @@ class PoolRegistry:
         if url.get_backend_name() != "sqlite":
             kwargs["pool_size"] = cfg.pool_size
             kwargs["max_overflow"] = cfg.max_overflow
+        # Oracle fetch batch — the oracledb driver defaults cursor.arraysize to 100, which means
+        # ~10x more DB round-trips than asyncpg on a large read. The oracledb dialect accepts
+        # ``arraysize`` as a create_engine kwarg (sets the default for every cursor, streaming
+        # included), so raising it here speeds up big tables. Oracle only; other backends ignore it.
+        if cfg.arraysize and url.get_backend_name() == "oracle":
+            kwargs["arraysize"] = int(cfg.arraysize)
         engine = create_async_engine(url, **kwargs)
         # SQLite ships with FK enforcement OFF by default — without ``PRAGMA
         # foreign_keys=ON`` per-connection, ON DELETE CASCADE silently no-ops on

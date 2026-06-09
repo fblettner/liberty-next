@@ -93,6 +93,12 @@ class PoolConfig(BaseModel):
     max_rows: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
         "Default row cap for SELECTs on this pool. Falls back to 1000. Per-screen / per-request overrides win."
     ))
+    arraysize: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
+        "Oracle only — rows fetched per DB round-trip (cursor ``arraysize``). The oracledb driver "
+        "defaults to 100, which is conservative for large reads; raise it (e.g. 500–1000) to cut "
+        "round-trips and speed up big tables. Ignored on non-Oracle pools (asyncpg/Postgres already "
+        "batches larger). Blank → the driver default."
+    ))
     trim_strings: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
         "Strip trailing whitespace from string cells on SELECT. Enable for Oracle pools with "
         "space-padded CHAR / NCHAR columns (JD Edwards is the canonical case)."
@@ -101,6 +107,12 @@ class PoolConfig(BaseModel):
         "On INSERT / UPDATE, replace empty binds with type-appropriate defaults (a space for "
         "CHAR-family columns, 0 for numerics). Enable for Oracle pools with NOT-NULL string "
         "columns (Oracle treats ``''`` as NULL)."
+    ))
+    debug_sql: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
+        "Log every executed statement on this pool — the resolved SQL (schema placeholders + "
+        "filter wrap applied) and the final bound parameters (after trim / coalesce / sequence "
+        "resolution), i.e. exactly what reaches the driver. Turn on to debug writes that affect "
+        "0 rows; leave off in production (binds may contain sensitive values)."
     ))
     # NB: an earlier iteration carried ``strip_both_columns`` on the pool — moved to the
     # sql_copy step (Step.strip_both_columns) because JDE column names embed a 2-letter
@@ -297,6 +309,15 @@ class ColumnHint(BaseModel):
             "row's current application id."
         ),
     )
+    group: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule", "x_enum_ref": "COLUMN_GROUPS"},
+        description=(
+            "When set, this column lives on a RELATED 1:1 table (it comes from the read query's "
+            "JOIN) and is written back through the screen's matching ``column_groups`` entry on Save "
+            "— not the main update query. Blank → the column writes to the main table."
+        ),
+    )
 
     @property
     def visible_when_rules(self) -> list[VisibleWhen]:
@@ -317,41 +338,143 @@ class ColumnHint(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+def _validate_sql_field(v: str | dict[str, str]) -> str | dict[str, str]:
+    """Shared validator for the ``sql`` field on :class:`CrudSlot` and :class:`QueryDef` —
+    accepts a string (single dialect-independent statement) OR a dict keyed by SQLAlchemy
+    backend name. A dict must carry a non-empty ``default`` variant; that's the fallback
+    when the runtime pool's dialect isn't explicitly listed."""
+    if isinstance(v, dict):
+        if "default" not in v:
+            raise ValueError("a per-dialect sql map must include a 'default' key")
+        if not v.get("default", "").strip():
+            raise ValueError("the 'default' sql variant must not be empty")
+    return v
+
+
+class CrudSlot(BaseModel):
+    """One CRUD slot inside a :class:`TableDef` — the SQL + executable bits.
+
+    Carries **no metadata of its own**: a table's ``label`` / ``description`` / ``name``
+    live on the parent :class:`TableDef`. The slot only knows how to *execute* its
+    statement against the pool. Same ``sql`` shape rules as :class:`QueryDef` (single
+    string OR per-dialect map with a required ``default``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sql: str | dict[str, str] = Field(
+        description=(
+            "The SQL statement with ``:name`` placeholders. Use a per-dialect map "
+            "(``{ default = \"…\", oracle = \"…\" }``) to ship variants per database "
+            "backend; ``default`` is required."
+        ),
+    )
+    writable: bool = Field(
+        default=False,
+        description=(
+            "Allow non-SELECT statements (INSERT / UPDATE / DELETE). Required for any "
+            "mutating slot — the runtime defaults this on ``put`` / ``post`` / ``delete`` "
+            "slots when the SQL says so, but the explicit flag wins."
+        ),
+    )
+    params: list[ParamDef] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Params"},
+        description="Declared parameters — give each ``:name`` placeholder a form label and a default.",
+    )
+
+    @field_validator("sql")
+    @classmethod
+    def _require_default(cls, v: str | dict[str, str]) -> str | dict[str, str]:
+        return _validate_sql_field(v)
+
+
+class TableDef(BaseModel):
+    """A first-class CRUD table — one operator-facing entity with its own metadata + up
+    to four executable slots (``get`` / ``put`` / ``post`` / ``delete``).
+
+    Replaces the v1-style flat list of CRUD-suffixed queries where ``label`` / ``description``
+    were duplicated across each slot. Now there's one canonical home for the table's
+    metadata; the slots only carry SQL. Every cross-file reference still uses the
+    synthesised name ``<table.name>_<slot>`` (e.g. ``f0092_get``) — the connector builds
+    a flat name → query index at load time so callers don't see the shape change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description=(
+            "The table's base name — the operator-visible identifier (e.g. ``f0092``). "
+            "Synthetic query names follow ``<name>_<slot>`` (``f0092_get``, ``f0092_put``, …) "
+            "and that's what every screen / dictionary / action reference uses."
+        ),
+    )
+    label: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Advanced"},
+        description="Short name shown in listings.",
+    )
+    description: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Advanced"},
+        description="Longer description of what this table represents.",
+    )
+    get: CrudSlot | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Get"},
+        description="The READ slot (SELECT). Synthesised name ``<name>_get``.",
+    )
+    put: CrudSlot | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Put"},
+        description="The UPDATE slot. Synthesised name ``<name>_put``.",
+    )
+    post: CrudSlot | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Post"},
+        description="The INSERT slot. Synthesised name ``<name>_post``.",
+    )
+    delete: CrudSlot | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Delete"},
+        description="The DELETE slot. Synthesised name ``<name>_delete``.",
+    )
+
+    def slots(self) -> list[tuple[str, CrudSlot]]:
+        """Iterate present slots in CRUD order — used by the connector loader to build
+        synthetic ``<name>_<crud>`` entries in its flat query index."""
+        out: list[tuple[str, CrudSlot]] = []
+        for crud in ("get", "put", "post", "delete"):
+            slot = getattr(self, crud)
+            if slot is not None:
+                out.append((crud, slot))
+        return out
+
+
 class QueryDef(BaseModel):
-    """A named SQL query with ``:name`` placeholders. **Phase 3 — pure SQL definition.**
+    """A standalone named SQL query — one of the three "single SQL per entity" kinds:
 
-    Carries only what the SQL connector needs to *run* the query: the statement, declared
-    parameters, the writable gate, and friendly metadata. Per-screen display + behaviour
-    (``columns`` hints, ``auto_load``, ``audit_table``, ``key_columns``, ``max_rows``,
-    ``update_query`` / ``insert_query`` / ``delete_query`` companion refs) lives on the
-    matching :class:`liberty.screens.config.Screen` and is threaded into the SQL connector
-    by the route layer at execute time.
+    * **custom** queries (``[[connectors.X.queries]]``) — anything the operator wired by
+      hand that doesn't fit the CRUD-table shape;
+    * **sequence** queries (``[[connectors.X.sequences]]``) — value sources for a
+      dictionary SEQUENCE rule;
+    * **lookup** queries (``[[connectors.X.lookups]]``) — value sources for a dictionary
+      LOOKUP rule.
 
-    ``sql`` is either a single statement (the common case) or a per-dialect map —
-    e.g. ``sql = { default = "…", oracle = "…" }`` — keyed by SQLAlchemy backend
-    name; the connector picks the variant matching its pool's database, falling
-    back to ``default`` (which is required when ``sql`` is a map). v1's per-``dbtype``
-    SQL variants migrate to this shape.
-    """
+    The section a query sits in *is* its type (no ``type`` field on the entry — that was
+    the v1-Phase-3 shape we deprecated). Same ``sql`` rules as :class:`CrudSlot`: a single
+    string OR a per-dialect map with a required ``default``.
 
-    # ``extra = "ignore"`` (not "forbid") so a connectors.toml written before Phase 3 keeps
-    # loading. Removed keys (``columns`` / ``auto_load`` / ``audit`` / ``max_rows`` /
-    # ``key_columns`` / ``update_query`` / ``insert_query`` / ``delete_query``) are silently
-    # dropped on parse — operators re-migrate at their pace via ``liberty-migrate sql`` to
-    # repopulate the matching ``Screen`` fields.
+    Per-screen display + behaviour (``columns`` hints, ``auto_load``, ``audit_table`` …)
+    lives on the matching :class:`liberty.screens.config.Screen` and is threaded into the
+    SQL connector by the route layer at execute time — same as Phase 3."""
+
+    # ``extra = "ignore"`` (not "forbid") so a connectors.toml written under the v1-Phase-3
+    # flat-queries shape keeps loading — the migration in :func:`parse_connectors` already
+    # lifted such entries into the right section, but a hand-edited file with a stray
+    # ``type`` field on a custom query parses without surfacing the deprecated field as a
+    # validation error.
     model_config = ConfigDict(extra="ignore")
 
     name: str = Field(description="Unique name within the connector. The permission string is ``sql:<connector>:<name>``.")
-    type: str | None = Field(
-        default=None,
-        json_schema_extra={"x_enum_ref": "QUERY_TYPE"},
-        description=(
-            "What this query is, for the editor's tabs: ``table`` (a CRUD slot — get/put/post/delete, "
-            "grouped by name into a table), ``custom`` (a standalone query), ``sequence`` (generates a "
-            "value for a dictionary SEQUENCE rule), or ``lookup`` (value source for a dictionary LOOKUP "
-            "rule). Empty → the editor infers it from the name (``…_get`` etc. → table, else custom)."
-        ),
-    )
     sql: str | dict[str, str] = Field(description="The SQL statement with ``:name`` placeholders. Use a per-dialect map (``{ default = \"…\", oracle = \"…\" }``) to ship variants per database backend; ``default`` is required.")
     writable: bool = Field(default=False, description="Allow non-SELECT statements (INSERT / UPDATE / DELETE). Required for any mutating query.")
     params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters — give each ``:name`` placeholder a form label and a default.")
@@ -361,12 +484,7 @@ class QueryDef(BaseModel):
     @field_validator("sql")
     @classmethod
     def _require_default(cls, v: str | dict[str, str]) -> str | dict[str, str]:
-        if isinstance(v, dict):
-            if "default" not in v:
-                raise ValueError("a per-dialect sql map must include a 'default' key")
-            if not v.get("default", "").strip():
-                raise ValueError("the 'default' sql variant must not be empty")
-        return v
+        return _validate_sql_field(v)
 
     def sql_for(self, dialect: str | None) -> str:
         """The SQL to run on a pool of *dialect* (falls back to ``default``)."""
@@ -382,6 +500,22 @@ class QueryDef(BaseModel):
     @property
     def dialects(self) -> list[str]:
         return ["default"] if isinstance(self.sql, str) else list(self.sql)
+
+
+def _crud_slot_to_querydef(name: str, slot: CrudSlot, *, label: str | None, description: str | None, crud: str) -> QueryDef:
+    """Lift a :class:`CrudSlot` into a flat :class:`QueryDef` for the connector's unified
+    name → query index. ``writable`` defaults to True on the mutating slots when the slot
+    doesn't say so explicitly; the runtime's statement-type guard already rejects bad
+    INSERT/UPDATE/DELETE without ``writable``, so this is a no-op safety net."""
+    writable = slot.writable or (crud != "get")
+    return QueryDef(
+        name=name,
+        sql=slot.sql,
+        writable=writable,
+        params=list(slot.params),
+        label=label,
+        description=description,
+    )
 
 
 class SqlConnectorConfig(BaseModel):
@@ -400,7 +534,66 @@ class SqlConnectorConfig(BaseModel):
         description="Landing menu item id when this app is picked.",
         json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
     )
-    queries: list[QueryDef] = Field(default_factory=list, json_schema_extra={"x_group": "Queries"}, description="The named SQL queries this connector exposes.")
+    tables: list[TableDef] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Tables"},
+        description=(
+            "CRUD tables exposed by this connector — each entry owns one canonical "
+            "``label`` / ``description`` and up to four executable slots (get / put / "
+            "post / delete). Synthesised query names follow ``<table_name>_<slot>``."
+        ),
+    )
+    queries: list[QueryDef] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Queries"},
+        description="Custom standalone queries — anything that doesn't fit the CRUD-table shape.",
+    )
+    sequences: list[QueryDef] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Sequences"},
+        description=(
+            "Sequence queries — value sources for dictionary SEQUENCE rules. Each is "
+            "addressed by its own ``name``."
+        ),
+    )
+    lookups: list[QueryDef] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Lookups"},
+        description=(
+            "Lookup queries — value sources for dictionary LOOKUP rules. Each is "
+            "addressed by its own ``name``."
+        ),
+    )
+
+    def iter_named_queries(self) -> "list[tuple[str, QueryDef]]":
+        """The unified name → QueryDef index used by the SQL connector at load time.
+
+        Order: tables (each slot synthesised as ``<table.name>_<slot>``), then
+        ``queries`` (custom), then ``sequences``, then ``lookups``. Duplicate names
+        raise :class:`ValueError` — the caller treats it as a config error."""
+        out: list[tuple[str, QueryDef]] = []
+        seen: set[str] = set()
+        def _push(name: str, q: QueryDef) -> None:
+            if name in seen:
+                raise ValueError(
+                    f"duplicate query name {name!r} — a CRUD slot synthesised name "
+                    f"collides with a sibling query in the same connector; rename one."
+                )
+            seen.add(name)
+            out.append((name, q))
+        for tbl in self.tables:
+            for crud, slot in tbl.slots():
+                qname = f"{tbl.name}_{crud}"
+                _push(qname, _crud_slot_to_querydef(
+                    qname, slot, label=tbl.label, description=tbl.description, crud=crud,
+                ))
+        for q in self.queries:
+            _push(q.name, q)
+        for q in self.sequences:
+            _push(q.name, q)
+        for q in self.lookups:
+            _push(q.name, q)
+        return out
 
 
 # --------------------------------------------------------------------------- #
@@ -530,9 +723,152 @@ class ConnectorsFile(BaseModel):
     connectors: dict[str, ConnectorConfig] = Field(default_factory=dict)
 
 
+_CRUD_SUFFIXES = ("_get", "_put", "_post", "_delete")
+
+
+def _classify_legacy_query(q: dict[str, Any]) -> str:
+    """Pick a section name (``tables`` / ``queries`` / ``sequences`` / ``lookups``) for
+    one legacy flat-shape query entry. ``type`` field wins when set; otherwise we fall
+    back to a name-suffix guess (``_get``/``_put``/``_post``/``_delete`` → table, else
+    custom). ``custom`` maps to ``queries`` (the new section name for standalone SQL)."""
+    raw_type = q.get("type")
+    if isinstance(raw_type, str):
+        t = raw_type.strip().lower()
+        if t == "table": return "tables"
+        if t == "sequence": return "sequences"
+        if t == "lookup": return "lookups"
+        if t == "custom": return "queries"
+        # Unknown type (e.g. the historical AI-scaffold bug emitted ``select``) falls
+        # through to the suffix guess — no warning at this layer; the loader caller can
+        # log if they care.
+    name = q.get("name") or ""
+    if isinstance(name, str) and name.lower().endswith(_CRUD_SUFFIXES):
+        return "tables"
+    return "queries"
+
+
+def _split_legacy_queries(connector_name: str, flat: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Lift a flat ``[[connectors.X.queries]]`` list (Phase-3 shape, with a per-query
+    ``type`` field) into the four-section shape the new models expect. Groups CRUD-suffixed
+    entries by base into :class:`TableDef`-shaped dicts; promotes the GET slot's label /
+    description onto the table (falls back to the first available slot). Drops the
+    ``type`` field everywhere — sections are implicit now.
+
+    Used by :func:`parse_connectors` on legacy files; also re-used by the admin save
+    endpoint as a defensive boundary against a stale client sending the old shape."""
+    tables_by_base: dict[str, dict[str, Any]] = {}
+    customs: list[dict[str, Any]] = []
+    sequences: list[dict[str, Any]] = []
+    lookups: list[dict[str, Any]] = []
+    for raw in flat:
+        if not isinstance(raw, dict):
+            # Anything that isn't a dict is a config error; let validation surface it.
+            customs.append(raw)  # type: ignore[arg-type]
+            continue
+        q = dict(raw)
+        section = _classify_legacy_query(q)
+        q.pop("type", None)  # implicit now
+        if section == "tables":
+            name = str(q.get("name") or "")
+            # Strip the CRUD suffix to find the base. Names without one shouldn't reach
+            # here (classifier would have routed them to ``queries``) but guard anyway.
+            base, crud = name, "get"
+            for suf in _CRUD_SUFFIXES:
+                if name.lower().endswith(suf):
+                    base = name[: -len(suf)]
+                    crud = suf[1:]   # "_get" → "get"
+                    break
+            tbl = tables_by_base.setdefault(base, {"name": base})
+            # Promote label / description onto the table from the GET slot first, else
+            # the first available slot. Existing values win — once promoted, later slots
+            # don't overwrite.
+            for meta_key in ("label", "description"):
+                if meta_key in q:
+                    if crud == "get" or meta_key not in tbl:
+                        tbl[meta_key] = q.pop(meta_key)
+                    else:
+                        q.pop(meta_key, None)
+            # The slot body is everything else (sql / writable / params).
+            slot: dict[str, Any] = {}
+            for k in ("sql", "writable", "params"):
+                if k in q:
+                    slot[k] = q[k]
+            tbl[crud] = slot
+        elif section == "sequences":
+            sequences.append(q)
+        elif section == "lookups":
+            lookups.append(q)
+        else:
+            customs.append(q)
+    return {
+        "tables": list(tables_by_base.values()),
+        "queries": customs,
+        "sequences": sequences,
+        "lookups": lookups,
+    }
+
+
+def _migrate_legacy_shape(data: dict[str, Any]) -> dict[str, Any]:
+    """In-memory pre-pass: detect connectors using the legacy flat-queries shape
+    (no ``tables`` / ``sequences`` / ``lookups`` sections, ``queries`` carries a ``type``
+    field per entry) and rewrite them to the new sectioned shape *before* validation. A
+    connector that already declares any of the new section keys is treated as new-shape
+    and left alone — the migration is one-way and idempotent.
+
+    Always returns a fresh dict; never mutates the caller's input."""
+    connectors = data.get("connectors") or {}
+    if not isinstance(connectors, dict) or not connectors:
+        return data
+    new_connectors: dict[str, Any] = {}
+    changed = False
+    for name, conn in connectors.items():
+        if not isinstance(conn, dict) or conn.get("type") != "sql":
+            new_connectors[name] = conn
+            continue
+        already_new = any(k in conn for k in ("tables", "sequences", "lookups"))
+        flat = conn.get("queries")
+        # The new shape ALSO uses ``queries`` (for custom standalone queries) — only
+        # call this "legacy" when the flat-list entries have a ``type`` field on them
+        # OR when no other section is present and the queries look CRUD-named.
+        needs_migration = False
+        if isinstance(flat, list) and not already_new:
+            needs_migration = any(
+                isinstance(q, dict) and "type" in q for q in flat
+            ) or any(
+                isinstance(q, dict)
+                and isinstance(q.get("name"), str)
+                and q["name"].lower().endswith(_CRUD_SUFFIXES)
+                for q in flat
+            )
+        if not needs_migration:
+            new_connectors[name] = conn
+            continue
+        # Migrate this connector in memory. Preserve every non-``queries`` field.
+        rest = {k: v for k, v in conn.items() if k != "queries"}
+        split = _split_legacy_queries(name, list(flat or []))
+        new_conn: dict[str, Any] = dict(rest)
+        for section in ("tables", "queries", "sequences", "lookups"):
+            entries = split.get(section) or []
+            if entries:
+                new_conn[section] = entries
+        new_connectors[name] = new_conn
+        changed = True
+    if not changed:
+        return data
+    out = dict(data)
+    out["connectors"] = new_connectors
+    return out
+
+
 def parse_connectors(data: dict[str, Any], *, env: dict[str, str] | None = None) -> ConnectorsFile:
-    """Validate a raw TOML dict into a :class:`ConnectorsFile` (after env substitution)."""
-    return ConnectorsFile.model_validate(substitute_env(data, env=env))
+    """Validate a raw TOML dict into a :class:`ConnectorsFile` (after env substitution).
+
+    Auto-migrates the legacy flat ``[[connectors.X.queries]]`` shape (per-query ``type``
+    field, CRUD slots as siblings) into the new sectioned shape (``tables`` / ``queries``
+    / ``sequences`` / ``lookups``). The migration is in-memory only — operators still
+    have to save through the admin endpoint to rewrite the file on disk in the new
+    shape."""
+    return ConnectorsFile.model_validate(_migrate_legacy_shape(substitute_env(data, env=env)))
 
 
 def load_connectors_file(

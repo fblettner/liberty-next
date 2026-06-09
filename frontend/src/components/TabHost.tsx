@@ -4,10 +4,11 @@
 // new tab doesn't flash the fallback over the ones already loaded. The whole host is hidden
 // when the current route is the index landing or a framework page (Settings / nomaflow) — those
 // render through <Outlet/> instead — but the tabs underneath stay mounted.
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type LazyExoticComponent, type ComponentType } from 'react'
 import i18n from 'i18next'
 import { Centered } from '../common'
 import { useTabs } from '../tabs/TabsContext'
+import { useWorkspace } from '../workspace/WorkspaceContext'
 
 const TableView = lazy(() => import('../pages/TableView'))
 const HttpRunner = lazy(() => import('../pages/HttpRunner'))
@@ -15,6 +16,29 @@ const DashboardView = lazy(() => import('../pages/DashboardView'))
 const NomaflowRunDetail = lazy(() => import('../pages/Nomaflow/RunDetail'))
 const Settings = lazy(() => import('../pages/Settings'))
 const Monitoring = lazy(() => import('../pages/Monitoring'))
+
+// `page` tabs (menus.toml type="page") → the framework page rendered inside the tab, keyed by its
+// route path (the tab's ``target``). Kept in sync with src/tabs/pageTabs.ts (the path set) + App's
+// TabRoute markers. A path with no entry falls back to a spinner (shouldn't happen for known pages).
+const PAGE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
+  '/nomaflow': lazy(() => import('../pages/Nomaflow')),
+  '/nomaflow/schedule': lazy(() => import('../pages/Nomaflow/Schedule')),
+  '/nomaflow/package': lazy(() => import('../pages/Nomaflow/PackagePage')),
+  '/nomaflow/changes': lazy(() => import('../pages/Nomaflow/ChangesPage')),
+  '/nomaflow/integrity': lazy(() => import('../pages/Nomaflow/IntegrityPage')),
+  '/reports': lazy(() => import('../pages/Reports')),
+}
+
+// A ``screen`` tab opens a designed screen by id (``/screen/<app>/<id>``). We resolve the screen
+// from the workspace catalog to get its connector + read query, then drive the TableView with the
+// screen-id override so the exact screen's columns / dialog apply (even when another screen shares
+// the same read query). A spinner shows until the catalog resolves it (or it's been deleted).
+function ScreenTab({ app, screenId }: { app: string; screenId: string }) {
+  const { findScreenById } = useWorkspace()
+  const scr = findScreenById(app, screenId)
+  if (!scr) return <Centered />
+  return <TableView connector={scr.connector} query={scr.read_query} screenApp={app} screenId={screenId} />
+}
 
 export default function TabHost({ hidden }: { hidden: boolean }) {
   const { tabs, activeId } = useTabs()
@@ -49,6 +73,10 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
               <Settings />
             ) : tab.kind === 'monitoring' ? (
               <Monitoring />
+            ) : tab.kind === 'page' ? (
+              (() => { const P = PAGE_COMPONENTS[tab.target]; return P ? <P /> : <Centered /> })()
+            ) : tab.kind === 'screen' ? (
+              <ScreenTab app={tab.connector} screenId={tab.target} />
             ) : (
               <TableView connector={tab.connector} query={tab.target} />
             )}

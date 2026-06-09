@@ -22,7 +22,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
-import type { ScreenListItem, ScreensByApp } from '../types/screens'
+import type { ScreenListItem, ScreensByApp, SharedAction } from '../types/screens'
 import { type LicenseInfo, RESTRICTED } from '../types/license'
 import { useAuth } from '../auth/AuthContext'
 
@@ -36,6 +36,9 @@ interface WorkspaceState {
   /** Every dashboard the caller may open (each carries label + widget list; widgets the caller can't
    *  read have already been filtered server-side). `null` while loading; `[]` when there are none. */
   dashboards: DashboardListItem[] | null
+  /** Shared actions (actions.toml) keyed by id — the action runner resolves a screen's
+   *  `call_action` against this. `null` while loading; `{}` when there are none. */
+  sharedActions: Record<string, SharedAction> | null
   license: LicenseInfo // `full` (licensed connectors loaded) or `restricted` (they weren't); defaults restricted
   error: string | null
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
@@ -88,6 +91,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
   const [screens, setScreens] = useState<Record<string, ScreenListItem[]> | null>(null)
+  const [sharedActions, setSharedActions] = useState<Record<string, SharedAction> | null>(null)
   const [dashboards, setDashboards] = useState<DashboardListItem[] | null>(null)
   const [license, setLicense] = useState<LicenseInfo>(RESTRICTED)
   const [error, setError] = useState<string | null>(null)
@@ -100,6 +104,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setMenus(null)
       setScreens(null)
       setDashboards(null)
+      setSharedActions(null)
       setLicense(RESTRICTED)
       setError(null)
       return
@@ -117,13 +122,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // isn't in the catalog).
       api.get<ScreensByApp>('/api/screens').catch((): ScreensByApp => ({ screens: {} })),
       api.get<{ dashboards: DashboardListItem[] }>('/api/dashboards').catch(() => ({ dashboards: [] as DashboardListItem[] })),
+      api.get<{ actions: SharedAction[] }>('/api/actions').catch(() => ({ actions: [] as SharedAction[] })),
     ])
-      .then(([c, m, s, d]) => {
+      .then(([c, m, s, d, a]) => {
         if (cancelled) return
         setConnectors(c.connectors)
         setMenus(m.menus)
         setScreens(s.screens)
         setDashboards(d.dashboards)
+        setSharedActions(Object.fromEntries((a.actions ?? []).map((x) => [x.id, x])))
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e))
@@ -218,8 +225,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, dashboards, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById }),
-    [connectors, apps, menus, screens, dashboards, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById],
+    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById }),
+    [connectors, apps, menus, screens, dashboards, sharedActions, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

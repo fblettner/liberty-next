@@ -24,7 +24,8 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
+from decimal import Decimal
 from typing import Any, AsyncIterator
 
 _log = logging.getLogger(__name__)
@@ -61,11 +62,15 @@ def _oracle_target_table(sql: str) -> tuple[str | None, str] | None:
     return (owner.upper() if owner else None, table.upper())
 
 
-# Per-(pool, owner, table) cache of {column_name: simple_type} where simple_type is one of
-# "char" / "number" / "other". Populated lazily on first write to a table — refreshed on
-# registry rebuild via :func:`reset_oracle_column_cache`. Module-level so all SQLConnectors
-# sharing a pool also share the cache.
-_ORACLE_COL_TYPES_CACHE: dict[tuple[str, str | None, str], dict[str, str]] = {}
+# Per-(pool, owner, table) cache of column metadata. Each entry is
+# ``{column_name: {"kind": str, "length": int | None}}`` where ``kind`` is one of
+# ``"char_fixed"`` (CHAR / NCHAR — space-padded by Oracle), ``"char"`` (VARCHAR2 / NVARCHAR2
+# / CLOB / NCLOB / LONG — not padded), ``"number"``, or ``"other"``. ``length`` carries the
+# declared CHAR length and is only meaningful for ``"char_fixed"`` (None elsewhere — VARCHAR2
+# binds don't pad). Populated lazily on first write to a table — refreshed on registry rebuild
+# via :func:`reset_oracle_column_cache`. Module-level so all SQLConnectors sharing a pool also
+# share the cache.
+_ORACLE_COL_TYPES_CACHE: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
 
 
 def reset_oracle_column_cache() -> None:
@@ -86,7 +91,17 @@ def reset_audit_table_cache() -> None:
     _AUDIT_TABLES_VERIFIED.clear()
 
 
-_ORACLE_CHAR_TYPES = {"CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
+# Fixed-width CHAR family — Oracle space-pads stored values to the column's declared length.
+# Comparisons against a VARCHAR2 bind use non-blank-padded semantics, so a trimmed read value
+# bound back into a WHERE clause won't match its CHAR(N) source unless the bind is re-padded
+# to N spaces. ``_pad_char_binds`` does that under the ``trim_strings`` pool flag.
+_ORACLE_FIXED_CHAR_TYPES = {"CHAR", "NCHAR"}
+# Variable-width / large character storage — never padded; padding a bind here would BREAK
+# the comparison (stored "JDE" ≠ bind "JDE       " under non-blank-padded VARCHAR2 semantics).
+_ORACLE_VAR_CHAR_TYPES = {"VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
+# Union — used by the empty-bind coalesce path (every Oracle string column treats ``""`` as
+# NULL, so all of these need the single-space sentinel for NOT-NULL columns).
+_ORACLE_CHAR_TYPES = _ORACLE_FIXED_CHAR_TYPES | _ORACLE_VAR_CHAR_TYPES
 _ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT"}
 
 # ── write-time type coercion + form-rule resolution ────────────────────────────────────────
@@ -107,6 +122,72 @@ _BOOLEAN_FORMATS = {"boolean"}
 # `DynamicResultMapper` parity) and on write (this module): a Python date/datetime / ISO string
 # / already-Julian int all collapse to the integer CYYDDD form before binding.
 _JDEDATE_FORMATS = {"jdedate"}
+# JDE times — stored as integers ``HHMMSS`` in JD Edwards (14:30:52 → 143052, midnight → 0).
+# Symmetric with jdedate: a Python time/datetime / "HH:MM:SS" string / already-HHMMSS int all
+# collapse to the integer form on write, and decode back to "HH:MM:SS" on read.
+_JDETIME_FORMATS = {"jdetime"}
+
+
+def _to_jde_time(t: Any) -> int | None:
+    """``time | datetime | "HH:MM:SS" string | HHMMSS int`` → JDE ``HHMMSS`` integer; ``None``
+    when the input can't be parsed. ``int`` passes through (already in HHMMSS form); a string of
+    digits is treated as a pre-converted HHMMSS integer. A "HH:MM:SS" (or "HH:MM") string is
+    parsed to its components. Out-of-range components return ``None``."""
+    from datetime import time as _time
+    if isinstance(t, bool):
+        return None
+    if isinstance(t, int):
+        return t if 0 <= t <= 235959 else None
+    if isinstance(t, datetime):
+        t = t.time()
+    if isinstance(t, str):
+        s = t.strip()
+        if s.isdigit():
+            n = int(s)
+            return n if 0 <= n <= 235959 else None
+        # "HH:MM[:SS]" — accept a bare HH:MM (seconds default to 0).
+        parts = s.split(":")
+        if 2 <= len(parts) <= 3 and all(p.isdigit() for p in parts):
+            hh, mm = int(parts[0]), int(parts[1])
+            ss = int(parts[2]) if len(parts) == 3 else 0
+            if 0 <= hh < 24 and 0 <= mm < 60 and 0 <= ss < 60:
+                return hh * 10000 + mm * 100 + ss
+        # An ISO datetime string ("YYYY-MM-DD HH:MM:SS") — pull the time off the back.
+        try:
+            return _to_jde_time(datetime.fromisoformat(s.replace("T", " ")).time())
+        except ValueError:
+            return None
+    if isinstance(t, _time):
+        return t.hour * 10000 + t.minute * 100 + t.second
+    return None
+
+
+def _from_jde_time(v: Any) -> str | int | None:
+    """Inverse of :func:`_to_jde_time` — JDE ``HHMMSS`` integer → ``"HH:MM:SS"`` string. The
+    frontend renders/edits the string; the write path re-encodes via ``_coerce_value(.., "jdetime")``.
+    Pass-through on ``None``; out-of-range components return the raw value so bad data stays visible."""
+    if v is None:
+        return None
+    try:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            n = int(v)
+        elif isinstance(v, str):
+            s = v.strip()
+            if not s.isdigit():
+                return v
+            n = int(s)
+        else:
+            n = int(str(v))
+    except (TypeError, ValueError):
+        return v
+    if not (0 <= n <= 235959):
+        return v
+    hh, mm, ss = n // 10000, (n // 100) % 100, n % 100
+    if mm >= 60 or ss >= 60:
+        return v
+    return f"{hh:02d}:{mm:02d}:{ss:02d}"
 
 
 def _to_jde_julian(d: Any) -> int | None:
@@ -160,6 +241,10 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
             # Always convert — JDE stores integers, never dates/strings. None on a parse
             # failure surfaces as SQL NULL, matching the "empty string → None" convention.
             return _to_jde_julian(value)
+        if f in _JDETIME_FORMATS:
+            # Same contract as jdedate: JDE stores HHMMSS integers. A SYSDATE-stamped ``now``
+            # (datetime) lands here for a ``format = "jdetime"`` audit column and becomes HHMMSS.
+            return _to_jde_time(value)
         if f in _INTEGER_FORMATS:
             if isinstance(value, bool):
                 return int(value)  # True/False → 1/0
@@ -226,6 +311,10 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
 _RULES_LOGIN = {"LOGIN"}
 _RULES_NOW = {"SYSDATE", "CURRENT_DATE"}
 _RULES_SEQUENCE = {"SEQUENCE", "NN"}
+# Statements with a SET/VALUES clause that a DEFAULT can fill — DELETE binds only a WHERE key,
+# so a default there would corrupt the predicate. (SEQUENCE/NN stays INSERT-only — see
+# ``_resolve_sequences`` — because a sequence on UPDATE would re-issue a new number every save.)
+_RULES_DEFAULTABLE = {"INSERT", "UPDATE", "MERGE"}
 _RULES_PASSWORD = {"PASSWORD"}
 _RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missing/empty
 # v1 parity: a column-hint-level ``rules = "DISABLED"`` opts out of an inherited dictionary
@@ -332,7 +421,7 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     can use a btree index on the column. Falls back to a wide VARCHAR when the format is
     unknown (matches the historic v1 behaviour but only for one bind, not every column)."""
     f = (fmt or "").strip().lower()
-    if f in ("integer", "number", "jdedate"):
+    if f in ("integer", "number", "jdedate", "jdetime"):
         return "NUMBER" if dialect == "oracle" else "INTEGER"
     if f in ("decimal", "currency"):
         return "NUMBER" if dialect == "oracle" else "NUMERIC"
@@ -347,7 +436,7 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     return "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
 
 
-def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -> str:
+def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False) -> str:
     """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``.
 
     Text columns get the operator-aware ``LOWER(col) LIKE LOWER(...)`` family for
@@ -357,6 +446,13 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -
     the previous universal CAST AS VARCHAR(4000) on every column kept it from ever using
     an index.
 
+    ``trim_text`` (the pool's ``trim_strings`` flag) wraps the *text* column side in ``TRIM``.
+    JDE stores CHAR(N) blank-padded, so ``DTSY`` comes back ``'01        '``; an ``equals``
+    filter binding ``'01'`` would never match the raw column. The pool flag already trims the
+    *result* rows — this makes the *filter* honour it too, so a query author no longer has to
+    hand-write ``TRIM(DTSY)`` in the SELECT just to make its filters work. (Number / date columns
+    aren't space-padded, so trimming is text-only.)
+
     Non-text columns (number / date / boolean / jdedate) only use ``equals``. The wrap
     helper coerces the bind to the right *Python* type before passing it down (so a
     string ``"10"`` becomes ``int(10)``) — asyncpg then sends the proper type code and
@@ -365,7 +461,7 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str) -
     reject the string ``"10"`` even though Postgres would have accepted it.
     """
     text_format = (fmt or "").lower() in _TEXT_FORMATS or fmt is None or fmt == ""
-    col_ref = f"lib_flt.{name}"
+    col_ref = f"TRIM(lib_flt.{name})" if (text_format and trim_text) else f"lib_flt.{name}"
     if text_format:
         # The bind side still casts to a wide VARCHAR — asyncpg can't infer the type of a
         # bind otherwise (Postgres needs the cast to know whether to compare as text vs
@@ -414,11 +510,127 @@ def _coalesce_oracle_nulls(bound: dict[str, Any], col_types: dict[str, str]) -> 
         base = k.upper()
         if base.endswith("_ORIGINAL"):
             base = base[: -len("_ORIGINAL")]
-        t = col_types.get(base)
-        if t == "char":
+        meta = col_types.get(base)
+        kind = (meta or {}).get("kind")
+        if kind in ("char", "char_fixed"):
             out[k] = " "  # space, not '' — Oracle treats '' as NULL on every string type
-        elif t == "number":
+        elif kind == "number":
             out[k] = 0
+    return out
+
+
+def _jsonable_number(v: Any) -> Any:
+    """Serialize a driver ``Decimal`` (Postgres ``numeric`` / ``decimal``, Oracle ``NUMBER``) as a
+    JSON **number** instead of the string ``default=str`` / FastAPI's ``jsonable_encoder`` would
+    emit. Without this a ``numeric`` column comes back as ``"123"`` and a chart / numeric consumer
+    breaks — which is why queries grew ``CAST(col AS INTEGER)`` workarounds. Now they don't need to:
+
+      * integral decimal (``Decimal('123')`` / ``Decimal('123.00')``) → ``int`` — lossless;
+      * fractional (``Decimal('1.5')``) → ``float`` — JS / charts use floats anyway;
+      * non-finite (``NaN`` / ``Infinity``) → ``str`` — not representable as a JSON number.
+
+    Everything else (str / int / float / date / bytes / None) passes through untouched."""
+    if isinstance(v, Decimal):
+        if not v.is_finite():
+            return str(v)
+        return int(v) if v == v.to_integral_value() else float(v)
+    return v
+
+
+_WHERE_BIND_RE = re.compile(
+    r"(?:"
+    r"(\w+(?:\.\w+)?)\s*(?:=|<=|>=|<>|!=|<|>)\s*:(\w+)"     # COL <op> :BIND
+    r"|:(\w+)\s*(?:=|<=|>=|<>|!=|<|>)\s*(\w+(?:\.\w+)?)"     # :BIND <op> COL
+    r"|(\w+(?:\.\w+)?)\s+LIKE\s+:(\w+)"                       # COL LIKE :BIND
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _where_bind_columns(sql: str) -> dict[str, str]:
+    """Map a bind name → the column it's COMPARED to in *sql* (``RLTOROLE = :FROMUSER`` →
+    ``{"FROMUSER": "RLTOROLE"}``). Lets :func:`_pad_char_binds` pad a WHERE/JOIN bind to the
+    compared CHAR column's width even when the bind name differs from the column — the common case
+    for an operator-authored query (a duplicate-relationship INSERT…SELECT WHERE ``RLTOROLE =
+    :FROMUSER``) where ``_pad_char_binds``'s name-match can't reach it. Column qualifier
+    (``A.RLTOROLE``) is dropped; bind names upper-cased to match the bound dict."""
+    out: dict[str, str] = {}
+    for m in _WHERE_BIND_RE.finditer(sql or ""):
+        col, bind = (m.group(1), m.group(2)) if m.group(2) else \
+                    (m.group(4), m.group(3)) if m.group(3) else (m.group(5), m.group(6))
+        if not col or not bind:
+            continue
+        out.setdefault(bind.upper(), col.split(".")[-1].upper())
+    return out
+
+
+def _pad_char_binds(
+    bound: dict[str, Any], col_types: dict[str, dict[str, Any]],
+    where_col_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Right-pad non-empty string binds with spaces to the column's declared width when the
+    target is a fixed-width ``CHAR(N)`` / ``NCHAR(N)``. Powers the symmetric round-trip the
+    ``trim_strings`` pool flag promises: reads strip trailing whitespace, writes (especially
+    DELETE / UPDATE WHERE clauses) pad the bind back so Oracle's non-blank-padded VARCHAR2 vs
+    CHAR comparison matches the stored value.
+
+    Without this, a JDE F0092 row read as ``ULUSER="JDE"`` (post-trim) is unfindable on
+    DELETE / UPDATE — Oracle compares CHAR(10) ``"JDE       "`` against VARCHAR2 bind ``"JDE"``
+    with non-blank-padded semantics → no match, 0 rows affected, 200 OK. The fix lives in the
+    bind layer so operators don't have to hand-roll ``RPAD(:col, 10)`` in every WHERE.
+
+    Only touches columns whose ``ALL_TAB_COLUMNS.data_type`` is CHAR / NCHAR. VARCHAR2 stays
+    untouched (padding a VARCHAR2 bind would make it NOT match a non-padded stored value).
+    Skips binds that aren't non-empty strings (numbers, dates, None, "" — the latter is the
+    coalesce step's domain). The migration's ``:<COL>_ORIGINAL`` UPDATE rebind strips the
+    suffix to find the source column metadata.
+
+    Over-WIDTH SET values are trimmed to fit. JDE stores a UDC code in F0005's 10-char ``DRKY``
+    (often right-justified, so it reads back ``"       DMY"``), but the *consuming* column is sized
+    by the data dictionary — ``F00921.ULFRMT`` is ``CHAR(3)``. Writing the padded 10-char value
+    there is ``ORA-12899: value too large``. So a non-``_ORIGINAL`` (write) value longer than the
+    column is stripped to its logical content; Oracle re-pads ``CHAR`` on storage, and right-
+    justified targets are re-justified by the query's own ``LPAD`` (e.g. F00950's MCU). ``_ORIGINAL``
+    (WHERE) binds are left alone — they must equal the stored padded value to match. A pure-blank
+    value is never stripped to ``""`` (that would become NULL on Oracle — the coalesce step's ``" "``
+    sentinel survives)."""
+    if not col_types:
+        return bound
+    out = dict(bound)
+    for k, v in list(out.items()):
+        if not isinstance(v, str) or not v:
+            continue
+        base = k.upper()
+        is_original = base.endswith("_ORIGINAL")
+        if is_original:
+            base = base[: -len("_ORIGINAL")]
+        meta = col_types.get(base)
+        if meta is None and where_col_map:
+            # The bind name isn't a column, but the SQL compares it to one (``RLTOROLE = :FROMUSER``)
+            # — pad to THAT column's width. A compared bind must equal the stored padded value, so
+            # treat it like an ``_ORIGINAL`` WHERE bind (pad only, never trim over-wide).
+            mapped = where_col_map.get(base)
+            if mapped is not None:
+                meta = col_types.get(mapped)
+                is_original = True
+        if not meta or meta.get("kind") != "char_fixed":
+            continue
+        length = meta.get("length")
+        if not isinstance(length, int) or length <= 0:
+            continue
+        if len(v) > length:
+            # Too wide for the target — only fix SET values (a WHERE bind must keep the stored
+            # padded form). Strip the source padding so the logical code fits; keep a blank as a
+            # single space (NULL guard). If it's still too long after stripping, it's genuine
+            # over-length data — leave it and let the DB raise.
+            if not is_original:
+                trimmed = v.strip() or " "
+                if len(trimmed) <= length:
+                    out[k] = trimmed
+            continue
+        if len(v) == length:
+            continue
+        out[k] = v.ljust(length)
     return out
 
 from sqlalchemy import text
@@ -434,9 +646,9 @@ from liberty.connectors.base import (
     detect_statement_type,
     find_bind_params,
 )
-from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig
+from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig, _crud_slot_to_querydef
 from liberty.connectors.db import PoolRegistry
-from liberty.connectors.dictionary import DictionaryFile, SequenceDef
+from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, SequenceDef
 
 # Internal sentinel raised by `test_run(dry_run=True)` on a write — forces `engine.begin()`'s
 # context manager to roll back; caught outside the `async with`. Not part of the public surface.
@@ -529,6 +741,9 @@ class Column:
     format: str | None = None
     rule: dict[str, Any] | None = None
     dd: str | None = None
+    # The related-table write-back group this column belongs to (``ColumnHint.group``). Surfaced so
+    # the save path can split a row's writes per table; ``None`` ⇒ writes to the main table.
+    group: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "type": self.type}
@@ -554,6 +769,8 @@ class Column:
             d["format"] = self.format
         if self.rule is not None:
             d["rule"] = self.rule
+        if self.group is not None:
+            d["group"] = self.group
         return d
 
 
@@ -574,6 +791,19 @@ class QueryResult:
     rowcount: int = -1
     duration_ms: float = 0.0
     truncated: bool = False
+    # Values the server filled in for binds the caller left empty — currently the SEQUENCE / NN
+    # auto-IDs assigned during an INSERT (e.g. a sequence-driven PK). Surfaced so a caller can
+    # chain a dependent write against the freshly-assigned key (parent insert → child insert
+    # bound to the parent's new PK) without a separate read-back. Keys are uppercased column
+    # names. Empty for SELECTs and for writes where the caller supplied every value explicitly.
+    resolved_binds: dict[str, Any] = field(default_factory=dict)
+    # The FULL final bind set that actually hit the DB on a write — post filter-wrap,
+    # form-rule resolution (LOGIN / SYSDATE / DEFAULT / coercion), Oracle bind hygiene, and
+    # SEQUENCE/NN. This is what the audit mirror records, and what change-capture must record
+    # (so a DD default / audit value filled server-side on an empty bind is part of the package,
+    # not the empty value the form sent). Server-side only — NOT in :meth:`to_dict` (it can carry
+    # the whole row + resolved secrets; the client never needs it). Empty for SELECTs.
+    bound_params: dict[str, Any] = field(default_factory=dict)
 
     @property
     def row_count(self) -> int:
@@ -591,6 +821,7 @@ class QueryResult:
             "rowcount": self.rowcount,
             "truncated": self.truncated,
             "duration_ms": round(self.duration_ms, 3),
+            "resolved_binds": self.resolved_binds,
         }
 
 
@@ -634,6 +865,20 @@ class StreamDone:
 StreamEvent = StreamMeta | StreamRows | StreamDone
 
 
+def flatten_query_metas(desc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a sectioned SQL :meth:`SQLConnector.describe` dict back into the single flat
+    query-meta list every pre-sections consumer expects: each table's present CRUD slots
+    (already named ``<table>_<crud>``) in CRUD order, then custom ``queries``, then
+    ``sequences``, then ``lookups``. SQL text is preserved — callers publishing over HTTP
+    strip it via :func:`liberty.web.deps.public_query`."""
+    out: list[dict[str, Any]] = []
+    for tbl in desc.get("tables", []):
+        out.extend(tbl.get("slots", []))
+    for key in ("queries", "sequences", "lookups"):
+        out.extend(desc.get(key, []))
+    return out
+
+
 class SQLConnector:
     """A connector exposing a fixed set of named queries against one pool."""
 
@@ -670,7 +915,12 @@ class SQLConnector:
         # App-wide fallback language — used when a request supplies no Accept-Language. Lives on
         # [app] in app.toml; passed through by ConnectorRegistry so it's a single source of truth.
         self._default_language = default_language
-        self._queries: dict[str, QueryDef] = {q.name: q for q in config.queries}
+        # Unified name → QueryDef index across every section the new SqlConnectorConfig
+        # exposes — tables (each present CRUD slot synthesised as ``<table_name>_<crud>``),
+        # custom queries, sequences, lookups. Callers see one flat namespace and don't have
+        # to know which section a query came from; the section IS the type. Duplicate names
+        # raise ValueError at config-build time (caller logs + skips that connector).
+        self._queries: dict[str, QueryDef] = dict(config.iter_named_queries())
         self._dialect: str | None = None  # lazily resolved from the pool
 
     def _resolve_dialect(self) -> str:
@@ -703,29 +953,57 @@ class SQLConnector:
         onto :class:`liberty.screens.config.Screen`. This output now carries only the SQL-layer
         bits: the statement, declared params, bind names, writable flag, dialects, and
         friendly labels. The frontend reads per-screen behaviour from
-        ``GET /api/screens/{app}/{id}`` instead."""
+        ``GET /api/screens/{app}/{id}`` instead.
+
+        **Sectioned shape** — the output mirrors :class:`SqlConnectorConfig`'s four
+        sections: ``tables`` (each a ``{name, label, description, slots}`` where every
+        present CRUD slot is a query-meta dict tagged with its ``crud``), plus flat
+        ``queries`` (custom), ``sequences`` and ``lookups``. The synthesised slot name
+        is ``<table_name>_<crud>``. :func:`liberty.web.deps.public_connector` flattens
+        all four sections back into one ``queries`` list for the runtime TableView /
+        screen-picker consumers, so they don't need to know about sections."""
+        def _qmeta(q: QueryDef) -> dict[str, Any]:
+            return {
+                "name": q.name,
+                "label": q.label,
+                "description": q.description,
+                "writable": q.writable,
+                "statement_type": detect_statement_type(q.default_sql),
+                "dialects": q.dialects,
+                "params": [
+                    {"name": p.name, "label": p.label, "default": p.default}
+                    for p in q.params
+                ],
+                "bind_params": find_bind_params(q.default_sql),
+                "sql": q.sql,
+            }
+
+        tables: list[dict[str, Any]] = []
+        for tbl in self.config.tables:
+            slots: list[dict[str, Any]] = []
+            for crud, slot in tbl.slots():
+                qname = f"{tbl.name}_{crud}"
+                meta = _qmeta(_crud_slot_to_querydef(
+                    qname, slot, label=tbl.label, description=tbl.description, crud=crud,
+                ))
+                meta["crud"] = crud
+                slots.append(meta)
+            tables.append({
+                "name": tbl.name,
+                "label": tbl.label,
+                "description": tbl.description,
+                "slots": slots,
+            })
+
         return {
             "name": self.name,
             "type": "sql",
             "pool": self.pool_name,
             "show_in_switcher": self.config.show_in_switcher,
-            "queries": [
-                {
-                    "name": q.name,
-                    "label": q.label,
-                    "description": q.description,
-                    "writable": q.writable,
-                    "statement_type": detect_statement_type(q.default_sql),
-                    "dialects": q.dialects,
-                    "params": [
-                        {"name": p.name, "label": p.label, "default": p.default}
-                        for p in q.params
-                    ],
-                    "bind_params": find_bind_params(q.default_sql),
-                    "sql": q.sql,
-                }
-                for q in self._queries.values()
-            ],
+            "tables": tables,
+            "queries": [_qmeta(q) for q in self.config.queries],
+            "sequences": [_qmeta(q) for q in self.config.sequences],
+            "lookups": [_qmeta(q) for q in self.config.lookups],
         }
 
     # -- execution --------------------------------------------------------- #
@@ -778,11 +1056,11 @@ class SQLConnector:
         strict-type check rejects a string against an INTEGER-typed bind, so the wrap
         helper is the place to convert ``"10"`` → ``int(10)`` before binding. Non-active
         params and any other binds pass through untouched."""
-        if stmt_type != "SELECT" or not column_hints:
+        if stmt_type != "SELECT":
             return sql_text, params
-        _ = qdef  # kept for signature symmetry — no longer reads qdef.columns (Phase 3).
         active: list[tuple[str, str | None, str, Any]] = []
-        for col in column_hints:
+        active_names: set[str] = set()
+        for col in column_hints or []:
             if not col.filter:
                 continue
             v = (params or {}).get(col.name)
@@ -806,10 +1084,35 @@ class SQLConnector:
             # asyncpg gets to send the column's native type code and the index applies.
             coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
             active.append((col.name, fmt, op, coerced))
+            active_names.add(col.name.upper())
+        # Declared query params (``QueryDef.params``) used as OPTIONAL equality filters — the v1
+        # lib_lkp lookup pattern, now applied by the framework so the lookup query stays a plain
+        # ``SELECT col… FROM table``. A declared param filters its matching result column when
+        # (a) it isn't already a ``:bind`` in the SQL (the author would handle that themselves) and
+        # (b) a non-empty value was supplied. ``equals`` semantics (exact match), typed bind, and
+        # trim-aware via the shared predicate builder — no CAST/wrap noise in the TOML.
+        declared = [pd.name for pd in (getattr(qdef, "params", None) or [])]
+        if declared:
+            sql_binds = {b.upper() for b in find_bind_params(sql_text)}
+            for name in declared:
+                up = name.upper()
+                if up in sql_binds or up in active_names:
+                    continue
+                v = (params or {}).get(name)
+                if v is None or v == "":
+                    continue
+                entry = self._dict.find_entry(name, connector=dict_scope or self.name)
+                fmt = entry.format if (entry is not None and entry.format) else None
+                coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
+                active.append((name, fmt, "equals", coerced))
+                active_names.add(up)
         if not active:
             return sql_text, params
         dialect = self._resolve_dialect()
-        preds = [_build_filter_predicate(name, fmt, op, dialect) for name, fmt, op, _ in active]
+        # Honour the pool's ``trim_strings`` on the filter's text columns too (JDE CHAR(N) is
+        # blank-padded — without this a query that doesn't hand-TRIM its SELECT can't be filtered).
+        trim_text = self._pools.trim_strings(self.pool_name)
+        preds = [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text) for name, fmt, op, _ in active]
         body, order_clause = _split_order_by(sql_text)
         where_clause = " AND ".join(f"({p})" for p in preds)
         out = f"SELECT * FROM (\n{body}\n) lib_flt\nWHERE 1=1 AND {where_clause}"
@@ -818,7 +1121,14 @@ class SQLConnector:
         # Merge the coerced active-filter values into a fresh params dict so the
         # downstream ``_build_params`` picks them up (it reads the dict by bind name).
         new_params: dict[str, Any] = dict(params or {})
-        for name, _fmt, _op, coerced in active:
+        for name, fmt, _op, coerced in active:
+            # Symmetric with the predicate's column side: when ``trim_strings`` wraps a text
+            # column in ``TRIM()``, trim the *bind* too (both sides — Oracle TRIM is both-sided).
+            # JDE codes are space-padded *and* sometimes right-justified, so a lookup value reads
+            # back as ``'      01'``; without this it never equals ``TRIM(col) = '01'``. Text
+            # columns only — numbers / dates aren't space-padded.
+            if trim_text and isinstance(coerced, str) and ((fmt or "").lower() in _TEXT_FORMATS or not fmt):
+                coerced = coerced.strip()
             new_params[name] = coerced
         return out, new_params
 
@@ -893,8 +1203,10 @@ class SQLConnector:
         Steps, in order:
 
         1. **LOGIN** → stamp the caller's username (``"anonymous"`` when unauthenticated).
-        2. **SYSDATE / CURRENT_DATE** → stamp ``datetime.now(UTC)`` (one value per call so
-           every audit column in the same write lands on the same instant).
+        2. **SYSDATE / CURRENT_DATE** → stamp ``datetime.now()`` in **local server time**
+           (one value per call so every audit column in the same write lands on the same
+           instant; local because JDE/Oracle SYSDATE is local — UTC would write the wrong
+           day/time near midnight on a non-UTC server).
         3. **PASSWORD** → Argon2-hash a non-empty value; blank/missing pass through as NULL
            (the dialog already strips blank password fields from the submit body for UPDATE
            — keeping the existing hash; INSERT with an empty password lands as NULL).
@@ -902,10 +1214,12 @@ class SQLConnector:
            proper value on uncheck, but the migration / batch-edit grid may not yet — this is
            the safety net for the Y/N case where the DB doesn't accept NULL). ``true_value``
            passes through; only the empty/null side is substituted.
-        5. **DEFAULT** → on INSERT only, when the bind is missing/empty, use the entry's
-           ``default`` value.
+        5. **DEFAULT** → on any SET-clause write (INSERT/UPDATE/MERGE), when the bind is
+           missing/empty, use the entry's ``default`` value. This lets audit constants
+           (PID/JOBN) re-stamp on UPDATE; editable defaults are untouched because the form
+           sends their non-empty current value.
         6. **Type coercion** → strings to the matching Python type for ``format`` ∈
-           {integer/number/decimal/currency/date/datetime/timestamp/boolean/jdedate}.
+           {integer/number/decimal/currency/date/datetime/timestamp/boolean/jdedate/jdetime}.
 
         ``SEQUENCE`` / ``NN`` is handled separately by :meth:`_resolve_sequences` because it
         needs a DB connection (and must run inside the same write transaction).
@@ -947,9 +1261,13 @@ class SQLConnector:
                 if rule in _RULES_NOW:
                     # One ``now()`` per call, so every audit column in the same write lands on
                     # the same instant. Coerce to the matching Python type for the column's
-                    # format (date / datetime / jdedate) so the driver picks the right SQL type.
+                    # format (date / datetime / jdedate / jdetime) so the driver picks the right
+                    # SQL type. **Local server time**, not UTC: "today" means the server's day —
+                    # JDE (like Oracle's SYSDATE) stamps local time, and a UTC ``now`` would write
+                    # the wrong CYYDDD date / HHMMSS time for the hours either side of midnight
+                    # when the server isn't on UTC.
                     if now is None:
-                        now = datetime.now(timezone.utc).replace(tzinfo=None)
+                        now = datetime.now()
                     out[k] = _coerce_value(now, fmt) if fmt else now
                     continue
                 if rule in _RULES_PASSWORD:
@@ -971,9 +1289,15 @@ class SQLConnector:
                     if fv is not None:
                         out[k] = fv
                         continue  # don't also fall into DEFAULT — BOOLEAN's "false" *is* the default
-                # DEFAULT — only on INSERT, only when the user didn't supply a value.
+                # DEFAULT — on any SET-clause write (INSERT/UPDATE/MERGE), only when the caller
+                # didn't supply a value. This is what makes audit constants (e.g. PID="LIBERTY",
+                # JOBN) re-stamp on UPDATE the way LOGIN/SYSDATE already do — a blank bind on the
+                # update means the form didn't carry the audit value, so the DD default fills it.
+                # Editable defaults (FSTP="Y", OUTQ="QPRINT", …) are unaffected: the dialog sends
+                # their non-empty current value on update, so this only fires if one is cleared to
+                # blank — in which case the configured default is the right fallback anyway.
                 if (
-                    stmt_type == "INSERT" and (v is None or v == "")
+                    stmt_type in _RULES_DEFAULTABLE and (v is None or v == "")
                     and default is not None and rule not in _RULES_SEQUENCE
                 ):
                     out[k] = default
@@ -1026,8 +1350,15 @@ class SQLConnector:
         for k, v in list(out.items()):
             if k.upper().endswith("_ORIGINAL"):
                 continue
-            if v not in (None, ""):
-                continue  # caller supplied an explicit value — never overwrite
+            # "An explicit value from the caller wins — never overwrite." But a SEQUENCE column is
+            # numeric and JDE has no NULLs, so the form posts an unassigned key as ``0`` (e.g.
+            # AUSEQNO=0), not NULL/"". A sequence number is never legitimately 0 (they start at 1),
+            # so treat 0 / "0" as UNASSIGNED here too — otherwise the posted 0 blocks the sequence
+            # from firing and the row lands with seq 0. Only a real, non-zero value short-circuits.
+            zero_numeric = isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0
+            zero_string = isinstance(v, str) and v.strip() == "0"
+            if v not in (None, "") and not zero_numeric and not zero_string:
+                continue
 
             # Two lookup paths to find a sequence for this bind:
             #   1. via the dd_id (v1 ``ly_sequence.seq_dd_id`` — fires for any column whose dd
@@ -1101,6 +1432,19 @@ class SQLConnector:
         _ = qdef
         cap = override if override is not None else (screen_max_rows if screen_max_rows is not None else self.max_rows)
         return max(1, min(int(cap), self.HARD_MAX_ROWS))
+
+    def _debug_log_sql(self, query_name: str, stmt_type: str, sql_text: str, bound: dict[str, Any]) -> None:
+        """When the pool's ``debug_sql`` flag is on, log the statement *as it reaches the driver*:
+        the resolved SQL (schema placeholders + filter wrap applied) and the final bound params
+        (post trim / coalesce / pad / sequence). Logged at WARNING so it surfaces on the console
+        even under ``log_level = "warning"`` — the flag is opt-in per pool, so this is intentional,
+        not noise. The flag check is cheap; building the message only happens when it's on."""
+        if not self._pools.debug_sql(self.pool_name):
+            return
+        _log.warning(
+            "[debug_sql] %s.%s (%s) on pool %r\n  SQL: %s\n  binds: %r",
+            self.name, query_name, stmt_type, self.pool_name, sql_text, bound,
+        )
 
     async def execute(
         self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
@@ -1181,6 +1525,7 @@ class SQLConnector:
 
         started = time.perf_counter()
         if is_select:
+            self._debug_log_sql(query_name, stmt_type, sql_text, bound)
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
                 columns = _apply_column_hints(
@@ -1192,12 +1537,22 @@ class SQLConnector:
                     if len(rows) >= cap:
                         truncated = True
                         break
-                    rows.append(dict(row))
+                    # Decimal → JSON number (so numeric columns don't serialize as strings).
+                    rows.append({k: _jsonable_number(v) for k, v in row.items()})
             # Oracle CHAR/NCHAR columns are space-padded to their declared width; the trailing
             # spaces leak into UI labels and form fields and make editing painful (cursor lands
             # after the padding, search/sort sees "Test    " ≠ "Test"). v1 stripped automatically;
             # v2 does the same when the pool flag is set (auto-on for Oracle, see ``PoolRegistry.
             # trim_strings``). The trim only touches strings — numbers, dates, bytes pass through.
+            #
+            # ``rstrip`` only (NOT ``strip``): a right-justified JDE code (KY in F0005, MCU
+            # everywhere) is *left*-padded, and a live read is an edit-then-write-back round trip —
+            # stripping the leading padding would make ``_pad_char_binds`` (which only right-pads)
+            # restore the wrong justification on save. Leading padding is preserved here and trimmed
+            # *only* where it's safe: the filter bind, for a comparison that's never written back
+            # (see ``_apply_filter_wrap``). The nomaflow copy path can strip both sides because its
+            # target is a clean Postgres replica, never written back to JDE (see coercion.py's
+            # ``strip_both_columns``).
             if self._pools.trim_strings(self.pool_name):
                 for row in rows:
                     for k, v in row.items():
@@ -1215,6 +1570,13 @@ class SQLConnector:
                     for cn in _jdedate_cols:
                         if cn in row:
                             row[cn] = _from_jde_julian(row[cn])
+            # JDE HHMMSS times → "HH:MM:SS" strings on read — symmetric with jdedate above.
+            _jdetime_cols = [c.name for c in columns if (c.format or "").lower() == "jdetime"]
+            if _jdetime_cols:
+                for row in rows:
+                    for cn in _jdetime_cols:
+                        if cn in row:
+                            row[cn] = _from_jde_time(row[cn])
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name,
@@ -1227,60 +1589,123 @@ class SQLConnector:
                 truncated=truncated,
             )
 
-        # Oracle write-time null coalesce — see the helpers at the top of the module. Lookup
-        # the target table's column types once (cached), replace None bind values with the
-        # right sentinel. Skipped silently if the SQL shape doesn't match a single-target
-        # write (the operator can still hand-roll COALESCE / NVL in unusual shapes).
-        if self._pools.coalesce_nulls(self.pool_name):
+        # Oracle write-time bind hygiene — both transformers consult the same Oracle column
+        # metadata, so the introspection runs once when either pool flag is on:
+        #
+        #   * ``coalesce_nulls`` → :func:`_coalesce_oracle_nulls` replaces empty string binds
+        #     with " " for CHAR-family columns and 0 for NUMBER columns. Fixes ORA-01400 on
+        #     INSERTs / UPDATEs against NOT-NULL Oracle string columns (JDE F-tables typically).
+        #   * ``trim_strings`` → :func:`_pad_char_binds` right-pads non-empty string binds to
+        #     the declared CHAR(N) width for fixed-width CHAR / NCHAR columns. The symmetric
+        #     partner of the reads-side trim — without it, a trimmed bind doesn't match the
+        #     space-padded stored value on a DELETE / UPDATE WHERE clause, the SQL returns
+        #     200 OK with 0 rows affected, and the operator is left wondering why their delete
+        #     "worked" but the row is still there. See [[project-jde-pool-settings]].
+        #
+        # The introspection REQUIRES both ``owner`` (schema) AND ``table``. With ``owner=None``
+        # the ``all_tab_columns`` query would match the same table across every schema the
+        # connection user can see (JDE: PRODDTA / DEMODTA / TESTDTA …) and pollute the cache
+        # with mixed column metadata. We skip + warn instead so the operator notices the SQL
+        # needs a ``#SCHEMA.<NAME>#`` placeholder.
+        wants_coalesce = self._pools.coalesce_nulls(self.pool_name)
+        wants_pad = self._pools.trim_strings(self.pool_name)
+        if wants_coalesce or wants_pad:
             target = _oracle_target_table(sql_text)
-            if target is not None:
+            if target is None:
+                col_types: dict[str, dict[str, Any]] = {}
+            else:
                 owner, table = target
-                key = (self.pool_name, owner, table)
-                col_types = _ORACLE_COL_TYPES_CACHE.get(key)
-                if col_types is None:
-                    try:
-                        introspect_sql = (
-                            "SELECT column_name, data_type FROM all_tab_columns "
-                            "WHERE table_name = :t"
-                        ) + (" AND owner = :o" if owner else "")
-                        introspect_params: dict[str, Any] = {"t": table}
-                        if owner:
-                            introspect_params["o"] = owner
-                        async with engine.connect() as introspect_conn:
-                            r = await introspect_conn.execute(text(introspect_sql), introspect_params)
+                if owner is None:
+                    _log.warning(
+                        "oracle bind hygiene skipped for table %r on pool %r: no schema in SQL — "
+                        "use ``#SCHEMA.<NAME>#`` to qualify it, otherwise ``all_tab_columns`` "
+                        "returns the same table from every schema in scope.",
+                        table, self.pool_name,
+                    )
+                    col_types = {}
+                else:
+                    key = (self.pool_name, owner, table)
+                    col_types = _ORACLE_COL_TYPES_CACHE.get(key) or {}
+                    if not col_types:
+                        try:
+                            introspect_sql = (
+                                "SELECT column_name, data_type, char_length "
+                                "FROM all_tab_columns "
+                                "WHERE owner = :o AND table_name = :t"
+                            )
+                            async with engine.connect() as introspect_conn:
+                                r = await introspect_conn.execute(
+                                    text(introspect_sql), {"o": owner, "t": table},
+                                )
+                                col_types = {}
+                                for row in r.mappings():
+                                    cname = str(row.get("column_name") or "").upper()
+                                    dtype = str(row.get("data_type") or "").upper()
+                                    raw_len = row.get("char_length")
+                                    try:
+                                        clen: int | None = int(raw_len) if raw_len is not None else None
+                                    except (TypeError, ValueError):
+                                        clen = None
+                                    if not cname:
+                                        continue
+                                    if dtype in _ORACLE_FIXED_CHAR_TYPES:
+                                        col_types[cname] = {"kind": "char_fixed", "length": clen}
+                                    elif dtype in _ORACLE_VAR_CHAR_TYPES:
+                                        col_types[cname] = {"kind": "char", "length": None}
+                                    elif dtype in _ORACLE_NUMBER_TYPES:
+                                        col_types[cname] = {"kind": "number", "length": None}
+                                    else:
+                                        col_types[cname] = {"kind": "other", "length": None}
+                                _ORACLE_COL_TYPES_CACHE[key] = col_types
+                        except Exception as e:
+                            _log.warning(
+                                "oracle column introspection failed for %s.%s on pool %r: %s — "
+                                "writes proceed without bind hygiene",
+                                owner, table, self.pool_name, e,
+                            )
                             col_types = {}
-                            for row in r.mappings():
-                                cname = str(row.get("column_name") or "").upper()
-                                dtype = str(row.get("data_type") or "").upper()
-                                if not cname:
-                                    continue
-                                if dtype in _ORACLE_CHAR_TYPES:
-                                    col_types[cname] = "char"
-                                elif dtype in _ORACLE_NUMBER_TYPES:
-                                    col_types[cname] = "number"
-                                else:
-                                    col_types[cname] = "other"
-                            _ORACLE_COL_TYPES_CACHE[key] = col_types
-                    except Exception as e:
-                        _log.warning(
-                            "oracle column introspection failed for %s.%s on pool %r: %s — "
-                            "writes proceed without null coalesce",
-                            owner or "?", table, self.pool_name, e,
-                        )
-                        col_types = {}
+            if wants_coalesce:
                 bound = _coalesce_oracle_nulls(bound, col_types)
+            if wants_pad:
+                # ``where_col_map`` lets a WHERE/JOIN bind whose NAME differs from the column it's
+                # compared to (``RLTOROLE = :FROMUSER``) still pad to that CHAR column's width.
+                bound = _pad_char_binds(bound, col_types, where_col_map=_where_bind_columns(sql_text))
 
         async with engine.begin() as conn:
             # SEQUENCE / NN — run the named "next number" query in the *same* transaction as
             # the INSERT so a concurrent insert can't grab the same value (the surrounding
             # ``engine.begin()`` block serialises). A missing/failing sequence logs and falls
             # through with NULL (the DB will then reject the row if the column is NOT NULL).
+            pre_seq = dict(bound)
             bound = await self._resolve_sequences(
                 conn, bound, qdef, stmt_type=stmt_type, language=lang, column_hints=column_hints,
                 dict_scope=dict_scope,
             )
+            # The binds the sequence machinery just filled (empty → value) — these are the
+            # freshly-assigned auto-IDs (typically the PK). Surfaced on the result so a caller
+            # can bind a dependent child insert to the parent's new key in the same Save.
+            seq_assigned = {
+                k.upper(): v for k, v in bound.items()
+                if pre_seq.get(k) in (None, "") and v not in (None, "")
+                and not k.upper().endswith("_ORIGINAL")
+            }
+            self._debug_log_sql(query_name, stmt_type, sql_text, bound)
             result = await conn.execute(stmt, bound)
             rowcount = result.rowcount
+            # 0-row write watch — a successful SQL execute that didn't touch any row is almost
+            # always a config bug worth surfacing: a DELETE/UPDATE whose WHERE doesn't match
+            # the stored value (CHAR vs VARCHAR2 padding, case mismatch), an INSERT that
+            # silently no-ops because the target table is partitioned away, an action chain
+            # pointing at the wrong query variant (``_put`` instead of ``_post``), etc.
+            # Logged as a WARN so it shows up in the server console without making the call
+            # itself fail (some writes legitimately affect 0 rows — e.g. an idempotent
+            # cleanup that runs whether the row exists or not).
+            if stmt_type in WRITE_STATEMENTS and rowcount == 0:
+                _log.warning(
+                    "%s.%s: %s affected 0 rows — check the WHERE clause (CHAR padding, "
+                    "case, missing bind) or the target query variant. SQL=%r bound=%r",
+                    self.name, query_name, stmt_type, sql_text, bound,
+                )
             # AUD audit (v1's tbl_audit = 'Y' → migrated as Screen.audit_table = "AUD_<table>",
             # threaded in by the route layer). The mirror INSERT runs in the *same* transaction
             # so a successful write + failing audit rolls back together — a missing/misshapen
@@ -1298,6 +1723,8 @@ class SQLConnector:
             statement_type=stmt_type,
             rowcount=rowcount,
             duration_ms=duration_ms,
+            resolved_binds=seq_assigned,
+            bound_params=bound,
         )
 
     async def execute_stream(
@@ -1370,6 +1797,7 @@ class SQLConnector:
         stmt = text(sql_text)
         engine: AsyncEngine = self._pools.engine(self.pool_name)
         _trim = self._pools.trim_strings(self.pool_name)
+        self._debug_log_sql(query_name, stmt_type, sql_text, bound)
         started = time.perf_counter()
 
         # Server-side cursor via conn.stream(). The ``stream_results=True`` execution option
@@ -1391,6 +1819,7 @@ class SQLConnector:
             )
             # JDE Julian date columns — same case-insensitive convention as execute().
             _jdedate_cols = {c.name for c in columns if (c.format or "").lower() == "jdedate"}
+            _jdetime_cols = {c.name for c in columns if (c.format or "").lower() == "jdetime"}
             yield StreamMeta(columns=columns, cap=cap, chunk_size=chunk)
 
             sent = 0
@@ -1407,15 +1836,19 @@ class SQLConnector:
                     if sent + len(out) >= cap:
                         truncated = True
                         break
-                    row = dict(raw)
+                    row = {k: _jsonable_number(v) for k, v in raw.items()}   # Decimal → JSON number
                     if _trim:
                         for k, v in row.items():
                             if isinstance(v, str):
-                                row[k] = v.rstrip()
+                                row[k] = v.rstrip()   # trailing only — preserve left-padding for write-back (see execute())
                     if _jdedate_cols:
                         for cn in _jdedate_cols:
                             if cn in row:
                                 row[cn] = _from_jde_julian(row[cn])
+                    if _jdetime_cols:
+                        for cn in _jdetime_cols:
+                            if cn in row:
+                                row[cn] = _from_jde_time(row[cn])
                     out.append(row)
                 if out:
                     sent += len(out)
@@ -1465,6 +1898,7 @@ class SQLConnector:
         engine = self._pools.engine(self.pool_name)
         started = time.perf_counter()
         if is_select:
+            self._debug_log_sql("<test-run>", stmt_type, sql_text, bound)
             async with engine.connect() as conn:
                 result = await conn.execute(stmt, bound)
                 # No QueryDef → no column hints to overlay; we still expose discovered names + types.
@@ -1475,7 +1909,8 @@ class SQLConnector:
                     if len(rows) >= cap:
                         truncated = True
                         break
-                    rows.append(dict(row))
+                    # Decimal → JSON number (so numeric columns don't serialize as strings).
+                    rows.append({k: _jsonable_number(v) for k, v in row.items()})
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name, query="<test-run>", statement_type=stmt_type,
@@ -1486,6 +1921,7 @@ class SQLConnector:
         # when the block exits with an exception); we catch it outside and report the rowcount.
         # Without dry_run the block exits normally and the transaction commits.
         rowcount = -1
+        self._debug_log_sql("<test-run>", stmt_type, sql_text, bound)
         try:
             async with engine.begin() as conn:
                 result = await conn.execute(stmt, bound)
@@ -1644,7 +2080,7 @@ class SQLConnector:
 
         * ``AUD_ACTION`` — the statement type (``INSERT`` / ``UPDATE`` / ``DELETE``)
         * ``AUD_USER`` — the caller's username (or ``"anonymous"`` if the call wasn't authenticated)
-        * ``AUD_DATE`` — UTC timestamp captured server-side
+        * ``AUD_DATE`` — local server-time timestamp captured server-side
 
         Columns are taken from ``params`` (uppercase keys, not ending in ``_ORIGINAL`` — those are
         only WHERE rebinds for the main UPDATE). The AUD table is auto-created from the source
@@ -1671,18 +2107,18 @@ class SQLConnector:
         #                    VALUES (:col1, :col2, …, :_AUD_ACTION, :_AUD_USER, :_AUD_DATE)`
         # Reserved bind names start with `_aud_` so they can't collide with the row's columns.
         col_list = list(cols)
-        # ``_aud_date`` is naive UTC: the audit column is ``TIMESTAMP`` (without time zone)
-        # — matches the auto-create DDL above and what v1's AUD_<table>s used. Binding a
-        # tz-aware ``datetime.now(UTC)`` against a tz-naive column trips asyncpg with
-        # "can't subtract offset-naive and offset-aware datetimes" and rolls the whole
-        # audited write back (auto-create + main + audit are one transaction). The same
-        # naive-UTC convention runs for SYSDATE in ``_apply_form_rules``, so the two
-        # paths stay consistent.
+        # ``_aud_date`` is naive **local** server time: the audit column is ``TIMESTAMP``
+        # (without time zone) — matches the auto-create DDL above and what v1's AUD_<table>s
+        # used. ``datetime.now()`` is naive (no tzinfo) so it binds cleanly against the
+        # tz-naive column (a tz-aware ``now`` trips asyncpg with "can't subtract offset-naive
+        # and offset-aware datetimes" and rolls the whole audited write back — auto-create +
+        # main + audit are one transaction). Local, not UTC, so it agrees with the SYSDATE
+        # rule in ``_apply_form_rules`` and reads consistently next to UPMJ/UPMT in the DB.
         bind_params = {
             **cols,
             "_aud_action": stmt_type,
             "_aud_user": user or "anonymous",
-            "_aud_date": datetime.now(timezone.utc).replace(tzinfo=None),
+            "_aud_date": datetime.now(),
         }
         col_sql = ", ".join([*col_list, "AUD_ACTION", "AUD_USER", "AUD_DATE"])
         val_sql = ", ".join([f":{c}" for c in col_list] + [":_aud_action", ":_aud_user", ":_aud_date"])
@@ -1703,14 +2139,30 @@ def _resolve_hint(
     the hint — see :func:`_apply_column_hints`)."""
     label, fmt = h.label, h.format
     rule: dict[str, Any] | None = None
-    if h.dictionary_key:
-        entry = dictionary.find_entry(h.dictionary_key, connector=connector)
-        if entry is not None:
-            if label is None:
-                label = entry.label_for(language)
-            if fmt is None:
-                fmt = entry.format
-            rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+    entry = dictionary.find_entry(h.dictionary_key, connector=connector) if h.dictionary_key else None
+    if entry is not None:
+        if label is None:
+            label = entry.label_for(language)
+        if fmt is None:
+            fmt = entry.format
+    # The hint's OWN ``rules`` override wins over the dictionary entry's rule — e.g. APPS_ID is a
+    # global LOOKUP in the dictionary but THIS screen overrides it to SEQUENCE (it creates the row).
+    # Without honouring the override the grid kept rendering the LOOKUP. Build a synthetic entry so
+    # the override resolves (SEQUENCE / NN resolve to no display rule → the grid shows the raw value).
+    hint_rules = h.rules.strip().upper() if h.rules else None
+    if hint_rules:
+        synth = DictionaryEntry(
+            label=(entry.label if entry else None),
+            format=fmt or (entry.format if entry else None),
+            rules=hint_rules,
+            rules_values=(h.rules_values.strip() if h.rules_values else None),
+            lookup_params=(entry.lookup_params if entry else {}),
+            false_value=(entry.false_value if entry else None),
+            default=(entry.default if entry else None),
+        )
+        rule = dictionary.resolve_rule(synth, connector=connector, language=language)
+    elif entry is not None:
+        rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
@@ -1722,6 +2174,7 @@ def _resolve_hint(
         # this to cross-map columns by dictionary key (`APPS_ID` matches USR_APPS_ID / RLU_APPS_ID
         # / CFD_APPS_ID across queries).
         dd=h.dd if h.dd else None,
+        group=h.group or None,
     )
 
 

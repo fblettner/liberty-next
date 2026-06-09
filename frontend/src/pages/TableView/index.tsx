@@ -63,10 +63,10 @@ const ViewToggle = styled.div`
   }
 `
 
-export default function TableView({ connector, query }: { connector: string; query: string }) {
+export default function TableView({ connector, query, screenApp, screenId }: { connector: string; query: string; screenApp?: string; screenId?: string }) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { menus, findScreen } = useWorkspace()
+  const { menus, findScreen, findScreenById } = useWorkspace()
   // URL search params seed the param form / filter panel on initial load — that's how the
   // row-menu's NavigateAction drill-down works ("?USR_ID=42" → the destination's USR_ID param
   // is pre-filled, then auto_load fires the query against that value). Also makes screens
@@ -146,7 +146,10 @@ export default function TableView({ connector, query }: { connector: string; que
   // to load doesn't hang the drill seed (and the auto-run it gates) forever.
   const [screenReady, setScreenReady] = useState(false)
   useEffect(() => {
-    const stub = findScreen(connector, query)
+    // When a specific screen is requested (a ``screen`` menu leaf → ``/screen/<app>/<id>``), open
+    // THAT screen by id — two screens on the same read query stay distinct. Otherwise resolve the
+    // screen by (connector, query) as usual (the inline / generic path).
+    const stub = screenId ? findScreenById(screenApp ?? connector, screenId) : findScreen(connector, query)
     setScreenReady(false)
     // Phase 3 — every Screen drives per-query behaviour now (columns / auto_load / audit / max_rows
     // / update_query / etc.), so always fetch the full body when a Screen exists for this
@@ -165,7 +168,7 @@ export default function TableView({ connector, query }: { connector: string; que
       .catch(() => { if (!cancelled) setScreen(null) })
       .finally(() => { if (!cancelled) setScreenReady(true) })
     return () => { cancelled = true }
-  }, [findScreen, connector, query])
+  }, [findScreen, findScreenById, connector, query, screenApp, screenId])
 
   // Server-filter fields: columns flagged `filter` in the *screen*'s ``columns`` if present,
   // else the query's `columns` config (v1's col_filter). The migrated SQL is wrapped in
@@ -237,7 +240,14 @@ export default function TableView({ connector, query }: { connector: string; que
         // rows appear live without React stuttering on per-chunk re-renders. On a 15K-row
         // query that took ~6s end-to-end before, the first rows land in ~100ms and the grid
         // is responsive throughout.
-        const qs = new URLSearchParams({ ...sent, _stream: '1', ...(limit ? { _limit: limit } : {}) }).toString()
+        // ``_screen`` / ``_app`` pin THIS screen's hints when several screens share one read_query
+        // (a copied screen with different hidden columns) — else the backend applies the first
+        // match's hints (the original).
+        const qs = new URLSearchParams({
+          ...sent, _stream: '1',
+          ...(limit ? { _limit: limit } : {}),
+          ...(screenId ? { _screen: screenId, _app: screenApp ?? connector } : {}),
+        }).toString()
         const path = `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${qs}`
         const ctrl = new AbortController()
         streamAbortRef.current = ctrl
@@ -322,8 +332,14 @@ export default function TableView({ connector, query }: { connector: string; que
   // True when *this* tab's TableView is the active route. Every tab stays mounted (TabHost) and
   // they all share one ``useSearchParams`` / ``useLocation``, so the URL binds belong to whichever
   // tab the path points at — gate the drill logic on this so an inactive tab never reacts to
-  // another tab's drill URL.
-  const onThisTab = location.pathname === tabPath({ kind: 'sql', connector, target: query })
+  // another tab's drill URL. A screen tab routes through ``/screen/<app>/<id>`` (not
+  // ``/sql/<connector>/<query>``), so match the right path — otherwise the drill binds (filters
+  // passed between screens) never seed and auto_load runs unfiltered.
+  const onThisTab = location.pathname === (
+    screenId
+      ? tabPath({ kind: 'screen', connector: screenApp ?? connector, target: screenId })
+      : tabPath({ kind: 'sql', connector, target: query })
+  )
 
   // Auto-load: run a SELECT immediately when the screen opens, once, if the screen asks for it.
   // Phase 3 — ``auto_load`` is a screen-level flag now; fall back to the (deprecated) meta-level

@@ -414,3 +414,73 @@ def test_sql_stream_respects_limit(app) -> None:
         assert [e["kind"] for e in events] == ["meta", "rows", "done"]
         assert events[-1]["total"] == 1
         assert events[-1]["truncated"] is True
+
+
+def test_public_connector_keeps_empty_switcher_app_hides_permission_filtered() -> None:
+    """A connector with NO queries at all but ``show_in_switcher`` is an app whose screens read
+    from other connectors (e.g. nomajde after its tables/lookups moved to jdedwards) — keep it so
+    the app switcher (which filters /api/connectors by menu app name) can still find it. A
+    connector that HAS queries but none the caller may use stays hidden (permission filter, no
+    name leak)."""
+    from liberty.web.deps import public_connector
+
+    class _P:
+        def __init__(self, allow: bool) -> None:
+            self._allow = allow
+
+        def has_permission(self, _perm: str) -> bool:
+            return self._allow
+
+    empty = {"name": "nomajde", "type": "sql", "tables": [], "queries": [],
+             "sequences": [], "lookups": [], "show_in_switcher": True}
+    out = public_connector(empty, _P(True))
+    assert out is not None and out["name"] == "nomajde" and out["queries"] == []
+
+    # opted OUT of the switcher → hidden when empty
+    assert public_connector({**empty, "show_in_switcher": False}, _P(True)) is None
+
+    # has queries but all forbidden → hidden (permission filter), even with show_in_switcher
+    has_q = {"name": "secret", "type": "sql", "tables": [],
+             "queries": [{"name": "q1", "sql": "SELECT 1"}], "sequences": [], "lookups": [],
+             "show_in_switcher": True}
+    assert public_connector(has_q, _P(False)) is None
+    assert public_connector(has_q, _P(True)) is not None
+
+
+def test_find_screen_resolves_column_group_write_query() -> None:
+    """A column-group write query resolves to its screen so the group write inherits the screen's
+    column hints (a group column's ``dd`` rule fires) — marked ``group`` so the route does NOT also
+    apply the screen's main audit table / change-capture to the related-table write."""
+    from liberty.web.connectors import _find_screen_for_query, _column_hints_for
+    from liberty.screens.config import parse_screens
+
+    sf = parse_screens({"screens": {"nomajde": {"f0092": {
+        "connector": "jdedwards",
+        "read_query": "f0092_get", "update_query": "f0092_put", "insert_query": "f0092_post",
+        "column_groups": [{"id": "f00921", "connector": "jdedwards",
+                           "update_query": "f00921_put", "insert_query": "f00921_post",
+                           "delete_query": "f00921_delete", "key_columns": ["ULUSER"]}],
+        "columns": [{"name": "ULMUSE", "dd": "MUSE", "group": "f00921"}],
+    }}}})
+    s, slot, app = _find_screen_for_query(sf, "jdedwards", "f0092_put")
+    assert s is not None and slot == "update" and app == "nomajde"
+    s, slot, app = _find_screen_for_query(sf, "jdedwards", "f00921_post")
+    assert s is not None and slot == "group" and app == "nomajde"
+    assert "ULMUSE" in {c.name for c in (_column_hints_for(s) or [])}   # group column's dd is available
+
+
+def test_resolve_action_screen_for_change_capture() -> None:
+    """A tagged screen-action call (``_change_context`` {app, screen}) resolves to the originating
+    screen so its run_query write / call_api / call_plugin lands in THAT screen's package."""
+    from liberty.web.connectors import _resolve_action_screen
+    from liberty.screens.config import parse_screens
+    sf = parse_screens({"screens": {"nomajde": {"f0092": {
+        "read_query": "f0092_get", "change_tracked": True, "change_entity": "user",
+    }}}})
+    s = _resolve_action_screen(sf, {"app": "nomajde", "screen": "f0092"})
+    assert s is not None and s.change_tracked is True and s.change_entity == "user"
+    # Missing context / unknown screen / no screens → None (no capture).
+    assert _resolve_action_screen(sf, None) is None
+    assert _resolve_action_screen(sf, {"app": "nomajde", "screen": "nope"}) is None
+    assert _resolve_action_screen(sf, {"app": "x", "screen": "f0092"}) is None
+    assert _resolve_action_screen(None, {"app": "nomajde", "screen": "f0092"}) is None

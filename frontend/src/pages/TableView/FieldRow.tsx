@@ -29,7 +29,11 @@ const ReadOnlyBox = styled.div`
 
 // ── widget choice mirrors ResultTable.editCtrlOf — keep both in sync. ─────────
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
-function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
+// ``jdedate`` is a JDE Julian (CYYDDD) date: stored as an integer, but the read path converts it to
+// an ISO ``YYYY-MM-DD`` string (``_from_jde_julian``) and Save re-encodes the picked date back to
+// Julian — so it edits as a real date with a calendar, not a number. (Its SQL ``typ`` is integer,
+// which is why matching on ``typ`` alone missed it.)
+function isDateish(fmt: string, typ: string) { return fmt === 'date' || fmt === 'jdedate' || /date|timestamp/.test(typ) }
 export function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
 
 /** Field-lookup shim — keeps the LOOKUP spec resolution call site stable. Resolves the
@@ -104,7 +108,9 @@ export function FieldRow({
       <Checkbox
         checked={checked}
         onChange={(v) => onChange(field.name, v ? trueV : falseV)}
-        label={checked ? trueV : (falseV ?? t('common.no'))}
+        // Label the STATE, not the raw stored code: a user sees "enabled / disabled", not "1 / 0"
+        // (the true/false values like Y/1/01 are storage detail, meaningless on a checkbox).
+        label={checked ? t('common.enabled') : t('common.disabled')}
       />
     )
   } else if (effectiveRule?.kind === 'enum') {

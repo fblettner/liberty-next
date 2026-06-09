@@ -29,6 +29,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "datetime", "label": "Date & Time"},
             {"value": "timestamp", "label": "Timestamp"},
             {"value": "jdedate", "label": "JD Edwards Date"},
+            {"value": "jdetime", "label": "JD Edwards Time"},
             {"value": "number", "label": "Number"},
             {"value": "integer", "label": "Integer"},
             {"value": "decimal", "label": "Decimal"},
@@ -51,6 +52,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "DISABLED", "label": "Disable Dictionary Rule"},
             {"value": "ENUM", "label": "Enumeration"},
             {"value": "JDEDATE", "label": "JD Edwards Date"},
+            {"value": "JDETIME", "label": "JD Edwards Time"},
             {"value": "LOGIN", "label": "User connected"},
             {"value": "LOOKUP", "label": "Lookup Table"},
             {"value": "NN", "label": "Next Number"},
@@ -59,15 +61,10 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "SYSDATE", "label": "Date Today"},
         ],
     },
-    "QUERY_TYPE": {
-        "label": "Query Type",
-        "values": [
-            {"value": "table", "label": "Table (CRUD)"},
-            {"value": "custom", "label": "Custom query"},
-            {"value": "sequence", "label": "Sequence"},
-            {"value": "lookup", "label": "Lookup"},
-        ],
-    },
+    # QUERY_TYPE retired — a query's role is implied by which section it sits under in
+    # connectors.toml (``[[connectors.X.tables]]`` / ``queries`` / ``sequences`` /
+    # ``lookups``). Kept here as a comment so a future contributor searching for it lands
+    # on this explanation instead of resurrecting the enum.
     "DATASOURCE_TYPE": {
         "label": "Datasource Type",
         "values": [
@@ -122,7 +119,8 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
     "MENU_ITEM_TYPE": {
         "label": "Menu Item Type",
         "values": [
-            {"value": "query", "label": "Query (table / screen)"},
+            {"value": "screen", "label": "Screen (designed view)"},
+            {"value": "query", "label": "Query (raw table view)"},
             {"value": "endpoint", "label": "Endpoint (API call)"},
             {"value": "dashboard", "label": "Dashboard (widget grid)"},
             {"value": "page", "label": "Page (frontend route)"},

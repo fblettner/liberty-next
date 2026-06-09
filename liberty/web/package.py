@@ -71,10 +71,22 @@ def _by_kind(manifest: Manifest, kind: str) -> list[Any]:
 
 def _trim_queries(connector_cfg: dict[str, Any], wanted: set[str]) -> dict[str, Any]:
     """Keep only the queries / endpoints the manifest references, drop the rest. Preserves
-    every other top-level field on the connector (pool / auth / show_in_switcher / home / …)."""
+    every other top-level field on the connector (pool / auth / show_in_switcher / home / …).
+
+    *wanted* holds flat synthesised query names (``<base>_<crud>`` for table slots, plus
+    custom / sequence / lookup names). Custom queries, sequences and lookups are trimmed by
+    name. A **table** is kept whole when any of its four synthesised slot names is wanted —
+    the table is the natural unit, and keeping all its slots leaves the export self-contained
+    rather than emitting a half-populated table."""
     out = dict(connector_cfg)
-    if "queries" in out:
-        out["queries"] = [q for q in out["queries"] if q.get("name") in wanted]
+    for section in ("queries", "sequences", "lookups"):
+        if section in out:
+            out[section] = [q for q in out[section] if q.get("name") in wanted]
+    if "tables" in out:
+        out["tables"] = [
+            t for t in out["tables"]
+            if {f"{t.get('name')}_{crud}" for crud in ("get", "put", "post", "delete")} & wanted
+        ]
     if "endpoints" in out:
         out["endpoints"] = [e for e in out["endpoints"] if e.get("name") in wanted]
     return out

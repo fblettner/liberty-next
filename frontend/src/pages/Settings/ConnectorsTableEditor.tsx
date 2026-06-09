@@ -1,30 +1,27 @@
-// Unified per-table editor: presents a `<base>_<get|put|post|delete>` quartet (or whichever slots
-// exist) as ONE configurable object — a tab strip across the top:
+// Unified per-table editor: presents a first-class CRUD `TableEntry` (its `name` / `label` /
+// `description` + up to four CRUD slots) as ONE configurable object — a tab strip across the top:
 //   General · Read · Update · Insert · Delete
-// **Phase 3** — per-screen behaviour (`columns` / `auto_load` / `audit_table` / `max_rows` /
-// `key_columns` / companion-query refs) has moved off `QueryDef` onto `Screen`. The connector's
-// per-table editor now only edits the SQL-level pieces of each query: General (label/description
-// on the read query — friendly metadata that still rides on `QueryDef`) and the four CRUD bodies
-// (sql / params / writable). Columns + per-table behaviour live in the Screen Designer's
-// "Columns" / "General" tabs — the "Open in Screens" link in this editor's header jumps to the
-// matching screen when one exists.
+// **Sectioned model** — the table metadata (label / description) lives on the `TableEntry` itself,
+// NOT on a `_get` slot, so a write-only table (only `_put` / `_post`, no `_get`) edits its metadata
+// just the same. Each CRUD tab edits its slot (`sql` / `writable`); a missing slot shows a
+// "+ Create" button. The table `name` is renamed cross-file via the Rename button (editing it
+// inline would break every screen / dictionary / chart / dashboard / menu reference).
 //
-// Missing slot → a "+ Create" button that adds the empty query stub. No rename yet (delete +
-// re-add), matching the rest of the Phase-7 builders.
+// **Phase 3** — per-screen behaviour (`columns` / `auto_load` / `audit_table` / `max_rows` /
+// `key_columns` / companion-query refs) lives on the `Screen`, edited in the Screen Designer; the
+// "Open in Screens" link in this editor's header jumps to the matching screen.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, Copy, Edit3, ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
   CRUD_KINDS,
   type CrudKind,
-  type QuerySlot,
-  newQueryStub,
+  type CrudSlotEntry,
+  type TableEntry,
   pickSchemaProperties,
-  removeQueryByName,
-  replaceQueryByName,
 } from './connectorTables'
 
 // ── styled bits ───────────────────────────────────────────────────────────────
@@ -60,101 +57,116 @@ type TabKey = 'general' | CrudKind
 const TAB_ORDER: TabKey[] = ['general', 'get', 'put', 'post', 'delete']
 const TAB_TO_CRUD: Partial<Record<TabKey, CrudKind>> = { get: 'get', put: 'put', post: 'post', delete: 'delete' }
 
-// Phase 3 — General edits only the friendly metadata still on QueryDef (label/description).
-// auto_load / audit / max_rows / key_columns / columns moved to Screen — edit them in the
-// Screen Designer's General + Columns tabs.
-const GENERAL_KEYS = ['type', 'label', 'description']
-// per-query body — `name` is left out (renames break grouping); writable hidden for read.
-// CRUD table queries carry no declared `params`: reads filter via the screen's FilterPanel and
-// writes bind the edited row's columns (+ `:<COL>_ORIGINAL`) — neither uses ParamDefs. So the
-// Params field is omitted on every table slot (it lives only on the Custom / Sequence / Lookup
-// editors, where the caller actually supplies the binds).
+// General edits the table-level metadata that lives on the TableDef itself (label / description) —
+// `name` is renamed cross-file via the Rename button. CRUD bodies edit the CrudSlot: `sql` on the
+// read, `sql` + `writable` on the writes. Table CRUD slots carry no declared params (reads filter
+// via the screen's FilterPanel; writes bind the edited row's columns), so Params is omitted — it
+// lives only on the Custom / Sequence / Lookup query editors.
+const GENERAL_KEYS = ['label', 'description']
 const READ_BODY_KEYS = ['sql']
 const WRITE_BODY_KEYS = ['sql', 'writable']
 
+const SLOT_DEFAULTS: Record<CrudKind, CrudSlotEntry> = {
+  get: { sql: '' },
+  put: { sql: '', writable: true },
+  post: { sql: '', writable: true },
+  delete: { sql: '', writable: true },
+}
+
 export interface ConnectorsTableEditorProps {
-  base: string
-  /** The connector this table lives in — threaded into `SqlConnectorContext` so every SQL
-   *  editor in the form enables schema-aware autocomplete against that connector's pool. */
+  table: TableEntry
+  /** The connector this table lives in — threaded into `SqlConnectorContext` so every SQL editor
+   *  enables schema-aware autocomplete against that connector's pool. */
   connectorName: string
-  slots: Partial<Record<CrudKind, QuerySlot>>
-  queries: Record<string, unknown>[]
-  queryDefSchema: JsonSchema
+  /** TableDef schema (label / description live here) + CrudSlot schema (sql / writable). */
+  tableDefSchema: JsonSchema
+  crudSlotSchema: JsonSchema
   defs: Record<string, JsonSchema>
-  onChangeQueries: (next: Record<string, unknown>[]) => void
+  /** Persist the edited table back to the connector's `tables[]` (replace-by-name). */
+  onChange: (next: TableEntry) => void
+  /** Drop the whole table from the connector. */
+  onDelete: () => void
   onBack: () => void
   onDuplicate?: () => void
-  /** Cross-file rename of the table base (all CRUD slots + screen bindings). Parent wires it to
-   *  the rename endpoint; absent → no Rename button. */
+  /** Cross-file rename of the table name (all CRUD slot refs + screen bindings). Parent wires it
+   *  to the rename endpoint; absent → no Rename button. */
   onRename?: () => void
-  /** When the parent finds a Screen whose `read_query` matches this table's `_get`, it passes
-   *  `{app, id}` here so the header shows an "Open visual builder" button. Click → the parent's
-   *  ``onOpenScreen`` opens the screen designer modal in-place (no Settings tab switch). */
+  /** Reclassify the table to a standalone query / sequence / lookup (single-slot tables only).
+   *  Absent → no Change-type button. */
+  onChangeType?: () => void
+  /** Find every screen / menu / action / dictionary reference to this table (via its slot
+   *  queries). Absent → no Find-usages button. */
+  onFindUsages?: () => void
+  /** Move this table (all its CRUD slots) to another connector + rewrite refs. Absent → no button. */
+  onMove?: () => void
+  /** When the parent finds a Screen whose `read_query` matches `<name>_get`, it passes `{app, id}`
+   *  so the header shows an "Open visual builder" button. */
   screenLink?: { app: string; id: string } | null
-  /** Open the visual builder for the matched screen in-place. The parent renders the modal. */
   onOpenScreen?: (app: string, id: string) => void
 }
 
 export default function ConnectorsTableEditor({
-  base, connectorName, slots, queries, queryDefSchema, defs, onChangeQueries, onBack, onDuplicate, onRename, screenLink, onOpenScreen,
+  table, connectorName, tableDefSchema, crudSlotSchema, defs, onChange, onDelete, onBack, onDuplicate, onRename, onChangeType, onFindUsages, onMove, screenLink, onOpenScreen,
 }: ConnectorsTableEditorProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const [tab, setTab] = useState<TabKey>(slots.get ? 'general' : 'get')
+  const filledSlots = CRUD_KINDS.filter((c) => table[c])
+  const [tab, setTab] = useState<TabKey>('general')
 
-  const getSlot = slots.get
-  const editGet = (patch: Record<string, unknown>) => {
-    if (getSlot) {
-      // update an existing _get — `undefined` keys mean "unset" (the patch already shaped that).
-      const next = { ...getSlot.query, ...patch }
-      for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k]
-      onChangeQueries(replaceQueryByName(queries, getSlot.name, next))
-    } else {
-      const fresh = { ...newQueryStub(base, 'get'), ...patch }
-      for (const [k, v] of Object.entries(patch)) if (v === undefined) delete fresh[k]
-      onChangeQueries([...queries, fresh])
-    }
+  const setSlot = (crud: CrudKind, slot: CrudSlotEntry | undefined) => {
+    const next: TableEntry = { ...table }
+    if (slot === undefined) delete next[crud]
+    else next[crud] = slot
+    onChange(next)
   }
-  const editCrud = (crud: CrudKind, patch: Record<string, unknown>) => {
-    const slot = slots[crud]
-    if (!slot) return
-    const next = { ...slot.query, ...patch }
+  const createSlot = (crud: CrudKind) => setSlot(crud, { ...SLOT_DEFAULTS[crud] })
+  const editMeta = (patch: Record<string, unknown>) => {
+    const next: TableEntry = { ...table, ...patch }
     for (const [k, v] of Object.entries(patch)) if (v === undefined) delete next[k]
-    onChangeQueries(replaceQueryByName(queries, slot.name, next))
+    onChange(next)
   }
-  const createSlot = (crud: CrudKind) => {
-    onChangeQueries([...queries, newQueryStub(base, crud)])
+  const editSlot = (crud: CrudKind, patch: Record<string, unknown>) => {
+    const cur = (table[crud] ?? {}) as CrudSlotEntry
+    const slot: CrudSlotEntry = { ...cur, ...patch }
+    for (const [k, v] of Object.entries(patch)) if (v === undefined) delete slot[k]
+    setSlot(crud, slot)
   }
   const removeWholeTable = async () => {
     const ok = await modals.confirm({
       title: t('settings.tables.deleteTable'),
-      message: t('settings.tables.confirmDelete', { name: base }),
+      message: t('settings.tables.confirmDelete', { name: table.name }),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    let next = queries
-    for (const crud of CRUD_KINDS) {
-      const slot = slots[crud]
-      if (slot) next = removeQueryByName(next, slot.name)
-    }
-    onChangeQueries(next)
-    onBack()
+    onDelete()
+  }
+  // Delete a single CRUD slot off the table (the operator created one they don't want, or a v1
+  // migration left a stray _put/_post/_delete). The slot's synthesised name `<base>_<crud>` may be
+  // referenced elsewhere; deleting it can leave a dangling ref (the Integrity tab flags those).
+  const removeSlot = async (crud: CrudKind) => {
+    const ok = await modals.confirm({
+      title: t('settings.tables.deleteSlot', 'Delete query'),
+      message: t('settings.tables.confirmDeleteSlot', 'Delete the {{crud}} query "{{name}}"? Any screen / action / dictionary reference to it will break until updated.', { crud: crud.toUpperCase(), name: `${table.name}_${crud}` }),
+      variant: 'danger',
+      confirmLabel: t('common.delete'),
+    })
+    if (!ok) return
+    setSlot(crud, undefined)
   }
 
-  const filledSlots = CRUD_KINDS.filter((c) => slots[c])
-  // pre-pick the subset schemas — flatten x_group so the inner SchemaForm has no nested tabs.
-  const generalSchema: JsonSchema = pickSchemaProperties(queryDefSchema, GENERAL_KEYS)
-  const readBodySchema: JsonSchema = pickSchemaProperties(queryDefSchema, READ_BODY_KEYS)
-  const writeBodySchema: JsonSchema = pickSchemaProperties(queryDefSchema, WRITE_BODY_KEYS)
+  // Pre-pick the subset schemas — flatten x_group so the inner SchemaForm has no nested tabs.
+  const generalSchema: JsonSchema = pickSchemaProperties(tableDefSchema, GENERAL_KEYS)
+  const readBodySchema: JsonSchema = pickSchemaProperties(crudSlotSchema, READ_BODY_KEYS)
+  const writeBodySchema: JsonSchema = pickSchemaProperties(crudSlotSchema, WRITE_BODY_KEYS)
 
-  const renderQueryBody = (crud: CrudKind): ReactNode => {
-    const slot = slots[crud]
+  const renderSlot = (crud: CrudKind): ReactNode => {
+    const slot = table[crud] as CrudSlotEntry | undefined
     if (!slot) {
       return (
         <Empty>
           <Stack gap={10} style={{ alignItems: 'center' }}>
-            <div>{t('settings.tables.missingSlot', { crud: crud.toUpperCase(), name: `${base}_${crud}` })}</div>
+            <div>{t('settings.tables.missingSlot', { crud: crud.toUpperCase(), name: `${table.name}_${crud}` })}</div>
             <Button $variant="ghost" $size="sm" onClick={() => createSlot(crud)}>
               <Plus size={13} /> {t('settings.tables.createSlot', { crud: crud.toUpperCase() })}
             </Button>
@@ -162,21 +174,26 @@ export default function ConnectorsTableEditor({
         </Empty>
       )
     }
-    const value = slot.query
     const schema = crud === 'get' ? readBodySchema : writeBodySchema
+    const keys = crud === 'get' ? READ_BODY_KEYS : WRITE_BODY_KEYS
     return (
       <>
-        <Sub><code style={{ fontFamily: fonts.mono }}>{slot.name}</code></Sub>
+        <Row style={{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <Sub style={{ marginBottom: 0 }}><code style={{ fontFamily: fonts.mono }}>{`${table.name}_${crud}`}</code></Sub>
+          <Button $variant="ghost" $size="sm" onClick={() => removeSlot(crud)} style={{ color: colors.red.main }}>
+            <Trash2 size={13} /> {t('common.delete', 'Delete')}
+          </Button>
+        </Row>
         <SchemaForm
           schema={schema}
           defs={defs}
-          value={value}
+          value={slot}
           onChange={(v) => {
-            // SchemaForm gives us the *whole* picked value; convert into a patch so we don't blow
-            // away the keys we didn't pick (label/columns/etc on _get, query name, etc.).
+            // SchemaForm returns the whole picked value; convert to a patch so we don't drop keys
+            // we didn't pick.
             const patch: Record<string, unknown> = {}
-            for (const k of crud === 'get' ? READ_BODY_KEYS : WRITE_BODY_KEYS) patch[k] = v[k]
-            if (slot === getSlot) editGet(patch); else editCrud(crud, patch)
+            for (const k of keys) patch[k] = v[k]
+            editSlot(crud, patch)
           }}
         />
       </>
@@ -185,37 +202,23 @@ export default function ConnectorsTableEditor({
 
   const renderTab = (): ReactNode => {
     if (tab === 'general') {
-      if (!getSlot) return (
-        <Empty>
-          <Stack gap={10} style={{ alignItems: 'center' }}>
-            <div>{t('settings.tables.needRead', { name: `${base}_get` })}</div>
-            <Button $variant="ghost" $size="sm" onClick={() => createSlot('get')}>
-              <Plus size={13} /> {t('settings.tables.createSlot', { crud: 'GET' })}
-            </Button>
-          </Stack>
-        </Empty>
-      )
       return (
         <>
           <Sub>{t('settings.tables.generalHint')}</Sub>
           <SchemaForm
             schema={generalSchema}
             defs={defs}
-            value={getSlot.query}
+            value={{ label: table.label ?? undefined, description: table.description ?? undefined }}
             onChange={(v) => {
               const patch: Record<string, unknown> = {}
               for (const k of GENERAL_KEYS) patch[k] = v[k]
-              editGet(patch)
+              editMeta(patch)
             }}
           />
         </>
       )
     }
-    // Phase 3 — the Columns tab has moved to the Screen Designer (a single source of truth
-    // for column display metadata across the grid editor + the dialog form). The "Open in
-    // Screens" link in this editor's header jumps to the matching screen.
-    const crud = TAB_TO_CRUD[tab]!
-    return renderQueryBody(crud)
+    return renderSlot(TAB_TO_CRUD[tab]!)
   }
 
   return (
@@ -223,7 +226,7 @@ export default function ConnectorsTableEditor({
     <div>
       <Header>
         <BackBtn type="button" onClick={onBack}><ArrowLeft size={13} /> {t('settings.tables.backToTables')}</BackBtn>
-        <Title>{base} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
+        <Title>{table.name} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
         <Row gap={6}>
           {screenLink && onOpenScreen && (
             <Button $variant="ghost" $size="sm" onClick={() => onOpenScreen(screenLink.app, screenLink.id)}
@@ -231,9 +234,24 @@ export default function ConnectorsTableEditor({
               <ExternalLink size={13} /> {t('settings.tables.openInScreens')}
             </Button>
           )}
+          {onFindUsages && (
+            <Button $variant="ghost" $size="sm" onClick={onFindUsages}>
+              <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+            </Button>
+          )}
           {onRename && (
             <Button $variant="ghost" $size="sm" onClick={onRename}>
               <Edit3 size={13} /> {t('settings.rename.button')}
+            </Button>
+          )}
+          {onChangeType && (
+            <Button $variant="ghost" $size="sm" onClick={onChangeType}>
+              <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
+            </Button>
+          )}
+          {onMove && (
+            <Button $variant="ghost" $size="sm" onClick={onMove}>
+              <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton', 'Move')}
             </Button>
           )}
           {onDuplicate && (
@@ -249,7 +267,9 @@ export default function ConnectorsTableEditor({
       <TabsBar>
         {TAB_ORDER.map((k) => {
           const crud = TAB_TO_CRUD[k]
-          const missing = crud ? !slots[crud] : (!getSlot && k === 'general')
+          // General always applies (it edits table-level metadata). A CRUD tab is "missing" when
+          // that slot doesn't exist yet — the badge invites the operator to create it.
+          const missing = crud ? !table[crud] : false
           return (
             <TabBtn key={k} type="button" $active={tab === k} $missing={missing} onClick={() => setTab(k)}>
               {t(`settings.tables.tab.${k}`)}{missing && <span className="badge">+</span>}

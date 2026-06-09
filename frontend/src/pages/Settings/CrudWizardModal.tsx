@@ -332,8 +332,9 @@ export function CrudWizardModal({
     setSqlOverride({})
   }
 
+  // No backdrop-click-to-close — outside clicks must not discard wizard progress (Cancel / Escape).
   const modalNode: ReactNode = (
-    <Overlay onClick={onCancel}>
+    <Overlay>
       <Modal style={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <span>

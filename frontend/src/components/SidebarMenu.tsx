@@ -149,7 +149,7 @@ const LeafLabel = styled.span`
   text-overflow: ellipsis;
 `
 
-function leafPath(node: MenuNode): string | null {
+function leafPath(node: MenuNode, app: string): string | null {
   if (!node.target) return null
   const t = encodeURIComponent(node.target)
   // Dashboards have no connector segment — the catalog is flat (keyed by id).
@@ -157,19 +157,22 @@ function leafPath(node: MenuNode): string | null {
   // A `page` leaf's target IS the route — navigate straight to it (e.g. /nomaflow).
   // No connector, no encoding (it's a path, not an identifier). See NOMAFLOW-UI.md §2.
   if (node.type === 'page') return node.target
+  // A `screen` leaf's target is a screen id, scoped to this menu's app — the dedicated route
+  // resolves it (its own columns / dialog), distinct from any other screen on the same query.
+  if (node.type === 'screen') return `/screen/${encodeURIComponent(app)}/${t}`
   if (!node.connector) return null
   const c = encodeURIComponent(node.connector)
   return node.type === 'endpoint' ? `/http/${c}/${t}` : `/sql/${c}/${t}`
 }
 
 /** Folder ids on the path to the leaf whose route is `activePath` — so the menu opens to "you are here". */
-function ancestorsOfActive(nodes: MenuNode[], activePath: string): Set<string> {
+function ancestorsOfActive(nodes: MenuNode[], activePath: string, app: string): Set<string> {
   const out = new Set<string>()
   const walk = (ns: MenuNode[], ancestors: string[]): boolean => {
     for (const n of ns) {
       if (n.items) {
         if (walk(n.items, [...ancestors, n.id])) return true
-      } else if (leafPath(n) === activePath) {
+      } else if (leafPath(n, app) === activePath) {
         ancestors.forEach((a) => out.add(a))
         return true
       }
@@ -185,7 +188,7 @@ function NodeIcon({ node, fallback }: { node: MenuNode; fallback?: ComponentType
   return Icon ? <Icon size={14} /> : null
 }
 
-function Node({ node, openIds }: { node: MenuNode; openIds: Set<string> }) {
+function Node({ node, openIds, app }: { node: MenuNode; openIds: Set<string>; app: string }) {
   const [open, setOpen] = useState(() => openIds.has(node.id))  // collapsed by default; the path to the active screen auto-opens
   if (node.items) {
     const Chev = open ? ChevronDown : ChevronRight
@@ -198,13 +201,13 @@ function Node({ node, openIds }: { node: MenuNode; openIds: Set<string> }) {
         </FolderRow>
         {open && (
           <ChildrenWrap>
-            {node.items.map((c) => <Node key={c.id} node={c} openIds={openIds} />)}
+            {node.items.map((c) => <Node key={c.id} node={c} openIds={openIds} app={app} />)}
           </ChildrenWrap>
         )}
       </>
     )
   }
-  const to = leafPath(node)
+  const to = leafPath(node, app)
   const inner = (
     <>
       <NodeIcon node={node} />
@@ -220,13 +223,13 @@ function Node({ node, openIds }: { node: MenuNode; openIds: Set<string> }) {
 
 export default function SidebarMenu({ menu }: { menu: AppMenuTree }) {
   const { pathname } = useLocation()
-  const openIds = useMemo(() => ancestorsOfActive(menu.items, pathname), [menu, pathname])
+  const openIds = useMemo(() => ancestorsOfActive(menu.items, pathname, menu.app), [menu, pathname])
   if (menu.items.length === 0) return null
   return (
     <>
       <SectionLabel title={menu.label}>{menu.label}</SectionLabel>
       {menu.items.map((node) => (
-        <Node key={node.id} node={node} openIds={openIds} />
+        <Node key={node.id} node={node} openIds={openIds} app={menu.app} />
       ))}
     </>
   )

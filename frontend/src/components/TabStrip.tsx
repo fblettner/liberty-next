@@ -6,7 +6,17 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity, CalendarClock, Package, GitCompare, ShieldCheck, FileText } from 'lucide-react'
+
+// Icon per `page` tab (keyed by route path), so Jobs / Schedule / Package / … stay recognisable.
+const PAGE_ICONS: Record<string, typeof TableIcon> = {
+  '/nomaflow': Workflow,
+  '/nomaflow/schedule': CalendarClock,
+  '/nomaflow/package': Package,
+  '/nomaflow/changes': GitCompare,
+  '/nomaflow/integrity': ShieldCheck,
+  '/reports': FileText,
+}
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -15,7 +25,11 @@ import { findMenuLabelWithApp } from '../services/menuLabels'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
-  min-height: 40px; border-bottom: 1px solid ${colors.border};
+  /* Fixed header height: 8px top padding + the 42px tab row = 50px, which lines the bottom
+     divider up with the floating utility pill's bottom edge. The empty (no-tab) state used to
+     fall back to a shorter 40px, so its divider sat too high — pin the same 50px here so the
+     header height is constant whether or not tabs are open. */
+  min-height: 50px; border-bottom: 1px solid ${colors.border};
   /* Keep clear of the fixed utility pill floating over the top-right (Layout publishes its width as
      --utilbar-width). +28px = its 16px right offset + a 12px gap, so the right arrow / close-all and
      the last tab never slide under it. Falls back to a sane reserve before the first measure. */
@@ -25,28 +39,35 @@ const Bar = styled.div`
 // old single-element bar so the active tab's seamless-bottom trick is unchanged.
 const Scroller = styled.div`
   display: flex; align-items: stretch; gap: 4px; flex: 1; min-width: 0;
-  overflow-x: auto; scrollbar-width: thin;
+  /* overflow-y MUST be pinned: setting only overflow-x to auto makes the browser compute
+     overflow-y as auto too, and the 42px-tall tabs overflow the strip, so a phantom vertical
+     scrollbar capsule appears in the header (it scrolls nothing). Hidden removes it. */
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
 `
-// Edge buttons (scroll arrows + close-all) — compact square toolbar controls, vertically centred
-// in the strip and lifted just above its bottom border to line up with the tabs.
-const EdgeBtn = styled.button<{ $danger?: boolean }>`
+// Edge buttons (the tab scroll arrows) — compact square toolbar controls, vertically centred in
+// the strip and lifted just above its bottom border to line up with the tabs. (Close-all moved to
+// the top-right utility pill so it aligns with the other toolbar controls.)
+const EdgeBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
   width: 30px; height: 30px; align-self: center; margin-bottom: 6px; padding: 0;
   border: 1px solid transparent; border-radius: ${radius.md};
   background: transparent;
-  color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.secondary)};
+  color: ${colors.text.secondary};
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
   & svg { display: block; }   /* lift the inline baseline gap that nudged the icon down a pixel */
   &:hover:not(:disabled) {
-    background: ${({ $danger }) => ($danger ? colors.red.bg : 'var(--hover-subtle)')};
-    border-color: ${({ $danger }) => ($danger ? colors.red.border : colors.border)};
-    color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.primary)};
+    background: var(--hover-subtle);
+    border-color: ${colors.border};
+    color: ${colors.text.primary};
   }
   &:disabled { opacity: 0.35; cursor: default; }
 `
 const TitleBlock = styled.div`
-  display: flex; align-items: baseline; gap: 10px; padding: 4px 6px 12px;
+  /* Centre the title vertically in the now-taller (50px) bar instead of stretching + sitting high.
+     align-self center opts out of the Bar's align-items stretch so it keeps its natural height. */
+  align-self: center;
+  display: flex; align-items: baseline; gap: 10px; padding: 0 6px;
   & .name { font-size: ${fontSize['2xl']}; font-weight: 700; letter-spacing: -0.3px; line-height: 1; color: ${colors.blue.main}; }
   & .sub { font-size: ${fontSize.base}; color: ${colors.text.muted}; }
 `
@@ -77,8 +98,8 @@ const CloseX = styled.span`
 
 export default function TabStrip() {
   const { t } = useTranslation()
-  const { tabs, activeId, setActive, close, closeAll } = useTabs()
-  const { menus } = useWorkspace()
+  const { tabs, activeId, setActive, close } = useTabs()
+  const { menus, connectors, findScreenById } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
 
@@ -139,7 +160,6 @@ export default function TabStrip() {
       close(tab.id)
     }
   }
-  const onCloseAll = () => { closeAll(); navigate('/') }
   const by = (dx: number) => scrollerRef.current?.scrollBy({ left: dx, behavior: 'smooth' })
 
   return (
@@ -147,7 +167,7 @@ export default function TabStrip() {
       {scroll.overflow && (
         <EdgeBtn onClick={() => by(-240)} disabled={scroll.atStart}
           title={t('tabs.scrollLeft', 'Scroll left')} aria-label={t('tabs.scrollLeft', 'Scroll left')}>
-          <ChevronLeft size={18} strokeWidth={2.25} />
+          <ChevronLeft size={16} />
         </EdgeBtn>
       )}
       <Scroller ref={scrollerRef} onScroll={measure}>
@@ -157,6 +177,7 @@ export default function TabStrip() {
             tab.kind === 'nomaflow_run' ? Workflow :
             tab.kind === 'settings' ? SlidersHorizontal :
             tab.kind === 'monitoring' ? Activity :
+            tab.kind === 'page' ? (PAGE_ICONS[tab.target] ?? FileText) :
             TableIcon
           // Resolve label + owning app via the menu tree so duplicates like "Users" under
           // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
@@ -170,9 +191,30 @@ export default function TabStrip() {
             label = t('nav.settings', 'Settings')
           } else if (tab.kind === 'monitoring') {
             label = t('nav.monitoring', 'Monitoring')
+          } else if (tab.kind === 'page') {
+            // Page tabs are menu-driven (type="page"); resolve the leaf's localized label by its
+            // route path. Falls back to the last path segment when not found in any menu.
+            const hit = findMenuLabelWithApp(menus, { kind: 'page', connector: '', target: tab.target })
+            label = hit?.label ?? tab.target.split('/').filter(Boolean).pop() ?? tab.target
+            appLabel = hit?.appLabel
+          } else if (tab.kind === 'screen') {
+            // A screen tab IS identified by its screen, so always show the SCREEN's own label —
+            // consistent whether it was opened from a menu or a row-menu drill, and not the menu
+            // item's name (which can differ from the screen, and differs per entry point). The
+            // menu label is only a fallback for a screen with no label of its own.
+            const scr = findScreenById(tab.connector, tab.target)
+            const hit = findMenuLabelWithApp(menus, tab as { kind: 'screen'; connector: string; target: string })
+            label = scr?.label ?? hit?.label ?? tab.target
+            appLabel = scr?.app ?? hit?.appLabel
           } else {
             const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
-            label = hit?.label ?? tab.target
+            // sql / http: menu label first; but a drill-navigate to a query that isn't in any menu
+            // would otherwise show the raw query name — fall back to the query's friendly label.
+            const cm = (connectors ?? []).find((c) => c.name === tab.connector)
+            const q = tab.kind === 'sql' && cm?.type === 'sql'
+              ? cm.queries.find((x) => x.name === tab.target)
+              : undefined
+            label = hit?.label ?? q?.description ?? q?.label ?? tab.target
             appLabel = hit?.appLabel
           }
           const tip = tab.connector || tab.target ? `${label} — ${tab.connector}.${tab.target}` : label
@@ -191,12 +233,7 @@ export default function TabStrip() {
       {scroll.overflow && (
         <EdgeBtn onClick={() => by(240)} disabled={scroll.atEnd}
           title={t('tabs.scrollRight', 'Scroll right')} aria-label={t('tabs.scrollRight', 'Scroll right')}>
-          <ChevronRight size={18} strokeWidth={2.25} />
-        </EdgeBtn>
-      )}
-      {tabs.length >= 2 && (
-        <EdgeBtn $danger onClick={onCloseAll} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
-          <X size={18} strokeWidth={2.25} />
+          <ChevronRight size={16} />
         </EdgeBtn>
       )}
     </Bar>

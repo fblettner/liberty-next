@@ -24,13 +24,16 @@ from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry, load_connectors
 from liberty.connectors.base import ConnectorError
 from liberty.licensing import verify_license
+from liberty.actions import load_actions
 from liberty.charts import load_charts
 from liberty.dashboards import load_dashboards
 from liberty.menus import load_menus
 from liberty.screens import load_screens
 from liberty.web import (
     access_router,
+    actions_router,
     admin_router,
+    changesets_router,
     charts_router,
     dictgen_router,
     connectors_router,
@@ -39,6 +42,7 @@ from liberty.web import (
     jobs_router,
     license_router,
     menus_router,
+    plugins_router,
     reports_router,
     screens_router,
     theme_router,
@@ -148,8 +152,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
         app.state.charts = load_charts(settings.charts.config_path)
+        app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
+        # Change packages — control tables on the configured pool. None when disabled so the route
+        # capture hook short-circuits. Schema is created lazily here (idempotent), like nomaflow.
+        app.state.changesets_db = None
+        if settings.changesets.enabled:
+            from liberty.changesets.db import ChangeSetDatabase
+            cs_db = ChangeSetDatabase(app.state.connectors.pools, settings.changesets.pool)
+            try:
+                # Self-bootstrap the control tables (idempotent). Guarded like nomaflow: an
+                # unreachable pool skips change-package capture rather than failing app boot.
+                await cs_db.create_schema()
+                app.state.changesets_db = cs_db
+            except Exception as exc:  # noqa: BLE001 — never let a bad control pool take down boot
+                _log.warning(
+                    "changesets pool %r unusable (%s) — change-package capture disabled this run",
+                    settings.changesets.pool, exc,
+                )
         app.state.token_service = token_service
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
@@ -168,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from liberty.jobs.wiring import build_nomaflow, shutdown_nomaflow
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
+            changesets=app.state.changesets_db,
         )
         # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
         # config TOMLs reload the matching subsystem without an explicit Settings →
@@ -516,6 +538,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(screens_router)
     app.include_router(export_router)
     app.include_router(charts_router)
+    app.include_router(actions_router)
     app.include_router(dashboards_router)
     app.include_router(license_router)
     app.include_router(theme_router)
@@ -524,7 +547,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(access_router)
     app.include_router(dictgen_router)
     app.include_router(jobs_router)
+    app.include_router(plugins_router)
     app.include_router(reports_router)
+    app.include_router(changesets_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:

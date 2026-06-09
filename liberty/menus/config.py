@@ -43,12 +43,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # A leaf's kind; ``None`` = a folder/group node.
-#  query     → a SELECT screen / TableView
+#  screen    → a designed screen (the preferred navigable target — the screen is where column
+#              visibility / filters / the dialog live). ``target`` is the screen's read query
+#              (how the runtime resolves the Screen + routes to ``/sql/<connector>/<target>``).
+#  query     → a raw SELECT query / TableView with no designed screen behind it.
 #  endpoint  → an API call / HttpRunner
 #  dashboard → a dashboard
 #  page      → a registered frontend route (a custom feature area, e.g. /nomaflow) —
 #              ``target`` is the route path, ``connector`` is unused. See NOMAFLOW-UI.md §2.
-ItemType = Literal["query", "endpoint", "dashboard", "page"]
+# ``screen`` and ``query`` are runtime-identical (both route to ``/sql/<connector>/<target>`` and
+# the TableView resolves any designed Screen by ``(connector, target)``); they differ only in what
+# the editor's target dropdown offers — designed screens vs raw queries.
+ItemType = Literal["screen", "query", "endpoint", "dashboard", "page"]
 
 
 class MenuItem(BaseModel):
@@ -72,7 +78,7 @@ class MenuItem(BaseModel):
     icon: str | None = Field(default=None, description="Lucide icon name (e.g. ``shield``, ``users``).")
     type: ItemType | None = Field(
         default=None,
-        description="Blank = folder; ``query`` opens a screen; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard; ``page`` navigates to a registered frontend route.",
+        description="Blank = folder; ``screen`` opens a designed screen; ``query`` opens a raw query/table view; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard; ``page`` navigates to a registered frontend route.",
         json_schema_extra={"x_enum_ref": "MENU_ITEM_TYPE"},
     )
     connector: str | None = Field(

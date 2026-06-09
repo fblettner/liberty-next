@@ -29,7 +29,8 @@ from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry, UnknownConnectorError
 from liberty.dashboards import DashboardsFile
 from liberty.menus import AppMenu, MenuItem, MenusFile, build_menu_tree
-from liberty.web.deps import get_connectors, get_menus, request_language
+from liberty.screens import ScreensFile
+from liberty.web.deps import get_connectors, get_menus, get_screens, request_language
 
 router = APIRouter(prefix="/api", tags=["menus"])
 
@@ -42,6 +43,7 @@ def _get_dashboards(request: Request) -> DashboardsFile:
 
 Dashboards = Annotated[DashboardsFile, Depends(_get_dashboards)]
 Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
+Screens = Annotated[ScreensFile, Depends(get_screens)]
 
 
 def _app_settings(connectors: ConnectorRegistry, app: str) -> tuple[bool, str | None]:
@@ -54,7 +56,19 @@ def _app_settings(connectors: ConnectorRegistry, app: str) -> tuple[bool, str | 
     return bool(getattr(cfg, "show_in_switcher", True)), getattr(cfg, "home", None)
 
 
-def _keeper(principal: Principal, dashboards: DashboardsFile, app: str):
+def _screen_perm(screens: "ScreensFile | None", app: str, screen_id: str | None) -> str | None:
+    """The ``sql:<connector>:<read_query>`` permission gating a ``screen`` menu leaf — resolved
+    from the designed screen ``(app, screen_id)``. Returns ``None`` when the screen can't be
+    resolved (no catalog / unknown id), so the caller falls back to the menu-allow check."""
+    if screens is None or not screen_id:
+        return None
+    scr = (screens.screens.get(app) or {}).get(screen_id)
+    if scr is None:
+        return None
+    return f"sql:{scr.connector or app}:{scr.read_query}"
+
+
+def _keeper(principal: Principal, dashboards: DashboardsFile, app: str, screens: "ScreensFile | None" = None):
     """A ``keep(item, connector)`` predicate, with the first-class ``menu:<app>:<id>`` /
     ``dashboard:<id>`` RBAC overlay on top of the query-derived visibility:
 
@@ -85,6 +99,14 @@ def _keeper(principal: Principal, dashboards: DashboardsFile, app: str):
             # A page leaf points at a frontend route; the route enforces its own auth. Only the
             # roles filter + the menu deny (both above) gate it here.
             return True
+        if item.type == "screen":
+            # A screen leaf's target is a screen id — resolve it to the screen's read query and
+            # gate on that (same ``sql:<connector>:<read_query>`` the screen catalog uses). When
+            # the screen can't be resolved, a menu-allow can still surface it.
+            perm = _screen_perm(screens, app, item.target)
+            if perm is None:
+                return principal.has_permission(menu_perm)
+            return principal.has_permission(perm) or principal.has_permission(menu_perm)
         perm = f"{'sql' if item.type == 'query' else 'api'}:{connector}:{item.target}"
         return principal.has_permission(perm) or principal.has_permission(menu_perm)
 
@@ -109,15 +131,18 @@ def _home_path(app: str, app_menu: AppMenu, home: str | None, *, keep) -> str | 
         return None
     if target.type == "dashboard":
         return f"/dashboard/{target.target}"
+    if target.type == "screen":
+        # A screen home opens the dedicated screen route — resolved to its specific screen id.
+        return f"/screen/{app}/{target.target}"
     prefix = "sql" if target.type == "query" else "http"
     return f"/{prefix}/{effective_connector}/{target.target}"
 
 
 def _app_tree(
     app: str, app_menu: AppMenu, *, language: str | None, principal: Principal,
-    dashboards: DashboardsFile, connectors: ConnectorRegistry,
+    dashboards: DashboardsFile, connectors: ConnectorRegistry, screens: "ScreensFile | None" = None,
 ) -> dict[str, Any] | None:
-    keep = _keeper(principal, dashboards, app)
+    keep = _keeper(principal, dashboards, app, screens)
     items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items:
         return None  # nothing the caller can see → no menu for this app
@@ -137,7 +162,7 @@ def _app_tree(
     },
 )
 async def list_menus(
-    request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors,
+    request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors, screens: Screens,
 ) -> dict[str, Any]:
     """Returns ``{ "menus": { "<app>": <menu-tree>, ... } }``. Each tree carries:
     ``label``, ``items`` (the visible tree), ``show_in_switcher`` (whether the app
@@ -147,7 +172,7 @@ async def list_menus(
     out = {
         app: tree
         for app, app_menu in menus.menus.items()
-        if (tree := _app_tree(app, app_menu, language=lang, principal=principal, dashboards=dashboards, connectors=connectors)) is not None
+        if (tree := _app_tree(app, app_menu, language=lang, principal=principal, dashboards=dashboards, connectors=connectors, screens=screens)) is not None
     }
     return {"menus": out}
 
@@ -161,7 +186,7 @@ async def list_menus(
     },
 )
 async def get_app_menu(
-    app: str, request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors,
+    app: str, request: Request, principal: CurrentPrincipal, menus: Menus, dashboards: Dashboards, connectors: Connectors, screens: Screens,
 ) -> dict[str, Any]:
     """Same shape as one element of the ``GET /api/menus`` map, narrowed to a single
     app. Returns 404 when the caller can see nothing in the menu — keeps parity with
@@ -169,7 +194,7 @@ async def get_app_menu(
     app_menu = menus.menus.get(app)
     tree = _app_tree(
         app, app_menu, language=request_language(request), principal=principal,
-        dashboards=dashboards, connectors=connectors,
+        dashboards=dashboards, connectors=connectors, screens=screens,
     ) if app_menu else None
     if tree is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No accessible menu for app {app!r}")

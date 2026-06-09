@@ -220,6 +220,29 @@ async def test_column_hints_attach_display_rule(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
+async def test_column_hint_rules_override_wins_over_dictionary(pools: PoolRegistry) -> None:
+    """A column hint's own ``rules`` override wins over the dictionary entry's rule. The bug:
+    APPS_ID is a global LOOKUP in the dictionary, but a screen that CREATES the row overrides the
+    column to SEQUENCE — yet the grid kept rendering the LOOKUP. SEQUENCE resolves to no display
+    rule (it's insert-time), so the grid should show the raw value, not a lookup label."""
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection, LookupDef
+    d = DictionaryFile(connectors={"db": DictionarySection(
+        entries={"id": DictionaryEntry(label="App", rules="LOOKUP", rules_values="apps")},
+        lookups={"apps": LookupDef(query="all", value="id", label="name")},
+    )})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id")])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    # No override → the dictionary's LOOKUP rule applies.
+    base = {c.name: c for c in (await conn.execute("all", column_hints=[ColumnHint(name="id"), ColumnHint(name="name")])).columns}
+    assert base["id"].rule and base["id"].rule["kind"] == "lookup"
+    # Column overrides rules → SEQUENCE: the LOOKUP must NOT win — SEQUENCE has no display rule.
+    over = {c.name: c for c in (await conn.execute("all", column_hints=[
+        ColumnHint(name="id", rules="SEQUENCE", rules_values="seq_app"), ColumnHint(name="name"),
+    ])).columns}
+    assert over["id"].rule is None
+
+
+@pytest.mark.asyncio
 async def test_column_hints_match_case_insensitively(pools: PoolRegistry) -> None:
     # The database may report column names in a different case than the hints use
     # (Postgres folds unquoted identifiers to lowercase; v1's migrated col_target/dd are
@@ -422,14 +445,14 @@ async def test_audit_auto_creates_missing_aud_table(pools: PoolRegistry) -> None
 
 
 @pytest.mark.asyncio
-async def test_audit_date_is_naive_utc_for_tz_naive_columns(pools: PoolRegistry) -> None:
-    """Regression — the ``AUD_DATE`` bind must be a **naive** UTC datetime. The auto-create
-    DDL emits ``CAST(NULL AS TIMESTAMP) AS AUD_DATE`` (TIMESTAMP without time zone on
-    Postgres); a tz-aware ``datetime.now(UTC)`` against that column trips asyncpg with
+async def test_audit_date_is_naive_for_tz_naive_columns(pools: PoolRegistry) -> None:
+    """Regression — the ``AUD_DATE`` bind must be a **naive** datetime (local server time).
+    The auto-create DDL emits ``CAST(NULL AS TIMESTAMP) AS AUD_DATE`` (TIMESTAMP without time
+    zone on Postgres); a tz-aware ``now`` against that column trips asyncpg with
     ``can't subtract offset-naive and offset-aware datetimes`` and rolls the *entire*
     audited write back — main statement + auto-create + audit INSERT all gone, leaving the
     operator with no audit table created and the same error on retry. Matches the same
-    naive-UTC convention SYSDATE uses in ``_apply_form_rules``."""
+    naive local-time convention SYSDATE uses in ``_apply_form_rules``."""
     from datetime import datetime as dt
     from liberty.connectors.sql import reset_audit_table_cache
     reset_audit_table_cache()
@@ -629,11 +652,13 @@ def test_describe_lists_metadata(pools: PoolRegistry) -> None:
 async def test_trim_strings_strips_trailing_whitespace_when_enabled() -> None:
     """v1's automatic trim for Oracle CHAR/NCHAR — re-enable on any pool via the explicit
     ``trim_strings = true`` flag. SQLite (used in tests) doesn't space-pad on its own, so we
-    feed pre-padded values to verify the strip logic runs."""
+    feed pre-padded values to verify the strip logic runs. TRAILING only: leading padding on a
+    right-justified JDE code (KY/MCU) is preserved so an edit-then-write-back round trip restores
+    the right justification (the filter bind is trimmed separately for comparison)."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as c:
         await c.execute(text("CREATE TABLE lbl (id INTEGER PRIMARY KEY, name TEXT)"))
-        await c.execute(text("INSERT INTO lbl VALUES (1, 'role   '), (2, 'demo')"))
+        await c.execute(text("INSERT INTO lbl VALUES (1, 'role   '), (2, 'demo'), (3, '      01')"))
     pools = PoolRegistry({"on": PoolConfig(url="sqlite://", trim_strings=True)})
     pools.register_engine("on", engine)
     conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="on", queries=[
@@ -644,7 +669,8 @@ async def test_trim_strings_strips_trailing_whitespace_when_enabled() -> None:
                 ColumnHint(name="ID", label="Identifier"),       # hint upper, result upper — fine
                 ColumnHint(name="status", hidden=True),          # hint lower, result "STATUS"
             ])
-    assert [row["name"] for row in r.rows] == ["role", "demo"]   # trailing spaces stripped
+    # trailing stripped; leading padding on the right-justified code preserved for write-back
+    assert [row["name"] for row in r.rows] == ["role", "demo", "      01"]
     await engine.dispose()
 
 
@@ -692,7 +718,15 @@ async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
     # to the source column's type — so an empty CHAR ORIGINAL bind becomes " " (space).
     # Char sentinel is " " (space) not "" because Oracle treats "" as NULL on every string
     # type — binding "" to a NCHAR NOT-NULL column still violates the constraint.
-    col_types = {"NAME": "char", "AMOUNT": "number", "STATUS": "char"}
+    # Cache shape carries ``{kind, length}`` per column — kind distinguishes fixed-width
+    # CHAR / NCHAR (``char_fixed``) from VARCHAR2 / NVARCHAR2 (``char``); both trigger the
+    # space sentinel here, but only ``char_fixed`` triggers the WHERE-bind right-padding
+    # (covered by the separate ``_pad_char_binds`` test below).
+    col_types = {
+        "NAME": {"kind": "char_fixed", "length": 10},
+        "AMOUNT": {"kind": "number", "length": None},
+        "STATUS": {"kind": "char", "length": None},
+    }
     bound = {
         "NAME": None,            # CHAR none → space
         "AMOUNT": "",            # NUMBER empty → 0 (frontend sends "" for blank inputs)
@@ -708,6 +742,105 @@ async def test_oracle_coalesce_nulls_replaces_with_typed_sentinels() -> None:
         "EXTRA": None,              # column unknown — pass through
         "NAME_ORIGINAL": " ",       # _ORIGINAL suffix strip → still CHAR → space
     }
+
+
+def test_pad_char_binds_right_pads_to_declared_char_width() -> None:
+    """``trim_strings = true`` rounds out the JDE round-trip: reads strip trailing whitespace,
+    writes pad the bind back to the column's declared CHAR(N) width before binding. Without
+    it, a DELETE / UPDATE WHERE bound from a trimmed read value matches 0 rows on Oracle
+    (CHAR(10) stored ``"JDE       "`` vs VARCHAR2 bind ``"JDE"`` is non-blank-padded → unequal).
+
+    Only touches fixed-width ``CHAR`` / ``NCHAR`` — VARCHAR2 binds stay untouched (padding
+    would BREAK the comparison; stored ``"JDE"`` ≠ bind ``"JDE       "`` on VARCHAR2).
+    Already-long-enough values pass through; ``_ORIGINAL``-suffixed UPDATE rebinds resolve
+    to the source column's metadata."""
+    from liberty.connectors.sql import _pad_char_binds
+
+    col_types = {
+        "ULUSER": {"kind": "char_fixed", "length": 10},     # CHAR(10) — pad
+        "ULMNI":  {"kind": "char_fixed", "length": 1},      # CHAR(1)  — already fits
+        "NOTES":  {"kind": "char",       "length": None},   # VARCHAR2 — never pad
+        "AMOUNT": {"kind": "number",     "length": None},   # numbers untouched
+    }
+    bound = {
+        "ULUSER": "JDE",                # CHAR(10) → "JDE       " (7 spaces)
+        "ULMNI": "Y",                   # CHAR(1)  → unchanged (length already met)
+        "NOTES": "free text",           # VARCHAR2 → unchanged (mustn't pad)
+        "AMOUNT": "123",                # number → unchanged
+        "ULUSER_ORIGINAL": "JDE",       # _ORIGINAL → resolves to ULUSER → pad to 10
+        "UNKNOWN": "value",             # column not in cache → unchanged
+        "ULUSER_EMPTY": "",             # empty string → left to coalesce, not this step
+        "ULUSER_NONE": None,            # None → not a string → unchanged
+    }
+    out = _pad_char_binds(bound, col_types)
+    assert out["ULUSER"] == "JDE       "
+    assert len(out["ULUSER"]) == 10
+    assert out["ULMNI"] == "Y"
+    assert out["NOTES"] == "free text"
+    assert out["AMOUNT"] == "123"
+    assert out["ULUSER_ORIGINAL"] == "JDE       "
+    assert out["UNKNOWN"] == "value"
+    assert out["ULUSER_EMPTY"] == ""
+    assert out["ULUSER_NONE"] is None
+
+    # Empty col_types → no-op (introspection failed or no schema → skip silently).
+    assert _pad_char_binds({"X": "val"}, {}) == {"X": "val"}
+
+
+def test_pad_char_binds_trims_over_wide_set_value_to_fit_column() -> None:
+    """A UDC code read from F0005's 10-char DRKY (right-justified, e.g. ``"       DMY"``) written to
+    a narrower DD-sized column (``F00921.ULFRMT`` CHAR(3)) is ORA-12899 unless trimmed. The write
+    (non-_ORIGINAL) value is stripped to its logical content so it fits; Oracle re-pads CHAR on
+    storage. A WHERE (_ORIGINAL) bind keeps its padded form, a blank stays a space (NULL guard),
+    and a genuinely-too-long value is left for the DB to reject."""
+    from liberty.connectors.sql import _pad_char_binds
+
+    col_types = {
+        "ULFRMT": {"kind": "char_fixed", "length": 3},
+        "CODE": {"kind": "char_fixed", "length": 3},
+    }
+    bound = {
+        "ULFRMT": "       DMY",          # 10-char right-justified UDC value → strip → "DMY"
+        "ULFRMT_ORIGINAL": "       DMY", # WHERE bind → left alone (must match stored form)
+        "BLANK": " " * 6,                # over-wide pure blank → kept as a single space, not ""
+        "CODE": "ABCDE",                 # 5 non-blank chars into CHAR(3) → can't fit → unchanged (DB errors)
+    }
+    # BLANK / CODE need a char_fixed entry to be considered
+    col_types["BLANK"] = {"kind": "char_fixed", "length": 3}
+    out = _pad_char_binds(bound, col_types)
+    assert out["ULFRMT"] == "DMY"                 # stripped to fit CHAR(3)
+    assert out["ULFRMT_ORIGINAL"] == "       DMY" # WHERE bind untouched
+    assert out["BLANK"] == " "                    # blank → single space (NULL guard), fits
+    assert out["CODE"] == "ABCDE"                 # too long even stripped → left for the DB
+
+    # Length-missing or zero → skip (can't pad without a width).
+    assert _pad_char_binds(
+        {"X": "val"},
+        {"X": {"kind": "char_fixed", "length": None}},
+    ) == {"X": "val"}
+    assert _pad_char_binds(
+        {"X": "val"},
+        {"X": {"kind": "char_fixed", "length": 0}},
+    ) == {"X": "val"}
+
+
+def test_pad_char_binds_pads_where_bind_compared_to_char_column() -> None:
+    """A WHERE/JOIN bind whose NAME differs from the column it's compared to (an operator-authored
+    ``RLTOROLE = :FROMUSER`` in a duplicate-relationship INSERT…SELECT) is padded to that CHAR
+    column's width — otherwise the blank-padded JDE value never matches and the write affects 0 rows."""
+    from liberty.connectors.sql import _where_bind_columns, _pad_char_binds
+    sql = "INSERT INTO F95921 SELECT RLFRROLE, :TOUSER, :RLUSER FROM F95921 WHERE RLTOROLE = :FROMUSER"
+    mp = _where_bind_columns(sql)
+    assert mp == {"FROMUSER": "RLTOROLE"}
+    ct = {"RLTOROLE": {"kind": "char_fixed", "length": 10}, "RLUSER": {"kind": "char_fixed", "length": 10}}
+    out = _pad_char_binds({"FROMUSER": "DEMO", "TOUSER": "DEMO2", "RLUSER": "admin"}, ct, where_col_map=mp)
+    assert out["FROMUSER"] == "DEMO      "   # padded to RLTOROLE(10) via the comparison
+    assert out["RLUSER"] == "admin     "     # direct name match still pads
+    assert out["TOUSER"] == "DEMO2"          # not compared to a column → untouched (Oracle pads on store)
+    # A compared bind is a WHERE bind — over-wide is NOT trimmed (must equal the stored padded form)
+    assert _pad_char_binds({"FROMUSER": "TOOLONGVALUE"}, ct, where_col_map=mp)["FROMUSER"] == "TOOLONGVALUE"
+    # reversed order + qualified column both map
+    assert _where_bind_columns("WHERE A.RLTOROLE = :X AND :Y = B.RLFRROLE") == {"X": "RLTOROLE", "Y": "RLFRROLE"}
 
 
 def test_trim_strings_and_coalesce_nulls_are_explicit_per_pool() -> None:
@@ -856,6 +989,31 @@ async def test_write_coerces_empty_string_to_null(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_surfaces_resolved_bound_params_for_capture(pools: PoolRegistry) -> None:
+    """A write's result carries the FULL resolved bind set on ``bound_params`` — what actually hit
+    the DB, with DD defaults / audit stamps filled server-side. Change-capture records THIS (not the
+    empty binds the form sent), so a default set on save lands in the package and on apply. Never
+    leaked to the client via to_dict()."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "STATUS": DictionaryEntry(default="active"),     # filled when the form sends empty
+        "WHO": DictionaryEntry(rules="LOGIN"),            # audit stamp
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, status, name) VALUES (:ID, :STATUS, :WHO)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    res = await conn.execute(
+        "ins", {"ID": 9101, "STATUS": "", "WHO": None}, user="franck",
+        column_hints=[ColumnHint(name="ID"), ColumnHint(name="STATUS"), ColumnHint(name="WHO")],
+    )
+    assert res.bound_params.get("STATUS") == "active"    # DD default filled — and surfaced for capture
+    assert res.bound_params.get("WHO") == "FRANCK"       # LOGIN stamp filled
+    assert res.bound_params.get("ID") == 9101
+    assert "bound_params" not in res.to_dict()           # server-only — never sent to the client
+
+
+@pytest.mark.asyncio
 async def test_form_rule_login_stamps_user_uppercase(pools: PoolRegistry) -> None:
     """``rules = "LOGIN"`` substitutes the caller's username on INSERT and UPDATE — used by
     the v1 audit columns (e.g. TV_AUDIT_USER, ACL_AUDIT_USER). The value is **uppercased**
@@ -893,6 +1051,7 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
         "CREATED_AT": DictionaryEntry(format="datetime", rules="SYSDATE"),
         "CREATED_ON": DictionaryEntry(format="date", rules="SYSDATE"),
         "JDE_DATE": DictionaryEntry(format="jdedate", rules="SYSDATE"),
+        "JDE_TIME": DictionaryEntry(format="jdetime", rules="SYSDATE"),
         "PLAIN": DictionaryEntry(rules="SYSDATE"),  # no format — fall through to bare datetime
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
@@ -901,22 +1060,26 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
     out = conn._apply_form_rules(
-        {"CREATED_AT": None, "CREATED_ON": None, "JDE_DATE": None, "PLAIN": None},
+        {"CREATED_AT": None, "CREATED_ON": None, "JDE_DATE": None, "JDE_TIME": None, "PLAIN": None},
         cfg.queries[0], stmt_type="INSERT", user="x",
         column_hints=[ColumnHint(name="CREATED_AT"), ColumnHint(name="CREATED_ON"),
-                      ColumnHint(name="JDE_DATE"), ColumnHint(name="PLAIN")],
+                      ColumnHint(name="JDE_DATE"), ColumnHint(name="JDE_TIME"), ColumnHint(name="PLAIN")],
     )
     # datetime column → datetime, date column → date (no time), jdedate → CYYDDD int.
     assert isinstance(out["CREATED_AT"], dt) and not isinstance(out["CREATED_AT"], date.__class__)
     assert isinstance(out["CREATED_ON"], date) and not isinstance(out["CREATED_ON"], dt)
     assert isinstance(out["JDE_DATE"], int)
-    # The SYSDATE rule stamps ``datetime.now(UTC)`` — compare against the UTC date, not the
-    # local one, otherwise the test flakes across midnight UTC in non-UTC timezones.
-    from datetime import timezone
-    today_utc = dt.now(timezone.utc).date()
-    assert out["JDE_DATE"] == (today_utc.year - 1900) * 1000 + today_utc.timetuple().tm_yday
-    # All three resolve to the same instant (the same ``now()`` per call).
-    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today_utc
+    # The SYSDATE rule stamps **local** ``datetime.now()`` (JDE/Oracle SYSDATE semantics) —
+    # compare against the local date. ``today`` is captured around the call; the only flake
+    # window is the rare sub-call tick across local midnight, accepted as negligible.
+    today = dt.now().date()
+    assert out["JDE_DATE"] == (today.year - 1900) * 1000 + today.timetuple().tm_yday
+    # jdetime column → a valid HHMMSS int from the same instant that decodes cleanly.
+    from liberty.connectors.sql import _from_jde_time
+    assert isinstance(out["JDE_TIME"], int) and 0 <= out["JDE_TIME"] <= 235959
+    assert isinstance(_from_jde_time(out["JDE_TIME"]), str)   # in range → "HH:MM:SS", not raw
+    # All resolve to the same instant (the same ``now()`` per call).
+    assert out["CREATED_AT"].date() == out["CREATED_ON"] == today
     # No format → bare datetime (the pre-coercion fallback).
     assert isinstance(out["PLAIN"], dt)
 
@@ -944,6 +1107,35 @@ def test_jdedate_coercion() -> None:
     # First and last days of a JDE year.
     assert _to_jde_julian(date(2000, 1, 1)) == 100001    # century 1, year 0, day 1
     assert _to_jde_julian(date(2024, 12, 31)) == 124366  # 2024 is a leap year
+
+
+def test_jdetime_coercion_roundtrip() -> None:
+    """``_coerce_value(x, "jdetime")`` collapses time / datetime / "HH:MM:SS" / HHMMSS-int to the
+    JDE HHMMSS integer, and ``_from_jde_time`` decodes it back to "HH:MM:SS" on read — symmetric
+    with jdedate. This is what lets an audit time column (UPMT) stamp the current time via
+    SYSDATE + format=jdetime and render readably in the grid."""
+    from datetime import time, datetime as dt
+    from liberty.connectors.sql import _coerce_value, _to_jde_time, _from_jde_time
+    # 14:30:52 → 143052
+    assert _coerce_value(time(14, 30, 52), "jdetime") == 143052
+    assert _coerce_value(dt(2026, 5, 18, 14, 30, 52), "jdetime") == 143052
+    assert _coerce_value("14:30:52", "jdetime") == 143052
+    assert _coerce_value("14:30", "jdetime") == 143000           # bare HH:MM → seconds 0
+    assert _coerce_value("2026-05-18 14:30:52", "jdetime") == 143052
+    assert _coerce_value(143052, "jdetime") == 143052            # already HHMMSS
+    assert _coerce_value("143052", "jdetime") == 143052
+    assert _coerce_value(time(0, 0, 0), "jdetime") == 0          # midnight
+    # Empty / unparseable / out-of-range → None.
+    assert _coerce_value("", "jdetime") is None
+    assert _coerce_value(None, "jdetime") is None
+    assert _coerce_value("not-a-time", "jdetime") is None
+    assert _to_jde_time(995959) is None                          # hour 99 out of range
+    # Read-side decode is the exact inverse.
+    assert _from_jde_time(143052) == "14:30:52"
+    assert _from_jde_time(0) == "00:00:00"
+    assert _from_jde_time("143052") == "14:30:52"
+    assert _from_jde_time(None) is None
+    assert _from_jde_time(146099) == 146099                      # minute 60 invalid → raw value back
 
 
 def test_infer_false_value_pairs() -> None:
@@ -1154,7 +1346,7 @@ async def test_form_rule_disabled_opts_out_of_inherited_rule(pools: PoolRegistry
 
 @pytest.mark.asyncio
 async def test_form_rule_sysdate_stamps_now(pools: PoolRegistry) -> None:
-    """``rules = "SYSDATE"`` / ``"CURRENT_DATE"`` stamps ``datetime.now(UTC)`` (one value per
+    """``rules = "SYSDATE"`` / ``"CURRENT_DATE"`` stamps local ``datetime.now()`` (one value per
     call, so every audit column in the same write lands on the same instant)."""
     from datetime import datetime
     from liberty.connectors.dictionary import DictionarySection
@@ -1196,10 +1388,11 @@ async def test_form_rule_password_hashes_value(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_form_rule_default_on_insert_only(pools: PoolRegistry) -> None:
-    """The dictionary entry's ``default`` value seeds an empty INSERT bind — but never an
-    UPDATE (UPDATE keeps the column's current value when not supplied), and never overwrites
-    an explicit user value."""
+async def test_form_rule_default_fills_empty_on_insert_and_update(pools: PoolRegistry) -> None:
+    """The dictionary entry's ``default`` seeds an empty bind on any SET-clause write
+    (INSERT/UPDATE/MERGE) — this is what re-stamps audit constants like PID/JOBN on UPDATE,
+    matching how LOGIN/SYSDATE already fire on every write. An explicit user value always wins,
+    so editable defaults (FSTP/OUTQ) keep the value the dialog sends."""
     from liberty.connectors.dictionary import DictionarySection
     d = DictionaryFile(connectors={"db": DictionarySection(entries={
         "STATUS": DictionaryEntry(default="active"),
@@ -1215,9 +1408,17 @@ async def test_form_rule_default_on_insert_only(pools: PoolRegistry) -> None:
     # INSERT + explicit value → keep it
     out = conn._apply_form_rules({"STATUS": "draft"}, cfg.queries[0], stmt_type="INSERT", user="x")
     assert out["STATUS"] == "draft"
-    # UPDATE + missing value → leave None (don't default — UPDATE preserves the current value)
+    # UPDATE + missing/blank value → now fills the default (the audit-field fix)
     out = conn._apply_form_rules({"STATUS": None, "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
-    assert out["STATUS"] is None
+    assert out["STATUS"] == "active"
+    out = conn._apply_form_rules({"STATUS": "", "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS"] == "active"
+    # UPDATE + explicit value → keep it (editable defaults aren't clobbered)
+    out = conn._apply_form_rules({"STATUS": "draft", "ID_ORIGINAL": 1}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS"] == "draft"
+    # The _ORIGINAL WHERE bind never gets a default — it carries the pre-edit key untouched
+    out = conn._apply_form_rules({"STATUS": "x", "STATUS_ORIGINAL": None}, cfg.queries[1], stmt_type="UPDATE", user="x")
+    assert out["STATUS_ORIGINAL"] is None
 
 
 @pytest.mark.asyncio
@@ -1293,6 +1494,58 @@ async def test_form_rule_sequence_resolves_in_same_transaction(pools: PoolRegist
             ])).rows
     ids = sorted(r["id"] for r in final if r["name"].startswith("from-seq"))
     assert ids == [4, 100, 101]  # each call ran ``MAX(id) + 1`` in its own transaction
+
+
+@pytest.mark.asyncio
+async def test_sequence_fires_when_numeric_bind_is_zero(pools: PoolRegistry) -> None:
+    """JDE has no NULLs — the form posts an unassigned numeric key as ``0`` (e.g. AUSEQNO=0), not
+    NULL. A sequence number is never legitimately 0, so a posted 0 (int / float / "0") must still
+    fire the SEQUENCE; only a real, non-zero value short-circuits it."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="item_next_id"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="item_next_id", sql="SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM item"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+        QueryDef(name="all", sql="SELECT id, name FROM item ORDER BY id"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="ID"), ColumnHint(name="NAME")]
+    # fixture has 1,2,3 → 0-bind should be reassigned to 4 (not kept as 0)
+    await conn.execute("ins", {"ID": 0, "NAME": "zero-int"}, column_hints=hints)
+    await conn.execute("ins", {"ID": "0", "NAME": "zero-str"}, column_hints=hints)
+    rows = (await conn.execute("all", column_hints=hints)).rows
+    seq = {r["name"]: r["id"] for r in rows}
+    assert seq["zero-int"] == 4 and seq["zero-str"] == 5   # both got fresh sequence numbers
+    assert 0 not in (seq["zero-int"], seq["zero-str"])
+
+
+@pytest.mark.asyncio
+async def test_resolved_binds_surfaces_sequence_assigned_pk(pools: PoolRegistry) -> None:
+    """An INSERT whose PK the server fills from a SEQUENCE returns that value in
+    ``resolved_binds`` (uppercased key) so a caller can chain a dependent child write to the
+    parent's brand-new key. A caller-supplied explicit value is NOT echoed (nothing was assigned),
+    and a non-sequence INSERT returns an empty ``resolved_binds``."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ID": DictionaryEntry(format="number", rules="SEQUENCE", rules_values="item_next_id"),
+        "NAME": DictionaryEntry(label="Name", format="text"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="item_next_id", sql="SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM item"),
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (:ID, :NAME)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="ID"), ColumnHint(name="NAME")]
+    # Sequence-assigned PK → surfaced (fixture has 1,2,3 → next is 4).
+    r = await conn.execute("ins", {"ID": None, "NAME": "from-seq"}, column_hints=hints)
+    assert r.resolved_binds == {"ID": 4}
+    assert r.to_dict()["resolved_binds"] == {"ID": 4}
+    # Caller supplied the value → nothing was assigned → not echoed.
+    r2 = await conn.execute("ins", {"ID": 50, "NAME": "explicit"}, column_hints=hints)
+    assert r2.resolved_binds == {}
 
 
 @pytest.mark.asyncio
@@ -1530,3 +1783,91 @@ async def test_jdedate_columns_converted_to_iso_on_read(pools: PoolRegistry) -> 
     assert rs[1] == {"id": 2, "upmj": 0}
     # NULL stays NULL
     assert rs[2] == {"id": 3, "upmj": None}
+
+
+def test_filter_predicate_trims_text_column_under_trim_strings() -> None:
+    """The runtime filter wrap must honour the pool's ``trim_strings`` on TEXT columns — JDE
+    CHAR(N) is blank-padded, so ``DTSY`` comes back ``'01      '`` and an ``equals`` filter
+    binding ``'01'`` would never match the raw column. With trim on, the column side is wrapped
+    in TRIM so the filter works without the query hand-TRIMming its SELECT. Numbers aren't padded,
+    so they stay untrimmed (preserves index usage / typed binds)."""
+    from liberty.connectors.sql import _build_filter_predicate
+
+    # text + trim → TRIM(col); LIKE family too
+    assert _build_filter_predicate("DTSY", "text", "equals", "postgresql", trim_text=True) == \
+        "TRIM(lib_flt.DTSY) = CAST(:DTSY AS VARCHAR(4000))"
+    assert "LOWER(TRIM(lib_flt.DTSY))" in _build_filter_predicate("DTSY", "text", "contains", "postgresql", trim_text=True)
+    # text + no trim → raw column (default, unchanged behaviour)
+    assert _build_filter_predicate("DTSY", "text", "equals", "postgresql") == \
+        "lib_flt.DTSY = CAST(:DTSY AS VARCHAR(4000))"
+    # numeric column is never trimmed, even with trim on
+    assert _build_filter_predicate("AN8", "integer", "equals", "postgresql", trim_text=True) == "lib_flt.AN8 = :AN8"
+
+
+@pytest.mark.asyncio
+async def test_filter_bind_trimmed_to_match_trimmed_column() -> None:
+    """End-to-end counterpart to the predicate test: a padded filter value (a right-justified JDE
+    UDC code arrives as ``'      01'``) must match the ``TRIM()``'d column. The wrap trims BOTH the
+    column and the bind, so the comparison is symmetric — without the bind trim the equals filter
+    returns 0 rows (the bug the operator hit moving f0004 to read jdedwards directly)."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE f0004 (id INTEGER PRIMARY KEY, dtsy TEXT)"))
+        await c.execute(text("INSERT INTO f0004 VALUES (1, '01'), (2, '02')"))
+    pools = PoolRegistry({"on": PoolConfig(url="sqlite://", trim_strings=True)})
+    pools.register_engine("on", engine)
+    conn = SQLConnector("c", SqlConnectorConfig(type="sql", pool="on", queries=[
+        QueryDef(name="get", sql="SELECT id, dtsy FROM f0004 ORDER BY id"),
+    ]), pools)
+    hints = [ColumnHint(name="dtsy", label="System", filter=True, format="text")]
+    r = await conn.execute("get", {"dtsy": "      01", "dtsy_op": "equals"}, column_hints=hints)
+    assert [row["id"] for row in r.rows] == [1]   # leading-space bind still matches TRIM(dtsy)='01'
+    await engine.dispose()
+
+
+def test_jsonable_number_coerces_decimal_to_json_number() -> None:
+    """Postgres ``numeric``/Oracle ``NUMBER`` come back from the driver as ``Decimal``. The result
+    layer serializes them as JSON numbers (not the string ``default=str`` would emit), so a
+    ``numeric`` column returns ``123`` not ``"123"`` and queries don't need ``CAST(col AS INTEGER)``.
+    Integral → int (lossless), fractional → float, non-finite → str, everything else untouched."""
+    from decimal import Decimal
+    from liberty.connectors.sql import _jsonable_number
+
+    assert _jsonable_number(Decimal("123")) == 123 and isinstance(_jsonable_number(Decimal("123")), int)
+    assert _jsonable_number(Decimal("123.00")) == 123 and isinstance(_jsonable_number(Decimal("123.00")), int)
+    assert _jsonable_number(Decimal("-7")) == -7
+    v = _jsonable_number(Decimal("1.5"))
+    assert v == 1.5 and isinstance(v, float)
+    # non-finite isn't a JSON number → string
+    assert _jsonable_number(Decimal("NaN")) == "NaN"
+    # non-Decimal passes through unchanged (identity for str / int / float / None)
+    for x in ("abc", 42, 3.14, None):
+        assert _jsonable_number(x) is x
+
+
+@pytest.mark.asyncio
+async def test_declared_param_wraps_as_optional_lookup_filter(pools: PoolRegistry) -> None:
+    """A plain lookup query that declares a ``params`` entry gets an optional equality filter
+    applied by the framework when a value is supplied — so the lookup query stays a plain
+    ``SELECT col… FROM table`` (no lib_lkp wrap / CAST baked into the TOML). No value → all rows;
+    value → filtered."""
+    conn = _connector(pools, QueryDef(
+        name="lkp",
+        sql="SELECT id, name, status FROM item ORDER BY id",
+        params=[ParamDef(name="status")],
+    ))
+    assert [r["id"] for r in (await conn.execute("lkp", {"status": "off"})).rows] == [3]      # filtered
+    assert [r["id"] for r in (await conn.execute("lkp", {})).rows] == [1, 2, 3]                # no value → all
+    assert [r["id"] for r in (await conn.execute("lkp", {"status": ""})).rows] == [1, 2, 3]    # empty → all
+
+
+@pytest.mark.asyncio
+async def test_declared_param_that_is_a_sql_bind_is_not_wrapped(pools: PoolRegistry) -> None:
+    """When the declared param is already a ``:placeholder`` in the SQL, the author owns it — the
+    framework must NOT also wrap it (which could reference a non-result column and error)."""
+    conn = _connector(pools, QueryDef(
+        name="own",
+        sql="SELECT id, name FROM item WHERE status = :status ORDER BY id",
+        params=[ParamDef(name="status")],
+    ))
+    assert [r["id"] for r in (await conn.execute("own", {"status": "on"})).rows] == [1, 2]

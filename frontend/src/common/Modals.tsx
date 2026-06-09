@@ -15,7 +15,8 @@
 //
 // All three resolve when the user clicks a button (confirm: bool, prompt: str|null, alert: void).
 // The promise resolves to the "cancel" outcome (``false`` / ``null`` / ``void``) when the user
-// clicks the overlay or presses Escape — same as the browser dialogs.
+// presses Escape (or the explicit Cancel button). A backdrop click does NOT dismiss — these often
+// hold typed input (a prompt's new id) and an accidental outside-click losing it was too easy.
 //
 // Mount ``<ModalsProvider>`` once near the top of the tree (``main.tsx``). The provider keeps
 // at most one modal queued at a time; firing a second call while the first is open replaces it
@@ -104,8 +105,8 @@ export interface ChooseOptions<V extends string = string> {
   message: ReactNode
   /** 2-5 button choices. Order = left-to-right in the footer. */
   options: ReadonlyArray<ChooseOption<V>>
-  /** Value resolved when the operator dismisses the modal via overlay click or Escape.
-   *  When unset (``null``), Escape / overlay click resolves ``null`` — the caller treats it
+  /** Value resolved when the operator dismisses the modal via Escape / Cancel.
+   *  When unset (``null``), Escape resolves ``null`` — the caller treats it
    *  as "keep editing" / no decision. */
   cancelValue?: V | null
   /** When set, render an explicit leftmost ghost Cancel button (resolves like Escape →
@@ -119,7 +120,7 @@ export interface ModalsContextValue {
   alert: (opts: AlertOptions) => Promise<void>
   /** Multi-button choice — for "unsaved changes: Save / Discard / Keep editing" and similar
    *  three-way dialogs that don't fit the binary ``confirm``. Returns the picked option's
-   *  ``value``, or ``cancelValue`` (default ``null``) on Escape / overlay click. */
+   *  ``value``, or ``cancelValue`` (default ``null``) on Escape / Cancel. */
   choose: <V extends string>(opts: ChooseOptions<V>) => Promise<V | null>
 }
 
@@ -248,7 +249,7 @@ function ConfirmModalContent({
     return () => document.removeEventListener('keydown', onKey)
   }, [onConfirm, onCancel])
   return createPortal(
-    <TopOverlay onClick={onCancel}>
+    <TopOverlay>
       <Modal style={{ width: 440 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>{opts.message}</ModalBody>
@@ -315,7 +316,7 @@ function PromptModalContent({
     return () => document.removeEventListener('keydown', onKey)
   }, [onCancel])
   return createPortal(
-    <TopOverlay onClick={onCancel}>
+    <TopOverlay>
       <Modal style={{ width: 460 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>
@@ -362,7 +363,7 @@ function AlertModalContent({
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
   return createPortal(
-    <TopOverlay onClick={onClose}>
+    <TopOverlay>
       <Modal style={{ width: 440 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>{opts.message}</ModalBody>
@@ -394,7 +395,7 @@ function ChooseModalContent({
     return () => document.removeEventListener('keydown', onKey)
   }, [onCancel])
   return createPortal(
-    <TopOverlay onClick={onCancel}>
+    <TopOverlay>
       <Modal style={{ width: 480 }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{opts.title}</ModalHeader>
         <ModalBody>{opts.message}</ModalBody>

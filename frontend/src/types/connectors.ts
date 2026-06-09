@@ -37,10 +37,30 @@ export interface ApiEndpointMeta {
   params: ParamDef[]
 }
 
+/** One CRUD slot of a table in the runtime connector meta — a query-meta plus which CRUD verb
+ *  it fills (`get` / `put` / `post` / `delete`). */
+export interface TableSlotMeta extends SqlQueryMeta {
+  crud: string
+}
+
+/** A first-class CRUD table in the runtime connector meta — its own name / label / description
+ *  plus the present CRUD slots. Emitted by `public_connector` alongside the flat `queries` so the
+ *  screen editor can offer "pick a table → fill its read/update/insert/delete queries at once". */
+export interface TableMeta {
+  name: string
+  label: string | null
+  description: string | null
+  slots: TableSlotMeta[]
+}
+
 export interface SqlConnectorMeta {
   name: string
   type: 'sql'
+  /** Every runnable query, flat — table CRUD slots (synthesised `<base>_<crud>` names), custom
+   *  queries, sequences and lookups. The historical shape; TableView + pickers read this. */
   queries: SqlQueryMeta[]
+  /** The CRUD tables, grouped — present alongside `queries` for editors that want the grouping. */
+  tables?: TableMeta[]
 }
 
 export interface ApiConnectorMeta {
@@ -85,6 +105,10 @@ export type DisplayRule =
       /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
        *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
       return_params?: string[]
+      /** The lookup's declared query params double as the **key columns** that disambiguate a
+       *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
+       *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
+      key_columns?: string[]
     }
 
 export interface Column {
@@ -112,6 +136,14 @@ export interface Column {
    *  filters can cross-map columns by dd — one `APPS_ID` filter targets USR_APPS_ID,
    *  RLU_APPS_ID, CFD_APPS_ID, etc. across queries. Absent when the operator never set `dd`. */
   dd?: string
+  /** The related-table write-back group this column belongs to (Screen.column_groups[].id). When
+   *  set, the column comes from the read query's JOIN and is written back to the related table on
+   *  Save (not the main update query). Absent ⇒ writes to the main table. */
+  group?: string | null
+  /** Part of the row's natural key (the Columns-tab ``key`` flag; legacy ``key_columns`` is
+   *  folded into this server-side). Used to stamp an action's writes with the firing row's
+   *  identity so the change package groups them under that record. */
+  key?: boolean
 }
 
 export interface QueryResult {

@@ -102,6 +102,18 @@ export const genericFilterFn: FilterFn<any> = (row, columnId, value) => {
     default: return true
   }
 }
+/** Trim- and case-tolerant equality for enum / lookup select filters. The dropdown's option value
+ *  is a trimmed code (e.g. ``"F"``), but the row's raw value is CHAR-padded (``"F   "``) on JDE — a
+ *  strict built-in ``equals`` would never match it, so the filter returned no rows. A no-op for
+ *  already-trimmed values (e.g. Postgres), where the bug never showed. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const selectFilterFn: FilterFn<any> = (row, columnId, value) => {
+  if (value == null || value === '') return true
+  const v = row.getValue(columnId)
+  return String(value).trim().toLowerCase() === (isEmpty(v) ? '' : String(v).trim().toLowerCase())
+}
+selectFilterFn.autoRemove = (value) => value == null || value === ''
+
 // Only drop the filter when there's no operator at all — *not* when the operand is still
 // empty: that lets you pick an operator first and type the value afterwards (an empty operand
 // just means the filter matches everything for now).

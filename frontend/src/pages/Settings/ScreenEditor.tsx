@@ -17,22 +17,28 @@
 import { useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react'
 import {
-  Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
+  Banner, Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
   type FrameworkEnums, type JsonSchema, type SearchSelectOption,
 } from '../../common'
+import ParamBindList, { type ParamBind } from './ParamBindList'
+import {
+  builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
+} from './actionCandidates'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { colors, fontSize, fonts } from '../../theme'
+import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
 import { EditQueryModal } from './EditQueryModal'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
+import ColumnGroupsEditor from './ColumnGroupsEditor'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
 import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
 import ExportEditor from './ExportEditor'
 import type { ActionPath } from './actionPath'
 import type { Column, QueryResult } from '../../types/connectors'
+import type { DictionaryDoc } from '../../types/config'
 import { api } from '../../api/client'
 
 type Row = Record<string, unknown>
@@ -52,7 +58,12 @@ type Row = Record<string, unknown>
 // with no hint that some are mutually exclusive). The picker turns it into one decision per
 // screen — "what happens when a row is clicked" — then reveals only the relevant fields.
 const GENERAL_FORM_KEYS = [
-  'label', 'description', 'audit_table', 'max_rows', 'auto_load', 'editable', 'uploadable',
+  'label', 'description', 'audit_table',
+  // Change-package capture (Settings → Packages): toggle on to record every write on this
+  // screen into the app's active change package, with ``change_entity`` as its grouping label
+  // and ``post_apply`` selecting the run-once steps this screen's changes need on promotion.
+  'change_tracked', 'change_entity', 'post_apply',
+  'max_rows', 'auto_load', 'editable', 'uploadable',
   // Default tanstack-table grouping — column(s) the grid groups by on first open. Surfaces
   // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
   // ``x_enum_ref`` mechanism the Columns tab uses to pick column names.
@@ -62,11 +73,6 @@ const GENERAL_FORM_KEYS = [
   // /admin/config/charts/parsed.
   'chart_id',
 ] as const
-
-// Sub-schema for the "open dialog" mode — the three fields that go together. We render this
-// through SchemaForm so the ParamBind list editor (Add row, source/value picker, …) comes for
-// free instead of being hand-rolled here.
-const ROW_CLICK_DIALOG_KEYS = ['row_click_screen', 'row_click_connector', 'row_click_binds'] as const
 
 // Known SPA-route targets the row-click can drill into. Hand-curated because these are
 // React-defined routes (not discoverable via the API), so the dropdown ships with the frontend
@@ -97,6 +103,19 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   &:hover { color: ${colors.text.primary}; }
 `
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
+const GroupsHr = styled.div`border-top: 1px solid ${colors.border}; margin: 18px 0 14px;`
+// Collapsible hook section on the Actions tab — header (chevron · heading · count) + body.
+const HookSection = styled.div`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; margin-bottom: 8px; background: ${colors.bg.input};
+  & > .head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+    background: none; border: none; padding: 10px 12px; color: ${colors.text.primary};
+    font-size: ${fontSize.sm}; font-weight: 600; font-family: ${fonts.sans}; }
+  & > .head:hover { background: var(--hover-subtle); }
+  & > .head .title { flex: 1; }
+  & > .head .count { font-size: ${fontSize.micro}; color: ${colors.text.muted}; min-width: 18px; text-align: center; }
+  & > .head .count.has { color: ${colors.blue.main}; font-weight: 700; }
+  & > .body { padding: 4px 12px 12px; border-top: 1px solid ${colors.border}; }
+`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 // Section divider for the row-click block in General — visually separates it from the schema-form
 // fields above so the mode picker reads as "a different decision", not "yet another field".
@@ -104,6 +123,10 @@ const RowClickHeader = styled.div`
   margin-top: 18px; padding-top: 14px; border-top: 1px solid ${colors.border};
   font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
   text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+`
+// Muted one-liner under a row-click dialog control (the ``Field`` component has no help slot).
+const RowClickHint = styled.div`
+  font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 5px; line-height: 1.4;
 `
 // Column-placeholder chip row under the row_click_route input. Each chip inserts the
 // matching ``{column}`` token into the route at the current cursor position so operators
@@ -161,7 +184,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // Workspace connectors carry their query list; we render the connector + query pickers as
   // SearchSelects driven off that list (instead of plain text fields). Fetched once at login;
   // permission-pruned to what the caller can read.
-  const { connectors: wsConnectors } = useWorkspace()
+  const { connectors: wsConnectors, findScreenById } = useWorkspace()
   // Workspace context streams the connector list after login; until then it's null. Guard
   // both reads so the pickers show ``loading`` placeholders instead of crashing on first render.
   const effectiveConnector = (typeof value.connector === 'string' && value.connector.trim() ? value.connector : app)
@@ -184,6 +207,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       label: q.description || q.label || q.name,
       mono: q.name,
     }))
+  }, [selectedConnectorMeta])
+  // CRUD tables on the effective connector — drives the "pick a table → fill all four queries"
+  // shortcut so operators don't wire read / update / insert / delete one by one. Sorted by name.
+  const tableOptions = useMemo<SearchSelectOption[]>(() => {
+    if (selectedConnectorMeta?.type !== 'sql' || !selectedConnectorMeta.tables) return []
+    return [...selectedConnectorMeta.tables]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((tbl) => ({ value: tbl.name, label: tbl.description || tbl.label || tbl.name, mono: tbl.name }))
   }, [selectedConnectorMeta])
   // Fetch the read query's columns once we know the effective connector + read query —
   // powers the SCREEN_COLUMNS augmented enum (the column picker for ``initial_group_by``).
@@ -218,6 +249,31 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     return () => { cancelled = true }
   }, [])
 
+  // Fetch the dictionary so the Columns editor's ``rules_values`` field — whose ``x_enum_ref_when``
+  // swaps between ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS based on the chosen ``rules`` — renders a
+  // dropdown of the ids that actually exist (shared + this connector's overlay). Without this only
+  // BOOLEAN works (its ``BOOLEAN_TRUE_VALUES`` enum is static); SEQUENCE / LOOKUP / ENUM came back
+  // empty. Mirrors what DictionaryBuilder does for the same field.
+  const [dict, setDict] = useState<DictionaryDoc['dictionary'] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api.get<DictionaryDoc>('/admin/config/dictionary/parsed')
+      .then((r) => { if (!cancelled) setDict(r.dictionary) })
+      .catch(() => { /* silent — dropdowns just stay empty */ })
+    return () => { cancelled = true }
+  }, [])
+
+  // Fetch the post-apply step library ([changesets] post_apply) — powers the POST_APPLY_STEPS enum
+  // for Screen.post_apply (which run-once steps this change-tracked screen's changes require).
+  const [postApplySteps, setPostApplySteps] = useState<Array<{ id: string; label?: string | null }>>([])
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ post_apply: Array<{ id: string; label?: string | null }> }>('/admin/changesets/config/post-apply')
+      .then((r) => { if (!cancelled) setPostApplySteps(r.post_apply ?? []) })
+      .catch(() => { /* silent — empty dropdown (changesets off / none configured) */ })
+    return () => { cancelled = true }
+  }, [])
+
   // Augment the parent's framework enums with SCREEN_COLUMNS — the read query's column names.
   // Consumed by Screen fields that declare ``x_enum_ref: "SCREEN_COLUMNS"`` (currently:
   // ``initial_group_by``, ``treeview.parent/child/label/order_by``). Also adds CHART_IDS for
@@ -225,13 +281,22 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // FrameworkEnumsContext; we LAYER the per-screen enums on top via a nested Provider around
   // the General SchemaForm so the dropdown options match the live state.
   const parentEnums = useContext(FrameworkEnumsContext)
+  // The screen's columns for the SCREEN_COLUMNS picker (initial_group_by, treeview, row-click
+  // source binds). PREFER the screen's OWN ``Screen.columns`` — the Phase-3 single source of
+  // truth, always present and free (no DB round-trip). Fall back to the live read-query
+  // introspection only when the screen hasn't defined columns yet. This is what fixes the empty
+  // dropdown on screens whose read query takes a required ``:param`` (e.g. ``WHERE APPS_ID =
+  // :APPS_ID``): the ``?_limit=0`` introspection of such a query can fail, but we no longer
+  // depend on it when the screen already lists its columns.
+  const effectiveScreenColumns = useMemo<Column[]>(() => {
+    const defined = Array.isArray(value.columns) ? (value.columns as unknown as Column[]) : []
+    return defined.length ? defined : (screenColumns ?? [])
+  }, [value.columns, screenColumns])
   const augmentedEnums = useMemo<FrameworkEnums>(() => {
     const base: FrameworkEnums = { ...(parentEnums ?? {}) }
-    const colValues = (screenColumns ?? []).map((c) => ({
-      value: c.name,
-      label: c.label ?? c.name,
-      mono: c.name,
-    }))
+    const colValues = effectiveScreenColumns
+      .filter((c) => c.name)
+      .map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name }))
     base.SCREEN_COLUMNS = { label: `Columns — ${readQueryName || '(no read query)'}`, values: colValues }
     // CHART_IDS — every entry in charts.toml. Operators pick from a dropdown
     // of "<label> (id)" rows; the id is what we store. Empty catalog = the
@@ -244,29 +309,114 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       mono: id,
     }))
     base.CHART_IDS = { label: 'Saved charts', values: chartValues }
+    // ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS — the dictionary ids in this screen's connector scope
+    // (shared + the connector overlay). Drive the Columns editor's ``rules_values`` dropdown via
+    // its ``x_enum_ref_when`` (rules=ENUM → ENUM_IDS, LOOKUP → LOOKUP_IDS, SEQUENCE/NN →
+    // SEQUENCE_IDS). Without these the dropdown only worked for BOOLEAN (static enum).
+    const mkIdValues = (
+      labelKeys: ReadonlyArray<string>,
+      ...maps: (Record<string, Record<string, unknown>> | undefined)[]
+    ) => {
+      const out = new Map<string, string>()
+      for (const m of maps) {
+        if (!m) continue
+        for (const [id, rec] of Object.entries(m)) {
+          let lbl = id
+          for (const k of labelKeys) {
+            const v = (rec as Record<string, unknown>)?.[k]
+            if (typeof v === 'string' && v.trim()) { lbl = v; break }
+          }
+          out.set(id, lbl)
+        }
+      }
+      return [...out.entries()].map(([value, label]) => ({ value, label, mono: value }))
+    }
+    const dscope = dict?.connectors?.[effectiveConnector]
+    base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
+    base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
+    base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
+    // COLUMN_GROUPS — the group ids defined on this screen, for the per-column ``group`` picker.
+    // (The group editor itself — connector / query / bind dropdowns — is the dedicated
+    // ColumnGroupsEditor, not a schema-enum field, so no WRITABLE_QUERIES enum is needed here.)
+    const groups = Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []
+    base.COLUMN_GROUPS = {
+      label: 'Column groups',
+      values: groups
+        .filter((g) => typeof g?.id === 'string' && g.id)
+        .map((g) => ({ value: g.id as string, label: g.label ? `${g.label} (${g.id})` : (g.id as string), mono: g.id as string })),
+    }
+    // POST_APPLY_STEPS — the configured run-once step ids ([changesets] post_apply), for the
+    // Screen.post_apply multi-select (General tab, next to change_tracked).
+    base.POST_APPLY_STEPS = {
+      label: 'Post-apply steps',
+      values: postApplySteps.map((s) => ({ value: s.id, label: s.label ? `${s.label} (${s.id})` : s.id, mono: s.id })),
+    }
     return base
-  }, [parentEnums, screenColumns, readQueryName, chartsCatalog])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector, selectedConnectorMeta, value.column_groups, postApplySteps])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
   // its field-level enums + descriptions kick in.
   const generalSchema = useMemo<JsonSchema>(() => pickSchemaProperties(schema, GENERAL_FORM_KEYS as unknown as string[]), [schema])
-  // Sub-schema for the row-click "open dialog" mode's three fields. We render this with
-  // SchemaForm to reuse its ParamBind list editor for ``row_click_binds``; the screen +
-  // connector strings get text inputs (we override row_click_screen with a SearchSelect of
-  // sibling screens further below — the schema render is the fallback when the parent
-  // didn't pass siblingScreenIds).
-  const rowClickDialogSchema = useMemo<JsonSchema>(() => {
-    const picked = pickSchemaProperties(schema, ROW_CLICK_DIALOG_KEYS as unknown as string[])
-    // When we have a sibling-screen dropdown, hide the auto-rendered text field for it so we
-    // don't show two controls for the same thing.
-    if (siblingScreenIds.length > 0 && picked.properties && typeof picked.properties === 'object') {
-      const p = { ...(picked.properties as Record<string, JsonSchema>) }
-      delete p.row_click_screen
-      return { ...picked, properties: p }
-    }
-    return picked
-  }, [schema, siblingScreenIds.length])
+
+  // ── Row-click "open a sibling Screen as a dialog" binds ───────────────────────────────────
+  // The binds map THIS screen's clicked-row columns (``source``) → the TARGET screen's
+  // read_query params (``param``). Both sides get a dropdown so the operator picks instead of
+  // typing: source = this screen's read-query columns (+ the #BUILTIN# paths); param = the
+  // target read_query's declared params + scanned ``:bind_params``.
+  const rowClickSourceOptions = useMemo<SearchSelectOption[]>(
+    () => mergeCandidates(screenReadColumnOptions(effectiveScreenColumns), builtinSourceOptions()),
+    [effectiveScreenColumns],
+  )
+  // Connector picker for the (optional) row-click connector override — SQL connectors only.
+  const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
+    () => (wsConnectors ?? [])
+      .filter((c) => c.type === 'sql')
+      .map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+      .sort((a, b) => a.value.localeCompare(b.value)),
+    [wsConnectors],
+  )
+  // Resolve the target screen → its read_query → the query def carrying its params.
+  const rowClickTarget = (typeof value.row_click_screen === 'string' && value.row_click_screen)
+    ? findScreenById(app, value.row_click_screen)
+    : null
+  const rowClickConnector = (typeof value.row_click_connector === 'string' && value.row_click_connector.trim())
+    ? value.row_click_connector
+    : (rowClickTarget?.connector || effectiveConnector)
+  // The target read_query def — ``null`` until we can locate it in the workspace catalog (target
+  // screen not picked yet, query renamed, connector not visible…). Distinguishing "not found" from
+  // "found with zero params" is what lets the unmatched-param warning fire on a query that declares
+  // NO params at all (the user's ``:APPS_ID``-missing case) without false-positiving on an
+  // unresolvable target.
+  const rowClickTargetQuery = useMemo(() => {
+    if (!rowClickTarget?.read_query) return null
+    const conn = (wsConnectors ?? []).find((c) => c.name === rowClickConnector)
+    if (!conn || conn.type !== 'sql') return null
+    return conn.queries.find((q) => q.name === rowClickTarget.read_query) ?? null
+  }, [rowClickTarget?.read_query, rowClickConnector, wsConnectors])
+  // ``param`` dropdown — reuse ``targetParamOptions`` (declared params ∪ scanned ``:bind_params``)
+  // by shaping a synthetic ``navigate`` action whose ``to`` is the target read_query.
+  const rowClickParamOptions = useMemo<SearchSelectOption[]>(
+    () => (rowClickTarget?.read_query
+      ? targetParamOptions(
+          { type: 'navigate', to: rowClickTarget.read_query, connector: rowClickConnector },
+          wsConnectors,
+          rowClickConnector,
+        )
+      : []),
+    [rowClickTarget?.read_query, rowClickConnector, wsConnectors],
+  )
+  // #2 — warn when a bind targets a ``param`` that isn't an actual ``:placeholder`` on the target
+  // read_query: the runtime fetches the row server-side, so a bind with no matching placeholder is
+  // silently dropped and the dialog opens unfiltered. Only checked once the target query RESOLVES
+  // (``rowClickTargetQuery`` non-null) — an unresolvable target stays silent (we can't judge it).
+  const rowClickUnmatchedParams = useMemo<string[]>(() => {
+    if (!rowClickTargetQuery) return []
+    const known = new Set(rowClickParamOptions.map((o) => o.value))
+    const binds = Array.isArray(value.row_click_binds) ? (value.row_click_binds as ParamBind[]) : []
+    return binds.map((b) => b?.param).filter((p): p is string => !!p && !known.has(p))
+  }, [rowClickTargetQuery, rowClickParamOptions, value.row_click_binds])
+
   // Phase 3 — the Columns tab edits ``Screen.columns`` via SchemaNavigator. Same ColumnHint
   // shape used elsewhere; carries the full ``$defs`` map so nested ``filter_from`` /
   // ``visible_when`` / ``lookup_param_binds`` drill in via the breadcrumb navigator.
@@ -274,6 +424,19 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     () => ({ ...pickSchemaProperties(schema, COLUMNS_KEYS as unknown as string[]), $defs: defs }),
     [schema, defs],
   )
+  // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
+  // "Columns in this group" chips in the ColumnGroupsEditor so the operator sees the mapping
+  // without scanning the whole column list.
+  const columnsByGroup = useMemo<Map<string, string[]>>(() => {
+    const m = new Map<string, string[]>()
+    const cols = Array.isArray(value.columns) ? (value.columns as Record<string, unknown>[]) : []
+    for (const c of cols) {
+      const g = typeof c.group === 'string' ? c.group : ''
+      const name = typeof c.name === 'string' ? c.name : ''
+      if (g && name) { const list = m.get(g) ?? []; list.push(name); m.set(g, list) }
+    }
+    return m
+  }, [value.columns])
   // (Schema-mode sub-schemas + tab/field mutation helpers are gone — the visual builder owns
   // the dialog-tab/field editing experience now. ``setProp`` / ``dialog`` / ``setDialog`` /
   // ``createDialog`` remain since they're used by the Dialog tab's empty-state "Create dialog"
@@ -282,6 +445,26 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     const next = { ...value }
     if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) delete next[k]
     else next[k] = v
+    onChange(next)
+  }
+  // Fill the four CRUD query fields from a chosen table's slots in one shot. A present slot sets
+  // its field (read=`_get`, update=`_put`, insert=`_post`, delete=`_delete`); an absent slot
+  // clears the matching field — except read_query (required), which we only overwrite when the
+  // table has a read. The operator can still fine-tune any field afterwards.
+  const applyTable = (base: string) => {
+    if (selectedConnectorMeta?.type !== 'sql') return
+    const tbl = (selectedConnectorMeta.tables ?? []).find((t) => t.name === base)
+    if (!tbl) return
+    const slot = (crud: string): string | undefined => tbl.slots.find((s) => s.crud === crud)?.name
+    const next = { ...value }
+    const set = (key: string, name: string | undefined, keepWhenMissing: boolean) => {
+      if (name) next[key] = name
+      else if (!keepWhenMissing) delete next[key]
+    }
+    set('read_query', slot('get'), true)
+    set('update_query', slot('put'), false)
+    set('insert_query', slot('post'), false)
+    set('delete_query', slot('delete'), false)
     onChange(next)
   }
   const dialog = (value.dialog && typeof value.dialog === 'object' ? value.dialog : null) as { title?: string; tabs?: Row[] } | null
@@ -396,30 +579,45 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
 
         {currentMode === 'dialog' && (
           <>
-            {siblingScreenIds.length > 0 && (
-              <Field label={t('settings.screens.editor.rowClickScreenLabel', 'Target screen')}>
-                <SearchSelect
-                  value={(value.row_click_screen as string | undefined) ?? ''}
-                  options={siblingScreenIds.map((sid) => ({ value: sid, label: sid, mono: sid }))}
-                  onChange={(v) => setProp('row_click_screen', v || null)}
-                  placeholder={t('settings.screens.editor.rowClickScreenPlaceholder', 'Pick a sibling screen…')}
-                />
-              </Field>
+            <Field label={t('settings.screens.editor.rowClickScreenLabel', 'Target screen')}>
+              <SearchSelect
+                value={(value.row_click_screen as string | undefined) ?? ''}
+                options={[...siblingScreenIds].sort((a, b) => a.localeCompare(b)).map((sid) => ({ value: sid, label: sid, mono: sid }))}
+                onChange={(v) => setProp('row_click_screen', v || null)}
+                placeholder={t('settings.screens.editor.rowClickScreenPlaceholder', 'Pick a sibling screen…')}
+              />
+            </Field>
+            <Field label={t('settings.screens.editor.rowClickConnectorLabel', 'Target connector')}>
+              <SearchSelect
+                value={(value.row_click_connector as string | undefined) ?? ''}
+                options={sqlConnectorOptions}
+                onChange={(v) => setProp('row_click_connector', v || null)}
+                anyLabel={t('settings.screens.editor.rowClickConnectorInherit', '(inherit — {{conn}})', { conn: rowClickTarget?.connector || effectiveConnector })}
+                placeholder={t('settings.screens.editor.rowClickConnectorPlaceholder', 'Inherit from target screen')}
+              />
+              <RowClickHint>{t('settings.screens.editor.rowClickConnectorHelp', 'Connector hosting the target screen; blank → the target screen’s own (or this screen’s) connector.')}</RowClickHint>
+            </Field>
+            <Field label={t('settings.screens.editor.rowClickBindsLabel', 'Pass these values to the target')}>
+              <ParamBindList
+                value={Array.isArray(value.row_click_binds) ? (value.row_click_binds as ParamBind[]) : []}
+                onChange={(next) => setProp('row_click_binds', next.length ? next : null)}
+                sourceOptions={rowClickSourceOptions}
+                paramOptions={rowClickParamOptions}
+                paramPlaceholder={t('settings.screens.editor.rowClickParamPlaceholder', 'Target param (:placeholder)')}
+              />
+              <RowClickHint>{t('settings.screens.editor.rowClickBindsHelp', 'Bind the clicked row’s columns into the target screen’s read_query. “source” reads a column on this screen’s row; “value” is a literal.')}</RowClickHint>
+            </Field>
+            {rowClickUnmatchedParams.length > 0 && (
+              <Banner $tone="warning">
+                {t('settings.screens.editor.rowClickUnmatchedWarning',
+                  'These binds target a param the read_query “{{q}}” doesn’t declare, so they won’t filter the row: {{params}}. Add the matching “:{{first}}” placeholder to that query (Edit query), or remove the bind.',
+                  {
+                    q: rowClickTarget?.read_query ?? '',
+                    params: rowClickUnmatchedParams.join(', '),
+                    first: rowClickUnmatchedParams[0],
+                  })}
+              </Banner>
             )}
-            <SchemaForm
-              schema={rowClickDialogSchema}
-              defs={defs}
-              value={value}
-              onChange={(v) => {
-                const next: Row = { ...value }
-                for (const k of ROW_CLICK_DIALOG_KEYS) {
-                  const val = v[k]
-                  if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
-                  else next[k] = val
-                }
-                onChange(next)
-              }}
-            />
           </>
         )}
 
@@ -537,6 +735,18 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   const renderQueries = (): ReactNode => (
     <>
       <Sub>{t('settings.screens.editor.queriesHint')}</Sub>
+      {tableOptions.length > 0 && (
+        <Field label={t('settings.screens.editor.queries.fromTable', 'Fill from table')}>
+          <SearchSelect
+            value=""
+            options={tableOptions}
+            onChange={(v) => v && applyTable(v)}
+            anyLabel={t('settings.screens.editor.queries.fromTableHint', 'Pick a table to fill all four CRUD queries…')}
+            placeholder={t('common.pick')}
+            loading={!selectedConnectorMeta}
+          />
+        </Field>
+      )}
       {renderQueryField('read_query', true)}
       {renderQueryField('update_query', false)}
       {renderQueryField('insert_query', false)}
@@ -551,22 +761,75 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // column hint and its nested rules.
   const renderColumns = (): ReactNode => {
     const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
+    const currentGroups = Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []
+    // Source / key candidates for the group binds + key_columns — the screen's own columns.
+    const columnOptions: SearchSelectOption[] = effectiveScreenColumns
+      .filter((c) => c.name)
+      .map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name }))
     return (
       <>
-        <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
-        <SchemaNavigator
-          root={{
-            label: t('settings.screens.editor.columnsCrumb', { id }),
-            schema: columnsSchema,
-            value: { columns: currentColumns },
-            onChange: (v) => {
-              const next = Array.isArray(v.columns) && (v.columns as unknown[]).length
-                ? (v.columns as unknown[])
-                : null
-              setProp('columns', next)
-            },
-          }}
+        {/* Related-table write-back groups (1:1) FIRST — define them, then tag columns with a
+            group in the list below. Each group names its update/insert queries + the FK binds and
+            shows which columns are attached, so the column→table mapping is visible at a glance. */}
+        <Sub>{t('settings.screens.editor.columnGroupsHint',
+          'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) in the column list below.')}</Sub>
+        <ColumnGroupsEditor
+          value={currentGroups}
+          onChange={(next) => setProp('column_groups', next.length ? next : null)}
+          screenConnector={effectiveConnector}
+          connectorOptions={connectorOptions}
+          columnOptions={columnOptions}
+          columnsByGroup={columnsByGroup}
         />
+        <GroupsHr />
+        <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
+        {/* Import columns from the read query — seed the list from the query's result columns
+            (name + dd) in one click instead of adding each by hand. Only adds columns NOT already
+            defined, so it's safe to re-run after the query gains a column. */}
+        {(() => {
+          const have = new Set(
+            (currentColumns as { name?: string }[]).map((c) => (c.name ?? '').toLowerCase()),
+          )
+          const missing = (screenColumns ?? []).filter((c) => c.name && !have.has(c.name.toLowerCase()))
+          return (
+            <Button
+              $size="sm" $variant="ghost"
+              disabled={!screenColumns || missing.length === 0}
+              onClick={() => setProp('columns', [
+                ...(currentColumns as unknown[]),
+                // Column names are stored UPPERCASE (the write queries + dictionary use v1's
+                // uppercase ids; a Postgres read folds them lowercase, so normalize on import).
+                ...missing.map((c) => ({ name: c.name.toUpperCase(), ...(c.dd ? { dd: c.dd.toUpperCase() } : {}) })),
+              ])}
+              style={{ marginBottom: 8 }}
+            >
+              <Plus size={13} />{' '}
+              {!screenColumns
+                ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
+                : missing.length === 0
+                  ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
+                  : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
+            </Button>
+          )
+        })()}
+        {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
+            ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
+            COLUMN_GROUPS for the per-column ``group`` picker. */}
+        <FrameworkEnumsContext.Provider value={augmentedEnums}>
+          <SchemaNavigator
+            root={{
+              label: t('settings.screens.editor.columnsCrumb', { id }),
+              schema: columnsSchema,
+              value: { columns: currentColumns },
+              onChange: (v) => {
+                const next = Array.isArray(v.columns) && (v.columns as unknown[]).length
+                  ? (v.columns as unknown[])
+                  : null
+                setProp('columns', next)
+              },
+            }}
+          />
+        </FrameworkEnumsContext.Provider>
       </>
     )
   }
@@ -586,8 +849,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // mounts when this is non-null and reads / writes through the matching list's accessors.
   // A ``listKey`` of ``'on_load'`` / ``'on_save'`` / ``'on_cancel'`` targets the dialog's hook;
   // anything else targets the screen's top-level slot.
-  type ListKey = 'on_load' | 'on_save' | 'on_cancel' | 'actions' | 'on_insert' | 'on_update' | 'on_delete' | 'row_menu'
+  type ListKey = 'on_load' | 'on_save' | 'on_cancel' | 'actions' | 'on_insert' | 'on_update' | 'on_delete' | 'on_duplicate' | 'row_menu'
   const [openEditor, setOpenEditor] = useState<{ listKey: ListKey; path: ActionPath } | null>(null)
+  // The Actions tab stacks several hook sections (on_save / on_cancel / screen actions / on_insert /
+  // on_update / on_delete); most are empty on a given screen, so each is COLLAPSIBLE and collapsed
+  // by default — the header shows the action count so a non-empty hook stands out. (row_menu has its
+  // own single-section tab and stays expanded.) Toggle state keyed by listKey.
+  const [expandedHooks, setExpandedHooks] = useState<Set<string>>(new Set())
+  const toggleHook = (k: string) => setExpandedHooks((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
 
 
   // Dialog lifecycle hook accessors — same pattern for each. ``setDialog`` strips empty hook
@@ -613,6 +882,11 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   const screenReadColumns: Row[] = Array.isArray((value as Row).columns)
     ? ((value as Row).columns as Row[])
     : []
+  // on_duplicate exposes the ORIGINAL record under SOURCE_<col> keys at runtime — surface them as
+  // pickable ``source`` options (otherwise the operator has to know the prefix + type it).
+  const duplicateSourceOptions: SearchSelectOption[] = screenReadColumns
+    .filter((c) => typeof c.name === 'string' && c.name)
+    .map((c) => ({ value: `SOURCE_${c.name as string}`, label: `SOURCE_${c.name as string} (original row)`, mono: `SOURCE_${c.name as string}`, group: 'Duplicate source' }))
   const renderHookList = (
     listKey: ListKey,
     actions: Row[],
@@ -620,23 +894,40 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     heading: string,
     hint: string,
     emptyMessage: string,
-  ): ReactNode => (
-    <ActionTreeView
-      actions={actions}
-      onChange={onChange}
-      path={null}
-      onPathChange={(p) => p && p.length > 0 && setOpenEditor({ listKey, path: p })}
-      selectedPath={openEditor?.listKey === listKey ? openEditor.path : null}
-      defs={defs}
-      effectiveConnector={effectiveConnector}
-      onEditQuery={onEditQueryRaise}
-      rootLabel={heading}
-      heading={heading}
-      hint={hint}
-      emptyMessage={emptyMessage}
-      screenReadColumns={screenReadColumns}
-    />
-  )
+  ): ReactNode => {
+    const tree = (
+      <ActionTreeView
+        actions={actions}
+        onChange={onChange}
+        path={null}
+        onPathChange={(p) => p && p.length > 0 && setOpenEditor({ listKey, path: p })}
+        selectedPath={openEditor?.listKey === listKey ? openEditor.path : null}
+        defs={defs}
+        effectiveConnector={effectiveConnector}
+        onEditQuery={onEditQueryRaise}
+        rootLabel={heading}
+        // Collapsible sections render the heading in their own header (below); a single-section tab
+        // (row_menu) keeps ActionTreeView's internal heading.
+        heading={listKey === 'row_menu' ? heading : undefined}
+        hint={hint}
+        emptyMessage={emptyMessage}
+        screenReadColumns={screenReadColumns}
+        extraSourceOptions={listKey === 'on_duplicate' ? duplicateSourceOptions : undefined}
+      />
+    )
+    if (listKey === 'row_menu') return tree
+    const expanded = expandedHooks.has(listKey)
+    return (
+      <HookSection>
+        <button type="button" className="head" onClick={() => toggleHook(listKey)}>
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span className="title">{heading}</span>
+          <span className={actions.length ? 'count has' : 'count'}>{actions.length}</span>
+        </button>
+        {expanded && <div className="body">{tree}</div>}
+      </HookSection>
+    )
+  }
   const renderOnLoad = (): ReactNode => renderHookList(
     'on_load', onLoad, (n) => setDialogList('on_load', n),
     t('settings.screens.onLoad.heading'),
@@ -686,9 +977,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // ParamBinds resolve against the *new row's* values (insert/update) or the deleted row's
   // values (delete). Edit them in the same "Actions" tab alongside the toolbar buttons —
   // related concept, same Action shape.
-  const screenHookList = (key: 'on_insert' | 'on_update' | 'on_delete'): Row[] =>
+  const screenHookList = (key: 'on_insert' | 'on_update' | 'on_delete' | 'on_duplicate'): Row[] =>
     Array.isArray((value as Row)[key]) ? ((value as Row)[key] as Row[]) : []
-  const setScreenHook = (key: 'on_insert' | 'on_update' | 'on_delete', next: Row[]) => {
+  const setScreenHook = (key: 'on_insert' | 'on_update' | 'on_delete' | 'on_duplicate', next: Row[]) => {
     const v = { ...value }
     if (next.length === 0) delete v[key]
     else v[key] = next
@@ -713,6 +1004,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         t('settings.screens.onDelete.heading'),
         t('settings.screens.onDelete.hint'),
         t('settings.screens.onDelete.empty'),
+      )}
+      {renderHookList(
+        'on_duplicate', screenHookList('on_duplicate'), (n) => setScreenHook('on_duplicate', n),
+        t('settings.screens.onDuplicate.heading', 'On duplicate (row hook)'),
+        t('settings.screens.onDuplicate.hint', 'Runs when a row is duplicated (Duplicate → Save), instead of on_insert. The source record is exposed as SOURCE_<col> so actions can copy related-table rows (roles, menus…) from the original to the new row.'),
+        t('settings.screens.onDuplicate.empty', 'No on-duplicate actions yet — duplicating just writes the cloned row.'),
       )}
     </>
   )
@@ -934,6 +1231,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           on_insert: { list: screenHookList('on_insert'), setList: (n) => setScreenHook('on_insert', n), label: t('settings.screens.onInsert.heading') },
           on_update: { list: screenHookList('on_update'), setList: (n) => setScreenHook('on_update', n), label: t('settings.screens.onUpdate.heading') },
           on_delete: { list: screenHookList('on_delete'), setList: (n) => setScreenHook('on_delete', n), label: t('settings.screens.onDelete.heading') },
+          on_duplicate: { list: screenHookList('on_duplicate'), setList: (n) => setScreenHook('on_duplicate', n), label: t('settings.screens.onDuplicate.heading', 'On duplicate (row hook)') },
           row_menu:  { list: rowMenu,   setList: setRowMenu,                          label: t('settings.screens.rowmenu.heading') },
         }
         const cfg = lookup[openEditor.listKey]
@@ -948,6 +1246,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
             onEditQuery={onEditQueryRaise}
             rootLabel={cfg.label}
             screenReadColumns={screenReadColumns}
+            extraSourceOptions={openEditor.listKey === 'on_duplicate' ? duplicateSourceOptions : undefined}
             onClose={() => setOpenEditor(null)}
           />
         )

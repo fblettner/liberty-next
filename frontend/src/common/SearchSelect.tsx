@@ -25,6 +25,9 @@ export interface SearchSelectOption {
   /** Optional secondary text rendered in a mono-font column beside `label` (typically the same as
    *  `value` for framework-enum dropdowns). When absent the option renders as a single column. */
   mono?: string
+  /** Optional grouping key — consumed by the grouped suggestion overlay in ParamBindList's
+   *  ``SourcePathInput`` (chain inputs / step results / loop). SearchSelect itself ignores it. */
+  group?: string
 }
 
 // Everything inside the panel shares the same 12px left inset so the trigger label, the search
@@ -164,7 +167,12 @@ export function SearchSelect({
     }
   }, [open])
 
+  // Exact match drives the trigger label; fall back to a trim-tolerant match so a JDE-padded
+  // lookup value (option ``"      01"``) still shows its label when the stored value reads back
+  // as ``"01"`` (or vice versa) — common after a UDC lookup moved to read JDE directly. Display
+  // only: the stored ``value`` passed to ``onChange`` is never rewritten, so save keeps its form.
   const current = options.find((o) => o.value === value)
+    ?? (value ? options.find((o) => o.value.trim() === String(value).trim()) : undefined)
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     if (!needle) return options

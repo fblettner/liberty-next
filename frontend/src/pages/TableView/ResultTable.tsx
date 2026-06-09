@@ -19,19 +19,21 @@ import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
 import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { Action, PromptField, ScreenDetail } from '../../types/screens'
+import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError, authHeaders } from '../../api/client'
 import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
-import { genericFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
+import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { resolveBindList, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, type Row as CtxRow } from './dialogHelpers'
+import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
 type DataRow = Record<string, unknown>
@@ -48,7 +50,9 @@ function cellAlign(c: Column): 'left' | 'right' | 'center' | undefined {
   return undefined
 }
 function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
-function isDateish(fmt: string, typ: string) { return fmt === 'date' || /date|timestamp/.test(typ) }
+// jdedate = JDE Julian date: integer SQL type, but read as ISO YYYY-MM-DD and re-encoded to Julian
+// on Save — so it edits with a calendar, not as a number. Keep in sync with FieldRow.isDateish.
+function isDateish(fmt: string, typ: string) { return fmt === 'date' || fmt === 'jdedate' || /date|timestamp/.test(typ) }
 function filterKindOf(c: Column): FilterKind {
   if (c.rule?.kind === 'boolean') return 'boolean'
   if (c.rule?.kind === 'enum') return 'enum'
@@ -70,26 +74,17 @@ function editCtrlOf(c: Column): EditCtrl {
   return 'text'
 }
 const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
-  kind === 'boolean' || kind === 'enum' || kind === 'lookup'
-    ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
-    : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
+  // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
+  // ``selectFilterFn``. Boolean keeps the built-in strict ``equals``.
+  kind === 'enum' || kind === 'lookup'
+    ? { filterFn: selectFilterFn, meta: { filter: { kind, options }, align } as FilterMeta }
+    : kind === 'boolean'
+      ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
+      : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
 
-// Send both the as-is keys and UPPERCASE copies: the migrated `_put`/`_post`/`_delete` queries
-// use v1's uppercase column names, while Postgres returns the read result's columns lowercased;
-// `text()` binds only the `:params` it references, so the extras are harmless.
-function withUpper(o: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...o }
-  for (const [k, v] of Object.entries(o)) out[k.toUpperCase()] = v
-  return out
-}
-// The row's original (pre-edit) values, keyed `<NAME>_ORIGINAL` — so an `_put` query whose WHERE
-// must match a column the user just edited (e.g. a business key) can bind `:<NAME>_ORIGINAL` to the
-// old value. The verbatim-migrated v1 `_put` queries don't reference these (their WHERE reuses
-// `:<NAME>`, so editing the key matches nothing — same behaviour as v1); they're forward-compat,
-// and harmless when unused since `text()` only binds the `:params` the SQL actually mentions.
-function originalKeys(row: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(row).map(([k, v]) => [`${k}_ORIGINAL`, v]))
-}
+// (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
+// ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
+// write/delete path shared with the dialog.)
 
 // Slice 6 — row context menu action runner: resolve a list of ParamBinds against a row's live
 // values. `value` binds are literal; `source` binds read another column on the same row
@@ -224,7 +219,10 @@ function EditCell({
       const labKey = rule.label
       const matches = lookupRows.filter((r) => active.every(({ column: col, value }) => {
         const rv = r[col] ?? r[col.toLowerCase()] ?? r[col.toUpperCase()]
-        return rv != null && String(rv) === String(value)
+        // Trim-tolerant: JDE pads / right-justifies UDC codes, so the dependent column and the
+        // sibling cell value can differ in padding for the same logical code (matches the
+        // filter-panel cascade fix in services/lookups.ts).
+        return rv != null && String(rv).trim() === String(value).trim()
       }))
       opts = matches
         .map((r) => {
@@ -315,14 +313,19 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
   if (!vw) return true
   const conds = Array.isArray(vw) ? vw : [vw]
   return conds.every(({ field, value }) => {
-    const v = activeFilters[field]
-    if (v == null || v === '') return true
-    return Array.isArray(value) ? value.includes(v) : v === value
+    const raw = activeFilters[field]
+    if (raw == null || raw === '') return true
+    // Trim both sides: the active filter value can come from a JDE UDC lookup whose code reads
+    // back space-padded ("1         "), while the visible_when allowed values are clean config
+    // ("1"). Without trimming, a padded filter hides every conditional column (the bug after
+    // moving the security-type lookup to read JDE directly).
+    const v = String(raw).trim()
+    return Array.isArray(value) ? value.some((x) => String(x).trim() === v) : String(value).trim() === v
   })
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog,
 }: {
   result: QueryResult
   connector: string
@@ -339,6 +342,12 @@ export function ResultTable({
    *  shows Add Row / Edit Row buttons that open the ScreenDialog form instead of the inline
    *  grid editor. When null/missing the existing inline batch-edit flow is the only path. */
   screen?: ScreenDetail | null
+  /** Default values to pre-fill the Add dialog with — used by a nested table to seed the parent's
+   *  FK (e.g. {APPS_ID: 7}) so a new child row opens already tied to its parent. */
+  addSeed?: Record<string, unknown>
+  /** Render this grid's Add/Edit ScreenDialog as a NESTED sub-dialog (smaller, raised z-index) —
+   *  set when ResultTable is embedded inside a parent dialog's nested-table tab. */
+  nestedDialog?: boolean
 }) {
   const { t } = useTranslation()
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
@@ -349,6 +358,7 @@ export function ResultTable({
   // BackButton can close the drill tab + return in one click ("same tab" feel, see UI 3).
   const location = useLocation()
   const { activeId } = useTabs()
+  const { sharedActions } = useWorkspace()
   const canEdit = !!(updateQuery || insertQuery)
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -360,8 +370,10 @@ export function ResultTable({
     setDlgRow(row); setDlgMode('edit'); setDlgOpen(true)
   }, [])
   const openDialogForAdd = useCallback(() => {
-    setDlgRow({}); setDlgMode('add'); setDlgOpen(true)
-  }, [])
+    // Seed the Add dialog with any defaults (a nested table passes the parent FK so the new child
+    // row opens already linked to its parent); empty for a normal screen.
+    setDlgRow({ ...(addSeed ?? {}) }); setDlgMode('add'); setDlgOpen(true)
+  }, [addSeed])
 
   // Row-click → sibling-screen dialog (v1's "Display Properties" pattern, promoted at migration
   // time on screens without their own dialog). When ``screen.row_click_screen`` is set and the
@@ -519,14 +531,18 @@ export function ResultTable({
     const result = await runChain([a], {}, ctx, {
       defaultConnector: connector,
       requestPrompt,
-      navigate: (to, conn, params) => {
+      sharedActions: sharedActions ?? undefined,
+      navigate: (to, conn, params, screen) => {
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
           if (v != null && v !== '') qs.set(k, String(v))
         }
-        const url =
-          `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}` +
-          (qs.toString() ? `?${qs.toString()}` : '')
+        // A pinned screen opens the dedicated /screen/<conn>/<id> route (that exact screen's
+        // columns / filters / dialog apply); otherwise the query route, resolved by read query.
+        const base = screen
+          ? `/screen/${encodeURIComponent(conn)}/${encodeURIComponent(screen)}`
+          : `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}`
+        const url = base + (qs.toString() ? `?${qs.toString()}` : '')
         // Close the menu *before* navigating — leaving it open during the route change makes the
         // overlay flicker on the destination page until the document-mousedown listener fires.
         setMenuBusy(null); closeMenu()
@@ -543,7 +559,7 @@ export function ResultTable({
       // eslint-disable-next-line no-console
       console.info('row-menu warnings:', result.warnings)
     }
-  }, [connector, onSaved, closeMenu, navigate, requestPrompt])
+  }, [connector, onSaved, closeMenu, navigate, requestPrompt, sharedActions])
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
   // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
   // ParamBinds resolve to literal `value`s only — a `source` bind against an unset form falls
@@ -599,15 +615,16 @@ export function ResultTable({
     const result = await runChain([a], {}, {}, {
       defaultConnector: connector,
       requestPrompt,
-      navigate: (to, conn, params) => {
+      sharedActions: sharedActions ?? undefined,
+      navigate: (to, conn, params, screen) => {
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
           if (v != null && v !== '') qs.set(k, String(v))
         }
-        navigate(
-          `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}` +
-          (qs.toString() ? `?${qs.toString()}` : ''),
-        )
+        const base = screen
+          ? `/screen/${encodeURIComponent(conn)}/${encodeURIComponent(screen)}`
+          : `/sql/${encodeURIComponent(conn)}/${encodeURIComponent(to)}`
+        navigate(base + (qs.toString() ? `?${qs.toString()}` : ''))
       },
     })
     setActionBusy(null)
@@ -616,11 +633,12 @@ export function ResultTable({
       return
     }
     if (result.cancelled) return   // soft cancel — no banner
-    // Notify messages → status banner; otherwise generic "<label> · OK".
-    const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : (a.label || a.id)
+    // Intentional notify messages → status banner. Otherwise a clean "<label> · done" — a
+    // successful run reports success, NOT a per-step dump (0-row notices are console diagnostics).
+    const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : `${a.label || a.id} · ${t('common.done')}`
     setActionStatus({ message: msg, tone: 'ok' })
     onSaved?.()
-  }, [connector, onSaved, navigate, requestPrompt])
+  }, [connector, onSaved, navigate, requestPrompt, sharedActions])
 
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
@@ -662,6 +680,11 @@ export function ResultTable({
   const [saving, setSaving] = useState(false)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const editsRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())  // row → edited fields (uncontrolled inputs write here)
+  // New rows born from a Copy/duplicate or Paste carry the ORIGINAL row's values here. On Save such
+  // a row fires ``on_duplicate`` (with the source exposed as ``SOURCE_<col>``) instead of
+  // ``on_insert`` — a copy/paste in the grid IS a duplicate, same as the dialog's Duplicate button.
+  // A blank "+ Add row" / imported row has no entry → plain ``on_insert``.
+  const newRowSourceRef = useRef<Map<DataRow, Record<string, unknown>>>(new Map())
   // ``editTick`` increments on every edit to force a parent re-render — needed for *new* rows
   // where ``setDirtyRows`` doesn't fire (new rows aren't in the dirty set, they're tracked
   // separately as inserts). The cell functions read live values via ``cur(row, …)``, so a
@@ -677,6 +700,7 @@ export function ResultTable({
   const resetEdit = useCallback(() => {
     setEditMode(false); setDirtyRows(new Set()); setNewRows([]); setDeleted(new Set()); setSelected(new Set()); setSaveErrors([])
     editsRef.current = new Map()
+    newRowSourceRef.current = new Map()
     setEditTick(0)
   }, [])
   // a refetch (or a query change) ends any in-progress batch edit (the clipboard survives — it's just data)
@@ -704,19 +728,25 @@ export function ResultTable({
     setEditTick((t) => t + 1)
     if (!newRowsRef.current.includes(row)) setDirtyRows((s) => new Set(s).add(row))
   }, [])
-  // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values
-  const prependNewRows = useCallback((seeds: Record<string, unknown>[]) => {
+  // add new rows at the TOP of the grid (newest first); `seeds` carries each row's initial values.
+  // `sources` (parallel to `seeds`, optional) marks a row as a DUPLICATE of an existing one — its
+  // source values, recorded so Save can fire ``on_duplicate`` with ``SOURCE_<col>`` instead of
+  // ``on_insert``. Omit it (Add row / import) for a plain insert.
+  const prependNewRows = useCallback((seeds: Record<string, unknown>[], sources?: Record<string, unknown>[]) => {
     if (seeds.length === 0) return
-    const fresh = seeds.map((s) => {
+    const fresh = seeds.map((s, i) => {
       const row: DataRow = {}
       editsRef.current.set(row, { ...s })
+      const src = sources?.[i]
+      if (src) newRowSourceRef.current.set(row, { ...src })
       return row
     })
     setNewRows((p) => [...fresh, ...p])
     if (!editMode) setEditMode(true)
   }, [editMode])
-  const addRow = useCallback(() => prependNewRows([{}]), [prependNewRows])
-  const duplicateRow = useCallback((row: DataRow) => prependNewRows([valuesOf(row)]), [prependNewRows, valuesOf])
+  const addRow = useCallback(() => prependNewRows([{ ...(addSeed ?? {}) }]), [prependNewRows, addSeed])
+  // Copy/duplicate a row → a new row seeded from it, with the original recorded as its duplicate source.
+  const duplicateRow = useCallback((row: DataRow) => { const v = valuesOf(row); prependNewRows([v], [v]) }, [prependNewRows, valuesOf])
   const toggleDelete = useCallback((row: DataRow, isNew: boolean) => {
     if (isNew) {
       setNewRows((p) => p.filter((r) => r !== row)); editsRef.current.delete(row)
@@ -729,7 +759,9 @@ export function ResultTable({
     setSelected((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
   }, [])
   const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
-  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
+  // Paste copied rows as new rows — each is a duplicate of the row it was copied from (the clipboard
+  // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
+  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
@@ -795,26 +827,36 @@ export function ResultTable({
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
     const jobs: Promise<unknown>[] = []
-    const post = (q: string, params: Record<string, unknown>) =>
-      jobs.push(api.post(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}`, { params: withUpper(params) }))
     const localErrs: string[] = []
-    // edited existing rows → `_put`: new values for SET, plus `:<NAME>_ORIGINAL` for a key-aware WHERE
+    // Same write path as the dialog Save: ``saveScreenRow`` splits each row across the main table
+    // and any ``column_groups`` (related 1:1 tables) by each column's ``group``, so an inline grid
+    // edit to a JOINed column lands in its related table. New-row inserts capture the
+    // server-assigned PK (``resolvedBinds``) so the ``on_insert`` hook + FK binds see it.
+    const columnGroups = (screen?.column_groups ?? []) as ColumnGroup[]
+    const newBinds = new Map<DataRow, Record<string, unknown>>()
+    const writeRow = (mode: 'add' | 'edit', sent: Record<string, unknown>, savedRow: DataRow) =>
+      saveScreenRow({
+        connector, mode, sent, savedRow, columns: result.columns, columnGroups,
+        mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery,
+      })
+    // edited existing rows → main `_put` (+ each group's update/insert), key-aware WHERE via originals
     for (const row of dirtyRows) {
       if (deleted.has(row)) continue
       if (!updateQuery) { localErrs.push(t('table.editNoUpdate')); break }
-      post(updateQuery, { ...row, ...editsRef.current.get(row), ...originalKeys(row) })
+      jobs.push(writeRow('edit', editsRef.current.get(row) ?? {}, row))
     }
-    // new rows → `_post`: just the entered values (nothing existed before)
+    // new rows → main `_post` (+ each group's insert): just the entered values (nothing existed before)
     for (const row of newRows) {
       if (deleted.has(row)) continue
       if (!insertQuery) { localErrs.push(t('table.editNoInsert')); break }
-      post(insertQuery, editsRef.current.get(row) ?? {})
+      jobs.push(writeRow('add', editsRef.current.get(row) ?? {}, {}).then((r) => { newBinds.set(row, r.resolvedBinds) }))
     }
-    // rows marked for deletion → `_delete`: the current row identifies it (it wasn't edited if it's deleted)
+    // rows marked for deletion → main `_delete` (+ each group's delete first, FK-safe): the
+    // current row identifies it (it wasn't edited if it's deleted)
     for (const row of deleted) {
       if (newRows.includes(row)) continue
       if (!deleteQuery) { localErrs.push(t('table.editNoDelete')); break }
-      post(deleteQuery, { ...row })
+      jobs.push(deleteScreenRow({ connector, row, columnGroups, mainDeleteQuery: deleteQuery }))
     }
     const settled = await Promise.allSettled(jobs)
     const reqErrs = settled
@@ -831,11 +873,23 @@ export function ResultTable({
     // ``ParamBind.source`` resolution. ``notify`` messages collect on the result's warnings.
     // Failures append to ``saveErrors`` so the operator sees what went wrong; the row mutation
     // itself already succeeded (the chains run *after*).
+    // Tag hook action calls for change capture on a change-tracked screen — same as the dialog's
+    // Save (a grid edit/insert/duplicate must land in the package identically to a form one). The
+    // main row write is already captured via screen-match in _run_sql; this carries the HOOK
+    // actions (run_query auto, call_api/plugin on their change_replay opt-in) into the same package.
     const fireChain = async (actions: Action[] | undefined, ctx: DataRow): Promise<string | null> => {
       if (!actions?.length) return null
+      // Per-ROW changeContext: stamp THIS row's natural key (entity_key) so each row's action
+      // writes group under that record — fireChain runs once per affected row, so it can't share
+      // a single context the way the dialog (one row) does.
+      const changeContext = screen?.change_tracked
+        ? { app: screen.app, screen: screen.id, entity_key: entityKeyOf(screen.columns, ctx) }
+        : undefined
       const result = await runChain(actions, {}, ctx, {
         defaultConnector: connector,
         requestPrompt,   // batch-save hooks rarely prompt, but a migrated chain might carry one
+        sharedActions: sharedActions ?? undefined,
+        changeContext,
       })
       if (result.warnings.length > 0) {
         // eslint-disable-next-line no-console
@@ -852,8 +906,20 @@ export function ResultTable({
     }
     for (const row of newRows) {
       if (deleted.has(row)) continue
-      const err = await fireChain(screen?.on_insert, editsRef.current.get(row) ?? {})
-      if (err) hookErrs.push(err)
+      const base = { ...editsRef.current.get(row), ...newBinds.get(row) }
+      // A copy/paste/duplicate row fires on_duplicate (instead of on_insert), with the original
+      // exposed as SOURCE_<col> — identical to the dialog's Duplicate path so a chain that copies
+      // related-table rows works the same whether duplicated in the form or in the grid.
+      const src = newRowSourceRef.current.get(row)
+      if (src) {
+        const ctx: DataRow = { ...base }
+        for (const [k, v] of Object.entries(src)) ctx[`SOURCE_${k}`] = v
+        const err = await fireChain(screen?.on_duplicate, ctx)
+        if (err) hookErrs.push(err)
+      } else {
+        const err = await fireChain(screen?.on_insert, base)
+        if (err) hookErrs.push(err)
+      }
     }
     for (const row of deleted) {
       if (newRows.includes(row)) continue
@@ -863,7 +929,7 @@ export function ResultTable({
     setSaving(false)
     if (hookErrs.length) setSaveErrors([...new Set(hookErrs)])
     else { resetEdit(); onSaved?.() }
-  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen])
+  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen, sharedActions])
 
   // ── rule helpers (memoized per result) ──
   const enumMaps = useMemo(() => {
@@ -967,10 +1033,17 @@ export function ResultTable({
       // and emit a {column, value} narrow entry when set. EditCell filters the lookup
       // rows on the fly so the dropdown shows only matching options (DRSY=01 → DRRT only
       // shows the RT codes where SY=01). Empty values mean "no narrowing for that dep".
+      // Prefer the screen's explicit ``filter_from``; else fall back to the lookup's own declared
+      // ``key_columns`` (same-named row column → lookup column) so the edit dropdown auto-narrows
+      // to the right rows for a non-unique value, matching the grid's display disambiguation.
       const narrowBy: { column: string; value: unknown }[] | undefined =
-        c.rule?.kind === 'lookup' && c.filter_from && c.filter_from.length > 0
-          ? c.filter_from.map((dep) => ({ column: dep.column, value: cur(row, dep.source) }))
-          : undefined
+        c.rule?.kind !== 'lookup'
+          ? undefined
+          : c.filter_from && c.filter_from.length > 0
+            ? c.filter_from.map((dep) => ({ column: dep.column, value: cur(row, dep.source) }))
+            : (c.rule.key_columns && c.rule.key_columns.length > 0
+                ? c.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
+                : undefined)
       return (
         <EditCell
           ctrl={editCtrlOf(c)}
@@ -992,6 +1065,57 @@ export function ResultTable({
         const r = c.rule
         const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
         const map = data?.map
+        // Per-row label disambiguation. A lookup ``value`` need not be globally unique — e.g.
+        // USR_ID repeats across apps and is only unique per USR_APPS_ID — so the value→label
+        // ``map`` collides (it keeps whichever row landed last). Resolve the label using the
+        // row's *key columns*: explicit ``filter_from`` if the screen set it, else the lookup's
+        // own declared ``key_columns`` (automatic, no per-column config). Build a composite
+        // ``<key…>\0<value>`` → label map ONCE per lookup column (O(rows)), then resolve each
+        // cell in O(1). Falls back to the plain ``map`` when no key columns / no composite hit.
+        const keyDeps: { source: string; column: string }[] =
+          c.filter_from && c.filter_from.length > 0
+            ? c.filter_from.map((d) => ({ source: d.source, column: d.column }))
+            : (r.key_columns ?? []).map((kc) => ({ source: kc, column: kc }))
+        const norm = (x: unknown) => String(x ?? '').trim()
+        const compositeMap = (() => {
+          if (!keyDeps.length || !data?.rows) return undefined
+          const m = new Map<string, string>()
+          for (const lr of data.rows) {
+            const key = [
+              ...keyDeps.map((d) => norm(lr[data.byColLower.get(d.column.toLowerCase()) ?? d.column])),
+              norm(lr[data.vKey]),
+            ].join(' ')
+            m.set(key, lr[data.lKey] == null ? '' : String(lr[data.lKey]))
+          }
+          return m
+        })()
+        // Trim-tolerant value->label map for display resolution only. ``data.map`` is keyed on the
+        // RAW value because EditCell uses it for the edit dropdown's option values + return-param
+        // row matching, which must stay exact (and write-back must keep the value's padding). So we
+        // build a SEPARATE trimmed-key map here, used only to resolve the displayed label — never
+        // written back. Comparison-only, like the server-side filter-bind trim.
+        const trimmedMap = (() => {
+          if (!data?.rows) return undefined
+          const m = new Map<string, string>()
+          for (const lr of data.rows) {
+            const v = lr[data.vKey]
+            if (v == null) continue
+            m.set(norm(v), lr[data.lKey] == null ? String(v) : String(lr[data.lKey]))
+          }
+          return m
+        })()
+        const resolveLabel = (row: DataRow, value: unknown): string | undefined => {
+          const raw = value == null ? '' : String(value)
+          if (compositeMap) {
+            const key = [...keyDeps.map((d) => norm(cur(row, d.source))), norm(value)].join(' ')
+            const hit = compositeMap.get(key)
+            if (hit != null && hit !== '') return hit
+          }
+          // Exact match first (fast, padding-preserving), then trim-tolerant (JDE pads / right-
+          // justifies codes, so the cell's raw value and the lookup's value column can differ in
+          // padding for the same logical code). Resolution-only — never written back.
+          return map?.get(raw) ?? trimmedMap?.get(norm(value))
+        }
         // Lookup-filter options for both the (ID) and the resolved-label columns: the ID
         // column filters by code, the label column filters by label. Each picker shows
         // "<code> — <label>" so the operator sees both. Empty until the lookup table loads.
@@ -1029,14 +1153,17 @@ export function ResultTable({
         out.push({
           id: `${c.name}__lookup`,
           header: colHeader(c),
-          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (map?.get(String(v)) ?? String(v)) },
+          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
           ...filterPropsFor('lookup', lookupOptsByLabel),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code
             const raw = cur(info.row.original as DataRow, c.name)
+            const resolved = resolveLabel(info.row.original as DataRow, raw)
             const { text, kind, isNull } = ruleCell(raw, c, undefined, map)
-            return span(text, isNull ? 'null' : kind, align, isNull ? undefined : String(raw ?? ''))
+            // ``resolved`` (composite/key-column hit) wins over the value-only ``map`` so the right
+            // label shows when the same code maps to different labels across key-column values.
+            return span(resolved ?? text, isNull ? 'null' : (resolved ? 'lookup' : kind), align, isNull ? undefined : String(raw ?? ''))
           },
         })
         continue
@@ -1170,7 +1297,11 @@ export function ResultTable({
       <DataTable<DataRow>
         columns={columns}
         data={data}
-        tableId={`sql:${connector}:${query}`}
+        // Persist column visibility/order PER SCREEN, not per query: several screens can share one
+        // read_query (a copy with different hidden columns), so a query-only key made them collide
+        // — hiding a column on one bled into the others. Fall back to the query when there's no
+        // screen (an ad-hoc query run).
+        tableId={screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`}
         exportFilename={query}
         toolbarAfterSearch={runControl}
         toolbarRight={maxRowsControl}
@@ -1293,6 +1424,7 @@ export function ResultTable({
       {hasDialog && screen && dlgOpen && (
         <ScreenDialog
           open={dlgOpen}
+          nested={nestedDialog}
           mode={dlgMode}
           screen={screen}
           columns={result.columns}

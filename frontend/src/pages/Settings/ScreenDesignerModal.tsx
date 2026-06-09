@@ -159,7 +159,9 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
 
   return createPortal(
     <FrameworkEnumsContext.Provider value={enums}>
-      <Overlay onClick={() => void cancel()}>
+      {/* No backdrop-click-to-close — an outside click must not discard in-progress edits.
+          Close via Cancel / Escape (both route through ``cancel`` → the unsaved-changes prompt). */}
+      <Overlay>
         <VisualBuilderModal $fullscreen={fullscreen} onClick={(e) => e.stopPropagation()}>
           <ModalHeader>
             <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>

@@ -1,0 +1,173 @@
+"""Bridge the connector write path to change-package capture.
+
+Capture is **cross-DB**: the tracked write commits on its own connector (e.g. ``jdedwards`` /
+Oracle) while the package tables live on the *control* pool (Postgres). So capture cannot share the
+write's transaction (unlike the same-connector audit mirror) — it runs **after** the write commits,
+best-effort: the caller wraps it so a capture failure never fails an already-committed write (it's
+logged loudly; the audit tables remain the immutable reconciliation source).
+
+The ``application`` key for the package scope is the **connector name** (one connector = one
+environment). The natural key + pre-image come from the bound params the route already has:
+``:_ORIGINAL`` binds are the pre-image (old state, for drift detection on promotion); the uppercase
+non-``_ORIGINAL`` binds are the new state.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
+
+from liberty.changesets.store import capture as _store_capture
+
+_WRITE_OPS = {"INSERT", "UPDATE", "DELETE"}
+_ORIG = "_ORIGINAL"
+
+
+def _jsonable(v: Any) -> Any:
+    """Coerce a resolved bind value into something the JSON ``new_values`` / ``old_values`` columns
+    accept. The capture now records the FULL post-rule bind set, which can include Python
+    ``datetime`` (a SYSDATE stamp on a non-JDE column) or ``Decimal`` (a numeric column) — neither
+    is JSON-native. JDE audit dates/times are already ``jdedate``/``jdetime`` *ints*, so this is a
+    safety net for the general case. Binary values can't round-trip through a textual change entry,
+    so they're dropped to ``None``."""
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return int(v) if v == v.to_integral_value() else float(v)
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return None
+    return v
+
+
+def split_params(params: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split bound params into ``(new_values, old_values)`` — same convention the audit mirror uses:
+    uppercase, non-``_ORIGINAL`` binds are the new row; ``:<COL>_ORIGINAL`` binds are the pre-image
+    (suffix stripped). Lowercase / internal binds (``_aud_*``, filter ``*_op``) are ignored. Values
+    are JSON-normalised (the captured binds are the resolved ones, which may be datetime/Decimal)."""
+    new_values: dict[str, Any] = {}
+    old_values: dict[str, Any] = {}
+    for k, v in (params or {}).items():
+        if not k or not k.isupper():
+            continue
+        if k.endswith(_ORIG):
+            old_values[k[: -len(_ORIG)]] = _jsonable(v)
+        else:
+            new_values[k] = _jsonable(v)
+    return new_values, old_values
+
+
+def entity_key(new_values: dict[str, Any], old_values: dict[str, Any], key_columns: list[str]) -> dict[str, Any]:
+    """Natural key from the screen's ``key_columns`` — prefer the pre-image (``old_values``) so the
+    key is the row's *stable* identity across an insert→update→delete sequence (compaction groups on
+    it); fall back to ``new_values`` (inserts and key-less deletes have no pre-image)."""
+    key: dict[str, Any] = {}
+    for kc in key_columns or []:
+        k = kc.upper()
+        if k in old_values:
+            key[k] = old_values[k]
+        elif k in new_values:
+            key[k] = new_values[k]
+    return key
+
+
+async def capture_write(
+    db: Any,  # ChangeSetDatabase
+    *,
+    connector: str,
+    query: str,
+    statement_type: str | None,
+    params: dict[str, Any] | None,
+    user: str | None,
+    key_columns: list[str] | None,
+    read_query: str | None,
+    entity: str | None,
+    change_tracked: bool = True,
+    application: str | None = None,
+    post_apply_ids: list[str] | None = None,
+    key_override: dict[str, Any] | None = None,
+    source_action: str | None = None,
+) -> str | None:
+    """Capture a committed write into the connector's current package. The caller supplies the
+    write target's ``key_columns`` (for the natural key + drift pre-image), its ``read_query``
+    (full-pre-image drift on apply; ``None`` when the target has no standalone read — e.g. a 1:1
+    column-group table that's only JOINed into the screen's read), and the display ``entity``.
+
+    A SINGLE screen Save can produce several captures: the main table plus each 1:1 column-group
+    table it writes — each lands as its own entry with its own key, so compaction nets them per
+    physical table (not collapsed together just because they share the parent row's key).
+
+    Returns the entry id, or ``None`` when it's not a write / not tracked. Raises on capture
+    failure — the caller logs + swallows so the committed write isn't undone."""
+    op = (statement_type or "").upper()
+    if op not in _WRITE_OPS:
+        return None
+    if not change_tracked:
+        return None
+    new_values, old_values = split_params(params)
+    # ``key_override`` — the FIRING ROW's natural key, supplied by the caller when the write's own
+    # binds don't carry it. An ACTION write (e.g. import_security's duplicate_* INSERT) targets an
+    # arbitrary table whose params don't include the screen's key (AUUSER), so without this the
+    # entry has no entity_key and the package can't attribute it to the role it was fired for — it
+    # shows as an anonymous "INSERT on duplicate_security_workbench". The frontend resolves the
+    # originating row's key (the ``key = true`` column) and threads it through ``_change_context``.
+    ekey = key_override if key_override is not None else entity_key(new_values, old_values, key_columns or [])
+    return await _store_capture(
+        db,
+        application or connector,  # package scope — the originating screen's connector for an action
+        connector=connector,      # the data target (for replay); usually == application
+        query=query,
+        operation=op,
+        entity=entity,
+        entity_key=ekey or None,
+        new_values=new_values or None,
+        old_values=old_values or None,
+        read_query=read_query or None,
+        user=user,
+        post_apply_ids=post_apply_ids,
+        source_action=source_action,
+    )
+
+
+async def capture_invocation(
+    db: Any,  # ChangeSetDatabase
+    *,
+    application: str,
+    connector: str,
+    operation: str,            # Operation.CALL_API.value / Operation.CALL_PLUGIN.value
+    target: str,               # the endpoint name (API) or ``module:function`` (plugin)
+    params: dict[str, Any] | None,
+    entity: str | None,
+    user: str | None,
+    post_apply_ids: list[str] | None = None,
+    replay: bool = True,
+    key_override: dict[str, Any] | None = None,
+    source_action: str | None = None,
+) -> str:
+    """Capture a screen-action API/plugin call into *application*'s draft package. A change-tracked
+    screen captures EVERY call it fires (so the package shows it for review); ``replay`` — the
+    action's ``change_replay`` opt-in — records whether apply actually RE-RUNS it on the target.
+    Unlike :func:`capture_write` this isn't a row diff — there's no natural key, pre-image, or read
+    query (the call's effects are opaque), so it's stored with the resolved call ``params`` in
+    ``new_values``. ``application`` is the originating screen's connector (the package scope), which
+    may differ from the API/plugin ``connector`` the call targets."""
+    return await _store_capture(
+        db,
+        application,
+        connector=connector,
+        query=target,
+        operation=operation,
+        entity=entity,
+        # Same as capture_write: stamp the firing row's key (the role) when supplied so a call_api /
+        # call_plugin fired from a row groups under that role instead of showing keyless.
+        entity_key=key_override or None,
+        new_values={k: _jsonable(v) for k, v in (params or {}).items()} or None,
+        old_values=None,
+        read_query=None,
+        user=user,
+        post_apply_ids=post_apply_ids,
+        replay=replay,
+        source_action=source_action,
+    )

@@ -16,6 +16,7 @@ and the caller's permission. (The OpenAPI docs at ``/docs`` describe all of this
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Annotated, Any, AsyncIterator
@@ -96,7 +97,7 @@ async def describe_connector(connector: str, principal: CurrentPrincipal, connec
 
 
 # `_limit` (query string) / `max_rows` (POST body) aren't query params — they override the row cap.
-_RESERVED_BODY_KEYS = {"params", "max_rows"}
+_RESERVED_BODY_KEYS = {"params", "max_rows", "_change_context"}
 
 
 def _params_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
@@ -125,15 +126,64 @@ def _find_screen_for_query(
     ``(None, None, None)`` when nothing matches."""
     slots = (("read_query", "read"), ("update_query", "update"),
              ("insert_query", "insert"), ("delete_query", "delete"))
+    group_slots = (("update_query", "update"), ("insert_query", "insert"), ("delete_query", "delete"))
     for app, app_screens in screens.screens.items():
         for s in app_screens.values():
             eff = s.connector or app
-            if eff != connector:
-                continue
-            for attr, slot in slots:
-                if getattr(s, attr) == query:
-                    return s, slot, app
+            if eff == connector:
+                for attr, slot in slots:
+                    if getattr(s, attr) == query:
+                        return s, slot, app
+            # Column-group write queries (the 1:1 related-table CRUD) also resolve to this screen —
+            # so the group write inherits the screen's column hints and dictionary scope, and a group
+            # column's ``dd`` mapping (e.g. ULMUSE → MUSE) fires its LOGIN/SYSDATE/etc. rule just like
+            # the main write. A group may target a DIFFERENT connector than the screen, so match on
+            # the group's own connector, not the screen's.
+            for grp in getattr(s, "column_groups", None) or []:
+                g_conn = getattr(grp, "connector", None) or eff
+                if g_conn != connector:
+                    continue
+                for attr, _slot in group_slots:
+                    if getattr(grp, attr, None) == query:
+                        # Marked ``group`` (not the CRUD slot) so the route knows to take only the
+                        # screen's column hints + dict scope from this match — NOT its audit_table
+                        # (which is the MAIN table's) or its change-tracking (keyed on the main row).
+                        return s, "group", app
     return None, None, None
+
+
+def _resolve_action_screen(screens: ScreensFile | None, action_context: dict[str, Any] | None) -> Screen | None:
+    """The originating :class:`Screen` for a tagged screen-action call. The frontend tags each
+    action backend call (run_query / call_api / call_plugin) fired from a change-tracked screen's
+    lifecycle hook with ``{app, screen}`` so the write/invocation is captured into THAT screen's
+    package (the action's own query/endpoint isn't a screen). ``None`` when untagged or not found."""
+    if not screens or not action_context:
+        return None
+    app = action_context.get("app")
+    sid = action_context.get("screen")
+    if not app or not sid:
+        return None
+    return (screens.screens.get(app) or {}).get(sid)
+
+
+def _find_group_for_query(screen: Screen, connector: str, query: str, app: str | None) -> Any | None:
+    """The :class:`ColumnGroup` on *screen* whose write query is *(connector, query)* — used to
+    capture a 1:1 related-table write into the change package with the GROUP's key (the related
+    table's key, e.g. the FK) rather than the main row's. The group's effective connector follows
+    the same fallback as :func:`_find_screen_for_query` (``group.connector`` → screen's →
+    ``app``). ``None`` when no group matches."""
+    eff = screen.connector or (app or "")
+    for grp in getattr(screen, "column_groups", None) or []:
+        g_conn = getattr(grp, "connector", None) or eff
+        if g_conn != connector:
+            continue
+        if query in (
+            getattr(grp, "update_query", None),
+            getattr(grp, "insert_query", None),
+            getattr(grp, "delete_query", None),
+        ):
+            return grp
+    return None
 
 
 def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
@@ -149,24 +199,48 @@ def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
 async def _run_sql(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
-    screens: ScreensFile | None = None,
+    screens: ScreensFile | None = None, changesets: Any = None,
+    action_context: dict[str, Any] | None = None,
+    screen_hint: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
     scope = the screen's app) into the SQL connector. A query with no screen runs unadorned
     — no audit, no filter wrap, no per-screen rule resolution; dictionary lookup by bind name
-    still applies for write-side rule coercion using the connector's own name as scope."""
-    screen, _slot, screen_app = (
-        _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
-    )
+    still applies for write-side rule coercion using the connector's own name as scope.
+
+    ``screen_hint`` (``(app, screen_id)``) pins the EXACT screen whose hints to apply, for when
+    several screens share one ``read_query`` (e.g. a copied F95921 screen with hidden columns
+    tweaked): without it, ``_find_screen_for_query`` returns the FIRST match and the copy's hints
+    are ignored. The caller (a screen TableView / a nested-table tab) knows its own screen id."""
+    screen, slot, screen_app = (None, None, None)
+    if screen_hint and screens:
+        app_h, sid_h = screen_hint
+        screen = (screens.screens.get(app_h) or {}).get(sid_h)
+        if screen is not None:
+            slot, screen_app = "read", app_h
+    if screen is None:
+        screen, slot, screen_app = (
+            _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+        )
+    # A column-group write resolves to its screen for the COLUMN HINTS + dict scope (so a group
+    # column's ``dd`` rule — e.g. ULMUSE → MUSE → LOGIN — fires like the main write). But its audit
+    # + change-capture belong to a DIFFERENT table than the screen's main one, so don't inherit
+    # those here (the main audit table / main-row key would be wrong for the related row).
+    is_group = slot == "group"
     column_hints = _column_hints_for(screen)
-    audit_table = screen.audit_table if screen else None
+    audit_table = None if is_group else (screen.audit_table if screen else None)
     screen_max_rows = screen.max_rows if screen else None
     # Dictionary scope follows the screen's app (where operator metadata lives), not the
-    # data-pool connector. Falls back to the connector's own name when there's no matching
-    # screen (a query opened by an AI tool / external caller / dashboard widget — those don't
-    # have a screen and the connector resolves rules against its own scope).
-    dict_scope = screen_app if screen is not None else None
+    # data-pool connector. When the query has no screen of its OWN but was fired as a screen
+    # ACTION (tagged with the originating screen via ``action_context``), resolve the dictionary
+    # under THAT screen's app — the same scope its main write uses. So an audit bind named by its
+    # dd_id (``:USER`` / ``:PID`` / ``:UPMJ`` …) in a shared-action query gets the LOGIN / DEFAULT
+    # / SYSDATE rule + JDE format applied exactly like the source screen's own write, instead of
+    # silently no-op'ing because the data-pool connector's scope holds no dictionary. Falls back
+    # to the connector's own name when there's no screen AND no action context (a query opened by
+    # an AI tool / external caller / dashboard widget — those resolve against the connector scope).
+    dict_scope = screen_app if screen is not None else ((action_context or {}).get("app") or None)
     try:
         conn = connectors.sql(connector)
         # `user` is recorded on the audit row when the screen carries `audit_table`; otherwise
@@ -180,6 +254,73 @@ async def _run_sql(
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=f"query failed: {type(exc).__name__}: {exc}") from exc
+    # Change-package capture — AFTER the write has committed (cross-DB: control pool ≠ this
+    # connector, so it can't share the write's transaction). Best-effort: a capture failure is
+    # logged but never undoes the already-committed write — the audit table stays the immutable
+    # trail. No-op for SELECTs / untracked screens (capture_write guards both). A column-group
+    # write (the 1:1 related table) is ALSO captured so the promotion bundle recreates the
+    # related row — but keyed on the GROUP's key (its FK), and with no standalone read query
+    # (the related table is only JOINed into the screen's read), so apply reports it
+    # ``unverified`` rather than skipping it. Same display ``entity`` as the main row so the two
+    # group together in the package view; compaction keys on the physical table so they stay
+    # distinct ops despite sharing the parent key.
+    # A screen ACTION's run_query write (fired from on_save/on_insert/on_update/on_delete). The
+    # frontend tags it with the originating change-tracked screen (``action_context``) so it lands in
+    # the SAME package as that screen's main write. It targets an arbitrary table (not the screen's
+    # own), so there's no natural key / read query — captured with the resolved binds and replayed
+    # verbatim (``unverified`` drift) on apply. This path takes precedence over the screen-match
+    # capture below so an action query that happens to match some other screen isn't double-captured.
+    action_screen = _resolve_action_screen(screens, action_context) if (changesets is not None) else None
+    if action_screen is not None and getattr(action_screen, "change_tracked", False):
+        from liberty.changesets.capture import capture_write
+        # Package scope = the originating screen's connector, so the action write groups with that
+        # screen's main write (one bundle for the whole Save) even when it targets another connector.
+        app_scope = getattr(action_screen, "connector", None) or (action_context or {}).get("app")
+        try:
+            await capture_write(
+                changesets, connector=connector, query=query,
+                statement_type=result.statement_type, params=(result.bound_params or params), user=user,
+                key_columns=[], read_query=None,
+                entity=getattr(action_screen, "change_entity", None), change_tracked=True,
+                application=app_scope, post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
+                # Attribute this action write to the role/row it was fired for (the originating
+                # screen's key, resolved client-side) so the package groups it under that record.
+                key_override=(action_context or {}).get("entity_key") or None,
+                source_action=(action_context or {}).get("action") or None,
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
+            _log.error("action change capture failed for %s.%s: %s", connector, query, exc)
+    elif changesets is not None and action_context is None and screen is not None and getattr(screen, "change_tracked", False):
+        from liberty.changesets.capture import capture_write
+        if is_group:
+            grp = _find_group_for_query(screen, connector, query, screen_app)
+            cap_keys = list(getattr(grp, "key_columns", None) or []) if grp else []
+            cap_read_query: str | None = None
+        else:
+            # ``effective_key_columns()`` — NOT the raw ``key_columns`` list, which is the legacy
+            # explicit field and is usually empty now: the row key is ticked per-column via
+            # ``ColumnHint.key`` in the Columns tab. Without this the main entry captures no natural
+            # key (the package shows it with no ULUSER=…), can't be drift-checked, and can't merge.
+            cap_keys = list(screen.effective_key_columns())
+            cap_read_query = screen.read_query
+        # Capture the FULL resolved binds (DD defaults + LOGIN/SYSDATE + sequences baked in), not
+        # the raw request params — otherwise a value the server filled on an empty bind (PID,
+        # JOBN, an editable default, an audit stamp) is missing from the package and never lands
+        # on apply. Falls back to the request params if the connector didn't surface them.
+        cap_params = result.bound_params or params
+        try:
+            await capture_write(
+                changesets, connector=connector, query=query,
+                statement_type=result.statement_type, params=cap_params, user=user,
+                key_columns=cap_keys, read_query=cap_read_query,
+                entity=getattr(screen, "change_entity", None), change_tracked=True,
+                post_apply_ids=list(getattr(screen, "post_apply", None) or []),
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
+            _log.error(
+                "change capture failed for %s.%s (write committed but NOT packaged): %s",
+                connector, query, exc,
+            )
     return result.to_dict()
 
 
@@ -187,6 +328,7 @@ def _stream_sql_ndjson(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None, chunk_size: int | None = None,
+    screen_hint: tuple[str, str] | None = None,
 ) -> StreamingResponse:
     """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
     :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
@@ -207,9 +349,16 @@ def _stream_sql_ndjson(
     # ── prep (mirrors _run_sql) — done synchronously so any failure raises before we start
     # streaming. Once the generator below begins yielding, headers have been sent and we
     # can't change the status code; preflight everything we can up here.
-    screen, _slot, screen_app = (
-        _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
-    )
+    screen, _slot, screen_app = (None, None, None)
+    if screen_hint and screens:
+        app_h, sid_h = screen_hint
+        screen = (screens.screens.get(app_h) or {}).get(sid_h)
+        if screen is not None:
+            screen_app = app_h
+    if screen is None:
+        screen, _slot, screen_app = (
+            _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+        )
     column_hints = _column_hints_for(screen)
     screen_max_rows = screen.max_rows if screen else None
     dict_scope = screen_app if screen is not None else None
@@ -309,6 +458,9 @@ async def sql_pool_schemas(
         raise http_for_connector_error(exc) from exc
     try:
         return await list_pool_schemas(connectors.pools, conn.pool_name)
+    except asyncio.CancelledError:
+        _log.info("schema list on %r cancelled (client disconnect / shutdown)", connector)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="schema list cancelled") from None
     except SQLAlchemyError as exc:
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, detail=f"schema list failed: {type(exc).__name__}: {exc}",
@@ -352,6 +504,13 @@ async def sql_pool_schema(
             connectors.pools, conn.pool_name,
             only_schema=only_schema, name_like=name_like,
         )
+    except asyncio.CancelledError:
+        # The full-catalog Oracle/JDE introspection is slow (5+s); a client navigating away or a
+        # server shutdown cancels it mid-fetch. That's expected, not an app error — convert to a
+        # quiet 503 so uvicorn doesn't dump a CancelledError traceback ("Exception in ASGI
+        # application"). The slow walk itself is a separate perf follow-up (cache it).
+        _log.info("schema introspection on %r cancelled (client disconnect / shutdown)", connector)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="introspection cancelled") from None
     except SQLAlchemyError as exc:
         # Don't 500 — the editor calls this on focus and gracefully degrades without suggestions.
         raise HTTPException(
@@ -414,16 +573,21 @@ async def sql_query_get(
     stream = _streaming_requested(qp); qp.pop("_stream", None)
     limit = _as_int(qp.pop("_limit", None))
     chunk_size = _as_int(qp.pop("_chunk_size", None))
+    # ``_screen`` / ``_app`` pin the EXACT screen whose hints to apply when several screens share
+    # this read_query (a copied screen with different hidden columns). The TableView / nested-table
+    # caller passes its own ids; absent → first-match (the historical behaviour).
+    sid = qp.pop("_screen", None); sapp = qp.pop("_app", None)
+    screen_hint = (sapp, sid) if (sid and sapp) else None
     if stream:
         return _stream_sql_ndjson(
             connectors, connector, query, qp,
             language=request_language(request), max_rows=limit, user=principal.username,
-            screens=screens, chunk_size=chunk_size,
+            screens=screens, chunk_size=chunk_size, screen_hint=screen_hint,
         )
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
-        screens=screens,
+        screens=screens, screen_hint=screen_hint,
     )
 
 
@@ -465,6 +629,9 @@ async def sql_query_post(
     chunk_size = _as_int(qp.get("_chunk_size"))
     limit = _as_int(body.get("max_rows")) if body else None  # body {"params": …, "max_rows": N}
     params = _params_from_body(body)
+    # ``_change_context`` (when present) marks this as a screen-action run_query fired from a
+    # change-tracked screen's lifecycle hook — captured into that screen's package (see _run_sql).
+    action_context = body.get("_change_context") if isinstance(body, dict) else None
     if stream:
         return _stream_sql_ndjson(
             connectors, connector, query, params,
@@ -474,7 +641,8 @@ async def sql_query_post(
     return await _run_sql(
         connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
-        screens=screens,
+        screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
+        action_context=action_context if isinstance(action_context, dict) else None,
     )
 
 
@@ -494,7 +662,8 @@ async def sql_query_post(
     },
 )
 async def http_call(
-    connector: str, endpoint: str, principal: CurrentPrincipal, connectors: Connectors, body: dict[str, Any] | None = None
+    connector: str, endpoint: str, request: Request, principal: CurrentPrincipal,
+    connectors: Connectors, screens: Screens, body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Forward a call to one of *connector*'s configured HTTP endpoints. The connector
     applies its base URL + auth + retry policy + per-endpoint method / path; the body
@@ -514,5 +683,32 @@ async def http_call(
         raise http_for_connector_error(exc) from exc
     # APIConnector.call never raises — a failed upstream call comes back as a
     # structured ApiResult with success=False; surface it as-is (HTTP 200).
-    result = await conn.call(endpoint, _params_from_body(body))
+    call_params = _params_from_body(body)
+    result = await conn.call(endpoint, call_params)
+    # Change-package capture for a call_api action fired from a change-tracked screen. A tracked
+    # screen CAPTURES every call (so the package shows it for review); the action's ``change_replay``
+    # opt-in — threaded in the tag as ``replay`` — decides whether APPLY actually re-fires it (an
+    # external call's side effects can't be drift-checked). Only a SUCCESSFUL upstream call is
+    # captured (a failed one didn't change anything). Best-effort.
+    action_context = body.get("_change_context") if isinstance(body, dict) else None
+    changesets = getattr(request.app.state, "changesets_db", None)
+    action_screen = _resolve_action_screen(screens, action_context) if changesets is not None else None
+    if action_screen is not None and getattr(action_screen, "change_tracked", False) and getattr(result, "success", True):
+        from liberty.changesets.capture import capture_invocation
+        from liberty.changesets.models import Operation
+        # Package scope = the originating screen's connector (groups with its main write); the call's
+        # own ``connector`` is the API target re-invoked on apply.
+        app_scope = getattr(action_screen, "connector", None) or (action_context or {}).get("app")
+        try:
+            await capture_invocation(
+                changesets, application=app_scope, connector=connector,
+                operation=Operation.CALL_API.value, target=endpoint, params=call_params,
+                entity=getattr(action_screen, "change_entity", None), user=principal.username,
+                post_apply_ids=list(getattr(action_screen, "post_apply", None) or []),
+                replay=bool((action_context or {}).get("replay", True)),
+                key_override=(action_context or {}).get("entity_key") or None,
+                source_action=(action_context or {}).get("action") or None,
+            )
+        except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) call
+            _log.error("call_api change capture failed for %s.%s: %s", connector, endpoint, exc)
     return result.to_dict()

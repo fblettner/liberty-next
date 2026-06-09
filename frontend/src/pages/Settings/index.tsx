@@ -31,9 +31,13 @@ const AppBuilder = lazy(() => import('./AppBuilder'))
 // the framework. PDF branding (the install-wide defaults that wrap every
 // report) lives inside AppBuilder now since it's stored in app.toml.
 const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
-const PackageBuilder = lazy(() => import('./PackageBuilder'))
+const ActionsBuilder = lazy(() => import('./ActionsBuilder'))
+// NOTE: Package, Changes and Integrity moved OUT of Settings into the nomaflow area — they're
+// package/change management + config health (operations flows), not configuration. The builder
+// components still live in this folder (they share FindDependenciesModal / FindUsagesModal with the
+// other config editors); the nomaflow pages import them. See pages/Nomaflow/{Package,Changes,Integrity}Page.
 
-const TABS = ['pools', 'connectors', 'dictionary', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'package'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -75,6 +79,7 @@ export default function Settings() {
         <TabGroupLabel>{t('settings.tabGroups.perConnector', 'Per connector')}</TabGroupLabel>
         <TabBtn $active={tab === 'connectors'} onClick={() => setTab('connectors')}>{t('settings.tabs.connectors')}</TabBtn>
         <TabBtn $active={tab === 'dictionary'} onClick={() => setTab('dictionary')}>{t('settings.tabs.dictionary')}</TabBtn>
+        <TabBtn $active={tab === 'actions'} onClick={() => setTab('actions')}>{t('settings.tabs.actions', 'Actions')}</TabBtn>
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts', 'Charts')}</TabBtn>
@@ -90,7 +95,6 @@ export default function Settings() {
         <TabBtn $active={tab === 'theme'} onClick={() => setTab('theme')}>{t('settings.tabs.theme', 'Theme')}</TabBtn>
         <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
         <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app', 'App')}</TabBtn>
-        <TabBtn $active={tab === 'package'} onClick={() => setTab('package')}>{t('settings.tabs.package', 'Package')}</TabBtn>
       </Tabs>
       <Suspense fallback={<Centered />}>
         {tab === 'pools' ? <PoolsBuilder />
@@ -101,10 +105,10 @@ export default function Settings() {
           : tab === 'charts' ? <ChartsBuilder />
           : tab === 'dashboards' ? <DashboardsBuilder />
           : tab === 'reports' ? <ReportsBuilder />
+          : tab === 'actions' ? <ActionsBuilder />
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
-          : tab === 'app' ? <AppBuilder />
-          : <PackageBuilder />}
+          : <AppBuilder />}
       </Suspense>
     </PageLayout>
   )

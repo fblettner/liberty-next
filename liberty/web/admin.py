@@ -54,18 +54,23 @@ from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
 from liberty.screens import Screen, load_screens
 from liberty.screens.config import ScreensFile, parse_screens
+from liberty.actions import load_actions
+from liberty.actions.config import SharedActionsFile, parse_actions
 from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
 from liberty.dashboards.config import DashboardsFile, parse_dashboards
 from liberty.theme import font_choices, load_theme, parse_theme, preset_choices, resolve_theme
 from liberty.web.clone import CloneError, clone_app, delete_app
+from liberty.web.move import MoveError, move_query
 from liberty.web.rename import (
     RenameError,
     rename_connector,
     rename_dictionary_entry,
     rename_lookup,
+    rename_action,
     rename_query,
+    rename_screen,
     rename_screen_app,
     rename_sequence,
     rename_table,
@@ -93,6 +98,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
     request.app.state.menus = load_menus(settings.menus.config_path)
     request.app.state.screens = load_screens(settings.screens.config_path)
     request.app.state.charts = load_charts(settings.charts.config_path)
+    request.app.state.actions = load_actions(settings.actions.config_path)
     request.app.state.dashboards = load_dashboards(settings.dashboards.config_path)
     request.app.state.auth_backend = build_auth_backend(settings, new.pools)
 
@@ -221,6 +227,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "menus": MenusFile.model_json_schema(),
         "screens": ScreensFile.model_json_schema(),
         "charts": ChartsFile.model_json_schema(),
+        "actions": SharedActionsFile.model_json_schema(),
         "dashboards": DashboardsFile.model_json_schema(),
         "framework_enums": bundled,
     }
@@ -325,6 +332,20 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
     return {"saved": True, "path": str(path)}
 
 
+@router.get("/config/integrity", summary="Config integrity check")
+async def config_integrity(request: Request, _: Superuser) -> dict[str, Any]:
+    """Walk every cross-reference in the loaded config and report broken references (errors) +
+    smells (unused connectors / orphan screens — warnings). Runs against the in-memory registries
+    (``app.state``), so it reflects the last ``/admin/reload``. Feeds Settings → Integrity."""
+    from liberty.web.integrity import check_integrity
+    issues = check_integrity(request.app.state)
+    return {
+        "issues": [i.to_dict() for i in issues],
+        "errors": sum(1 for i in issues if i.severity == "error"),
+        "warnings": sum(1 for i in issues if i.severity == "warning"),
+    }
+
+
 @router.get("/config/connectors/parsed", summary="Get connectors")
 async def get_connectors_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``[connectors.*]`` as ``{name: connector dict}`` (default-valued keys dropped).
@@ -355,6 +376,12 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     contract as pools (idempotent on already-ENC: values; raises 422 if a plaintext secret was
     typed but no master key is configured, since silently storing plaintext is the worst outcome)."""
     master_key = request.app.state.settings.crypto.master_key
+    # Migrate legacy-shape connector bodies in place before validation / write. A stale UI
+    # client could still POST flat-``queries``-with-``type`` payloads; the loader's same
+    # migration normalises them so the disk always lands in the new sectioned shape.
+    from liberty.connectors.config import _migrate_legacy_shape
+    migrated = _migrate_legacy_shape({"connectors": body.connectors})
+    body.connectors = migrated.get("connectors") or {}
     for name, raw in body.connectors.items():
         # Enforce always-licensed names: the UI may have stripped or unset the flag, but the
         # framework gates these regardless of what's on disk — keep the file accurate by
@@ -566,7 +593,7 @@ def _dump_screen(s: Screen) -> dict[str, Any]:
             for a_dict, a_model in zip(d.get("dialog", {}).get(hook, []), getattr(s.dialog, hook, [])):
                 _reinject_action_type(a_dict, a_model)
     # Screen-level action lists.
-    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete"):
+    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete", "on_duplicate"):
         for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, [])):
             _reinject_action_type(a_dict, a_model)
     # Fold ``screen.key_columns`` (the old flat list — what pre-Phase-3 migration emitted
@@ -711,6 +738,59 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting charts are invalid: {exc}") from exc
 
     path = Path(request.app.state.settings.charts.config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/actions/parsed", summary="Get shared actions config")
+async def get_actions_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``actions.toml`` parsed — ``{path, actions: {<id>: SharedAction dict}}``. The
+    ``id`` is the map key, so it's dropped from each body (re-injected by parse_actions on save)."""
+    path = Path(request.app.state.settings.actions.config_path)
+    cfg = load_actions(path)
+    out: dict[str, Any] = {}
+    for aid, a in cfg.actions.items():
+        d = a.model_dump(exclude_defaults=True, exclude_none=True, exclude={"id"})
+        # Re-inject the Action ``type`` discriminator on every step (+ nested then/else/steps) —
+        # exclude_defaults strips it, and the editor's union parser needs it to render each step
+        # as its real variant (else an `if` reaches the builder typeless and renders as run_query).
+        for s_dict, s_model in zip(d.get("steps", []), a.steps):
+            _reinject_action_type(s_dict, s_model)
+        out[aid] = d
+    return {"path": str(path), "actions": out}
+
+
+class ActionsBody(BaseModel):
+    actions: dict[str, dict[str, Any]]
+
+
+@router.put("/config/actions/parsed", summary="Update shared actions config")
+async def put_actions_parsed(body: ActionsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate the submitted dict against :class:`SharedActionsFile`, then rewrite ``actions.toml``
+    via ``tomli-w`` (tomllib+tomli_w, not tomlkit — actions can carry large step trees). Re-parses
+    the written text. Does not reload — call ``POST /admin/reload``."""
+    try:
+        validated = parse_actions({"actions": body.actions})
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid actions: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid actions: {exc}") from exc
+
+    # ``exclude_defaults=False`` is intentional — the same reason as screens / menus: an Action's
+    # ``type`` discriminator equals its Literal default, so excluding defaults would strip it and
+    # the re-validation below (+ the runtime) couldn't pick the union branch.
+    normalized = validated.model_dump(exclude_defaults=False, exclude_none=True)
+    for action in normalized.get("actions", {}).values():
+        action.pop("id", None)   # id is the table key
+    import tomli_w
+    new_text = tomli_w.dumps(normalized)
+    try:
+        parse_actions(tomllib.loads(new_text))   # belt-and-braces re-validation
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting actions are invalid: {exc}") from exc
+
+    path = Path(request.app.state.settings.actions.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
@@ -1887,20 +1967,37 @@ def _apply_connector_queries(request: Request, payload: dict[str, Any]) -> str:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail=f"connector {connector!r} is not a SQL connector")
     existing = conn.model_dump(exclude_defaults=True)
-    by_name = {q.get("name"): q for q in existing.get("queries") or []}
-    # QueryDef.type accepts table / custom / sequence / lookup. A proposal carrying a
-    # per-CRUD-slot kind (select / insert / update / delete) — a bug in an earlier scaffold
-    # tool revision — would land as an invalid string and the name-based classifier in the
-    # builder would skip it (the query disappears from both Tables and Custom). Drop those
-    # so the name-pattern fallback (``<slug>_get`` → table) picks it up cleanly.
-    _BAD_TYPES = {"select", "insert", "update", "delete"}
-    for q in queries:
-        if not q.get("name"):
+    # Bucket the incoming proposals into the four sections with the SAME classifier the loader
+    # uses (``type`` field wins, else CRUD-suffix guess → table). It drops the stray ``type``
+    # field, so an earlier scaffold revision's bad per-slot kind (select / insert / …) falls
+    # through to the name-pattern fallback cleanly. Then merge per section:
+    #   * queries / sequences / lookups — replace-by-name, append new.
+    #   * tables — merge by table name: incoming slots + non-null label/description win, new
+    #     tables are appended. (A clone of a CRUD screen re-forms its ``<base>_<suffix>_<crud>``
+    #     slots back into one table here.)
+    from liberty.connectors.config import _split_legacy_queries
+    incoming = _split_legacy_queries(connector, [dict(q) for q in queries if q.get("name")])
+    for section in ("queries", "sequences", "lookups"):
+        by_name = {q.get("name"): q for q in (existing.get(section) or [])}
+        for q in incoming.get(section) or []:
+            by_name[q.get("name")] = q
+        merged = list(by_name.values())
+        if merged:
+            existing[section] = merged
+    tbl_by_name: dict[Any, dict[str, Any]] = {t.get("name"): t for t in (existing.get("tables") or [])}
+    for t in incoming.get("tables") or []:
+        cur = tbl_by_name.get(t.get("name"))
+        if cur is None:
+            tbl_by_name[t.get("name")] = t
             continue
-        if isinstance(q.get("type"), str) and q["type"].lower() in _BAD_TYPES:
-            q = {k: v for k, v in q.items() if k != "type"}
-        by_name[q["name"]] = q
-    existing["queries"] = list(by_name.values())
+        for meta_key in ("label", "description"):
+            if t.get(meta_key) is not None:
+                cur[meta_key] = t[meta_key]
+        for crud in ("get", "put", "post", "delete"):
+            if crud in t:
+                cur[crud] = t[crud]
+    if tbl_by_name:
+        existing["tables"] = list(tbl_by_name.values())
     try:
         SqlConnectorConfig.model_validate(existing)
     except ValidationError as exc:
@@ -2277,8 +2374,14 @@ async def _delete_dashboard(request: Request, scope: str | None, dashboard_id: s
 
 
 async def _delete_connector_queries(request: Request, connector: str, query_names: list[str]) -> None:
-    """Remove *query_names* from ``[connectors.<connector>].queries`` via tomlkit so other
-    connectors / comments in connectors.toml round-trip untouched."""
+    """Remove *query_names* from ``[connectors.<connector>]`` via tomlkit so other connectors /
+    comments in connectors.toml round-trip untouched.
+
+    *query_names* are flat synthesised names, so a name is matched against all four sections:
+    a custom ``queries`` / ``sequences`` / ``lookups`` entry is dropped by name, and a table
+    slot (``<base>_<crud>``) is removed from its :class:`TableDef` — a table left with no
+    slots is dropped entirely (an operator deleting every CRUD op of a table means to remove
+    the table)."""
     path = Path(request.app.state.settings.connectors.config_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
@@ -2286,12 +2389,28 @@ async def _delete_connector_queries(request: Request, connector: str, query_name
     if connectors_tbl is None or connector not in connectors_tbl:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"connector {connector!r} not found")
     conn_tbl = connectors_tbl[connector]
-    queries = conn_tbl.get("queries")
-    if not isinstance(queries, list):
-        return
     to_drop = set(query_names)
-    kept = [q for q in queries if not (isinstance(q, dict) and q.get("name") in to_drop)]
-    conn_tbl["queries"] = kept
+    # Flat sections — drop standalone entries by name.
+    for section in ("queries", "sequences", "lookups"):
+        lst = conn_tbl.get(section)
+        if isinstance(lst, list):
+            conn_tbl[section] = [q for q in lst if not (isinstance(q, dict) and q.get("name") in to_drop)]
+    # Tables — drop the matching ``<base>_<crud>`` slot off each table; remove a table that's
+    # left with no slots at all.
+    tables = conn_tbl.get("tables")
+    if isinstance(tables, list):
+        kept_tables = []
+        for t in tables:
+            if not isinstance(t, dict):
+                kept_tables.append(t)
+                continue
+            base = t.get("name")
+            for crud in ("get", "put", "post", "delete"):
+                if f"{base}_{crud}" in to_drop:
+                    t.pop(crud, None)
+            if any(crud in t for crud in ("get", "put", "post", "delete")):
+                kept_tables.append(t)
+        conn_tbl["tables"] = kept_tables
     # Re-validate the connector after the drops — refuses to write a connector that's now
     # invalid (e.g. a sequence config that pointed at one of the deleted queries).
     try:
@@ -2495,12 +2614,67 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 charts_path=Path(settings.charts.config_path),
                 dashboards_path=Path(settings.dashboards.config_path),
             )
+        elif body.kind == "screen":
+            if not body.scope:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="a screen rename requires `scope` (the app name)")
+            result = rename_screen(
+                body.old_name, body.new_name,
+                app=body.scope,
+                screens_path=Path(settings.screens.config_path),
+                menus_path=Path(settings.menus.config_path),
+            )
+        elif body.kind == "action":
+            result = rename_action(
+                body.old_name, body.new_name,
+                actions_path=Path(settings.actions.config_path),
+                screens_path=Path(settings.screens.config_path),
+            )
         else:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen_app, dictionary_entry, query, table",
+                detail=f"rename kind {body.kind!r} not supported — one of: connector, sequence, lookup, screen, screen_app, dictionary_entry, query, table, action",
             )
     except RenameError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    return result.to_dict()
+
+
+class MoveBody(BaseModel):
+    """Payload for ``POST /admin/config/move`` — move a query definition between connectors.
+
+    ``kind`` is one of ``table`` / ``query`` / ``sequence`` / ``lookup`` (the connectors.toml
+    section that holds the definition). ``name`` is the entry's name (a table base, e.g.
+    ``f0004`` — its ``<base>_<crud>`` slots move together). ``from_connector`` / ``to_connector``
+    are the source and (already-existing) target connectors."""
+
+    kind: str
+    name: str
+    from_connector: str
+    to_connector: str
+
+
+@router.post("/config/move", summary="Move query between connectors (cross-file)")
+async def move_query_between_connectors(body: MoveBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Relocate a table / query / sequence / lookup definition from one connector to another and
+    rewrite every safe reference (dictionary lookups/sequences, menus, charts, dashboard widgets,
+    actions, and screens whose connector isn't shared with queries left behind). References that
+    can't be auto-rewritten come back in ``manual_refs`` for the operator to fix.
+
+    Atomic — nothing is written unless every rewritten doc re-parses. Does **not** reload; the
+    caller runs ``POST /admin/reload`` after to apply the change."""
+    settings = request.app.state.settings
+    try:
+        result = move_query(
+            body.kind, body.name, body.from_connector, body.to_connector,
+            connectors_path=Path(settings.connectors.config_path),
+            screens_path=Path(settings.screens.config_path),
+            menus_path=Path(settings.menus.config_path),
+            dictionary_path=_dictionary_path(settings),
+            charts_path=Path(settings.charts.config_path),
+            dashboards_path=Path(settings.dashboards.config_path),
+            actions_path=Path(settings.actions.config_path),
+        )
+    except MoveError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return result.to_dict()
 

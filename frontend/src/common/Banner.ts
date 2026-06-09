@@ -1,13 +1,16 @@
 import styled from '@emotion/styled'
 import { colors, radius, fontSize } from '../theme'
 
-/** Inline status strip — error / ok / info, coloured from the theme. */
-export const Banner = styled.div<{ $tone?: 'error' | 'ok' | 'info' }>`
+/** Inline status strip — error / warning / ok / info, coloured from the theme. */
+export const Banner = styled.div<{ $tone?: 'error' | 'warning' | 'ok' | 'info' }>`
   padding: 8px 12px;
   border-radius: ${radius.md};
   font-size: ${fontSize.base};
   ${({ $tone = 'info' }) => {
-    const c = $tone === 'error' ? colors.red : $tone === 'ok' ? colors.green : colors.blue
+    const c = $tone === 'error' ? colors.red
+      : $tone === 'warning' ? colors.orange
+      : $tone === 'ok' ? colors.green
+      : colors.blue
     return `background: ${c.bg}; border: 1px solid ${c.border}; color: ${c.main};`
   }}
 `

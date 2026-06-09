@@ -191,8 +191,9 @@ export function ScaffoldQueryModal({
     ? t('settings.scaffold.sequence.title', 'New sequence')
     : t('settings.scaffold.lookup.title', 'New lookup')
 
+  // No backdrop-click-to-close — outside clicks must not discard form input (Cancel / Escape).
   const modalNode: ReactNode = (
-    <Overlay onClick={onCancel}>
+    <Overlay>
       <Modal style={{ width: 'min(720px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <span>

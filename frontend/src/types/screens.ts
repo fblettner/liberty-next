@@ -42,6 +42,10 @@ export type DisplayRule =
       /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
        *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
       return_params?: string[]
+      /** The lookup's declared query params double as the **key columns** that disambiguate a
+       *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
+       *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
+      key_columns?: string[]
     }
 
 /** One input field on the *prompt sub-dialog* shown before an action with `prompt_fields` fires.
@@ -125,18 +129,32 @@ export interface FormTab extends TabCommon {
   type?: 'form'
   cols?: number | null
   fields: ScreenField[]
+  /** Embedded child-record forms rendered as labelled sections below this tab's own fields, so
+   *  one tab edits the main table PLUS related tables, all saved in a single Save. Each is a full
+   *  nested_form (own queries or a `form_screen` reference + `param_binds`). */
+  nested_forms?: NestedFormTab[]
 }
 
 /** A child-record form embedded inline in this tab (v2's port of v1's "FormsDialog inside a
- *  FormsDialog"). The parent's PK is bound into the nested `read_query` via `param_binds`;
- *  the linked row (if any) populates the fields, and saving fires `update_query` (or
- *  `insert_query` when the row didn't exist yet). All on `connector` (default: parent's). */
+ *  FormsDialog"). Two modes:
+ *   • REFERENCE — `form_screen` set: reuse an existing screen's form (its read/update/insert
+ *     queries + fields). `read_query` / `fields` are inherited from that screen and left blank here.
+ *   • INLINE — `form_screen` blank: configure the queries + fields on this tab (a self-contained
+ *     form that can use queries the parent screen doesn't).
+ *  Either way the parent's PK is bound into the read query via `param_binds`; the linked row (if
+ *  any) populates the fields, and saving fires `update_query` (or `insert_query` when none existed). */
 export interface NestedFormTab extends TabCommon {
   type: 'nested_form'
   connector?: string | null
-  read_query: string
+  /** Reference mode: id of the screen whose form this tab reuses. Blank → inline mode. */
+  form_screen?: string | null
+  /** Inline mode read query. Blank in reference mode (inherited from `form_screen`). */
+  read_query?: string
   update_query?: string | null
   insert_query?: string | null
+  /** Removes the linked child when the PARENT row is deleted (run child-first, bound by
+   *  `param_binds`). Blank → rely on a DB ON DELETE CASCADE / an `on_delete` action. */
+  delete_query?: string | null
   cols?: number | null
   fields: ScreenField[]
   param_binds?: ParamBind[]
@@ -208,11 +226,41 @@ export type Action =
       endpoint: string
       param_binds?: ParamBind[]
       bind_result?: boolean
+      /** When true AND fired from a change-tracked screen, record this call in the change package
+       *  so a promotion bundle re-runs it on the target. Off by default (replay re-fires side
+       *  effects + can't be drift-checked). */
+      change_replay?: boolean
+    })
+  | (ActionCommon & PromptableAction & {
+      /** Invoke a server-side plugin callable (`module:function` — the same entry points nomaflow
+       *  runs as python job steps). `param_binds` become its keyword args (coerced server-side to
+       *  each param's annotated type). With `bind_result`, the callable's return lands under this
+       *  step's `id` as `{rows, first_row, success}`. */
+      type: 'call_plugin'
+      callable: string
+      param_binds?: ParamBind[]
+      bind_result?: boolean
+      /** When true AND fired from a change-tracked screen, record this call in the change package
+       *  so a promotion bundle re-runs the callable on the target. Off by default. */
+      change_replay?: boolean
+    })
+  | (ActionCommon & PromptableAction & {
+      /** Run a SHARED action (defined once in actions.toml) by id. The runner inlines its steps
+       *  and runs them against the firing context; `param_binds` seed the shared action's
+       *  `INPUT.<param>` so its steps can read caller-provided values. A `prompt_fields` prompt
+       *  (like chain/call_api) fires first → its values merge into INPUT for the shared steps. */
+      type: 'call_action'
+      ref: string
+      param_binds?: ParamBind[]
+      /** Replay the shared action's call_api/call_plugin steps on apply (its SQL writes always
+       *  replay). Set here on the screen action — no need to edit the shared action's steps. */
+      change_replay?: boolean
     })
   | (ActionCommon & PromptableAction & {
       type: 'navigate'
-      to: string             // target query name on `connector`
+      to?: string | null     // target query name on `connector` (unset when `screen` is set)
       connector?: string | null  // blank → the firing screen's effective connector
+      screen?: string | null  // target screen id → opens /screen/<connector>/<screen>
       param_binds?: ParamBind[]
     })
   | (ActionCommon & {
@@ -409,12 +457,64 @@ export interface ScreenDetail extends ScreenListItem {
   on_insert?: Action[]
   on_update?: Action[]
   on_delete?: Action[]
+  /** Fires when a row is DUPLICATED (the dialog's Duplicate button → Save). Runs instead of
+   *  on_insert for the clone; the firing context exposes the source record under ``SOURCE_<col>``
+   *  keys so actions can copy related-table rows (roles, menus…) from the original to the new row. */
+  on_duplicate?: Action[]
+  /** Capture every write on this screen into the connector's change package (Settings → Changes).
+   *  Drives whether the dialog tags its write-hook action calls for change capture. */
+  change_tracked?: boolean
+  /** Display label grouping the screen's changes in the package view (e.g. user / role). */
+  change_entity?: string | null
   /** Phase 1 — per-screen resolved column hints (label / format / hidden / filter / filter_from /
    *  visible_when / rule / width / align / dd). Same shape :class:`Column` carries on the SQL
    *  endpoint's ``result.columns``, so the TableView can swap this list in transparently. Only
    *  set when ``Screen.columns`` is non-empty; when absent the TableView falls back to the SQL
    *  endpoint's resolved columns from the query level. */
   columns?: Column[]
+  /** Related 1:1 tables whose columns are edited inline on this screen and written back on Save.
+   *  A column joins a group via its ``group`` field; the save path splits the row's writes per
+   *  table using these definitions. */
+  column_groups?: ColumnGroup[]
+}
+
+/** A 1:1 related-table write-back target. The main read query JOINs the related table so its
+ *  columns render inline (grid + dialog); on Save the columns tagged with this group's id are
+ *  written through ``update_query`` / ``insert_query``, linked to the parent row by ``param_binds``.
+ *  Update-vs-insert is decided by whether ``key_columns`` came back non-null from the JOIN. */
+export interface ColumnGroup {
+  id: string
+  label?: string | null
+  connector?: string | null
+  update_query: string
+  insert_query?: string | null
+  /** Removes the related row when the main row is deleted (FK-safe: child first). Blank → leave it. */
+  delete_query?: string | null
+  key_columns?: string[]
+  param_binds?: ParamBind[]
+  /** Insert the related row on every Add even when no field was filled (FK + server defaults
+   *  populate it) — for a mandatory 1:1 companion. Off → only insert when a field has a value. */
+  insert_on_add?: boolean
+}
+
+/** One reusable shared action (actions.toml `[actions.<id>]`) — a named chain referenced by a
+ *  screen's `call_action`. The same typed steps a screen uses; served by `GET /api/actions`. */
+/** A shared action's declared input — bound at the call site (`call_action.param_binds`), read by
+ *  steps as `INPUT.<name>`. The `default` lives here (used when the caller doesn't bind it). */
+export interface ActionParam {
+  name: string
+  label?: string | null
+  default?: string | null
+  description?: string | null
+}
+
+export interface SharedAction {
+  id: string
+  label?: string | null
+  description?: string | null
+  params?: ActionParam[]
+  prompt_fields?: PromptField[]
+  steps?: Action[]
 }
 
 /** `GET /api/screens` reply — apps → list view. */

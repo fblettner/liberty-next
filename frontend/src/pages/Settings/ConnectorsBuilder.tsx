@@ -11,7 +11,7 @@
 // only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -21,10 +21,11 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
 import { ScreenDesignerModal } from './ScreenDesignerModal'
-import { CRUD_KINDS, classifyQueryName, duplicateTable as duplicateTableQueries, groupQueriesByTable, newQueryStub, pickSchemaProperties, tableExists } from './connectorTables'
+import { CRUD_KINDS, type TableEntry, duplicateTableEntry, findTableIndex, newEmptyTable, pickSchemaProperties, removeTableByName, replaceTableByName, tableEntryFromFlatQueries, tableExistsByName } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
 import { CrudWizardModal } from './CrudWizardModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
+import { MoveQueryModal } from './MoveQueryModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { DictionaryScan } from './DictionaryScan'
 
@@ -164,6 +165,7 @@ export default function ConnectorsBuilder() {
   const [screenDesigner, setScreenDesigner] = useState<{ app: string; id: string } | null>(null)
   const [selTable, setSelTable] = useState<string | null>(null)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [moveTarget, setMoveTarget] = useState<{ kind: 'table' | 'query' | 'sequence' | 'lookup'; name: string } | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
   const [tq, setTq] = useState('')
@@ -186,6 +188,8 @@ export default function ConnectorsBuilder() {
       api.get<{ pools: Record<string, unknown> }>('/admin/config/pools'),
     ])
       .then(([s, d, dd, p]) => {
+        // The builder edits the sectioned shape (`tables` / `queries` / `sequences` / `lookups`)
+        // directly — no flattening. Save sends it back as-is.
         setSchemas(s); setConns(d.connectors); setOriginal(JSON.stringify(d.connectors))
         setAlwaysLicensed(new Set(d.always_licensed ?? []))
         setDictionary(dd.dictionary); setDictOriginal(JSON.stringify(dd.dictionary))
@@ -249,19 +253,19 @@ export default function ConnectorsBuilder() {
   }, [schemas, dictionary, sel, menus])
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
-  const updateQueries = (name: string, queries: Record<string, unknown>[]) => {
+  // Replace one section array (`tables` / `queries` / `sequences` / `lookups`) on a connector.
+  const updateSection = (name: string, section: string, arr: Record<string, unknown>[]) => {
     setConns((p) => {
       const cur = (p ?? {})[name] ?? {}
-      return { ...(p ?? {}), [name]: { ...cur, queries } }
+      return { ...(p ?? {}), [name]: { ...cur, [section]: arr } }
     })
     setStatus(null)
   }
+  const updateTables = (name: string, tables: TableEntry[]) => updateSection(name, 'tables', tables as Record<string, unknown>[])
   // Add a free-standing custom query (Custom queries tab) — a query not tied to a table's CRUD set.
-  // A CRUD-suffixed name (…_get/_put/_post/_delete) would instead surface under Tables; that's fine,
-  // it's the same name-based classification used everywhere.
   const addCustomQuery = async () => {
     if (!sel) return
-    const existing = queriesArr.map((q) => String(q.name ?? ''))
+    const existing = customQueries.map((q) => String(q.name ?? ''))
     const name = (await modals.prompt({
       title: t('settings.connectors.addQuery', 'Add query'),
       message: t('settings.connectors.queryNamePrompt', 'Query name (e.g. post_invoice, customer_balance):'),
@@ -269,8 +273,8 @@ export default function ConnectorsBuilder() {
       validate: (v) => validateId({ kind: 'query', proposed: v, existing, mode: 'add' }),
     }))?.trim()
     if (!name) return
-    if (queriesArr.some((q) => q.name === name)) { setSelQuery(name); return }
-    updateQueries(sel, [...queriesArr, { name, type: 'custom', sql: '' }])
+    if (customQueries.some((q) => q.name === name)) { setSelQuery(name); return }
+    updateSection(sel, 'queries', [...customQueries, { name, sql: '' }])
     setSelQuery(name); setStatus(null)
   }
   const openAddConnector = () => { setAddConnType('sql'); setAddConnName(''); setAddConnError(null); setAddConnOpen(true) }
@@ -293,11 +297,21 @@ export default function ConnectorsBuilder() {
   // Clone / delete a single query (Unclassified / Sequences / Lookups editor) — the counterparts
   // of the Tables editor's per-table Clone / Delete, so every query kind has the same Rename /
   // Clone / Delete trio. Like the table clone, this prompts for the new name (no silent _copy).
+  // The single-query editor (Custom / Sequences / Lookups tabs) operates on whichever section the
+  // current ``mode`` maps to. Reads ``conns`` / ``sel`` / ``mode`` directly so it doesn't depend
+  // on the post-early-return render locals.
+  const curSection = (): { key: string; arr: Record<string, unknown>[] } => {
+    const key = mode === 'sequences' ? 'sequences' : mode === 'lookups' ? 'lookups' : 'queries'
+    const c = sel ? (conns ?? {})[sel] : null
+    const arr = (c && Array.isArray((c as Record<string, unknown>)[key]) ? (c as Record<string, unknown>)[key] : []) as Record<string, unknown>[]
+    return { key, arr }
+  }
   const duplicateQuery = async (name: string) => {
     if (!sel) return
-    const src = queriesArr.find((qq) => qq.name === name)
+    const { key, arr } = curSection()
+    const src = arr.find((qq) => qq.name === name)
     if (!src) return
-    const existing = queriesArr.map((qq) => String(qq.name ?? ''))
+    const existing = arr.map((qq) => String(qq.name ?? ''))
     const next = (await modals.prompt({
       title: t('common.clone', 'Clone'),
       message: t('settings.tables.duplicatePrompt', { name }),
@@ -309,7 +323,7 @@ export default function ConnectorsBuilder() {
       },
     }))?.trim()
     if (!next) return
-    updateQueries(sel, [...queriesArr, { ...src, name: next }])
+    updateSection(sel, key, [...arr, { ...src, name: next }])
     setSelQuery(next); setStatus(null)
   }
   const deleteQuery = async (name: string) => {
@@ -321,7 +335,8 @@ export default function ConnectorsBuilder() {
       confirmLabel: t('common.delete'),
     })
     if (!ok) return
-    updateQueries(sel, queriesArr.filter((qq) => qq.name !== name))
+    const { key, arr } = curSection()
+    updateSection(sel, key, arr.filter((qq) => qq.name !== name))
     setSelQuery(null); setStatus(null)
   }
   // Note: API connector testing is no longer a toolbar action — it lives in the editor's
@@ -509,13 +524,13 @@ export default function ConnectorsBuilder() {
   }
   const renameQuery = async (oldName: string) => {
     if (!sel) return
-    const existing = queriesArr.map((q) => String(q.name))
+    const existing = curSection().arr.map((q) => String(q.name))
     const next = await promptRename(oldName, t('settings.connectors.renameQuery', 'Rename query'), t('settings.connectors.renameQueryPrompt', { name: oldName }), existing)
     if (next) await runCrossRename('query', oldName, next, (n) => setSelQuery(n))
   }
   const renameTable = async (oldBase: string) => {
     if (!sel) return
-    const existing = grouped.tables.map((g) => g.base)
+    const existing = tablesArr.map((tb) => tb.name)
     const next = await promptRename(oldBase, t('settings.connectors.renameTable', 'Rename table'), t('settings.connectors.renameTablePrompt', { name: oldBase }), existing)
     if (next) await runCrossRename('table', oldBase, next, (n) => setSelTable(n))
   }
@@ -539,31 +554,27 @@ export default function ConnectorsBuilder() {
     })
     if (choice === 'cancel' || choice == null) return
     if (choice === 'wizard') { setCrudWizardOpen(true); return }
-    // Empty stub path — original behaviour. The "id" the operator types is the table
-    // BASE name; the actual query created is ``<base>_get``. Validate against the existing
-    // table bases so two stubs can't collide.
-    const existingBases = grouped.tables.map((g) => g.base)
+    // Empty stub path — the operator types the table NAME; we create a blank table with an
+    // empty read (`get`) slot. Validate against the existing table names so two can't collide.
+    const cur = (conns ?? {})[connectorName] ?? {}
+    const curTables = (Array.isArray(cur.tables) ? cur.tables : []) as TableEntry[]
+    const existingNames = curTables.map((tb) => tb.name)
     const base = (await modals.prompt({
       title: t('settings.tables.addTable'),
       message: t('settings.tables.namePrompt'),
       placeholder: 'snake_case',
-      validate: (v) => validateId({ kind: 'query', proposed: v, existing: existingBases, mode: 'add' }),
+      validate: (v) => validateId({ kind: 'query', proposed: v, existing: existingNames, mode: 'add' }),
     }))?.trim()
     if (!base) return
-    const cur = (conns ?? {})[connectorName] ?? {}
-    const queries = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
-    const getName = `${base}_get`
-    if (queries.some((q) => typeof q.name === 'string' && q.name.toLowerCase() === getName.toLowerCase())) {
-      setSelTable(base); return
-    }
-    updateQueries(connectorName, [...queries, newQueryStub(base, 'get')])
+    if (tableExistsByName(curTables, base)) { setSelTable(base); return }
+    updateTables(connectorName, [...curTables, newEmptyTable(base)])
     setSelTable(base)
   }
   const duplicateTable = async (connectorName: string, oldBase: string) => {
     const cur = (conns ?? {})[connectorName] ?? {}
-    const queries = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
+    const curTables = (Array.isArray(cur.tables) ? cur.tables : []) as TableEntry[]
     // Pre-check: nothing to duplicate from. Surface as an alert before prompting at all.
-    if (duplicateTableQueries(queries, oldBase, `${oldBase}_copy`) === queries) {
+    if (findTableIndex(curTables, oldBase) < 0) {
       await modals.alert({
         title: t('settings.tables.duplicate'),
         message: t('settings.tables.duplicateNoSource', { name: oldBase }),
@@ -571,24 +582,121 @@ export default function ConnectorsBuilder() {
       })
       return
     }
-    const suggested = `${oldBase}_copy`
     const newBase = (await modals.prompt({
       title: t('settings.tables.duplicate'),
       message: t('settings.tables.duplicatePrompt', { name: oldBase }),
-      defaultValue: suggested,
+      defaultValue: `${oldBase}_copy`,
       submitLabel: t('settings.tables.duplicate'),
       validate: (v) => {
         if (!v) return null   // empty → close as if cancelled
         if (v.toLowerCase() === oldBase.toLowerCase()) return t('settings.tables.duplicateSameName')
-        if (tableExists(queries, v)) return t('settings.tables.duplicateExists', { name: v })
+        if (tableExistsByName(curTables, v)) return t('settings.tables.duplicateExists', { name: v })
         return null
       },
     }))?.trim()
     if (!newBase) return
-    const next = duplicateTableQueries(queries, oldBase, newBase)
-    if (next === queries) return
-    updateQueries(connectorName, next)
+    updateTables(connectorName, duplicateTableEntry(curTables, oldBase, newBase))
     setSelTable(newBase)
+  }
+
+  // Reclassify a connector entity between the four sections. A standalone query / sequence /
+  // lookup is the same `QueryDef` shape, so moving among those three keeps the name (and every
+  // reference) intact. Crossing the Table boundary changes the *runtime* name — a table's slot is
+  // addressed as `<base>_<crud>`, a standalone query by its bare name — so we confirm first and the
+  // operator updates any screen / action / dictionary reference afterwards. Converting a table is
+  // only offered for a single-slot table (a multi-slot table is genuinely a CRUD set, not one
+  // query). Common reason: a v1 query mis-tagged `type = "table"` migrated into a one-slot table.
+  type SectionKind = 'tables' | 'queries' | 'sequences' | 'lookups'
+  const sectionLabel = (k: SectionKind): string => ({
+    tables: t('settings.tables.tablesView'),
+    queries: t('settings.tables.looseSectionLabel', 'Queries'),
+    sequences: t('settings.connectors.sequencesView', 'Sequences'),
+    lookups: t('settings.connectors.lookupsView', 'Lookups'),
+  }[k])
+  const modeFor = (k: SectionKind): 'tables' | 'custom' | 'sequences' | 'lookups' => (k === 'queries' ? 'custom' : k)
+  const changeType = async (fromKind: SectionKind, name: string) => {
+    if (!sel || !conns) return
+    const conn = conns[sel] ?? {}
+    const arrOf = (k: SectionKind) => (Array.isArray(conn[k]) ? conn[k] : []) as Record<string, unknown>[]
+    const choice = await modals.choose({
+      title: t('settings.connectors.changeTypeTitle', 'Change type'),
+      message: t('settings.connectors.changeTypePrompt', 'Move "{{name}}" to which kind?', { name }),
+      options: (['tables', 'queries', 'sequences', 'lookups'] as SectionKind[])
+        .filter((k) => k !== fromKind)
+        .map((k) => ({ value: k, label: sectionLabel(k) })),
+      cancelValue: 'cancel',
+      cancelLabel: t('common.cancel'),
+    })
+    if (!choice || choice === 'cancel') return
+    const toKind = choice as SectionKind
+    const crossesTable = (fromKind === 'tables') !== (toKind === 'tables')
+
+    let queryDef: Record<string, unknown> | null = null
+    let tableEntry: TableEntry | null = null
+    const nextConn: Record<string, unknown> = { ...conn }
+
+    if (fromKind === 'tables') {
+      const tb = (arrOf('tables') as unknown as TableEntry[]).find((x) => x.name === name)
+      if (!tb) return
+      const filled = CRUD_KINDS.filter((c) => tb[c])
+      if (filled.length > 1) {
+        await modals.alert({
+          title: t('settings.connectors.changeTypeTitle', 'Change type'),
+          message: t('settings.connectors.changeTypeMultiSlot', 'This table has more than one CRUD slot, so it is a real CRUD set — not a single query. Delete the extra slots first if it is really just one query.'),
+          variant: 'danger',
+        })
+        return
+      }
+      const slot = (tb[filled[0]] ?? {}) as Record<string, unknown>
+      queryDef = {
+        name: tb.name, sql: slot.sql ?? '',
+        ...(slot.writable != null ? { writable: slot.writable } : {}),
+        ...(slot.params != null ? { params: slot.params } : {}),
+        ...(tb.label != null ? { label: tb.label } : {}),
+        ...(tb.description != null ? { description: tb.description } : {}),
+      }
+      nextConn.tables = removeTableByName(arrOf('tables') as unknown as TableEntry[], name)
+    } else {
+      const q = arrOf(fromKind).find((x) => x.name === name)
+      if (!q) return
+      nextConn[fromKind] = arrOf(fromKind).filter((x) => x.name !== name)
+      if (toKind === 'tables') {
+        tableEntry = {
+          name: String(q.name),
+          ...(q.label != null ? { label: q.label as string } : {}),
+          ...(q.description != null ? { description: q.description as string } : {}),
+          get: {
+            sql: q.sql ?? '',
+            ...(q.writable != null ? { writable: q.writable as boolean } : {}),
+            ...(q.params != null ? { params: q.params as unknown[] } : {}),
+          },
+        }
+      } else {
+        queryDef = { ...q }   // same QueryDef shape — just changes which section it lives in
+      }
+    }
+
+    if (crossesTable) {
+      const oldRef = fromKind === 'tables' ? `${name}_get` : name
+      const newRef = toKind === 'tables' ? `${name}_get` : name
+      const ok = await modals.confirm({
+        title: t('settings.connectors.changeTypeTitle', 'Change type'),
+        message: t('settings.connectors.changeTypeRenameWarn', 'This changes the query\'s runtime name from "{{old}}" to "{{new}}". Update any screen / action / dictionary reference to the new name afterwards. Continue?', { old: oldRef, new: newRef }),
+        confirmLabel: t('settings.connectors.changeTypeTitle', 'Change type'),
+      })
+      if (!ok) return
+    }
+
+    if (toKind === 'tables' && tableEntry) {
+      const cur = (Array.isArray(nextConn.tables) ? nextConn.tables : []) as TableEntry[]
+      nextConn.tables = [...cur, tableEntry]
+    } else if (queryDef) {
+      const cur = (Array.isArray(nextConn[toKind]) ? nextConn[toKind] : []) as Record<string, unknown>[]
+      nextConn[toKind] = [...cur, queryDef]
+    }
+    setConns((p) => ({ ...(p ?? {}), [sel]: nextConn }))
+    setSelTable(null); setSelQuery(null); setStatus(null)
+    setMode(modeFor(toKind))
   }
 
   // Handler for the scaffold modal save: append the new query to the connector + the new
@@ -597,10 +705,11 @@ export default function ConnectorsBuilder() {
   // top-toolbar Save to commit both files; this just stages the edits in memory.
   const onScaffoldSave = (kind: ScaffoldKind, result: { query: { name: string; sql: string; label?: string }; dictEntry: Record<string, unknown>; dictId: string }) => {
     if (!sel || !conns || !dictionary) return
-    // 1) append the query to the selected connector's queries list
+    // 1) append the scaffolded query to the matching section (sequences / lookups).
+    const section = kind === 'sequence' ? 'sequences' : 'lookups'
     const conn = conns[sel] ?? {}
-    const existing = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
-    updateQueries(sel, [...existing, { ...result.query, type: kind === 'sequence' ? 'sequence' : 'lookup' }])
+    const existing = Array.isArray(conn[section]) ? (conn[section] as Record<string, unknown>[]) : []
+    updateSection(sel, section, [...existing, { ...result.query }])
     // 2) write the dict entry under the connector's per-connector scope (creating it when
     //    absent). The kind picks ``sequences`` vs ``lookups``; the dict key is ``result.dictId``.
     const dictKey = kind === 'sequence' ? 'sequences' : 'lookups'
@@ -662,24 +771,28 @@ export default function ConnectorsBuilder() {
   const isSql = selConn?.type !== 'api'
 
   // --- query classification by explicit ``type`` ----------------------------
-  // Each query carries ``type`` (table / custom / sequence / lookup); the tabs filter on it — no
-  // more inferring from name-suffix + dictionary refs. A query with no ``type`` (shouldn't happen
-  // after the backfill) falls back to a trivial suffix guess so it still lands somewhere sensible.
-  const queriesArr = (selConn && Array.isArray(selConn.queries) ? selConn.queries : []) as Record<string, unknown>[]
-  const queryType = (q: Record<string, unknown>): string => {
-    const t = typeof q.type === 'string' ? q.type : ''
-    if (t) return t
-    return classifyQueryName(typeof q.name === 'string' ? q.name : '') ? 'table' : 'custom'
-  }
-  const tableQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'table') : []
-  const customQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'custom') : []
-  const sequenceQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'sequence') : []
-  const lookupQueries = isSql ? queriesArr.filter((q) => queryType(q) === 'lookup') : []
-  // Tables view groups the type=table queries by their CRUD suffix into get/put/post/delete slots.
-  const grouped = isSql ? groupQueriesByTable(tableQueries) : { tables: [], loose: [] }
+  // The connector is in the sectioned shape — read each section directly. No more name-suffix /
+  // ``type``-field inference: the section a query sits in IS its kind.
+  const tablesArr = (selConn && isSql && Array.isArray(selConn.tables) ? selConn.tables : []) as TableEntry[]
+  const customQueries = (selConn && isSql && Array.isArray(selConn.queries) ? selConn.queries : []) as Record<string, unknown>[]
+  const sequenceQueries = (selConn && isSql && Array.isArray(selConn.sequences) ? selConn.sequences : []) as Record<string, unknown>[]
+  const lookupQueries = (selConn && isSql && Array.isArray(selConn.lookups) ? selConn.lookups : []) as Record<string, unknown>[]
+  // Every query name across all four sections — used to guard new-name collisions in the scaffold /
+  // CRUD-wizard modals (a custom query can't reuse a table slot's synthesised name, etc.).
+  const allQueryNames = (() => {
+    const s = new Set<string>()
+    for (const tb of tablesArr) for (const c of CRUD_KINDS) if (tb[c]) s.add(`${tb.name}_${c}`)
+    for (const arr of [customQueries, sequenceQueries, lookupQueries]) for (const q of arr) if (typeof q.name === 'string') s.add(q.name)
+    return s
+  })()
   const tNeedle = tq.trim().toLowerCase()
-  const shownTables = tNeedle ? grouped.tables.filter((g) => g.base.toLowerCase().includes(tNeedle)) : grouped.tables
+  // Display sorted by name (the on-disk order is preserved — this only orders the list view),
+  // matching the Queries / Sequences / Lookups lists below.
+  const shownTables = (tNeedle ? tablesArr.filter((tb) => tb.name.toLowerCase().includes(tNeedle)) : tablesArr)
+    .slice().sort((a, b) => a.name.localeCompare(b.name))
   const queryDefSchema = (selSchema?.$defs?.QueryDef ?? null) as JsonSchema | null
+  const tableDefSchema = (selSchema?.$defs?.TableDef ?? null) as JsonSchema | null
+  const crudSlotSchema = (selSchema?.$defs?.CrudSlot ?? null) as JsonSchema | null
   const allDefs = (selSchema?.$defs ?? {}) as Record<string, JsonSchema>
   // QueryDef minus `name`: the name is display-only in the editor and renamed via the cross-file
   // Rename button — editing it inline would silently break every reference (screens / dictionary /
@@ -710,6 +823,15 @@ export default function ConnectorsBuilder() {
         <Button $variant="ghost" $size="sm" onClick={() => renameQuery(String(picked.name))} disabled={busy}>
           <Edit3 size={13} /> {t('settings.rename.button')}
         </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => changeType(curSection().key as SectionKind, String(picked.name))} disabled={busy}>
+          <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => {
+          const k = curSection().key
+          setMoveTarget({ kind: k === 'sequences' ? 'sequence' : k === 'lookups' ? 'lookup' : 'query', name: String(picked.name) })
+        }} disabled={busy}>
+          <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton', 'Move')}
+        </Button>
         <Button $variant="ghost" $size="sm" onClick={() => duplicateQuery(String(picked.name))} disabled={busy}>
           <Copy size={13} /> {t('settings.tables.duplicate')}
         </Button>
@@ -725,7 +847,8 @@ export default function ConnectorsBuilder() {
           onChange={(v: Record<string, unknown>) => {
             // The form omits `name`, so preserve it on the patched query.
             const merged = { ...v, name: picked.name }
-            updateQueries(sel!, queriesArr.map((qq) => (qq.name === picked.name ? merged : qq)))
+            const { key, arr } = curSection()
+            updateSection(sel!, key, arr.map((qq) => (qq.name === picked.name ? merged : qq)))
           }}
         />
       </SqlConnectorContext.Provider>
@@ -811,7 +934,7 @@ export default function ConnectorsBuilder() {
                         {t('settings.tables.tablesView')}
                       </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'custom'} onClick={() => setMode('custom')}>
-                        {t('settings.tables.looseSectionLabel', 'Unclassified')}
+                        {t('settings.tables.looseSectionLabel', 'Queries')}
                       </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'sequences'} onClick={() => setMode('sequences')}>
                         {t('settings.connectors.sequencesView', 'Sequences')}
@@ -891,67 +1014,73 @@ export default function ConnectorsBuilder() {
               {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
                   own tab now, so this list isn't mixed with them anymore. */}
               {isSql && mode === 'tables' && (
-                selTable && queryDefSchema ? (() => {
+                selTable && tableDefSchema && crudSlotSchema ? (() => {
+                  const table = tablesArr.find((tb) => tb.name === selTable)
+                  if (!table) return <Empty>{t('settings.tables.emptyConnector')}</Empty>
                   // The corresponding Screen (if any) is keyed by (connector, get-slot name).
-                  // The cross-link only shows when both are present + a screen with a dialog is
-                  // actually registered for this read query.
-                  const slotsForSel = grouped.tables.find((g) => g.base === selTable)?.slots ?? {}
-                  const getName = slotsForSel.get?.name
+                  const getName = table.get ? `${table.name}_get` : undefined
                   const matchedScreen = sel && getName ? findScreen(sel, getName) : null
                   return (
                     <ConnectorsTableEditor
-                      base={selTable}
+                      table={table}
                       connectorName={sel!}
-                      slots={slotsForSel}
-                      queries={queriesArr}
-                      queryDefSchema={queryDefSchema}
+                      tableDefSchema={tableDefSchema}
+                      crudSlotSchema={crudSlotSchema}
                       defs={allDefs}
-                      onChangeQueries={(next) => updateQueries(sel!, next)}
+                      onChange={(next) => updateTables(sel!, replaceTableByName(tablesArr, selTable, next))}
+                      onDelete={() => { updateTables(sel!, removeTableByName(tablesArr, selTable)); setSelTable(null) }}
                       onBack={() => setSelTable(null)}
                       onDuplicate={() => sel && duplicateTable(sel, selTable)}
                       onRename={() => renameTable(selTable)}
+                      onChangeType={() => changeType('tables', selTable)}
+                      onMove={() => setMoveTarget({ kind: 'table', name: selTable })}
+                      onFindUsages={() => {
+                        if (!sel) return
+                        // Target the read slot (else the first present slot) — the dependent
+                        // screens / menus reference the table through its slot query names.
+                        const crud = CRUD_KINDS.find((c) => table[c]) ?? 'get'
+                        const qn = `${table.name}_${table.get ? 'get' : crud}`
+                        setUsagesTarget({ kind: 'query', name: qn, scope: sel, label: `table ${sel}.${table.name}` })
+                      }}
                       screenLink={matchedScreen ? { app: matchedScreen.app, id: matchedScreen.id } : null}
                       onOpenScreen={(app, id) => setScreenDesigner({ app, id })}
                     />
                   )
                 })() : (
                   <Stack gap={10}>
-                    {grouped.tables.length > 6 && (
+                    {tablesArr.length > 6 && (
                       <NavSearch>
                         <Search size={13} />
-                        <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`filter ${grouped.tables.length}…`} />
+                        <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`filter ${tablesArr.length}…`} />
                       </NavSearch>
                     )}
-                    {shownTables.length === 0 && grouped.tables.length > 0 && (
+                    {shownTables.length === 0 && tablesArr.length > 0 && (
                       <Empty>{t('common.noMatches')}</Empty>
                     )}
-                    {grouped.tables.length === 0 && (
+                    {tablesArr.length === 0 && (
                       <Empty>{t('settings.tables.emptyConnector')}</Empty>
                     )}
                     <TableList>
-                      {shownTables.map((g) => {
-                        // Friendly description for the table — read query's `description`
-                        // (v1's tbl_label, e.g. "Security - Users"), falls back to `label`.
-                        // Same fallback chain as TableView's title resolver and the main
-                        // /connectors page; sits below the technical base name on a second row.
-                        const getQ = g.slots.get?.query as Record<string, unknown> | undefined
-                        const desc = (typeof getQ?.description === 'string' && getQ.description)
-                                  || (typeof getQ?.label === 'string' && getQ.label)
+                      {shownTables.map((tb) => {
+                        // Friendly subtitle — the table's own `description` (else `label`), which
+                        // lives on the TableEntry itself (not stranded on a `_get` slot).
+                        const desc = (typeof tb.description === 'string' && tb.description)
+                                  || (typeof tb.label === 'string' && tb.label)
                                   || null
                         return (
-                          <TableRow key={g.base} type="button" onClick={() => setSelTable(g.base)}>
+                          <TableRow key={tb.name} type="button" onClick={() => setSelTable(tb.name)}>
                             <span className="text">
-                              <span className="base">{g.base}</span>
+                              <span className="base">{tb.name}</span>
                               {desc && <span className="desc">{desc}</span>}
                             </span>
                             {CRUD_KINDS.map((c) => (
-                              <Slot key={c} $on={!!g.slots[c]} title={g.slots[c]?.name ?? `${g.base}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
+                              <Slot key={c} $on={!!tb[c]} title={tb[c] ? `${tb.name}_${c}` : `${tb.name}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
                             ))}
                             <RowAction
                               role="button"
                               aria-label={t('settings.tables.duplicate')}
                               title={t('settings.tables.duplicate')}
-                              onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, g.base) }}
+                              onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, tb.name) }}
                             >
                               <Copy size={13} />
                             </RowAction>
@@ -975,7 +1104,7 @@ export default function ConnectorsBuilder() {
                 ).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
                 const qNeedle = tq.trim().toLowerCase()
                 const shown = qNeedle ? matches.filter((q) => String(q.name).toLowerCase().includes(qNeedle)) : matches
-                const picked = selQuery ? queriesArr.find((q) => q.name === selQuery) : null
+                const picked = selQuery ? matches.find((q) => q.name === selQuery) : null
                 if (picked && queryDefSchema) {
                   return renderQueryEditor(picked as Record<string, unknown>)
                 }
@@ -1081,34 +1210,25 @@ export default function ConnectorsBuilder() {
             const ids = Object.keys(perConn[sel]?.[section] ?? {})
             return new Set(ids)
           })()}
-          existingQueryNames={new Set(queriesArr
-            .map((q) => typeof q.name === 'string' ? q.name : '')
-            .filter(Boolean))}
+          existingQueryNames={allQueryNames}
           onSave={(result) => onScaffoldSave(scaffoldKind, result)}
           onCancel={() => setScaffoldKind(null)}
         />
       )}
-      {/* CRUD wizard — opened from "+ Add table → Generate from DB". Saves the four queries
-          to the connector's ``queries`` list + auto-selects the new table in the list so the
-          operator can keep tweaking inside ConnectorsTableEditor. The top-toolbar Save commits
-          the result to disk. */}
+      {/* CRUD wizard — opened from "+ Add table → Generate from DB". Groups the four generated
+          queries into ONE table entry (replace-by-name) + auto-selects it in the list so the
+          operator can keep tweaking inside ConnectorsTableEditor. The top-toolbar Save commits. */}
       {crudWizardOpen && sel && (
         <CrudWizardModal
           connector={sel}
-          existingQueryNames={new Set(queriesArr
-            .map((q) => typeof q.name === 'string' ? q.name : '')
-            .filter(Boolean))}
+          existingQueryNames={allQueryNames}
           onSave={(result) => {
-            const cur = (conns ?? {})[sel] ?? {}
-            const existing = Array.isArray(cur.queries) ? (cur.queries as Record<string, unknown>[]) : []
-            updateQueries(sel, [...existing, ...result.queries])
+            const tb = tableEntryFromFlatQueries(result.queries)
+            updateTables(sel, replaceTableByName(tablesArr, tb.name, tb))
             setCrudWizardOpen(false)
-            // The base name follows the v1 ``<base>_<crud>`` convention; jump straight to the
-            // new table in the Tables list so the operator can tweak the auto-generated SQL.
-            const firstName = result.queries[0]?.name ?? ''
-            const m = firstName.match(/^(.+)_(get|put|post|delete)$/i)
-            if (m) setSelTable(m[1])
-            // Chain the v1 "create the missing dictionary items" step — scans the just-reversed
+            // Jump straight to the new table so the operator can tweak the auto-generated SQL.
+            if (tb.name) setSelTable(tb.name)
+            // Chain the "create the missing dictionary items" step — scans the just-reversed
             // table's columns + proposes dictionary entries (JDE DD / inferred type).
             setDictScan({ connector: sel, table: result.table, schema: result.schema })
           }}
@@ -1132,7 +1252,8 @@ export default function ConnectorsBuilder() {
         />
       )}
       {cloneModalOpen && (
-        <Overlay onClick={() => !cloneBusy && setCloneModalOpen(false)}>
+        // No backdrop-click-to-close — outside clicks must not abandon the clone form mid-fill.
+        <Overlay>
           <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
             <ModalHeader>{t('settings.connectors.clone', 'Clone')}</ModalHeader>
             <ModalBody>
@@ -1191,7 +1312,8 @@ export default function ConnectorsBuilder() {
       {/* "+ Connector" — type (sql / api) + name. The type is the discriminator: chosen here at
           creation, fixed afterwards (so it isn't shown/editable in the Settings tab). */}
       {addConnOpen && (
-        <Overlay onClick={() => setAddConnOpen(false)}>
+        // No backdrop-click-to-close — outside clicks must not abandon the new-connector form.
+        <Overlay>
           <Modal style={{ width: 'min(440px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
             <ModalHeader>{t('settings.connectors.addConnectorTitle', 'Add a connector')}</ModalHeader>
             <ModalBody>
@@ -1224,6 +1346,16 @@ export default function ConnectorsBuilder() {
         </Overlay>
       )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
+      {moveTarget && sel && (
+        <MoveQueryModal
+          kind={moveTarget.kind}
+          name={moveTarget.name}
+          fromConnector={sel}
+          candidates={Object.keys(conns ?? {}).filter((n) => n !== sel && (conns?.[n]?.type ?? 'sql') !== 'api')}
+          onMoved={() => { load(); void refreshWorkspace() }}
+          onClose={() => { setMoveTarget(null); setSelQuery(null); setSelTable(null) }}
+        />
+      )}
     </Shell>
     </FrameworkEnumsContext.Provider>
   )

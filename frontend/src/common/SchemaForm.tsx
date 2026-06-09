@@ -14,9 +14,9 @@
 // from `GET /admin/config/schema → framework_enums`, threaded through `FrameworkEnumsContext`. A
 // Literal-typed `x_enum_ref` field renders as a strict SearchSelect (the value MUST be in the set);
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical } from 'lucide-react'
 import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
@@ -412,7 +412,9 @@ const NavListRow = styled.button`
   color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
   & .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & svg { flex-shrink: 0; color: ${colors.text.muted}; }
+  & .grip { cursor: grab; }
   &:hover { border-color: ${colors.blue.border}; color: ${colors.text.primary}; }
+  &[draggable='true'] { cursor: grab; }
 `
 const SearchRow = styled.div`
   display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; margin-bottom: 8px;
@@ -428,6 +430,18 @@ function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
   const needle = q.trim().toLowerCase()
   const rows = value.map((it, i) => ({ i, label: itemSummary(it, itemSchema, defs) }))
   const shown = needle ? rows.filter((r) => r.label.toLowerCase().includes(needle)) : rows
+  // Drag-reorder the items (their stored order IS the display order — e.g. a screen's columns
+  // render in this sequence). Disabled while filtering (the visible rows aren't the full order, so
+  // a drop index would be ambiguous); clear the filter to reorder.
+  const dragFrom = useRef<number | null>(null)
+  const reorder = (from: number | null, to: number) => {
+    if (from == null || from === to) return
+    const next = value.slice()
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    onChange(next)
+  }
+  const canReorder = !needle && value.length > 1
   return (
     <div>
       {value.length > 6 && (
@@ -438,7 +452,14 @@ function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
         </SearchRow>
       )}
       {shown.map(({ i, label }) => (
-        <NavListRow key={i} type="button" onClick={() => onNavigate(i, label)}>
+        <NavListRow
+          key={i} type="button" onClick={() => onNavigate(i, label)}
+          draggable={canReorder}
+          onDragStart={() => { dragFrom.current = i }}
+          onDragOver={canReorder ? (e) => e.preventDefault() : undefined}
+          onDrop={canReorder ? (e) => { e.preventDefault(); reorder(dragFrom.current, i); dragFrom.current = null } : undefined}
+        >
+          {canReorder && <GripVertical size={13} className="grip" aria-label="drag to reorder" />}
           <span className="lbl">{label}</span>
           <SmallX as="span" role="button" title="remove" onClick={(e) => { e.stopPropagation(); onChange(value.filter((_, j) => j !== i)) }}><X size={12} /></SmallX>
           <ChevronRight size={13} />

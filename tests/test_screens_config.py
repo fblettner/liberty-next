@@ -45,25 +45,28 @@ def test_param_bind_either_mode() -> None:
 
 
 def test_screen_field_shape() -> None:
-    """Phase 2: ScreenField is **layout-only** — just ``name`` + ``hidden`` / ``disabled`` /
-    ``required`` / ``colspan`` + the three conditional rule lists. Display metadata (``dd`` /
-    ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` / ``lookup_param_binds``)
-    lives on the matching :class:`~liberty.connectors.config.ColumnHint` in
-    ``Screen.columns`` (single source of truth for both grid + dialog)."""
+    """ScreenField carries placement (``colspan``) + per-dialog override flags (``hidden`` /
+    ``disabled`` / ``required``) + the conditional rule lists, PLUS optional self-contained display
+    metadata (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` /
+    ``lookup_param_binds``). The MAIN screen's fields inherit the display metadata from the matching
+    ``Screen.columns`` (set it there), but a NESTED form's fields — which reference a table with no
+    column-hint layer — carry their own ``dd`` so the dictionary resolves their rule/label/format."""
     f = ScreenField(name="USR_ROLE_ID", hidden=False, disabled=True, required=True, colspan=2)
     assert f.name == "USR_ROLE_ID" and f.required is True and f.colspan == 2 and f.disabled is True
     # `name` is mandatory
     with pytest.raises(Exception):
         ScreenField()  # type: ignore[call-arg]
-    # Legacy field-level metadata is *silently dropped* on parse (extra='ignore' — back-compat
-    # so a screens.toml from before Phase 2 keeps loading). Operators re-migrate at their pace.
-    legacy = ScreenField.model_validate({
-        "name": "USR_ROLE_ID", "dd": "ROL_ID", "label": "Role", "rules": "LOOKUP",
-        "rules_values": "5", "default": "ADMIN", "format": "text",
+    # Field-level display metadata is KEPT (a nested-form field links its dd here, since it has no
+    # Screen.columns layer to inherit from).
+    withdd = ScreenField.model_validate({
+        "name": "JDE_SY", "dd": "SY", "label": "System", "rules": "LOOKUP",
+        "rules_values": "get_sy", "default": "920", "format": "text",
         "lookup_param_binds": [{"param": "X", "source": "Y"}],
     })
-    # The legacy fields are dropped — only the layout-only ones survive.
-    assert legacy.model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
+    assert withdd.dd == "SY" and withdd.rules == "LOOKUP" and withdd.rules_values == "get_sy"
+    assert withdd.lookup_param_binds[0].source == "Y"
+    # A layout-only field omits all of it — stays terse on dump.
+    assert ScreenField(name="USR_ROLE_ID").model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
 
 
 def test_screen_row_click_route_validates_placeholders() -> None:
@@ -339,12 +342,12 @@ def test_parse_screens_injects_id_from_key() -> None:
     # discriminated union resolves cleanly. Backward compat for every screens.toml file
     # written before the nested-tab variants were added.
     assert isinstance(tab, FormTab) and tab.type == "form"
-    # Phase 2: legacy per-field metadata (``dd`` / ``lookup_param_binds``) is silently dropped
-    # by ``extra="ignore"`` — the ScreenField is layout-only now. A re-migrated screens.toml
-    # would have these moved onto the matching ColumnHint in ``Screen.columns``.
+    # Field-level ``dd`` + ``lookup_param_binds`` are KEPT — a field links its own dictionary entry
+    # (the main screen usually inherits via Screen.columns, but nested-form fields rely on this).
     field = tab.fields[1]
     assert field.name == "USR_ROLE_ID"
-    assert not hasattr(field, "dd")  # dropped from the schema
+    assert field.dd == "ROL_ID"
+    assert field.lookup_param_binds[0].source == "USR_APPS_ID"
 
 
 def test_parse_screens_with_nested_tab_kinds() -> None:
@@ -445,6 +448,181 @@ def test_parse_screens_infers_nested_tab_type_from_keys() -> None:
     assert tabs[1].param_binds[0].source == "APPS_ID"
     assert isinstance(tabs[2], NestedTableTab)
     assert tabs[2].screen == "settings_activity_log"
+
+
+def test_nested_form_reference_mode() -> None:
+    """A ``nested_form`` can REFERENCE an existing screen (``form_screen``) instead of inlining its
+    queries + fields. The reference is unambiguous across the type-stripped round-trip: a tab with
+    ``screen`` is a nested_table, one with ``form_screen`` (or ``read_query``) is a nested_form."""
+    raw = {
+        "screens": {
+            "nomasx1": {
+                "settings_applications": {
+                    "read_query": "settings_applications_get",
+                    "dialog": {
+                        "tabs": [
+                            # Reference mode: no type, no read_query — just ``form_screen``.
+                            {
+                                "id": "jd_edwards",
+                                "form_screen": "settings_jdedwards",
+                                "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+    }
+    sf = parse_screens(raw)
+    tab = sf.screens["nomasx1"]["settings_applications"].dialog.tabs[0]  # type: ignore[union-attr]
+    assert isinstance(tab, NestedFormTab)
+    assert tab.form_screen == "settings_jdedwards"
+    assert tab.read_query == ""                       # inherited from the referenced screen at runtime
+    assert tab.param_binds[0].source == "APPS_ID"
+
+
+def test_form_tab_embeds_nested_forms() -> None:
+    """A ``form`` tab can carry ``nested_forms`` — embedded child forms saved alongside the main
+    table in one pass. Each is a full NestedFormTab (inline queries or a form_screen reference)."""
+    sf = parse_screens({
+        "screens": {"nomajde": {"f0092": {
+            "read_query": "f0092_get",
+            "dialog": {"tabs": [{
+                "id": "main", "type": "form",
+                "fields": [{"name": "ULUSER"}],
+                "nested_forms": [{
+                    "id": "sec", "label": "F00926",
+                    "read_query": "f00926_get", "insert_query": "f00926_post",
+                    "fields": [{"name": "SECUSER"}],
+                    "param_binds": [{"param": "USER", "source": "ULUSER"}],
+                }],
+            }]},
+        }}},
+    })
+    tab = sf.screens["nomajde"]["f0092"].dialog.tabs[0]  # type: ignore[union-attr]
+    assert isinstance(tab, FormTab)
+    assert len(tab.nested_forms) == 1
+    nf = tab.nested_forms[0]
+    assert nf.type == "nested_form" and nf.read_query == "f00926_get"
+    assert nf.param_binds[0].source == "ULUSER"
+
+
+def test_column_groups_and_column_group_ref() -> None:
+    """A screen can declare related 1:1 write-back ``column_groups``; a column joins one via its
+    ``group`` field. (The read query JOINs the related table; the save splits writes per table.)"""
+    sf = parse_screens({
+        "screens": {"nomajde": {"f0092": {
+            "read_query": "f0092_get", "update_query": "f0092_put",
+            "columns": [
+                {"name": "ULUSER", "key": True},
+                {"name": "ABALPH", "group": "addr"},
+            ],
+            "column_groups": [{
+                "id": "addr", "label": "Address Book",
+                "update_query": "f0101_put", "insert_query": "f0101_post",
+                "key_columns": ["ABAN8"],
+                "param_binds": [{"param": "ABAN8", "source": "ULUSER"}],
+            }],
+        }}},
+    })
+    s = sf.screens["nomajde"]["f0092"]
+    assert [c.name for c in s.columns if c.group == "addr"] == ["ABALPH"]
+    grp = s.column_groups[0]
+    assert grp.id == "addr" and grp.update_query == "f0101_put" and grp.key_columns == ["ABAN8"]
+    assert grp.param_binds[0].source == "ULUSER"
+    # A column with no group writes to the main table.
+    assert next(c for c in s.columns if c.name == "ULUSER").group is None
+
+
+def test_call_plugin_action_round_trips() -> None:
+    """``call_plugin`` is a first-class action (sibling of run_query / call_api): the discriminator
+    resolves it, its ``callable`` carries the PLUGIN_CALLABLES picker hint, and param_binds + the
+    promptable mixin fields parse."""
+    import json
+
+    from liberty.screens.config import Action
+    from pydantic import TypeAdapter
+
+    a = TypeAdapter(Action).validate_python({
+        "type": "call_plugin", "id": "remerge", "label": "Re-merge security",
+        "callable": "nomajde.security:j_remerge_security",
+        "param_binds": [{"param": "role_id", "source": "AUUSER"}],
+        "bind_result": True,
+    })
+    assert type(a).__name__ == "CallPluginAction"
+    assert a.callable == "nomajde.security:j_remerge_security"
+    assert a.param_binds[0].param == "role_id" and a.bind_result is True
+    # The editor's callable dropdown is schema-driven via the PLUGIN_CALLABLES enum ref.
+    schema = TypeAdapter(Action).json_schema()
+    cp = next(s for s in schema["$defs"].values() if s.get("title") == "CallPluginAction")
+    assert cp["properties"]["callable"].get("x_enum_ref") == "PLUGIN_CALLABLES"
+    # round-trips through a JSON dump unchanged
+    assert json.loads(a.model_dump_json())["type"] == "call_plugin"
+
+
+def test_column_group_per_column_picker_is_schema_driven() -> None:
+    """The per-column ``group`` dropdown in the Columns-tab editor is schema-driven — it resolves
+    its options from the ``COLUMN_GROUPS`` enum the ScreenEditor injects (the screen's defined group
+    ids). Guards that wiring so the operator picks a group instead of hand-typing its id. (The group
+    EDITOR's own connector / query / bind dropdowns are the dedicated ColumnGroupsEditor component,
+    not schema enums, so only this one field carries an ``x_enum_ref``.)"""
+    defs = ScreensFile.model_json_schema()["$defs"]
+    assert defs["ColumnHint"]["properties"]["group"].get("x_enum_ref") == "COLUMN_GROUPS"
+
+
+def test_column_groups_roundtrip_through_toml(tmp_path) -> None:
+    """A screen authored with ``column_groups`` + a grouped column survives a load → dump → load
+    cycle — the shape the editor writes back is parsed identically on the next open."""
+    f = tmp_path / "screens.toml"
+    f.write_text(
+        textwrap.dedent(
+            """
+            [screens.nomajde.f0092]
+            read_query = "f0092_get"
+            update_query = "f0092_put"
+
+            [[screens.nomajde.f0092.columns]]
+            name = "ULUSER"
+            key = true
+
+            [[screens.nomajde.f0092.columns]]
+            name = "ABALPH"
+            group = "addr"
+
+            [[screens.nomajde.f0092.column_groups]]
+            id = "addr"
+            label = "Address Book"
+            update_query = "f0101_put"
+            insert_query = "f0101_post"
+            delete_query = "f0101_delete"
+            key_columns = ["ABAN8"]
+
+            [[screens.nomajde.f0092.column_groups.param_binds]]
+            param = "ABAN8"
+            source = "ULUSER"
+            """
+        )
+    )
+    s = load_screens(f).screens["nomajde"]["f0092"]
+    # Re-dump the parsed model (what the editor's Save serialises) and parse it again.
+    redumped = parse_screens({"screens": {"nomajde": {"f0092": s.model_dump(exclude_defaults=True)}}})
+    s2 = redumped.screens["nomajde"]["f0092"]
+    grp = s2.column_groups[0]
+    assert grp.id == "addr" and grp.update_query == "f0101_put" and grp.insert_query == "f0101_post"
+    assert grp.delete_query == "f0101_delete"
+    assert grp.key_columns == ["ABAN8"] and grp.param_binds[0].source == "ULUSER"
+    assert next(c for c in s2.columns if c.name == "ABALPH").group == "addr"
+
+
+def test_nested_form_without_source_rejected() -> None:
+    """A nested_form with neither ``form_screen`` nor ``read_query`` would render empty — reject it."""
+    with pytest.raises(Exception):
+        parse_screens({
+            "screens": {"nomasx1": {"s": {
+                "read_query": "s_get",
+                "dialog": {"tabs": [{"id": "bad", "type": "nested_form", "fields": [{"name": "X"}]}]},
+            }}},
+        })
 
 
 def test_parse_screens_id_mismatch_rejected() -> None:

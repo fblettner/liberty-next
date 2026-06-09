@@ -26,8 +26,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  ChevronDown, ChevronRight, CornerDownLeft, Edit3, FileText, GitBranch, LayoutList, Layers,
-  Plus, Repeat, Trash2, Zap,
+  Boxes, ChevronDown, ChevronRight, CornerDownLeft, Edit3, FileText, GitBranch, LayoutList, Layers,
+  Link2, Plus, Repeat, Trash2, Zap,
 } from 'lucide-react'
 import {
   Button, Field, Row, SchemaForm, SearchSelect, Stack, useModals,
@@ -39,6 +39,7 @@ import type { ScreenDetail } from '../../types/screens'
 import type { Column } from '../../types/connectors'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { pickSchemaProperties } from './connectorTables'
+import { NavigateTargetField } from './NavigateTargetField'
 import {
   ACTION_DEF_NAME, ACTION_OVERRIDE_KEYS, ACTION_TYPES, blankActionOfType,
   PROMPT_FIELDS_KEY, PROMPT_FIELD_ADVANCED_KEYS, PROMPT_FIELD_BASIC_KEYS, PROMPT_FIELD_BINDS_KEY,
@@ -124,6 +125,8 @@ function variantIcon(type: ActionType): ReactNode {
   switch (type) {
     case 'run_query': return <Zap size={13} />
     case 'call_api': return <Layers size={13} />
+    case 'call_plugin': return <Boxes size={13} />
+    case 'call_action': return <Link2 size={13} />
     case 'navigate': return <CornerDownLeft size={13} />
     case 'if': return <GitBranch size={13} />
     case 'loop': return <Repeat size={13} />
@@ -151,6 +154,17 @@ function summarize(a: Row): string {
     const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
     const captureHint = a.bind_result ? ' · captures result' : ''
     return `→ ${a.connector ?? '?'}/${a.endpoint ?? '?'}${bindHint}${captureHint}`
+  }
+  if (t === 'call_plugin') {
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
+    const captureHint = a.bind_result ? ' · captures result' : ''
+    return `⚙ ${a.callable ?? '?'}${bindHint}${captureHint}`
+  }
+  if (t === 'call_action') {
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
+    return `↪ ${a.ref ?? '?'}${bindHint}`
   }
   if (t === 'navigate') {
     const conn = a.connector ? String(a.connector) : '<screen connector>'
@@ -231,15 +245,19 @@ export interface ActionTreeViewProps {
    *  columns gives the operator the names without remembering them. Pass ``screen.columns``
    *  from the parent (ScreenVisualBuilder / ScreenEditor). */
   screenReadColumns?: Row[]
+  /** Extra ``source`` autocomplete options injected for this hook — e.g. the on_duplicate hook
+   *  passes ``SOURCE_<col>`` entries (the original record, exposed at runtime) so they're pickable,
+   *  not just typeable. Merged into the source dropdown after the chain + column candidates. */
+  extraSourceOptions?: SearchSelectOption[]
 }
 
 export default function ActionTreeView({
   actions, onChange, path, onPathChange, defs, effectiveConnector, onEditQuery, rootLabel,
-  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true, screenReadColumns,
+  heading, hint, emptyMessage, selectedPath, showBreadcrumb = true, screenReadColumns, extraSourceOptions,
 }: ActionTreeViewProps) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors: wsConnectors, findScreen } = useWorkspace()
+  const { connectors: wsConnectors, screens: wsScreens, findScreen, findScreenById } = useWorkspace()
 
   // ── workspace catalog → dropdown options ───────────────────────────────────────────────
   const sqlConnectorOptions = useMemo<SearchSelectOption[]>(
@@ -250,6 +268,46 @@ export default function ActionTreeView({
     () => (wsConnectors ?? []).filter((c) => c.type === 'api').map((c) => ({ value: c.name, label: c.name, mono: c.name })),
     [wsConnectors],
   )
+  // Plugin callables for the ``call_plugin`` picker — the discovered ``j_*`` catalog (same one the
+  // Job Designer reads), fetched once. ``allowCustom`` on the picker lets the operator type a
+  // callable the AST walk didn't surface. Best-effort: a failure just leaves the dropdown empty.
+  const [pluginCallableOptions, setPluginCallableOptions] = useState<SearchSelectOption[]>([])
+  const [pluginCallablesLoading, setPluginCallablesLoading] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setPluginCallablesLoading(true)
+    api.get<{ callables: { callable: string; module: string; name: string; docstring: string | null }[] }>('/api/plugins/callables')
+      .then((r) => {
+        if (cancelled) return
+        setPluginCallableOptions((r.callables ?? []).map((c) => ({
+          value: c.callable, label: c.docstring || c.callable, mono: c.callable,
+        })))
+      })
+      .catch(() => { /* leave empty; picker stays freeform */ })
+      .finally(() => { if (!cancelled) setPluginCallablesLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+  // Shared actions for the ``call_action`` ref picker + the per-ref declared params (so the bind
+  // editor offers the action's INPUT names as bind targets). actions.toml, via /api/actions.
+  const [sharedActionOptions, setSharedActionOptions] = useState<SearchSelectOption[]>([])
+  const [sharedActionParams, setSharedActionParams] = useState<Record<string, SearchSelectOption[]>>({})
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ actions: { id: string; label?: string | null; description?: string | null; params?: { name: string; label?: string | null; description?: string | null }[] }[] }>('/api/actions')
+      .then((r) => {
+        if (cancelled) return
+        setSharedActionOptions((r.actions ?? []).map((a) => ({
+          value: a.id, label: a.label || a.description || a.id, mono: a.id,
+        })))
+        const pmap: Record<string, SearchSelectOption[]> = {}
+        for (const a of r.actions ?? []) {
+          pmap[a.id] = (a.params ?? []).map((p) => ({ value: p.name, label: p.label || p.description || p.name, mono: p.name }))
+        }
+        setSharedActionParams(pmap)
+      })
+      .catch(() => { /* leave empty; picker stays freeform */ })
+    return () => { cancelled = true }
+  }, [])
 
   // ── variant + PromptField sub-schemas (memoised against defs — identical to ActionListEditor) ──
   const actionVariantSchema = (a: Row): JsonSchema | null => {
@@ -350,11 +408,12 @@ export default function ActionTreeView({
   // anything specific — the function returns the same dehydrated catalog every render.
   const sourceOptions = useMemo<SearchSelectOption[]>(
     () => mergeCandidates(
-      sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value })),
+      sourceCandidates.map((c) => ({ value: c.value, label: c.label, mono: c.value, group: c.group })),
+      extraSourceOptions ?? [],
       screenColumnOptions,
       builtinSourceOptions(),
     ),
-    [sourceCandidates, screenColumnOptions],
+    [sourceCandidates, screenColumnOptions, extraSourceOptions],
   )
 
   // ── target-screen column lookup (paramOptions enrichment) ──────────────────────────────
@@ -382,12 +441,18 @@ export default function ActionTreeView({
     const targetConn = (typeof selectedForTarget.connector === 'string' && selectedForTarget.connector.trim()
       ? selectedForTarget.connector
       : effectiveConnector) as string
+    if (!targetConn) return null
+    // navigate-to-SCREEN: the target screen is named directly (no read_query to reverse-resolve).
+    if (aType === 'navigate' && typeof selectedForTarget.screen === 'string' && selectedForTarget.screen) {
+      const byId = findScreenById(targetConn, selectedForTarget.screen)
+      return byId ? { app: byId.app, id: byId.id } : { app: targetConn, id: selectedForTarget.screen }
+    }
     const targetQuery = String((aType === 'navigate' ? selectedForTarget.to : selectedForTarget.query) ?? '')
-    if (!targetConn || !targetQuery) return null
+    if (!targetQuery) return null
     const hit = findScreen(targetConn, targetQuery)
     if (!hit) return null
     return { app: hit.app, id: hit.id }
-  }, [selectedForTarget, effectiveConnector, findScreen])
+  }, [selectedForTarget, effectiveConnector, findScreen, findScreenById])
   useEffect(() => {
     if (!targetScreenKey) return
     const cacheKey = `${targetScreenKey.app}/${targetScreenKey.id}`
@@ -411,6 +476,24 @@ export default function ActionTreeView({
     // ESLint can't see through the ref — explicitly listing the tick is the idiomatic dance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetScreenKey, targetScreenColumnsTick])
+  // The selected action's ``param`` (target placeholder) candidates. ``targetParamOptions`` keys
+  // off ``to`` (the query name) for navigate — but a navigate-to-SCREEN has no ``to``, so resolve
+  // the target screen's read_query first and feed THAT as the query. (Without this the PARAM field
+  // fell back to a plain text input whenever the navigate targeted a screen.)
+  const selectedDeclaredParamOptions = useMemo<SearchSelectOption[]>(() => {
+    if (!selectedForTarget) return []
+    if (String(selectedForTarget.type) === 'navigate'
+        && typeof selectedForTarget.screen === 'string' && selectedForTarget.screen) {
+      const conn = (typeof selectedForTarget.connector === 'string' && selectedForTarget.connector.trim()
+        ? selectedForTarget.connector
+        : effectiveConnector) as string
+      const hit = findScreenById(conn, selectedForTarget.screen)
+      if (!hit?.read_query) return []
+      const tConn = hit.connector || conn
+      return targetParamOptions({ type: 'navigate', to: hit.read_query, connector: tConn }, wsConnectors, tConn)
+    }
+    return targetParamOptions(selectedForTarget, wsConnectors, effectiveConnector)
+  }, [selectedForTarget, effectiveConnector, wsConnectors, findScreenById])
 
   // ── path-aware mutators (delegating to the immutable helpers) ──────────────────────────
   const patchSelected = (patch: Row) => {
@@ -586,6 +669,35 @@ export default function ActionTreeView({
   // shared module (the function is ~40 LOC, copying is simpler than restructuring).
   const renderActionOverrides = (a: Row, onPatch: (patch: Row) => void): ReactNode => {
     const aType = (a.type as ActionType) || 'run_query'
+    // call_action: a single ``ref`` picker (the shared action id) — no connector / query target.
+    if (aType === 'call_action') {
+      return (
+        <Field label={t('settings.screens.action.sharedRef', 'Shared action *')}>
+          <SearchSelect
+            value={(a.ref as string | undefined) ?? ''}
+            options={sharedActionOptions}
+            onChange={(v) => onPatch({ ref: v || '' })}
+            allowCustom
+            placeholder={t('settings.screens.action.sharedRefPick', 'Pick a shared action…')}
+          />
+        </Field>
+      )
+    }
+    // call_plugin: a single ``callable`` picker (module:function) — no connector / query target.
+    if (aType === 'call_plugin') {
+      return (
+        <Field label={t('settings.screens.action.callable', 'Plugin callable *')}>
+          <SearchSelect
+            value={(a.callable as string | undefined) ?? ''}
+            options={pluginCallableOptions}
+            onChange={(v) => onPatch({ callable: v || '' })}
+            allowCustom
+            placeholder={t('settings.screens.action.callablePick', 'Pick a plugin callable…')}
+            loading={pluginCallablesLoading}
+          />
+        </Field>
+      )
+    }
     if (aType !== 'run_query' && aType !== 'call_api' && aType !== 'navigate') return null
     const isApi = aType === 'call_api'
     const opts = isApi ? apiConnectorOptions : sqlConnectorOptions
@@ -616,29 +728,42 @@ export default function ActionTreeView({
             placeholder={effectiveConnector}
           />
         </Field>
-        <Field label={targetLabel + ' *'}>
-          <Row gap={6} style={{ alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <SearchSelect
-                value={(a[targetKey] as string | undefined) ?? ''}
-                options={targetOpts}
-                onChange={(v) => onPatch({ [targetKey]: v || '' })}
-                placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-                loading={!targetConnMeta}
-              />
-            </div>
-            {(aType === 'run_query' || aType === 'navigate') && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
-              <Button
-                $variant="ghost"
-                $size="sm"
-                onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
-                title={t('settings.editQuery.edit', 'Edit query')}
-              >
-                <Edit3 size={13} />
-              </Button>
-            )}
-          </Row>
-        </Field>
+        {aType === 'navigate' ? (
+          <NavigateTargetField
+            key={`${a.id ?? ''}:navtarget`}
+            action={a}
+            onPatch={onPatch}
+            actionConn={actionConn}
+            hasConnector={!!targetConnMeta}
+            queryOptions={targetOpts}
+            screenOptions={((wsScreens ?? {})[actionConn] ?? []).map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id })).sort((x, y) => String(x.mono).localeCompare(String(y.mono)))}
+            onEditQuery={onEditQuery}
+          />
+        ) : (
+          <Field label={targetLabel + ' *'}>
+            <Row gap={6} style={{ alignItems: 'center' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <SearchSelect
+                  value={(a[targetKey] as string | undefined) ?? ''}
+                  options={targetOpts}
+                  onChange={(v) => onPatch({ [targetKey]: v || '' })}
+                  placeholder={targetConnMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
+                  loading={!targetConnMeta}
+                />
+              </div>
+              {aType === 'run_query' && typeof a[targetKey] === 'string' && a[targetKey] && actionConn && (
+                <Button
+                  $variant="ghost"
+                  $size="sm"
+                  onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
+                  title={t('settings.editQuery.edit', 'Edit query')}
+                >
+                  <Edit3 size={13} />
+                </Button>
+              )}
+            </Row>
+          </Field>
+        )}
       </>
     )
   }
@@ -1078,7 +1203,7 @@ export default function ActionTreeView({
             source field is the same chain-context autocomplete the Condition / LoopAction
             source fields use. ``param_binds`` is stripped from the variant SchemaForm via
             ACTION_OVERRIDE_KEYS so this is the single editing surface for binds. */}
-        {(sType === 'run_query' || sType === 'call_api' || sType === 'navigate') && (
+        {(sType === 'run_query' || sType === 'call_api' || sType === 'call_plugin' || sType === 'call_action' || sType === 'navigate') && (
           <Stack gap={6}>
             <SubHead>{t('settings.screens.paramBinds.heading')}</SubHead>
             <Sub>{t('settings.screens.paramBinds.hint')}</Sub>
@@ -1090,16 +1215,19 @@ export default function ActionTreeView({
                     ``Screen.columns`` lists the columns the operator is binding to.
                 Never mixes in the firing screen's own columns — that would be a v1-shaped foot
                 gun (target = where you're writing, not where you came from).
+                For call_plugin the ``param`` is the callable's keyword-argument name (not
+                discoverable from the AST catalog), so the left column stays freeform.
                 ``sourceOptions`` (right column) = the firing context (firing screen's columns +
                 chain context + standard built-ins). */}
             <ParamBindList
               value={Array.isArray(selected.param_binds) ? (selected.param_binds as ParamBind[]) : []}
               onChange={(next) => patchSelected({ param_binds: next.length ? next : null })}
               sourceOptions={sourceOptions}
-              paramOptions={mergeCandidates(
-                targetParamOptions(selected, wsConnectors, effectiveConnector),
-                targetScreenColumnOptions,
-              )}
+              paramOptions={sType === 'call_plugin' ? []
+                : sType === 'call_action' ? (sharedActionParams[String(selected.ref ?? '')] ?? [])
+                : mergeCandidates(selectedDeclaredParamOptions, targetScreenColumnOptions)}
+              paramPlaceholder={sType === 'call_plugin' ? t('settings.screens.action.kwarg', 'kwarg')
+                : sType === 'call_action' ? t('settings.screens.action.inputName', 'input') : undefined}
             />
           </Stack>
         )}

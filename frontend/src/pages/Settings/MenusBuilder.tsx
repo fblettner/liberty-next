@@ -16,8 +16,7 @@ import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight,
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
-import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc } from '../../types/config'
-import { groupQueriesByTable } from './connectorTables'
+import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc, ScreensDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -203,6 +202,8 @@ export default function MenusBuilder() {
   // Read-only — the inspector's CONNECTOR / TARGET dropdowns pull from here. Loaded alongside
   // the menus + schema so the framework-enum augmentation can offer real query / endpoint names.
   const [connectors, setConnectors] = useState<Record<string, Record<string, unknown>> | null>(null)
+  // Designed screens, by app → id → screen. Feeds the target dropdown for ``screen`` menu items.
+  const [screens, setScreens] = useState<ScreensDoc['screens'] | null>(null)
   const [apps, setApps] = useState<AppsMap | null>(null)
   const [original, setOriginal] = useState('')
   const [selApp, setSelApp] = useState<string | null>(null)
@@ -222,10 +223,14 @@ export default function MenusBuilder() {
       api.get<ConfigSchemas>('/admin/config/schema'),
       api.get<MenusDoc>('/admin/config/menus/parsed'),
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
+      // Screens feed the ``screen`` menu-item target dropdown. Non-fatal — a failure just leaves
+      // that dropdown empty (the operator can still wire ``query`` / ``endpoint`` targets).
+      api.get<ScreensDoc>('/admin/config/screens/parsed').catch((): ScreensDoc => ({ path: '', screens: {} })),
     ])
-      .then(([s, d, c]) => {
+      .then(([s, d, c, sc]) => {
         setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
         setConnectors(c.connectors)
+        setScreens(sc.screens)
         setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -298,20 +303,35 @@ export default function MenusBuilder() {
     const connKey = (typeof selRec?.connector === 'string' && selRec.connector) ? selRec.connector : selApp
     const conn = connectors && connKey ? connectors[connKey] : undefined
     const targets: { value: string; label: string; mono?: string }[] = []
-    if (selRec?.type === 'query' && conn?.type === 'sql') {
-      const qs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
-      const grouped = groupQueriesByTable(qs)
-      for (const g of grouped.tables) {
-        if (!g.slots.get) continue   // a table without a _get isn't a viewable target
-        const q = g.slots.get.query
-        const desc = typeof q?.description === 'string' ? q.description : (typeof q?.label === 'string' ? q.label : '')
-        targets.push({ value: g.slots.get.name, label: desc || g.base, mono: g.base })
+    if (selRec?.type === 'screen') {
+      // Designed screens for this app — the screen is where columns / filters / the dialog live,
+      // so it's the preferred menu destination. The stored ``target`` is the SCREEN ID (so two
+      // screens on the same read query stay distinct); the runtime resolves it to its route.
+      const appScreens = (screens && connKey ? screens[connKey] : undefined) ?? {}
+      for (const [sid, scr] of Object.entries(appScreens)) {
+        const lbl = typeof scr?.label === 'string' && scr.label ? scr.label : sid
+        targets.push({ value: sid, label: lbl, mono: sid })
       }
-      for (const ls of grouped.loose) {
-        if (!ls.name) continue
-        const desc = typeof ls.query?.description === 'string' ? ls.query.description : (typeof ls.query?.label === 'string' ? ls.query.label : '')
-        targets.push({ value: ls.name, label: desc || ls.name, mono: ls.name })
+      targets.sort((a, b) => (a.mono ?? a.value).localeCompare(b.mono ?? b.value))
+    } else if (selRec?.type === 'query' && conn?.type === 'sql') {
+      // Navigable targets only: each table's read (`<base>_get`) and the standalone custom
+      // queries. Sequences / lookups are internal value-sources (never a menu destination), so
+      // they're excluded. Sorted by name.
+      const tables = Array.isArray(conn.tables) ? (conn.tables as Record<string, unknown>[]) : []
+      for (const tb of tables) {
+        if (!tb.get) continue   // a table without a read isn't a viewable target
+        const name = `${tb.name}_get`
+        const desc = typeof tb.description === 'string' ? tb.description : (typeof tb.label === 'string' ? tb.label : '')
+        targets.push({ value: name, label: desc || String(tb.name), mono: String(tb.name) })
       }
+      const customs = Array.isArray(conn.queries) ? (conn.queries as Record<string, unknown>[]) : []
+      for (const q of customs) {
+        const name = typeof q.name === 'string' ? q.name : ''
+        if (!name) continue
+        const desc = typeof q.description === 'string' ? q.description : (typeof q.label === 'string' ? q.label : '')
+        targets.push({ value: name, label: desc || name, mono: name })
+      }
+      targets.sort((a, b) => (a.mono ?? a.value).localeCompare(b.mono ?? b.value))
     } else if (selRec?.type === 'endpoint' && conn?.type === 'api') {
       const es = Array.isArray(conn.endpoints) ? (conn.endpoints as Record<string, unknown>[]) : []
       for (const e of es) {
@@ -322,12 +342,16 @@ export default function MenusBuilder() {
       }
     }
     base.MENU_TARGETS = {
-      label: selRec?.type === 'endpoint' ? `Endpoints — ${connKey ?? ''}` : `Queries — ${connKey ?? ''}`,
+      label: selRec?.type === 'endpoint'
+        ? `Endpoints — ${connKey ?? ''}`
+        : selRec?.type === 'screen'
+          ? `Screens — ${connKey ?? ''}`
+          : `Queries — ${connKey ?? ''}`,
       values: targets,
     }
 
     return base
-  }, [schemas, connectors, apps, selApp, selItem])
+  }, [schemas, connectors, screens, apps, selApp, selItem])
 
   if (error && !apps) return <Banner $tone="error">{error}</Banner>
   if (!apps || !schemas) return <Centered />

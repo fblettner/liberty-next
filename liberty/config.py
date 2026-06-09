@@ -152,6 +152,13 @@ class ChartSettings(BaseModel):
     config_path: Path = Field(default_factory=lambda: _default_config_path("charts"))
 
 
+class ActionSettings(BaseModel):
+    """Shared actions — reusable named action chains (see :mod:`liberty.actions`). ``[actions.<id>]``
+    per action; a missing file is fine (no shared actions → screens just use inline chains)."""
+
+    config_path: Path = Field(default_factory=lambda: _default_config_path("actions"))
+
+
 class DashboardSettings(BaseModel):
     """Dashboard layouts — Phase 8 slice 3 (see :mod:`liberty.dashboards`). A dashboard is a
     grid of widgets (chart, kpi, …) surfaced through the menu system like any other screen."""
@@ -311,12 +318,46 @@ class JobsSettings(BaseModel):
     enabled: bool = True
 
 
+class PostApplyStep(BaseModel):
+    """A reusable run-ONCE step (a library entry, keyed by ``id``) that a change-tracked screen can
+    reference via ``Screen.post_apply``. When a package is exported, the union of the step-ids of the
+    screens that CONTRIBUTED to it is resolved here and appended to the bundle — so a UDC change and a
+    security change on the same connector pull in different post-apply steps (the security screen's
+    remerge, not both). Executed once on the target after every change op applies. Mirrors the
+    apply-op shape so it reuses the apply engine's replay paths."""
+
+    id: str = Field(description="Unique id, referenced by ``Screen.post_apply``.")
+    type: Literal["call_plugin", "call_api", "run_query"] = Field(
+        default="call_plugin", description="How to run: a server plugin, an API endpoint, or a SQL query.",
+    )
+    connector: str | None = Field(
+        default=None, description="Target connector for call_api / run_query. Blank → the package's connector.",
+    )
+    target: str = Field(description="The callable (``module:function``), endpoint name, or query name to run.")
+    params: dict[str, Any] = Field(default_factory=dict, description="Static params passed to the call.")
+    label: str | None = Field(default=None, description="Display label in the apply report.")
+
+
+class ChangeSetsSettings(BaseModel):
+    """Change packages — capture tracked writes into reviewable, promotable change-sets (see
+    ``project_nomajde_change_packages``). ``pool`` defaults to ``"default"`` so the ``ly_change_*``
+    *control* tables land on the same pool as auth / nomaflow; point it at the framework Postgres
+    (e.g. ``nomasx1``) when the default pool is a connector you don't want control tables on.
+    ``enabled`` off → no capture (the screens' ``change_tracked`` flags become no-ops).
+    ``post_apply`` runs once on the target after a bundle of the matching ``application`` applies."""
+
+    pool: str = "default"
+    enabled: bool = True
+    post_apply: list[PostApplyStep] = Field(default_factory=list)
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     menus: MenuSettings = Field(default_factory=MenuSettings)
     screens: ScreenSettings = Field(default_factory=ScreenSettings)
     charts: ChartSettings = Field(default_factory=ChartSettings)
+    actions: ActionSettings = Field(default_factory=ActionSettings)
     dashboards: DashboardSettings = Field(default_factory=DashboardSettings)
     theme: ThemeSettings = Field(default_factory=ThemeSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
@@ -326,6 +367,7 @@ class Settings(BaseModel):
     license: LicenseSettings = Field(default_factory=LicenseSettings)
     jobs: JobsSettings = Field(default_factory=JobsSettings)
     reports: ReportsSettings = Field(default_factory=ReportsSettings)
+    changesets: ChangeSetsSettings = Field(default_factory=ChangeSetsSettings)
 
 
 def load_settings(

@@ -14,12 +14,12 @@ import { useWorkspace } from "./workspace/WorkspaceContext";
 // Settings is also a tab now (its <Settings> lazy-loads inside TabHost); /settings is a TabRoute
 // marker like the screen routes. AI assistant is no longer a routed page — it lives in a
 // right-side drawer toggled from the utility bar (see components/AiDrawer). The /chat URL is gone.
-const Nomaflow = lazy(() => import("./pages/Nomaflow"));
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
-const NomaflowSchedule = lazy(() => import("./pages/Nomaflow/Schedule"));
-const Reports = lazy(() => import("./pages/Reports"));
-// NomaflowRunDetail is mounted by TabHost (workspace tab kind 'nomaflow_run'), not directly
-// by a Route here — the `/nomaflow/runs/:runId` route uses TabRoute to add/activate the tab.
+// nomaflow Jobs / Schedule / Package / Changes / Integrity and the Reports list are hosted as
+// `page` workspace TABS (TabHost's path → component registry, src/tabs/pageTabs.ts), so clicking a
+// page menu item opens a tab instead of replacing the active tab's content. Their routes below are
+// TabRoute markers. The job editor stays a direct Outlet page (transient, reached from a button);
+// NomaflowRunDetail is its own `nomaflow_run` tab.
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
@@ -37,9 +37,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
 // ``target``.
 function TabRoute({ kind }: { kind: TabKind }) {
   const { connector = "", target = "", runId = "" } = useParams();
+  const { pathname } = useLocation();
   const { openOrActivate } = useTabs();
   useEffect(() => {
-    if (kind === "settings" || kind === "monitoring") {
+    if (kind === "page") {
+      // The route path IS the page tab's target (one tab per page path).
+      openOrActivate({ kind, connector: "", target: pathname });
+    } else if (kind === "settings" || kind === "monitoring") {
       openOrActivate({ kind, connector: "", target: "" });
     } else if (kind === "nomaflow_run" && runId) {
       openOrActivate({ kind, connector: "", target: runId });
@@ -48,7 +52,7 @@ function TabRoute({ kind }: { kind: TabKind }) {
     } else if (connector && target) {
       openOrActivate({ kind, connector, target });
     }
-  }, [kind, connector, target, runId, openOrActivate]);
+  }, [kind, connector, target, runId, pathname, openOrActivate]);
   return null;
 }
 
@@ -81,15 +85,21 @@ export default function App() {
       >
         <Route index element={<Home />} />
         <Route path="sql/:connector/:target" element={<TabRoute kind="sql" />} />
+        {/* A designed screen by id — ``:connector`` carries the screen's app, ``:target`` its id. */}
+        <Route path="screen/:connector/:target" element={<TabRoute kind="screen" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
         <Route path="settings" element={<TabRoute kind="settings" />} />
         <Route path="monitoring" element={<TabRoute kind="monitoring" />} />
-        {/* nomaflow feature area — Jobs list + Job editor + Schedule (NOMAFLOW-UI.md) */}
-        <Route path="nomaflow" element={<Nomaflow />} />
+        {/* nomaflow feature area — Jobs / Schedule / Package / Changes / Integrity open as `page`
+            tabs (TabHost renders them); only the Job editor is a direct Outlet page. */}
+        <Route path="nomaflow" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
         <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
-        <Route path="nomaflow/schedule" element={<NomaflowSchedule />} />
+        <Route path="nomaflow/schedule" element={<TabRoute kind="page" />} />
+        <Route path="nomaflow/package" element={<TabRoute kind="page" />} />
+        <Route path="nomaflow/changes" element={<TabRoute kind="page" />} />
+        <Route path="nomaflow/integrity" element={<TabRoute kind="page" />} />
         {/* nomaflow run detail is hosted by TabHost as a `nomaflow_run` workspace tab — the
             TabRoute marker just opens/activates the tab; the actual rendering happens in
             TabHost so the run-detail page sits in the tab strip alongside Job Runs / Users / … */}
@@ -97,7 +107,7 @@ export default function App() {
         {/* reports feature area — flat list of available reports + run dialog.
             Operators add a menu entry of type='page' target='/reports' to surface
             it in their sidebar; the API endpoints live in liberty/web/reports.py. */}
-        <Route path="reports" element={<Reports />} />
+        <Route path="reports" element={<TabRoute kind="page" />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

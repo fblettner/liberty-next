@@ -75,7 +75,7 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp } = useWorkspace()
+  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link
@@ -263,10 +263,14 @@ export default function ScreensBuilder() {
   }
   useEffect(load, [t])
 
-  // When the app changes, drop the search + restore (or clear) the screen selection.
+  // Drop the search ONLY when switching apps — not when ``doc`` changes. ``doc`` is rewritten on
+  // every edit / rename / save-reload, so keying the reset on it wiped the operator's filter each
+  // time they touched a screen (they had to re-type it constantly).
+  useEffect(() => { setQ('') }, [selApp])
+  // Keep the screen selection valid as the app or doc changes (e.g. after a delete / rename) —
+  // without clearing the search.
   useEffect(() => {
     if (!doc || !selApp) { setSelId(null); return }
-    setQ('')
     const ids = Object.keys(doc[selApp] ?? {})
     setSelId((cur) => (cur && doc[selApp]?.[cur] ? cur : ids[0] ?? null))
   }, [selApp, doc])
@@ -354,6 +358,18 @@ export default function ScreensBuilder() {
     openDesigner()
   }
   const renameScreen = async (app: string, oldId: string) => {
+    // Cross-file rename via the backend — it rewrites the screen key AND every reference
+    // (``screen`` menu leaves + intra-app nested_table / row_click_screen / navigate.screen).
+    // It operates on the SAVED files, so unsaved edits must be committed first (else the reload
+    // below would discard them). This replaces the old in-place id swap, which left menus dangling.
+    if (dirty) {
+      await modals.alert({
+        title: t('settings.rename.button', 'Rename'),
+        message: t('settings.screens.renameSaveFirst', 'Save your changes before renaming — the rename rewrites the saved files (screens + menus).'),
+        variant: 'danger',
+      })
+      return
+    }
     const next = (await modals.prompt({
       title: t('settings.rename.button', 'Rename'),
       message: t('settings.screens.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
@@ -361,9 +377,20 @@ export default function ScreensBuilder() {
       validate: (v) => validateScreenId(v.trim(), app, oldId),
     }))?.trim()
     if (!next || next === oldId) return
-    // Reuse updateScreen's id-rename machinery (also rewrites same-app sibling references to oldId).
-    const src = (doc?.[app]?.[oldId] ?? {}) as Record<string, unknown>
-    updateScreen(app, oldId, { ...src, id: next })
+    setBusy(true)
+    try {
+      const result = await api.post<{ files: Record<string, number>; total_refs: number }>(
+        '/admin/config/rename', { kind: 'screen', old_name: oldId, new_name: next, scope: app },
+      )
+      await api.post('/admin/reload')
+      refreshWorkspace()
+      setSelId(next)
+      load()
+      const filesTouched = Object.values(result.files).filter((n) => n > 0).length
+      setStatus(t('settings.connectors.renamedAcross', { from: oldId, to: next, refs: result.total_refs, files: filesTouched }))
+    } catch (e) {
+      setError(t('settings.connectors.renameFailed', { name: oldId, error: e instanceof ApiError ? e.message : String(e) }))
+    } finally { setBusy(false) }
   }
   // Clone now opens CloneWithDepsModal — operator gets the "also clone referenced
   // queries" checkbox + the live count of how many queries would be duplicated. The
@@ -583,12 +610,11 @@ export default function ScreensBuilder() {
         ScreenEditor with its 5 internal tabs (General / Queries / Dialog / Actions / Row menu).
         Portaled to document.body because Settings panels use backdrop-filter (the liquid-glass
         surface), which would otherwise clamp position:fixed to the panel bounds. The modal closes
-        on Overlay click, header X, and Escape (handler bound above). Edits flow through the same
-        updateScreen → setDoc chain as before; ScreensBuilder's Save bar at the bottom commits. */}
+        on header X and Escape (handler bound above) — NOT on backdrop click, so an outside click
+        can't discard in-progress edits. Edits flow through the same updateScreen → setDoc chain;
+        ScreensBuilder's Save bar at the bottom commits. */}
     {designerOpen && selScreen && selApp && selId && createPortal(
-      // Overlay click = Cancel (revert in-modal edits). Matches the dialog convention everywhere
-      // else in the app: clicking outside a modal cancels.
-      <Overlay onClick={cancelDesigner}>
+      <Overlay>
         <VisualBuilderModal $fullscreen={designerFullscreen} onClick={(e) => e.stopPropagation()}>
           <ModalHeader>
             {/* The header is two flex regions — title on the left, actions clustered on the

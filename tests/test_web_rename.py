@@ -36,6 +36,7 @@ from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
 from liberty.web.rename import (
     RenameError,
+    rename_action,
     rename_connector,
     rename_dictionary_entry,
     rename_lookup,
@@ -957,6 +958,142 @@ def test_rename_table_renames_all_slots_and_bindings(cfg_tree: dict[str, Path]) 
     assert rq["query"] == "accounts_put"
 
 
+def test_rename_table_new_shape_renames_table_name_and_bindings(tmp_path: Path) -> None:
+    """New sectioned shape: a table rename touches the single ``tables[].name`` field (slots
+    are synthesised, so there's nothing else to rewrite in connectors.toml) while the
+    ``<base>_<crud>`` cross-file bindings still flip to the new base."""
+    from liberty.web.rename import rename_table
+    conn = tmp_path / "connectors.toml"
+    scr = tmp_path / "screens.toml"
+    _write(conn, """
+        [pools.default]
+        url = "sqlite+aiosqlite:///:memory:"
+
+        [connectors.foo]
+        type = "sql"
+        pool = "default"
+
+        [[connectors.foo.tables]]
+        name = "users"
+        label = "Users"
+        description = "App users"
+        [connectors.foo.tables.get]
+        sql = "SELECT 1 AS id"
+        [connectors.foo.tables.put]
+        sql = "UPDATE users SET name = :name WHERE id = :id"
+        writable = true
+
+        [[connectors.foo.queries]]
+        name = "custom_report"
+        sql = "SELECT 2 AS id"
+    """)
+    _write(scr, """
+        [screens.foo.users]
+        connector = "foo"
+        read_query = "users_get"
+        update_query = "users_put"
+    """)
+    rename_table(
+        "users", "accounts", connector="foo",
+        connectors_path=conn, screens_path=scr,
+        menus_path=tmp_path / "menus.toml", dictionary_path=tmp_path / "dictionary.toml",
+    )
+    foo = tomllib.loads(conn.read_text())["connectors"]["foo"]
+    assert {t["name"] for t in foo["tables"]} == {"accounts"}
+    # slots ride along on the table — they're addressed by the synthesised base, not renamed.
+    assert "get" in foo["tables"][0] and "put" in foo["tables"][0]
+    # the custom query is untouched.
+    assert {q["name"] for q in foo["queries"]} == {"custom_report"}
+    s = tomllib.loads(scr.read_text())["screens"]["foo"]["users"]
+    assert s["read_query"] == "accounts_get" and s["update_query"] == "accounts_put"
+
+
+def test_rename_query_new_shape_walks_sequences_section(tmp_path: Path) -> None:
+    """A standalone query rename finds entries in any flat section — here a ``sequences`` entry
+    in the new sectioned shape — and rewrites its dictionary references."""
+    from liberty.web.rename import rename_query
+    conn = tmp_path / "connectors.toml"
+    dct = tmp_path / "dictionary.toml"
+    _write(conn, """
+        [pools.default]
+        url = "sqlite+aiosqlite:///:memory:"
+
+        [connectors.foo]
+        type = "sql"
+        pool = "default"
+
+        [[connectors.foo.tables]]
+        name = "users"
+        [connectors.foo.tables.get]
+        sql = "SELECT 1 AS id"
+
+        [[connectors.foo.sequences]]
+        name = "next_id"
+        sql = "SELECT COALESCE(MAX(id), 0) + 1 AS id FROM users"
+    """)
+    _write(dct, """
+        default_language = "en"
+        [connectors.foo.sequences.SEQ]
+        connector = "foo"
+        query = "next_id"
+    """)
+    rename_query(
+        "next_id", "next_user_id", connector="foo",
+        connectors_path=conn, screens_path=tmp_path / "screens.toml",
+        menus_path=tmp_path / "menus.toml", dictionary_path=dct,
+    )
+    foo = tomllib.loads(conn.read_text())["connectors"]["foo"]
+    assert {q["name"] for q in foo["sequences"]} == {"next_user_id"}
+    d = tomllib.loads(dct.read_text())
+    assert d["connectors"]["foo"]["sequences"]["SEQ"]["query"] == "next_user_id"
+
+
+def test_rename_screen_cascades_to_menus_and_screen_refs(tmp_path: Path) -> None:
+    """Renaming a screen id updates the screen key, the ``screen`` menu leaf targeting it, and
+    intra-app screen references (nested_table tab / row_click_screen / navigate.screen)."""
+    from liberty.web.rename import rename_screen
+    scr = tmp_path / "screens.toml"
+    menu = tmp_path / "menus.toml"
+    _write(scr, """
+        [screens.foo.users]
+        id = "users"
+        connector = "foo"
+        read_query = "users_get"
+        row_click_screen = "users_detail"
+
+        [screens.foo.users_detail]
+        id = "users_detail"
+        connector = "foo"
+        read_query = "users_get"
+
+        [[screens.foo.users.row_menu]]
+        id = "drill"
+        type = "navigate"
+        connector = "foo"
+        to = "users_get"
+        screen = "users_detail"
+    """)
+    _write(menu, """
+        [menus.foo]
+        label = "Foo"
+        [[menus.foo.items]]
+        id = "ud"
+        label = "User detail"
+        type = "screen"
+        target = "users_detail"
+    """)
+    rename_screen("users_detail", "user_profile", app="foo",
+                  screens_path=scr, menus_path=menu)
+    s = tomllib.loads(scr.read_text())["screens"]["foo"]
+    assert "user_profile" in s and "users_detail" not in s
+    assert s["user_profile"]["id"] == "user_profile"   # body id follows the key
+    assert s["users"]["row_click_screen"] == "user_profile"
+    nav = [a for a in s["users"]["row_menu"] if a.get("type") == "navigate"][0]
+    assert nav["screen"] == "user_profile"
+    m = tomllib.loads(menu.read_text())["menus"]["foo"]["items"][0]
+    assert m["target"] == "user_profile"
+
+
 def test_rename_query_rejects_collision(cfg_tree: dict[str, Path]) -> None:
     from liberty.web.rename import rename_query, RenameError
     with pytest.raises(RenameError):
@@ -1002,3 +1139,51 @@ def test_rename_query_is_connector_scoped(tmp_path: Path) -> None:
     s = tomllib.loads(scr.read_text())["screens"]
     assert s["foo"]["a"]["read_query"] == "list_all"
     assert s["bar"]["b"]["read_query"] == "list_get"                    # bar's ref untouched
+
+
+def test_rename_action_rewrites_key_and_screen_refs(tmp_path: Path) -> None:
+    """Renaming a shared action rewrites its actions.toml key AND every screen's call_action.ref
+    (+ refs in other shared actions). Without this, a rename would orphan every caller."""
+    a_path = tmp_path / "actions.toml"
+    s_path = tmp_path / "screens.toml"
+    _write(a_path, """
+        [actions.create_role]
+        label = "Create role"
+        [[actions.create_role.steps]]
+        id = "s"
+        type = "run_query"
+        connector = "jde"
+        query = "f0092_post"
+
+        [actions.wrapper]
+        [[actions.wrapper.steps]]
+        id = "w"
+        type = "call_action"
+        ref = "create_role"
+    """)
+    _write(s_path, """
+        [screens.jde.f1]
+        read_query = "g"
+        [[screens.jde.f1.on_insert]]
+        id = "a"
+        type = "call_action"
+        ref = "create_role"
+    """)
+    result = rename_action("create_role", "make_role", actions_path=a_path, screens_path=s_path)
+    assert result.files[str(a_path)] == 2          # the key + the wrapper's call_action ref
+    assert result.files[str(s_path)] == 1          # the screen's call_action ref
+    a = tomllib.loads(a_path.read_text())
+    s = tomllib.loads(s_path.read_text())
+    assert "create_role" not in a["actions"] and "make_role" in a["actions"]
+    assert a["actions"]["wrapper"]["steps"][0]["ref"] == "make_role"
+    assert s["screens"]["jde"]["f1"]["on_insert"][0]["ref"] == "make_role"
+
+
+def test_rename_action_rejects_existing_target(tmp_path: Path) -> None:
+    a_path = tmp_path / "actions.toml"
+    _write(a_path, """
+        [actions.a]
+        [actions.b]
+    """)
+    with pytest.raises(RenameError, match="already exists"):
+        rename_action("a", "b", actions_path=a_path, screens_path=None)
