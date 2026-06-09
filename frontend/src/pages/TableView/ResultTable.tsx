@@ -808,12 +808,18 @@ export function ResultTable({
       const keys = (keyColumns ?? []).filter(Boolean)
       const newSeeds: Record<string, unknown>[] = []
       const matched: DataRow[] = []
-      if (keys.length > 0) {
-        const keyOf = (o: Record<string, unknown>) => keys.map((k) => String(o[k] ?? '')).join(' ')
+      // Match on the key columns ACTUALLY PRESENT in the sheet. A hidden / derived key column (e.g.
+      // JDE FSSY, auto-populated from the object) isn't exported, so requiring ALL keys would make
+      // every imported row look new — and re-importing an existing row would then try to INSERT it
+      // and fail on a duplicate PK. Compare TRIMMED (JDE pads CHAR columns; the read trims them).
+      const norm = (v: unknown) => String(v ?? '').trim()
+      const matchKeys = keys.filter((k) => seeds.some((s) => k in s))
+      if (matchKeys.length > 0) {
+        const keyOf = (o: Record<string, unknown>) => matchKeys.map((k) => norm(o[k])).join(' ')
         const byKey = new Map<string, DataRow>()
         for (const row of result.rows) byKey.set(keyOf(row), row)
         for (const seed of seeds) {
-          const match = keys.every((k) => k in seed) ? byKey.get(keyOf(seed)) : undefined
+          const match = byKey.get(keyOf(seed))  // every matchKey is present in the seed by construction
           if (match) {  // overlay the imported fields onto the existing row as pending edits
             editsRef.current.set(match, { ...editsRef.current.get(match), ...seed })
             matched.push(match)
