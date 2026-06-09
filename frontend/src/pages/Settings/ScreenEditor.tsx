@@ -437,6 +437,13 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     }
     return m
   }, [value.columns])
+  // The screen's own columns as picker options — source/key candidates for a column group's FK
+  // binds. Used by the ColumnGroupsEditor (which lives on the Queries tab — a group defines a
+  // related-table JOIN + its write-back queries, so it's query structure, not display).
+  const groupColumnOptions = useMemo<SearchSelectOption[]>(
+    () => effectiveScreenColumns.filter((c) => c.name).map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name })),
+    [effectiveScreenColumns],
+  )
   // (Schema-mode sub-schemas + tab/field mutation helpers are gone — the visual builder owns
   // the dialog-tab/field editing experience now. ``setProp`` / ``dialog`` / ``setDialog`` /
   // ``createDialog`` remain since they're used by the Dialog tab's empty-state "Create dialog"
@@ -751,6 +758,49 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       {renderQueryField('update_query', false)}
       {renderQueryField('insert_query', false)}
       {renderQueryField('delete_query', false)}
+      {/* Seed the Columns tab from the read query's result columns (name + dd) in one click. Lives
+          here because it derives from the read query; only adds columns NOT already defined, so
+          it's safe to re-run after the query gains a column. */}
+      {(() => {
+        const cols = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
+        const have = new Set((cols as { name?: string }[]).map((c) => (c.name ?? '').toLowerCase()))
+        const missing = (screenColumns ?? []).filter((c) => c.name && !have.has(c.name.toLowerCase()))
+        return (
+          <Button
+            $size="sm" $variant="ghost"
+            disabled={!screenColumns || missing.length === 0}
+            onClick={() => setProp('columns', [
+              ...cols,
+              // Column names are stored UPPERCASE (write queries + dictionary use v1's uppercase
+              // ids; a Postgres read folds them lowercase, so normalize on import).
+              ...missing.map((c) => ({ name: c.name.toUpperCase(), ...(c.dd ? { dd: c.dd.toUpperCase() } : {}) })),
+            ])}
+            style={{ marginTop: 4, marginBottom: 8 }}
+          >
+            <Plus size={13} />{' '}
+            {!screenColumns
+              ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
+              : missing.length === 0
+                ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
+                : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
+          </Button>
+        )
+      })()}
+      {/* Column groups — related 1:1 tables JOINed into the read query, each with its own
+          write-back update/insert/delete queries. This is query structure (a join + its CRUD), so
+          it lives here, not on the Columns tab; columns are tagged into a group via their "Group"
+          field in the column list. */}
+      <GroupsHr />
+      <Sub>{t('settings.screens.editor.columnGroupsHint',
+        'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) on the Columns tab.')}</Sub>
+      <ColumnGroupsEditor
+        value={Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []}
+        onChange={(next) => setProp('column_groups', next.length ? next : null)}
+        screenConnector={effectiveConnector}
+        connectorOptions={connectorOptions}
+        columnOptions={groupColumnOptions}
+        columnsByGroup={columnsByGroup}
+      />
     </>
   )
 
@@ -761,57 +811,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // column hint and its nested rules.
   const renderColumns = (): ReactNode => {
     const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
-    const currentGroups = Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []
-    // Source / key candidates for the group binds + key_columns — the screen's own columns.
-    const columnOptions: SearchSelectOption[] = effectiveScreenColumns
-      .filter((c) => c.name)
-      .map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name }))
     return (
       <>
-        {/* Related-table write-back groups (1:1) FIRST — define them, then tag columns with a
-            group in the list below. Each group names its update/insert queries + the FK binds and
-            shows which columns are attached, so the column→table mapping is visible at a glance. */}
-        <Sub>{t('settings.screens.editor.columnGroupsHint',
-          'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) in the column list below.')}</Sub>
-        <ColumnGroupsEditor
-          value={currentGroups}
-          onChange={(next) => setProp('column_groups', next.length ? next : null)}
-          screenConnector={effectiveConnector}
-          connectorOptions={connectorOptions}
-          columnOptions={columnOptions}
-          columnsByGroup={columnsByGroup}
-        />
-        <GroupsHr />
-        <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
-        {/* Import columns from the read query — seed the list from the query's result columns
-            (name + dd) in one click instead of adding each by hand. Only adds columns NOT already
-            defined, so it's safe to re-run after the query gains a column. */}
-        {(() => {
-          const have = new Set(
-            (currentColumns as { name?: string }[]).map((c) => (c.name ?? '').toLowerCase()),
-          )
-          const missing = (screenColumns ?? []).filter((c) => c.name && !have.has(c.name.toLowerCase()))
-          return (
-            <Button
-              $size="sm" $variant="ghost"
-              disabled={!screenColumns || missing.length === 0}
-              onClick={() => setProp('columns', [
-                ...(currentColumns as unknown[]),
-                // Column names are stored UPPERCASE (the write queries + dictionary use v1's
-                // uppercase ids; a Postgres read folds them lowercase, so normalize on import).
-                ...missing.map((c) => ({ name: c.name.toUpperCase(), ...(c.dd ? { dd: c.dd.toUpperCase() } : {}) })),
-              ])}
-              style={{ marginBottom: 8 }}
-            >
-              <Plus size={13} />{' '}
-              {!screenColumns
-                ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
-                : missing.length === 0
-                  ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
-                  : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
-            </Button>
-          )
-        })()}
+        {/* Just the column list + drill. The "import from read query" button lives on the Queries
+            tab (it seeds from the read query), and column GROUPS live there too. */}
         {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
             ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
             COLUMN_GROUPS for the per-column ``group`` picker. */}

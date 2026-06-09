@@ -6,10 +6,8 @@
 // valid, and a re-fetch of the same root doesn't reset where you are. Reset to the top when the root
 // `label` changes (= a different thing is being edited).
 import { useEffect, useState } from 'react'
-import styled from '@emotion/styled'
-import { ChevronRight, ArrowLeft, Layers } from 'lucide-react'
 import { SchemaForm, type JsonSchema, type NavSeg } from './SchemaForm'
-import { colors, fontSize, fonts, radius } from '../theme'
+import { SubNav } from './SubNav'
 
 // minimal $ref / anyOf peeling, mirroring SchemaForm's `effective` (kept local to avoid exporting it)
 function effective(s: JsonSchema | undefined, defs: Record<string, JsonSchema>): JsonSchema {
@@ -31,27 +29,6 @@ export interface NavRoot {
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
 }
-
-const Crumbs = styled.nav`
-  display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin-bottom: 14px;
-  padding: 7px 10px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-  & > .lead { color: ${colors.text.muted}; margin-right: 4px; display: inline-flex; }
-`
-const Crumb = styled.button<{ $current?: boolean }>`
-  border: none; background: none; padding: 3px 6px; border-radius: ${radius.sm};
-  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
-  font-weight: ${({ $current }) => ($current ? 600 : 400)};
-  color: ${({ $current }) => ($current ? colors.text.primary : colors.text.muted)};
-  cursor: ${({ $current }) => ($current ? 'default' : 'pointer')};
-  ${({ $current }) => (!$current ? `&:hover { color: ${colors.blue.main}; background: var(--hover-subtle); }` : '')}
-`
-const Sep = styled(ChevronRight)`flex-shrink: 0; color: ${colors.text.muted}; opacity: 0.4; margin: 0;`
-const BackBtn = styled.button`
-  margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
-  border: 1px solid ${colors.border}; background: ${colors.bg.card}; color: ${colors.text.secondary};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
-  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
-`
 
 export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }: {
   root: NavRoot
@@ -101,18 +78,21 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
   const cur = levels[levels.length - 1]
   const go = (depth: number) => setPath((p) => p.slice(0, depth))   // depth 0 = root
 
+  // Back lands on the parent level; the breadcrumb gives the full context. Both live in the pinned,
+  // left-aligned SubNav so they never scroll out of view inside a long form.
+  const parentLabel = levels.length > 1 ? levels[levels.length - 2].label : undefined
+  const crumbs = levels.map((lv, i) => ({
+    label: lv.label,
+    onClick: i < levels.length - 1 ? () => go(i) : undefined,
+  }))
+
   return (
     <div>
-      <Crumbs aria-label="path">
-        <span className="lead" title="you're editing one item of the config tree"><Layers size={13} /></span>
-        {levels.map((lv, i) => (
-          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-            {i > 0 && <Sep size={13} />}
-            <Crumb type="button" $current={i === levels.length - 1} onClick={() => i < levels.length - 1 && go(i)}>{lv.label}</Crumb>
-          </span>
-        ))}
-        {path.length > 0 && <BackBtn type="button" onClick={() => go(path.length - 1)}><ArrowLeft size={13} /> back</BackBtn>}
-      </Crumbs>
+      <SubNav
+        onBack={path.length > 0 ? () => go(path.length - 1) : undefined}
+        backLabel={parentLabel}
+        crumbs={crumbs}
+      />
       <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery} />
     </div>
   )
