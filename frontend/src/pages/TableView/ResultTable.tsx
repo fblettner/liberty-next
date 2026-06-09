@@ -785,7 +785,14 @@ export function ResultTable({
       const byHeader = new Map<string, string>() // normalized header text → result column name
       for (const c of result.columns) {
         const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
-        add(c.name); add(c.label); add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+        add(c.name)
+        // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
+        // description. The description isn't unique (two codes can share one), and both kinds now
+        // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
+        // (the export emits both "X (ID)" and "X"; the latter holds the description and was
+        // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
+        if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
+        add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
       }
       const seeds = rows.map((r) => {
         const out: Record<string, unknown> = {}
@@ -1169,30 +1176,66 @@ export function ResultTable({
         continue
       }
 
+      if (c.rule?.kind === 'enum') {
+        // Same shape as a LOOKUP: a "(ID)" column carrying the raw CODE (editable / exported /
+        // imported) plus a derived label column (the description — read-only). The grid otherwise
+        // never shows the code, so an export couldn't round-trip; this makes ENUM behave exactly
+        // like LOOKUP — resolved by code, never by the (non-unique) description.
+        const emap = enumMaps.get(c.name)   // code → label
+        const fmtOpt = (v: { value: string; label: string }) =>
+          v.value && v.label && v.value !== v.label ? `${v.value} — ${v.label}` : (v.label || v.value)
+        const optsByCode = c.rule.values.map((v) => ({ value: v.value, label: fmtOpt(v) }))
+        const optsByLabel = c.rule.values.map((v) => ({ value: v.label || v.value, label: fmtOpt(v) }))
+        out.push({
+          id: c.name,
+          header: colHeader(c) + idSuffix,
+          accessorFn: (row) => row[c.name],
+          size: c.width ?? undefined,
+          ...filterPropsFor('enum', optsByCode, align),
+          cell: (info) => {
+            const g = grouped(info, align); if (g) return g
+            if (editMode && !isGroupRow(info)) return editCellFor(c, info)
+            const v = cur(info.row.original as DataRow, c.name)
+            const { text, isNull } = ruleCell(v, { ...c, rule: undefined }, undefined, undefined)
+            return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
+          },
+        })
+        out.push({
+          id: `${c.name}__enum`,
+          header: colHeader(c),
+          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (emap?.get(String(v)) ?? String(v)) },
+          ...filterPropsFor('enum', optsByLabel),
+          cell: (info) => {
+            const g = grouped(info, align); if (g) return g
+            // Derived from the "(ID)" column — read-only; reflects the current (possibly edited) code.
+            const v = cur(info.row.original as DataRow, c.name)
+            const { text, kind, isNull } = ruleCell(v, c, emap, undefined)
+            return span(text, isNull ? 'null' : kind, align, isNull ? undefined : String(v ?? ''))
+          },
+        })
+        continue
+      }
+
       const kind = filterKindOf(c)
-      const enumMapForCol = enumMaps.get(c.name)
-      const enumOptions = c.rule?.kind === 'enum' ? c.rule.values.map((v) => ({ value: v.label, label: v.label })) : undefined
       out.push({
         id: c.name,
         header: colHeader(c),
         accessorFn: (row) => {
           const v = row[c.name]
           if (c.rule?.kind === 'boolean') return v === null || v === undefined ? null : v === c.rule.true_value ? 'true' : 'false'
-          if (c.rule?.kind === 'enum' && v != null) return enumMapForCol?.get(String(v)) ?? v
           return v
         },
         size: c.width ?? undefined,
-        ...filterPropsFor(kind, enumOptions, align),
+        ...filterPropsFor(kind, undefined, align),
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
           if (editMode && !isGroupRow(info)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
-          const { text, kind: rk, isNull } = ruleCell(v, c, enumMapForCol, undefined)
-          // Hover title: for ENUM cells, the raw code (the visible text is the label); for
-          // BOOLEAN cells (now rendered as a colored bullet), the localized "yes"/"no" so the
-          // value stays accessible to keyboard / screen-reader / colorblind users.
+          // Non-enum / non-lookup here (those are split out above), so no enum map is needed.
+          const { text, kind: rk, isNull } = ruleCell(v, c, undefined, undefined)
+          // Hover title: BOOLEAN cells (rendered as a colored bullet) get the localized "yes"/"no"
+          // so the value stays accessible to keyboard / screen-reader / colorblind users.
           const titleVal = isNull ? undefined
-            : rk === 'enum' ? String(v ?? '')
             : rk === 'boolean-true' ? t('common.true')
             : rk === 'boolean-false' ? t('common.false')
             : undefined
