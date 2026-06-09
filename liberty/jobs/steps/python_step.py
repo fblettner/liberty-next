@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from liberty.config import Settings
 from liberty.connectors import ConnectorRegistry
@@ -54,7 +55,9 @@ class PythonStepExecutor:
     """Executes one ``python`` step. Stateless — same instance can run any
     number of steps concurrently; each resolves its own callable."""
 
-    def __init__(self, connectors: ConnectorRegistry, *, settings: Settings | None = None) -> None:
+    def __init__(
+        self, connectors: ConnectorRegistry, *, settings: Settings | None = None, changesets: Any = None,
+    ) -> None:
         self._connectors = connectors
         # *settings* is optional so existing tests (which built the executor with just a
         # registry) keep working; when present, callables that declare a ``settings``
@@ -62,6 +65,10 @@ class PythonStepExecutor:
         # operate on config files (clone-app, future config-management steps) and need
         # to know paths like settings.connectors.config_path.
         self._settings = settings
+        # The change-package DB — injected for callables declaring a ``changesets`` param (e.g. a
+        # batch re-merge job that reads the active draft package's touched roles). None when the
+        # deployment has change packages disabled / a test built the executor without it.
+        self._changesets = changesets
 
     async def execute(self, step: Step, ctx: RunContext) -> StepResult:
         if step.type is not StepType.PYTHON:
@@ -88,6 +95,7 @@ class PythonStepExecutor:
                     # ``settings`` only when the executor was built with one (build_executors passes
                     # it; bare-registry tests leave it None — and the invoker skips None injections).
                     ("settings", self._settings),
+                    ("changesets", self._changesets),
                 ),
             )
         except PluginInvocationError as exc:

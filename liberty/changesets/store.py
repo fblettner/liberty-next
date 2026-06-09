@@ -146,6 +146,31 @@ async def list_packages(session: AsyncSession, *, application: str | None = None
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def active_draft_entity_key_values(session: AsyncSession, application: str) -> list[str]:
+    """Distinct ``entity_key`` VALUES across the application's active DRAFT package's entries — the
+    records (e.g. role ids) touched by the accumulated, not-yet-promoted changes. Powers a batch
+    job that wants "what changed since the last promotion" (e.g. the JDE security re-merge: every
+    captured change is stamped with its role, so this is the set of roles to act on). Empty when
+    there's no draft or its entries carry no key. Only non-empty string values are returned —
+    numeric / null key parts (an audit seq, a date) aren't records to act on."""
+    pkg_id = (await session.execute(
+        select(ChangePackage.id)
+        .where(ChangePackage.application == application, ChangePackage.status == PackageStatus.DRAFT.value)
+        .order_by(ChangePackage.created_at.desc())
+    )).scalars().first()
+    if pkg_id is None:
+        return []
+    keys = (await session.execute(
+        select(ChangeEntry.entity_key).where(ChangeEntry.package_id == pkg_id)
+    )).scalars().all()
+    out: set[str] = set()
+    for ek in keys:
+        for v in (ek or {}).values():
+            if isinstance(v, str) and v.strip():
+                out.add(v.strip())
+    return sorted(out)
+
+
 async def get_package(session: AsyncSession, package_id: str) -> ChangePackage | None:
     """One package with its entries eager-loaded (for the detail view)."""
     res = await session.execute(

@@ -90,6 +90,10 @@ async def run_plugin(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown plugin callable: {ref}")
 
     settings = getattr(request.app.state, "settings", None)
+    # The change-package DB — injected for callables that declare a ``changesets`` param (e.g. a
+    # batch re-merge that reads the active draft package's touched roles). Only injected when the
+    # callable asks for it and it's available (the invoker skips None).
+    changesets_db = getattr(request.app.state, "changesets_db", None)
     ctx = RunContext(
         run_id=f"action:{principal.username}",
         job_id="__action__",
@@ -99,7 +103,7 @@ async def run_plugin(
         result: StepResult = await invoke_callable(
             ref,
             dict(params),
-            injections=(("connectors", connectors), ("ctx", ctx), ("settings", settings)),
+            injections=(("connectors", connectors), ("ctx", ctx), ("settings", settings), ("changesets", changesets_db)),
         )
     except PluginInvocationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

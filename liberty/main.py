@@ -189,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from liberty.jobs.wiring import build_nomaflow, shutdown_nomaflow
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
+            changesets=app.state.changesets_db,
         )
         # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
         # config TOMLs reload the matching subsystem without an explicit Settings →

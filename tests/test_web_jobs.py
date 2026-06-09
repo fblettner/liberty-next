@@ -146,7 +146,7 @@ def _record_kwargs(**kw) -> int:
     (filled when ``ctx`` is injected) — multi-step jobs use this one so each
     step's kwargs are captured separately."""
     ctx = kw.get("ctx")
-    filtered = {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings")}
+    filtered = {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings", "changesets")}
     RECORDED_KWARGS.clear()
     RECORDED_KWARGS.update(filtered)
     if ctx is not None:

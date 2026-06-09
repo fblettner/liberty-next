@@ -233,3 +233,26 @@ async def test_action_write_stamps_firing_row_key_via_override() -> None:
         assert e.entity == "roles" and e.entity_key == {"AUUSER": "DEMO"}
         assert e.new_values == {"SOME_COL": "x"}
         assert e.source_action == "import security"   # → the change view groups/names by it
+
+
+@pytest.mark.asyncio
+async def test_active_draft_entity_key_values_returns_touched_roles() -> None:
+    """The batch re-merge reads the active draft package's touched roles — the distinct string
+    entity_key values across its entries (numeric key parts like a julian date are excluded)."""
+    db = await _db()
+    # a relationship write (key = parent role), an action-stamped write (key_override = the role),
+    # and another role with a numeric key part that must not surface as a "role".
+    await capture_write(db, connector="jdedwards", query="f95921_post", statement_type="INSERT",
+                        params={"RLTOROLE": "DEMO"}, user="u", key_columns=["RLTOROLE"],
+                        read_query=None, entity="roles")
+    await capture_write(db, connector="jdedwards", query="duplicate_security_workbench",
+                        statement_type="INSERT", params={"X": "y"}, user="u", key_columns=[],
+                        read_query=None, entity="roles", key_override={"AUUSER": "DEMO"})
+    await capture_write(db, connector="jdedwards", query="f95921_post", statement_type="INSERT",
+                        params={"RLTOROLE": "DEMO2", "RLEFFDATE": 126000}, user="u",
+                        key_columns=["RLTOROLE", "RLEFFDATE"], read_query=None, entity="roles")
+    async with db.session() as s:
+        roles = await store.active_draft_entity_key_values(s, "jdedwards")
+        # a different application has no draft → empty
+        assert await store.active_draft_entity_key_values(s, "other") == []
+    assert roles == ["DEMO", "DEMO2"]   # distinct + sorted; the numeric 126000 is not a role

@@ -83,6 +83,10 @@ class NomaflowComponents:
     runner: JobRunner
     scheduler: JobScheduler
     db: JobDatabase
+    # The change-package DB (or None) — kept so refresh_executors re-injects it after a connector
+    # hot-reload rebuilds the executors (it doesn't change on reload, but the rebuilt executors
+    # would otherwise lose the injection).
+    changesets: Any | None = None
 
 
 def build_executors(
@@ -90,6 +94,7 @@ def build_executors(
     *,
     settings: Settings | None = None,
     registry: Any | None = None,
+    changesets: Any | None = None,
 ) -> dict[StepType, StepExecutor]:
     """The default executor wiring — one per implemented :class:`StepType`.
 
@@ -113,7 +118,7 @@ def build_executors(
     out: dict[StepType, StepExecutor] = {
         StepType.SQL_QUERY: SqlQueryExecutor(connectors),
         StepType.SQL_COPY: SqlCopyExecutor(connectors),
-        StepType.PYTHON: PythonStepExecutor(connectors, settings=settings),
+        StepType.PYTHON: PythonStepExecutor(connectors, settings=settings, changesets=changesets),
         StepType.LDAP_SYNC: LdapSyncExecutor(connectors),
         StepType.HTTP: HttpStepExecutor(),
     }
@@ -146,7 +151,9 @@ def refresh_executors(
     (``liberty.web.hot_reload._reload_connectors``). The retention sweep + scheduler
     don't need rebuilding — they look up pools by name through the new registry
     on every fire."""
-    new = build_executors(connectors, settings=settings, registry=components.registry)
+    new = build_executors(
+        connectors, settings=settings, registry=components.registry, changesets=components.changesets,
+    )
     for step_type, executor in new.items():
         components.runner.add_executor(step_type, executor)
 
@@ -156,6 +163,7 @@ async def build_nomaflow(
     connectors: ConnectorRegistry,
     *,
     sio_layer: Any | None = None,
+    changesets: Any | None = None,
 ) -> NomaflowComponents | None:
     """Build the nomaflow stack from a (settings, connectors) pair, or return
     None if the deployment isn't carrying enough to start it.
@@ -234,7 +242,7 @@ async def build_nomaflow(
     # Order matters — the runner needs the executor map at __init__ time, but
     # the call_job executor needs the runner to spawn children. The
     # post-construction attach_runner is the bridge.
-    executors = build_executors(connectors, settings=settings, registry=registry)
+    executors = build_executors(connectors, settings=settings, registry=registry, changesets=changesets)
     runner = JobRunner(db, executors, broadcaster=broadcaster)
     call_job_exec = executors.get(StepType.CALL_JOB)
     if isinstance(call_job_exec, CallJobExecutor):
@@ -250,7 +258,7 @@ async def build_nomaflow(
     else:
         _log.info("nomaflow.wiring scheduler disabled via [jobs] enabled=false")
 
-    return NomaflowComponents(registry=registry, runner=runner, scheduler=scheduler, db=db)
+    return NomaflowComponents(registry=registry, runner=runner, scheduler=scheduler, db=db, changesets=changesets)
 
 
 async def shutdown_nomaflow(components: NomaflowComponents | None) -> None:
