@@ -14,7 +14,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from liberty.changesets.models import AppliedBundle, ChangeEntry, ChangePackage, EntryStatus, Operation, PackageStatus
+from liberty.changesets.models import (
+    AppliedBundle,
+    ChangeEntry,
+    ChangePackage,
+    EntryStatus,
+    Operation,
+    PackageKind,
+    PackageStatus,
+)
 
 
 def _utcnow() -> datetime:
@@ -22,11 +30,14 @@ def _utcnow() -> datetime:
 
 
 async def get_active_package(session: AsyncSession, application: str) -> ChangePackage | None:
-    """The open draft for *application*, or ``None`` if there isn't one yet."""
+    """The open AUTO draft for *application* (the capture target), or ``None`` if there isn't one
+    yet. Scoped to ``kind='auto'`` so a custom holding package — also a draft — is never returned
+    as the capture target."""
     res = await session.execute(
         select(ChangePackage).where(
             ChangePackage.application == application,
             ChangePackage.status == PackageStatus.DRAFT.value,
+            ChangePackage.kind == PackageKind.AUTO.value,
         )
     )
     return res.scalar_one_or_none()
@@ -54,6 +65,130 @@ async def get_or_create_active_package(
     session.add(pkg)
     await session.flush()  # assign pkg.id before entries reference it
     return pkg
+
+
+async def create_custom_package(
+    session: AsyncSession, application: str, *, name: str, description: str | None = None,
+    user: str | None = None,
+) -> ChangePackage:
+    """Create an operator-managed CUSTOM holding package (``kind='custom'``, status ``draft``).
+    Unlike the auto package it never receives auto-captures — the operator moves entries into it to
+    park work for a future promotion — but it has the same full lifecycle (submit → approve →
+    export). Many custom packages may coexist with the one auto draft per application."""
+    pkg = ChangePackage(
+        application=application,
+        name=name.strip() or f"Custom · {application}",
+        status=PackageStatus.DRAFT.value,
+        kind=PackageKind.CUSTOM.value,
+        description=(description or None),
+        created_by=user,
+    )
+    session.add(pkg)
+    await session.flush()
+    return pkg
+
+
+async def rename_package(
+    session: AsyncSession, package_id: str, *, name: str | None = None, description: str | None = None,
+) -> ChangePackage | None:
+    """Rename / re-describe a package. Returns None if not found; raises :class:`LifecycleError` if
+    it isn't a draft (a submitted/approved package is frozen). ``name``/``description`` are applied
+    only when provided (``None`` leaves the field untouched; pass ``""`` to clear a description)."""
+    pkg = await session.get(ChangePackage, package_id)
+    if pkg is None:
+        return None
+    if pkg.status != PackageStatus.DRAFT.value:
+        raise LifecycleError(f"can only rename a draft package (this one is {pkg.status!r})")
+    if name is not None and name.strip():
+        pkg.name = name.strip()
+    if description is not None:
+        pkg.description = description.strip() or None
+    return pkg
+
+
+def _union_post_apply(dest: ChangePackage, source_ids: list[str] | None) -> None:
+    """Union *source_ids* into *dest*'s ``post_apply_ids`` (dedup, order-preserving). Moving entries
+    that may depend on a run-once step (e.g. a security re-merge) must carry that step to the
+    package they land in, so exporting the destination on its own still runs it. Over-includes
+    rather than miss — post-apply steps are idempotent run-once."""
+    if not source_ids:
+        return
+    merged = list(dest.post_apply_ids or [])
+    for pid in source_ids:
+        if pid not in merged:
+            merged.append(pid)
+    dest.post_apply_ids = merged
+
+
+async def move_entries(
+    session: AsyncSession, *, entry_ids: list[str], dest_package_id: str,
+) -> tuple[ChangePackage, int]:
+    """Move the given entries into *dest_package_id*, re-sequenced at the tail of the destination
+    (relative capture order preserved). Returns ``(dest_package, moved_count)``.
+
+    Raises :class:`LifecycleError` if the destination isn't a draft, if a source entry's package
+    isn't a draft (can't edit a frozen package), if an entry was already applied/conflicted, or if
+    source and destination span different applications (a package is scoped to one application —
+    its key/connector/post-apply assumptions don't carry across). Unknown ids are ignored; moving
+    zero entries is a no-op that still returns the destination."""
+    dest = await session.get(ChangePackage, dest_package_id)
+    if dest is None:
+        raise LifecycleError(f"destination package {dest_package_id!r} not found")
+    if dest.status != PackageStatus.DRAFT.value:
+        raise LifecycleError(f"can only move entries into a draft package (destination is {dest.status!r})")
+
+    entries: list[ChangeEntry] = []
+    for eid in entry_ids:
+        e = await session.get(ChangeEntry, eid)
+        if e is None:
+            continue
+        if e.package_id == dest.id:
+            continue  # already there — skip silently
+        if e.status in (EntryStatus.APPLIED.value, EntryStatus.CONFLICT.value):
+            raise LifecycleError(f"cannot move an entry that is {e.status!r}")
+        src = await session.get(ChangePackage, e.package_id)
+        if src is not None and src.status != PackageStatus.DRAFT.value:
+            raise LifecycleError(f"can only move entries out of a draft package (source is {src.status!r})")
+        if src is not None and src.application != dest.application:
+            raise LifecycleError(
+                f"cannot move entries across applications ({src.application!r} → {dest.application!r})"
+            )
+        entries.append(e)
+        if src is not None:
+            _union_post_apply(dest, src.post_apply_ids)
+
+    if not entries:
+        return dest, 0
+
+    next_seq = int(await session.scalar(
+        select(func.coalesce(func.max(ChangeEntry.seq), 0) + 1).where(ChangeEntry.package_id == dest.id)
+    ) or 1)
+    for e in sorted(entries, key=lambda x: x.seq):
+        e.package_id = dest.id
+        e.seq = next_seq
+        next_seq += 1
+    return dest, len(entries)
+
+
+async def delete_entries(session: AsyncSession, *, entry_ids: list[str]) -> int:
+    """Permanently remove entries from their package (unlike ``exclude``, which only skips on
+    export). Use to drop changes that should never promote nor be kept — e.g. a role created then
+    deleted in the same session (net no-op). Returns the number deleted. Raises
+    :class:`LifecycleError` if an entry's package isn't a draft or the entry was applied/conflicted.
+    Only the log row is removed; the row already written to its own table is untouched."""
+    deleted = 0
+    for eid in entry_ids:
+        e = await session.get(ChangeEntry, eid)
+        if e is None:
+            continue
+        if e.status in (EntryStatus.APPLIED.value, EntryStatus.CONFLICT.value):
+            raise LifecycleError(f"cannot delete an entry that is {e.status!r}")
+        pkg = await session.get(ChangePackage, e.package_id)
+        if pkg is not None and pkg.status != PackageStatus.DRAFT.value:
+            raise LifecycleError(f"can only delete entries of a draft package (this one is {pkg.status!r})")
+        await session.delete(e)
+        deleted += 1
+    return deleted
 
 
 async def record_entry(

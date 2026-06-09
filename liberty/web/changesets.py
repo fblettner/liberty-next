@@ -70,6 +70,7 @@ def _pkg_summary(p: Any, entry_count: int) -> dict[str, Any]:
         "application": p.application,
         "name": p.name,
         "status": p.status,
+        "kind": getattr(p, "kind", "auto") or "auto",
         "description": p.description,
         "created_by": p.created_by,
         "created_at": _iso(p.created_at),
@@ -122,6 +123,52 @@ async def list_changesets(request: Request, _: Superuser, application: str | Non
         pkgs = await store.list_packages(session, application=application)
         counts = await _entry_counts(session, [p.id for p in pkgs])
         return {"packages": [_pkg_summary(p, counts.get(p.id, 0)) for p in pkgs]}
+
+
+class CreatePackageBody(BaseModel):
+    """Create a custom (operator-managed) holding package for an application."""
+
+    application: str
+    name: str
+    description: str | None = None
+
+
+@router.post("", summary="Create a custom change package")
+async def create_changeset(body: CreatePackageBody, request: Request, principal: Superuser) -> dict[str, Any]:
+    """Open a CUSTOM holding package for ``application``. It never receives auto-captures — the
+    operator moves entries into it to park work for a future promotion — but has the full lifecycle.
+    Many custom packages may coexist with the one auto draft per application."""
+    if not body.application.strip() or not body.name.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="application and name are required")
+    db = _db(request)
+    async with db.session() as session:
+        pkg = await store.create_custom_package(
+            session, body.application.strip(), name=body.name, description=body.description, user=principal.username,
+        )
+        await session.flush()
+        return {**_pkg_summary(pkg, 0), "entries": []}
+
+
+class RenamePackageBody(BaseModel):
+    """Rename / re-describe a draft package. ``None`` leaves a field untouched."""
+
+    name: str | None = None
+    description: str | None = None
+
+
+@router.patch("/{package_id}", summary="Rename a draft change package")
+async def rename_changeset(package_id: str, body: RenamePackageBody, request: Request, _: Superuser) -> dict[str, Any]:
+    db = _db(request)
+    async with db.session() as session:
+        try:
+            pkg = await store.rename_package(session, package_id, name=body.name, description=body.description)
+        except store.LifecycleError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if pkg is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"change package {package_id!r} not found")
+        await session.flush()
+        full = await store.get_package(session, package_id)
+        return {**_pkg_summary(full, len(full.entries)), "entries": [_entry_dict(e) for e in full.entries]}
 
 
 def _applied_dict(a: Any) -> dict[str, Any]:
@@ -273,6 +320,46 @@ async def exclude_entry(package_id: str, entry_id: str, request: Request, _: Sup
 @router.post("/{package_id}/entries/{entry_id}/include", summary="Re-include a previously excluded entry")
 async def include_entry(package_id: str, entry_id: str, request: Request, _: Superuser) -> dict[str, Any]:
     return await _set_excluded(request, entry_id, excluded=False)
+
+
+class EntryIdsBody(BaseModel):
+    """A set of entry ids to act on (move / delete) — one or many."""
+
+    entry_ids: list[str] = []
+
+
+@router.post("/{package_id}/entries/move-in", summary="Move entries into this package")
+async def move_entries_in(package_id: str, body: EntryIdsBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Move the given entries (from their current packages) INTO ``package_id``, re-sequenced at its
+    tail. ``package_id`` is the DESTINATION. Both source and destination must be drafts of the same
+    application. Returns the destination package detail with a ``moved`` count."""
+    db = _db(request)
+    async with db.session() as session:
+        try:
+            dest, moved = await store.move_entries(session, entry_ids=body.entry_ids, dest_package_id=package_id)
+        except store.LifecycleError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        await session.flush()
+        full = await store.get_package(session, dest.id)
+        return {**_pkg_summary(full, len(full.entries)), "entries": [_entry_dict(e) for e in full.entries], "moved": moved}
+
+
+@router.post("/{package_id}/entries/delete", summary="Permanently delete entries from a package")
+async def delete_entries(package_id: str, body: EntryIdsBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Permanently remove the given entries from their (draft) package — unlike ``exclude`` (which
+    only skips on export), a deleted entry is gone, so a later re-export can't re-include it. Only
+    the package log rows go; the rows already written to their own tables are untouched."""
+    db = _db(request)
+    async with db.session() as session:
+        try:
+            deleted = await store.delete_entries(session, entry_ids=body.entry_ids)
+        except store.LifecycleError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        await session.flush()
+        full = await store.get_package(session, package_id)
+        if full is None:
+            return {"deleted": deleted, "entries": []}
+        return {**_pkg_summary(full, len(full.entries)), "entries": [_entry_dict(e) for e in full.entries], "deleted": deleted}
 
 
 # ── export (Phase 3) ─────────────────────────────────────────────────────────────────────────

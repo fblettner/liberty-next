@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from liberty.changesets.db import ChangeSetDatabase
 from liberty.changesets import store
-from liberty.changesets.models import EntryStatus, Operation, PackageStatus
+from liberty.changesets.models import EntryStatus, Operation, PackageKind, PackageStatus
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 
@@ -176,3 +176,106 @@ async def test_applied_bundle_log_record_find_list() -> None:
         assert [r.name for r in rows] == ["Package 2 · jdedwards", "Package 1 · jdedwards"]
         assert rows[0].status == "partial"
         assert await store.list_applied_bundles(s, application="other") == []
+
+
+# ── custom packages + move/delete entries ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_custom_package_coexists_with_auto_draft() -> None:
+    """A custom holding package is a draft too, but kind='custom' — so it doesn't trip the
+    one-auto-draft-per-application invariant, and get_active_package never returns it."""
+    db = await _db()
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT")
+    async with db.session() as s:
+        auto = await store.get_active_package(s, "jde")
+        assert auto is not None and auto.kind == PackageKind.AUTO.value
+        custom = await store.create_custom_package(s, "jde", name="Future work", user="op")
+        assert custom.kind == PackageKind.CUSTOM.value and custom.status == PackageStatus.DRAFT.value
+        assert custom.id != auto.id
+    # the auto-capture target is still the AUTO draft, never the custom one
+    async with db.session() as s:
+        active = await store.get_active_package(s, "jde")
+        assert active.id == auto.id
+        pkgs = await store.list_packages(s, application="jde")
+        assert len(pkgs) == 2
+
+
+@pytest.mark.asyncio
+async def test_move_entries_into_custom_package() -> None:
+    db = await _db()
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT",
+                        entity="role", entity_key={"AUUSER": "R1"})
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT",
+                        entity="role", entity_key={"AUUSER": "R2"})
+    async with db.session() as s:
+        auto = await store.get_active_package(s, "jde")
+        custom = await store.create_custom_package(s, "jde", name="Parked", user="op")
+        full = await store.get_package(s, auto.id)
+        move_id = [e.id for e in full.entries if (e.entity_key or {}).get("AUUSER") == "R2"]
+        dest, moved = await store.move_entries(s, entry_ids=move_id, dest_package_id=custom.id)
+        assert moved == 1 and dest.id == custom.id
+    async with db.session() as s:
+        auto_full = await store.get_package(s, auto.id)
+        custom_full = await store.get_package(s, custom.id)
+        assert [(e.entity_key or {}).get("AUUSER") for e in auto_full.entries] == ["R1"]
+        assert [(e.entity_key or {}).get("AUUSER") for e in custom_full.entries] == ["R2"]
+        assert custom_full.entries[0].seq == 1  # re-sequenced at the destination's tail
+
+
+@pytest.mark.asyncio
+async def test_move_rejects_cross_application_and_frozen_source() -> None:
+    db = await _db()
+    await store.capture(db, "appA", connector="c", query="f_post", operation="INSERT", entity="x", entity_key={"k": "1"})
+    await store.capture(db, "appB", connector="c", query="f_post", operation="INSERT", entity="x", entity_key={"k": "2"})
+    async with db.session() as s:
+        a = await store.get_active_package(s, "appA")
+        b = await store.get_active_package(s, "appB")
+        a_full = await store.get_package(s, a.id)
+        # cross-application move is refused
+        with pytest.raises(store.LifecycleError):
+            await store.move_entries(s, entry_ids=[a_full.entries[0].id], dest_package_id=b.id)
+    # submitting appA freezes it → can't move its entries out
+    await store.capture(db, "appA", connector="c", query="f_put", operation="UPDATE", entity="x", entity_key={"k": "1"})
+    async with db.session() as s:
+        a = await store.get_active_package(s, "appA")
+        await store.submit_package(s, a.id, user="op")
+        custom = await store.create_custom_package(s, "appA", name="P", user="op")
+        a_full = await store.get_package(s, a.id)
+        with pytest.raises(store.LifecycleError):
+            await store.move_entries(s, entry_ids=[a_full.entries[0].id], dest_package_id=custom.id)
+
+
+@pytest.mark.asyncio
+async def test_delete_entries_permanently_drops_them() -> None:
+    db = await _db()
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT", entity="r", entity_key={"k": "1"})
+    await store.capture(db, "jde", connector="jde", query="f_delete", operation="DELETE", entity="r", entity_key={"k": "1"})
+    async with db.session() as s:
+        auto = await store.get_active_package(s, "jde")
+        full = await store.get_package(s, auto.id)
+        ids = [e.id for e in full.entries]
+        deleted = await store.delete_entries(s, entry_ids=ids)
+        assert deleted == 2
+    async with db.session() as s:
+        full = await store.get_package(s, auto.id)
+        assert full.entries == []
+
+
+@pytest.mark.asyncio
+async def test_rename_only_drafts() -> None:
+    db = await _db()
+    async with db.session() as s:
+        custom = await store.create_custom_package(s, "jde", name="Old", user="op")
+        renamed = await store.rename_package(s, custom.id, name="New name", description="why")
+        assert renamed.name == "New name" and renamed.description == "why"
+    # freeze it, then rename is refused
+    await store.capture(db, "jde", connector="jde", query="f_post", operation="INSERT")
+    async with db.session() as s:
+        await store.move_entries(
+            s, entry_ids=[(await store.get_package(s, (await store.get_active_package(s, "jde")).id)).entries[0].id],
+            dest_package_id=custom.id,
+        )
+        await store.submit_package(s, custom.id, user="op")
+        with pytest.raises(store.LifecycleError):
+            await store.rename_package(s, custom.id, name="nope")

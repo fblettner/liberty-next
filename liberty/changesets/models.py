@@ -44,6 +44,17 @@ class PackageStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class PackageKind(str, Enum):
+    """``auto`` is the framework-managed capture target — exactly one active (``draft``) per
+    application, the package every tracked write lands in. ``custom`` is an operator-created
+    holding package: it never receives auto-captures, the operator MOVES entries into it (to park
+    work for a future promotion), and it has the same full lifecycle as an auto package (submit →
+    approve → export). Many custom packages may coexist with the one auto draft per application."""
+
+    AUTO = "auto"
+    CUSTOM = "custom"
+
+
 class Operation(str, Enum):
     # Row operations — a captured SQL write, net-compacted per row on export.
     INSERT = "INSERT"
@@ -83,6 +94,9 @@ class ChangePackage(Base):
     application: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(_STATUS_COL, nullable=False, default=PackageStatus.DRAFT.value)
+    # auto (framework capture target — one active per app) vs custom (operator-created holding
+    # package). Only auto drafts are constrained by the active-draft unique index below.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default=PackageKind.AUTO.value, server_default=PackageKind.AUTO.value)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Union of the ``Screen.post_apply`` step-ids of the screens that contributed to this package —
     # accumulated as changes are captured. On export these ids resolve to ``[changesets] post_apply``
@@ -106,10 +120,12 @@ class ChangePackage(Base):
     )
 
     __table_args__ = (
-        # At most one DRAFT per application — the "current package" invariant. Partial unique index
+        # At most one AUTO DRAFT per application — the "current package" invariant. Scoped to
+        # ``kind='auto'`` so custom holding packages (also drafts) can coexist. Partial unique index
         # works on Postgres and SQLite; the store also enforces it at the application layer.
         Index("ux_ly_change_pkg_active", "application", unique=True,
-              postgresql_where=text("status = 'draft'"), sqlite_where=text("status = 'draft'")),
+              postgresql_where=text("status = 'draft' AND kind = 'auto'"),
+              sqlite_where=text("status = 'draft' AND kind = 'auto'")),
         Index("ix_ly_change_pkg_app_status", "application", "status"),
     )
 
