@@ -432,7 +432,7 @@ class DictionaryFile(BaseModel):
         # SEQUENCE / NN are server-side (SQLConnector._resolve_sequences fires the sequence
         # query inside the INSERT transaction); auto-filling the form would mean firing the
         # sequence on every Open and reverting on Cancel — not worth the complexity.
-        if rule in ("SYSDATE", "CURRENT_DATE"):
+        if rule == "SYSDATE":   # CURRENT_DATE (its retired alias) is normalised to SYSDATE by the migrator
             return {"kind": "auto_fill", "source": "current_date"}
         if rule == "LOGIN":
             return {"kind": "auto_fill", "source": "login_user"}

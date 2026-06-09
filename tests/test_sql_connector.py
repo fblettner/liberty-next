@@ -1323,18 +1323,19 @@ def test_resolve_rule_form_layer_auto_fill() -> None:
     so the existing widget-detection path isn't perturbed."""
     from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile
     d = DictionaryFile()
-    # SYSDATE + CURRENT_DATE both map to the same source — v1 used SYSDATE on Oracle and
-    # CURRENT_DATE on Postgres; v2 normalises.
     assert d.resolve_rule(DictionaryEntry(rules="SYSDATE")) == {"kind": "auto_fill", "source": "current_date"}
-    assert d.resolve_rule(DictionaryEntry(rules="CURRENT_DATE")) == {"kind": "auto_fill", "source": "current_date"}
+    # CURRENT_DATE was a retired alias of SYSDATE — the migrator normalises it, so the runtime no
+    # longer recognises it directly (returns None like any unknown rule).
+    assert d.resolve_rule(DictionaryEntry(rules="CURRENT_DATE")) is None
     # LOGIN — the current user's username (auth-installed at the frontend layer).
     assert d.resolve_rule(DictionaryEntry(rules="LOGIN")) == {"kind": "auto_fill", "source": "login_user"}
     # PASSWORD intentionally returns None — masking is driven by ``format = "password"``, not
     # by the rule kind. Treating it as auto_fill would seed the column with whatever the source
     # resolves to (typically the username), which is the v1 / v2 bug we already fixed.
     assert d.resolve_rule(DictionaryEntry(rules="PASSWORD")) is None
-    # SEQUENCE / NN are server-side (fired in SQLConnector._resolve_sequences during INSERT).
+    # SEQUENCE is server-side (fired in SQLConnector._resolve_sequences during INSERT) — no auto_fill.
     assert d.resolve_rule(DictionaryEntry(rules="SEQUENCE", rules_values="1")) is None
+    # NN — retired alias of SEQUENCE; the migrator normalises it, so it's just an unknown rule now.
     assert d.resolve_rule(DictionaryEntry(rules="NN", rules_values="1")) is None
     # Unknown rule still returns None (existing behaviour — widget-detection won't fire).
     assert d.resolve_rule(DictionaryEntry(rules="UNKNOWN_RULE")) is None
@@ -1482,13 +1483,14 @@ async def test_form_rule_disabled_opts_out_of_inherited_rule(pools: PoolRegistry
 
 @pytest.mark.asyncio
 async def test_form_rule_sysdate_stamps_now(pools: PoolRegistry) -> None:
-    """``rules = "SYSDATE"`` / ``"CURRENT_DATE"`` stamps local ``datetime.now()`` (one value per
-    call, so every audit column in the same write lands on the same instant)."""
+    """``rules = "SYSDATE"`` stamps local ``datetime.now()`` on an absent bind (one value per call,
+    so every audit column in the same write lands on the same instant). (CURRENT_DATE — its retired
+    alias — is normalised to SYSDATE by the migrator.)"""
     from datetime import datetime
     from liberty.connectors.dictionary import DictionarySection
     d = DictionaryFile(connectors={"db": DictionarySection(entries={
         "CREATED": DictionaryEntry(format="datetime", rules="SYSDATE"),
-        "UPDATED": DictionaryEntry(format="datetime", rules="CURRENT_DATE"),
+        "UPDATED": DictionaryEntry(format="datetime", rules="SYSDATE"),
     })})
     cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
         QueryDef(name="ins", writable=True,

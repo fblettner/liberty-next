@@ -309,8 +309,10 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
 # Same set v1's FormsDialog/FormsTable evaluated on Save — re-implemented here so the dialog,
 # batch-edit grid, and any future API caller all get it consistently.
 _RULES_LOGIN = {"LOGIN"}
-_RULES_NOW = {"SYSDATE", "CURRENT_DATE"}
-_RULES_SEQUENCE = {"SEQUENCE", "NN"}
+# CURRENT_DATE (alias of SYSDATE) and NN (alias of SEQUENCE) were retired in v2 — the migrator
+# normalises them, so the runtime only recognises the survivors.
+_RULES_NOW = {"SYSDATE"}
+_RULES_SEQUENCE = {"SEQUENCE"}
 # Statements with a SET/VALUES clause that a DEFAULT can fill — DELETE binds only a WHERE key,
 # so a default there would corrupt the predicate. (SEQUENCE/NN stays INSERT-only — see
 # ``_resolve_sequences`` — because a sequence on UPDATE would re-issue a new number every save.)

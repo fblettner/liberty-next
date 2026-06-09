@@ -847,6 +847,8 @@ def test_migrate_dictionary_sequence_becomes_first_class_section() -> None:
     e = out["entries"]
     assert e["ACT_UKID"]["rules_values"] == "get_act_ukid_from_sod_activities"
     assert e["RISK_UKID"]["rules_values"] == "get_risk_ukid_from_sod_risks"
+    # NN is a retired alias — normalised to SEQUENCE on migration (the survivor v2 recognises).
+    assert e["RISK_UKID"]["rules"] == "SEQUENCE"
     # An orphan seq_id leaves the value untouched — operator decides what to do.
     assert e["UNKNOWN_UKID"]["rules_values"] == "999"
     # A non-numeric rules_values isn't resolved (already a v2 sequence id, or hand-edited).
