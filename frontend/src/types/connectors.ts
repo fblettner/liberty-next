@@ -127,6 +127,10 @@ export interface Column {
    *  its value matches `value` (or is in `value` when it's an array). So a set filter outside the
    *  allowed set drops the column from the grid. (A bare `{field, value}` is treated as one item.) */
   visible_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[]
+  /** Write this column only when the condition holds (opt-in, independent of `visible_when`).
+   *  Backend-enforced: when set and it doesn't hold for the row, the column is written as its
+   *  type-neutral value (blank / 0) and its DD default/rule is suppressed. Blank → always written. */
+  write_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[]
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string

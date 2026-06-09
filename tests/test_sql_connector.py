@@ -1207,6 +1207,64 @@ async def test_jde_tokens_always_julian_without_column_format(pools: PoolRegistr
 
 
 @pytest.mark.asyncio
+async def test_write_when_neutralizes_non_applicable_column(pools: PoolRegistry) -> None:
+    """A column whose ``write_when`` does NOT hold for the row is written as its type-neutral value
+    (blank / 0), overriding the DD default — so a field irrelevant to the row's kind isn't dirtied.
+    When the condition holds, the column writes normally (DD default still fills an empty bind). A
+    column with no ``write_when`` is untouched (opt-in)."""
+    from liberty.connectors.dictionary import DictionarySection
+    from liberty.connectors.config import ColumnHint
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "VWYN": DictionaryEntry(rules="DEFAULT", default="Y"),   # the F00950 over-fill source
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True,
+                 sql="INSERT INTO item (id, name, status) VALUES (:SETY, :VWYN, :OTHER)"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [
+        ColumnHint(name="SETY"),
+        ColumnHint(name="VWYN", dd="VWYN", write_when={"field": "SETY", "value": ["A", "M"]}),
+        ColumnHint(name="OTHER"),   # no write_when → always written
+    ]
+    # Type "2" → VWYN not applicable → neutralized to " " (NOT the DD default "Y").
+    out = conn._apply_form_rules({"SETY": "2", "VWYN": None, "OTHER": "x"}, cfg.queries[0],
+                                 stmt_type="INSERT", user="u", column_hints=hints)
+    out = conn._apply_write_when(out, cfg.queries[0], stmt_type="INSERT", column_hints=hints,
+                                 context={"SETY": "2", "VWYN": None, "OTHER": "x"})
+    assert out["VWYN"] == " "          # neutralized — DD default "Y" suppressed
+    assert out["OTHER"] == "x"          # no write_when → untouched
+    # Type "A" → VWYN applicable → DD default fills it; write_when leaves it alone.
+    out2 = conn._apply_form_rules({"SETY": "A", "VWYN": None, "OTHER": "x"}, cfg.queries[0],
+                                  stmt_type="INSERT", user="u", column_hints=hints)
+    out2 = conn._apply_write_when(out2, cfg.queries[0], stmt_type="INSERT", column_hints=hints,
+                                  context={"SETY": "A", "VWYN": None, "OTHER": "x"})
+    assert out2["VWYN"] == "Y"          # applicable → DD default kept
+
+
+@pytest.mark.asyncio
+async def test_write_when_uses_derived_discriminator_from_context(pools: PoolRegistry) -> None:
+    """The discriminator may be a SUBMITTED field that isn't itself a written column (e.g. F00950's
+    derived SEC_TYPE) — write_when reads it from the full submitted ``context``. A row whose
+    discriminator field is absent entirely fails open (never neutralized)."""
+    from liberty.connectors.config import ColumnHint
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :THDV)"),
+    ])
+    conn = SQLConnector("db", cfg, pools)
+    hints = [ColumnHint(name="THDV", write_when={"field": "SEC_TYPE", "value": "ALIAS"})]
+    out = conn._apply_write_when({"THDV": "somevalue"}, cfg.queries[0], stmt_type="INSERT",
+                                 column_hints=hints, context={"SEC_TYPE": "OBJECTS", "THDV": "somevalue"})
+    assert out["THDV"] == " "                                  # OBJECTS ≠ ALIAS → neutralized
+    out2 = conn._apply_write_when({"THDV": "somevalue"}, cfg.queries[0], stmt_type="INSERT",
+                                  column_hints=hints, context={"SEC_TYPE": "ALIAS", "THDV": "somevalue"})
+    assert out2["THDV"] == "somevalue"                         # ALIAS → applicable → kept
+    out3 = conn._apply_write_when({"THDV": "somevalue"}, cfg.queries[0], stmt_type="INSERT",
+                                  column_hints=hints, context={"THDV": "somevalue"})
+    assert out3["THDV"] == "somevalue"                         # discriminator absent → fail open
+
+
+@pytest.mark.asyncio
 async def test_query_tokens_execute_roundtrip(pools: PoolRegistry) -> None:
     """End-to-end: a writable query with ``{{LOGIN}}`` binds the resolved (server) value and writes
     it — proving the rewrite → bind → execute path, not just the resolver."""

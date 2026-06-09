@@ -358,6 +358,35 @@ _PREDEFINED_TOKENS = {
 }
 #: The ``{{JOBN}}`` constant — Liberty as the writing job/workstation in JDE audit columns.
 _JOBN_VALUE = "LIBERTY"
+# Formats whose "not applicable" (write_when=false) neutral value is ``0``; everything else is a
+# single space (JDE CHAR NOT-NULL safe — padded to width on Oracle, matching the coalesce step's
+# ``" "`` sentinel for empties). See ``_neutral_for_format`` / ``SQLConnector._apply_write_when``.
+_NEUTRAL_NUMERIC_FORMATS = {"integer", "number", "decimal", "currency", "jdedate", "jdetime"}
+
+
+def _neutral_for_format(fmt: str | None) -> Any:
+    """The value written for a column whose ``write_when`` does not hold — i.e. it's irrelevant to
+    this row's kind. ``0`` for numerics (incl. JDE jdedate/jdetime), a single space otherwise.
+    Mirrors JDE's own convention (an N/A security column is stored blank / 0)."""
+    if fmt and fmt.lower() in _NEUTRAL_NUMERIC_FORMATS:
+        return 0
+    return " "
+
+
+def _write_when_holds(rules: list[Any], field_value: Any) -> bool:
+    """True when EVERY ``write_when`` rule holds (AND) — a rule holds when the discriminator's
+    current value is in the rule's allowed set (trim-tolerant; value may be a scalar or a list). A
+    rule whose ``field`` is absent from the row is treated as holding (fail-open): ``write_when``
+    must never neutralise a column just because its discriminator wasn't supplied, so it can't
+    regress a write that doesn't carry that field."""
+    for r in rules:
+        v = field_value(r.field)
+        if v is None:
+            continue  # discriminator not present → can't disqualify; fail open
+        allowed = r.value if isinstance(r.value, list) else [r.value]
+        if str(v).strip() not in {str(a).strip() for a in allowed}:
+            return False
+    return True
 # ``COL = {{TOKEN}}`` — captures the assigned column (group 1, possibly schema/table-qualified or
 # quoted) so the token coerces to that column's format. Then bare ``{{TOKEN}}`` (VALUES position,
 # WHERE, …) resolves to the token's natural Python type.
@@ -1440,6 +1469,46 @@ class SQLConnector:
                 out[k] = _coerce_value(out[k], fmt)
         return out
 
+    def _apply_write_when(
+        self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str,
+        column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Neutralise columns whose ``write_when`` does not hold for this row — write the
+        type-neutral value (blank / 0) instead of whatever the data-dictionary default left, so a
+        field irrelevant to the row's kind isn't dirtied by an inherited default. Opt-in: a column
+        with no ``write_when`` is untouched (zero regression for existing screens). Runs AFTER the
+        form rules so it OVERRIDES any DD default that fired. Only SET-clause statements write
+        columns — a DELETE's binds are WHERE keys, left alone.
+
+        The discriminator value is read from the bound (written) value first, else *context* (the
+        full submitted params — a derived selector like ``SEC_TYPE`` may be submitted but not itself
+        a written column)."""
+        if stmt_type not in _SET_CLAUSE_STATEMENTS:
+            return bound
+        hints = column_hints or []
+        if not any(h.write_when_rules for h in hints):
+            return bound
+        meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
+        ctx_upper = {str(k).upper(): v for k, v in (context or {}).items()}
+
+        def _field_value(field: str) -> Any:
+            fu = field.upper()
+            return bound[fu] if fu in bound else ctx_upper.get(fu)
+
+        out = dict(bound)
+        for h in hints:
+            rules = h.write_when_rules
+            if not rules:
+                continue
+            col = h.name.upper()
+            if col not in out:
+                continue  # not a written column on this query
+            if _write_when_holds(rules, _field_value):
+                continue  # applicable → keep the bound value (and its DD default) as-is
+            out[col] = _neutral_for_format((meta.get(col) or {}).get("fmt"))
+        return out
+
     async def _resolve_sequences(
         self, conn: Any, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, language: str,
         column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
@@ -1651,6 +1720,14 @@ class SQLConnector:
         bound = self._apply_form_rules(
             bound, qdef, stmt_type=stmt_type, user=user, column_hints=column_hints,
             dict_scope=dict_scope,
+        )
+        # write_when: a column not applicable to this row's kind is written as its neutral value
+        # (blank / 0), overriding any DD default the form rules just applied. ``params`` is the full
+        # submitted set, so a derived discriminator (e.g. SEC_TYPE) that isn't itself a written
+        # column is still available to evaluate the condition.
+        bound = self._apply_write_when(
+            bound, qdef, stmt_type=stmt_type, column_hints=column_hints,
+            dict_scope=dict_scope, context=params,
         )
         bound.update(token_binds)  # server-resolved tokens win, untouched by form rules
         stmt = text(sql_text)

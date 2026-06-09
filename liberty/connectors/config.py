@@ -238,6 +238,20 @@ class ColumnHint(BaseModel):
     filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Show this column in the table's filter panel.")
     filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading filters — narrow this column's options based on other filters.")
     visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Show this column only when a filter has a specific value. Multiple rules are AND-ed.")
+    write_when: VisibleWhen | list[VisibleWhen] | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Write this column only when the condition holds. Opt-in and INDEPENDENT of "
+            "``visible_when`` (a hidden column can still be written — e.g. a key resolved by a "
+            "lookup). When set and it does NOT hold for the row, the column is written as its "
+            "type-neutral value (blank / 0) and its data-dictionary default/rule is suppressed — so "
+            "a field that's irrelevant to the row's kind (e.g. a JDE security flag for a security "
+            "type that doesn't use it) isn't dirtied by an inherited default. Blank → always written "
+            "(unchanged behaviour). Multiple rules are AND-ed; the ``field`` must be a column carried "
+            "in the write (the discriminator, e.g. the security type)."
+        ),
+    )
     width: int | None = Field(default=None, description="Fixed column width in pixels (blank = auto-size).")
     align: Literal["left", "right", "center"] | None = Field(
         default=None,
@@ -325,6 +339,13 @@ class ColumnHint(BaseModel):
         if self.visible_when is None:
             return []
         return [self.visible_when] if isinstance(self.visible_when, VisibleWhen) else list(self.visible_when)
+
+    @property
+    def write_when_rules(self) -> list[VisibleWhen]:
+        """``write_when`` normalised to a list (a single rule → ``[rule]``; unset → ``[]``)."""
+        if self.write_when is None:
+            return []
+        return [self.write_when] if isinstance(self.write_when, VisibleWhen) else list(self.write_when)
 
     @property
     def dictionary_key(self) -> str:

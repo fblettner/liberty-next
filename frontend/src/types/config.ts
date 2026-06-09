@@ -166,6 +166,9 @@ export interface ColumnHint {
   filter?: boolean
   filter_from?: { source: string; column: string }[]
   visible_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[] | null
+  /** Write this column only when the condition holds (opt-in, independent of `visible_when`).
+   *  Backend-enforced neutralization (blank / 0) + DD-default suppression when it doesn't hold. */
+  write_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[] | null
   width?: number | null
   align?: 'left' | 'right' | 'center' | null
   format?: string | null
