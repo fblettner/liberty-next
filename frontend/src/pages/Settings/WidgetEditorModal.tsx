@@ -7,7 +7,8 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { X, BarChart3, Hash, Table as TableIcon } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
 import { ChartCanvas } from '../TableView/ChartCanvas'
@@ -22,16 +23,6 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 const PREVIEW_LIMIT = 1000
 export type WidgetKind = 'chart' | 'kpi' | 'table'
 
-const Box = styled(Modal)`width: min(980px, 96vw); height: min(700px, 94vh);`
-const Header = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
-  & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; font-family: ${fonts.sans}; }
-`
-const CloseBtn = styled.button`
-  margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-  border-radius: ${radius.md}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
 const KindBar = styled.div`display: flex; gap: 6px; flex-wrap: wrap;`
 const KindBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: ${radius.md}; cursor: pointer;
@@ -171,16 +162,16 @@ export function WidgetEditorModal({
     ? { type: 'table', label: label || null, col_span: colSpan, row_span: rowSpan, connector, query, columns, ...(maxRows ? { max_rows: parseInt(maxRows, 10) } : {}) }
     : null
 
-  // No backdrop-click-to-close — outside clicks must not discard edits (Cancel / Escape).
   return (
-    <Overlay>
-      <Box onClick={(e) => e.stopPropagation()}>
-        <Header>
-          <span className="title">{t('settings.dash.widget', 'Widget')}</span>
-          <CloseBtn onClick={() => void requestClose()} title={t('common.close')}><X size={16} /></CloseBtn>
-        </Header>
-        <ModalBody>
-          {error && <Banner $tone="error">{error}</Banner>}
+    <EditorModalShell
+      title={t('settings.dash.widget', 'Widget')}
+      onClose={() => void requestClose()}
+      onSave={save}
+      dirty={dirty}
+      frameStyle={{ width: 'min(980px, 96vw)', height: 'min(700px, 94vh)' }}
+      footerLeft={<Tag $tone="blue">{kind}</Tag>}
+    >
+      {error && <Banner $tone="error">{error}</Banner>}
           <KindBar>
             <KindBtn $active={kind === 'chart'} onClick={() => setKind('chart')}><BarChart3 size={14} /> {t('settings.dash.kindChart', 'Chart')}</KindBtn>
             <KindBtn $active={kind === 'kpi'} onClick={() => setKind('kpi')}><Hash size={14} /> {t('settings.dash.kindKpi', 'KPI')}</KindBtn>
@@ -280,15 +271,7 @@ export function WidgetEditorModal({
               </PreviewWrap>
             </>
           )}
-        </ModalBody>
-        <ModalFooter>
-          <Tag $tone="blue">{kind}</Tag>
-          <div style={{ flex: 1 }} />
-          <Button $size="sm" $variant="ghost" onClick={() => void requestClose()}>{t('common.cancel', 'Cancel')}</Button>
-          <Button $size="sm" $variant="primary" onClick={save}>{t('common.save')}</Button>
-        </ModalFooter>
-      </Box>
-    </Overlay>
+    </EditorModalShell>
   )
 }
 

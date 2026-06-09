@@ -8,9 +8,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { X, SlidersHorizontal, BarChart3 } from 'lucide-react'
+import { SlidersHorizontal, BarChart3 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Field, Input, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
 import { ChartCanvas } from '../TableView/ChartCanvas'
@@ -18,7 +19,7 @@ import type { QueryResult } from '../../types/connectors'
 import type { ChartSpec, SavedChartSpec } from '../../types/charts'
 import { defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, fonts } from '../../theme'
 
 const PREVIEW_LIMIT = 1000
 
@@ -31,16 +32,6 @@ export interface ChartRecord {
   spec?: SavedChartSpec
 }
 
-const Box = styled(Modal)`width: min(960px, 96vw); height: min(680px, 92vh);`
-const Header = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
-  & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; font-family: ${fonts.mono}; }
-`
-const CloseBtn = styled.button`
-  margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-  border-radius: ${radius.md}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
 const Tabs = styled.div`display: flex; gap: 16px; padding: 0 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
 const TabBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 7px; padding: 11px 4px; margin-bottom: -1px;
@@ -147,21 +138,26 @@ export function ChartEditorModal({
     // keep / null → stay
   }
 
-  // No backdrop-click-to-close — outside clicks must not discard edits (Cancel / Escape).
   return (
-    <Overlay>
-      <Box onClick={(e) => e.stopPropagation()}>
-        <Header>
-          <BarChart3 size={17} color={colors.blue.main} />
-          <span className="title">{isNew ? t('settings.charts.add', 'Add chart') : `[charts.${scope}.${initial?.id}]`}</span>
-          <CloseBtn onClick={() => void requestClose()} title={t('common.close')}><X size={16} /></CloseBtn>
-        </Header>
+    <EditorModalShell
+      title={(
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: fonts.mono }}>
+          <BarChart3 size={16} color={colors.blue.main} />
+          {isNew ? t('settings.charts.add', 'Add chart') : `[charts.${scope}.${initial?.id}]`}
+        </span>
+      )}
+      onClose={() => void requestClose()}
+      onSave={save}
+      dirty={dirty}
+      frameStyle={{ width: 'min(960px, 96vw)', height: 'min(680px, 92vh)' }}
+      tabs={(
         <Tabs>
           <TabBtn $active={tab === 'general'} onClick={() => setTab('general')}><SlidersHorizontal size={14} /> {t('settings.charts.tabGeneral', 'General')}</TabBtn>
           <TabBtn $active={tab === 'chart'} onClick={() => setTab('chart')}><BarChart3 size={14} /> {t('settings.charts.tabChart', 'Chart')}</TabBtn>
         </Tabs>
-        <ModalBody>
-          {error && <Banner $tone="error">{error}</Banner>}
+      )}
+    >
+      {error && <Banner $tone="error">{error}</Banner>}
           {tab === 'general' ? (
             <>
               <Grid2>
@@ -220,13 +216,7 @@ export function ChartEditorModal({
               )}
             </PreviewBox>
           )}
-        </ModalBody>
-        <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={() => void requestClose()}>{t('common.cancel', 'Cancel')}</Button>
-          <Button $size="sm" $variant="primary" onClick={save}>{t('common.save')}</Button>
-        </ModalFooter>
-      </Box>
-    </Overlay>
+    </EditorModalShell>
   )
 }
 

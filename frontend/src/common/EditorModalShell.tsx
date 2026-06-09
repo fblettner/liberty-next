@@ -11,7 +11,7 @@
 // the footer, right; header + tabs + footer are fixed, only the body scrolls. Escape calls onClose
 // (the caller's onClose may prompt for unsaved changes). No backdrop-click-to-close by default — an
 // editor must not discard in-progress edits on a stray click.
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
@@ -32,7 +32,9 @@ const IconBtn = styled.button`
   cursor: pointer; flex-shrink: 0;
   &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
 `
-const TabsSlot = styled.div`flex-shrink: 0; padding: 0 20px;`
+// The consumer's tab bar controls its own padding/border (it's rendered full-width here, like the
+// header/footer), so this slot only pins it.
+const TabsSlot = styled.div`flex-shrink: 0;`
 // Fills the space between the fixed header/tabs and footer. ``$scroll`` true → this IS the scroll
 // region (simple forms). False → ``overflow: hidden`` so a child that manages its own scrolling
 // (e.g. ScreenEditor's per-tab scroll panes) isn't double-scrolled.
@@ -71,13 +73,18 @@ export interface EditorModalShellProps {
   dismissOnBackdrop?: boolean
   /** Body owns the scroll (default true). Set false when a child manages its own scrolling. */
   scrollBody?: boolean
+  /** Overlay z-index override — for a modal opened from inside another modal (default = Overlay's). */
+  overlayZIndex?: number
+  /** Frame size/style override (e.g. a specific width/height for a non-preset modal). */
+  frameStyle?: CSSProperties
   /** The body content. */
   children: ReactNode
 }
 
 export function EditorModalShell({
   title, onClose, variant = 'default', fullscreen, onToggleFullscreen, dirty, onSave,
-  saveDisabled, busy, tabs, footer, footerLeft, dismissOnBackdrop = false, scrollBody = true, children,
+  saveDisabled, busy, tabs, footer, footerLeft, dismissOnBackdrop = false, scrollBody = true,
+  overlayZIndex, frameStyle, children,
 }: EditorModalShellProps) {
   const { t } = useTranslation()
   const Frame = FRAMES[variant]
@@ -104,8 +111,8 @@ export function EditorModalShell({
   )
 
   return createPortal(
-    <Overlay onClick={dismissOnBackdrop ? onClose : undefined}>
-      <Frame $fullscreen={fullscreen} onClick={(e) => e.stopPropagation()}>
+    <Overlay onClick={dismissOnBackdrop ? onClose : undefined} style={overlayZIndex != null ? { zIndex: overlayZIndex } : undefined}>
+      <Frame $fullscreen={fullscreen} style={frameStyle} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <HeaderRow>
             <span className="title">{title}</span>

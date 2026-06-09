@@ -14,17 +14,15 @@
 //
 // NOT re-exported from common/index.ts — direct import keeps it in the Settings chunk.
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Centered, Mono, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Row,
-  SchemaForm, SqlConnectorContext, SpinnerRing, useModals, type JsonSchema,
+  Banner, Centered, Mono, SchemaForm, SqlConnectorContext, useModals, type JsonSchema,
 } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
 import { flattenConnectorSections } from './connectorTables'
-import { colors, fontSize, fonts } from '../../theme'
+import { colors, fontSize } from '../../theme'
 
 export interface EditQueryModalProps {
   connector: string
@@ -138,14 +136,7 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
     onClose()
   }
 
-  // Escape closes (through the same dirty-prompt as Cancel) — the only keyboard close affordance
-  // now that backdrop-click no longer dismisses the modal.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void cancel() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancel reads stable state
-  }, [dirty])
+  // Escape is handled by EditorModalShell (→ onClose → ``cancel`` → the dirty prompt).
 
   const save = async () => {
     if (!conns) return
@@ -160,68 +151,39 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
     } finally { setBusy(false) }
   }
 
-  const modalNode = (
-    // z-index 900 — this modal is frequently opened from INSIDE another modal: the Screen
-    // Designer (400) and the shared-action designer (400), but ALSO the screen's Action editor,
-    // which is itself a RAISED overlay at 800. So 600 (the old value) painted behind the action
-    // editor — the pencil opened the modal under it. 900 sits above all of them while staying
-    // below SearchSelect dropdowns (1000) and the global confirm TopOverlay (2000) so its own
-    // pickers + the unsaved-changes prompt still appear on top.
-    //
-    // No backdrop-click-to-close: an editor modal must not discard in-progress edits because
-    // the operator clicked outside it. Closing is via Cancel / Escape only (Escape still routes
-    // through ``cancel`` → the unsaved-changes prompt when dirty).
-    <Overlay style={{ zIndex: 900 }}>
-      <Modal style={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }} onClick={(e) => e.stopPropagation()}>
-        <ModalHeader>
-          <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <span>
-              {seed
-                ? t('settings.editQuery.titleNew', 'New query')
-                : t('settings.editQuery.title', 'Edit query')} ·{' '}
-              <Mono style={{ display: 'inline', color: colors.text.muted, fontSize: fontSize.sm, fontWeight: 400 }}>
-                {connector}.{queryName}
-              </Mono>
-            </span>
-            <Button $variant="ghost" $size="sm" onClick={cancel} disabled={busy}>
-              <X size={13} /> {t('common.cancel')}
-            </Button>
-          </Row>
-        </ModalHeader>
-        <ModalBody>
-          {error && <Banner $tone="error">{error}</Banner>}
-          {conns == null || queryDefSchema == null ? (
-            <Centered />
-          ) : query == null ? (
-            <Banner $tone="info">
-              {t('settings.editQuery.notFound', 'Query "{{q}}" not found on connector "{{c}}".', { q: queryName, c: connector })}
-            </Banner>
-          ) : (
-            <SqlConnectorContext.Provider value={connector}>
-              <SchemaForm
-                schema={queryDefSchema}
-                defs={allDefs}
-                value={query}
-                onChange={(v: Query) => updateQuery(v)}
-              />
-            </SqlConnectorContext.Provider>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Row gap={8}>
-            <Button $variant="ghost" $size="sm" onClick={cancel} disabled={busy}>
-              <X size={13} /> {t('common.cancel')}
-            </Button>
-            <Button $variant="primary" $size="sm" disabled={busy || !dirty || !query} onClick={save}>
-              {busy ? <SpinnerRing size={13} thickness={2} /> : null} {t('common.save')}
-            </Button>
-          </Row>
-        </ModalFooter>
-      </Modal>
-    </Overlay>
+  // z-index 900 — this modal is frequently opened from INSIDE another modal (Screen Designer, the
+  // shared-action designer, the screen's raised Action editor at 800), so it must sit above them
+  // while staying below SearchSelect dropdowns (1000) and the global confirm overlay (2000).
+  return (
+    <EditorModalShell
+      title={(
+        <>
+          {seed ? t('settings.editQuery.titleNew', 'New query') : t('settings.editQuery.title', 'Edit query')} ·{' '}
+          <Mono style={{ display: 'inline', color: colors.text.muted, fontSize: fontSize.sm, fontWeight: 400 }}>
+            {connector}.{queryName}
+          </Mono>
+        </>
+      )}
+      onClose={() => void cancel()}
+      onSave={() => void save()}
+      dirty={dirty}
+      saveDisabled={!dirty || !query}
+      busy={busy}
+      overlayZIndex={900}
+      frameStyle={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }}
+    >
+      {error && <Banner $tone="error">{error}</Banner>}
+      {conns == null || queryDefSchema == null ? (
+        <Centered />
+      ) : query == null ? (
+        <Banner $tone="info">
+          {t('settings.editQuery.notFound', 'Query "{{q}}" not found on connector "{{c}}".', { q: queryName, c: connector })}
+        </Banner>
+      ) : (
+        <SqlConnectorContext.Provider value={connector}>
+          <SchemaForm schema={queryDefSchema} defs={allDefs} value={query} onChange={(v: Query) => updateQuery(v)} />
+        </SqlConnectorContext.Provider>
+      )}
+    </EditorModalShell>
   )
-  return createPortal(modalNode, document.body)
 }
-
-// Suppress unused-import warnings for ``fonts`` — kept so future stylings can pull from the theme.
-void fonts
