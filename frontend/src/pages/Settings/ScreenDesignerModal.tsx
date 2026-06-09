@@ -4,18 +4,16 @@
 // can open the visual builder for a specific screen — clicked from the Screens list, jumped to
 // from a Connectors → CRUD table — without a tab switch.
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Save, X, Maximize2, Minimize2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Centered, FrameworkEnumsContext, ModalFooter, ModalHeader,
-  Overlay, Row, SpinnerRing, VisualBuilderModal, useModals,
+  Banner, Centered, FrameworkEnumsContext, useModals,
   type FrameworkEnums, type JsonSchema,
 } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import type { ConfigSchemas, ScreensDoc, Screen } from '../../types/config'
 import ScreenEditor from './ScreenEditor'
-import { colors, fontSize, fonts } from '../../theme'
+import { colors, fonts } from '../../theme'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
@@ -133,14 +131,7 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
     if (choice === 'discard') onClose()
     else if (choice === 'save') await save()
   }
-
-  // Escape closes (with the same prompt).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void cancel() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancel reads stable state
-  }, [dirty])
+  // Escape is handled by EditorModalShell (it calls onClose → ``cancel`` → the unsaved prompt).
 
   // Loading / error states.
   const inner = (!schema || !doc) ? <Centered />
@@ -157,53 +148,31 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
       />
     )
 
-  return createPortal(
+  return (
+    // Context propagates across the shell's portal — ScreenEditor (inside) still gets the enums.
     <FrameworkEnumsContext.Provider value={enums}>
-      {/* No backdrop-click-to-close — an outside click must not discard in-progress edits.
-          Close via Cancel / Escape (both route through ``cancel`` → the unsaved-changes prompt). */}
-      <Overlay>
-        <VisualBuilderModal $fullscreen={fullscreen} onClick={(e) => e.stopPropagation()}>
-          <ModalHeader>
-            <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>
-                {t('settings.screens.designerTitle')} ·{' '}
-                <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
-                  [screens.{app}.{currentId}]
-                </span>
-              </span>
-              <Row gap={8} style={{ alignItems: 'center' }}>
-                {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-                <Button $variant="ghost" $size="sm" onClick={() => setFullscreen((v) => !v)}
-                  title={fullscreen ? t('common.restore') : t('common.maximize')}
-                  aria-pressed={fullscreen}>
-                  {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                </Button>
-                <Button $variant="ghost" $size="sm" onClick={() => void cancel()}>
-                  <X size={13} /> {t('common.cancel')}
-                </Button>
-              </Row>
-            </Row>
-          </ModalHeader>
-          <div style={{
-            flex: '1 1 auto', minHeight: 0, padding: 20, overflow: 'hidden',
-            display: 'flex', flexDirection: 'column', color: colors.text.secondary, fontSize: fontSize.md,
-          }}>
-            {inner}
-          </div>
-          <ModalFooter>
-            <Row gap={8}>
-              <Button onClick={() => void cancel()} $variant="ghost" $size="sm" disabled={busy}>
-                <X size={13} /> {t('common.cancel')}
-              </Button>
-              <Button $variant="primary" $size="sm" disabled={busy || !dirty} onClick={() => void save()}>
-                {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-              </Button>
-            </Row>
-          </ModalFooter>
-        </VisualBuilderModal>
-      </Overlay>
-    </FrameworkEnumsContext.Provider>,
-    document.body,
+      <EditorModalShell
+        variant="visual"
+        title={(
+          <>
+            {t('settings.screens.designerTitle')} ·{' '}
+            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
+              [screens.{app}.{currentId}]
+            </span>
+          </>
+        )}
+        onClose={() => void cancel()}
+        onSave={() => void save()}
+        dirty={dirty}
+        saveDisabled={!dirty}
+        busy={busy}
+        fullscreen={fullscreen}
+        onToggleFullscreen={() => setFullscreen((v) => !v)}
+        scrollBody={false}  /* ScreenEditor manages its own per-tab scroll */
+      >
+        {inner}
+      </EditorModalShell>
+    </FrameworkEnumsContext.Provider>
   )
 }
 
