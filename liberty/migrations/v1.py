@@ -1417,6 +1417,12 @@ def migrate_dictionary(
         if not dd:
             continue
         rules = str(r.get("dd_rules") or "").strip() or None
+        # Normalise the retired alias rules to their v2 survivor so nothing emits a dead value:
+        # NN was an exact alias of SEQUENCE, CURRENT_DATE of SYSDATE.
+        if rules == "NN":
+            rules = "SEQUENCE"
+        elif rules == "CURRENT_DATE":
+            rules = "SYSDATE"
         fmt = _column_format(r.get("dd_type"))
         # v1's `dd_rules = "PASSWORD"` marks a credential column. v2's frontend keys the masked
         # widget (PasswordInput, "leave blank to keep" placeholder, blank-on-submit skip) off the
@@ -1427,12 +1433,12 @@ def migrate_dictionary(
         if rules == "PASSWORD" and not fmt:
             fmt = "password"
         rules_values = str(r.get("dd_rules_values") or "").strip() or None
-        # v1's `dd_rules = "SEQUENCE"` / `"NN"` carries a numeric seq_id in dd_rules_values
-        # that points at ``ly_sequence.seq_id``; v2 ports ``ly_sequence`` to a first-class
-        # ``[sequences.<id>]`` section and the entry's rules_values becomes the v2 sequence id
-        # (a slug of seq_label). The SQL connector resolves it via DictionaryFile.find_sequence
-        # at INSERT time. Orphan seq_id → kept verbatim (operator notices the migration warning).
-        if rules in ("SEQUENCE", "NN") and rules_values:
+        # v1's `dd_rules = "SEQUENCE"` (and its alias `"NN"`, already normalised above) carries a
+        # numeric seq_id in dd_rules_values that points at ``ly_sequence.seq_id``; v2 ports
+        # ``ly_sequence`` to a first-class ``[sequences.<id>]`` section and the entry's rules_values
+        # becomes the v2 sequence id (a slug of seq_label). The SQL connector resolves it via
+        # DictionaryFile.find_sequence at INSERT time. Orphan seq_id → kept verbatim (warning).
+        if rules == "SEQUENCE" and rules_values:
             resolved = _resolve_seq_id(rules_values)
             if resolved is not None:
                 rules_values = resolved

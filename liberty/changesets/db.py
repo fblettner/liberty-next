@@ -64,12 +64,27 @@ class ChangeSetDatabase:
         wanted = (
             ("ly_change_entries", "replay", "BOOLEAN"),
             ("ly_change_entries", "source_action", "VARCHAR(256)"),
+            # ``kind`` backfills existing packages to 'auto' (DEFAULT) — they were all framework
+            # capture targets before custom packages existed.
+            ("ly_change_packages", "kind", "VARCHAR(16) NOT NULL DEFAULT 'auto'"),
         )
+        added: set[tuple[str, str]] = set()
         for table, col, ddl in wanted:
             if not insp.has_table(table):
                 continue
             if col not in {c["name"] for c in insp.get_columns(table)}:
                 sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+                added.add((table, col))
+        # When ``kind`` was just added, the active-draft unique index still carries the old
+        # ``WHERE status='draft'`` predicate (create_all won't ALTER it). Recreate it scoped to
+        # ``kind='auto'`` so custom drafts can coexist. ``CREATE UNIQUE INDEX … WHERE`` + ``DROP
+        # INDEX IF EXISTS`` are accepted by both Postgres and SQLite.
+        if ("ly_change_packages", "kind") in added:
+            sync_conn.exec_driver_sql("DROP INDEX IF EXISTS ux_ly_change_pkg_active")
+            sync_conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX ux_ly_change_pkg_active ON ly_change_packages (application) "
+                "WHERE status = 'draft' AND kind = 'auto'"
+            )
 
     async def drop_schema(self) -> None:  # pragma: no cover - destructive helper
         engine = self._pools.engine(self._pool_name)

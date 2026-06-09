@@ -215,8 +215,8 @@ export default function DictionaryBuilder() {
     base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(['label'], dict?.enums, overlay?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups (current scope)', values: mkValues(['description'], dict?.lookups, overlay?.lookups) }
     // SEQUENCE_IDS — the named sequences in scope (shared + per-connector overlay). Drives the
-    // DictionaryEntry.rules_values dropdown when `rules = "SEQUENCE"` / `"NN"` (the SQL connector
-    // resolves the id to the sequence's query at INSERT time via DictionaryFile.find_sequence).
+    // DictionaryEntry.rules_values dropdown when `rules = "SEQUENCE"` (the SQL connector resolves
+    // the id to the sequence's query at INSERT time via DictionaryFile.find_sequence).
     base.SEQUENCE_IDS = { label: 'Sequences (current scope)', values: mkValues(['description'], dict?.sequences, overlay?.sequences) }
 
     // CONNECTOR_NAMES — every connector in connectors.toml. Drives LookupDef.connector (which in

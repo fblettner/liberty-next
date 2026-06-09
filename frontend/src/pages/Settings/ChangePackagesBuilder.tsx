@@ -5,15 +5,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown, RefreshCw, Trash2, Search, Inbox } from 'lucide-react'
+import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown, RefreshCw, Trash2, Search, Inbox, Plus, FolderInput } from 'lucide-react'
 import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ApplyBundlePanel } from './ApplyBundleModal'
 import { PostApplyEditor } from './PostApplyEditor'
+import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from '../../common/Modal'
+import { createPortal } from 'react-dom'
 
 type Pkg = {
-  id: string; application: string; name: string; status: string; description: string | null
+  id: string; application: string; name: string; status: string; kind?: string; description: string | null
   created_by: string | null; created_at: string | null
   submitted_by: string | null; submitted_at: string | null
   approved_by: string | null; approved_at: string | null
@@ -145,6 +147,25 @@ const STATUS_TONE: Record<string, string> = {
   draft: colors.blue.main, pending: colors.orange.main, approved: colors.green.main,
   exported: colors.text.muted, promoted: colors.text.muted, rejected: colors.red.main,
 }
+// Distinguish the framework capture target (auto) from operator-created holding packages (custom).
+const KIND_TONE: Record<string, string> = { auto: colors.text.muted, custom: colors.purple.main }
+// A small inline action button used inside an entry/group row (Move / Delete).
+const MiniBtn = styled.button<{ $danger?: boolean }>`
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  background: none; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
+  color: ${(p) => (p.$danger ? colors.red.main : colors.text.muted)}; font-size: ${fontSize.micro};
+  padding: 1px 7px; cursor: pointer;
+  &:hover { border-color: ${(p) => (p.$danger ? colors.red.border : colors.blue.border)}; color: ${(p) => (p.$danger ? colors.red.main : colors.text.secondary)}; }
+  &:disabled { opacity: 0.4; cursor: default; }
+`
+// Destination rows in the "Move to…" picker.
+const PickRow = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+  padding: 9px 11px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+  & .name { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
+  & .meta { font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-left: auto; }
+  &:hover { border-color: ${colors.blue.border}; background: var(--hover-subtle); }
+`
 const OP_TONE: Record<string, string> = {
   INSERT: colors.green.main, UPDATE: colors.blue.main, DELETE: colors.red.main,
   CALL_API: colors.orange.main, CALL_PLUGIN: colors.orange.main,
@@ -304,6 +325,70 @@ export default function ChangePackagesBuilder() {
     } finally { setBusy(false) }
   }, [modals, t, selId, loadList])
 
+  // ── custom packages + move/delete entries ───────────────────────────────────────────────────
+  // The entry ids currently being moved (group or single) + the source package's application — set
+  // when the operator hits "Move", drives the destination picker modal. Null = no picker open.
+  const [moveFor, setMoveFor] = useState<{ entryIds: string[]; app: string } | null>(null)
+
+  // Create a CUSTOM holding package for `app` (named by the operator) and select it. Custom packages
+  // never receive auto-captures — the operator moves entries into them to park work for a later
+  // promotion. Returns the new id, or null if cancelled.
+  const createCustom = useCallback(async (app: string): Promise<string | null> => {
+    const name = await modals.prompt({
+      title: t('settings.changes.newPkgTitle', 'New custom package'),
+      message: t('settings.changes.newPkgMsg', 'A holding package for "{{app}}" — move changes into it to promote later. Name:', { app }),
+      placeholder: t('settings.changes.newPkgPlaceholder', 'e.g. Future role cleanup'),
+    })
+    if (!name || !name.trim()) return null
+    try {
+      const pkg = await api.post<Pkg>('/admin/changesets', { application: app, name: name.trim() })
+      await loadList()
+      setSelId(pkg.id)
+      return pkg.id
+    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)); return null }
+  }, [modals, t, loadList])
+
+  // Move the given entries INTO destPkgId, then refresh the list + the currently-open package
+  // (entries left it) + the destination if it's open.
+  const moveEntriesTo = useCallback(async (entryIds: string[], destPkgId: string) => {
+    setBusy(true); setError(null)
+    try {
+      await api.post(`/admin/changesets/${encodeURIComponent(destPkgId)}/entries/move-in`, { entry_ids: entryIds })
+      await Promise.all([loadList(), selId ? loadDetail(selId) : Promise.resolve()])
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false); setMoveFor(null) }
+  }, [selId, loadList, loadDetail])
+
+  // Permanently delete entries from their package (group or single) — gone for good, so a re-export
+  // can't re-include them (unlike Exclude). Confirms first; the written rows are untouched.
+  const deleteEntries = useCallback(async (entryIds: string[], label: string) => {
+    if (!selId) return
+    const ok = await modals.confirm({
+      title: t('settings.changes.delEntriesTitle', 'Delete change(s)?'),
+      message: t('settings.changes.delEntriesMsg',
+        'Permanently remove {{n}} change(s) ({{label}}) from this package? The rows already written to the database are not affected — only the package log is cleaned up, so a re-export can’t re-include them.',
+        { n: entryIds.length, label }),
+      variant: 'danger',
+      confirmLabel: t('common.delete', 'Delete'),
+    })
+    if (!ok) return
+    setBusy(true); setError(null)
+    try {
+      await api.post(`/admin/changesets/${encodeURIComponent(selId)}/entries/delete`, { entry_ids: entryIds })
+      await Promise.all([loadList(), loadDetail(selId)])
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }, [selId, modals, t, loadList, loadDetail])
+
+  // Candidate destinations for a move: other DRAFT packages of the same application (auto draft +
+  // any custom holding packages), excluding the source itself.
+  const moveTargets = useMemo(() => {
+    if (!moveFor) return []
+    return (packages ?? []).filter((p) => p.status === 'draft' && p.application === moveFor.app && p.id !== selId)
+  }, [moveFor, packages, selId])
+
   // Left-panel filter — names are just "Package N" (not useful), so match the typed text against
   // status, application AND the displayed lifecycle dates (the label + the formatted timestamps),
   // so e.g. "approved", "2026-06" or a day all narrow the list.
@@ -403,6 +488,11 @@ export default function ChangePackagesBuilder() {
       ) : (
         <Wrap>
           <List>
+            <Button $size="sm" $variant="ghost" disabled={busy || !(detail?.application ?? visiblePackages[0]?.application)}
+              onClick={() => { const app = detail?.application ?? visiblePackages[0]?.application; if (app) void createCustom(app) }}
+              title={t('settings.changes.newPkgTip', 'Create a custom holding package — move changes into it to promote in a later commit')}>
+              <Plus size={13} /> {t('settings.changes.newPkg', 'New package')}
+            </Button>
             <FilterBox>
               <Search size={13} />
               <input
@@ -421,6 +511,7 @@ export default function ChangePackagesBuilder() {
                 <span className="name">{p.name}</span>
                 <span className="meta">
                   <Badge $tone={STATUS_TONE[p.status] ?? colors.text.muted}>{p.status}</Badge>
+                  {p.kind === 'custom' && <> <Badge $tone={KIND_TONE.custom}>{t('settings.changes.kindCustom', 'custom')}</Badge></>}
                   {' '}{p.application} · {t('settings.changes.nChanges', '{{n}} change(s)', { n: p.entry_count })}
                 </span>
                 {d && <span className="meta">{d.label} · {d.when}</span>}
@@ -491,18 +582,35 @@ export default function ChangePackagesBuilder() {
               // The action that produced this batch (e.g. "import security") — shown in place of a
               // bare count so the group reads as "what happened", not "how many rows".
               const action = entries[0]?.source_action ?? ''
+              const draftPkg = detail?.status === 'draft'
+              const groupIds = entries.map((e) => e.id)
+              const groupLabel = `${entity}${keyLabel ? ` · ${keyLabel}` : ''}`
               return (
               <Group key={gkey}>
-                <GroupToggleHead onClick={() => toggle(openGroups, setOpenGroups, gkey)}>
-                  {groupOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <Layers size={13} style={{ verticalAlign: -2 }} />
-                  <span style={{ textTransform: 'capitalize' }}>{entity}</span>
-                  {keyLabel && <span className="keys">· {keyLabel}</span>}
-                  {action && <Badge $tone={colors.blue.main} style={{ marginLeft: 6 }}>{action}</Badge>}
-                  <Badge $tone={colors.text.muted} style={{ marginLeft: 'auto' }}>
-                    {t('settings.changes.nChanges', '{{n}} change(s)', { n: entries.length })}
-                  </Badge>
-                </GroupToggleHead>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <GroupToggleHead onClick={() => toggle(openGroups, setOpenGroups, gkey)} style={{ flex: 1, minWidth: 0 }}>
+                    {groupOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    <Layers size={13} style={{ verticalAlign: -2 }} />
+                    <span style={{ textTransform: 'capitalize' }}>{entity}</span>
+                    {keyLabel && <span className="keys">· {keyLabel}</span>}
+                    {action && <Badge $tone={colors.blue.main} style={{ marginLeft: 6 }}>{action}</Badge>}
+                    <Badge $tone={colors.text.muted} style={{ marginLeft: 'auto' }}>
+                      {t('settings.changes.nChanges', '{{n}} change(s)', { n: entries.length })}
+                    </Badge>
+                  </GroupToggleHead>
+                  {draftPkg && (
+                    <>
+                      <MiniBtn disabled={busy} title={t('settings.changes.moveGroup', 'Move this record to another package')}
+                        onClick={() => detail && setMoveFor({ entryIds: groupIds, app: detail.application })}>
+                        <FolderInput size={11} /> {t('settings.changes.move', 'Move')}
+                      </MiniBtn>
+                      <MiniBtn $danger disabled={busy} title={t('settings.changes.deleteGroup', 'Delete this record from the package')}
+                        onClick={() => void deleteEntries(groupIds, groupLabel)}>
+                        <Trash2 size={11} /> {t('common.delete', 'Delete')}
+                      </MiniBtn>
+                    </>
+                  )}
+                </div>
                 {groupOpen && entries.map((e) => {
                   const oldV = e.old_values ?? {}; const newV = e.new_values ?? {}
                   const { fields, changed, unchanged } = classifyFields(oldV, newV)
@@ -532,9 +640,19 @@ export default function ChangePackagesBuilder() {
                         <span className="count">{summary}</span>
                         <span className="q">{e.connector}.{e.query}</span>
                         {draft && (
-                          <ExBtn disabled={busy} onClick={(ev) => { ev.stopPropagation(); void act(`/entries/${encodeURIComponent(e.id)}/${excluded ? 'include' : 'exclude'}`) }}>
-                            {excluded ? <><Eye size={11} /> {t('settings.changes.include', 'Include')}</> : <><EyeOff size={11} /> {t('settings.changes.exclude', 'Exclude')}</>}
-                          </ExBtn>
+                          <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, flexShrink: 0 }}>
+                            <ExBtn style={{ marginLeft: 0 }} disabled={busy} onClick={(ev) => { ev.stopPropagation(); void act(`/entries/${encodeURIComponent(e.id)}/${excluded ? 'include' : 'exclude'}`) }}>
+                              {excluded ? <><Eye size={11} /> {t('settings.changes.include', 'Include')}</> : <><EyeOff size={11} /> {t('settings.changes.exclude', 'Exclude')}</>}
+                            </ExBtn>
+                            <MiniBtn disabled={busy} title={t('settings.changes.moveEntry', 'Move this change to another package')}
+                              onClick={(ev) => { ev.stopPropagation(); detail && setMoveFor({ entryIds: [e.id], app: detail.application }) }}>
+                              <FolderInput size={11} /> {t('settings.changes.move', 'Move')}
+                            </MiniBtn>
+                            <MiniBtn $danger disabled={busy} title={t('settings.changes.deleteEntry', 'Delete this change from the package')}
+                              onClick={(ev) => { ev.stopPropagation(); void deleteEntries([e.id], e.operation.replace('_', ' ')) }}>
+                              <Trash2 size={11} />
+                            </MiniBtn>
+                          </span>
                         )}
                       </div>
                       {open && (
@@ -582,6 +700,33 @@ export default function ChangePackagesBuilder() {
       )}
         <PostApplyEditor />
         </>
+      )}
+      {moveFor && createPortal(
+        <Overlay onClick={() => setMoveFor(null)}>
+          <Modal onClick={(e) => e.stopPropagation()} style={{ minWidth: 'min(440px, 95vw)' }}>
+            <ModalHeader>{t('settings.changes.moveTitle', 'Move {{n}} change(s) to…', { n: moveFor.entryIds.length })}</ModalHeader>
+            <ModalBody>
+              {moveTargets.length === 0 ? (
+                <Sub style={{ margin: 0 }}>{t('settings.changes.moveNoTargets', 'No other draft package for this application yet — create one below.')}</Sub>
+              ) : moveTargets.map((p) => (
+                <PickRow key={p.id} onClick={() => void moveEntriesTo(moveFor.entryIds, p.id)}>
+                  <Layers size={14} />
+                  <span className="name">{p.name}</span>
+                  {p.kind === 'custom' && <Badge $tone={KIND_TONE.custom}>{t('settings.changes.kindCustom', 'custom')}</Badge>}
+                  <span className="meta">{t('settings.changes.nChanges', '{{n}} change(s)', { n: p.entry_count })}</span>
+                </PickRow>
+              ))}
+              <PickRow onClick={async () => { const id = await createCustom(moveFor.app); if (id) await moveEntriesTo(moveFor.entryIds, id) }}>
+                <Plus size={14} />
+                <span className="name">{t('settings.changes.moveToNew', 'New custom package…')}</span>
+              </PickRow>
+            </ModalBody>
+            <ModalFooter>
+              <Button $variant="ghost" onClick={() => setMoveFor(null)}>{t('common.cancel', 'Cancel')}</Button>
+            </ModalFooter>
+          </Modal>
+        </Overlay>,
+        document.body,
       )}
     </>
   )

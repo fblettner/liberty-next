@@ -38,10 +38,14 @@ export interface ChainCtx {
 /** Result of running a list of actions — surfaces warnings / refresh request / soft cancel /
  *  any values a :class:`ReturnAction` collected (caller writes them back to the form). */
 export interface ChainResult {
-  /** False when an action failed *and* its ``stop_on_error`` is not false. */
+  /** False when an action failed *and* its ``stop_on_error`` is not false (the chain aborted). */
   ok: boolean
-  /** Human-readable messages (notify actions, soft-error fallthroughs). */
+  /** Benign, informational messages — ``notify`` actions, "no handler in this surface" notices. */
   warnings: string[]
+  /** Real step failures that did NOT abort the chain because the step's ``stop_on_error`` is
+   *  ``false``. The chain continued, but these MUST still be surfaced to the operator (a failed
+   *  query is never silent) — ``stop_on_error: false`` controls *flow*, not *visibility*. */
+  errors: string[]
   /** True when a :class:`RefreshAction` fired — caller re-runs the read query. */
   refresh: boolean
   /** True when a prompt was cancelled — caller treats as a no-op, no error banner. */
@@ -376,7 +380,7 @@ async function runOneAction(
         if (!shared) {
           const msg = `${a.label || a.id}: shared action '${a.ref}' is not defined`
           if (a.stop_on_error !== false) { result.error = msg; result.ok = false; return { abort: true } }
-          result.warnings.push(msg)
+          result.errors.push(msg)
           break
         }
         // Cycle guard — a shared action that (transitively) calls itself would loop forever.
@@ -434,7 +438,7 @@ async function runOneAction(
         if (!Array.isArray(arr)) {
           const msg = `loop '${a.id}': source '${a.source}' did not resolve to an array`
           if (a.stop_on_error !== false) { result.error = msg; result.ok = false; return { abort: true } }
-          result.warnings.push(msg)
+          result.errors.push(msg)
           break
         }
         const savedLoop = ctx.loop
@@ -524,7 +528,7 @@ async function runOneAction(
         if (resp?.success === false) {
           const msg = `${a.label || a.id}: API ${resp?.status_code ?? ''} ${resp?.error ?? ''}`.trim()
           if (a.stop_on_error !== false) { result.error = msg; result.ok = false; return { abort: true } }
-          result.warnings.push(msg)
+          result.errors.push(msg)
           break
         }
         if (a.bind_result) {
@@ -616,7 +620,9 @@ async function runOneAction(
   } catch (e) {
     const msg = `${a.label || a.id}: ${e instanceof ApiError ? e.message : String(e)}`
     if (a.stop_on_error !== false) { result.error = msg; result.ok = false; return { abort: true } }
-    result.warnings.push(msg)
+    // stop_on_error=false → don't abort the chain, but a step that THREW genuinely failed — record
+    // it as an error (always surfaced), not a benign warning that gets console-logged and lost.
+    result.errors.push(msg)
     return { abort: false }
   }
 }
@@ -638,6 +644,7 @@ export async function runChain(
   const result: ChainResult = {
     ok: true,
     warnings: [],
+    errors: [],
     refresh: false,
     cancelled: false,
     returnedValues: {},

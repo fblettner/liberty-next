@@ -309,12 +309,20 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
 # Same set v1's FormsDialog/FormsTable evaluated on Save — re-implemented here so the dialog,
 # batch-edit grid, and any future API caller all get it consistently.
 _RULES_LOGIN = {"LOGIN"}
-_RULES_NOW = {"SYSDATE", "CURRENT_DATE"}
-_RULES_SEQUENCE = {"SEQUENCE", "NN"}
+# CURRENT_DATE (alias of SYSDATE) and NN (alias of SEQUENCE) were retired in v2 — the migrator
+# normalises them, so the runtime only recognises the survivors.
+_RULES_NOW = {"SYSDATE"}
+_RULES_SEQUENCE = {"SEQUENCE"}
 # Statements with a SET/VALUES clause that a DEFAULT can fill — DELETE binds only a WHERE key,
 # so a default there would corrupt the predicate. (SEQUENCE/NN stays INSERT-only — see
 # ``_resolve_sequences`` — because a sequence on UPDATE would re-issue a new number every save.)
 _RULES_DEFAULTABLE = {"INSERT", "UPDATE", "MERGE"}
+# Statements that have a SET/VALUES clause at all — the only ones where a form rule (LOGIN /
+# SYSDATE / BOOLEAN / DEFAULT) should *substitute* a bind. A DELETE is WHERE-only: every bind is a
+# key match against the stored row, so stamping SYSDATE/LOGIN there would corrupt the predicate
+# (e.g. a jdedate key bound to *today* instead of the row's saved effective date). DELETE binds get
+# type coercion only — same treatment as an UPDATE's ``_ORIGINAL`` WHERE binds.
+_SET_CLAUSE_STATEMENTS = {"INSERT", "UPDATE", "MERGE"}
 _RULES_PASSWORD = {"PASSWORD"}
 _RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missing/empty
 # v1 parity: a column-hint-level ``rules = "DISABLED"`` opts out of an inherited dictionary
@@ -322,6 +330,41 @@ _RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missi
 # scope SEQUENCE to INSERT, so this is mostly belt-and-braces — but the operator may want it
 # on PASSWORD / SYSDATE too, e.g. an import screen that bulk-loads pre-computed values).
 _RULES_DISABLED = {"DISABLED"}
+
+
+# ── Predefined query tokens (``{{LOGIN}}`` / ``{{SYSDATE}}`` …) ────────────────────────────────
+# A writable query embeds these where it wants an automatic, server-resolved value — making the
+# stamp an EXPLICIT decision of the query (``ULUPMJ = {{SYSDATE}}``) instead of an implicit side
+# effect of the column's data-dictionary rule (which is overloaded for display / default / format
+# elsewhere). Resolved at execute time, **bound** (never string-substituted — SQL-injection-safe),
+# and — for an ``COL = {{TOKEN}}`` assignment — coerced to the assigned column's DD format, so
+# ``{{SYSDATE}}`` on a ``jdedate`` column lands as the CYYDDD integer and ``{{SYSTIME}}`` on a
+# ``jdetime`` column as HHMMSS. A normal ``:BIND`` stays value-driven (screen value wins, then
+# default / DD rule); a token is always the server value (not screen-overridable). ``LOGIN`` is the
+# authenticated principal (uppercased, server-trusted). Unknown ``{{x}}`` is left untouched.
+#
+# ``JDEDATE`` / ``JDETIME`` ALWAYS produce the JDE Julian date (CYYDDD) / time (HHMMSS) integer,
+# independent of any column-format lookup — use these on JDE audit columns (``ULUPMJ`` / ``ULUPMT``):
+# their physical name (table-alias prefix + data item) isn't in the dictionary (only the data item
+# ``UPMJ`` / ``UPMT`` is) and they aren't screen fields, so ``{{SYSDATE}}``'s adapt-to-column
+# coercion can't resolve a format for them and would emit a raw date/time (which oracledb rejects).
+# ``SYSDATE`` / ``SYSTIME`` stay adaptive — for a plain date/datetime column or one whose format IS
+# resolvable via a column hint / the dictionary.
+#
+# ``PID`` / ``JOBN`` are the JDE audit provenance constants: ``PID`` → the connector name
+# (uppercased), ``JOBN`` → ``"LIBERTY"``. Strings, no format dependency.
+_PREDEFINED_TOKENS = {
+    "LOGIN", "USER", "SYSDATE", "SYSTIME", "SYSTIMESTAMP", "NOW", "JDEDATE", "JDETIME", "PID", "JOBN",
+}
+#: The ``{{JOBN}}`` constant — Liberty as the writing job/workstation in JDE audit columns.
+_JOBN_VALUE = "LIBERTY"
+# ``COL = {{TOKEN}}`` — captures the assigned column (group 1, possibly schema/table-qualified or
+# quoted) so the token coerces to that column's format. Then bare ``{{TOKEN}}`` (VALUES position,
+# WHERE, …) resolves to the token's natural Python type.
+_ASSIGN_TOKEN_RE = re.compile(
+    r"""([A-Za-z_][\w."`\[\]]*?)\s*=\s*\{\{\s*([A-Za-z_]\w*)\s*\}\}""", re.IGNORECASE,
+)
+_TOKEN_RE = re.compile(r"""\{\{\s*([A-Za-z_]\w*)\s*\}\}""")
 
 
 # ── Runtime filter wrap (v1-style: wrap only what the caller filtered, type-aware) ────────────
@@ -1194,6 +1237,80 @@ class SQLConnector:
             seen.add(base)
         return out
 
+    def _resolve_query_tokens(
+        self, sql_text: str, qdef: QueryDef, *, user: str | None,
+        column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Replace ``{{TOKEN}}`` placeholders in *sql_text* with bind parameters and return the
+        rewritten SQL plus ``{bind_name: value}`` for those binds (merged into the execute binds
+        AFTER form rules, so they're never overridden). For an ``COL = {{TOKEN}}`` assignment the
+        value is coerced to the assigned column's DD format (``jdedate`` → CYYDDD, ``jdetime`` →
+        HHMMSS, …); a bare token resolves to its natural Python type. Unknown tokens are left as-is
+        (a typo surfaces as a SQL error rather than silently vanishing). No-op when the SQL carries
+        no ``{{`` — so it's free for the overwhelming majority of queries."""
+        if "{{" not in sql_text:
+            return sql_text, {}
+        meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
+        binds: dict[str, Any] = {}
+        counter = 0
+        now_cell: list[datetime] = []
+
+        def _value(token: str, fmt: str | None) -> Any:
+            token = token.upper()
+            if token in ("LOGIN", "USER"):
+                # Server-trusted authenticated principal (uppercased, v1 convention).
+                return (user or "anonymous").upper()
+            if token == "PID":
+                return self.name.upper()   # JDE program-id provenance → the connector name
+            if token == "JOBN":
+                return _JOBN_VALUE          # JDE work-station / job → "LIBERTY"
+            # Temporal tokens — one ``now()`` per query so all stamps share an instant. Local
+            # server time (JDE/Oracle SYSDATE semantics), same as the SYSDATE form rule.
+            if not now_cell:
+                now_cell.append(datetime.now())
+            now = now_cell[0]
+            # JDE tokens are always the Julian integer — never depend on a column-format lookup (the
+            # audit column's physical name isn't in the dictionary).
+            if token == "JDEDATE":
+                return _coerce_value(now, "jdedate")   # CYYDDD int
+            if token == "JDETIME":
+                return _coerce_value(now, "jdetime")   # HHMMSS int
+            if fmt:
+                return _coerce_value(now, fmt)   # jdedate→CYYDDD, jdetime→HHMMSS, date→date, …
+            if token == "SYSDATE":
+                return now.date()
+            if token == "SYSTIME":
+                return now.time().replace(microsecond=0)
+            return now                            # SYSTIMESTAMP / NOW
+
+        def _next_bind() -> str:
+            nonlocal counter
+            counter += 1
+            return f"__tok_{counter}"
+
+        def _assign_sub(m: "re.Match[str]") -> str:
+            col, tok = m.group(1), m.group(2)
+            if tok.upper() not in _PREDEFINED_TOKENS:
+                return m.group(0)
+            colname = col.split(".")[-1].strip('"`[]').upper()
+            fmt = (meta.get(colname) or {}).get("fmt")
+            name = _next_bind()
+            binds[name] = _value(tok, fmt)
+            return f"{col} = :{name}"
+
+        def _bare_sub(m: "re.Match[str]") -> str:
+            tok = m.group(1)
+            if tok.upper() not in _PREDEFINED_TOKENS:
+                return m.group(0)
+            name = _next_bind()
+            binds[name] = _value(tok, None)
+            return f":{name}"
+
+        # Assignment form first (so the column's format drives coercion), then any bare tokens.
+        out = _ASSIGN_TOKEN_RE.sub(_assign_sub, sql_text)
+        out = _TOKEN_RE.sub(_bare_sub, out)
+        return out, binds
+
     def _apply_form_rules(
         self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, user: str | None,
         column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
@@ -1252,20 +1369,29 @@ class SQLConnector:
             # specific column hint can defuse an inherited dictionary rule (e.g. a bulk-import
             # screen that wants SYSDATE / SEQUENCE to *not* fire because the rows carry their
             # own pre-computed audit/PK values). Coercion still applies below.
-            if not is_original and rule not in _RULES_DISABLED:
+            if not is_original and stmt_type in _SET_CLAUSE_STATEMENTS and rule not in _RULES_DISABLED:
                 if rule in _RULES_LOGIN:
-                    # v1 stored audit usernames as uppercase ("ADMIN" not "admin"). Match
-                    # that — the audit tables + downstream reporting all rely on it.
+                    # LOGIN is the server-trusted authenticated principal, NOT a data value — it
+                    # overwrites any caller-supplied value (anti-spoof: a client must not be able to
+                    # set the audit username). v1 stored these uppercase ("ADMIN" not "admin") —
+                    # match that, the audit tables + downstream reporting rely on it.
                     out[k] = (user or "anonymous").upper()
                     continue
-                if rule in _RULES_NOW:
-                    # One ``now()`` per call, so every audit column in the same write lands on
-                    # the same instant. Coerce to the matching Python type for the column's
-                    # format (date / datetime / jdedate / jdetime) so the driver picks the right
-                    # SQL type. **Local server time**, not UTC: "today" means the server's day —
-                    # JDE (like Oracle's SYSDATE) stamps local time, and a UTC ``now`` would write
-                    # the wrong CYYDDD date / HHMMSS time for the hours either side of midnight
-                    # when the server isn't on UTC.
+                if rule in _RULES_NOW and (v is None or v == ""):
+                    # SYSDATE / CURRENT_DATE is a DATA value (an audit timestamp OR a defaulted
+                    # business date) — fill ONLY when the caller didn't pass one, so a passed value
+                    # always wins (an editable date the operator set, e.g. F95921.RLEFFDATE in a
+                    # date picker). Audit columns aren't dialog fields, so the form never sends them
+                    # (the bind is absent) — they still re-stamp on every write. Same "fill-if-absent"
+                    # contract as BOOLEAN / DEFAULT below. (LOGIN above stays forced — identity, not
+                    # data.) A passed value falls through to type coercion.
+                    #
+                    # One ``now()`` per call, so every audit column in the same write lands on the
+                    # same instant. Coerce to the matching Python type for the column's format (date /
+                    # datetime / jdedate / jdetime) so the driver picks the right SQL type. **Local
+                    # server time**, not UTC: "today" means the server's day — JDE (like Oracle's
+                    # SYSDATE) stamps local time, and a UTC ``now`` would write the wrong CYYDDD date /
+                    # HHMMSS time for the hours either side of midnight when the server isn't on UTC.
                     if now is None:
                         now = datetime.now()
                     out[k] = _coerce_value(now, fmt) if fmt else now
@@ -1510,6 +1636,12 @@ class SQLConnector:
             sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
             dict_scope=dict_scope,
         )
+        # Predefined ``{{TOKEN}}`` placeholders (LOGIN / SYSDATE / SYSTIME / …) → bind params,
+        # format-coerced to the assigned column. Runs after the filter wrap so a wrapped SELECT is
+        # covered too; the resolved binds are merged AFTER form rules so they're never overridden.
+        sql_text, token_binds = self._resolve_query_tokens(
+            sql_text, qdef, user=user, column_hints=column_hints, dict_scope=dict_scope,
+        )
         bound = self._build_params(sql_text, qdef, params)
         # Resolve form-layer rules (LOGIN / SYSDATE / PASSWORD / DEFAULT) + coerce string
         # binds to the matching Python type for the column's resolved format. SEQUENCE / NN
@@ -1520,6 +1652,7 @@ class SQLConnector:
             bound, qdef, stmt_type=stmt_type, user=user, column_hints=column_hints,
             dict_scope=dict_scope,
         )
+        bound.update(token_binds)  # server-resolved tokens win, untouched by form rules
         stmt = text(sql_text)
         is_select = stmt_type == "SELECT"
 

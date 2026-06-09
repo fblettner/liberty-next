@@ -43,19 +43,19 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
         ],
     },
     "DICTIONARY_RULES": {
+        # Retired duplicates / dead rules (v2): COLOR (never implemented — use the ``color``
+        # *format*), JDEDATE / JDETIME (never implemented as rules — use the ``jdedate`` / ``jdetime``
+        # *format*, or the ``{{JDEDATE}}`` / ``{{JDETIME}}`` query tokens for write-time stamps),
+        # NN (exact alias of SEQUENCE), CURRENT_DATE (exact alias of SYSDATE). The v1 migrator
+        # normalises NN → SEQUENCE and CURRENT_DATE → SYSDATE so nothing emits the dead alias.
         "label": "Dictionary Rules",
         "values": [
             {"value": "BOOLEAN", "label": "Boolean (Y/N)"},
-            {"value": "COLOR", "label": "Color Picker"},
-            {"value": "CURRENT_DATE", "label": "Date Today"},
             {"value": "DEFAULT", "label": "Default value"},
             {"value": "DISABLED", "label": "Disable Dictionary Rule"},
             {"value": "ENUM", "label": "Enumeration"},
-            {"value": "JDEDATE", "label": "JD Edwards Date"},
-            {"value": "JDETIME", "label": "JD Edwards Time"},
             {"value": "LOGIN", "label": "User connected"},
             {"value": "LOOKUP", "label": "Lookup Table"},
-            {"value": "NN", "label": "Next Number"},
             {"value": "PASSWORD", "label": "Password (mask and encryption)"},
             {"value": "SEQUENCE", "label": "Sequence"},
             {"value": "SYSDATE", "label": "Date Today"},
