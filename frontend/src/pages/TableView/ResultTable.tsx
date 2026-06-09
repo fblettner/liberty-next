@@ -23,7 +23,7 @@ import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types
 import { api, ApiError, authHeaders } from '../../api/client'
 import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
-import { genericFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
+import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
@@ -74,9 +74,13 @@ function editCtrlOf(c: Column): EditCtrl {
   return 'text'
 }
 const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
-  kind === 'boolean' || kind === 'enum' || kind === 'lookup'
-    ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
-    : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
+  // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
+  // ``selectFilterFn``. Boolean keeps the built-in strict ``equals``.
+  kind === 'enum' || kind === 'lookup'
+    ? { filterFn: selectFilterFn, meta: { filter: { kind, options }, align } as FilterMeta }
+    : kind === 'boolean'
+      ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
+      : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
 
 // (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
 // ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
