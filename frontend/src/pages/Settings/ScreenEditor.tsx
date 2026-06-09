@@ -783,6 +783,33 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         />
         <GroupsHr />
         <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
+        {/* Import columns from the read query — seed the list from the query's result columns
+            (name + dd) in one click instead of adding each by hand. Only adds columns NOT already
+            defined, so it's safe to re-run after the query gains a column. */}
+        {(() => {
+          const have = new Set(
+            (currentColumns as { name?: string }[]).map((c) => (c.name ?? '').toLowerCase()),
+          )
+          const missing = (screenColumns ?? []).filter((c) => c.name && !have.has(c.name.toLowerCase()))
+          return (
+            <Button
+              $size="sm" $variant="ghost"
+              disabled={!screenColumns || missing.length === 0}
+              onClick={() => setProp('columns', [
+                ...(currentColumns as unknown[]),
+                ...missing.map((c) => ({ name: c.name, ...(c.dd ? { dd: c.dd } : {}) })),
+              ])}
+              style={{ marginBottom: 8 }}
+            >
+              <Plus size={13} />{' '}
+              {!screenColumns
+                ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
+                : missing.length === 0
+                  ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
+                  : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
+            </Button>
+          )
+        })()}
         {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
             ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
             COLUMN_GROUPS for the per-column ``group`` picker. */}
