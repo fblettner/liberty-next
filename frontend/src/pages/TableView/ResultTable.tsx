@@ -805,7 +805,13 @@ export function ResultTable({
       if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return }
       if (!editMode) setEditMode(true)
 
-      const keys = (keyColumns ?? []).filter(Boolean)
+      // Effective key columns come from the per-column ``key`` flags resolved onto the RESULT
+      // columns (the Columns-tab "key"), not ``screen.key_columns`` — that's the legacy explicit
+      // override and is usually EMPTY even when the row has a key (F00950 keys via per-column flags).
+      // An empty list meant every imported row looked new → re-import failed on duplicate-PK insert.
+      // Using the result columns also guarantees the names match the seed keys' case.
+      const keyColsFromResult = result.columns.filter((c) => c.key).map((c) => c.name)
+      const keys = (keyColsFromResult.length ? keyColsFromResult : (keyColumns ?? [])).filter(Boolean)
       const newSeeds: Record<string, unknown>[] = []
       const matched: DataRow[] = []
       // Match on the key columns ACTUALLY PRESENT in the sheet. A hidden / derived key column (e.g.
