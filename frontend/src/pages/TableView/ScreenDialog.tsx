@@ -404,7 +404,7 @@ export function ScreenDialog({
     actions: Action[],
     baseCtx: Row,
     opts?: { track?: boolean },
-  ): Promise<{ ok: boolean; warnings: string[]; refresh: boolean; error?: string }> => {
+  ): Promise<{ ok: boolean; warnings: string[]; errors: string[]; refresh: boolean; error?: string }> => {
     // Only the write hooks (on_save/insert/update, on_delete) tag their action calls for change
     // capture — on_load / on_cancel are read/UI and must not land in the package. Gated on the
     // screen actually being change-tracked.
@@ -438,6 +438,7 @@ export function ScreenDialog({
     return {
       ok: result.ok,
       warnings: result.warnings,
+      errors: result.errors,
       refresh: result.refresh,
       error: result.error,
     }
@@ -466,6 +467,10 @@ export function ScreenDialog({
     setActionBusy(null)
     if (!result.ok) {
       setActionStatus({ message: result.error || a.label || a.id, tone: 'error' })
+    } else if (result.errors.length > 0) {
+      // The chain continued (stop_on_error=false) but a step failed — show it with an error tone
+      // so a swallowed query failure can't masquerade as success.
+      setActionStatus({ message: result.errors.join(' · '), tone: 'error' })
     } else {
       // For ``notify`` the action emits its own message via warnings; for run_query / refresh
       // / navigate we surface a generic "<label> · OK" so the operator sees feedback.
@@ -491,6 +496,7 @@ export function ScreenDialog({
       const ctx: Row = { ...savedRow, ...formValues }
       const result = await runOnSaveActions(actions, ctx)
       if (!result.ok) setActionStatus({ message: result.error || t('dialog.onLoadFailed', { defaultValue: 'on_load failed' }), tone: 'error' })
+      else if (result.errors.length > 0) setActionStatus({ message: result.errors.join(' · '), tone: 'error' })
       if (result.refresh) onSaved()
     })()
   }, [open, dlg, formValues, savedRow, runOnSaveActions, onSaved, t])
@@ -536,8 +542,9 @@ export function ScreenDialog({
     const ctx: Row = { ...savedRow, ...formValues }
     const result = await runOnSaveActions(actions, ctx)
     setClosing(false)
-    if (!result.ok) {
-      setActionStatus({ message: result.error || t('dialog.onCancelFailed', { defaultValue: 'on_cancel failed' }), tone: 'error' })
+    if (!result.ok || result.errors.length > 0) {
+      const msg = result.error || result.errors.join(' · ') || t('dialog.onCancelFailed', { defaultValue: 'on_cancel failed' })
+      setActionStatus({ message: msg, tone: 'error' })
       return false   // block the close
     }
     return true
@@ -611,10 +618,11 @@ export function ScreenDialog({
       const onDelete = (screen.on_delete ?? []) as Action[]
       if (onDelete.length > 0) {
         const result = await runOnSaveActions(onDelete, savedRow, { track: true })
-        if (!result.ok) {
-          // Row was deleted; the chain failed. Surface clearly and still refresh so the user
-          // sees the new state. Same convention as on_save failure.
-          setError(t('dialog.onSaveFailed', { message: result.error || '' }))
+        if (!result.ok || result.errors.length > 0) {
+          // Row was deleted; the chain failed (aborted, or continued past a stop_on_error=false
+          // step that still failed). Surface clearly and still refresh so the user sees the new
+          // state. Same convention as on_save failure.
+          setError(t('dialog.onSaveFailed', { message: result.error || result.errors.join(' · ') || '' }))
           onSaved()
           setDeleting(false)
           return
@@ -747,7 +755,7 @@ export function ScreenDialog({
       const actions = [...dialogActions, ...screenRowActions]
       const result = actions.length > 0
         ? await runOnSaveActions(actions, ctx, { track: true })
-        : { ok: true, warnings: [], refresh: false }
+        : { ok: true, warnings: [], errors: [], refresh: false }
       setSaving(false)
       if (!result.ok) {
         // The *main* save succeeded; only the action chain failed. Tell the user clearly that the
@@ -755,6 +763,15 @@ export function ScreenDialog({
         // or close.
         setError(t('dialog.onSaveFailed', { message: result.error || '' }))
         onSaved()  // refresh anyway so the user sees the new primary state
+        return
+      }
+      // The chain didn't abort (every failing step had stop_on_error=false), but a step still
+      // FAILED — surface it. ``stop_on_error: false`` means "keep going", NOT "hide it"; a silently
+      // swallowed query error is exactly the regression we're fixing. Keep the dialog open with the
+      // error banner; the primary row is saved, so still refresh.
+      if (result.errors.length > 0) {
+        setError(t('dialog.onSaveFailed', { message: result.errors.join(' · ') }))
+        onSaved()
         return
       }
       // success — surface any non-fatal warnings (notify messages, skipped stubs with
