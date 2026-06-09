@@ -797,7 +797,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
               disabled={!screenColumns || missing.length === 0}
               onClick={() => setProp('columns', [
                 ...(currentColumns as unknown[]),
-                ...missing.map((c) => ({ name: c.name, ...(c.dd ? { dd: c.dd } : {}) })),
+                // Column names are stored UPPERCASE (the write queries + dictionary use v1's
+                // uppercase ids; a Postgres read folds them lowercase, so normalize on import).
+                ...missing.map((c) => ({ name: c.name.toUpperCase(), ...(c.dd ? { dd: c.dd.toUpperCase() } : {}) })),
               ])}
               style={{ marginBottom: 8 }}
             >
