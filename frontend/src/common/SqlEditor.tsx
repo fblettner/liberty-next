@@ -16,8 +16,8 @@
 import '../services/monaco' // side effect: register Monaco + the SQL language; no-op when already loaded
 import MonacoEditor, { type OnChange, type OnMount } from '@monaco-editor/react'
 import styled from '@emotion/styled'
-import { useState } from 'react'
-import { Play, Wand2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Play, Wand2, Braces } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsLight } from './useIsLight'
 import { Centered } from './Spinner'
@@ -38,6 +38,32 @@ const Frame = styled.div<{ $h: number }>`
 const Toolbar = styled.div`
   display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 4px;
 `
+const MenuWrap = styled.div`position: relative; margin-right: auto;`
+const TokenMenu = styled.div`
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 230px;
+  background: ${colors.bg.dropdown}; border: 1px solid ${colors.border}; border-radius: ${radius.md};
+  padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+`
+const TokenItem = styled.button`
+  display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; cursor: pointer;
+  padding: 5px 8px; border: none; background: transparent; border-radius: ${radius.sm};
+  & .tok { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
+  & .desc { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  &:hover { background: var(--hover-subtle); }
+`
+// The predefined query tokens the backend resolves at write time (liberty/connectors/sql.py:
+// _PREDEFINED_TOKENS). Inserting one writes ``{{TOKEN}}`` at the cursor; it's bound + coerced to the
+// assigned column's format on execute (SYSDATE → jdedate CYYDDD, SYSTIME → jdetime HHMMSS, …).
+const QUERY_TOKENS = [
+  { tok: 'LOGIN', descKey: 'tokLogin', descFallback: 'Current user (uppercased)' },
+  { tok: 'PID', descKey: 'tokPid', descFallback: 'Program id — the connector name (e.g. ULPID)' },
+  { tok: 'JOBN', descKey: 'tokJobn', descFallback: 'Job/workstation — "LIBERTY" (e.g. ULJOBN)' },
+  { tok: 'JDEDATE', descKey: 'tokJdedate', descFallback: 'JDE Julian date today — CYYDDD integer (e.g. ULUPMJ)' },
+  { tok: 'JDETIME', descKey: 'tokJdetime', descFallback: 'JDE time now — HHMMSS integer (e.g. ULUPMT)' },
+  { tok: 'SYSDATE', descKey: 'tokSysdate', descFallback: 'Current date (native date column)' },
+  { tok: 'SYSTIME', descKey: 'tokSystime', descFallback: 'Current time (native time column)' },
+  { tok: 'SYSTIMESTAMP', descKey: 'tokSystimestamp', descFallback: 'Current date & time' },
+] as const
 const ToolBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: ${radius.sm};
   border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
@@ -72,8 +98,36 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
   const [schema, setSchema] = useState<PoolSchema | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [runnerOpen, setRunnerOpen] = useState(false)
+  const [tokenOpen, setTokenOpen] = useState(false)
+  const tokenWrapRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const handleChange: OnChange = (v) => onChange(v ?? '')
+  // Insert a ``{{TOKEN}}`` at the cursor (replacing any selection), then refocus. Monaco's edit
+  // fires onChange, so the controlled `value` stays in sync. Falls back to appending if the editor
+  // hasn't mounted yet.
+  const insertToken = (tok: string) => {
+    const snippet = `{{${tok}}}`
+    const ed = editorRef.current
+    setTokenOpen(false)
+    if (ed) {
+      const sel = ed.getSelection()
+      if (sel) {
+        ed.executeEdits('insert-token', [{ range: sel, text: snippet, forceMoveMarkers: true }])
+        ed.focus()
+        return
+      }
+    }
+    onChange(value + snippet)
+  }
+  // Close the token menu on an outside click.
+  useEffect(() => {
+    if (!tokenOpen) return
+    const h = (e: MouseEvent) => { if (tokenWrapRef.current && !tokenWrapRef.current.contains(e.target as Node)) setTokenOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [tokenOpen])
   const handleMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor
     if (!connector) return
     const model = editor.getModel()
     if (!model) return
@@ -86,9 +140,10 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
       }
     })
   }
-  // Toolbar shown only when this editor is bound to a connector (i.e. only in the config builder).
-  // RawEditor / readOnly / no-connector cases keep the bare editor — matches what shipped before.
-  const showToolbar = !!connector && !readOnly
+  // Toolbar shown whenever the field is editable — the Token inserter works on any SQL field
+  // (with or without a connector). The wizard / run buttons still require a connector (schema +
+  // execution). A read-only / RawEditor mount keeps the bare editor — matches what shipped before.
+  const showToolbar = !readOnly
   // Never offer Run on a write statement (INSERT / UPDATE / DELETE / …) — executing it (even a
   // dry-run) against the live DB is dangerous. Only read queries (SELECT / CTE-SELECT / WITH …)
   // get the runner. Cheap leading-keyword check on the SQL.
@@ -98,11 +153,29 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
     <div>
       {showToolbar && (
         <Toolbar>
-          <ToolBtn type="button" disabled={!schema} onClick={() => setWizardOpen(true)}
-            title={schema ? t('settings.sqlEditor.wizardTitle') : t('settings.sqlEditor.wizardLoading')}>
-            <Wand2 size={11} /> {t('settings.sqlEditor.wizard')}
-          </ToolBtn>
-          {canRun && (
+          <MenuWrap ref={tokenWrapRef}>
+            <ToolBtn type="button" $active={tokenOpen} onClick={() => setTokenOpen((v) => !v)}
+              title={t('settings.sqlEditor.tokenTitle', 'Insert a predefined value resolved at write time')}>
+              <Braces size={11} /> {t('settings.sqlEditor.token', 'Token')}
+            </ToolBtn>
+            {tokenOpen && (
+              <TokenMenu>
+                {QUERY_TOKENS.map((q) => (
+                  <TokenItem key={q.tok} type="button" onClick={() => insertToken(q.tok)}>
+                    <span className="tok">{`{{${q.tok}}}`}</span>
+                    <span className="desc">{t(`settings.sqlEditor.${q.descKey}`, q.descFallback)}</span>
+                  </TokenItem>
+                ))}
+              </TokenMenu>
+            )}
+          </MenuWrap>
+          {connector && (
+            <ToolBtn type="button" disabled={!schema} onClick={() => setWizardOpen(true)}
+              title={schema ? t('settings.sqlEditor.wizardTitle') : t('settings.sqlEditor.wizardLoading')}>
+              <Wand2 size={11} /> {t('settings.sqlEditor.wizard')}
+            </ToolBtn>
+          )}
+          {connector && canRun && (
             <ToolBtn type="button" $active={runnerOpen} onClick={() => setRunnerOpen((v) => !v)}
               title={t('settings.sqlEditor.runTitle')}>
               <Play size={11} /> {t('settings.sqlEditor.run')}

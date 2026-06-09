@@ -1084,6 +1084,142 @@ async def test_form_rule_sysdate_format_aware(pools: PoolRegistry) -> None:
     assert isinstance(out["PLAIN"], dt)
 
 
+@pytest.mark.asyncio
+async def test_form_rule_sysdate_skipped_on_delete_where_key(pools: PoolRegistry) -> None:
+    """A DELETE is WHERE-only — its binds are key matches against the stored row, so the SYSDATE /
+    CURRENT_DATE rule must NOT fire (else a jdedate key like F95921.RLEFFDATE binds to *today*
+    instead of the row's saved effective date, and the DELETE matches 0 rows). The provided value
+    is still type-coerced (ISO date → CYYDDD), just not substituted with now()."""
+    from datetime import datetime as dt
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        # RLEFFDATE defaults to today on INSERT (correct) — but on DELETE it's a WHERE key.
+        "RLEFFDATE": DictionaryEntry(format="jdedate", rules="SYSDATE"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="del", writable=True,
+                 sql="DELETE FROM f95921 WHERE RLFRROLE = :RLFRROLE AND RLEFFDATE = :RLEFFDATE"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="RLFRROLE"), ColumnHint(name="RLEFFDATE")]
+    # The row carries its stored effective date (2024-05-26, read back as ISO from the Julian).
+    out = conn._apply_form_rules(
+        {"RLFRROLE": "APMGRJDE", "RLEFFDATE": "2024-05-26"},
+        cfg.queries[0], stmt_type="DELETE", user="x", column_hints=hints,
+    )
+    # Coerced to the ROW's Julian — NOT today's. (2024-05-26 → (2024-1900)*1000 + 147 = 124147.)
+    assert out["RLEFFDATE"] == 124147
+    today_cyyddd = (dt.now().year - 1900) * 1000 + dt.now().timetuple().tm_yday
+    assert out["RLEFFDATE"] != today_cyyddd
+    # Sanity: the SAME column on INSERT still stamps today (the rule fires on SET-clause writes).
+    ins = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO f95921 (RLEFFDATE) VALUES (:RLEFFDATE)"),
+    ])
+    conn2 = SQLConnector("db", ins, pools, dictionary=d)
+    out2 = conn2._apply_form_rules({"RLEFFDATE": None}, ins.queries[0], stmt_type="INSERT", user="x",
+                                   column_hints=[ColumnHint(name="RLEFFDATE")])
+    assert out2["RLEFFDATE"] == today_cyyddd
+
+
+@pytest.mark.asyncio
+async def test_form_rule_passed_date_wins_but_login_stays_forced(pools: PoolRegistry) -> None:
+    """A passed value wins over a SYSDATE rule (it's a data value — an editable date the operator
+    set must not be overwritten with today); an *absent* SYSDATE bind still re-stamps (audit columns
+    the form never sends). LOGIN is the exception — server-trusted identity, always forced (a passed
+    value is ignored, anti-spoof)."""
+    from datetime import datetime as dt
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "RLEFFDATE": DictionaryEntry(format="jdedate", rules="SYSDATE"),
+        "UPDATED_BY": DictionaryEntry(rules="LOGIN"),
+        "UPDATED_AT": DictionaryEntry(format="jdedate", rules="SYSDATE"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="upd", writable=True,
+                 sql="UPDATE f95921 SET RLEFFDATE = :RLEFFDATE, UPDATED_BY = :UPDATED_BY, UPDATED_AT = :UPDATED_AT WHERE id = :id"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="RLEFFDATE"), ColumnHint(name="UPDATED_BY"), ColumnHint(name="UPDATED_AT")]
+    today_cyyddd = (dt.now().year - 1900) * 1000 + dt.now().timetuple().tm_yday
+    out = conn._apply_form_rules(
+        # operator passes RLEFFDATE explicitly; a spoofed UPDATED_BY; UPDATED_AT absent (audit col).
+        {"RLEFFDATE": "2024-05-26", "UPDATED_BY": "evil-spoof", "UPDATED_AT": None},
+        cfg.queries[0], stmt_type="UPDATE", user="admin", column_hints=hints,
+    )
+    assert out["RLEFFDATE"] == 124147          # passed date kept (coerced), NOT today
+    assert out["UPDATED_BY"] == "ADMIN"        # LOGIN forced to the authenticated user (anti-spoof)
+    assert out["UPDATED_AT"] == today_cyyddd   # absent → SYSDATE still re-stamps
+
+
+@pytest.mark.asyncio
+async def test_query_tokens_format_aware(pools: PoolRegistry) -> None:
+    """``{{TOKEN}}`` placeholders resolve to bound, format-coerced values: LOGIN → uppercased user;
+    SYSDATE/SYSTIME coerce to the ASSIGNED column's DD format (jdedate → CYYDDD, jdetime → HHMMSS,
+    date → date). An unknown ``{{x}}`` is left untouched (a typo surfaces as a SQL error)."""
+    from datetime import datetime as dt
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "ULUPMJ": DictionaryEntry(format="jdedate"),
+        "ULUPMT": DictionaryEntry(format="jdetime"),
+        "CREATED_ON": DictionaryEntry(format="date"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="post", writable=True,
+                 sql=("UPDATE f SET ULMUSE = {{LOGIN}}, ULUPMJ = {{SYSDATE}}, "
+                      "ULUPMT = {{SYSTIME}}, CREATED_ON = {{SYSDATE}}, NOTE = {{BOGUS}} WHERE id = :id")),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="ULMUSE"), ColumnHint(name="ULUPMJ"),
+             ColumnHint(name="ULUPMT"), ColumnHint(name="CREATED_ON")]
+    sql, binds = conn._resolve_query_tokens(cfg.queries[0].sql, cfg.queries[0], user="franck", column_hints=hints)
+    # Known tokens replaced by binds; the unknown one is left literal; the :id bind is untouched.
+    assert ":__tok_" in sql and "{{BOGUS}}" in sql and "{{LOGIN}}" not in sql and ":id" in sql
+    now = dt.now()
+    cyyddd = (now.year - 1900) * 1000 + now.timetuple().tm_yday
+    vals = list(binds.values())
+    assert "FRANCK" in vals                       # LOGIN, uppercased
+    assert cyyddd in vals                          # SYSDATE on a jdedate column → CYYDDD int
+    assert now.date() in vals                      # SYSDATE on a date column → date object
+    assert any(isinstance(v, int) and 0 <= v <= 235959 and v != cyyddd for v in vals)  # SYSTIME jdetime → HHMMSS
+
+
+@pytest.mark.asyncio
+async def test_jde_tokens_always_julian_without_column_format(pools: PoolRegistry) -> None:
+    """{{JDEDATE}} / {{JDETIME}} always resolve to the Julian CYYDDD / HHMMSS integer — independent
+    of any column-format lookup. This is the JDE audit-column case: ULUPMJ / ULUPMT aren't in the
+    dictionary (only the data items UPMJ / UPMT are) and aren't screen fields, so {{SYSDATE}}'s
+    adapt-to-column coercion can't find a format and would emit a raw date/time (oracledb rejects)."""
+    from datetime import datetime as dt
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="post", writable=True,
+                 sql=("UPDATE F00921 SET ULUPMJ = {{JDEDATE}}, ULUPMT = {{JDETIME}}, "
+                      "ULPID = {{PID}}, ULJOBN = {{JOBN}} WHERE ULUSER = :ULUSER")),
+    ])
+    conn = SQLConnector("jdedwards", cfg, pools)  # NO dictionary, NO hints — formats can't be resolved
+    sql, binds = conn._resolve_query_tokens(cfg.queries[0].sql, cfg.queries[0], user="admin")
+    now = dt.now()
+    cyyddd = (now.year - 1900) * 1000 + now.timetuple().tm_yday
+    vals = list(binds.values())
+    assert cyyddd in vals                                              # JDEDATE → CYYDDD int
+    assert any(isinstance(v, int) and 0 <= v <= 235959 and v != cyyddd for v in vals)  # JDETIME → HHMMSS int
+    assert "JDEDWARDS" in vals                                         # PID → connector name uppercased
+    assert "LIBERTY" in vals                                           # JOBN → "LIBERTY"
+
+
+@pytest.mark.asyncio
+async def test_query_tokens_execute_roundtrip(pools: PoolRegistry) -> None:
+    """End-to-end: a writable query with ``{{LOGIN}}`` binds the resolved (server) value and writes
+    it — proving the rewrite → bind → execute path, not just the resolver."""
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="setname", writable=True, sql="UPDATE item SET name = {{LOGIN}} WHERE id = :id"),
+        QueryDef(name="get", sql="SELECT name FROM item WHERE id = :id"),
+    ])
+    conn = SQLConnector("db", cfg, pools)
+    await conn.execute("setname", {"id": 1}, user="alice")
+    r = await conn.execute("get", {"id": 1})
+    assert r.rows[0]["name"] == "ALICE"
+
+
 def test_jdedate_coercion() -> None:
     """``_coerce_value(x, "jdedate")`` accepts ``date`` / ``datetime`` / ISO string / int —
     all collapse to CYYDDD. Out-of-range years (< 1900) return None (can't encode). The
