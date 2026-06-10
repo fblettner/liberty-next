@@ -258,59 +258,49 @@ class ColumnHint(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # ── General — what this column is + where it writes ──────────────────────────────────
     name: str = Field(
         description="Result column this entry applies to (case-insensitive match).",
         # Column names by v1 convention are UPPERCASE (USR_ID / APPS_ID style).
         # Runtime match is case-insensitive, but normalising on save keeps the
         # saved screens.toml / connectors.toml consistent.
-        json_schema_extra={"x_case": "upper"},
+        json_schema_extra={"x_group": "General", "x_case": "upper"},
     )
     dd: str | None = Field(
         default=None,
         description="Inherit label / format / rule from this dictionary entry. Blank uses the column ``name`` as the key; set to ``\"\"`` to opt out.",
-        json_schema_extra={"x_enum_ref": "DD_ENTRIES", "x_case": "upper"},
+        json_schema_extra={"x_group": "General", "x_enum_ref": "DD_ENTRIES", "x_case": "upper"},
     )
-    label: str | None = Field(default=None, description="Display title in the grid header and the dialog field.")
-    hidden: bool = Field(default=False, description="Hide this column by default. The operator can un-hide it via the grid's Columns menu.")
     key: bool = Field(
         default=False,
+        json_schema_extra={"x_group": "General"},
         description=(
             "Mark this column as part of the row's primary key. Drives Excel-import "
             "update-vs-insert matching and locks the column on edit dialogs."
         ),
     )
-    filter: bool = Field(default=False, json_schema_extra={"x_group": "Filtering"}, description="Show this column in the table's filter panel.")
-    filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filtering"}, description="Cascading filters — narrow this column's options based on other filters.")
-    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filtering"}, description="Show this column only when a filter has a specific value. Multiple rules are AND-ed.")
-    write_when: VisibleWhen | list[VisibleWhen] | None = Field(
-        default=None,
-        json_schema_extra={"x_group": "Rule"},
-        description=(
-            "Write this column only when the condition holds. Opt-in and INDEPENDENT of "
-            "``visible_when`` (a hidden column can still be written — e.g. a key resolved by a "
-            "lookup). When set and it does NOT hold for the row, the column is written as its "
-            "type-neutral value (blank / 0) and its data-dictionary default/rule is suppressed — so "
-            "a field that's irrelevant to the row's kind (e.g. a JDE security flag for a security "
-            "type that doesn't use it) isn't dirtied by an inherited default. Blank → always written "
-            "(unchanged behaviour). Multiple rules are AND-ed; the ``field`` must be a column carried "
-            "in the write (the discriminator, e.g. the security type)."
-        ),
-    )
-    width: int | None = Field(default=None, description="Fixed column width in pixels (blank = auto-size).")
-    align: Literal["left", "right", "center"] | None = Field(
-        default=None,
-        description="Cell alignment (blank auto-picks based on type).",
-        json_schema_extra={"x_enum_ref": "COLUMN_ALIGN"},
-    )
+    # ── Display — how the column renders in the grid / header ─────────────────────────────
+    label: str | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Display title in the grid header and the dialog field.")
+    hidden: bool = Field(default=False, json_schema_extra={"x_group": "Display"}, description="Hide this column by default. The operator can un-hide it via the grid's Columns menu.")
     format: str | None = Field(
         default=None,
         description="How to render the value (date / number / boolean / currency / …). Overrides the dictionary format.",
-        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
+        json_schema_extra={"x_group": "Display", "x_enum_ref": "DICTIONARY_TYPE"},
     )
-    # ── form-side metadata (drives both the grid cell renderer and the dialog form) ──────
+    align: Literal["left", "right", "center"] | None = Field(
+        default=None,
+        description="Cell alignment (blank auto-picks based on type).",
+        json_schema_extra={"x_group": "Display", "x_enum_ref": "COLUMN_ALIGN"},
+    )
+    width: int | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Fixed column width in pixels (blank = auto-size).")
+    # ── Filter — grid filter panel + conditional column visibility ────────────────────────
+    filter: bool = Field(default=False, json_schema_extra={"x_group": "Filter"}, description="Show this column in the table's filter panel.")
+    filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filter"}, description="Cascading filters — narrow this column's options based on other filters.")
+    visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filter"}, description="Show this column only when a filter has a specific value. Multiple rules are AND-ed.")
+    # ── Edit — widget + edit constraints (dialog form & grid cell) ────────────────────────
     rules: str | None = Field(
         default=None,
-        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
+        json_schema_extra={"x_group": "Edit", "x_enum_ref": "DICTIONARY_RULES"},
         description=(
             "How to render and validate the column's value. BOOLEAN renders a checkbox, ENUM a "
             "dropdown, LOOKUP a searchable picker. Leave blank to inherit from the dictionary "
@@ -320,7 +310,7 @@ class ColumnHint(BaseModel):
     rules_values: str | None = Field(
         default=None,
         json_schema_extra={
-            "x_group": "Rule",
+            "x_group": "Edit",
             "x_enum_ref_when": {
                 "field": "rules",
                 "map": {
@@ -337,24 +327,9 @@ class ColumnHint(BaseModel):
             "LOOKUP → the lookup id; SEQUENCE / NN → the sequence id."
         ),
     )
-    default: str | None = Field(
-        default=None,
-        json_schema_extra={"x_group": "Rule"},
-        description="Pre-fill value when adding a new row.",
-    )
-    default_when: list[DefaultWhen] = Field(
-        default_factory=list,
-        json_schema_extra={"x_group": "Rule"},
-        description=(
-            "Conditional forced defaults: when a sibling column has a given value, set THIS column "
-            "to a value and lock it (read-only) on the dialog + grid. Each entry is "
-            "{field, value, default}; the first matching rule wins. Reactive (add + edit). Use for "
-            "values determined by the row's kind — e.g. FSSETY='S' forces FSDTAI=0."
-        ),
-    )
     required: bool = Field(
         default=False,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Edit"},
         description=(
             "Operator must fill this column before saving. Dialog field can override "
             "per-dialog if needed."
@@ -362,7 +337,7 @@ class ColumnHint(BaseModel):
     )
     disabled: bool = Field(
         default=False,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Edit"},
         description=(
             "Read-only — the operator sees the value but can't change it. Dialog field can "
             "override per-dialog if needed."
@@ -370,7 +345,7 @@ class ColumnHint(BaseModel):
     )
     disable_on_add: bool = Field(
         default=False,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Edit"},
         description=(
             "Read-only when ADDING a new row (still editable when editing an existing one). "
             "Use for a column whose value is system-assigned on create and must not be typed."
@@ -378,7 +353,7 @@ class ColumnHint(BaseModel):
     )
     disable_on_edit: bool = Field(
         default=False,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Edit"},
         description=(
             "Read-only when EDITING an existing row (still editable when adding a new one). "
             "Use for a key whose value must not change after creation — replaces v1's blanket "
@@ -387,9 +362,40 @@ class ColumnHint(BaseModel):
             "bulk-edit, since it lives on the column."
         ),
     )
+    # ── Defaults — pre-fill / conditional forced default / conditional write ──────────────
+    default: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Defaults"},
+        description="Pre-fill value when adding a new row.",
+    )
+    default_when: list[DefaultWhen] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Defaults"},
+        description=(
+            "Conditional forced defaults: when a sibling column has a given value, set THIS column "
+            "to a value and lock it (read-only) on the dialog + grid. Each entry is "
+            "{field, value, default}; the first matching rule wins. Reactive (add + edit). Use for "
+            "values determined by the row's kind — e.g. FSSETY='S' forces FSDTAI=0."
+        ),
+    )
+    write_when: VisibleWhen | list[VisibleWhen] | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Defaults"},
+        description=(
+            "Write this column only when the condition holds. Opt-in and INDEPENDENT of "
+            "``visible_when`` (a hidden column can still be written — e.g. a key resolved by a "
+            "lookup). When set and it does NOT hold for the row, the column is written as its "
+            "type-neutral value (blank / 0) and its data-dictionary default/rule is suppressed — so "
+            "a field that's irrelevant to the row's kind (e.g. a JDE security flag for a security "
+            "type that doesn't use it) isn't dirtied by an inherited default. Blank → always written "
+            "(unchanged behaviour). Multiple rules are AND-ed; the ``field`` must be a column carried "
+            "in the write (the discriminator, e.g. the security type)."
+        ),
+    )
+    # ── Lookup — only for LOOKUP columns ──────────────────────────────────────────────────
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Lookup"},
         description=(
             "Narrow this column's lookup query by binding extra parameters. Used when the "
             "lookup depends on another field's value — e.g. picking a role narrows by the "
@@ -398,7 +404,7 @@ class ColumnHint(BaseModel):
     )
     return_binds: list[ReturnBind] = Field(
         default_factory=list,
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Lookup"},
         description=(
             "For a LOOKUP column: when a value is picked, fill sibling columns on the same row "
             "from the picked row's returned fields. Each entry maps a lookup ``return_params`` "
@@ -409,7 +415,7 @@ class ColumnHint(BaseModel):
     )
     group: str | None = Field(
         default=None,
-        json_schema_extra={"x_group": "Rule", "x_enum_ref": "COLUMN_GROUPS"},
+        json_schema_extra={"x_group": "General", "x_enum_ref": "COLUMN_GROUPS"},
         description=(
             "When set, this column lives on a RELATED 1:1 table (it comes from the read query's "
             "JOIN) and is written back through the screen's matching ``column_groups`` entry on Save "
