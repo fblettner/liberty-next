@@ -168,6 +168,27 @@ class VisibleWhen(BaseModel):
         return {"field": self.field, "value": self.value}
 
 
+class DefaultWhen(BaseModel):
+    """A conditional forced default — when sibling column ``field`` equals ``value``, THIS column's
+    value is set to ``default`` and locked (read-only) on the dialog + grid, so the operator can't
+    change a value the row's kind determines (e.g. on f00950: FSSETY='S' → FSDTAI=0; FSSETY='2' →
+    FSRUN='N'). Lives on the TARGET column, like ``visible_when``. Reactive — applies on add and
+    edit and re-applies when the discriminator changes. UI-only (the write path is unchanged).
+    Multiple rules: the FIRST whose condition holds wins."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(
+        description="The sibling column whose value gates this default.",
+        json_schema_extra={"x_case": "upper"},
+    )
+    value: str | list[str] = Field(description="The discriminator value, or list of values, that triggers this default.")
+    default: str = Field(description="The value forced into this column (and locked) while the condition holds.")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"field": self.field, "value": self.value, "default": self.default}
+
+
 class ParamBind(BaseModel):
     """Bind a parameter of a target query — for a lookup combo, an action argument, a row
     context-menu trigger, or a nested-tab filter. Two modes: bind a literal value, or bind
@@ -320,6 +341,16 @@ class ColumnHint(BaseModel):
         default=None,
         json_schema_extra={"x_group": "Rule"},
         description="Pre-fill value when adding a new row.",
+    )
+    default_when: list[DefaultWhen] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Conditional forced defaults: when a sibling column has a given value, set THIS column "
+            "to a value and lock it (read-only) on the dialog + grid. Each entry is "
+            "{field, value, default}; the first matching rule wins. Reactive (add + edit). Use for "
+            "values determined by the row's kind — e.g. FSSETY='S' forces FSDTAI=0."
+        ),
     )
     required: bool = Field(
         default=False,

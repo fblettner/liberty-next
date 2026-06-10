@@ -130,6 +130,9 @@ export interface Column {
    *  the sibling column ``column`` on the same row. Drives the grid bulk-edit + Excel import
    *  return-fill (explicit replacement for v1's auto-by-dd return-param mapping). */
   return_binds?: { param: string; column: string }[]
+  /** Conditional forced defaults: when sibling `field` == `value`, this column is set to `default`
+   *  and locked (read-only). First matching rule wins. Honoured by the grid + dialog. */
+  default_when?: { field: string; value: string | string[]; default: string }[]
   /** conditional visibility (v1's cdn_*): a list of `{field, value}` conditions, all of which must
    *  hold for the column to appear — a condition holds when its `field` server-filter is unset, or
    *  its value matches `value` (or is in `value` when it's an array). So a set filter outside the

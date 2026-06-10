@@ -70,6 +70,21 @@ export function evalConditions(rules: FieldCondition[] | undefined, formValues: 
   return true
 }
 
+/** A conditional forced-default rule (``ColumnHint.default_when``). */
+export type DefaultWhenRule = { field: string; value: string | string[]; default: string }
+
+/** The conditional forced default for a column given the current values: the FIRST rule whose
+ *  {field, value} condition holds, or undefined when none match. When defined, the caller forces
+ *  the column to this value and locks it (read-only). Reuses {@link evalConditions} for the same
+ *  trim-tolerant, case-insensitive matching. */
+export function forcedDefault(rules: DefaultWhenRule[] | undefined, values: Row): string | undefined {
+  if (!rules || rules.length === 0) return undefined
+  for (const r of rules) {
+    if (evalConditions([{ field: r.field, value: r.value }], values)) return r.default
+  }
+  return undefined
+}
+
 /** Resolve a list of ParamBinds against the current form state. `value` binds are literals;
  *  `source` binds read the live value of another field on the same form (column name,
  *  case-insensitive). Empty / missing values are dropped — the caller decides whether that

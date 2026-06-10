@@ -118,6 +118,8 @@ def _resolve_screen_field(
             out["return_binds"] = [
                 {"param": b.param, "column": b.column} for b in hint.return_binds
             ]
+        if hint.default_when and not out.get("default_when"):
+            out["default_when"] = [w.as_dict() for w in hint.default_when]
     # ── hidden / disabled / required: field's explicit value wins; else inherit column's ──
     column_hidden = bool(hint.hidden) if hint is not None else False
     column_disabled = bool(hint.disabled) if hint is not None else False

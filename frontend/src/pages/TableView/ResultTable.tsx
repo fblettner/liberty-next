@@ -32,7 +32,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { entityKeyOf, resolveBindList, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, forcedDefault, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -947,17 +947,29 @@ export function ResultTable({
         connector, mode, sent, savedRow, columns: result.columns, columnGroups,
         mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery,
       })
+    // The values to write for a row = its edits, plus any conditional forced default (default_when)
+    // overlaid — so a system-determined value is persisted even though the cell was read-only and
+    // never "edited". UI-only enforcement lives here (and in the dialog), not the backend.
+    const sentWithForced = (row: DataRow): Record<string, unknown> => {
+      const sent: Record<string, unknown> = { ...(editsRef.current.get(row) ?? {}) }
+      const vals = valuesOf(row)
+      for (const c of result.columns) {
+        const f = forcedDefault(c.default_when, vals)
+        if (f !== undefined) sent[c.name] = f
+      }
+      return sent
+    }
     // edited existing rows → main `_put` (+ each group's update/insert), key-aware WHERE via originals
     for (const row of dirtyRows) {
       if (deleted.has(row)) continue
       if (!updateQuery) { localErrs.push(t('table.editNoUpdate')); break }
-      jobs.push(writeRow('edit', editsRef.current.get(row) ?? {}, row))
+      jobs.push(writeRow('edit', sentWithForced(row), row))
     }
     // new rows → main `_post` (+ each group's insert): just the entered values (nothing existed before)
     for (const row of newRows) {
       if (deleted.has(row)) continue
       if (!insertQuery) { localErrs.push(t('table.editNoInsert')); break }
-      jobs.push(writeRow('add', editsRef.current.get(row) ?? {}, {}).then((r) => { newBinds.set(row, r.resolvedBinds) }))
+      jobs.push(writeRow('add', sentWithForced(row), {}).then((r) => { newBinds.set(row, r.resolvedBinds) }))
     }
     // rows marked for deletion → main `_delete` (+ each group's delete first, FK-safe): the
     // current row identifies it (it wasn't edited if it's deleted)
@@ -1098,6 +1110,11 @@ export function ResultTable({
     }
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
+      // Conditional forced default (default_when): when a sibling column's value triggers a rule,
+      // the cell is system-determined → render its forced value READ-ONLY (no editor). Reactive:
+      // editing the discriminator re-ticks dataCols, so this re-evaluates. Save writes it too.
+      const forced = forcedDefault(c.default_when, valuesOf(row))
+      if (forced !== undefined) return span(String(forced), 'plain', cellAlign(c))
       const v = cur(row, c.name)
       // For LOOKUP columns, pull the already-fetched ``LookupData`` (value→label *and* raw
       // rows) from ``lookupMaps``. The map drives the dropdown options; the rows let the

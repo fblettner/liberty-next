@@ -108,6 +108,9 @@ export interface ScreenField {
   /** LOOKUP return → target-field fills: on a pick, write the picked row's ``param`` column into
    *  the form field named ``column``. Explicit replacement for v1's auto-by-dd return mapping. */
   return_binds?: { param: string; column: string }[]
+  /** Conditional forced defaults (column-level): when sibling `field` == `value`, this field is set
+   *  to `default` and locked. First matching rule wins. Reactive on the live form. */
+  default_when?: { field: string; value: string | string[]; default: string }[]
   /** Conditional visibility (v2's port of v1's col_cdn_id) — evaluated against the form. */
   visible_when?: FieldCondition[]
   /** Conditional required — when non-empty, every predicate must hold for the field to be required. */

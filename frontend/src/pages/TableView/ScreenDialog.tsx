@@ -24,7 +24,7 @@ import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
 import type { Action, ColumnGroup, FormTab, NestedFormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { entityKeyOf, evalConditions, type Row } from './dialogHelpers'
+import { entityKeyOf, evalConditions, forcedDefault, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
@@ -236,6 +236,28 @@ export function ScreenDialog({
     setTabIdx(0)
     setError(null)
   }, [open, mode, row, dlg, valueFor, colByName])
+
+  // Conditional forced defaults (column ``default_when``): when a discriminator field matches, force
+  // the target field to the rule's value (``fieldStateOf`` also locks it read-only). Reactive — it
+  // re-applies whenever the form changes, so changing the discriminator updates dependents live.
+  // Guarded by a value-diff so setting inside a formValues-watching effect doesn't loop.
+  useEffect(() => {
+    if (!dlg) return
+    setFormValues((prev) => {
+      let next = prev
+      let changed = false
+      for (const tab of dlg.tabs.filter(isFormTab)) {
+        for (const f of (tab as FormTab).fields ?? []) {
+          const forced = forcedDefault(f.default_when, prev)
+          if (forced !== undefined && String(prev[f.name] ?? '') !== String(forced)) {
+            if (!changed) { next = { ...prev }; changed = true }
+            next[f.name] = forced
+          }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [formValues, dlg])
 
   // ── record lock (Phase 9 — Socket.IO) ────────────────────────────────────────────────
   // On open in ``edit`` mode we acquire a row-level lock so a concurrent edit by another
@@ -803,7 +825,10 @@ export function ScreenDialog({
     // disable_on_edit while editing — the SAME setting the grid bulk-editor honours. `effMode`
     // already folds Duplicate (an edit-of → add). ORed on top of the rule/static disabled.
     const modeLocked = effMode === 'add' ? !!f.disable_on_add : !!f.disable_on_edit
-    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule || modeLocked }
+    // A conditional forced default (default_when) currently holds → the value is system-determined,
+    // so lock the field (the reactive effect above keeps its value in sync).
+    const forcedLocked = forcedDefault(f.default_when, formValues) !== undefined
+    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule || modeLocked || forcedLocked }
   }
 
   if (!open || !dlg) return null
