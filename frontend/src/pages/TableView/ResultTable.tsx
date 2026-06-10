@@ -156,9 +156,12 @@ const RowMenuErr = styled.div`
 `
 
 function EditCell({
-  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy,
+  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields,
 }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
+  /** The lookup's ``display_fields`` — extra row columns appended (dimmed, " · ") after each
+   *  option's label so similar codes are distinguishable, same as the dialog dropdown. */
+  displayFields?: string[]
   /** ``{value: label}`` map for LOOKUP columns — already resolved by the surrounding
    *  ``lookupMaps`` (one fetch per unique spec; v2 mirrors v1's "fetch the lookup once,
    *  populate every cell from the same set"). Undefined → not yet loaded → render a
@@ -210,6 +213,27 @@ function EditCell({
     // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
     // use the pre-projected value→label map directly — faster, no per-row scan.
     const active = (narrowBy ?? []).filter((n) => n.value != null && n.value !== '')
+    // ``display_fields`` → code: "extra · extra" map, built once from the raw rows; appended after
+    // each option's label so the grid edit dropdown shows the same extras as the dialog.
+    const extrasByCode = (() => {
+      if (!displayFields?.length || !lookupRows) return undefined
+      const valKey = rule.value
+      const m = new Map<string, string>()
+      for (const r of lookupRows) {
+        const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+        if (v == null) continue
+        const extras = displayFields
+          .map((f) => r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()])
+          .filter((x) => x != null && String(x).trim() !== '')
+          .map((x) => String(x).trim())
+        if (extras.length) m.set(String(v), extras.join(' · '))
+      }
+      return m
+    })()
+    const withExtra = (code: string, label: string) => {
+      const ex = extrasByCode?.get(code)
+      return ex ? `${label} · ${ex}` : label
+    }
     let opts: { value: string; label: string; mono: string }[]
     if (ready && active.length > 0 && lookupRows) {
       // Case-insensitive column lookup on the raw rows: Postgres folds unquoted columns
@@ -230,26 +254,25 @@ function EditCell({
           const l = r[labKey] ?? r[labKey.toLowerCase()] ?? r[labKey.toUpperCase()]
           return v == null
             ? null
-            : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v) }
+            : { value: String(v), label: withExtra(String(v), l == null ? String(v) : String(l)), mono: String(v) }
         })
         .filter((o): o is { value: string; label: string; mono: string } => o !== null)
         .sort((a, b) => a.label.localeCompare(b.label))
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
         .sort(([, a], [, b]) => a.localeCompare(b))
-        .map(([value, label]) => ({ value, label, mono: value }))
+        .map(([value, label]) => ({ value, label: withExtra(value, label), mono: value }))
     } else {
       opts = []
     }
-    // Lookup-pick handler — writes the picked value as usual, then dispatches the rule's
-    // ``return_params`` (v1's ly_lkp_params lkp_dir='OUT'): for each return_param dd_id,
-    // find the picked row's matching column (case-insensitive) and fire
-    // ``onLookupReturnValues`` with the {dd_id: value} map. The parent (ResultTable)
-    // maps each dd to a sibling grid column and writes it to the same row.
+    // Lookup-pick handler — writes the picked value, then applies the column's ``return_binds``:
+    // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
+    // ``onLookupReturnValues`` with a ``{targetColumn: value}`` map. The parent (ResultTable)
+    // writes each to the sibling cell on the same row. Explicit replacement for v1's auto-by-dd.
     const handlePick = (picked: string) => {
       onChange(picked === '' ? null : picked)
-      const returnParams = rule.return_params ?? []
-      if (!picked || returnParams.length === 0 || !lookupRows || !onLookupReturnValues) return
+      const binds = column.return_binds ?? []
+      if (!picked || binds.length === 0 || !lookupRows || !onLookupReturnValues) return
       const valueCol = rule.value
       const row = lookupRows.find((r) => {
         const rv = r[valueCol] ?? r[valueCol.toLowerCase()] ?? r[valueCol.toUpperCase()]
@@ -258,9 +281,9 @@ function EditCell({
       if (!row) return
       const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
       const aux: Record<string, unknown> = {}
-      for (const dd of returnParams) {
-        const v = lcRow.get(dd.toLowerCase())
-        if (v !== undefined) aux[dd] = v
+      for (const b of binds) {
+        const v = lcRow.get(b.param.toLowerCase())
+        if (v !== undefined) aux[b.column] = v
       }
       if (Object.keys(aux).length > 0) onLookupReturnValues(aux)
     }
@@ -775,6 +798,21 @@ export function ResultTable({
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
   const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
+  const lookupSpecs = useMemo<LookupSpec[]>(
+    () => result.columns.filter((c) => c.rule?.kind === 'lookup').map((c) => {
+      const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
+      // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
+      // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
+      // cache separately in services/lookups (specKey folds the params in).
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
+    }),
+    [result.columns],
+  )
+  // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
+  // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed the
+  // lookup-pick return-fill (``return_binds``) in the grid + on import, and the dropdown extras.
+  const lookupMaps = useLookupTables(lookupSpecs)
+
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
   // {normalized header text → result column name}, registering for each result column its `name`,
@@ -815,6 +853,40 @@ export function ResultTable({
         return out
       }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
       if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return }
+
+      // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
+      // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
+      // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
+      // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
+      // isn't loaded yet (the grid loads it when the column renders).
+      const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
+      if (returnFillCols.length > 0) {
+        for (const seed of seeds) {
+          for (const c of returnFillCols) {
+            const rule = c.rule
+            if (rule?.kind !== 'lookup') continue
+            const code = seed[c.name]
+            if (code == null || String(code).trim() === '') continue
+            const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params }))
+            if (!data?.rows) continue
+            const valKey = rule.value
+            const want = String(code).trim()
+            const row = data.rows.find((r) => {
+              const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+              return rv != null && String(rv).trim() === want
+            })
+            if (!row) continue
+            const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
+            for (const b of c.return_binds ?? []) {
+              const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
+              const cur = seed[target]
+              if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
+              const v = lcRow.get(b.param.toLowerCase())
+              if (v !== undefined) seed[target] = v
+            }
+          }
+        }
+      }
       if (!editMode) setEditMode(true)
 
       // Effective key columns come from the per-column ``key`` flags resolved onto the RESULT
@@ -853,7 +925,7 @@ export function ResultTable({
     } catch (e) {
       setSaveErrors([e instanceof Error ? e.message : String(e)])
     }
-  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, t])
+  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, lookupMaps, t])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
@@ -968,21 +1040,6 @@ export function ResultTable({
     for (const c of result.columns) if (c.rule?.kind === 'enum') m.set(c.name, enumMap(c.rule))
     return m
   }, [result.columns])
-  const lookupSpecs = useMemo<LookupSpec[]>(
-    () => result.columns.filter((c) => c.rule?.kind === 'lookup').map((c) => {
-      const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
-      // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
-      // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
-      // cache separately in services/lookups (specKey folds the params in).
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
-    }),
-    [result.columns],
-  )
-  // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
-  // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed
-  // the lookup-pick return-params write-back (v1's ly_lkp_params lkp_dir='OUT'): after a pick,
-  // the matching row's other columns flow to sibling grid cells with matching ``dd``.
-  const lookupMaps = useLookupTables(lookupSpecs)
 
   // new rows show at the TOP of the grid (newest first — `newRows` already keeps that order)
   const data = useMemo<DataRow[]>(() => (editMode ? [...newRows, ...result.rows] : result.rows), [result.rows, editMode, newRows])
@@ -1027,14 +1084,12 @@ export function ResultTable({
 
   const dataCols = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
     const idSuffix = ` ${t('table.idColumnSuffix')}`
-    // dd_id → column.name map across the result. Drives the lookup-return-params write-back
-    // for inline edit (v1's ly_lkp_params lkp_dir='OUT'): when a picked lookup row exposes
-    // extra columns, we write each return_param's value to the sibling grid column whose
-    // ``dd`` matches. Case-insensitive (Postgres folds unquoted to lowercase). First wins.
-    const ddToColName = new Map<string, string>()
+    // column-name → actual column.name map (case-insensitive). Resolves a lookup ``return_binds``
+    // target (normalised uppercase) to the grid's actual column name for the return-fill write.
+    const nameToColName = new Map<string, string>()
     for (const c of shownColumns) {
-      const dd = (c.dd || c.name).toLowerCase()
-      if (!ddToColName.has(dd)) ddToColName.set(dd, c.name)
+      const k = c.name.toLowerCase()
+      if (!nameToColName.has(k)) nameToColName.set(k, c.name)
     }
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
@@ -1048,14 +1103,12 @@ export function ResultTable({
             value: c.rule.value, label: c.rule.label, params: c.rule.params,
           }))
         : undefined
-      // Lookup-pick return-values dispatcher — writes each return_param value to the
-      // sibling grid column whose ``dd`` matches (in the *same* row). v1's "pick FSOBNM,
-      // FSSY auto-populates" behaviour.
+      // Lookup-pick return-fill dispatcher — the picked column's ``return_binds`` already produced
+      // a ``{targetColumn: value}`` map; write each to the sibling cell on the same row (resolving
+      // the target to the grid's actual column name). v1's "pick OBNM, SY auto-populates", explicit.
       const handleLookupReturnValues = (returnValues: Record<string, unknown>) => {
-        for (const [dd, val] of Object.entries(returnValues)) {
-          const targetCol = ddToColName.get(dd.toLowerCase())
-          if (!targetCol) continue
-          editChange(row, targetCol, val)
+        for (const [col, val] of Object.entries(returnValues)) {
+          editChange(row, nameToColName.get(col.toLowerCase()) ?? col, val)
         }
       }
       // Cascading narrowing for LOOKUP cells (v1's ly_tbl_filters in bulk-edit). For each
@@ -1085,6 +1138,7 @@ export function ResultTable({
           lookupRows={lookupData?.rows}
           onLookupReturnValues={handleLookupReturnValues}
           narrowBy={narrowBy}
+          displayFields={c.rule?.kind === 'lookup' ? c.rule.display_fields : undefined}
         />
       )
     }

@@ -39,9 +39,11 @@ export type DisplayRule =
       value: string
       label: string
       params?: Record<string, string>
-      /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
-       *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
+      /** Columns this lookup can flow back on a pick — the menu a column's ``return_binds`` picks
+       *  from. No longer auto-mapped by dd; the explicit mapping lives on ``Column.return_binds``. */
       return_params?: string[]
+      /** Extra result columns shown beside code + label in the dropdown (display only). */
+      display_fields?: string[]
       /** The lookup's declared query params double as the **key columns** that disambiguate a
        *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
        *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
@@ -101,6 +103,9 @@ export interface ScreenField {
    *  the read-column's `rule` so a screen-level LOOKUP override actually renders as a dropdown. */
   rule?: DisplayRule | null
   lookup_param_binds?: ParamBind[]
+  /** LOOKUP return → target-field fills: on a pick, write the picked row's ``param`` column into
+   *  the form field named ``column``. Explicit replacement for v1's auto-by-dd return mapping. */
+  return_binds?: { param: string; column: string }[]
   /** Conditional visibility (v2's port of v1's col_cdn_id) — evaluated against the form. */
   visible_when?: FieldCondition[]
   /** Conditional required — when non-empty, every predicate must hold for the field to be required. */

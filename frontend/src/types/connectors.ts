@@ -102,9 +102,11 @@ export type DisplayRule =
        *  Required for queries that take `:placeholder` params to even run — without these a UDC
        *  query returns nothing because SY/RT are NULL. The fetcher passes them as ?p=v on /api/sql. */
       params?: Record<string, string>
-      /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
-       *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
+      /** Columns this lookup can flow back on a pick — the menu a column's ``return_binds`` picks
+       *  from. No longer auto-mapped by dd; the explicit mapping lives on ``Column.return_binds``. */
       return_params?: string[]
+      /** Extra result columns shown beside code + label in the dropdown (display only). */
+      display_fields?: string[]
       /** The lookup's declared query params double as the **key columns** that disambiguate a
        *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
        *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
@@ -122,6 +124,10 @@ export interface Column {
   /** cascading-filter deps (v1's ly_tbl_filters): when the `source` filter has a value, this
    *  column's LOOKUP options are narrowed to the rows whose `column` matches it. */
   filter_from?: { source: string; column: string }[]
+  /** LOOKUP return → target-column fills: on a pick, write the picked row's ``param`` value into
+   *  the sibling column ``column`` on the same row. Drives the grid bulk-edit + Excel import
+   *  return-fill (explicit replacement for v1's auto-by-dd return-param mapping). */
+  return_binds?: { param: string; column: string }[]
   /** conditional visibility (v1's cdn_*): a list of `{field, value}` conditions, all of which must
    *  hold for the column to appear — a condition holds when its `field` server-filter is unset, or
    *  its value matches `value` (or is in `value` when it's an array). So a set filter outside the

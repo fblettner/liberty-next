@@ -44,13 +44,20 @@ export interface LookupData {
 /** A lookup's options as `{value, label}` — optionally narrowed to rows whose `filter.column`
  *  equals `filter.value` (the cascading-filter case); duplicates by value are dropped, order
  *  follows the query. */
-export function lookupOptions(data: LookupData, filter?: { column: string; value: string }): { value: string; label: string }[] {
+export function lookupOptions(
+  data: LookupData,
+  filter?: { column: string; value: string },
+  displayFields?: string[],
+): { value: string; label: string }[] {
   const colKey = filter ? (data.byColLower.get(filter.column.toLowerCase()) ?? filter.column) : undefined
   // Trim-tolerant cascade match: JDE pads / right-justifies UDC codes, so the dependent column
   // reads back e.g. "98  " / "      98" while the parent's selected value is "98". Compare both
   // sides trimmed — else selecting a parent narrows the child to zero rows. Display-only (the
   // option values below stay as-is; this only decides which rows show).
   const want = filter ? String(filter.value ?? '').trim() : undefined
+  // The lookup's ``display_fields`` — extra columns appended after the label (" · " joined) so the
+  // operator can tell similar rows apart. Resolve each to its actual-case row key once.
+  const extraKeys = (displayFields ?? []).map((f) => data.byColLower.get(f.toLowerCase()) ?? f)
   const out: { value: string; label: string }[] = []
   const seen = new Set<string>()
   for (const row of data.rows) {
@@ -61,7 +68,12 @@ export function lookupOptions(data: LookupData, filter?: { column: string; value
     if (seen.has(sv)) continue
     seen.add(sv)
     const l = row[data.lKey]
-    out.push({ value: sv, label: l === null || l === undefined ? sv : String(l) })
+    const base = l === null || l === undefined ? sv : String(l)
+    const extras = extraKeys
+      .map((k) => row[k])
+      .filter((x) => x !== null && x !== undefined && String(x).trim() !== '')
+      .map((x) => String(x).trim())
+    out.push({ value: sv, label: extras.length ? `${base} · ${extras.join(' · ')}` : base })
   }
   return out
 }

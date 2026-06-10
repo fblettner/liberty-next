@@ -125,17 +125,18 @@ export function FieldRow({
       />
     )
   } else if (effectiveRule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
-    const opts = lookupData ? lookupOptions(lookupData).map((o) => ({ value: o.value, label: o.label, mono: o.value })) : []
-    // Lookup pick handler — writes the picked value as usual, plus the rule's ``return_params``
-    // (v1's ly_lkp_params lkp_dir='OUT'): for each return_param dd_id, find the picked row's
-    // matching column (case-insensitive) and fire ``onLookupPick`` with the {dd_id: value} map.
-    // The parent (ScreenDialog) maps each dd to a sibling field name and writes them via
-    // ``setFormValues``. Example: pick FSOBNM, fires {SY: <picked row's SY column>}, parent
-    // writes that to FSSY (the field with dd="SY"). No-op when lookupData isn't loaded yet.
+    const opts = lookupData
+      ? lookupOptions(lookupData, undefined, effectiveRule.display_fields).map((o) => ({ value: o.value, label: o.label, mono: o.value }))
+      : []
+    // Lookup pick handler — writes the picked value, then applies this field's ``return_binds``:
+    // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
+    // ``onLookupPick`` with a ``{targetColumn: value}`` map. The parent (ScreenDialog) writes each
+    // to the matching sibling field. Example on f00950: pick OBNM → {FSSY: <picked row's SY>} →
+    // parent fills the product-code field. No-op when lookupData isn't loaded yet.
     const handlePick = (picked: string) => {
       onChange(field.name, picked === '' ? null : picked)
-      const returnParams = effectiveRule.return_params ?? []
-      if (!picked || returnParams.length === 0 || !lookupData || !onLookupPick) return
+      const binds = field.return_binds ?? []
+      if (!picked || binds.length === 0 || !lookupData || !onLookupPick) return
       const valueCol = effectiveRule.value
       const row = lookupData.rows.find((r) => {
         const rv = r[valueCol] ?? r[valueCol.toLowerCase()] ?? r[valueCol.toUpperCase()]
@@ -144,9 +145,9 @@ export function FieldRow({
       if (!row) return
       const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
       const aux: Record<string, unknown> = {}
-      for (const dd of returnParams) {
-        const v = lcRow.get(dd.toLowerCase())
-        if (v !== undefined) aux[dd] = v
+      for (const b of binds) {
+        const v = lcRow.get(b.param.toLowerCase())
+        if (v !== undefined) aux[b.column] = v
       }
       if (Object.keys(aux).length > 0) onLookupPick(aux)
     }

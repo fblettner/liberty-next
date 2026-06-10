@@ -200,6 +200,29 @@ class ParamBind(BaseModel):
     )
 
 
+class ReturnBind(BaseModel):
+    """Fill a sibling column from a LOOKUP's picked row. When this column's lookup value is
+    chosen, the picked row's ``param`` column is written into ``column`` on the SAME row. The
+    explicit, per-screen-column replacement for v1's implicit auto-by-dd return-param mapping —
+    so the operator says exactly which returned field fills which column. Applies uniformly in
+    the dialog form, the grid bulk-edit, and on Excel import (where it fills only when the target
+    cell is empty, so an explicit imported value wins)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    param: str = Field(
+        description=(
+            "A column returned by the lookup query whose value flows back — one of the lookup's "
+            "``return_params`` (the picked row's column with this name)."
+        ),
+        json_schema_extra={"x_case": "upper"},
+    )
+    column: str = Field(
+        description="The screen column on this row to fill with the returned value.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
+    )
+
+
 class ColumnHint(BaseModel):
     """Display + edit metadata for one column on a screen. Drives both the grid (the table view)
     and the dialog form — set it once, both surfaces use it.
@@ -340,6 +363,17 @@ class ColumnHint(BaseModel):
             "Narrow this column's lookup query by binding extra parameters. Used when the "
             "lookup depends on another field's value — e.g. picking a role narrows by the "
             "row's current application id."
+        ),
+    )
+    return_binds: list[ReturnBind] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "For a LOOKUP column: when a value is picked, fill sibling columns on the same row "
+            "from the picked row's returned fields. Each entry maps a lookup ``return_params`` "
+            "field → a target column on this screen. Applies in the dialog, the grid bulk-edit, "
+            "and on Excel import (import fills only an empty target — an explicit value wins). "
+            "Example: on f00950 OBNM's lookup returns SY, bound to fill the product-code column."
         ),
     )
     group: str | None = Field(

@@ -114,6 +114,10 @@ def _resolve_screen_field(
             out["lookup_param_binds"] = [
                 b.model_dump(mode="json", exclude_none=True) for b in hint.lookup_param_binds
             ]
+        if hint.return_binds and not out.get("return_binds"):
+            out["return_binds"] = [
+                {"param": b.param, "column": b.column} for b in hint.return_binds
+            ]
     # ── hidden / disabled / required: field's explicit value wins; else inherit column's ──
     column_hidden = bool(hint.hidden) if hint is not None else False
     column_disabled = bool(hint.disabled) if hint is not None else False

@@ -813,6 +813,10 @@ class Column:
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
+    # LOOKUP return → target-column fills (``ColumnHint.return_binds``). Each is ``{param, column}``:
+    # on a pick, the picked row's ``param`` value is written into the row's ``column``. Drives the
+    # grid bulk-edit + Excel import return-fill.
+    return_binds: list[dict[str, str]] = field(default_factory=list)
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -840,6 +844,8 @@ class Column:
             d["filter_from"] = self.filter_from
         if self.visible_when:
             d["visible_when"] = self.visible_when
+        if self.return_binds:
+            d["return_binds"] = self.return_binds
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -2387,6 +2393,7 @@ def _resolve_hint(
         disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
+        return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],
         width=h.width, align=h.align, format=fmt, rule=rule,
         # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
         # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator

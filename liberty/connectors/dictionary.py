@@ -210,10 +210,21 @@ class LookupDef(BaseModel):
         default_factory=list,
         title="Return params",
         description=(
-            "Extra fields written back to the form when the user picks a row. Each name is a "
-            "dictionary entry key; the picked row's column with that name fills the matching field."
+            "Columns this lookup can flow back when a row is picked — the menu a screen column's "
+            "``return_binds`` chooses from to fill a sibling column (the picked row's column with "
+            "this name). The lookup query must SELECT each one."
         ),
-        json_schema_extra={"x_group": "Target"},
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
+    )
+    display_fields: list[str] = Field(
+        default_factory=list,
+        title="Display fields",
+        description=(
+            "Extra result columns shown beside the code + label in the dropdown — e.g. a product "
+            "code or description, so the operator can tell similar rows apart. Display only; the "
+            "lookup query must SELECT each one."
+        ),
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
     # Upgrade-safety flag — see Screen.override.
     override: bool = Field(
@@ -409,11 +420,14 @@ class DictionaryFile(BaseModel):
             # which UDC table to read).
             if entry.lookup_params:
                 wire["params"] = dict(entry.lookup_params)
-            # ``return_params`` (v1's ly_lkp_params with ``lkp_dir = 'OUT'``) — extra dd_ids to
-            # write back from the picked row to other form fields / grid cells. Surfaced on the
-            # wire so the frontend's lookup-pick handler can populate sibling fields.
+            # ``return_params`` — the columns this lookup can flow back. No longer auto-mapped by
+            # dd (v1's buggy behaviour); surfaced so a screen column's ``return_binds`` editor can
+            # offer them as the choices for an explicit return → target-column mapping.
             if lk.return_params:
                 wire["return_params"] = list(lk.return_params)
+            # ``display_fields`` — extra result columns shown beside code + label in the dropdown.
+            if lk.display_fields:
+                wire["display_fields"] = list(lk.display_fields)
             # ``params`` (the lookup's declared query params) double as the **key columns** that
             # disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same USR_ID across
             # apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to resolve the

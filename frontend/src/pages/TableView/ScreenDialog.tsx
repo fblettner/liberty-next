@@ -320,19 +320,18 @@ export function ScreenDialog({
     setFormValues((p) => ({ ...p, [name]: v }))
   }, [])
 
-  // dd_id → field_name map across every FormTab. Drives the lookup-return-params write-back:
-  // when a LOOKUP pick exposes extra columns (v1's ly_lkp_params lkp_dir='OUT'), the parent
-  // looks up each return_param's dd here and writes the value to the matching sibling field.
-  // Case-insensitive (Postgres folds unquoted to lowercase). When several fields claim the
-  // same dd, the first wins — v1's convention; the operator can pin a different one via the
-  // explicit field.dd.
-  const ddToFieldName = useMemo(() => {
+  // column_name → actual field_name (case-insensitive) across every FormTab. Drives the lookup
+  // return-bind write-back: a LOOKUP pick produces a ``{targetColumn: value}`` map per the picked
+  // column's ``return_binds`` (the explicit replacement for v1's auto-by-dd return mapping); we
+  // write each value to the matching sibling field. Case-insensitive — return_binds.column is
+  // normalised uppercase, form fields keep their own case.
+  const nameToFieldName = useMemo(() => {
     const m = new Map<string, string>()
     if (!dlg) return m
     for (const tab of dlg.tabs.filter(isFormTab)) {
       for (const f of tab.fields ?? []) {
-        const dd = (f.dd || f.name).toLowerCase()
-        if (!m.has(dd)) m.set(dd, f.name)
+        const key = f.name.toLowerCase()
+        if (!m.has(key)) m.set(key, f.name)
       }
     }
     return m
@@ -341,15 +340,13 @@ export function ScreenDialog({
     setFormValues((p) => {
       const next = { ...p }
       let touched = false
-      for (const [dd, v] of Object.entries(returnValues)) {
-        const fieldName = ddToFieldName.get(dd.toLowerCase())
-        if (!fieldName) continue
-        next[fieldName] = v
+      for (const [col, v] of Object.entries(returnValues)) {
+        next[nameToFieldName.get(col.toLowerCase()) ?? col] = v
         touched = true
       }
       return touched ? next : p
     })
-  }, [ddToFieldName])
+  }, [nameToFieldName])
 
   // Imperative-from-async prompt plumbing. The chain runner pauses on actions with
   // ``prompt_fields`` and awaits ``requestPrompt`` — which sets ``pendingPrompt`` state +
