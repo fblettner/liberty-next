@@ -809,7 +809,7 @@ export function ResultTable({
       // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
       // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
       // cache separately in services/lookups (specKey folds the params in).
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources }
     }),
     [result.columns],
   )
@@ -872,7 +872,7 @@ export function ResultTable({
             if (rule?.kind !== 'lookup') continue
             const code = seed[c.name]
             if (code == null || String(code).trim() === '') continue
-            const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params }))
+            const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
             if (!data?.rows) continue
             const valKey = rule.value
             const want = String(code).trim()
@@ -1122,7 +1122,7 @@ export function ResultTable({
       const lookupData: LookupData | undefined = c.rule?.kind === 'lookup'
         ? lookupMaps.get(lookupKey({
             connector: c.rule.connector, query: c.rule.query,
-            value: c.rule.value, label: c.rule.label, params: c.rule.params,
+            value: c.rule.value, label: c.rule.label, params: c.rule.params, sources: c.rule.sources,
           }))
         : undefined
       // Lookup-pick return-fill dispatcher — the picked column's ``return_binds`` already produced
@@ -1178,7 +1178,7 @@ export function ResultTable({
 
       if (c.rule?.kind === 'lookup') {
         const r = c.rule
-        const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
+        const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources }))
         const map = data?.map
         // Per-row label disambiguation. A lookup ``value`` need not be globally unique — e.g.
         // USR_ID repeats across apps and is only unique per USR_APPS_ID — so the value→label
@@ -1261,7 +1261,8 @@ export function ResultTable({
           : undefined
         out.push({
           id: c.name,
-          header: colHeader(c) + idSuffix,
+          // hide_label → this is the ONLY column for the field, so drop the "(ID)" suffix.
+          header: c.hide_label ? colHeader(c) : colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
           ...filterPropsFor('lookup', lookupOptsByCode, align, lookupCellColumns(r)),
@@ -1273,7 +1274,7 @@ export function ResultTable({
             return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
           },
         })
-        out.push({
+        if (!c.hide_label) out.push({
           id: `${c.name}__lookup`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
@@ -1303,7 +1304,7 @@ export function ResultTable({
         const optsByLabel = c.rule.values.map((v) => ({ value: v.label || v.value, label: v.label || v.value, mono: v.value }))
         out.push({
           id: c.name,
-          header: colHeader(c) + idSuffix,
+          header: c.hide_label ? colHeader(c) : colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
           ...filterPropsFor('enum', optsByCode, align),
@@ -1315,7 +1316,7 @@ export function ResultTable({
             return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
           },
         })
-        out.push({
+        if (!c.hide_label) out.push({
           id: `${c.name}__enum`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (emap?.get(String(v)) ?? String(v)) },

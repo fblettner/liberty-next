@@ -821,6 +821,9 @@ class Column:
     # when sibling ``field`` == ``value``, this column is forced to ``default`` and locked. Honoured
     # by the grid bulk-edit + the dialog.
     default_when: list[dict[str, Any]] = field(default_factory=list)
+    # LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column
+    # (``ColumnHint.hide_label``).
+    hide_label: bool = False
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -852,6 +855,8 @@ class Column:
             d["return_binds"] = self.return_binds
         if self.default_when:
             d["default_when"] = self.default_when
+        if self.hide_label:
+            d["hide_label"] = True
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -2401,6 +2406,7 @@ def _resolve_hint(
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],
         default_when=[w.as_dict() for w in h.default_when],
+        hide_label=h.hide_label,
         width=h.width, align=h.align, format=fmt, rule=rule,
         # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
         # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator

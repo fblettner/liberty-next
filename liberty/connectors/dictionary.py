@@ -40,7 +40,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DictionaryEntry(BaseModel):
@@ -167,12 +167,49 @@ class EnumDef(BaseModel):
     )
 
 
+class LookupSource(BaseModel):
+    """An extra query whose rows are UNION-ALL'd into a lookup (app-level, not SQL). The whole point
+    is that it can live on a DIFFERENT connector / database than the primary query — an Oracle JDE
+    table and a Postgres table combine in the app layer, which SQL ``UNION`` can't do. Each source
+    must SELECT the same output columns as the primary (``value`` / ``label`` / ``display_fields`` /
+    ``return_params``); alias missing ones to '' / a constant, as a SQL union would."""
+
+    # x_summary → the editor's list row reads "connector · query" (not just the first field).
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"x_summary": ["connector", "query"]})
+
+    connector: str | None = Field(
+        default=None,
+        description="Connector hosting this source's query. Blank → the lookup's connector.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "CONNECTOR_NAMES"},
+    )
+    query: str = Field(
+        description="A query producing the SAME columns as the primary; its rows are appended to the list.",
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
+    )
+
+
 class LookupDef(BaseModel):
     """A reference to a *query* whose rows resolve a cell's value to a human label
     (v1's ``ly_lookup`` — ``lkp_query_id``/``lkp_dd_id``/``lkp_dd_label``). The frontend
-    fetches the query once and uses the named columns as a ``{value: label}`` map."""
+    fetches the query once and uses the named columns as a ``{value: label}`` map.
+
+    Set ``union`` to merge rows from additional queries (UNION ALL, app-level) — including ones on
+    other connectors/databases."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_params_to_key_columns(cls, data: Any) -> Any:
+        """Legacy ``params`` on a lookup was always the key-columns list (mis-named — it never bound
+        the query; the query declares its own ``:params`` and values come from the dictionary entry's
+        ``lookup_params``). Accept it as an alias for ``key_columns`` so old dictionary.toml keeps
+        loading; ``extra='forbid'`` is satisfied because we pop it here. New saves write
+        ``key_columns``."""
+        if isinstance(data, dict) and "params" in data and "key_columns" not in data:
+            data = dict(data)
+            data["key_columns"] = data.pop("params")
+        return data
 
     description: str | None = Field(default=None, description="Short description of this lookup.")
     connector: str | None = Field(
@@ -183,6 +220,17 @@ class LookupDef(BaseModel):
     query: str = Field(
         description="The query that produces the code → label rows.",
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_QUERIES"},
+    )
+    union: list[LookupSource] = Field(
+        default_factory=list,
+        title="Union sources",
+        description=(
+            "Extra queries whose rows are UNION-ALL'd into this lookup (app-level, then sorted by "
+            "``value``). Use to combine rows from DIFFERENT connectors/databases — e.g. an Oracle "
+            "JDE table and a Postgres table — which SQL UNION can't. Each must SELECT the same "
+            "output columns as the primary query (duplicates by value are KEPT, matching UNION ALL)."
+        ),
+        json_schema_extra={"x_group": "Target"},
     )
     value: str = Field(
         description="Result column matching the cell's value (the code).",
@@ -197,14 +245,18 @@ class LookupDef(BaseModel):
         description="Optional grouping key (not currently used).",
         json_schema_extra={"x_group": "Advanced"},
     )
-    params: list[str] = Field(
+    key_columns: list[str] = Field(
         default_factory=list,
-        title="Params",
+        title="Key columns",
         description=(
-            "Parameter names the lookup query expects. Each entry that uses this lookup "
-            "binds values via ``DictionaryEntry.lookup_params``."
+            "Columns that disambiguate a non-unique ``value`` — when the same code maps to different "
+            "labels depending on another column, list those columns so the right label resolves per "
+            "row (also the cascading-filter fallback). NOT query parameters: the lookup query "
+            "declares its own ``:params`` and the bind VALUES come from the dictionary entry's "
+            "``lookup_params`` / a column's ``lookup_param_binds``. (Legacy config used ``params`` "
+            "for this — still accepted as an alias.)"
         ),
-        json_schema_extra={"x_group": "Target"},
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
     return_params: list[str] = Field(
         default_factory=list,
@@ -441,13 +493,22 @@ class DictionaryFile(BaseModel):
             # ``filter_fields`` — which of those get an in-dropdown facet-chip filter.
             if lk.filter_fields:
                 wire["filter_fields"] = list(lk.filter_fields)
-            # ``params`` (the lookup's declared query params) double as the **key columns** that
-            # disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same USR_ID across
-            # apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to resolve the
-            # right label per row (match the row's same-named column), so the operator doesn't have
-            # to add a ``filter_from`` to every lookup column — it's automatic from the lookup def.
-            if lk.params:
-                wire["key_columns"] = list(lk.params)
+            # ``key_columns`` disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same
+            # USR_ID across apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to
+            # resolve the right label per row (match the row's same-named column), so the operator
+            # doesn't have to add a ``filter_from`` to every lookup column.
+            if lk.key_columns:
+                wire["key_columns"] = list(lk.key_columns)
+            # ``union`` — extra query sources merged (UNION ALL) into this lookup, possibly on other
+            # connectors. Emit the full source list (primary first); the frontend fetches each on its
+            # own connector and concatenates. Only when there's a union — single-source lookups keep
+            # the plain ``connector`` / ``query`` path unchanged.
+            if lk.union:
+                primary_conn = lk.connector or connector
+                sources = [{"connector": primary_conn, "query": lk.query}]
+                for s in lk.union:
+                    sources.append({"connector": s.connector or lk.connector or connector, "query": s.query})
+                wire["sources"] = sources
             return wire
         # Form-layer auto-fill rules — v1's `dd_rules` shapes the dialog runtime can act on at
         # *open time* (add mode only). Each maps to a built-in source the frontend resolves

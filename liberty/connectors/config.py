@@ -393,6 +393,15 @@ class ColumnHint(BaseModel):
         ),
     )
     # ── Lookup — only for LOOKUP columns ──────────────────────────────────────────────────
+    hide_label: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Lookup"},
+        description=(
+            "A LOOKUP / ENUM column normally shows TWO grid columns — the code (ID) and the "
+            "resolved label. Set this to show ONLY the code column when the description isn't "
+            "needed. The picker dropdown still shows code + label. Default: label shown."
+        ),
+    )
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
         json_schema_extra={"x_group": "Lookup"},

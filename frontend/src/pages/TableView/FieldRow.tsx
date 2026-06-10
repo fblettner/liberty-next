@@ -84,6 +84,7 @@ export function FieldRow({
       value: effectiveRule.value,
       label: effectiveRule.label,
       params: { ...(effectiveRule.params ?? {}), ...dyn },
+      sources: effectiveRule.sources,
     }
   }, [effectiveRule, field, formValues])
   // Mount a single-spec hook unconditionally (React requires stable hook order). The spec list is

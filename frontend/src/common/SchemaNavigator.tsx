@@ -5,7 +5,7 @@
 // current (schema, value, onChange) is *derived* from the root each render — so edits keep the path
 // valid, and a re-fetch of the same root doesn't reset where you are. Reset to the top when the root
 // `label` changes (= a different thing is being edited).
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { SchemaForm, type JsonSchema, type NavSeg } from './SchemaForm'
 import { SubNav } from './SubNav'
 
@@ -28,6 +28,14 @@ export interface NavRoot {
   schema: JsonSchema   // carries its own $defs
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
+  /** Optional per-level context for the SchemaForm — given the level's value + schema, return
+   *  tab groups to hide and/or extra notes to show under fields. Lets the caller (which has
+   *  external data like the dictionary) drive conditional tabs / hints without SchemaForm knowing
+   *  about it. Called for whichever level is currently shown. */
+  deriveContext?: (value: Record<string, unknown>, schema: JsonSchema) => {
+    hiddenGroups?: string[]
+    fieldNotes?: Record<string, ReactNode>
+  }
 }
 
 export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }: {
@@ -93,7 +101,8 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
         backLabel={parentLabel}
         crumbs={crumbs}
       />
-      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery} />
+      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery}
+        {...(root.deriveContext?.(cur.value, cur.schema) ?? {})} />
     </div>
   )
 }

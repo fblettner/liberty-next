@@ -331,7 +331,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       }
       return [...out.entries()].map(([value, label]) => ({ value, label, mono: value }))
     }
-    const dscope = dict?.connectors?.[effectiveConnector]
+    // Dictionary metadata (enums / lookups / sequences) is scoped to the APP, not the data-pool
+    // connector (matches the backend's ``dict_scope = app``) — so a cross-pool screen's
+    // rules_values dropdowns list the right ids (e.g. f00950 on jdedwards sees nomajde's lookups).
+    const dscope = dict?.connectors?.[app]
     base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
     base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
@@ -352,7 +355,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       values: postApplySteps.map((s) => ({ value: s.id, label: s.label ? `${s.label} (${s.id})` : s.id, mono: s.id })),
     }
     return base
-  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector, selectedConnectorMeta, value.column_groups, postApplySteps])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, app, selectedConnectorMeta, value.column_groups, postApplySteps])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
@@ -829,6 +832,45 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
                   ? (v.columns as unknown[])
                   : null
                 setProp('columns', next)
+              },
+              // Per-column context for the column form: resolve the column's DATA DICTIONARY rule
+              // (from the fetched dictionary) so we can (1) show the inherited default beside the
+              // RULES field when it's left blank, and (2) only show the Lookup tab when the column's
+              // effective rule is a LOOKUP (override or DD default). Only meaningful at the
+              // ColumnHint level — other drilled levels (filter_from, …) get no context.
+              deriveContext: (col, sch) => {
+                // Only at the ColumnHint level (its schema carries a ``rules`` property) — not the
+                // columns-array root or nested filter_from / bind levels.
+                if (!sch?.properties || !('rules' in sch.properties)) return {}
+                const ddName = typeof col.dd === 'string' ? col.dd : undefined
+                const name = typeof col.name === 'string' ? col.name : ''
+                const key = ddName === '' ? null : (ddName || name)  // dd="" opts out of the dictionary
+                let ddRule: string | undefined
+                let ddRuleVal: string | undefined
+                if (key) {
+                  // Dictionary scope is the screen's APP (where entries/lookups/enums live), NOT
+                  // its data-pool connector — matches the backend's ``dict_scope = app`` (a
+                  // cross-pool screen like f00950 runs on jdedwards but its DD entries are under
+                  // connectors.nomajde). Fall back to the shared top-level entries.
+                  const dscope = dict?.connectors?.[app]
+                  const entry = (dscope?.entries?.[key] ?? dscope?.entries?.[key.toUpperCase()]
+                    ?? dict?.entries?.[key] ?? dict?.entries?.[key.toUpperCase()]) as Record<string, unknown> | undefined
+                  ddRule = typeof entry?.rules === 'string' && entry.rules ? entry.rules.toUpperCase() : undefined
+                  ddRuleVal = typeof entry?.rules_values === 'string' && entry.rules_values ? entry.rules_values : undefined
+                }
+                const override = typeof col.rules === 'string' && col.rules ? col.rules.toUpperCase() : undefined
+                const effective = override ?? ddRule
+                return {
+                  hiddenGroups: effective === 'LOOKUP' ? [] : ['Lookup'],
+                  fieldNotes: !override && ddRule
+                    ? { rules: (
+                        <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
+                          {t('settings.screens.editor.ddDefaultRule', 'Data dictionary default: {{rule}}',
+                            { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
+                        </div>
+                      ) }
+                    : undefined,
+                }
               },
             }}
           />

@@ -46,6 +46,9 @@ export type DisplayRule =
       display_fields?: string[]
       /** Which display_fields get an in-dropdown facet-chip filter (subset of display_fields). */
       filter_fields?: string[]
+      /** Multi-source union sources `{connector, query}` (primary first) — fetched per-connector and
+       *  concatenated (UNION ALL, sorted by value). Absent for a single-query lookup. */
+      sources?: { connector: string; query: string }[]
       /** The lookup's declared query params double as the **key columns** that disambiguate a
        *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
        *  label per row by matching these same-named columns — automatic, no per-column filter_from. */

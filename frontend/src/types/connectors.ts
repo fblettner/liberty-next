@@ -109,6 +109,10 @@ export type DisplayRule =
       display_fields?: string[]
       /** Which display_fields get an in-dropdown facet-chip filter (subset of display_fields). */
       filter_fields?: string[]
+      /** Multi-source union: every source `{connector, query}` (primary first) is fetched on its
+       *  own connector and the rows concatenated (UNION ALL, sorted by value) — enables combining
+       *  rows across databases. Absent for a plain single-query lookup. */
+      sources?: { connector: string; query: string }[]
       /** The lookup's declared query params double as the **key columns** that disambiguate a
        *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
        *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
@@ -133,6 +137,8 @@ export interface Column {
   /** Conditional forced defaults: when sibling `field` == `value`, this column is set to `default`
    *  and locked (read-only). First matching rule wins. Honoured by the grid + dialog. */
   default_when?: { field: string; value: string | string[]; default: string }[]
+  /** LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column. */
+  hide_label?: boolean
   /** conditional visibility (v1's cdn_*): a list of `{field, value}` conditions, all of which must
    *  hold for the column to appear — a condition holds when its `field` server-filter is unset, or
    *  its value matches `value` (or is in `value` when it's an array). So a set filter outside the
