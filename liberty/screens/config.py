@@ -111,6 +111,14 @@ class ScreenField(BaseModel):
         default=None,
         description="Require a value on this dialog. Leave blank to inherit from the column.",
     )
+    disable_on_add: bool | None = Field(
+        default=None,
+        description="Read-only when ADDING a new row, on this dialog. Leave blank to inherit from the column.",
+    )
+    disable_on_edit: bool | None = Field(
+        default=None,
+        description="Read-only when EDITING an existing row, on this dialog. Leave blank to inherit from the column.",
+    )
     colspan: int | None = Field(default=None, description="How many tab-grid columns this field spans.")
     # ── self-contained field metadata (dd / label / format / rule) ──────────────────────────────
     # The MAIN screen's dialog fields inherit these from the matching ``Screen.columns`` entry — set

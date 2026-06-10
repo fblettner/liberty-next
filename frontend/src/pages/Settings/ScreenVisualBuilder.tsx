@@ -1777,6 +1777,22 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                   inheritedYesLabel={t('settings.screens.visual.override.readOnly', 'read-only')}
                   inheritedNoLabel={t('settings.screens.visual.override.editable', 'editable')}
                 />
+                <OverrideToggle
+                  label={t('settings.screens.field.disableOnAdd', 'Read-only on add')}
+                  value={selField.disable_on_add as boolean | null | undefined}
+                  inherited={Boolean(colFor(selField.name)?.disable_on_add)}
+                  onChange={(v) => updateField(selFieldIdx!, { disable_on_add: v })}
+                  inheritedYesLabel={t('settings.screens.visual.override.readOnly', 'read-only')}
+                  inheritedNoLabel={t('settings.screens.visual.override.editable', 'editable')}
+                />
+                <OverrideToggle
+                  label={t('settings.screens.field.disableOnEdit', 'Read-only on edit')}
+                  value={selField.disable_on_edit as boolean | null | undefined}
+                  inherited={Boolean(colFor(selField.name)?.disable_on_edit)}
+                  onChange={(v) => updateField(selFieldIdx!, { disable_on_edit: v })}
+                  inheritedYesLabel={t('settings.screens.visual.override.readOnly', 'read-only')}
+                  inheritedNoLabel={t('settings.screens.visual.override.editable', 'editable')}
+                />
                 <SchemaForm
                   schema={advancedPropsSchema}
                   defs={defs}
@@ -1798,6 +1814,23 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 </InspSection>
                 <InspSection>
                   <InspTitle><Filter size={13} /> {t('settings.screens.field.conditional')}</InspTitle>
+                  {(() => {
+                    // The column's ``visible_when`` is inherited by the dialog field when the field
+                    // sets no rule of its own — surface it so the operator knows it's already applied
+                    // (no need to re-enter) and that a rule below overrides it.
+                    const cw = colFor(selField.name)?.visible_when
+                    const rules = (Array.isArray(cw) ? cw : cw ? [cw] : []) as Row[]
+                    const fieldHas = Array.isArray(selField.visible_when) && (selField.visible_when as unknown[]).length > 0
+                    if (!rules.length || fieldHas) return null
+                    const desc = rules
+                      .map((r) => `${r.field}=${Array.isArray(r.value) ? (r.value as unknown[]).join('/') : String(r.value ?? '')}`)
+                      .join(', ')
+                    return (
+                      <Sub>{t('settings.screens.field.visibleWhenInherited',
+                        'Inherited from the column: visible only when {{cond}}. Add a rule below to override.',
+                        { cond: desc })}</Sub>
+                    )
+                  })()}
                   <SchemaForm
                     schema={conditionsSchema}
                     defs={defs}

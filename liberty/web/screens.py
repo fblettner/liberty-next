@@ -126,12 +126,22 @@ def _resolve_screen_field(
     out["hidden"] = bool(raw.get("hidden")) if raw.get("hidden") is not None else column_hidden
     out["disabled"] = bool(raw.get("disabled")) if raw.get("disabled") is not None else column_disabled
     out["required"] = bool(raw.get("required")) if raw.get("required") is not None else column_required
-    # Per-row-mode edit locks — column-level only (no per-field override): the dialog's
-    # ``fieldStateOf`` ORs these into ``disabled`` based on add-vs-edit mode, matching the grid.
-    if hint is not None and hint.disable_on_add:
+    # Per-row-mode edit locks — field's explicit value wins, else inherit the column's (3-state,
+    # same as hidden/disabled/required). The dialog's ``fieldStateOf`` ORs these into ``disabled``
+    # based on add-vs-edit mode, matching the grid.
+    column_dis_add = bool(hint.disable_on_add) if hint is not None else False
+    column_dis_edit = bool(hint.disable_on_edit) if hint is not None else False
+    if (bool(raw.get("disable_on_add")) if raw.get("disable_on_add") is not None else column_dis_add):
         out["disable_on_add"] = True
-    if hint is not None and hint.disable_on_edit:
+    if (bool(raw.get("disable_on_edit")) if raw.get("disable_on_edit") is not None else column_dis_edit):
         out["disable_on_edit"] = True
+    # Conditional visibility — inherit the COLUMN's ``visible_when`` when the field doesn't set its
+    # own. Column ``VisibleWhen`` ({field, value}) and field ``FieldCondition`` share the same shape;
+    # the dialog evaluates it against the live form (the discriminator is a sibling form field), so a
+    # column relevant only to e.g. security-type 3 hides in the dialog just as it does in the grid —
+    # no need to re-declare it on every dialog field. A field-level ``visible_when`` overrides.
+    if not raw.get("visible_when") and hint is not None and hint.visible_when_rules:
+        out["visible_when"] = [vw.as_dict() for vw in hint.visible_when_rules]
     key = (out.get("dd") or name).strip()
     entry = dictionary.find_entry(key, connector=connector) if key else None
     # Effective format — hint-level wins; ``label`` already came from the hint or stays
