@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
 import { Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
-import { lookupKey, useLookupTables, lookupOptions, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupOptions, lookupCellColumns, type LookupSpec } from '../../services/lookups'
 import { colors, radius, fontSize, fonts, shadow } from '../../theme'
 
 type LookupRule = Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
@@ -192,6 +192,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                           value={cur.val}
                           onChange={(val) => handleChange(c.name, { op: 'equals', val })}
                           options={opts ?? []}
+                          cellColumns={c.rule?.kind === 'lookup' ? lookupCellColumns(c.rule) : undefined}
                           anyLabel={t('table.filterAny')}
                           loading={isLookup && !opts}  /* lookup table still resolving */
                           disabled={isLookup && !opts}

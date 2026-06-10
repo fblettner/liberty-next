@@ -71,6 +71,24 @@ const SearchRow = styled.div`
     &::placeholder { color: ${colors.text.muted}; }
   }
 `
+// Facet-chip filter bar — one row per filterable cell column (a LOOKUP's filter_fields). Sits
+// fixed between the search box and the (scrolling) list.
+const FacetBar = styled.div`
+  padding: 6px ${PAD_X}; border-bottom: 1px solid ${colors.border};
+  display: flex; flex-direction: column; gap: 5px;
+`
+const FacetRow = styled.div`
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  & .flbl { color: ${colors.text.muted}; font-size: ${fontSize.micro}; font-family: ${fonts.sans}; margin-right: 2px; }
+`
+const Chip = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
+  font-size: ${fontSize.micro}; font-family: ${fonts.mono}; line-height: 1.6;
+  &:hover { border-color: ${colors.blue.border}; color: ${colors.text.primary}; }
+`
 // The List grows up to the Panel's available space (the Panel caps its own max-height
 // against the viewport). ``min-height: 0`` is the flex-shrink unlock — without it the
 // List would keep its content's full height and overflow the panel.
@@ -98,7 +116,7 @@ const CreateRow = styled.button`
 `
 
 export function SearchSelect({
-  value, onChange, options, placeholder, anyLabel, loading, disabled, allowCustom,
+  value, onChange, options, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns,
 }: {
   value: string
   onChange: (v: string) => void
@@ -111,10 +129,18 @@ export function SearchSelect({
   /** Combobox mode: pressing Enter in the search box commits the typed text as the value, even when
    *  it doesn't match any option. For fields with `examples`-suggested values (free-text). */
   allowCustom?: boolean
+  /** Metadata for each option's `cells` columns (by index): the column label + whether it gets an
+   *  in-dropdown facet-chip filter (a LOOKUP's display_fields / filter_fields). When a column is
+   *  filterable, a row of toggle chips of its distinct values shows above the list and narrows it. */
+  cellColumns?: { label: string; filterable?: boolean }[]
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  // facet filters: cell-column index → the ONE selected value (single-select per column — pick a
+  // value to see only its rows; click it again to clear). Across columns the selections AND.
+  // Reset when the panel closes.
+  const [facets, setFacets] = useState<Record<number, string>>({})
   const wrapRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -132,7 +158,7 @@ export function SearchSelect({
   >(null)
 
   useEffect(() => {
-    if (!open) { setQ(''); setPanelPos(null); return }
+    if (!open) { setQ(''); setPanelPos(null); setFacets({}); return }
     const compute = () => {
       const el = triggerRef.current
       if (!el) return
@@ -180,16 +206,39 @@ export function SearchSelect({
   // only: the stored ``value`` passed to ``onChange`` is never rewritten, so save keeps its form.
   const current = options.find((o) => o.value === value)
     ?? (value ? options.find((o) => o.value.trim() === String(value).trim()) : undefined)
+  // Filterable cell columns + their distinct values (the facet chips). Computed once per options set.
+  const facetCols = useMemo(() => {
+    if (!cellColumns) return []
+    return cellColumns
+      .map((c, index) => ({ index, label: c.label, filterable: !!c.filterable }))
+      .filter((c) => c.filterable)
+      .map((c) => ({
+        ...c,
+        values: Array.from(new Set(options.map((o) => (o.cells?.[c.index] ?? '').trim()).filter(Boolean))).sort(),
+      }))
+      .filter((c) => c.values.length > 0)
+  }, [cellColumns, options])
+  const toggleFacet = (idx: number, v: string) => setFacets((prev) => {
+    const next = { ...prev }
+    if (next[idx] === v) delete next[idx]   // click the active chip → clear
+    else next[idx] = v                      // single-select: replace any prior choice
+    return next
+  })
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    if (!needle) return options
-    return options.filter((o) =>
-      o.label.toLowerCase().includes(needle)
-      || o.value.toLowerCase().includes(needle)
-      || (o.mono ?? '').toLowerCase().includes(needle)
-      || (o.cells ?? []).some((c) => c.toLowerCase().includes(needle)),
-    )
-  }, [q, options])
+    const activeFacets = Object.entries(facets).filter(([, v]) => v)
+    return options.filter((o) => {
+      // facet narrowing: for EVERY column with a selection, the option's cell must equal it.
+      for (const [idxStr, val] of activeFacets) {
+        if ((o.cells?.[Number(idxStr)] ?? '').trim() !== val) return false
+      }
+      if (!needle) return true
+      return o.label.toLowerCase().includes(needle)
+        || o.value.toLowerCase().includes(needle)
+        || (o.mono ?? '').toLowerCase().includes(needle)
+        || (o.cells ?? []).some((c) => c.toLowerCase().includes(needle))
+    })
+  }, [q, options, facets])
 
   const pick = (v: string) => { onChange(v); setOpen(false) }
   const commitCustom = () => {
@@ -258,6 +307,18 @@ export function SearchSelect({
           onKeyDown={(e) => { if (e.key === 'Enter' && allowCustom) { e.preventDefault(); commitCustom() } }}
         />
       </SearchRow>
+      {facetCols.length > 0 && (
+        <FacetBar>
+          {facetCols.map((fc) => (
+            <FacetRow key={fc.index}>
+              <span className="flbl">{fc.label}</span>
+              {fc.values.map((v) => (
+                <Chip key={v} type="button" $active={facets[fc.index] === v} onClick={() => toggleFacet(fc.index, v)}>{v}</Chip>
+              ))}
+            </FacetRow>
+          ))}
+        </FacetBar>
+      )}
       <List ref={listRef}>
         <div style={{ height: virt.getTotalSize(), position: 'relative', width: '100%' }}>
           {virt.getVirtualItems().map((vi) => {

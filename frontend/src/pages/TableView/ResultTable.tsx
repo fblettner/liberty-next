@@ -25,7 +25,7 @@ import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
-import { lookupKey, useLookupTables, type LookupData, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupCellColumns, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -73,11 +73,16 @@ function editCtrlOf(c: Column): EditCtrl {
   if (isNumericish(fmt, typ)) return 'number'
   return 'text'
 }
-const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string; mono?: string; cells?: string[] }[], align?: FilterMeta['align']) =>
+const filterPropsFor = (
+  kind: FilterKind,
+  options?: { value: string; label: string; mono?: string; cells?: string[] }[],
+  align?: FilterMeta['align'],
+  cellColumns?: { label: string; filterable?: boolean }[],
+) =>
   // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
   // ``selectFilterFn``. Boolean keeps the built-in strict ``equals``.
   kind === 'enum' || kind === 'lookup'
-    ? { filterFn: selectFilterFn, meta: { filter: { kind, options }, align } as FilterMeta }
+    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns }, align } as FilterMeta }
     : kind === 'boolean'
       ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
       : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
@@ -156,12 +161,14 @@ const RowMenuErr = styled.div`
 `
 
 function EditCell({
-  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields,
+  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns,
 }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
   /** The lookup's ``display_fields`` — extra row columns appended (dimmed, " · ") after each
    *  option's label so similar codes are distinguishable, same as the dialog dropdown. */
   displayFields?: string[]
+  /** Per-cell-column metadata (label + filterable) for the dropdown's facet-chip filter. */
+  cellColumns?: { label: string; filterable?: boolean }[]
   /** ``{value: label}`` map for LOOKUP columns — already resolved by the surrounding
    *  ``lookupMaps`` (one fetch per unique spec; v2 mirrors v1's "fetch the lookup once,
    *  populate every cell from the same set"). Undefined → not yet loaded → render a
@@ -289,6 +296,7 @@ function EditCell({
         value={defaultText}
         onChange={handlePick}
         options={opts}
+        cellColumns={cellColumns}
         anyLabel="—"
         loading={!ready}
         placeholder=""
@@ -1136,6 +1144,7 @@ export function ResultTable({
           onLookupReturnValues={handleLookupReturnValues}
           narrowBy={narrowBy}
           displayFields={c.rule?.kind === 'lookup' ? c.rule.display_fields : undefined}
+          cellColumns={c.rule?.kind === 'lookup' ? lookupCellColumns(c.rule) : undefined}
         />
       )
     }
@@ -1238,7 +1247,7 @@ export function ResultTable({
           header: colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
-          ...filterPropsFor('lookup', lookupOptsByCode, align),
+          ...filterPropsFor('lookup', lookupOptsByCode, align, lookupCellColumns(r)),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
@@ -1251,7 +1260,7 @@ export function ResultTable({
           id: `${c.name}__lookup`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
-          ...filterPropsFor('lookup', lookupOptsByLabel),
+          ...filterPropsFor('lookup', lookupOptsByLabel, undefined, lookupCellColumns(r)),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code

@@ -79,6 +79,17 @@ export function lookupOptions(
   return out
 }
 
+/** Metadata for the extra dropdown columns (a lookup's display_fields), parallel by index to each
+ *  option's `cells`: the column label + whether it gets an in-dropdown facet-chip filter. Returns
+ *  undefined when the lookup declares no display_fields. */
+export function lookupCellColumns(
+  rule: { display_fields?: string[]; filter_fields?: string[] } | null | undefined,
+): { label: string; filterable: boolean }[] | undefined {
+  if (!rule?.display_fields?.length) return undefined
+  const filt = new Set(rule.filter_fields ?? [])
+  return rule.display_fields.map((f) => ({ label: f, filterable: filt.has(f) }))
+}
+
 function specKey(s: LookupSpec): string {
   // Include the static params in the key so two entries that bind the SAME lookup query with
   // different SY/RT cache separately (otherwise one would clobber the other's rows).

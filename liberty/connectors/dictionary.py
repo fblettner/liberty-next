@@ -226,6 +226,16 @@ class LookupDef(BaseModel):
         ),
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
+    filter_fields: list[str] = Field(
+        default_factory=list,
+        title="Filter fields",
+        description=(
+            "Which display_fields get an in-dropdown facet filter: the dropdown shows a row of "
+            "toggle chips for each chosen column's distinct values (e.g. FUNO → TBLE / APPL / UBE), "
+            "so the operator narrows the list before searching. Must be a subset of display_fields."
+        ),
+        json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
+    )
     # Upgrade-safety flag — see Screen.override.
     override: bool = Field(
         default=False,
@@ -428,6 +438,9 @@ class DictionaryFile(BaseModel):
             # ``display_fields`` — extra result columns shown beside code + label in the dropdown.
             if lk.display_fields:
                 wire["display_fields"] = list(lk.display_fields)
+            # ``filter_fields`` — which of those get an in-dropdown facet-chip filter.
+            if lk.filter_fields:
+                wire["filter_fields"] = list(lk.filter_fields)
             # ``params`` (the lookup's declared query params) double as the **key columns** that
             # disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same USR_ID across
             # apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to resolve the

@@ -13,7 +13,7 @@ import styled from '@emotion/styled'
 import { Checkbox, Field, Input, SearchSelect } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
-import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
+import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { type Row, resolveBindList } from './dialogHelpers'
 
@@ -154,6 +154,7 @@ export function FieldRow({
         value={textValue}
         onChange={handlePick}
         options={opts}
+        cellColumns={lookupCellColumns(effectiveRule)}
         anyLabel={required ? undefined : t('common.none')}
         loading={!lookupData}
         placeholder={t('common.pick')}
