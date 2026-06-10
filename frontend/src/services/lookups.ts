@@ -48,17 +48,17 @@ export function lookupOptions(
   data: LookupData,
   filter?: { column: string; value: string },
   displayFields?: string[],
-): { value: string; label: string }[] {
+): { value: string; label: string; mono: string; cells?: string[] }[] {
   const colKey = filter ? (data.byColLower.get(filter.column.toLowerCase()) ?? filter.column) : undefined
   // Trim-tolerant cascade match: JDE pads / right-justifies UDC codes, so the dependent column
   // reads back e.g. "98  " / "      98" while the parent's selected value is "98". Compare both
   // sides trimmed — else selecting a parent narrows the child to zero rows. Display-only (the
   // option values below stay as-is; this only decides which rows show).
   const want = filter ? String(filter.value ?? '').trim() : undefined
-  // The lookup's ``display_fields`` — extra columns appended after the label (" · " joined) so the
-  // operator can tell similar rows apart. Resolve each to its actual-case row key once.
+  // The lookup's ``display_fields`` → one extra table column per field (consistent length so the
+  // dropdown's columns line up). Resolve each to its actual-case row key once.
   const extraKeys = (displayFields ?? []).map((f) => data.byColLower.get(f.toLowerCase()) ?? f)
-  const out: { value: string; label: string }[] = []
+  const out: { value: string; label: string; mono: string; cells?: string[] }[] = []
   const seen = new Set<string>()
   for (const row of data.rows) {
     const v = row[data.vKey]
@@ -69,11 +69,12 @@ export function lookupOptions(
     seen.add(sv)
     const l = row[data.lKey]
     const base = l === null || l === undefined ? sv : String(l)
-    const extras = extraKeys
-      .map((k) => row[k])
-      .filter((x) => x !== null && x !== undefined && String(x).trim() !== '')
-      .map((x) => String(x).trim())
-    out.push({ value: sv, label: extras.length ? `${base} · ${extras.join(' · ')}` : base })
+    const cells = extraKeys.length
+      ? extraKeys.map((k) => { const x = row[k]; return x === null || x === undefined ? '' : String(x).trim() })
+      : undefined
+    // ``mono`` = the code column, ``label`` = the description, ``cells`` = display_fields. This is
+    // the ONE option shape every picker (dialog / grid / column-filter / advanced-filter) renders.
+    out.push({ value: sv, label: base, mono: sv, cells })
   }
   return out
 }

@@ -12,10 +12,11 @@
 //  · `allowCustom` → in the search box, pressing Enter (with no matching option) commits the typed
 //    text as the value. Free-text combobox semantics — for fields where v1 emitted aliases we don't
 //    want to reject (`format`, `dialect`, …).
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronDown, Check } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
@@ -25,6 +26,10 @@ export interface SearchSelectOption {
   /** Optional secondary text rendered in a mono-font column beside `label` (typically the same as
    *  `value` for framework-enum dropdowns). When absent the option renders as a single column. */
   mono?: string
+  /** Optional extra columns rendered after the label, as a row in a table (a LOOKUP's
+   *  ``display_fields``). Each option in the list should carry the same number of cells so the
+   *  columns line up. Also matched by the search box. */
+  cells?: string[]
   /** Optional grouping key — consumed by the grouped suggestion overlay in ParamBindList's
    *  ``SourcePathInput`` (chain inputs / step results / loop). SearchSelect itself ignores it. */
   group?: string
@@ -76,8 +81,10 @@ const Item = styled.button<{ $active?: boolean }>`
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
   font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & .mono { font-family: ${fonts.mono}; flex: 0 0 35%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${colors.text.primary}; }
-  & .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .mono { font-family: ${fonts.mono}; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${colors.text.primary}; }
+  & .t { flex: 2 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Extra LOOKUP display_fields columns — each its own equal-width cell so options read as a table. */
+  & .cell { font-family: ${fonts.mono}; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${colors.text.muted}; }
   & svg { flex-shrink: 0; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
@@ -179,7 +186,8 @@ export function SearchSelect({
     return options.filter((o) =>
       o.label.toLowerCase().includes(needle)
       || o.value.toLowerCase().includes(needle)
-      || (o.mono ?? '').toLowerCase().includes(needle),
+      || (o.mono ?? '').toLowerCase().includes(needle)
+      || (o.cells ?? []).some((c) => c.toLowerCase().includes(needle)),
     )
   }, [q, options])
 
@@ -192,6 +200,26 @@ export function SearchSelect({
   }
   const exactMatch = options.some((o) => o.value === q.trim())
   const showCreateRow = allowCustom && q.trim() !== '' && !exactMatch
+  // Widen the panel when options carry extra columns (a LOOKUP's display_fields) so the table
+  // columns have room — otherwise the 240px floor squeezes them to ellipsis.
+  const maxCells = options.reduce((n, o) => Math.max(n, o.cells?.length ?? 0), 0)
+
+  // Virtualize the option list — a lookup can resolve to thousands of rows, and rendering them all
+  // makes opening the dropdown janky. Render only the visible window (+overscan). The optional
+  // "(any)" clear row is index 0 of the virtual list so the offsets stay simple.
+  const listRef = useRef<HTMLDivElement>(null)
+  const rows = useMemo(() => {
+    const arr: ({ any: true } | { any: false; opt: SearchSelectOption })[] = []
+    if (anyLabel !== undefined) arr.push({ any: true })
+    for (const o of filtered) arr.push({ any: false, opt: o })
+    return arr
+  }, [filtered, anyLabel])
+  const virt = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 30,
+    overscan: 12,
+  })
 
   // Render the trigger label. With `mono` (framework-enum dropdowns) we show "code  Description" so
   // the user sees both the stored value and its human meaning. Without it the regular label suffices.
@@ -217,7 +245,7 @@ export function SearchSelect({
       style={{
         top: panelPos.top,
         left: panelPos.left,
-        minWidth: Math.max(240, panelPos.width),
+        minWidth: Math.max(240 + maxCells * 110, panelPos.width),
         maxHeight: panelPos.maxHeight,
       }}
     >
@@ -230,24 +258,35 @@ export function SearchSelect({
           onKeyDown={(e) => { if (e.key === 'Enter' && allowCustom) { e.preventDefault(); commitCustom() } }}
         />
       </SearchRow>
-      <List>
-        {anyLabel !== undefined && (
-          <Item type="button" $active={value === ''} onClick={() => pick('')}>
-            <span className="t">{anyLabel}</span>
-            {value === '' && <Check size={12} />}
-          </Item>
-        )}
-        {filtered.length === 0 ? (
-          <Empty>{t('table.noMatches', 'No matches')}</Empty>
-        ) : (
-          filtered.map((o) => (
-            <Item key={o.value} type="button" $active={o.value === value} onClick={() => pick(o.value)}>
-              {o.mono && o.mono !== o.label && <span className="mono">{o.mono}</span>}
-              <span className="t">{o.label}</span>
-              {o.value === value && <Check size={12} />}
-            </Item>
-          ))
-        )}
+      <List ref={listRef}>
+        <div style={{ height: virt.getTotalSize(), position: 'relative', width: '100%' }}>
+          {virt.getVirtualItems().map((vi) => {
+            const it = rows[vi.index]
+            const style: CSSProperties = { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)` }
+            if (it.any) {
+              return (
+                <div key="__any" data-index={vi.index} ref={virt.measureElement} style={style}>
+                  <Item type="button" $active={value === ''} onClick={() => pick('')}>
+                    <span className="t">{anyLabel}</span>
+                    {value === '' && <Check size={12} />}
+                  </Item>
+                </div>
+              )
+            }
+            const o = it.opt
+            return (
+              <div key={o.value} data-index={vi.index} ref={virt.measureElement} style={style}>
+                <Item type="button" $active={o.value === value} onClick={() => pick(o.value)}>
+                  {o.mono && o.mono !== o.label && <span className="mono">{o.mono}</span>}
+                  <span className="t">{o.label}</span>
+                  {o.cells?.map((c, i) => <span key={i} className="cell">{c}</span>)}
+                  {o.value === value && <Check size={12} />}
+                </Item>
+              </div>
+            )
+          })}
+        </div>
+        {filtered.length === 0 && <Empty>{t('table.noMatches', 'No matches')}</Empty>}
       </List>
       {showCreateRow && (
         <CreateRow type="button" onClick={commitCustom}>

@@ -125,9 +125,7 @@ export function FieldRow({
       />
     )
   } else if (effectiveRule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
-    const opts = lookupData
-      ? lookupOptions(lookupData, undefined, effectiveRule.display_fields).map((o) => ({ value: o.value, label: o.label, mono: o.value }))
-      : []
+    const opts = lookupData ? lookupOptions(lookupData, undefined, effectiveRule.display_fields) : []
     // Lookup pick handler — writes the picked value, then applies this field's ``return_binds``:
     // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
     // ``onLookupPick`` with a ``{targetColumn: value}`` map. The parent (ScreenDialog) writes each

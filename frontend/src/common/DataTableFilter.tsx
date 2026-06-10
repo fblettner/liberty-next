@@ -15,8 +15,10 @@ export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum' | 'look
 
 /** Per-column extras carried in TanStack's `columnDef.meta`. */
 export interface FilterMeta {
-  /** what filter control to show + how to interpret the filter value */
-  filter?: { kind: FilterKind; options?: { value: string; label: string }[] }
+  /** what filter control to show + how to interpret the filter value. ``options`` carry the same
+   *  shape the dialog/grid pickers use — a ``mono`` code column, the ``label``, and optional
+   *  ``cells`` (a LOOKUP's display_fields) — so SearchSelect renders the identical table. */
+  filter?: { kind: FilterKind; options?: { value: string; label: string; mono?: string; cells?: string[] }[] }
   /** header + cell text alignment (numbers → right, booleans → center, …); default left */
   align?: 'left' | 'right' | 'center'
   /** an internal helper column (the edit-mode select / status columns) — excluded from search, the Columns menu, etc. */

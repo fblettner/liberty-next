@@ -73,7 +73,7 @@ function editCtrlOf(c: Column): EditCtrl {
   if (isNumericish(fmt, typ)) return 'number'
   return 'text'
 }
-const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
+const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string; mono?: string; cells?: string[] }[], align?: FilterMeta['align']) =>
   // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
   // ``selectFilterFn``. Boolean keeps the built-in strict ``equals``.
   kind === 'enum' || kind === 'lookup'
@@ -213,28 +213,25 @@ function EditCell({
     // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
     // use the pre-projected value→label map directly — faster, no per-row scan.
     const active = (narrowBy ?? []).filter((n) => n.value != null && n.value !== '')
-    // ``display_fields`` → code: "extra · extra" map, built once from the raw rows; appended after
-    // each option's label so the grid edit dropdown shows the same extras as the dialog.
-    const extrasByCode = (() => {
+    // ``display_fields`` → code: [cell, cell] map, built once from the raw rows; each becomes an
+    // extra table column in the dropdown (same as the dialog picker). Consistent length so columns
+    // line up across options.
+    const cellsByCode = (() => {
       if (!displayFields?.length || !lookupRows) return undefined
       const valKey = rule.value
-      const m = new Map<string, string>()
+      const m = new Map<string, string[]>()
       for (const r of lookupRows) {
         const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
         if (v == null) continue
-        const extras = displayFields
-          .map((f) => r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()])
-          .filter((x) => x != null && String(x).trim() !== '')
-          .map((x) => String(x).trim())
-        if (extras.length) m.set(String(v), extras.join(' · '))
+        m.set(String(v), displayFields.map((f) => {
+          const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
+          return x == null ? '' : String(x).trim()
+        }))
       }
       return m
     })()
-    const withExtra = (code: string, label: string) => {
-      const ex = extrasByCode?.get(code)
-      return ex ? `${label} · ${ex}` : label
-    }
-    let opts: { value: string; label: string; mono: string }[]
+    type Opt = { value: string; label: string; mono: string; cells?: string[] }
+    let opts: Opt[]
     if (ready && active.length > 0 && lookupRows) {
       // Case-insensitive column lookup on the raw rows: Postgres folds unquoted columns
       // to lowercase, the dictionary uses uppercase. Compare as strings (lookups are
@@ -249,19 +246,19 @@ function EditCell({
         return rv != null && String(rv).trim() === String(value).trim()
       }))
       opts = matches
-        .map((r) => {
+        .map((r): Opt | null => {
           const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
           const l = r[labKey] ?? r[labKey.toLowerCase()] ?? r[labKey.toUpperCase()]
           return v == null
             ? null
-            : { value: String(v), label: withExtra(String(v), l == null ? String(v) : String(l)), mono: String(v) }
+            : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v), cells: cellsByCode?.get(String(v)) }
         })
-        .filter((o): o is { value: string; label: string; mono: string } => o !== null)
+        .filter((o): o is Opt => o !== null)
         .sort((a, b) => a.label.localeCompare(b.label))
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
         .sort(([, a], [, b]) => a.localeCompare(b))
-        .map(([value, label]) => ({ value, label: withExtra(value, label), mono: value }))
+        .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
     } else {
       opts = []
     }
@@ -1214,18 +1211,26 @@ export function ResultTable({
         // Use ``data.vKey`` / ``data.lKey`` (the *actual-case* row keys — Postgres folds
         // identifiers to lowercase, so the dictionary's uppercase ``r.value`` / ``r.label``
         // don't match row keys directly).
+        // The lookup's ``display_fields`` → extra table columns in the filter dropdown too (it uses
+        // the same SearchSelect as the dialog/grid). Resolve the keys once; emit one cell per field.
+        const dispKeys = data ? (r.display_fields ?? []).map((f) => data.byColLower.get(f.toLowerCase()) ?? f) : []
+        const cellsOf = (row: Record<string, unknown>) =>
+          dispKeys.length ? dispKeys.map((k) => { const x = row[k]; return x == null ? '' : String(x).trim() }) : undefined
+        // Same option shape as the dialog/grid picker — mono CODE column, the description as label,
+        // then the display_fields cells — so the filter dropdown renders the identical table (was a
+        // single concatenated "code — label" line before).
         const lookupOptsByCode = data && data.rows
           ? data.rows.map((row) => {
               const code = row[data.vKey] == null ? '' : String(row[data.vKey])
               const label = row[data.lKey] == null ? '' : String(row[data.lKey])
-              return { value: code, label: code && label && code !== label ? `${code} — ${label}` : (label || code) }
+              return { value: code, label: label || code, mono: code, cells: cellsOf(row) }
             })
           : undefined
         const lookupOptsByLabel = data && data.rows
           ? data.rows.map((row) => {
               const code = row[data.vKey] == null ? '' : String(row[data.vKey])
               const label = row[data.lKey] == null ? '' : String(row[data.lKey])
-              return { value: label || code, label: code && label && code !== label ? `${code} — ${label}` : (label || code) }
+              return { value: label || code, label: label || code, mono: code, cells: cellsOf(row) }
             })
           : undefined
         out.push({
@@ -1267,10 +1272,9 @@ export function ResultTable({
         // never shows the code, so an export couldn't round-trip; this makes ENUM behave exactly
         // like LOOKUP — resolved by code, never by the (non-unique) description.
         const emap = enumMaps.get(c.name)   // code → label
-        const fmtOpt = (v: { value: string; label: string }) =>
-          v.value && v.label && v.value !== v.label ? `${v.value} — ${v.label}` : (v.label || v.value)
-        const optsByCode = c.rule.values.map((v) => ({ value: v.value, label: fmtOpt(v) }))
-        const optsByLabel = c.rule.values.map((v) => ({ value: v.label || v.value, label: fmtOpt(v) }))
+        // mono CODE column + the label, matching the dialog/grid enum picker (was concatenated).
+        const optsByCode = c.rule.values.map((v) => ({ value: v.value, label: v.label || v.value, mono: v.value }))
+        const optsByLabel = c.rule.values.map((v) => ({ value: v.label || v.value, label: v.label || v.value, mono: v.value }))
         out.push({
           id: c.name,
           header: colHeader(c) + idSuffix,
