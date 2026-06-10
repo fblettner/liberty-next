@@ -1030,7 +1030,7 @@ export function ScreenDialog({
             {/* Duplicate (edit mode + insert_query) — turn this record into a new one: drop the key
                 columns, switch to add behaviour, keep the rest. Mirrors the table's bulk-edit
                 duplicate, but from inside the open form. Hidden once duplicating (effMode → add). */}
-            {effMode === 'edit' && screen.insert_query && !readOnly && (
+            {effMode === 'edit' && screen.insert_query && !screen.disable_add && !readOnly && (
               <Button
                 $size="sm"
                 $variant="ghost"

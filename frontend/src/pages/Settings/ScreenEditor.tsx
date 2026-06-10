@@ -63,7 +63,7 @@ const GENERAL_FORM_KEYS = [
   // screen into the app's active change package, with ``change_entity`` as its grouping label
   // and ``post_apply`` selecting the run-once steps this screen's changes need on promotion.
   'change_tracked', 'change_entity', 'post_apply',
-  'max_rows', 'auto_load', 'editable', 'uploadable',
+  'max_rows', 'auto_load', 'editable', 'uploadable', 'disable_add',
   // Default tanstack-table grouping — column(s) the grid groups by on first open. Surfaces
   // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
   // ``x_enum_ref`` mechanism the Columns tab uses to pick column names.

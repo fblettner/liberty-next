@@ -360,6 +360,18 @@ export function ResultTable({
   const { activeId } = useTabs()
   const { sharedActions } = useWorkspace()
   const canEdit = !!(updateQuery || insertQuery)
+  // Whether NEW records may be created here: an insert query exists AND the screen doesn't opt out
+  // via ``disable_add``. Gates every creation affordance (Add button, add-row / duplicate / paste /
+  // import) so an edit-only screen can keep its insert_query for the save path yet hide all the
+  // "make a new record" entry points. Edit / delete of existing rows is unaffected.
+  const canInsert = !!insertQuery && !screen?.disable_add
+  // ``Screen.editable`` (default true) gates INLINE GRID editing — the bulk-edit mode. False → the
+  // grid is view-only (a dialog, if any, still edits row-by-row). ``Screen.uploadable`` (default
+  // false) gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old
+  // behaviour: editable, not uploadable. Both were dormant before — honoured here so a screen
+  // migrated as view-only / no-import actually is.
+  const canBulkEdit = canEdit && screen?.editable !== false
+  const canImport = canInsert && !!screen?.uploadable
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
   // initial values; `mode='edit'` also drives the `:<COL>_ORIGINAL` binds inside ScreenDialog.
@@ -1318,7 +1330,7 @@ export function ResultTable({
                 : isDel ? <StatusMark $tone="deleted" title={t('table.rowDeleted')}>−</StatusMark>
                 : isDirty ? <StatusMark $tone="dirty" title={t('table.rowEdited')}>●</StatusMark>
                 : <span style={{ width: 7 }} />}
-              {insertQuery && !isDel && (
+              {canInsert && !isDel && (
                 <RowXBtn onClick={() => duplicateRow(row)} title={t('table.duplicateRow')}><Copy size={11} /></RowXBtn>
               )}
               <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
@@ -1329,7 +1341,7 @@ export function ResultTable({
         },
       },
     ]
-  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, insertQuery, isGroupRow, t])
+  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, canInsert, isGroupRow, t])
 
   const columns = useMemo<ColumnDef<DataRow, unknown>[]>(() => [...editCols, ...dataCols], [editCols, dataCols])
 
@@ -1343,7 +1355,7 @@ export function ResultTable({
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
       {editMode && saveErrors.length === 0 && <Banner $tone="info">{t('table.editingHint')}</Banner>}
-      {insertQuery && (
+      {canImport && (
         <input
           ref={fileRef}
           type="file"
@@ -1389,19 +1401,19 @@ export function ResultTable({
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
         toolbar={
-          !canEdit && screenActions.length === 0 && !screen?.export ? undefined : !editMode ? (
+          !(canBulkEdit || (canInsert && hasDialog) || canImport || screen?.export || screenActions.length > 0) ? undefined : !editMode ? (
             <>
-              {canEdit && hasDialog && screen?.insert_query && (
+              {hasDialog && canInsert && (
                 <TbBtn $tone="primary" onClick={openDialogForAdd} title={t('dialog.addTooltip')}>
                   <Plus size={13} /> {t('table.addRow')}
                 </TbBtn>
               )}
-              {canEdit && (
+              {canBulkEdit && (
                 <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
                   <Edit3 size={13} /> {hasDialog ? t('table.bulkEdit') : t('table.edit')}
                 </TbBtn>
               )}
-              {canEdit && insertQuery && (
+              {canImport && (
                 <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
                   <Upload size={13} /> {t('table.import')}
                 </TbBtn>
@@ -1441,20 +1453,20 @@ export function ResultTable({
               <TbBtn onClick={resetEdit} disabled={saving} title={t('common.cancel')}>
                 <X size={13} /> {t('common.cancel')}
               </TbBtn>
-              {insertQuery && (
-                <>
-                  <TbBtn onClick={addRow} disabled={saving} title={t('table.addRow')}>
-                    <Plus size={13} /> {t('table.addRow')}
-                  </TbBtn>
-                  <TbBtn onClick={() => fileRef.current?.click()} disabled={saving} title={t('table.import')}>
-                    <Upload size={13} /> {t('table.import')}
-                  </TbBtn>
-                </>
+              {canInsert && (
+                <TbBtn onClick={addRow} disabled={saving} title={t('table.addRow')}>
+                  <Plus size={13} /> {t('table.addRow')}
+                </TbBtn>
+              )}
+              {canImport && (
+                <TbBtn onClick={() => fileRef.current?.click()} disabled={saving} title={t('table.import')}>
+                  <Upload size={13} /> {t('table.import')}
+                </TbBtn>
               )}
               <TbBtn onClick={copySelected} disabled={saving || selected.size === 0} title={t('table.copyRows')}>
                 <Copy size={13} /> {t('table.copyRows')}{selected.size ? ` (${selected.size})` : ''}
               </TbBtn>
-              {insertQuery && (
+              {canInsert && (
                 <TbBtn onClick={pasteRows} disabled={saving || clipboard.length === 0} title={t('table.pasteRows')}>
                   <ClipboardPaste size={13} /> {t('table.pasteRows')}{clipboard.length ? ` (${clipboard.length})` : ''}
                 </TbBtn>

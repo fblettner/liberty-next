@@ -362,6 +362,10 @@ export interface ScreenListItem {
   key_columns?: string[]
   editable: boolean
   uploadable: boolean
+  /** Prevent creating NEW records on this screen even when `insert_query` is set (edit/delete of
+   *  existing rows stays allowed). Hides the Add button + dialog Add entry, and disables
+   *  add-row / duplicate-row / paste / import in the grid bulk-editor. */
+  disable_add?: boolean
   /** Default tanstack-table grouping for this screen — column name(s) the grid groups by on
    *  first open. Operators can ungroup / regroup from the Group control; this only seeds the
    *  initial state. Empty = no default grouping (flat rows). */

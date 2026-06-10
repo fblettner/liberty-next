@@ -1170,6 +1170,16 @@ class Screen(BaseModel):
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
     uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
+    disable_add: bool = Field(
+        default=False,
+        description=(
+            "Prevent creating NEW records on this screen, even when ``insert_query`` is set "
+            "(edit / delete of existing rows stays allowed). Hides the Add button and the "
+            "dialog's Add entry, and disables add-row / duplicate-row / paste / import in the "
+            "grid bulk-editor — every path that would insert a record. Use for a screen that "
+            "edits a fixed set of rows (e.g. a reference table seeded elsewhere)."
+        ),
+    )
     initial_group_by: list[str] = Field(
         default_factory=list,
         description=(
