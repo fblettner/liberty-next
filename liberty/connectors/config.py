@@ -314,6 +314,25 @@ class ColumnHint(BaseModel):
             "override per-dialog if needed."
         ),
     )
+    disable_on_add: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Read-only when ADDING a new row (still editable when editing an existing one). "
+            "Use for a column whose value is system-assigned on create and must not be typed."
+        ),
+    )
+    disable_on_edit: bool = Field(
+        default=False,
+        json_schema_extra={"x_group": "Rule"},
+        description=(
+            "Read-only when EDITING an existing row (still editable when adding a new one). "
+            "Use for a key whose value must not change after creation — replaces v1's blanket "
+            "'lock all keys on edit' with per-column control, so a key that genuinely needs "
+            "editing (e.g. on f00950) stays editable. Honoured by BOTH the dialog and the grid "
+            "bulk-edit, since it lives on the column."
+        ),
+    )
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
         json_schema_extra={"x_group": "Rule"},

@@ -1076,6 +1076,13 @@ export function ResultTable({
         />
       )
     }
+    // Per-row-mode edit lock (ColumnHint.disable_on_add / disable_on_edit): a new row (in newRows)
+    // checks disable_on_add, an existing row checks disable_on_edit. Locked → the cell falls through
+    // to its read-only display (same as non-edit mode), so the grid bulk-edit honours the SAME
+    // column setting the dialog's fieldStateOf does. Reads the live newRows via the ref — the cell
+    // renderers re-run each render, so this stays current without adding newRows to the memo deps.
+    const cellLocked = (c: Column, rowOriginal: DataRow) =>
+      newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
     const out: ColumnDef<DataRow, unknown>[] = []
     for (const c of shownColumns) {
       const align = cellAlign(c)
@@ -1163,7 +1170,7 @@ export function ResultTable({
           ...filterPropsFor('lookup', lookupOptsByCode, align),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
-            if (editMode && !isGroupRow(info)) return editCellFor(c, info)
+            if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
             const v = cur(info.row.original as DataRow, c.name)
             const { text, isNull } = ruleCell(v, { ...c, rule: undefined }, undefined, undefined)
             return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
@@ -1206,7 +1213,7 @@ export function ResultTable({
           ...filterPropsFor('enum', optsByCode, align),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
-            if (editMode && !isGroupRow(info)) return editCellFor(c, info)
+            if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
             const v = cur(info.row.original as DataRow, c.name)
             const { text, isNull } = ruleCell(v, { ...c, rule: undefined }, undefined, undefined)
             return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)

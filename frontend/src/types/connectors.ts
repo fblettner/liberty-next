@@ -148,6 +148,12 @@ export interface Column {
    *  folded into this server-side). Used to stamp an action's writes with the firing row's
    *  identity so the change package groups them under that record. */
   key?: boolean
+  /** Read-only when ADDING a new row (editable on edit). Honoured by the grid bulk-editor and the
+   *  dialog — locked cells fall back to their read-only display in that mode. UI-only. */
+  disable_on_add?: boolean
+  /** Read-only when EDITING an existing row (editable on add). Per-column replacement for v1's
+   *  blanket 'lock all keys on edit'. Honoured by the grid bulk-editor and the dialog. UI-only. */
+  disable_on_edit?: boolean
 }
 
 export interface QueryResult {

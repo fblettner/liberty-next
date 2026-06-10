@@ -107,6 +107,11 @@ export interface ScreenField {
   required_when?: FieldCondition[]
   /** Conditional disabled — when non-empty, every predicate must hold for the field to be locked. */
   disabled_when?: FieldCondition[]
+  /** Read-only when ADDING a new row (column-level, inherited from the ColumnHint). The dialog's
+   *  fieldStateOf ORs this into `disabled` when mode='add' — same setting the grid honours. */
+  disable_on_add?: boolean
+  /** Read-only when EDITING an existing row (column-level). ORed into `disabled` when mode='edit'. */
+  disable_on_edit?: boolean
 }
 
 /** Common to every tab kind — title + per-mode hide flags + translations + per-tab action

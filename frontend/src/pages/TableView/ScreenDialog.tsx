@@ -802,7 +802,11 @@ export function ScreenDialog({
     const disabledByRule = (f.disabled_when?.length ?? 0) > 0
       ? evalConditions(f.disabled_when, formValues)
       : !!f.disabled
-    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule }
+    // Per-row-mode lock (column-level): a column flagged disable_on_add is read-only while adding,
+    // disable_on_edit while editing — the SAME setting the grid bulk-editor honours. `effMode`
+    // already folds Duplicate (an edit-of → add). ORed on top of the rule/static disabled.
+    const modeLocked = effMode === 'add' ? !!f.disable_on_add : !!f.disable_on_edit
+    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule || modeLocked }
   }
 
   if (!open || !dlg) return null

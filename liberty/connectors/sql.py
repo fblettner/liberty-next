@@ -805,6 +805,11 @@ class Column:
     label: str | None = None
     hidden: bool = False
     key: bool = False
+    # Per-row-mode edit locks (``ColumnHint.disable_on_add`` / ``disable_on_edit``). Surfaced so the
+    # grid bulk-editor honours the SAME column setting the dialog does — locked → the cell falls back
+    # to its read-only display in that mode. UI-only: the write path is unchanged.
+    disable_on_add: bool = False
+    disable_on_edit: bool = False
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
@@ -825,6 +830,10 @@ class Column:
             d["hidden"] = True
         if self.key:
             d["key"] = True
+        if self.disable_on_add:
+            d["disable_on_add"] = True
+        if self.disable_on_edit:
+            d["disable_on_edit"] = True
         if self.filter:
             d["filter"] = True
         if self.filter_from:
@@ -2375,6 +2384,7 @@ def _resolve_hint(
         rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
+        disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         width=h.width, align=h.align, format=fmt, rule=rule,

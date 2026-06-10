@@ -122,6 +122,12 @@ def _resolve_screen_field(
     out["hidden"] = bool(raw.get("hidden")) if raw.get("hidden") is not None else column_hidden
     out["disabled"] = bool(raw.get("disabled")) if raw.get("disabled") is not None else column_disabled
     out["required"] = bool(raw.get("required")) if raw.get("required") is not None else column_required
+    # Per-row-mode edit locks — column-level only (no per-field override): the dialog's
+    # ``fieldStateOf`` ORs these into ``disabled`` based on add-vs-edit mode, matching the grid.
+    if hint is not None and hint.disable_on_add:
+        out["disable_on_add"] = True
+    if hint is not None and hint.disable_on_edit:
+        out["disable_on_edit"] = True
     key = (out.get("dd") or name).strip()
     entry = dictionary.find_entry(key, connector=connector) if key else None
     # Effective format — hint-level wins; ``label`` already came from the hint or stays
