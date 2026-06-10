@@ -32,7 +32,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { entityKeyOf, resolveBindList, forcedDefault, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, forcedDefault, applyRulesWhen, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -803,16 +803,21 @@ export function ResultTable({
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
   const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
-  const lookupSpecs = useMemo<LookupSpec[]>(
-    () => result.columns.filter((c) => c.rule?.kind === 'lookup').map((c) => {
-      const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
+  const lookupSpecs = useMemo<LookupSpec[]>(() => {
+    const out: LookupSpec[] = []
+    const specOf = (r: Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>) =>
       // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
       // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
       // cache separately in services/lookups (specKey folds the params in).
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources }
-    }),
-    [result.columns],
-  )
+      ({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources })
+    for (const c of result.columns) {
+      // Every lookup a column can render — the base rule AND every rules_when alternative — so all
+      // are fetched ONCE up front (cached/shared). Per row we only PICK which one; no per-row fetch.
+      if (c.rule?.kind === 'lookup') out.push(specOf(c.rule))
+      for (const rw of c.rules_when ?? []) if (rw.rule?.kind === 'lookup') out.push(specOf(rw.rule))
+    }
+    return out
+  }, [result.columns])
   // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
   // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed the
   // lookup-pick return-fill (``return_binds``) in the grid + on import, and the dropdown extras.
@@ -1115,14 +1120,20 @@ export function ResultTable({
       // editing the discriminator re-ticks dataCols, so this re-evaluates. Save writes it too.
       const forced = forcedDefault(c.default_when, valuesOf(row))
       if (forced !== undefined) return span(String(forced), 'plain', cellAlign(c))
+      // Per-row effective rule (rules_when): the cell's widget/lookup can differ row to row. Resolve
+      // it against this row's current values and render with the active rule (``ec``). Every possible
+      // lookup is pre-fetched, so this only PICKS the rule — no per-row fetch.
+      const ec: Column = c.rules_when?.length
+        ? { ...c, rule: applyRulesWhen(c.rules_when, c.rule ?? null, valuesOf(row)) ?? undefined }
+        : c
       const v = cur(row, c.name)
       // For LOOKUP columns, pull the already-fetched ``LookupData`` (value→label *and* raw
       // rows) from ``lookupMaps``. The map drives the dropdown options; the rows let the
       // pick handler resolve return_params.
-      const lookupData: LookupData | undefined = c.rule?.kind === 'lookup'
+      const lookupData: LookupData | undefined = ec.rule?.kind === 'lookup'
         ? lookupMaps.get(lookupKey({
-            connector: c.rule.connector, query: c.rule.query,
-            value: c.rule.value, label: c.rule.label, params: c.rule.params, sources: c.rule.sources,
+            connector: ec.rule.connector, query: ec.rule.query,
+            value: ec.rule.value, label: ec.rule.label, params: ec.rule.params, sources: ec.rule.sources,
           }))
         : undefined
       // Lookup-pick return-fill dispatcher — the picked column's ``return_binds`` already produced
@@ -1143,25 +1154,25 @@ export function ResultTable({
       // ``key_columns`` (same-named row column → lookup column) so the edit dropdown auto-narrows
       // to the right rows for a non-unique value, matching the grid's display disambiguation.
       const narrowBy: { column: string; value: unknown }[] | undefined =
-        c.rule?.kind !== 'lookup'
+        ec.rule?.kind !== 'lookup'
           ? undefined
           : c.filter_from && c.filter_from.length > 0
             ? c.filter_from.map((dep) => ({ column: dep.column, value: cur(row, dep.source) }))
-            : (c.rule.key_columns && c.rule.key_columns.length > 0
-                ? c.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
+            : (ec.rule.key_columns && ec.rule.key_columns.length > 0
+                ? ec.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
                 : undefined)
       return (
         <EditCell
-          ctrl={editCtrlOf(c)}
-          column={c}
+          ctrl={editCtrlOf(ec)}
+          column={ec}
           defaultText={v === null || v === undefined ? '' : String(v)}
           onChange={(nv) => editChange(row, c.name, nv)}
           lookupOptions={lookupData?.map}
           lookupRows={lookupData?.rows}
           onLookupReturnValues={handleLookupReturnValues}
           narrowBy={narrowBy}
-          displayFields={c.rule?.kind === 'lookup' ? c.rule.display_fields : undefined}
-          cellColumns={c.rule?.kind === 'lookup' ? lookupCellColumns(c.rule) : undefined}
+          displayFields={ec.rule?.kind === 'lookup' ? ec.rule.display_fields : undefined}
+          cellColumns={ec.rule?.kind === 'lookup' ? lookupCellColumns(ec.rule) : undefined}
         />
       )
     }

@@ -824,6 +824,12 @@ class Column:
     # LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column
     # (``ColumnHint.hide_label``).
     hide_label: bool = False
+    # Conditional RULE overrides (``ColumnHint.rules_when``). Each ``{field, value, rule}``: when
+    # sibling ``field`` == ``value``, render with ``rule`` (a fully-resolved DisplayRule, or null →
+    # plain) instead of the base ``rule``. First match wins; evaluated per row / form state. Every
+    # referenced lookup is loaded once (the rule objects just say WHICH lookup), so it's per-cell
+    # choice, not per-row fetch.
+    rules_when: list[dict[str, Any]] = field(default_factory=list)
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -857,6 +863,8 @@ class Column:
             d["default_when"] = self.default_when
         if self.hide_label:
             d["hide_label"] = True
+        if self.rules_when:
+            d["rules_when"] = self.rules_when
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -2362,6 +2370,21 @@ class SQLConnector:
         await conn.execute(text(audit_sql), bind_params)
 
 
+def _resolve_conditional_rule(
+    rules: str | None, rules_values: str | None, dictionary: DictionaryFile, *,
+    connector: str | None, language: str | None,
+) -> dict[str, Any] | None:
+    """Resolve a ``rules_when`` entry's (rules, rules_values) into a DisplayRule the same way the
+    base rule resolves — a synthetic dictionary entry → :meth:`resolve_rule`. Blank ``rules`` → None
+    (a plain input, no widget). Carries no entry-level ``lookup_params`` (the conditional lookup is a
+    DIFFERENT lookup than the column's DD entry; its dynamic params come from ``lookup_param_binds``)."""
+    r = rules.strip().upper() if rules else None
+    if not r:
+        return None
+    synth = DictionaryEntry(rules=r, rules_values=(rules_values.strip() if rules_values else None))
+    return dictionary.resolve_rule(synth, connector=connector, language=language)
+
+
 def _resolve_hint(
     h: ColumnHint, dictionary: DictionaryFile, language: str | None, *,
     connector: str | None = None, type_: str | None = None, name: str | None = None,
@@ -2407,6 +2430,11 @@ def _resolve_hint(
         return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],
         default_when=[w.as_dict() for w in h.default_when],
         hide_label=h.hide_label,
+        rules_when=[
+            {"field": w.field, "value": w.value,
+             "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language)}
+            for w in h.rules_when
+        ],
         width=h.width, align=h.align, format=fmt, rule=rule,
         # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
         # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator

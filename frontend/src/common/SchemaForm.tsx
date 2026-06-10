@@ -537,7 +537,7 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  */
 const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
 
-export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, fieldNotes }: {
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, hiddenFields, fieldNotes }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
@@ -546,6 +546,9 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
   /** x_group tab names to omit entirely (the caller decides per-context — e.g. hide "Lookup"
    *  unless the column's effective rule is a lookup). Fields in a hidden group don't render. */
   hiddenGroups?: string[]
+  /** Field names to omit (caller-driven, like hiddenGroups but per field) — e.g. hide the
+   *  lookup-only fields on a non-lookup column without hiding the whole Rules tab. */
+  hiddenFields?: string[]
   /** Extra content rendered under a field, keyed by field name — e.g. "default from the data
    *  dictionary: LOOKUP" beside the rules field. The caller computes it from external context. */
   fieldNotes?: Record<string, ReactNode>
@@ -650,6 +653,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         </TabsBar>
       )}
       {activeProps.map(([key, raw]) => {
+        if ((hiddenFields ?? []).includes(key)) return null
         const sub = effective(raw, allDefs)
         // ``x_visible_when`` — hide this field unless a sibling matches. The form's sibling
         // ``value`` is the parent ``value`` prop. Multiple allowed values via a list. Hidden

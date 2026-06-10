@@ -29,7 +29,7 @@ from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.config import ColumnHint
 from liberty.connectors.dictionary import DictionaryFile
-from liberty.connectors.sql import _hint_to_dict
+from liberty.connectors.sql import _hint_to_dict, _resolve_conditional_rule
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language
 
@@ -120,6 +120,12 @@ def _resolve_screen_field(
             ]
         if hint.default_when and not out.get("default_when"):
             out["default_when"] = [w.as_dict() for w in hint.default_when]
+        if hint.rules_when and not out.get("rules_when"):
+            out["rules_when"] = [
+                {"field": w.field, "value": w.value,
+                 "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language)}
+                for w in hint.rules_when
+            ]
     # ── hidden / disabled / required: field's explicit value wins; else inherit column's ──
     column_hidden = bool(hint.hidden) if hint is not None else False
     column_disabled = bool(hint.disabled) if hint is not None else False

@@ -244,6 +244,48 @@ class ReturnBind(BaseModel):
     )
 
 
+class RulesWhen(BaseModel):
+    """A conditional RULE override — when sibling column ``field`` equals ``value``, render THIS
+    column with ``rules`` / ``rules_values`` instead of the column's base rule. The first matching
+    entry wins; no match → the base ``rules``. ``rules = ""`` → plain input (no widget) — e.g. a JDE
+    alias row where the value is typed directly, not looked up. Reactive per row / form state, in the
+    dialog AND grid. Lives on the TARGET column, like ``default_when`` / ``visible_when``. Every
+    referenced lookup is still loaded ONCE (and cached) — only the per-cell rule choice is per-row.
+    The active lookup's params come from the column's shared ``lookup_param_binds`` (bound by name)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(
+        description="The sibling column whose value selects the rule (e.g. FSSETY).",
+        json_schema_extra={"x_case": "upper"},
+    )
+    value: str | list[str] = Field(description="The discriminator value, or list of values, that selects this rule.")
+    rules: str | None = Field(
+        default=None,
+        json_schema_extra={"x_enum_ref": "DICTIONARY_RULES"},
+        description="The rule to apply: BOOLEAN / ENUM / LOOKUP / SEQUENCE — or blank for a plain input (no widget).",
+    )
+    rules_values: str | None = Field(
+        default=None,
+        json_schema_extra={
+            "x_enum_ref_when": {
+                "field": "rules",
+                "map": {
+                    "BOOLEAN": "BOOLEAN_TRUE_VALUES",
+                    "ENUM": "ENUM_IDS",
+                    "LOOKUP": "LOOKUP_IDS",
+                    "SEQUENCE": "SEQUENCE_IDS",
+                    "NN": "SEQUENCE_IDS",
+                },
+            },
+        },
+        description="The rule's id: ENUM → enum id; LOOKUP → lookup id; SEQUENCE/NN → sequence id; BOOLEAN → true marker.",
+    )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"field": self.field, "value": self.value, "rules": self.rules, "rules_values": self.rules_values}
+
+
 class ColumnHint(BaseModel):
     """Display + edit metadata for one column on a screen. Drives both the grid (the table view)
     and the dialog form — set it once, both surfaces use it.
@@ -297,10 +339,10 @@ class ColumnHint(BaseModel):
     filter: bool = Field(default=False, json_schema_extra={"x_group": "Filter"}, description="Show this column in the table's filter panel.")
     filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filter"}, description="Cascading filters — narrow this column's options based on other filters.")
     visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filter"}, description="Show this column only when a filter has a specific value. Multiple rules are AND-ed.")
-    # ── Edit — widget + edit constraints (dialog form & grid cell) ────────────────────────
+    # ── Rules — the column's widget + conditional rules + lookup config ───────────────────
     rules: str | None = Field(
         default=None,
-        json_schema_extra={"x_group": "Edit", "x_enum_ref": "DICTIONARY_RULES"},
+        json_schema_extra={"x_group": "Rules", "x_enum_ref": "DICTIONARY_RULES"},
         description=(
             "How to render and validate the column's value. BOOLEAN renders a checkbox, ENUM a "
             "dropdown, LOOKUP a searchable picker. Leave blank to inherit from the dictionary "
@@ -310,7 +352,7 @@ class ColumnHint(BaseModel):
     rules_values: str | None = Field(
         default=None,
         json_schema_extra={
-            "x_group": "Edit",
+            "x_group": "Rules",
             "x_enum_ref_when": {
                 "field": "rules",
                 "map": {
@@ -327,6 +369,19 @@ class ColumnHint(BaseModel):
             "LOOKUP → the lookup id; SEQUENCE / NN → the sequence id."
         ),
     )
+    rules_when: list[RulesWhen] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Rules"},
+        description=(
+            "Conditional rule overrides: when a sibling column has a given value, render THIS column "
+            "with a different rule (or none → plain input). Each entry is {field, value, rules, "
+            "rules_values}; the first match wins, no match → the base ``rules``. Reactive per row / "
+            "form (dialog + grid). Use when one physical column means different things per kind — e.g. "
+            "on f00950 FSFRDV is a version LOOKUP for app security but a plain value for an alias. "
+            "All referenced lookups load once; only the per-cell choice is per-row."
+        ),
+    )
+    # ── Edit — edit constraints (required / read-only) ────────────────────────────────────
     required: bool = Field(
         default=False,
         json_schema_extra={"x_group": "Edit"},
@@ -392,10 +447,10 @@ class ColumnHint(BaseModel):
             "in the write (the discriminator, e.g. the security type)."
         ),
     )
-    # ── Lookup — only for LOOKUP columns ──────────────────────────────────────────────────
+    # ── Rules (cont.) — LOOKUP-only display/behaviour (shown in the Rules tab) ────────────
     hide_label: bool = Field(
         default=False,
-        json_schema_extra={"x_group": "Lookup"},
+        json_schema_extra={"x_group": "Rules"},
         description=(
             "A LOOKUP / ENUM column normally shows TWO grid columns — the code (ID) and the "
             "resolved label. Set this to show ONLY the code column when the description isn't "
@@ -404,7 +459,7 @@ class ColumnHint(BaseModel):
     )
     lookup_param_binds: list[ParamBind] = Field(
         default_factory=list,
-        json_schema_extra={"x_group": "Lookup"},
+        json_schema_extra={"x_group": "Rules"},
         description=(
             "Narrow this column's lookup query by binding extra parameters. Used when the "
             "lookup depends on another field's value — e.g. picking a role narrows by the "
@@ -413,7 +468,7 @@ class ColumnHint(BaseModel):
     )
     return_binds: list[ReturnBind] = Field(
         default_factory=list,
-        json_schema_extra={"x_group": "Lookup"},
+        json_schema_extra={"x_group": "Rules"},
         description=(
             "For a LOOKUP column: when a value is picked, fill sibling columns on the same row "
             "from the picked row's returned fields. Each entry maps a lookup ``return_params`` "

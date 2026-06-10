@@ -114,6 +114,9 @@ export interface ScreenField {
   /** Conditional forced defaults (column-level): when sibling `field` == `value`, this field is set
    *  to `default` and locked. First matching rule wins. Reactive on the live form. */
   default_when?: { field: string; value: string | string[]; default: string }[]
+  /** Conditional rule overrides: when sibling `field` == `value`, render with `rule` (resolved, or
+   *  null → plain) instead of the field's base `rule`. First match wins; reactive on the form. */
+  rules_when?: { field: string; value: string | string[]; rule: DisplayRule | null }[]
   /** Conditional visibility (v2's port of v1's col_cdn_id) — evaluated against the form. */
   visible_when?: FieldCondition[]
   /** Conditional required — when non-empty, every predicate must hold for the field to be required. */

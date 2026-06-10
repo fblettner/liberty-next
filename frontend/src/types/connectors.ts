@@ -139,6 +139,9 @@ export interface Column {
   default_when?: { field: string; value: string | string[]; default: string }[]
   /** LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column. */
   hide_label?: boolean
+  /** Conditional rule overrides: when sibling `field` == `value`, use `rule` (a resolved display
+   *  rule, or null → plain) instead of the base `rule`. First match wins; evaluated per row/form. */
+  rules_when?: { field: string; value: string | string[]; rule: DisplayRule | null }[]
   /** conditional visibility (v1's cdn_*): a list of `{field, value}` conditions, all of which must
    *  hold for the column to appear — a condition holds when its `field` server-filter is unset, or
    *  its value matches `value` (or is in `value` when it's an array). So a set filter outside the

@@ -34,6 +34,7 @@ export interface NavRoot {
    *  about it. Called for whichever level is currently shown. */
   deriveContext?: (value: Record<string, unknown>, schema: JsonSchema) => {
     hiddenGroups?: string[]
+    hiddenFields?: string[]
     fieldNotes?: Record<string, ReactNode>
   }
 }

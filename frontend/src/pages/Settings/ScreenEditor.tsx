@@ -860,8 +860,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
                 }
                 const override = typeof col.rules === 'string' && col.rules ? col.rules.toUpperCase() : undefined
                 const effective = override ?? ddRule
+                // Can this column ever be a LOOKUP? base override / DD default / any rules_when entry.
+                const rw = Array.isArray(col.rules_when) ? (col.rules_when as Record<string, unknown>[]) : []
+                const canLookup = effective === 'LOOKUP'
+                  || rw.some((e) => typeof e?.rules === 'string' && e.rules.toUpperCase() === 'LOOKUP')
                 return {
-                  hiddenGroups: effective === 'LOOKUP' ? [] : ['Lookup'],
+                  // The Rules tab always shows (it holds the rule); hide the LOOKUP-only fields when
+                  // the column can't be a lookup — the declutter the old "Lookup tab only" gave us.
+                  hiddenFields: canLookup ? [] : ['hide_label', 'lookup_param_binds', 'return_binds'],
                   fieldNotes: !override && ddRule
                     ? { rules: (
                         <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>

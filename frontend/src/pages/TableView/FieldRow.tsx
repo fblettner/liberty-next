@@ -15,7 +15,7 @@ import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { type Row, resolveBindList } from './dialogHelpers'
+import { type Row, resolveBindList, applyRulesWhen } from './dialogHelpers'
 
 export const CellWrap = styled.div<{ $span: number }>`
   grid-column: span ${({ $span }) => $span}; min-width: 0;
@@ -67,11 +67,12 @@ export function FieldRow({
   const value = formValues[field.name]
   const textValue = value === null || value === undefined ? '' : String(value)
   const label = field.label ?? column?.label ?? field.name
-  // Effective rule — screen-field-level override (v1 col_rules → ScreenField.rule, resolved by
-  // the backend on GET /api/screens) wins over the read column's rule (the dictionary's
-  // default). This is what fixes FSOBNM on F00950: the column has no rule but the field
-  // does (LOOKUP #9), so we pick that.
-  const effectiveRule = field.rule ?? column?.rule ?? null
+  // Effective rule — screen-field-level override (v1 col_rules → ScreenField.rule) wins over the
+  // read column's rule (the dictionary default). Then ``rules_when`` wins over BOTH when a
+  // discriminator matches the live form (e.g. f00950 FSFRDV → version lookup for app security, a
+  // plain input for an alias). Reactive: recomputes as formValues change; the matched rule object
+  // is referentially stable so the lookup memo below doesn't thrash.
+  const effectiveRule = applyRulesWhen(field.rules_when, field.rule ?? column?.rule, formValues)
 
   // For a LOOKUP field we need a live lookup spec — the *static* params from the rule plus the
   // dynamic ones from the field's lookup_param_binds (resolved against the current form values).

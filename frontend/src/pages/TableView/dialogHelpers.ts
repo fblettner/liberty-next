@@ -85,6 +85,23 @@ export function forcedDefault(rules: DefaultWhenRule[] | undefined, values: Row)
   return undefined
 }
 
+/** The ACTIVE display rule for a column/field given the current row/form values: the first
+ *  ``rules_when`` whose {field, value} condition holds wins (its rule may be null → plain input),
+ *  else the base rule. Generic over the rule type so it serves both the grid (Column.rule) and the
+ *  dialog (ScreenField.rule). The discriminator match reuses {@link evalConditions}. */
+export function applyRulesWhen<R>(
+  rulesWhen: { field: string; value: string | string[]; rule: R | null }[] | undefined,
+  baseRule: R | null | undefined,
+  values: Row,
+): R | null {
+  if (rulesWhen && rulesWhen.length) {
+    for (const rw of rulesWhen) {
+      if (evalConditions([{ field: rw.field, value: rw.value }], values)) return rw.rule
+    }
+  }
+  return baseRule ?? null
+}
+
 /** Resolve a list of ParamBinds against the current form state. `value` binds are literals;
  *  `source` binds read the live value of another field on the same form (column name,
  *  case-insensitive). Empty / missing values are dropped — the caller decides whether that
