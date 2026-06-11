@@ -162,10 +162,18 @@ const RowMenuErr = styled.div`
   font-size: ${fontSize.micro}; font-family: ${fonts.sans}; max-width: 320px; word-break: break-word;
 `
 
+/** A dropdown option: ``value`` (the code written back), ``label`` (the description), ``mono`` (the
+ *  code shown beside the label) and optional ``cells`` (a LOOKUP's display_fields, one per column). */
+type LookupOpt = { value: string; label: string; mono: string; cells?: string[] }
+
 function EditCell({
-  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns,
+  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns, prebuiltOptions,
 }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
+  /** A LOOKUP column's non-cascading dropdown options, built ONCE per (spec, display_fields) by the
+   *  parent and shared across every row's cell — see ``editOptsCache``. When present (and the cell
+   *  has no active cascade), it's used as-is so we don't rebuild the full option list per cell. */
+  prebuiltOptions?: LookupOpt[]
   /** The lookup's ``display_fields`` — extra row columns appended (dimmed, " · ") after each
    *  option's label so similar codes are distinguishable, same as the dialog dropdown. */
   displayFields?: string[]
@@ -222,26 +230,29 @@ function EditCell({
     // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
     // use the pre-projected value→label map directly — faster, no per-row scan.
     const active = (narrowBy ?? []).filter((n) => n.value != null && n.value !== '')
-    // ``display_fields`` → code: [cell, cell] map, built once from the raw rows; each becomes an
-    // extra table column in the dropdown (same as the dialog picker). Consistent length so columns
-    // line up across options.
-    const cellsByCode = (() => {
-      if (!displayFields?.length || !lookupRows) return undefined
-      const valKey = rule.value
-      const m = new Map<string, string[]>()
-      for (const r of lookupRows) {
-        const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-        if (v == null) continue
-        m.set(String(v), displayFields.map((f) => {
-          const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
-          return x == null ? '' : String(x).trim()
-        }))
-      }
-      return m
-    })()
-    type Opt = { value: string; label: string; mono: string; cells?: string[] }
+    const useCascade = ready && active.length > 0 && !!lookupRows
+    type Opt = LookupOpt
+    // ``display_fields`` → code: [cell, cell] map, built from the raw rows; each becomes an extra
+    // table column in the dropdown (same as the dialog picker). Only needed when we build options
+    // HERE (an active cascade, or the no-prebuilt fallback) — ``prebuiltOptions`` already bakes its
+    // cells in, so we skip this O(lookup rows) scan per cell on the common non-cascading path.
+    const cellsByCode = (useCascade || (ready && !prebuiltOptions)) && displayFields?.length && lookupRows
+      ? (() => {
+          const valKey = rule.value
+          const m = new Map<string, string[]>()
+          for (const r of lookupRows) {
+            const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+            if (v == null) continue
+            m.set(String(v), displayFields.map((f) => {
+              const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
+              return x == null ? '' : String(x).trim()
+            }))
+          }
+          return m
+        })()
+      : undefined
     let opts: Opt[]
-    if (ready && active.length > 0 && lookupRows) {
+    if (useCascade && lookupRows) {
       // Case-insensitive column lookup on the raw rows: Postgres folds unquoted columns
       // to lowercase, the dictionary uses uppercase. Compare as strings (lookups are
       // code-based: "01" matches "01", coercion stays out of the picture).
@@ -264,6 +275,9 @@ function EditCell({
         })
         .filter((o): o is Opt => o !== null)
         .sort((a, b) => a.label.localeCompare(b.label))
+    } else if (ready && prebuiltOptions) {
+      // Common path: a non-cascading lookup reuses the list the parent built once for this column.
+      opts = prebuiltOptions
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
         .sort(([, a], [, b]) => a.localeCompare(b))
@@ -833,7 +847,15 @@ export function ResultTable({
       for (const rw of c.rules_when ?? []) {
         if (rw.rule?.kind !== 'lookup') continue
         if (!rw.lookup_param_binds || rw.lookup_param_binds.length === 0) { add(specForRule(rw.rule, undefined, {})); continue }
-        for (const row of result.rows) add(specForRule(rw.rule, rw.lookup_param_binds, row as Record<string, unknown>))
+        for (const row of result.rows) {
+          // Only fetch a parameterized lookup once its narrowing binds resolve to a value. A row whose
+          // discriminator is blank would bind nothing and pull the WHOLE lookup table unfiltered — the
+          // bulk-edit / add-row "loads everything" slowdown. Skip it; the cell resolves once the
+          // discriminator has a value (and that row's narrowed spec gets fetched then).
+          const dyn = resolveBindList(rw.lookup_param_binds, row as Record<string, unknown>)
+          if (!Object.values(dyn).some((v) => v !== '' && v != null)) continue
+          add(specForRule(rw.rule, rw.lookup_param_binds, row as Record<string, unknown>))
+        }
       }
     }
     return out
@@ -848,13 +870,14 @@ export function ResultTable({
   // LookupData (narrowed by the row's per-rule binds). Shared by display-label resolution + the edit
   // dropdown so both pick the SAME conditional lookup for the row (f00950 FSDTAI: get_form_name for
   // FSSETY 6/8, get_data_item for 2/4 — each with the right narrowing).
-  const activeLookupFor = useCallback((c: Column, row: DataRow): { rule: Column['rule']; data: LookupData | undefined } => {
+  const activeLookupFor = useCallback((c: Column, row: DataRow): { rule: Column['rule']; data: LookupData | undefined; key?: string } => {
     const vals = valuesOf(row)
     const aw = activeRulesWhen(c.rules_when, vals)
     const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
     if (rule?.kind !== 'lookup') return { rule: rule ?? undefined, data: undefined }
     const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, vals)
-    return { rule, data: spec ? lookupMaps.get(lookupKey(spec)) : undefined }
+    const key = spec ? lookupKey(spec) : undefined
+    return { rule, data: key ? lookupMaps.get(key) : undefined, key }
   }, [valuesOf, specForRule, lookupMaps])
 
   // Filter options for a column with rules_when: the UNION across the base rule AND every conditional
@@ -1193,6 +1216,29 @@ export function ResultTable({
       const k = c.name.toLowerCase()
       if (!nameToColName.has(k)) nameToColName.set(k, c.name)
     }
+    // (1) Per-lookup edit-dropdown options, built ONCE per (spec, display_fields) and shared by every
+    // row's cell — keyed by the lookup's spec key. EditCell used to rebuild the whole option list
+    // (O(lookup rows)) on every cell render, so bulk-edit / add-row over a big UDC cost O(grid rows ×
+    // lookup rows × renders). This cache (rebuilt when lookupMaps changes, since it's recreated each
+    // dataCols memo run) collapses that to O(lookup rows) once. Cascading cells still build per row.
+    const editOptsCache = new Map<string, LookupOpt[]>()
+    const buildPrebuiltOpts = (d: LookupData, valKey: string, df: string[] | undefined): LookupOpt[] => {
+      let cellsByCode: Map<string, string[]> | undefined
+      if (df?.length) {
+        cellsByCode = new Map()
+        for (const r of d.rows) {
+          const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+          if (v == null) continue
+          cellsByCode.set(String(v), df.map((f) => {
+            const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
+            return x == null ? '' : String(x).trim()
+          }))
+        }
+      }
+      return [...d.map.entries()]
+        .sort(([, a], [, b]) => a.localeCompare(b))
+        .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
+    }
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
       // Conditional forced default (default_when): when a sibling column's value triggers a rule,
@@ -1204,7 +1250,7 @@ export function ResultTable({
       // the active rule + its already-fetched LookupData (narrowed by this row's per-rule binds) in
       // one shot — every possible lookup (incl. one fetch per distinct bind value) is pre-fetched, so
       // this only PICKS; no per-row network fetch.
-      const { rule: activeRule, data: lookupData } = activeLookupFor(c, row)
+      const { rule: activeRule, data: lookupData, key: lookupSpecKey } = activeLookupFor(c, row)
       // ec carries the active rule AND its per-rule return_binds (the edit pick reads
       // ``column.return_binds``), so a conditional lookup's pick fills the right siblings.
       const awEdit = c.rules_when?.length ? activeRulesWhen(c.rules_when, valuesOf(row)) : null
@@ -1237,6 +1283,18 @@ export function ResultTable({
             : (ec.rule.key_columns && ec.rule.key_columns.length > 0
                 ? ec.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
                 : undefined)
+      // (1) For a non-cascading lookup (no active narrowing on this row), hand EditCell the option
+      // list built ONCE for this lookup instead of letting it rebuild per cell. Cascading cells
+      // (narrowBy has a value) still narrow per row inside EditCell.
+      const narrowActive = (narrowBy ?? []).some((n) => n.value != null && n.value !== '')
+      let prebuiltOptions: LookupOpt[] | undefined
+      if (ec.rule?.kind === 'lookup' && !narrowActive && lookupData && lookupSpecKey) {
+        const df = ec.rule.display_fields
+        const ckey = `${lookupSpecKey}|${(df ?? []).join(',')}`
+        let o = editOptsCache.get(ckey)
+        if (!o) { o = buildPrebuiltOpts(lookupData, ec.rule.value, df); editOptsCache.set(ckey, o) }
+        prebuiltOptions = o
+      }
       return (
         <EditCell
           ctrl={editCtrlOf(ec)}
@@ -1249,6 +1307,7 @@ export function ResultTable({
           narrowBy={narrowBy}
           displayFields={ec.rule?.kind === 'lookup' ? ec.rule.display_fields : undefined}
           cellColumns={ec.rule?.kind === 'lookup' ? lookupCellColumns(ec.rule) : undefined}
+          prebuiltOptions={prebuiltOptions}
         />
       )
     }
