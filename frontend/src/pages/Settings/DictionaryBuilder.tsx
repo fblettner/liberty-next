@@ -8,7 +8,8 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch } from 'lucide-react'
+import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch, FileSpreadsheet } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
@@ -589,6 +590,36 @@ export default function DictionaryBuilder() {
     } finally { setBusy(false) }
   }
 
+  // Export every dictionary ENTRY (shared + per-connector overlays) to an .xlsx — one row per
+  // entry with the fields worth diffing against the source system's data dictionary (label /
+  // format / rule / default). Read-only; doesn't touch the editor state.
+  const exportEntries = () => {
+    if (!dict) return
+    const rows: Record<string, unknown>[] = []
+    const push = (scope: string, entries: Record<string, Record<string, unknown>> | undefined) => {
+      for (const [id, e] of Object.entries(entries ?? {})) {
+        rows.push({
+          scope: scope || 'shared', id,
+          label: typeof e.label === 'string' ? e.label : '',
+          format: typeof e.format === 'string' ? e.format : '',
+          rules: typeof e.rules === 'string' ? e.rules : '',
+          rules_values: typeof e.rules_values === 'string' ? e.rules_values : '',
+          false_value: typeof e.false_value === 'string' ? e.false_value : '',
+          default: typeof e.default === 'string' ? e.default : '',
+        })
+      }
+    }
+    push('shared', dict.entries as Record<string, Record<string, unknown>> | undefined)
+    for (const [conn, sec] of Object.entries((dict.connectors ?? {}) as Record<string, { entries?: Record<string, Record<string, unknown>> }>)) {
+      push(conn, sec?.entries)
+    }
+    rows.sort((a, b) => `${a.scope}\0${a.id}`.localeCompare(`${b.scope}\0${b.id}`))
+    const ws = XLSX.utils.json_to_sheet(rows, { header: ['scope', 'id', 'label', 'format', 'rules', 'rules_values', 'false_value', 'default'] })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'entries')
+    XLSX.writeFile(wb, 'dictionary_entries.xlsx')
+  }
+
   const scopeLabel = (s: string) => (s ? s : t('settings.dictionary.scope.shared'))
 
   return (
@@ -619,6 +650,9 @@ export default function DictionaryBuilder() {
           <>
             <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy}>
               <BookText size={13} /> {t('settings.dictscan.scanTable', 'Scan a table')}
+            </Button>
+            <Button $variant="ghost" $size="sm" onClick={exportEntries} disabled={busy || !dict} title={t('settings.dictionary.exportTitle', 'Export all entries to Excel (label / format / rule / default) — diff against the source data dictionary')}>
+              <FileSpreadsheet size={13} /> {t('settings.dictionary.export', 'Export')}
             </Button>
             <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
               <Undo2 size={13} /> {t('common.discard', 'Discard')}
