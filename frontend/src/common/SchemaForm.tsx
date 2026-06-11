@@ -645,10 +645,17 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
   const groupNames = [...groups.keys()].filter((g) => !(hiddenGroups ?? []).includes(g))
   const showTabs = groupNames.length > 1
   const [tab, setTab] = useState(groupNames[0])
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- reset to the first tab when the *model* changes
-  // Tab resets when the *model* changes — for discriminated unions, "model" is the resolved
-  // branch's title (so switching widget type from chart→kpi snaps the tab strip back to General).
-  useEffect(() => { setTab(groupNames[0]) }, [resolvedSchema.title])
+  // Remember the active tab PER model (resolved schema title) within this form instance — the
+  // SchemaNavigator reuses one SchemaForm across drill-in/out, so when the model changes (drill into
+  // a list item, then back) we RESTORE the tab the operator last had on that model instead of always
+  // snapping to the first. Fixes "edit a column → open a rules_when → Back lands on the General tab".
+  const tabByModel = useRef<Map<string, string>>(new Map())
+  const selectTab = (g: string) => { setTab(g); tabByModel.current.set(resolvedSchema.title ?? '', g) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only re-key on model change
+  useEffect(() => {
+    const remembered = tabByModel.current.get(resolvedSchema.title ?? '')
+    setTab(remembered && groupNames.includes(remembered) ? remembered : groupNames[0])
+  }, [resolvedSchema.title])
   const activeProps = groups.get(tab) ?? groups.get(groupNames[0]) ?? []
   const enums = useContext(FrameworkEnumsContext)
 
@@ -657,7 +664,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
       {showTabs && (
         <TabsBar>
           {groupNames.map((g) => (
-            <TabBtn key={g} type="button" $active={(groups.get(tab) ? tab : groupNames[0]) === g} onClick={() => setTab(g)}>{g}</TabBtn>
+            <TabBtn key={g} type="button" $active={(groups.get(tab) ? tab : groupNames[0]) === g} onClick={() => selectTab(g)}>{g}</TabBtn>
           ))}
         </TabsBar>
       )}

@@ -338,6 +338,19 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
     base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
+    // LOOKUP_RETURN_PARAMS — candidate dropdown for a ReturnBind's ``param`` (the lookup field that
+    // flows back). It's the UNION of every lookup's ``return_params`` in scope: the exact set depends
+    // on which lookup the column resolves to (which the static form can't narrow), so we offer all of
+    // them + free-text. Surfacing them as a picker reduces typos on the common case.
+    const returnParams = new Map<string, string>()
+    for (const m of [dict?.lookups, dscope?.lookups]) {
+      if (!m) continue
+      for (const rec of Object.values(m)) {
+        const rps = (rec as { return_params?: unknown }).return_params
+        if (Array.isArray(rps)) for (const p of rps) if (typeof p === 'string' && p) returnParams.set(p, p)
+      }
+    }
+    base.LOOKUP_RETURN_PARAMS = { label: 'Lookup return params', values: [...returnParams.keys()].sort().map((p) => ({ value: p, label: p, mono: p })) }
     // COLUMN_GROUPS — the group ids defined on this screen, for the per-column ``group`` picker.
     // (The group editor itself — connector / query / bind dropdowns — is the dedicated
     // ColumnGroupsEditor, not a schema-enum field, so no WRITABLE_QUERIES enum is needed here.)

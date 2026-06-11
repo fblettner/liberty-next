@@ -161,7 +161,10 @@ class VisibleWhen(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(description="The filter column whose value gates this column's visibility.")
+    field: str = Field(
+        description="The filter column whose value gates this column's visibility.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
+    )
     value: str | list[str] = Field(description="The allowed value, or list of allowed values.")
 
     def as_dict(self) -> dict[str, Any]:
@@ -180,7 +183,7 @@ class DefaultWhen(BaseModel):
 
     field: str = Field(
         description="The sibling column whose value gates this default.",
-        json_schema_extra={"x_case": "upper"},
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     value: str | list[str] = Field(description="The discriminator value, or list of values, that triggers this default.")
     default: str = Field(description="The value forced into this column (and locked) while the condition holds.")
@@ -213,7 +216,9 @@ class ParamBind(BaseModel):
     source: str | None = Field(
         default=None,
         description="Read the value at call time from a column / form field / chain context path.",
-        json_schema_extra={"x_case": "upper"},
+        # Offer the screen's columns as a dropdown (still free-text — a chain step can read a dotted
+        # context path like ``step1.first_row.col`` that isn't a column).
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     default: str | None = Field(
         default=None,
@@ -236,7 +241,9 @@ class ReturnBind(BaseModel):
             "A column returned by the lookup query whose value flows back — one of the lookup's "
             "``return_params`` (the picked row's column with this name)."
         ),
-        json_schema_extra={"x_case": "upper"},
+        # Candidate dropdown of return params across the scope's lookups (still free-text — the
+        # exact set depends on which lookup the column resolves to, which the form can't narrow here).
+        json_schema_extra={"x_enum_ref": "LOOKUP_RETURN_PARAMS", "x_case": "upper"},
     )
     column: str = Field(
         description="The screen column on this row to fill with the returned value.",
@@ -265,7 +272,7 @@ class RulesWhen(BaseModel):
 
     field: str = Field(
         description="The sibling column whose value selects the rule (e.g. FSSETY).",
-        json_schema_extra={"x_case": "upper"},
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     value: str | list[str] = Field(description="The discriminator value, or list of values, that selects this rule.")
     rules: str | None = Field(
