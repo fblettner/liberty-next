@@ -97,11 +97,11 @@ const MiniBtn = styled.button`
 // What a TablePicker pick yields: the chosen table's ``name`` + ``columns`` plus the schema
 // EXPRESSION to write in the SQL — a portable ``#SCHEMA.<KEY>#`` token when the pool defines a
 // schema map, else the real schema name, or null for a single-/zero-schema pool.
-interface PickedTable { schema: string | null; name: string; columns: PoolColumn[] }
+export interface PickedTable { schema: string | null; name: string; columns: PoolColumn[] }
 // Lazy table picker — schema list → ONE schema's tables (name-filtered) → pick. A real schema needs
 // a name filter before listing (no full-catalog dump); a single-/zero-schema pool (SQLite) lists
-// directly. Used for the base FROM and each added JOIN.
-function TablePicker({ connector, onPick }: { connector: string; onPick: (t: PickedTable) => void }) {
+// directly. Used for the base FROM and each added JOIN, and reused by the dictionary query generator.
+export function TablePicker({ connector, onPick }: { connector: string; onPick: (t: PickedTable) => void }) {
   const { t } = useTranslation()
   const [schemasInfo, setSchemasInfo] = useState<{ schemas: string[]; map: Record<string, string> } | null | undefined>(undefined)
   const [pickedSchema, setPickedSchema] = useState('')   // the schema EXPRESSION (a #SCHEMA.X# token or a real name)

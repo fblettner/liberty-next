@@ -16,7 +16,7 @@
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical, Wand2 } from 'lucide-react'
 import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
@@ -566,7 +566,7 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  */
 const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
 
-export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, hiddenFields, fieldNotes, ancestors }: {
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, onGenerateQuery, hiddenGroups, hiddenFields, fieldNotes, ancestors }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
@@ -591,13 +591,15 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
    *  argument resolves from a sibling ``connector`` field; the parent may fall back to
    *  the surrounding scope.
    *
-   *    onEditQuery  — opens the existing query for editing (Edit3 icon)
-   *    onCloneQuery — prompts for a new name, clones the existing query (Copy icon)
-   *    onAddQuery   — prompts for a new name, creates a blank query (Plus icon)
+   *    onEditQuery     — opens the existing query for editing (Edit3 icon)
+   *    onCloneQuery    — prompts for a new name, clones the existing query (Copy icon)
+   *    onAddQuery      — prompts for a new name, creates a blank query (Plus icon)
+   *    onGenerateQuery — scaffolds a query from the record's params + a picked table (Wand2 icon)
    */
   onEditQuery?: (connector: string | null | undefined, queryName: string) => void
   onCloneQuery?: (connector: string | null | undefined, queryName: string) => void
   onAddQuery?: (connector: string | null | undefined) => void
+  onGenerateQuery?: (connector: string | null | undefined) => void
 }) {
   const allDefs = { ...(schema.$defs ?? {}), ...(defs ?? {}) }
   // A discriminated union (Pydantic `Widget = ChartWidget | KpiWidget` → `oneOf` + `discriminator`)
@@ -762,7 +764,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
           // the caller's handler is responsible for falling back to the surrounding
           // scope). Edit / Clone require both connector + queryName; Add only needs
           // connector. Each button hides itself when its prerequisites aren't met.
-          if (ref && QUERY_ENUM_REFS.has(ref) && (onEditQuery || onCloneQuery || onAddQuery)) {
+          if (ref && QUERY_ENUM_REFS.has(ref) && (onEditQuery || onCloneQuery || onAddQuery || onGenerateQuery)) {
             const sibConn = typeof value.connector === 'string' ? value.connector : null
             const hasQuery = cur != null && String(cur) !== ''
             control = (
@@ -784,6 +786,12 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
                   <InlineActionBtn type="button" title="Add query" aria-label="Add query"
                     onClick={() => onAddQuery(sibConn)} disabled={!sibConn}>
                     <Plus size={13} />
+                  </InlineActionBtn>
+                )}
+                {onGenerateQuery && (
+                  <InlineActionBtn type="button" title="Generate query from table" aria-label="Generate query"
+                    onClick={() => onGenerateQuery(sibConn)} disabled={!sibConn}>
+                    <Wand2 size={13} />
                   </InlineActionBtn>
                 )}
               </div>

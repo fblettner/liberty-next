@@ -39,14 +39,15 @@ export interface NavRoot {
   }
 }
 
-export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }: {
+export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery, onGenerateQuery }: {
   root: NavRoot
   /** Forwarded to the underlying SchemaForm — fire when the operator clicks the in-line
-   *  Edit / Clone / Add buttons next to a query-bearing dropdown. Caller mounts the
-   *  EditQueryModal (with appropriate seed for clone / add) in response. */
+   *  Edit / Clone / Add / Generate buttons next to a query-bearing dropdown. Caller mounts the
+   *  EditQueryModal (with appropriate seed for clone / add) or the generator in response. */
   onEditQuery?: (connector: string | null | undefined, queryName: string) => void
   onCloneQuery?: (connector: string | null | undefined, queryName: string) => void
   onAddQuery?: (connector: string | null | undefined) => void
+  onGenerateQuery?: (connector: string | null | undefined) => void
 }) {
   const [path, setPath] = useState<NavSeg[]>([])
   useEffect(() => { setPath([]) }, [root.label])   // a different thing selected → back to the top
@@ -106,7 +107,7 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
         backLabel={parentLabel}
         crumbs={crumbs}
       />
-      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery}
+      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery} onGenerateQuery={onGenerateQuery}
         ancestors={ancestors}
         {...(root.deriveContext?.(cur.value, cur.schema) ?? {})} />
     </div>
