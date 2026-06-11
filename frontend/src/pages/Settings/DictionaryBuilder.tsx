@@ -223,6 +223,7 @@ export default function DictionaryBuilder() {
         }
       }
       return [...out.entries()].map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value))
     }
     const overlay = scope && dict ? (dict.connectors ?? {})[scope] : undefined
     base.ENUM_IDS = { label: 'Enums (current scope)', values: mkValues(['label'], dict?.enums, overlay?.enums) }

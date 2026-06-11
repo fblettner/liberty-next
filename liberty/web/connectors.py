@@ -23,6 +23,7 @@ from typing import Annotated, Any, AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from liberty.auth.dependencies import CurrentPrincipal
@@ -593,6 +594,173 @@ async def sql_query_get(
         language=request_language(request), max_rows=limit, user=principal.username,
         screens=screens, screen_hint=screen_hint,
     )
+
+
+class ImportBody(BaseModel):
+    """Batch Excel-import request: validate (``commit=false``) or persist (``commit=true``) a list
+    of already-mapped rows through the screen's insert / update queries."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    mode: str = Field(default="upsert", description="upsert | insert | update.")
+    insert_query: str | None = Field(default=None, description="Named INSERT query (insert / upsert).")
+    update_query: str | None = Field(default=None, description="Named UPDATE query (update / upsert).")
+    rows: list[dict[str, Any]] = Field(default_factory=list, description="Rows, keyed by column name.")
+    commit: bool = Field(default=False, description="false → dry-run validate (rolled back); true → persist the rows.")
+    screen_app: str | None = Field(default=None, description="Screen app — pins column hints / audit / dict scope.")
+    screen_id: str | None = Field(default=None, description="Screen id (with screen_app).")
+
+
+def _import_error(exc: Exception) -> str:
+    """A compact, operator-readable message from a DB error: keep the driver/ORA line, drop the huge
+    ``[SQL: …] [parameters: …]`` tail SQLAlchemy appends (it's noise in the per-row report)."""
+    msg = f"{type(exc).__name__}: {exc}"
+    cut = msg.find("[SQL:")  # SQLAlchemy separates the tail with a newline, not a space
+    return (msg[:cut] if cut > 0 else msg).strip()
+
+
+def _import_row_params(row: dict[str, Any]) -> dict[str, Any]:
+    """Bind params for one imported row — exactly what the grid/dialog Save sends (``withUpper`` +
+    ``originalKeys``), which the raw mapped row was missing:
+
+    * **UPPERCASE keys** — the JDE queries bind ``:FSSETY`` etc., but the mapped row keys follow the
+      result columns' case (often lowercase). Without folding, every bind comes through NULL/blank and
+      the WHERE matches nothing — the bug behind "everything validates".
+    * **``:<KEY>_ORIGINAL`` WHERE binds** — an UPDATE identifies the row by ``:FSSETY_ORIGINAL`` …; on
+      import the row's own (imported) key values ARE that identity (no separate 'old' key), so bind
+      each ``<COL>_ORIGINAL`` to the same value. Params a given statement doesn't reference are ignored
+      by the bind layer, so this one shape serves INSERT and UPDATE alike."""
+    up = {str(k).upper(): v for k, v in row.items()}
+    for k, v in list(up.items()):
+        up.setdefault(f"{k}_ORIGINAL", v)
+    return up
+
+
+@router.post(
+    "/sql/{connector}/_import",
+    summary="Import rows",
+    responses={
+        400: {"description": "Bad mode or no insert/update query for the chosen mode."},
+        403: {"description": "Caller lacks ``sql:<connector>:<query>`` on the insert/update query."},
+        404: {"description": "Unknown connector."},
+    },
+)
+async def sql_import(
+    connector: str, request: Request, principal: CurrentPrincipal,
+    connectors: Connectors, screens: Screens, body: ImportBody,
+) -> dict[str, Any]:
+    """Validate or persist a batch of imported rows against *connector*'s screen queries.
+
+    Each row runs through the screen's ``insert_query`` / ``update_query`` with the SAME machinery
+    as a normal Save (dictionary coercion, SEQUENCE/NN, audit mirror), so the rowcount and any DB
+    error are exactly what a real save sees. With ``commit=false`` each row's write is rolled back
+    (a dry-run, via ``execute(dry_run=True)``) — the validation pass. With ``commit=true`` the valid
+    rows are written for real, each in its own transaction (same per-row model as the grid Save),
+    and change-tracked screens capture them via the standard path.
+
+    ``upsert`` decides per row by a dry-run UPDATE probe: a row that matches → UPDATE, else INSERT —
+    no per-screen "select by key" query needed. ``insert`` / ``update`` force the one query.
+
+    Returns ``{committed, mode, valid, invalid, results: [{index, action, ok, error?, rowcount?}]}``.
+    """
+    mode = (body.mode or "upsert").lower()
+    if mode not in ("upsert", "insert", "update"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="mode must be upsert | insert | update.")
+    # Permission gate on EVERY query the chosen mode may run.
+    needed: set[str] = set()
+    if mode in ("upsert", "insert") and body.insert_query:
+        needed.add(body.insert_query)
+    if mode in ("upsert", "update") and body.update_query:
+        needed.add(body.update_query)
+    if not needed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"no {'insert' if mode == 'insert' else 'update' if mode == 'update' else 'insert/update'} query for mode {mode!r}.")
+    for q in needed:
+        require_permission(principal, f"sql:{connector}:{q}")
+
+    # Resolve the screen (explicit hint, else by the insert/update query) for column hints / audit /
+    # dictionary scope — so the dry-run coerces + audits exactly like the real Save.
+    screen_hint = (body.screen_app, body.screen_id) if (body.screen_app and body.screen_id) else None
+    screen, screen_app = (None, None)
+    if screen_hint and screens:
+        screen = (screens.screens.get(body.screen_app) or {}).get(body.screen_id)  # type: ignore[arg-type]
+        screen_app = body.screen_app if screen is not None else None
+    if screen is None and screens:
+        for q in (body.update_query, body.insert_query):
+            if not q:
+                continue
+            screen, _slot, screen_app = _find_screen_for_query(screens, connector, q)
+            if screen is not None:
+                break
+    column_hints = _column_hints_for(screen)
+    audit_table = screen.audit_table if screen else None
+    screen_max_rows = screen.max_rows if screen else None
+    dict_scope = screen_app if screen is not None else None
+
+    try:
+        conn = connectors.sql(connector)
+    except ConnectorError as exc:
+        raise http_for_connector_error(exc) from exc
+    lang = request_language(request)
+    user = principal.username
+    changesets = getattr(request.app.state, "changesets_db", None)
+
+    async def _probe_update(row: dict[str, Any]) -> int:
+        """Dry-run the UPDATE to decide upsert direction; rowcount > 0 ⇒ a row matched."""
+        res = await conn.execute(
+            body.update_query, _import_row_params(row), language=lang, user=user, column_hints=column_hints,  # type: ignore[arg-type]
+            audit_table=audit_table, screen_max_rows=screen_max_rows, dictionary_scope=dict_scope, dry_run=True,
+        )
+        return res.rowcount
+
+    async def _run(query_name: str, row: dict[str, Any]) -> int:
+        params = _import_row_params(row)
+        if body.commit:
+            # Real write through the full path (audit + change capture), same as the grid Save.
+            res = await _run_sql(
+                connectors, connector, query_name, params, language=lang, user=user,
+                screens=screens, changesets=changesets, screen_hint=screen_hint,
+            )
+            return int(res.get("rowcount") or -1)
+        res = await conn.execute(
+            query_name, params, language=lang, user=user, column_hints=column_hints,
+            audit_table=audit_table, screen_max_rows=screen_max_rows, dictionary_scope=dict_scope, dry_run=True,
+        )
+        return res.rowcount
+
+    results: list[dict[str, Any]] = []
+    for i, row in enumerate(body.rows):
+        action: str | None = None
+        try:
+            if mode == "insert":
+                action = "insert"
+                # The dry-run INSERT runs the real statement through execute() (dictionary coercion,
+                # dialect, CHAR padding, the table's PK), so a row whose key already exists raises the
+                # PK/unique violation here exactly as a real save would — no separate probe needed.
+                rc = await _run(body.insert_query, row)  # type: ignore[arg-type]
+            elif mode == "update":
+                action = "update"
+                rc = await _run(body.update_query, row)  # type: ignore[arg-type]
+                if rc == 0:
+                    results.append({"index": i, "action": "update", "ok": False,
+                                    "error": "no existing row matches the key columns."})
+                    continue
+            else:  # upsert — probe, then run the decided side
+                matched = (await _probe_update(row)) if body.update_query else 0
+                if matched and matched > 0:
+                    action = "update"
+                    rc = (await _run(body.update_query, row)) if body.commit else matched  # type: ignore[arg-type]
+                else:
+                    action = "insert"
+                    if not body.insert_query:
+                        results.append({"index": i, "action": "insert", "ok": False,
+                                        "error": "row is new but no insert query is configured."})
+                        continue
+                    rc = await _run(body.insert_query, row)
+            results.append({"index": i, "action": action, "ok": True, "rowcount": rc})
+        except (ConnectorError, SQLAlchemyError) as exc:
+            results.append({"index": i, "action": action, "ok": False, "error": _import_error(exc)})
+    valid = sum(1 for r in results if r["ok"])
+    return {"committed": body.commit, "mode": mode, "valid": valid,
+            "invalid": len(results) - valid, "results": results}
 
 
 @router.post(

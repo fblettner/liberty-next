@@ -39,7 +39,12 @@ def _connectors_toml(db_url: str) -> str:
 
         [[connectors.db.queries]]
         name = "add_item"
-        sql = "INSERT INTO item (id, name, status) VALUES (:id, :name, 'on')"
+        sql = "INSERT INTO item (id, name, status) VALUES (:ID, :NAME, 'on')"
+        writable = true
+
+        [[connectors.db.queries]]
+        name = "upd_item"
+        sql = "UPDATE item SET name = :NAME WHERE id = :ID_ORIGINAL"
         writable = true
 
         [[connectors.db.queries]]
@@ -102,7 +107,7 @@ def test_list_connectors_filtered_by_permission(app) -> None:
     with TestClient(app) as client:
         admin = client.get("/api/connectors", headers=_h(client, "admin")).json()["connectors"]
         db = next(c for c in admin if c["name"] == "db")
-        assert {q["name"] for q in db["queries"]} == {"answer", "items", "add_item", "bad"}
+        assert {q["name"] for q in db["queries"]} == {"answer", "items", "add_item", "upd_item", "bad"}
         assert all("sql" not in q for q in db["queries"])  # SQL text never leaves
         assert "pool" not in db
 
@@ -182,14 +187,14 @@ def test_sql_db_error_is_502(app) -> None:
 
 def test_sql_post_write_requires_writable_and_permission(app) -> None:
     with TestClient(app) as client:
-        # admin (superuser): runs the writable query
-        r = client.post("/api/sql/db/add_item", json={"params": {"id": 99, "name": "z"}}, headers=_h(client, "admin"))
+        # admin (superuser): runs the writable query (binds are UPPERCASE, JDE convention)
+        r = client.post("/api/sql/db/add_item", json={"params": {"ID": 99, "NAME": "z"}}, headers=_h(client, "admin"))
         assert r.status_code == 200 and r.json()["rowcount"] == 1 and r.json()["statement_type"] == "INSERT"
         # dbuser (sql:db:*) also covers it; the query's writable=true is the orthogonal gate
-        r = client.post("/api/sql/db/add_item", json={"params": {"id": 88, "name": "w"}}, headers=_h(client, "dbuser"))
+        r = client.post("/api/sql/db/add_item", json={"params": {"ID": 88, "NAME": "w"}}, headers=_h(client, "dbuser"))
         assert r.status_code == 200
         # reader has only sql:db:answer + sql:db:items → 403 on add_item
-        assert client.post("/api/sql/db/add_item", json={"params": {"id": 1, "name": "x"}}, headers=_h(client, "reader")).status_code == 403
+        assert client.post("/api/sql/db/add_item", json={"params": {"ID": 1, "NAME": "x"}}, headers=_h(client, "reader")).status_code == 403
         # the rows landed
         ids = [row["id"] for row in client.get("/api/sql/db/items", headers=_h(client, "admin")).json()["rows"]]
         assert 99 in ids and 88 in ids
@@ -484,3 +489,81 @@ def test_resolve_action_screen_for_change_capture() -> None:
     assert _resolve_action_screen(sf, {"app": "nomajde", "screen": "nope"}) is None
     assert _resolve_action_screen(sf, {"app": "x", "screen": "f0092"}) is None
     assert _resolve_action_screen(None, {"app": "nomajde", "screen": "f0092"}) is None
+
+
+def test_import_validate_is_a_dry_run(app) -> None:
+    """``commit=false`` runs each row against the DB but rolls it back: a valid row + a PK-clash row
+    are reported, and the table is left untouched."""
+    with TestClient(app) as client:
+        r = client.post("/api/sql/db/_import", headers=_h(client, "admin"), json={
+            "mode": "insert", "insert_query": "add_item",
+            "rows": [{"id": 5, "name": "x"}, {"id": 1, "name": "dup"}], "commit": False,
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["committed"] is False and body["valid"] == 1 and body["invalid"] == 1
+        assert body["results"][0]["ok"] is True and body["results"][0]["action"] == "insert"
+        assert body["results"][1]["ok"] is False and body["results"][1]["error"]
+        assert "[SQL:" not in body["results"][1]["error"]  # the verbose SQL/params tail is trimmed off
+        # Nothing persisted — id=5 was rolled back.
+        items = client.get("/api/sql/db/items", headers=_h(client, "admin")).json()["rows"]
+        assert {it["id"] for it in items} == {1, 2}
+
+
+def test_import_insert_flags_existing_rows_via_pk(app) -> None:
+    """Insert-only: a row whose key already exists is flagged invalid because the dry-run INSERT hits
+    the table's PRIMARY KEY (the real constraint), exactly as a real save would — no separate probe."""
+    with TestClient(app) as client:
+        r = client.post("/api/sql/db/_import", headers=_h(client, "admin"), json={
+            "mode": "insert", "insert_query": "add_item",
+            "rows": [{"id": 1, "name": "dup"}, {"id": 9, "name": "new"}], "commit": False,
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["results"][0]["ok"] is False and body["results"][0]["error"]  # PK / UNIQUE violation
+        assert body["results"][1]["ok"] is True
+        assert body["valid"] == 1 and body["invalid"] == 1
+
+
+def test_import_commit_persists_valid_rows(app) -> None:
+    with TestClient(app) as client:
+        r = client.post("/api/sql/db/_import", headers=_h(client, "admin"), json={
+            "mode": "insert", "insert_query": "add_item",
+            "rows": [{"id": 5, "name": "x"}], "commit": True,
+        })
+        assert r.status_code == 200, r.text
+        assert r.json()["valid"] == 1
+        items = client.get("/api/sql/db/items", headers=_h(client, "admin")).json()["rows"]
+        assert {it["id"] for it in items} == {1, 2, 5}
+
+
+def test_import_upsert_routes_update_vs_insert(app) -> None:
+    """upsert decides per row via a dry-run UPDATE probe: existing key → UPDATE, new key → INSERT."""
+    with TestClient(app) as client:
+        r = client.post("/api/sql/db/_import", headers=_h(client, "admin"), json={
+            "mode": "upsert", "insert_query": "add_item", "update_query": "upd_item",
+            "rows": [{"id": 1, "name": "A1"}, {"id": 9, "name": "N9"}], "commit": True,
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert [x["action"] for x in body["results"]] == ["update", "insert"]
+        assert body["valid"] == 2
+        items = {it["id"]: it["name"] for it in client.get("/api/sql/db/items", headers=_h(client, "admin")).json()["rows"]}
+        assert items[1] == "A1" and items[9] == "N9"
+
+
+def test_import_requires_query_permission(app) -> None:
+    """The caller must hold ``sql:<conn>:<query>`` on the insert/update query — reader lacks add_item."""
+    with TestClient(app) as client:
+        r = client.post("/api/sql/db/_import", headers=_h(client, "reader"), json={
+            "mode": "insert", "insert_query": "add_item", "rows": [{"id": 7, "name": "z"}], "commit": False,
+        })
+        assert r.status_code == 403
+
+
+def test_import_rejects_bad_mode(app) -> None:
+    with TestClient(app) as client:
+        r = client.post("/api/sql/db/_import", headers=_h(client, "admin"), json={
+            "mode": "sideways", "insert_query": "add_item", "rows": [], "commit": False,
+        })
+        assert r.status_code == 400

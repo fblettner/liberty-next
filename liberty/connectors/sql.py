@@ -639,6 +639,7 @@ def _where_bind_columns(sql: str) -> dict[str, str]:
 def _pad_char_binds(
     bound: dict[str, Any], col_types: dict[str, dict[str, Any]],
     where_col_map: dict[str, str] | None = None,
+    justify_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Right-pad non-empty string binds with spaces to the column's declared width when the
     target is a fixed-width ``CHAR(N)`` / ``NCHAR(N)``. Powers the symmetric round-trip the
@@ -690,6 +691,13 @@ def _pad_char_binds(
         length = meta.get("length")
         if not isinstance(length, int) or length <= 0:
             continue
+        # Justification (the dictionary's F9210.FRDRUL rule, resolved per column upstream): a fill char
+        # (`` `` or ``0``) means RIGHT-justify (left-pad) so the bind matches a JDE right-adjusted code;
+        # absent means the default LEFT-justify (right-pad). A blank value is never right-justified —
+        # zero-filling a blank key would turn the NULL/space sentinel into ``000…`` (the *RAZ guard).
+        fill = justify_map.get(base) if justify_map else None
+        if fill is not None and not v.strip():
+            fill = None
         if len(v) > length:
             # Too wide for the target — only fix SET values (a WHERE bind must keep the stored
             # padded form). Strip the source padding so the logical code fits; keep a blank as a
@@ -698,12 +706,91 @@ def _pad_char_binds(
             if not is_original:
                 trimmed = v.strip() or " "
                 if len(trimmed) <= length:
-                    out[k] = trimmed
+                    out[k] = trimmed.rjust(length, fill) if fill is not None else trimmed
             continue
         if len(v) == length:
             continue
-        out[k] = v.ljust(length)
+        out[k] = v.rjust(length, fill) if fill is not None else v.ljust(length)
     return out
+
+
+def _build_justify_map(
+    column_hints: "list[ColumnHint] | None", dictionary: "DictionaryFile", scope: str,
+) -> dict[str, str]:
+    """``column name (upper) → fill char`` for the RIGHT-justified columns of this write. The rule is
+    the data item's dictionary ``justify`` (JDE F9210.FRDRUL: ``right_blank`` → ``" "``, ``right_zero``
+    → ``"0"``), but a column hint OVERRIDES it: ``right_blank`` / ``right_zero`` force right-adjust,
+    ``left`` forces left even when the dictionary marks the item right-adjust (a code that's
+    right-justified in one table but trimmed in others — KY in F0005 vs elsewhere). Absent → left."""
+    out: dict[str, str] = {}
+    for h in column_hints or []:
+        hj = getattr(h, "justify", None)
+        if hj == "left":
+            eff: str | None = None
+        elif hj in ("right_blank", "right_zero"):
+            eff = hj
+        elif h.dd == "":          # dd explicitly cleared → no dictionary lookup, hint is the only source
+            eff = None
+        else:
+            entry = dictionary.find_entry(h.dd or h.name, connector=scope)
+            eff = entry.justify if entry else None
+        if eff == "right_blank":
+            out[h.name.upper()] = " "
+        elif eff == "right_zero":
+            out[h.name.upper()] = "0"
+    return out
+
+
+def _bind_get(bound: dict[str, Any], name: str) -> Any:
+    """Case-insensitive read of a bind value (bind names are UPPER by convention, but be tolerant)."""
+    if name in bound:
+        return bound[name]
+    nl = name.lower()
+    for k, v in bound.items():
+        if k.lower() == nl:
+            return v
+    return None
+
+
+def _apply_dynamic_justify(
+    bound: dict[str, Any], column_hints: "list[ColumnHint] | None", dictionary: "DictionaryFile", scope: str,
+) -> dict[str, Any]:
+    """Per-row justification for GENERIC value columns (``ColumnHint.justify_from``). F00950's
+    FSFRDV / FSTHDV aren't a fixed data item — their right/left adjust AND width come from the data
+    item named in FSDTAI. For each such column: read the source column's value → that data item's
+    dictionary entry → if it's right-adjust with a known ``size``, right-justify the column's bind to
+    that size with the rule's fill. The ``_ORIGINAL`` (WHERE) bind uses the source's ``_ORIGINAL``
+    value when present (the OLD data item, so the WHERE still matches after a row's FSDTAI changes),
+    else the current one. The later column-width padding fills to the physical CHAR width — matching
+    how JDE stores the value, and replacing a per-query CASE / LPAD."""
+    out = dict(bound)
+
+    def _justify(target_key: str, source_key: str) -> None:
+        di_raw = _bind_get(out, source_key)
+        if di_raw is None:
+            return
+        di = str(di_raw).strip().upper()
+        if not di:
+            return
+        entry = dictionary.find_entry(di, connector=scope)
+        if entry is None or entry.justify not in ("right_blank", "right_zero") or not entry.size:
+            return
+        fill = " " if entry.justify == "right_blank" else "0"
+        size = int(entry.size)
+        v = out.get(target_key)
+        if isinstance(v, str) and v.strip() and len(v.strip()) <= size:
+            out[target_key] = v.strip().rjust(size, fill)
+
+    for h in column_hints or []:
+        src = getattr(h, "justify_from", None)
+        if not src:
+            continue
+        base, s = h.name.upper(), src.upper()
+        _justify(base, s)
+        orig_src = f"{s}_ORIGINAL" if _bind_get(out, f"{s}_ORIGINAL") is not None else s
+        _justify(f"{base}_ORIGINAL", orig_src)
+    return out
+
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -810,6 +897,11 @@ class Column:
     # to its read-only display in that mode. UI-only: the write path is unchanged.
     disable_on_add: bool = False
     disable_on_edit: bool = False
+    # Static read-only (``ColumnHint.disabled``) + conditional read-only (``disabled_when``, each
+    # ``{field, value}`` ANDed against the row). Surfaced so the grid bulk-editor locks the SAME cells
+    # the dialog's ``fieldStateOf`` does — not only the per-mode ``disable_on_add`` / ``disable_on_edit``.
+    disabled: bool = False
+    disabled_when: list[dict[str, Any]] = field(default_factory=list)
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
@@ -851,6 +943,10 @@ class Column:
             d["disable_on_add"] = True
         if self.disable_on_edit:
             d["disable_on_edit"] = True
+        if self.disabled:
+            d["disabled"] = True
+        if self.disabled_when:
+            d["disabled_when"] = self.disabled_when
         if self.filter:
             d["filter"] = True
         if self.filter_from:
@@ -1680,8 +1776,15 @@ class SQLConnector:
         max_rows: int | None = None, user: str | None = None,
         column_hints: list[ColumnHint] | None = None, audit_table: str | None = None,
         screen_max_rows: int | None = None, dictionary_scope: str | None = None,
+        dry_run: bool = False,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
+
+        *dry_run* (writes only) runs the statement inside the transaction as usual — through the
+        full machinery (filter wrap, form rules, write_when, SEQUENCE/NN, audit mirror) so the
+        rowcount and any DB error are exactly what a real save would see — then rolls the
+        transaction back instead of committing (same ``_DryRunRollback`` trick as :meth:`test_run`).
+        The Excel-import validator uses it to try each row against the DB without mutating it.
 
         Phase 3 — per-screen behaviour (column hints / audit table / row cap) is threaded in
         by the route layer from the matching :class:`Screen` rather than read off ``QueryDef``:
@@ -1911,11 +2014,21 @@ class SQLConnector:
             if wants_coalesce:
                 bound = _coalesce_oracle_nulls(bound, col_types)
             if wants_pad:
+                # Dynamic justify FIRST (a generic value column right-justifies to the width of the data
+                # item named in a sibling column — F00950 FSFRDV/FSTHDV ← FSDTAI), THEN the static
+                # column-width padding below fills to the physical CHAR width.
+                bound = _apply_dynamic_justify(bound, column_hints, self._dict, dict_scope or self.name)
                 # ``where_col_map`` lets a WHERE/JOIN bind whose NAME differs from the column it's
                 # compared to (``RLTOROLE = :FROMUSER``) still pad to that CHAR column's width.
-                bound = _pad_char_binds(bound, col_types, where_col_map=_where_bind_columns(sql_text))
+                # ``justify_map`` flips left-pad → right-pad for the data items the dictionary (or a
+                # column override) marks right-adjust, so a right-justified key matches the stored value.
+                bound = _pad_char_binds(
+                    bound, col_types, where_col_map=_where_bind_columns(sql_text),
+                    justify_map=_build_justify_map(column_hints, self._dict, dict_scope or self.name),
+                )
 
-        async with engine.begin() as conn:
+        try:
+          async with engine.begin() as conn:
             # SEQUENCE / NN — run the named "next number" query in the *same* transaction as
             # the INSERT so a concurrent insert can't grab the same value (the surrounding
             # ``engine.begin()`` block serialises). A missing/failing sequence logs and falls
@@ -1960,6 +2073,11 @@ class SQLConnector:
                 await self._write_audit(
                     conn, qdef, stmt_type, bound, user, audit_table=audit_table, main_sql=sql_text,
                 )
+            # Validation-only: everything above ran (rowcount + any DB error are real), now undo it.
+            if dry_run:
+                raise _DryRunRollback()
+        except _DryRunRollback:
+            pass
         duration_ms = (time.perf_counter() - started) * 1000.0
         return QueryResult(
             connector=self.name,
@@ -2430,6 +2548,7 @@ def _resolve_hint(
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
         disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
+        disabled=h.disabled, disabled_when=[w.as_dict() for w in h.disabled_when],
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],

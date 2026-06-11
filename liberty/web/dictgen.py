@@ -52,10 +52,11 @@ class ScanBody(BaseModel):
     jde_dd_table_query: str = Field(
         default="dictionary_data_items_for_table_get",
         description=(
-            "Optional per-table JDE DD query that enriches the scan with format / rule / default. "
-            "Bound with ``:TBL_DB_NAME`` + ``:TBL_SCHEMA`` (the scanned table + its owner) and read for "
-            "the columns ``DD_ID, DD_LABEL, DD_TYPE, DD_RULES, DD_RULES_VALUES, DD_DEFAULT``. Use a "
-            "``#SCHEMA.<KEY>#`` token (not a bind) for the F92xx schema. Missing / erroring → ignored."
+            "Optional per-table JDE DD query that enriches the scan with format / rule / default / "
+            "justify. Bound with ``:TBL_DB_NAME`` + ``:TBL_SCHEMA`` (the scanned table + its owner) and "
+            "read for the columns ``DD_ID, DD_LABEL, DD_TYPE, DD_RULES, DD_RULES_VALUES, DD_DEFAULT, "
+            "DD_JUSTIFY`` (the last from F9210.FRDRUL — *RAB/*RABN/*RAZ). Use a ``#SCHEMA.<KEY>#`` token "
+            "(not a bind) for the F92xx schema. Missing / erroring → ignored."
         ),
     )
 
@@ -63,6 +64,18 @@ class ScanBody(BaseModel):
 def _dictionary_path(settings: Any) -> Path:
     explicit = settings.connectors.dictionary_path
     return Path(explicit) if explicit else Path(settings.connectors.config_path).with_name("dictionary.toml")
+
+
+def _map_jde_justify(frdrul: str | None) -> str | None:
+    """JDE F9210.FRDRUL → the dictionary ``justify`` setting. ``*RAB`` / ``*RABN`` (right-adjust, blank
+    fill) → ``right_blank``; ``*RAZ`` (right-adjust, zero fill) → ``right_zero``; anything else (incl.
+    left-justified / unset) → None."""
+    v = (frdrul or "").strip().upper()
+    if v in ("*RAB", "*RABN"):
+        return "right_blank"
+    if v == "*RAZ":
+        return "right_zero"
+    return None
 
 
 def _infer_format(type_str: str | None) -> str | None:
@@ -101,7 +114,7 @@ async def _fetch_jde_dd(registry: Any, conn_name: str, query_name: str) -> dict[
 
 async def _fetch_jde_dd_table(
     registry: Any, conn_name: str, query_name: str, *, table: str, owner: str | None,
-) -> dict[str, dict[str, str | None]]:
+) -> dict[str, dict[str, Any]]:
     """Per-table JDE DD enrichment: ``{DATA_ITEM (upper) → {label, format, rules, rules_values,
     default}}`` from *query_name*, bound with the scanned table + owner. The query is expected to
     return ``DD_ID`` (the stripped data item) + ``DD_LABEL`` / ``DD_TYPE`` / ``DD_RULES`` /
@@ -115,7 +128,7 @@ async def _fetch_jde_dd_table(
         res = await conn.execute(query_name, params={"TBL_DB_NAME": table, "TBL_SCHEMA": owner})
     except (ConnectorError, SQLAlchemyError, KeyError, ValueError):
         return {}
-    out: dict[str, dict[str, str | None]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for row in res.rows:
         m = {(k.upper() if isinstance(k, str) else k): v for k, v in row.items()}
         ddid = m.get("DD_ID")
@@ -127,9 +140,17 @@ async def _fetch_jde_dd_table(
         def _s(col: str) -> str | None:
             v = m.get(col)
             return str(v).strip() if v is not None and str(v).strip() != "" else None
+        def _i(col: str) -> int | None:
+            s = _s(col)
+            try:
+                return int(s) if s is not None else None
+            except ValueError:
+                return None
         out[key] = {
             "label": _s("DD_LABEL"), "format": _s("DD_TYPE"), "rules": _s("DD_RULES"),
             "rules_values": _s("DD_RULES_VALUES"), "default": _s("DD_DEFAULT"),
+            "justify": _map_jde_justify(_s("DD_JUSTIFY")),  # F9210.FRDRUL → right_blank / right_zero
+            "size": _i("DD_SIZE"),                          # F9210.FRDTAS — data item width (MCU = 12)
         }
     return out
 
@@ -228,6 +249,8 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
             "rules": rich.get("rules"),
             "rules_values": rich.get("rules_values"),
             "default": rich.get("default"),
+            "justify": rich.get("justify"),
+            "size": rich.get("size"),
         })
 
     return {"scope": scope, "dialect": dialect, "jde": is_jde, "items": items}

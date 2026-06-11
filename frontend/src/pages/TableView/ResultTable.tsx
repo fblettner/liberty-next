@@ -25,14 +25,15 @@ import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
-import { lookupKey, useLookupTables, lookupCellColumns, type LookupData, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupCellColumns, lookupOptions, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
+import { ImportDialog } from './ImportDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, evalConditions, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -162,10 +163,18 @@ const RowMenuErr = styled.div`
   font-size: ${fontSize.micro}; font-family: ${fonts.sans}; max-width: 320px; word-break: break-word;
 `
 
+/** A dropdown option: ``value`` (the code written back), ``label`` (the description), ``mono`` (the
+ *  code shown beside the label) and optional ``cells`` (a LOOKUP's display_fields, one per column). */
+type LookupOpt = { value: string; label: string; mono: string; cells?: string[] }
+
 function EditCell({
-  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns,
+  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns, prebuiltOptions,
 }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
+  /** A LOOKUP column's non-cascading dropdown options, built ONCE per (spec, display_fields) by the
+   *  parent and shared across every row's cell — see ``editOptsCache``. When present (and the cell
+   *  has no active cascade), it's used as-is so we don't rebuild the full option list per cell. */
+  prebuiltOptions?: LookupOpt[]
   /** The lookup's ``display_fields`` — extra row columns appended (dimmed, " · ") after each
    *  option's label so similar codes are distinguishable, same as the dialog dropdown. */
   displayFields?: string[]
@@ -222,26 +231,29 @@ function EditCell({
     // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
     // use the pre-projected value→label map directly — faster, no per-row scan.
     const active = (narrowBy ?? []).filter((n) => n.value != null && n.value !== '')
-    // ``display_fields`` → code: [cell, cell] map, built once from the raw rows; each becomes an
-    // extra table column in the dropdown (same as the dialog picker). Consistent length so columns
-    // line up across options.
-    const cellsByCode = (() => {
-      if (!displayFields?.length || !lookupRows) return undefined
-      const valKey = rule.value
-      const m = new Map<string, string[]>()
-      for (const r of lookupRows) {
-        const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-        if (v == null) continue
-        m.set(String(v), displayFields.map((f) => {
-          const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
-          return x == null ? '' : String(x).trim()
-        }))
-      }
-      return m
-    })()
-    type Opt = { value: string; label: string; mono: string; cells?: string[] }
+    const useCascade = ready && active.length > 0 && !!lookupRows
+    type Opt = LookupOpt
+    // ``display_fields`` → code: [cell, cell] map, built from the raw rows; each becomes an extra
+    // table column in the dropdown (same as the dialog picker). Only needed when we build options
+    // HERE (an active cascade, or the no-prebuilt fallback) — ``prebuiltOptions`` already bakes its
+    // cells in, so we skip this O(lookup rows) scan per cell on the common non-cascading path.
+    const cellsByCode = (useCascade || (ready && !prebuiltOptions)) && displayFields?.length && lookupRows
+      ? (() => {
+          const valKey = rule.value
+          const m = new Map<string, string[]>()
+          for (const r of lookupRows) {
+            const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+            if (v == null) continue
+            m.set(String(v), displayFields.map((f) => {
+              const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
+              return x == null ? '' : String(x).trim()
+            }))
+          }
+          return m
+        })()
+      : undefined
     let opts: Opt[]
-    if (ready && active.length > 0 && lookupRows) {
+    if (useCascade && lookupRows) {
       // Case-insensitive column lookup on the raw rows: Postgres folds unquoted columns
       // to lowercase, the dictionary uses uppercase. Compare as strings (lookups are
       // code-based: "01" matches "01", coercion stays out of the picture).
@@ -263,10 +275,11 @@ function EditCell({
             : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v), cells: cellsByCode?.get(String(v)) }
         })
         .filter((o): o is Opt => o !== null)
-        .sort((a, b) => a.label.localeCompare(b.label))
+    } else if (ready && prebuiltOptions) {
+      // Common path: a non-cascading lookup reuses the list the parent built once for this column.
+      opts = prebuiltOptions
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
-        .sort(([, a], [, b]) => a.localeCompare(b))
         .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
     } else {
       opts = []
@@ -750,6 +763,8 @@ export function ResultTable({
 
   const dirtyCount = dirtyRows.size + newRows.length + [...deleted].filter((r) => !newRows.includes(r)).length
   const fileRef = useRef<HTMLInputElement>(null)
+  // The validated Import dialog (modal-first: it handles upload + mode + check + save internally).
+  const [importOpen, setImportOpen] = useState(false)
 
   // current values of a row (its original fields overlaid with any pending edits)
   const valuesOf = useCallback((row: DataRow): Record<string, unknown> => ({ ...row, ...editsRef.current.get(row) }), [])
@@ -833,7 +848,15 @@ export function ResultTable({
       for (const rw of c.rules_when ?? []) {
         if (rw.rule?.kind !== 'lookup') continue
         if (!rw.lookup_param_binds || rw.lookup_param_binds.length === 0) { add(specForRule(rw.rule, undefined, {})); continue }
-        for (const row of result.rows) add(specForRule(rw.rule, rw.lookup_param_binds, row as Record<string, unknown>))
+        for (const row of result.rows) {
+          // Only fetch a parameterized lookup once its narrowing binds resolve to a value. A row whose
+          // discriminator is blank would bind nothing and pull the WHOLE lookup table unfiltered — the
+          // bulk-edit / add-row "loads everything" slowdown. Skip it; the cell resolves once the
+          // discriminator has a value (and that row's narrowed spec gets fetched then).
+          const dyn = resolveBindList(rw.lookup_param_binds, row as Record<string, unknown>)
+          if (!Object.values(dyn).some((v) => v !== '' && v != null)) continue
+          add(specForRule(rw.rule, rw.lookup_param_binds, row as Record<string, unknown>))
+        }
       }
     }
     return out
@@ -848,13 +871,14 @@ export function ResultTable({
   // LookupData (narrowed by the row's per-rule binds). Shared by display-label resolution + the edit
   // dropdown so both pick the SAME conditional lookup for the row (f00950 FSDTAI: get_form_name for
   // FSSETY 6/8, get_data_item for 2/4 — each with the right narrowing).
-  const activeLookupFor = useCallback((c: Column, row: DataRow): { rule: Column['rule']; data: LookupData | undefined } => {
+  const activeLookupFor = useCallback((c: Column, row: DataRow): { rule: Column['rule']; data: LookupData | undefined; key?: string } => {
     const vals = valuesOf(row)
     const aw = activeRulesWhen(c.rules_when, vals)
     const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
     if (rule?.kind !== 'lookup') return { rule: rule ?? undefined, data: undefined }
     const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, vals)
-    return { rule, data: spec ? lookupMaps.get(lookupKey(spec)) : undefined }
+    const key = spec ? lookupKey(spec) : undefined
+    return { rule, data: key ? lookupMaps.get(key) : undefined, key }
   }, [valuesOf, specForRule, lookupMaps])
 
   // Filter options for a column with rules_when: the UNION across the base rule AND every conditional
@@ -903,6 +927,49 @@ export function ResultTable({
     return { byCode: [...byCode.values()], byLabel: [...byLabel.values()] }
   }, [lookupMaps, result.rows, specForRule, t])
 
+  // ── Import: SCREEN-RULE validation, reusing the grid's OWN resolution ──
+  // The DB can't tell a bad lookup/enum value from a good one (a JDE CHAR column accepts any junk),
+  // so we check each cell against its column's rule. Crucially this reuses ``activeRulesWhen`` /
+  // ``activeLookupFor`` — the exact functions that drive the grid display — so it resolves the per-row
+  // ACTIVE rule (rules_when: FSDTAI is a data item for some sec_types, a form name for others; FSDLT's
+  // Y/N flips) and matches trim-tolerantly against the already-fetched lookup. No parallel re-impl.
+  // Trimmed valid-code set per fetched lookup (keyed by spec key), built once.
+  const lookupTrimSets = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const [key, data] of lookupMaps) m.set(key, new Set([...data.map.keys()].map((k) => k.trim())))
+    return m
+  }, [lookupMaps])
+  const validateImportRow = useCallback((row: Record<string, unknown>): string[] => {
+    const errs: string[] = []
+    const dr = row as DataRow
+    for (const c of result.columns) {
+      const raw = row[c.name]
+      if (raw == null || String(raw).trim() === '') continue   // empty → DB defaults / nullability decide
+      const val = String(raw).trim()
+      const name = c.label || c.name
+      // The rule that ACTUALLY applies to this row (rules_when), not the base rule.
+      const aw = c.rules_when?.length ? activeRulesWhen(c.rules_when, row) : null
+      const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
+      if (rule?.kind === 'lookup') {
+        const { data, key } = activeLookupFor(c, dr)
+        if (!data || !key) continue   // the narrowed lookup for this row's discriminator isn't loaded
+        const set = lookupTrimSets.get(key)
+        if (set && set.size > 0 && !set.has(val)) errs.push(`${name}: “${val}” is not a valid value`)
+      } else if (rule?.kind === 'enum') {
+        if (!rule.values.some((v) => v.value === val || v.value.trim() === val)) errs.push(`${name}: “${val}” is not an allowed value`)
+      } else if (rule?.kind === 'boolean') {
+        // Only a COMPLETE boolean (both tokens) is checkable — a one-sided flag can't be validated
+        // without false positives across JDE's mixed Y/N · 0/1 · blank conventions.
+        const tv = rule.true_value
+        const fv = rule.false_value
+        if (tv != null && fv != null && val !== String(tv).trim() && val !== String(fv).trim()) {
+          errs.push(`${name}: “${val}” must be ${tv} or ${fv}`)
+        }
+      }
+    }
+    return errs
+  }, [result.columns, activeLookupFor, lookupTrimSets])
+
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
   // {normalized header text → result column name}, registering for each result column its `name`,
@@ -914,69 +981,81 @@ export function ResultTable({
   // those columns: a match becomes an **edit** of that row (→ `update_query` on Save), the rest are
   // **new** rows (→ `insert_query`). That's the v2 replacement for v1's MERGE/UPSERT `_post` queries:
   // update-or-insert is decided here, in the batch-edit model, instead of in one SQL statement.
-  const importFile = useCallback(async (file: File) => {
-    setSaveErrors([])
-    try {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      if (!ws) return
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
-      const idTag = t('table.idColumnSuffix')
-      const byHeader = new Map<string, string>() // normalized header text → result column name
-      for (const c of result.columns) {
-        const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
-        add(c.name)
-        // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
-        // description. The description isn't unique (two codes can share one), and both kinds now
-        // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
-        // (the export emits both "X (ID)" and "X"; the latter holds the description and was
-        // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
-        if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
-        add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+  // Parse + header-map a sheet into rows keyed by column name, with lookup return-fill applied — the
+  // shared front half of BOTH the in-grid import and the validated Import dialog. Returns the mapped
+  // rows, or null when the file is empty / no header matched (a no-match also sets the banner).
+  const parseImportFile = useCallback(async (file: File): Promise<Record<string, unknown>[] | null> => {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    if (!ws) return null
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
+    const idTag = t('table.idColumnSuffix')
+    const byHeader = new Map<string, string>() // normalized header text → result column name
+    for (const c of result.columns) {
+      const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
+      add(c.name)
+      // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
+      // description. The description isn't unique (two codes can share one), and both kinds now
+      // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
+      // (the export emits both "X (ID)" and "X"; the latter holds the description and was
+      // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
+      if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
+      add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+    }
+    const seeds = rows.map((r) => {
+      const out: Record<string, unknown> = {}
+      for (const [header, v] of Object.entries(r)) {
+        const col = byHeader.get(header.trim().toLowerCase())  // header text → which result column
+        if (col) out[col] = v
       }
-      const seeds = rows.map((r) => {
-        const out: Record<string, unknown> = {}
-        for (const [header, v] of Object.entries(r)) {
-          const col = byHeader.get(header.trim().toLowerCase())  // header text → which result column
-          if (col) out[col] = v
-        }
-        return out
-      }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
-      if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return }
+      return out
+    }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
+    if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return null }
 
-      // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
-      // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
-      // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
-      // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
-      // isn't loaded yet (the grid loads it when the column renders).
-      const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
-      if (returnFillCols.length > 0) {
-        for (const seed of seeds) {
-          for (const c of returnFillCols) {
-            const rule = c.rule
-            if (rule?.kind !== 'lookup') continue
-            const code = seed[c.name]
-            if (code == null || String(code).trim() === '') continue
-            const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
-            if (!data?.rows) continue
-            const valKey = rule.value
-            const want = String(code).trim()
-            const row = data.rows.find((r) => {
-              const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-              return rv != null && String(rv).trim() === want
-            })
-            if (!row) continue
-            const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
-            for (const b of c.return_binds ?? []) {
-              const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
-              const cur = seed[target]
-              if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
-              const v = lcRow.get(b.param.toLowerCase())
-              if (v !== undefined) seed[target] = v
-            }
+    // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
+    // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
+    // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
+    // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
+    // isn't loaded yet (the grid loads it when the column renders).
+    const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
+    if (returnFillCols.length > 0) {
+      for (const seed of seeds) {
+        for (const c of returnFillCols) {
+          const rule = c.rule
+          if (rule?.kind !== 'lookup') continue
+          const code = seed[c.name]
+          if (code == null || String(code).trim() === '') continue
+          const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
+          if (!data?.rows) continue
+          const valKey = rule.value
+          const want = String(code).trim()
+          const row = data.rows.find((r) => {
+            const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+            return rv != null && String(rv).trim() === want
+          })
+          if (!row) continue
+          const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
+          for (const b of c.return_binds ?? []) {
+            const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
+            const cur = seed[target]
+            if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
+            const v = lcRow.get(b.param.toLowerCase())
+            if (v !== undefined) seed[target] = v
           }
         }
       }
+    }
+    return seeds
+  }, [result.columns, lookupMaps, t])
+
+  // In-grid import (edit-mode quick add): parse + map, then merge into the bulk editor — existing
+  // rows (matched on key) become pending edits, the rest new rows. The standalone Import button opens
+  // the validated ImportDialog instead (which parses via ``parseImportFile`` itself).
+  const importFile = useCallback(async (file: File) => {
+    setSaveErrors([])
+    try {
+      const seeds = await parseImportFile(file)
+      if (!seeds) return
       if (!editMode) setEditMode(true)
 
       // Effective key columns come from the per-column ``key`` flags resolved onto the RESULT
@@ -1015,7 +1094,7 @@ export function ResultTable({
     } catch (e) {
       setSaveErrors([e instanceof Error ? e.message : String(e)])
     }
-  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, lookupMaps, t])
+  }, [parseImportFile, prependNewRows, editMode, result.columns, result.rows, keyColumns])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
@@ -1193,6 +1272,14 @@ export function ResultTable({
       const k = c.name.toLowerCase()
       if (!nameToColName.has(k)) nameToColName.set(k, c.name)
     }
+    // (1) Per-lookup edit-dropdown options, built ONCE per (spec, display_fields) and shared by every
+    // row's cell — keyed by the lookup's spec key. EditCell used to rebuild the whole option list
+    // (O(lookup rows)) on every cell render, so bulk-edit / add-row over a big UDC cost O(grid rows ×
+    // lookup rows × renders). This cache (recreated each dataCols memo run, so it refreshes when
+    // lookupMaps changes) collapses that to O(lookup rows) once. Cascading cells still build per row.
+    // Built with the SAME ``lookupOptions`` the dialog (FieldRow) + advanced filter (FilterPanel) use,
+    // so the dropdown order matches them: the lookup query's own row order (its ORDER BY), not a re-sort.
+    const editOptsCache = new Map<string, LookupOpt[]>()
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
       // Conditional forced default (default_when): when a sibling column's value triggers a rule,
@@ -1204,7 +1291,7 @@ export function ResultTable({
       // the active rule + its already-fetched LookupData (narrowed by this row's per-rule binds) in
       // one shot — every possible lookup (incl. one fetch per distinct bind value) is pre-fetched, so
       // this only PICKS; no per-row network fetch.
-      const { rule: activeRule, data: lookupData } = activeLookupFor(c, row)
+      const { rule: activeRule, data: lookupData, key: lookupSpecKey } = activeLookupFor(c, row)
       // ec carries the active rule AND its per-rule return_binds (the edit pick reads
       // ``column.return_binds``), so a conditional lookup's pick fills the right siblings.
       const awEdit = c.rules_when?.length ? activeRulesWhen(c.rules_when, valuesOf(row)) : null
@@ -1237,6 +1324,18 @@ export function ResultTable({
             : (ec.rule.key_columns && ec.rule.key_columns.length > 0
                 ? ec.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
                 : undefined)
+      // (1) For a non-cascading lookup (no active narrowing on this row), hand EditCell the option
+      // list built ONCE for this lookup instead of letting it rebuild per cell. Cascading cells
+      // (narrowBy has a value) still narrow per row inside EditCell.
+      const narrowActive = (narrowBy ?? []).some((n) => n.value != null && n.value !== '')
+      let prebuiltOptions: LookupOpt[] | undefined
+      if (ec.rule?.kind === 'lookup' && !narrowActive && lookupData && lookupSpecKey) {
+        const df = ec.rule.display_fields
+        const ckey = `${lookupSpecKey}|${(df ?? []).join(',')}`
+        let o = editOptsCache.get(ckey)
+        if (!o) { o = lookupOptions(lookupData, undefined, df); editOptsCache.set(ckey, o) }
+        prebuiltOptions = o
+      }
       return (
         <EditCell
           ctrl={editCtrlOf(ec)}
@@ -1249,6 +1348,7 @@ export function ResultTable({
           narrowBy={narrowBy}
           displayFields={ec.rule?.kind === 'lookup' ? ec.rule.display_fields : undefined}
           cellColumns={ec.rule?.kind === 'lookup' ? lookupCellColumns(ec.rule) : undefined}
+          prebuiltOptions={prebuiltOptions}
         />
       )
     }
@@ -1257,8 +1357,14 @@ export function ResultTable({
     // to its read-only display (same as non-edit mode), so the grid bulk-edit honours the SAME
     // column setting the dialog's fieldStateOf does. Reads the live newRows via the ref — the cell
     // renderers re-run each render, so this stays current without adding newRows to the memo deps.
-    const cellLocked = (c: Column, rowOriginal: DataRow) =>
-      newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
+    const cellLocked = (c: Column, rowOriginal: DataRow) => {
+      // Mirror the dialog's fieldStateOf: static ``disabled`` (or conditional ``disabled_when`` when
+      // set, ANDed against the row), THEN the per-mode lock (disable_on_add for a new row,
+      // disable_on_edit for an existing one). Any one locks the cell to its read-only display.
+      const byRule = c.disabled_when?.length ? evalConditions(c.disabled_when, valuesOf(rowOriginal)) : !!c.disabled
+      const modeLocked = newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
+      return byRule || modeLocked
+    }
     const out: ColumnDef<DataRow, unknown>[] = []
     for (const c of shownColumns) {
       const align = cellAlign(c)
@@ -1482,7 +1588,7 @@ export function ResultTable({
         meta: c.rule?.kind === 'boolean' ? { ...fp.meta, exportValue: (o: unknown) => (o as DataRow)[c.name] } : fp.meta,
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
-          if (editMode && !isGroupRow(info)) return editCellFor(c, info)
+          if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
           // Non-enum / non-lookup here (those are split out above), so no enum map is needed.
           // Resolve rules_when per row so a conditional BOOLEAN renders with its own true/false
@@ -1640,7 +1746,7 @@ export function ResultTable({
                 </TbBtn>
               )}
               {canImport && (
-                <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
+                <TbBtn onClick={() => setImportOpen(true)} title={t('table.import')}>
                   <Upload size={13} /> {t('table.import')}
                 </TbBtn>
               )}
@@ -1799,6 +1905,20 @@ export function ResultTable({
           ))}
           {menuError && <RowMenuErr>{menuError}</RowMenuErr>}
         </RowMenuBox>
+      )}
+      {importOpen && (
+        <ImportDialog
+          parseFile={parseImportFile}
+          validateRow={validateImportRow}
+          keyColumns={[...new Set([...result.columns.filter((c) => c.key).map((c) => c.name), ...(keyColumns ?? [])])]}
+          connector={connector}
+          insertQuery={insertQuery}
+          updateQuery={updateQuery}
+          screenApp={screen?.app}
+          screenId={screen?.id}
+          onClose={() => setImportOpen(false)}
+          onCommitted={() => { setImportOpen(false); onSaved?.() }}
+        />
       )}
     </>
   )
