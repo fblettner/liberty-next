@@ -46,6 +46,8 @@ UsageType = Literal[
     "lookup_return_param",      # LookupDef.return_params[]
     # lookup / sequence / enum references
     "entry_rules_values",       # DictionaryEntry.rules_values pointing at this lookup / sequence / enum
+    "screen_column_rules_values",  # ColumnHint.rules_values (screen-level rule override) → lookup / enum / sequence
+    "screen_column_rules_when",    # ColumnHint.rules_when[].rules_values (conditional rule) → lookup / enum / sequence
     # query references
     "screen_read_query",        # Screen.read_query
     "screen_update_query",      # Screen.update_query
@@ -291,37 +293,73 @@ def _find_rule_target_usages(state: Any, kind: str, name: str, scope: str) -> li
     accept = _RULES_FOR_KIND.get(kind) or set()
     out: list[Usage] = []
     dictionary = _get_dictionary(state)
-    if dictionary is None:
-        return out
-    # Pass 1 — direct references (DD entries pointing at this lookup / sequence / enum).
-    referencing_entries: list[tuple[str, str]] = []  # (scope, entry_id) — used by pass 2
-    for s, section in _iter_dict_sections(dictionary):
-        if scope == "shared" and s != "shared":
-            continue
-        if scope != "shared" and s != scope:
-            continue
-        for eid, entry in (section.get("entries") or {}).items():
-            rules = (getattr(entry, "rules", None) or "").upper()
-            if rules in accept and (getattr(entry, "rules_values", None) or "") == name:
-                referencing_entries.append((s, eid))
-                out.append(Usage(
-                    type="entry_rules_values",
-                    label=f"{s} · entry {eid} · rules={rules}",
-                    deep_link=_dict_deep_link("entries", s, eid),
-                ))
-    # Pass 2 — transitive: for each referencing entry, pull in everything that references
-    # it (screens, connector column hints, prompt fields, other sequences / lookups). The
-    # result label is prefixed with "via entry <id>" so the chain is legible.
-    for s, eid in referencing_entries:
-        for u in _find_dd_usages(state, eid, s):
-            # Skip the dictionary-internal links we already surfaced in pass 1 to avoid duplicates.
-            if u.type in ("sequence_dd_id", "lookup_return_param"):
+    # Passes 1-2 are dictionary-driven (DD entries + their transitive references); they no-op when
+    # there's no dictionary. Pass 3 (direct screen-column rule references) only needs the screens.
+    if dictionary is not None:
+        # Pass 1 — direct references (DD entries pointing at this lookup / sequence / enum).
+        referencing_entries: list[tuple[str, str]] = []  # (scope, entry_id) — used by pass 2
+        for s, section in _iter_dict_sections(dictionary):
+            if scope == "shared" and s != "shared":
                 continue
-            out.append(Usage(
-                type=u.type,
-                label=f"via {eid} → {u.label}",
-                deep_link=u.deep_link,
-            ))
+            if scope != "shared" and s != scope:
+                continue
+            for eid, entry in (section.get("entries") or {}).items():
+                rules = (getattr(entry, "rules", None) or "").upper()
+                if rules in accept and (getattr(entry, "rules_values", None) or "") == name:
+                    referencing_entries.append((s, eid))
+                    out.append(Usage(
+                        type="entry_rules_values",
+                        label=f"{s} · entry {eid} · rules={rules}",
+                        deep_link=_dict_deep_link("entries", s, eid),
+                    ))
+        # Pass 2 — transitive: for each referencing entry, pull in everything that references
+        # it (screens, connector column hints, prompt fields, other sequences / lookups). The
+        # result label is prefixed with "via entry <id>" so the chain is legible.
+        for s, eid in referencing_entries:
+            for u in _find_dd_usages(state, eid, s):
+                # Skip the dictionary-internal links we already surfaced in pass 1 to avoid duplicates.
+                if u.type in ("sequence_dd_id", "lookup_return_param"):
+                    continue
+                out.append(Usage(
+                    type=u.type,
+                    label=f"via {eid} → {u.label}",
+                    deep_link=u.deep_link,
+                ))
+    # Pass 3 — DIRECT screen-column references that bypass a DD entry: a column's own rule override
+    # (``ColumnHint.rules`` / ``rules_values``) and each conditional ``rules_when`` entry. Neither
+    # resolves through a DD entry, so passes 1-2 miss them. Runs even with no dictionary loaded.
+    out.extend(_find_screen_rule_usages(state, accept, name, scope))
+    return out
+
+
+def _find_screen_rule_usages(state: Any, accept: set[str], name: str, scope: str) -> list[Usage]:
+    """Screen columns referencing this lookup / enum / sequence DIRECTLY — via a screen-level rule
+    override (``ColumnHint.rules`` + ``rules_values``) or a conditional ``rules_when`` entry. A
+    column's rule scope is the screen's APP (``dict_scope = app``), so match the app to *scope*; a
+    shared target may be referenced from any app."""
+    out: list[Usage] = []
+    screens = getattr(state, "screens", None)
+    if screens is None:
+        return out
+    for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
+        if scope != "shared" and app != scope:
+            continue
+        for sid, screen in screen_map.items():
+            for col in getattr(screen, "columns", None) or []:
+                if (getattr(col, "rules", None) or "").upper() in accept and (getattr(col, "rules_values", None) or "") == name:
+                    out.append(Usage(
+                        type="screen_column_rules_values",
+                        label=f"{app}.{sid} · column {col.name} · rules",
+                        deep_link=_screen_deep_link(app, sid),
+                    ))
+                for rw in getattr(col, "rules_when", None) or []:
+                    if (getattr(rw, "rules", None) or "").upper() in accept and (getattr(rw, "rules_values", None) or "") == name:
+                        cond = getattr(rw, "field", "") or ""
+                        out.append(Usage(
+                            type="screen_column_rules_when",
+                            label=f"{app}.{sid} · column {col.name} · rules_when ({cond})",
+                            deep_link=_screen_deep_link(app, sid),
+                        ))
     return out
 
 

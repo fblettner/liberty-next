@@ -48,6 +48,27 @@ def test_query_usages_includes_menu_target() -> None:
     assert "screen_read_query" in kinds  # the screen reads it too
 
 
+def test_lookup_usages_finds_direct_screen_column_refs() -> None:
+    """A screen column referencing a lookup DIRECTLY (a screen-level rules override or a conditional
+    rules_when) bypasses a DD entry, so the transitive walk misses it — pass 3 must surface both."""
+    screens = {
+        "jde": {
+            "f0004": {
+                "connector": "jde", "read_query": "g",
+                "columns": [
+                    {"name": "STATUS", "rules": "LOOKUP", "rules_values": "user_status"},
+                    {"name": "STATUS2", "rules_when": [
+                        {"field": "STY", "value": "M", "rules": "LOOKUP", "rules_values": "user_status"}]},
+                ],
+            }
+        }
+    }
+    state = _state(screens=screens)
+    kinds = {u.type for u in find_usages(state, kind="lookup", name="user_status", scope="jde")}
+    assert "screen_column_rules_values" in kinds   # base rule override
+    assert "screen_column_rules_when" in kinds     # conditional rule
+
+
 def test_query_usages_descends_into_column_groups() -> None:
     """A query referenced only by a column group's write-back query must NOT look unused — the
     reverse walk descends into the same nested screen structures integrity validates. Regression

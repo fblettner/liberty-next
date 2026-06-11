@@ -28,6 +28,10 @@ export interface FilterMeta {
   align?: 'left' | 'right' | 'center'
   /** an internal helper column (the edit-mode select / status columns) — excluded from search, the Columns menu, etc. */
   internal?: boolean
+  /** Override the exported value for this column. By default export uses the cell's accessor value;
+   *  a BOOLEAN column's accessor is the display token ("true"/"false"), so it sets this to emit the
+   *  RAW stored code ("1"/"0", "Y"/"N") instead — the only value a re-import can write back. */
+  exportValue?: (row: unknown) => unknown
 }
 
 /** The filter value for a text/number/date column: an operator + up to two operands.

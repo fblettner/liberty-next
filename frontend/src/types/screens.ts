@@ -30,7 +30,7 @@ export interface FieldCondition {
  *  the right widget without round-tripping the dictionary lookup. */
 export type DisplayRule =
   | { kind: 'boolean'; true_value: string; false_value?: string }
-  | { kind: 'enum'; values: { value: string; label: string }[] }
+  | { kind: 'enum'; values: { value: string; label: string }[]; /** enum set's name — dropdown empty-option label */ title?: string }
   | { kind: 'auto_fill'; source: 'current_date' | 'login_user' | string }
   | {
       kind: 'lookup'
@@ -38,6 +38,8 @@ export type DisplayRule =
       query: string
       value: string
       label: string
+      /** the lookup's human description — dropdown empty-option label */
+      title?: string
       params?: Record<string, string>
       /** Columns this lookup can flow back on a pick — the menu a column's ``return_binds`` picks
        *  from. No longer auto-mapped by dd; the explicit mapping lives on ``Column.return_binds``. */

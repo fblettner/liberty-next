@@ -118,7 +118,7 @@ export function FieldRow({
         value={textValue}
         onChange={(v) => onChange(field.name, v === '' ? null : v)}
         options={options}
-        anyLabel={required ? undefined : t('common.none')}
+        anyLabel={required ? undefined : (effectiveRule.title || t('common.none'))}
         placeholder={t('common.pick')}
       />
     )
@@ -153,7 +153,7 @@ export function FieldRow({
         onChange={handlePick}
         options={opts}
         cellColumns={lookupCellColumns(effectiveRule)}
-        anyLabel={required ? undefined : t('common.none')}
+        anyLabel={required ? undefined : (effectiveRule.title || t('common.none'))}
         loading={!lookupData}
         placeholder={t('common.pick')}
       />

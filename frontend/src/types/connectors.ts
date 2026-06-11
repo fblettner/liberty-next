@@ -83,7 +83,7 @@ export type DisplayRule =
        *  (the v1 default; the DB column must accept NULL). */
       false_value?: string
     }
-  | { kind: 'enum'; values: { value: string; label: string }[] }
+  | { kind: 'enum'; values: { value: string; label: string }[]; /** the enum set's name — shown as a dropdown's empty-option label */ title?: string }
   | {
       /** Form-layer auto-fill — seeds the field on dialog open (add mode only). ``source``
        *  is a built-in id the runtime resolves via the auth-builtins layer: ``current_date``
@@ -98,6 +98,8 @@ export type DisplayRule =
       query: string
       value: string
       label: string
+      /** the lookup's human description — shown as a dropdown's empty-option label */
+      title?: string
       /** Static parameter bindings for the lookup's query (v1 ly_dictionary_filters flt_type='VALUE').
        *  Required for queries that take `:placeholder` params to even run — without these a UDC
        *  query returns nothing because SY/RT are NULL. The fetcher passes them as ?p=v on /api/sql. */

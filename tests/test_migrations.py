@@ -2853,11 +2853,13 @@ async def test_read_dictionary_rules_and_migrate(v1_engine) -> None:
     usr_id_rule = d.resolve_rule(sec.entries["USR_ID"], connector="db", language="en")
     assert usr_id_rule == {
         "kind": "lookup", "connector": "default", "query": "users_list_select", "value": "USR_ID", "label": "USR_NAME",
+        "title": "Users list",   # the lookup's description → dropdown empty-option label
     }
     usr_name_rule = d.resolve_rule(sec.entries["USR_NAME"], connector="db", language="fr")
     assert usr_name_rule == {
         "kind": "enum",
         "values": [{"value": "A", "label": "Actif"}, {"value": "I", "label": "Inactive"}],
+        "title": "User Status",   # the enum set's label → dropdown empty-option label
     }
     # PASSWORD is a form-layer rule — not a display transform; resolve_rule returns None
     assert d.resolve_rule(sec.entries["USR_PWD"], connector="db") is None
