@@ -210,7 +210,10 @@ class ParamBind(BaseModel):
         description="Target parameter name (the ``:placeholder`` on the destination query).",
         # Param + source are column-name references. Normalise to UPPERCASE on save
         # so action chains / nested_table tabs / lookup binds all use one convention.
-        json_schema_extra={"x_case": "upper"},
+        # In a lookup_param_binds context the enclosing column/rule's ``rules_values`` picks the
+        # lookup → its query's :params (LOOKUP_PARAMS__<lookup id>). Resolves to nothing (free text)
+        # in non-lookup contexts (action / nested-table binds) — no enclosing ``rules_values``.
+        json_schema_extra={"x_case": "upper", "x_enum_ref_ancestor": {"field": "rules_values", "prefix": "LOOKUP_PARAMS__"}},
     )
     value: str | None = Field(default=None, description="Literal value to bind.")
     source: str | None = Field(
@@ -241,9 +244,9 @@ class ReturnBind(BaseModel):
             "A column returned by the lookup query whose value flows back — one of the lookup's "
             "``return_params`` (the picked row's column with this name)."
         ),
-        # Candidate dropdown of return params across the scope's lookups (still free-text — the
-        # exact set depends on which lookup the column resolves to, which the form can't narrow here).
-        json_schema_extra={"x_enum_ref": "LOOKUP_RETURN_PARAMS", "x_case": "upper"},
+        # The enclosing column/rule's ``rules_values`` picks the lookup → its ``return_params``
+        # (LOOKUP_RETURN_PARAMS__<lookup id>), so the dropdown is narrowed to THIS lookup's fields.
+        json_schema_extra={"x_enum_ref_ancestor": {"field": "rules_values", "prefix": "LOOKUP_RETURN_PARAMS__"}, "x_case": "upper"},
     )
     column: str = Field(
         description="The screen column on this row to fill with the returned value.",

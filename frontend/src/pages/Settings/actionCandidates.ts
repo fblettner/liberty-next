@@ -61,6 +61,26 @@ export function targetParamOptions(
   })).sort(byValue)
 }
 
+/** The param names a SQL query accepts — its declared ``params`` ∪ the scanned ``:bind_params``.
+ *  This is the authoritative candidate set for binding a lookup's parameters: a dd entry's STATIC
+ *  ``lookup_params`` or a screen column's DYNAMIC ``lookup_param_binds``. Resolve a lookup → its
+ *  ``query`` + ``connector`` → call this. (NOT the lookup's ``key_columns`` — those are label
+ *  disambiguation, not query parameters; the historical ``params``-named field was that, renamed.) */
+export function lookupQueryParamNames(
+  wsConnectors: ConnectorMeta[] | null | undefined,
+  connector: string,
+  queryName: string,
+): string[] {
+  const conn = (wsConnectors ?? []).find((c) => c.name === connector)
+  if (!conn || conn.type !== 'sql' || !queryName) return []
+  const q = (conn.queries as SqlQueryMeta[]).find((qq) => qq.name === queryName)
+  if (!q) return []
+  const names = new Set<string>()
+  for (const p of q.params) names.add(p.name)
+  for (const n of q.bind_params) names.add(n)
+  return [...names].sort()
+}
+
 /** ``source`` candidates from the *firing screen's* read-query columns. For a row-menu or
  *  toolbar action, the firing context IS the row that fired it; column names with no dots
  *  resolve against the row at runtime. The display label is the column's friendly label

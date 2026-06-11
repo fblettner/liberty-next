@@ -16,6 +16,7 @@ import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, Dicti
 import { renameKey } from '../../services/keyRename'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { lookupQueryParamNames } from './actionCandidates'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { EditQueryModal } from './EditQueryModal'
@@ -127,7 +128,7 @@ function setSection(
 export default function DictionaryBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
+  const { currentApp, refresh: refreshWorkspace, connectors: wsConnectors } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [dict, setDict] = useState<DictionaryData | null>(null)
   // Read-only — the *Lookups* form's query / value / label dropdowns read from here. We need to know
@@ -295,10 +296,16 @@ export default function DictionaryBuilder() {
       const ruleKind = typeof ent?.rules === 'string' ? ent.rules.toUpperCase() : ''
       const ruleArg = typeof ent?.rules_values === 'string' ? ent.rules_values : ''
       if (ruleKind === 'LOOKUP' && ruleArg) {
-        // Lookups follow the same resolution path as entries — scope's overlay first, then shared
+        // Lookups follow the same resolution path as entries — scope's overlay first, then shared.
         const lkpRec = (overlay?.lookups?.[ruleArg] ?? dict?.lookups?.[ruleArg]) as Record<string, unknown> | undefined
-        const params = lkpRec?.params
-        if (Array.isArray(params)) lkpParamNames = params.filter((p): p is string => typeof p === 'string' && !!p)
+        if (lkpRec) {
+          // The :params you bind live on the lookup's QUERY (its declared params ∪ scanned
+          // :bind_params), NOT on the lookup record (whose ``key_columns`` are display
+          // disambiguation). Resolve lookup → connector + query → that query's params.
+          const lkpConn = (typeof lkpRec.connector === 'string' && lkpRec.connector) ? lkpRec.connector : (scope || '')
+          const qName = typeof lkpRec.query === 'string' ? lkpRec.query : ''
+          lkpParamNames = lookupQueryParamNames(wsConnectors, lkpConn, qName)
+        }
       }
     }
     base.CURRENT_LOOKUP_PARAMS = {
@@ -308,7 +315,7 @@ export default function DictionaryBuilder() {
       values: lkpParamNames.map((p) => ({ value: p, label: p })),
     }
     return base
-  }, [schemas, dict, scope, kind, sel, connectors])
+  }, [schemas, dict, scope, kind, sel, connectors, wsConnectors])
 
   // Other dictionary kinds in the current scope — drives the cross-kind warning in the
   // validator (e.g. "id '1' is also used as a lookup in this scope — runtime works but

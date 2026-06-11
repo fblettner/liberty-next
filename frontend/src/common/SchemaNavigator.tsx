@@ -85,6 +85,10 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
   useEffect(() => { if (needTruncate != null) setPath((p) => p.slice(0, needTruncate)) }, [needTruncate])
 
   const cur = levels[levels.length - 1]
+  // The enclosing objects of the current level (nearest first) — so a drilled-in field's
+  // ``x_enum_ref_ancestor`` can read a driver off a parent (e.g. a lookup bind's ``param`` resolving
+  // the enclosing column/rule's ``rules_values``).
+  const ancestors = levels.slice(0, -1).map((l) => l.value).reverse()
   const go = (depth: number) => setPath((p) => p.slice(0, depth))   // depth 0 = root
 
   // Back lands on the parent level; the breadcrumb gives the full context. Both live in the pinned,
@@ -103,6 +107,7 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
         crumbs={crumbs}
       />
       <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery}
+        ancestors={ancestors}
         {...(root.deriveContext?.(cur.value, cur.schema) ?? {})} />
     </div>
   )

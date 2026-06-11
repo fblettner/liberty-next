@@ -56,6 +56,12 @@ export interface JsonSchema {
    *  `{field: "rules", map: {ENUM: "ENUM_IDS", LOOKUP: "LOOKUP_IDS", BOOLEAN: "BOOLEAN_TRUE_VALUES"}}`.
    *  The form watches the sibling and swaps the dropdown when it changes. */
   x_enum_ref_when?: { field: string; map: Record<string, string> }
+  /** Like `x_enum_ref`, but the ref NAME is built from a driver field found on the nearest ENCLOSING
+   *  object (this object's siblings first, then up the ancestor chain) — `<prefix><driver value>`.
+   *  Lets a deeply-nested field key its options off a parent's value, e.g. a lookup bind's `param`
+   *  resolving the enclosing column/rule's `rules_values` → that lookup's query params
+   *  (`LOOKUP_PARAMS__<lookup id>`). Falls through to no enum when no ancestor declares the field. */
+  x_enum_ref_ancestor?: { field: string; prefix: string }
   /** For a `dict[str, T]` field, the KEY is drawn from this framework-enum (the value editor stays
    *  whatever the additionalProperties type produces). e.g. `l: dict[str, str]` for translations
    *  uses `SUPPORTED_LANGUAGES` so the user picks "fr" / "Français" instead of typing a code. */
@@ -109,7 +115,20 @@ export const SqlConnectorContext = createContext<string | undefined>(undefined)
 /** Resolve a field's effective enum ref: prefer `x_enum_ref_when` (which switches by a sibling
  *  field's current value) over plain `x_enum_ref`. Returns `null` when no ref applies (the
  *  conditional rule fell through, or neither annotation is set). */
-function effectiveEnumRef(sub: JsonSchema, siblings: Record<string, unknown>): string | null {
+function effectiveEnumRef(
+  sub: JsonSchema,
+  siblings: Record<string, unknown>,
+  ancestors: Record<string, unknown>[] = [],
+): string | null {
+  if (sub.x_enum_ref_ancestor) {
+    const { field, prefix } = sub.x_enum_ref_ancestor
+    // Nearest scope that declares the driver field: this object first, then up the ancestor chain.
+    for (const scope of [siblings, ...ancestors]) {
+      const v = scope?.[field]
+      if (typeof v === 'string' && v) return prefix + v
+    }
+    return null  // no enclosing object set the driver → fall through to a plain (free-text) input
+  }
   if (sub.x_enum_ref_when) {
     const driver = siblings[sub.x_enum_ref_when.field]
     if (typeof driver === 'string') {
@@ -162,6 +181,7 @@ function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
     x_group: outer.x_group ?? branch.x_group,
     x_enum_ref: outer.x_enum_ref ?? branch.x_enum_ref,
     x_enum_ref_when: outer.x_enum_ref_when ?? branch.x_enum_ref_when,
+    x_enum_ref_ancestor: outer.x_enum_ref_ancestor ?? branch.x_enum_ref_ancestor,
     x_key_enum_ref: outer.x_key_enum_ref ?? branch.x_key_enum_ref,
     anyOf: undefined,
   } as JsonSchema
@@ -492,7 +512,7 @@ function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
 }
 
 // a collapsible list of nested objects (the no-navigator fallback — params / columns / queries / …)
-function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
+function ObjectListEditor({ itemSchema, defs, value, onChange, ancestors }: { itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void; ancestors?: Record<string, unknown>[] }) {
   const [open, setOpen] = useState<number | null>(null)
   const summary = (it: Record<string, unknown>) => itemSummary(it, itemSchema, defs)
   return (
@@ -506,7 +526,7 @@ function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: J
           </ItemHead>
           {open === i && (
             <ItemBody>
-              <SchemaForm schema={itemSchema} defs={defs} value={it} onChange={(v) => onChange(value.map((x, idx) => (idx === i ? v : x)))} />
+              <SchemaForm schema={itemSchema} defs={defs} value={it} onChange={(v) => onChange(value.map((x, idx) => (idx === i ? v : x)))} ancestors={ancestors} />
             </ItemBody>
           )}
         </ItemBox>
@@ -546,12 +566,16 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  */
 const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
 
-export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, hiddenFields, fieldNotes }: {
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, hiddenFields, fieldNotes, ancestors }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
   defs?: Defs
   onNavigate?: (seg: NavSeg) => void
+  /** The chain of ENCLOSING objects (nearest first) — threaded down through nested object fields,
+   *  inline list items, and drill-in levels so a field's ``x_enum_ref_ancestor`` can read a driver
+   *  field off the nearest parent that sets it. Empty at the form root. */
+  ancestors?: Record<string, unknown>[]
   /** x_group tab names to omit entirely (the caller decides per-context — e.g. hide "Lookup"
    *  unless the column's effective rule is a lookup). Fields in a hidden group don't render. */
   hiddenGroups?: string[]
@@ -692,7 +716,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         // depending on `rules`). If the field is *also* a Literal we constrain the option list to
         // that Literal's enum (the strict shape wins); otherwise it's a combobox (allowCustom —
         // typing a value the registry doesn't know commits).
-        const ref = effectiveEnumRef(sub, value)
+        const ref = effectiveEnumRef(sub, value, ancestors)
         const fe = enumFor(ref, enums)
         if (key === 'sql') {
           control = <SqlField value={cur} onChange={(v) => set(key, v)} />
@@ -790,7 +814,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
             control = onNavigate
               ? <ObjectNavList itemSchema={items} defs={allDefs} value={objs} onChange={setArr}
                   onNavigate={(index, summary) => onNavigate({ kind: 'item', key, index, label: `${labelPlain}: ${summary}` })} />
-              : <ObjectListEditor itemSchema={items} defs={allDefs} value={objs} onChange={setArr} />
+              : <ObjectListEditor itemSchema={items} defs={allDefs} value={objs} onChange={setArr} ancestors={[value, ...(ancestors ?? [])]} />
           } else {
             control = <StringListEditor value={arr.map((x) => (x == null ? '' : String(x)))}
               onChange={(v) => set(key, v.length ? v.map((x) => applyCase(x, sub)) : undefined)} />
@@ -811,7 +835,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
             </NavListRow>
           ) : (
             <ItemBox><ItemBody style={{ borderTop: 'none' }}>
-              <SchemaForm schema={sub} defs={allDefs} value={subValue} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} />
+              <SchemaForm schema={sub} defs={allDefs} value={subValue} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} ancestors={[value, ...(ancestors ?? [])]} />
             </ItemBody></ItemBox>
           )
         } else if (sub.type === 'integer' || sub.type === 'number') {
