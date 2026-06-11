@@ -25,14 +25,14 @@ import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
-import { lookupKey, useLookupTables, lookupCellColumns, type LookupData, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupCellColumns, lookupOptions, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, evalConditions, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -274,13 +274,11 @@ function EditCell({
             : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v), cells: cellsByCode?.get(String(v)) }
         })
         .filter((o): o is Opt => o !== null)
-        .sort((a, b) => a.label.localeCompare(b.label))
     } else if (ready && prebuiltOptions) {
       // Common path: a non-cascading lookup reuses the list the parent built once for this column.
       opts = prebuiltOptions
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
-        .sort(([, a], [, b]) => a.localeCompare(b))
         .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
     } else {
       opts = []
@@ -1219,26 +1217,11 @@ export function ResultTable({
     // (1) Per-lookup edit-dropdown options, built ONCE per (spec, display_fields) and shared by every
     // row's cell — keyed by the lookup's spec key. EditCell used to rebuild the whole option list
     // (O(lookup rows)) on every cell render, so bulk-edit / add-row over a big UDC cost O(grid rows ×
-    // lookup rows × renders). This cache (rebuilt when lookupMaps changes, since it's recreated each
-    // dataCols memo run) collapses that to O(lookup rows) once. Cascading cells still build per row.
+    // lookup rows × renders). This cache (recreated each dataCols memo run, so it refreshes when
+    // lookupMaps changes) collapses that to O(lookup rows) once. Cascading cells still build per row.
+    // Built with the SAME ``lookupOptions`` the dialog (FieldRow) + advanced filter (FilterPanel) use,
+    // so the dropdown order matches them: the lookup query's own row order (its ORDER BY), not a re-sort.
     const editOptsCache = new Map<string, LookupOpt[]>()
-    const buildPrebuiltOpts = (d: LookupData, valKey: string, df: string[] | undefined): LookupOpt[] => {
-      let cellsByCode: Map<string, string[]> | undefined
-      if (df?.length) {
-        cellsByCode = new Map()
-        for (const r of d.rows) {
-          const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-          if (v == null) continue
-          cellsByCode.set(String(v), df.map((f) => {
-            const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
-            return x == null ? '' : String(x).trim()
-          }))
-        }
-      }
-      return [...d.map.entries()]
-        .sort(([, a], [, b]) => a.localeCompare(b))
-        .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
-    }
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
       // Conditional forced default (default_when): when a sibling column's value triggers a rule,
@@ -1292,7 +1275,7 @@ export function ResultTable({
         const df = ec.rule.display_fields
         const ckey = `${lookupSpecKey}|${(df ?? []).join(',')}`
         let o = editOptsCache.get(ckey)
-        if (!o) { o = buildPrebuiltOpts(lookupData, ec.rule.value, df); editOptsCache.set(ckey, o) }
+        if (!o) { o = lookupOptions(lookupData, undefined, df); editOptsCache.set(ckey, o) }
         prebuiltOptions = o
       }
       return (
@@ -1316,8 +1299,14 @@ export function ResultTable({
     // to its read-only display (same as non-edit mode), so the grid bulk-edit honours the SAME
     // column setting the dialog's fieldStateOf does. Reads the live newRows via the ref — the cell
     // renderers re-run each render, so this stays current without adding newRows to the memo deps.
-    const cellLocked = (c: Column, rowOriginal: DataRow) =>
-      newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
+    const cellLocked = (c: Column, rowOriginal: DataRow) => {
+      // Mirror the dialog's fieldStateOf: static ``disabled`` (or conditional ``disabled_when`` when
+      // set, ANDed against the row), THEN the per-mode lock (disable_on_add for a new row,
+      // disable_on_edit for an existing one). Any one locks the cell to its read-only display.
+      const byRule = c.disabled_when?.length ? evalConditions(c.disabled_when, valuesOf(rowOriginal)) : !!c.disabled
+      const modeLocked = newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
+      return byRule || modeLocked
+    }
     const out: ColumnDef<DataRow, unknown>[] = []
     for (const c of shownColumns) {
       const align = cellAlign(c)
@@ -1541,7 +1530,7 @@ export function ResultTable({
         meta: c.rule?.kind === 'boolean' ? { ...fp.meta, exportValue: (o: unknown) => (o as DataRow)[c.name] } : fp.meta,
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
-          if (editMode && !isGroupRow(info)) return editCellFor(c, info)
+          if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
           // Non-enum / non-lookup here (those are split out above), so no enum map is needed.
           // Resolve rules_when per row so a conditional BOOLEAN renders with its own true/false

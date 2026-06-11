@@ -183,6 +183,12 @@ export interface Column {
   /** Read-only when EDITING an existing row (editable on add). Per-column replacement for v1's
    *  blanket 'lock all keys on edit'. Honoured by the grid bulk-editor and the dialog. UI-only. */
   disable_on_edit?: boolean
+  /** Static read-only — the operator sees the value but can't change it. Honoured by both the dialog
+   *  (``fieldStateOf``) and the grid bulk-editor. UI-only. */
+  disabled?: boolean
+  /** Conditional read-only — locked only when every ``{field, value}`` holds against the row. Empty
+   *  → the static ``disabled`` decides. Honoured by the dialog + the grid bulk-editor. UI-only. */
+  disabled_when?: { field: string; value: string | string[] }[]
 }
 
 export interface QueryResult {

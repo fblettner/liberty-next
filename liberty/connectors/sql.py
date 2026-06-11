@@ -810,6 +810,11 @@ class Column:
     # to its read-only display in that mode. UI-only: the write path is unchanged.
     disable_on_add: bool = False
     disable_on_edit: bool = False
+    # Static read-only (``ColumnHint.disabled``) + conditional read-only (``disabled_when``, each
+    # ``{field, value}`` ANDed against the row). Surfaced so the grid bulk-editor locks the SAME cells
+    # the dialog's ``fieldStateOf`` does — not only the per-mode ``disable_on_add`` / ``disable_on_edit``.
+    disabled: bool = False
+    disabled_when: list[dict[str, Any]] = field(default_factory=list)
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
@@ -851,6 +856,10 @@ class Column:
             d["disable_on_add"] = True
         if self.disable_on_edit:
             d["disable_on_edit"] = True
+        if self.disabled:
+            d["disabled"] = True
+        if self.disabled_when:
+            d["disabled_when"] = self.disabled_when
         if self.filter:
             d["filter"] = True
         if self.filter_from:
@@ -2430,6 +2439,7 @@ def _resolve_hint(
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
         disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
+        disabled=h.disabled, disabled_when=[w.as_dict() for w in h.disabled_when],
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],
