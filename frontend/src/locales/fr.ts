@@ -185,6 +185,7 @@ const fr: Resources = {
     deleteRow: 'Supprimer la ligne',
     copyRows: 'Copier',
     pasteRows: 'Coller',
+    pasteExcelHint: 'Coller des lignes depuis Excel avec Ctrl+V',
     selectAll: 'Tout sélectionner',
     selectNone: 'Tout désélectionner',
     resetColumns: 'Réinit.',

@@ -183,6 +183,7 @@ const en = {
     deleteRow: 'Delete row',
     copyRows: 'Copy',
     pasteRows: 'Paste',
+    pasteExcelHint: 'Paste rows from Excel with Ctrl+V',
     selectAll: 'Select all',
     selectNone: 'Select none',
     resetColumns: 'Reset',
