@@ -49,6 +49,15 @@ class ScanBody(BaseModel):
     jde: bool | None = Field(default=None, description="Treat the source as JDE. Default: inferred from the pool dialect (oracle).")
     jde_dd_connector: str = Field(default="nomajde", description="Connector hosting the JDE data dictionary.")
     jde_dd_query: str = Field(default="dictionary_data_items_get", description="Named query returning DTAI/DSCR rows.")
+    jde_dd_table_query: str = Field(
+        default="dictionary_data_items_for_table_get",
+        description=(
+            "Optional per-table JDE DD query that enriches the scan with format / rule / default. "
+            "Bound with ``:TBL_DB_NAME`` + ``:TBL_SCHEMA`` (the scanned table + its owner) and read for "
+            "the columns ``DD_ID, DD_LABEL, DD_TYPE, DD_RULES, DD_RULES_VALUES, DD_DEFAULT``. Use a "
+            "``#SCHEMA.<KEY>#`` token (not a bind) for the F92xx schema. Missing / erroring → ignored."
+        ),
+    )
 
 
 def _dictionary_path(settings: Any) -> Path:
@@ -90,6 +99,41 @@ async def _fetch_jde_dd(registry: Any, conn_name: str, query_name: str) -> dict[
     return out
 
 
+async def _fetch_jde_dd_table(
+    registry: Any, conn_name: str, query_name: str, *, table: str, owner: str | None,
+) -> dict[str, dict[str, str | None]]:
+    """Per-table JDE DD enrichment: ``{DATA_ITEM (upper) → {label, format, rules, rules_values,
+    default}}`` from *query_name*, bound with the scanned table + owner. The query is expected to
+    return ``DD_ID`` (the stripped data item) + ``DD_LABEL`` / ``DD_TYPE`` / ``DD_RULES`` /
+    ``DD_RULES_VALUES`` / ``DD_DEFAULT``. Best-effort — a missing query / unreachable source / wrong
+    shape yields an empty map (the scan then falls back to the DTAI/DSCR labels + inferred format)."""
+    try:
+        conn = registry.sql(conn_name)
+    except ConnectorError:
+        return {}
+    try:
+        res = await conn.execute(query_name, params={"TBL_DB_NAME": table, "TBL_SCHEMA": owner})
+    except (ConnectorError, SQLAlchemyError, KeyError, ValueError):
+        return {}
+    out: dict[str, dict[str, str | None]] = {}
+    for row in res.rows:
+        m = {(k.upper() if isinstance(k, str) else k): v for k, v in row.items()}
+        ddid = m.get("DD_ID")
+        if ddid is None:
+            continue
+        key = str(ddid).strip().upper()
+        if not key or key in out:
+            continue
+        def _s(col: str) -> str | None:
+            v = m.get(col)
+            return str(v).strip() if v is not None and str(v).strip() != "" else None
+        out[key] = {
+            "label": _s("DD_LABEL"), "format": _s("DD_TYPE"), "rules": _s("DD_RULES"),
+            "rules_values": _s("DD_RULES_VALUES"), "default": _s("DD_DEFAULT"),
+        }
+    return out
+
+
 @router.post("/dictionary/scan", summary="Scan dictionary")
 async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dict[str, Any]:
     registry = request.app.state.connectors
@@ -102,6 +146,7 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
 
     # Resolve (name, type) column pairs + the pool dialect, from whichever source was given.
     cols: list[tuple[str, str | None]]
+    real_schema: str | None = None   # the table's resolved owner — also bound into the JDE DD query
     if body.table:
         # Resolve a portable ``#SCHEMA.<KEY>#`` token to the pool's real owner before introspecting
         # (the table picker hands back the token when the pool maps one).
@@ -142,6 +187,16 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
         existing |= {k.upper() for k in sc.entries}
 
     dd_map = await _fetch_jde_dd(registry, body.jde_dd_connector, body.jde_dd_query) if is_jde else {}
+    # Per-table enrichment (format / rule / default straight from the JDE DD), keyed by data item.
+    # Runs on the SCANNED connector (the F92xx DD tables live in the same Oracle DB as the table +
+    # ALL_TAB_COLUMNS). Only in table mode (bound by table + owner); best-effort, empty when missing.
+    rich_map = (
+        await _fetch_jde_dd_table(
+            registry, body.connector, body.jde_dd_table_query, table=body.table, owner=real_schema,
+        )
+        if (is_jde and body.table and body.jde_dd_table_query)
+        else {}
+    )
 
     items: list[dict[str, Any]] = []
     for name, ctype in cols:
@@ -157,16 +212,22 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
         # (and queries alias the physical column back to it). Non-JDE: the id is the column itself.
         data_item = physical[2:] if (is_jde and len(physical) > 2) else None
         dd_id = data_item if data_item else physical
-        label = dd_map.get(data_item) if data_item else None
+        rich = rich_map.get(dd_id) or {}
+        # Prefer the per-table JDE DD enrichment (label / format / rule / default); fall back to the
+        # DTAI/DSCR label + the SQL-type-inferred format when the rich query isn't available.
+        label = rich.get("label") or (dd_map.get(data_item) if data_item else None)
         items.append({
             "column": name,
             "dd_id": dd_id,
             "exists": dd_id in existing,
             "type": ctype,
             "data_item": data_item,
-            "source": "jde" if label else "inferred",
+            "source": "jde" if (rich or label) else "inferred",
             "label": label or None,
-            "format": _infer_format(ctype),
+            "format": rich.get("format") or _infer_format(ctype),
+            "rules": rich.get("rules"),
+            "rules_values": rich.get("rules_values"),
+            "default": rich.get("default"),
         })
 
     return {"scope": scope, "dialect": dialect, "jde": is_jde, "items": items}

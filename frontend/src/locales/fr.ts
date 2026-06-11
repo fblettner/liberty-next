@@ -833,6 +833,7 @@ const fr: Resources = {
       unsavedMsg: 'Annuler vos modifications sur cette requête ?',
     },
     generateQuery: {
+      saved: 'Requête « {{name}} » enregistrée — affectez-la à l’entrée.',
       lookupTitle: 'Générer la requête de recherche',
       sequenceTitle: 'Générer la requête de séquence',
       table: 'Table à lire',

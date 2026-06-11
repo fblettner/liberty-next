@@ -34,7 +34,9 @@ export interface GenerateQueryModalProps {
   record: Record<string, unknown>
   /** Existing query names on the connector — used to refuse a colliding new name. */
   existingQueryNames: ReadonlySet<string>
-  onConfirm: (r: { name: string; sql: string }) => void
+  /** ``params`` = the declared query parameters (lookup → its key columns; sequence → its params) so
+   *  the new QueryDef carries them. */
+  onConfirm: (r: { name: string; sql: string; params: string[] }) => void
   onCancel: () => void
 }
 
@@ -128,9 +130,12 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
       return sql
     }
     if (!valueAlias) return ''
-    const sel = Array.from(new Set([valueAlias, labelAlias])).map(selectItem)
+    // SELECT value, label AND the key columns — a lookup is fetched whole and its keys are RETURNED
+    // for per-row disambiguation, not filtered in a WHERE (the bind narrowing is applied at runtime
+    // from the dictionary entry's params). Any static filter (e.g. HC_TYPE = 'PUSHBUTTON') is the
+    // operator's to add. De-dupe so a key that's already the value/label isn't selected twice.
+    const sel = Array.from(new Set([valueAlias, labelAlias, ...keyAliases])).map(selectItem)
     let sql = `SELECT\n    ${sel.join(',\n    ')}\nFROM\n    ${fq}`
-    if (keyAliases.length) sql += `\nWHERE\n    ${keyAliases.map((k) => `${colOrAlias(k)} = :${k}`).join('\n    AND ')}`
     sql += `\nORDER BY\n    ${labelAlias.toUpperCase()}`
     return sql
     // colMap is read through the closures above — list it so the SQL regenerates on each mapping change.
@@ -157,7 +162,9 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
     return () => document.removeEventListener('keydown', onKey)
   }, [onCancel])
 
-  const confirm = () => { if (!error) onConfirm({ name: name.trim(), sql: effectiveSql }) }
+  // Declared params: a lookup's key columns (returned for per-row matching) / a sequence's params.
+  const queryParams = isSequence ? seqParams : keyAliases
+  const confirm = () => { if (!error) onConfirm({ name: name.trim(), sql: effectiveSql, params: queryParams }) }
 
   const colOpts: SearchSelectOption[] = useMemo(
     () => (picked?.columns ?? []).map((c) => ({ value: c.name, label: c.name.toUpperCase(), mono: c.type ?? '' })),

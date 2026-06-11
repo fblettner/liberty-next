@@ -113,7 +113,9 @@ export function SqlTestRunner({ connector, sql, onClose }: SqlTestRunnerProps) {
   }
 
   return createPortal(
-    <Overlay onClick={onClose}>
+    // z-index 1000 (same as the SQL wizard) so the runner sits ABOVE an editor modal it's opened from
+    // (EditQueryModal at 900) instead of rendering under it — and below the global confirm overlay (2000).
+    <Overlay onClick={onClose} style={{ zIndex: 1000 }}>
       <RunModal onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <HeaderRow>

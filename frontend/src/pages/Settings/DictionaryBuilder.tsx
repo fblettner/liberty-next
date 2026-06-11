@@ -8,7 +8,8 @@
 // delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch } from 'lucide-react'
+import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch, FileSpreadsheet } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
@@ -154,10 +155,6 @@ export default function DictionaryBuilder() {
   // stub); omitted for Edit. null = closed.
   const [editQueryTarget, setEditQueryTarget] = useState<{
     connector: string; queryName: string; seed?: Record<string, unknown>
-    // ``generated`` marks a query created by the Generate button: on save we refresh the connector
-    // query list only (NOT a full dict reload, which would drop the unsaved ``query`` we just set on
-    // the record). The dict record's ``query`` is pointed at it up front, so the link survives.
-    generated?: boolean
   } | null>(null)
   // Generate-query target — the lazy table picker + dict-param-driven SQL generator. null = closed.
   const [generateTarget, setGenerateTarget] = useState<{ connector: string } | null>(null)
@@ -593,6 +590,36 @@ export default function DictionaryBuilder() {
     } finally { setBusy(false) }
   }
 
+  // Export every dictionary ENTRY (shared + per-connector overlays) to an .xlsx — one row per
+  // entry with the fields worth diffing against the source system's data dictionary (label /
+  // format / rule / default). Read-only; doesn't touch the editor state.
+  const exportEntries = () => {
+    if (!dict) return
+    const rows: Record<string, unknown>[] = []
+    const push = (scope: string, entries: Record<string, Record<string, unknown>> | undefined) => {
+      for (const [id, e] of Object.entries(entries ?? {})) {
+        rows.push({
+          scope: scope || 'shared', id,
+          label: typeof e.label === 'string' ? e.label : '',
+          format: typeof e.format === 'string' ? e.format : '',
+          rules: typeof e.rules === 'string' ? e.rules : '',
+          rules_values: typeof e.rules_values === 'string' ? e.rules_values : '',
+          false_value: typeof e.false_value === 'string' ? e.false_value : '',
+          default: typeof e.default === 'string' ? e.default : '',
+        })
+      }
+    }
+    push('shared', dict.entries as Record<string, Record<string, unknown>> | undefined)
+    for (const [conn, sec] of Object.entries((dict.connectors ?? {}) as Record<string, { entries?: Record<string, Record<string, unknown>> }>)) {
+      push(conn, sec?.entries)
+    }
+    rows.sort((a, b) => `${a.scope}\0${a.id}`.localeCompare(`${b.scope}\0${b.id}`))
+    const ws = XLSX.utils.json_to_sheet(rows, { header: ['scope', 'id', 'label', 'format', 'rules', 'rules_values', 'false_value', 'default'] })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'entries')
+    XLSX.writeFile(wb, 'dictionary_entries.xlsx')
+  }
+
   const scopeLabel = (s: string) => (s ? s : t('settings.dictionary.scope.shared'))
 
   return (
@@ -623,6 +650,9 @@ export default function DictionaryBuilder() {
           <>
             <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy}>
               <BookText size={13} /> {t('settings.dictscan.scanTable', 'Scan a table')}
+            </Button>
+            <Button $variant="ghost" $size="sm" onClick={exportEntries} disabled={busy || !dict} title={t('settings.dictionary.exportTitle', 'Export all entries to Excel (label / format / rule / default) — diff against the source data dictionary')}>
+              <FileSpreadsheet size={13} /> {t('settings.dictionary.export', 'Export')}
             </Button>
             <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
               <Undo2 size={13} /> {t('common.discard', 'Discard')}
@@ -826,10 +856,9 @@ export default function DictionaryBuilder() {
           // the SQL (shared editor + Build-a-SELECT wizard), not the whole QueryDef form.
           sqlOnly
           onClose={() => setEditQueryTarget(null)}
-          // Generated query: refresh only the connector list (preserve the unsaved record.query we
-          // just set). Otherwise reload the dictionary too so any query rename propagates into the
-          // LookupDef.query / SequenceDef.query references showing in the picker.
-          onSaved={editQueryTarget.generated ? refreshConnectors : load}
+          // Reload after an edit so any query rename propagates into the LookupDef.query /
+          // SequenceDef.query references showing in the picker.
+          onSaved={load}
         />
       )}
       {generateTarget && sel && (
@@ -842,13 +871,33 @@ export default function DictionaryBuilder() {
               .map((q) => String(q?.name ?? '')).filter(Boolean),
           )}
           onCancel={() => setGenerateTarget(null)}
-          onConfirm={({ name, sql }) => {
+          onConfirm={async ({ name, sql, params }) => {
+            // The operator already reviewed the SQL in the generator, so save the query straight to
+            // connectors.toml (fast tomllib write — no /admin/reload here; the dictionary record save
+            // reloads everything once) and point the record at it. No second editor / review step.
             const conn = generateTarget.connector
-            setGenerateTarget(null)
-            // Point the record at the new query up front, then open the bare editor (create mode)
-            // seeded with the generated SQL — review + the actual connectors write happen there.
-            setRecord(sel, { ...(section[sel] as Record<string, unknown>), query: name })
-            setEditQueryTarget({ connector: conn, queryName: name, seed: { type: 'custom', sql }, generated: true })
+            const recId = sel
+            // Type the new query by the kind being generated so it buckets into the connector's
+            // lookups / sequences section (not the generic queries section) on the server re-bucket.
+            const qType = kind === 'lookups' ? 'lookup' : kind === 'sequences' ? 'sequence' : 'custom'
+            // Declare the generated query's params (lookup key columns / sequence params) so the
+            // QueryDef carries them — the lookup binding / sequence narrowing reference them by name.
+            const paramDefs = params.filter(Boolean).map((p) => ({ name: p }))
+            setGenerateTarget(null); setBusy(true); setError(null)
+            try {
+              const d = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
+              const flat = flattenConnectorSections(d.connectors)
+              const cur = (flat[conn] ?? {}) as Record<string, unknown>
+              const arr = (Array.isArray(cur.queries) ? cur.queries : []) as Record<string, unknown>[]
+              if (!arr.some((q) => q && q.name === name)) arr.push({ name, sql, type: qType, ...(paramDefs.length ? { params: paramDefs } : {}) })
+              flat[conn] = { ...cur, queries: arr }
+              await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: flat })
+              await refreshConnectors()
+              setRecord(recId, { ...(section[recId] as Record<string, unknown>), query: name })
+              setStatus(t('settings.generateQuery.saved', 'Query "{{name}}" saved — set it on the record.', { name }))
+            } catch (e) {
+              setError(e instanceof ApiError ? e.message : String(e))
+            } finally { setBusy(false) }
           }}
         />
       )}

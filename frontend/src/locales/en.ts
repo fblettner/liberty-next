@@ -835,6 +835,7 @@ const en = {
       unsavedMsg: 'Discard your edits to this query?',
     },
     generateQuery: {
+      saved: 'Query "{{name}}" saved — set it on the record.',
       lookupTitle: 'Generate lookup query',
       sequenceTitle: 'Generate sequence query',
       table: 'Table to read from',
