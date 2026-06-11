@@ -2372,16 +2372,21 @@ class SQLConnector:
 
 def _resolve_conditional_rule(
     rules: str | None, rules_values: str | None, dictionary: DictionaryFile, *,
-    connector: str | None, language: str | None,
+    connector: str | None, language: str | None, false_value: str | None = None,
 ) -> dict[str, Any] | None:
     """Resolve a ``rules_when`` entry's (rules, rules_values) into a DisplayRule the same way the
     base rule resolves — a synthetic dictionary entry → :meth:`resolve_rule`. Blank ``rules`` → None
     (a plain input, no widget). Carries no entry-level ``lookup_params`` (the conditional lookup is a
-    DIFFERENT lookup than the column's DD entry; its dynamic params come from ``lookup_param_binds``)."""
+    DIFFERENT lookup than the column's DD entry; its dynamic params come from ``lookup_param_binds``).
+    ``false_value`` is the BOOLEAN branch's explicit uncheck value (else inferred from the true)."""
     r = rules.strip().upper() if rules else None
     if not r:
         return None
-    synth = DictionaryEntry(rules=r, rules_values=(rules_values.strip() if rules_values else None))
+    synth = DictionaryEntry(
+        rules=r,
+        rules_values=(rules_values.strip() if rules_values else None),
+        false_value=(false_value.strip() if false_value else None),
+    )
     return dictionary.resolve_rule(synth, connector=connector, language=language)
 
 
@@ -2432,7 +2437,7 @@ def _resolve_hint(
         hide_label=h.hide_label,
         rules_when=[
             {"field": w.field, "value": w.value,
-             "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language),
+             "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language, false_value=w.false_value),
              # Per-rule binds (this rule's lookup gets these — the grid binds them per distinct
              # value when fetching, so a parameterized conditional lookup resolves per row).
              "lookup_param_binds": [b.model_dump(mode="json", exclude_none=True) for b in w.lookup_param_binds],

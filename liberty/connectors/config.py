@@ -299,6 +299,15 @@ class RulesWhen(BaseModel):
         },
         description="The rule's id: ENUM → enum id; LOOKUP → lookup id; SEQUENCE/NN → sequence id; BOOLEAN → true marker.",
     )
+    false_value: str | None = Field(
+        default=None,
+        description=(
+            "BOOLEAN-only — value to write when the checkbox is unchecked, for THIS conditional rule "
+            "(independent of the column's base false value). Blank infers it from the true value "
+            "(Y→N, 1→0, true→false)."
+        ),
+        json_schema_extra={"x_visible_when": {"field": "rules", "value": "BOOLEAN"}},
+    )
     lookup_param_binds: list["ParamBind"] = Field(
         default_factory=list,
         description=(
@@ -314,7 +323,7 @@ class RulesWhen(BaseModel):
     def as_dict(self) -> dict[str, Any]:
         return {
             "field": self.field, "value": self.value,
-            "rules": self.rules, "rules_values": self.rules_values,
+            "rules": self.rules, "rules_values": self.rules_values, "false_value": self.false_value,
             "lookup_param_binds": [b.model_dump(mode="json", exclude_none=True) for b in self.lookup_param_binds],
             "return_binds": [{"param": b.param, "column": b.column} for b in self.return_binds],
         }
