@@ -16,9 +16,9 @@ import { TablePicker } from '../../common/SqlWizardModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null }
+interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null; rules?: string | null; rules_values?: string | null; default?: string | null }
 interface ScanResult { scope: string; dialect: string | null; jde: boolean; items: ScanItem[] }
-interface Sel { include: boolean; label: string; format: string }
+interface Sel { include: boolean; label: string; format: string; rules: string; rules_values: string; default: string }
 
 const Box = styled(Modal)`width: min(820px, 96vw); height: min(680px, 92vh);`
 const Header = styled.div`display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0; & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; }`
@@ -87,7 +87,10 @@ export function DictionaryScan({
       const r = await api.post<ScanResult>('/admin/dictionary/scan', body)
       setResult(r)
       const next: Record<string, Sel> = {}
-      for (const it of r.items) next[it.dd_id] = { include: !it.exists, label: it.label ?? '', format: it.format ?? '' }
+      for (const it of r.items) next[it.dd_id] = {
+        include: !it.exists, label: it.label ?? '', format: it.format ?? '',
+        rules: it.rules ?? '', rules_values: it.rules_values ?? '', default: it.default ?? '',
+      }
       setSel(next)
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
   }, [connector, preset, initialTable, pickedTable, pickedSchema, schema, scope, jde])
@@ -115,6 +118,11 @@ export function DictionaryScan({
         const entry: Record<string, unknown> = {}
         if (s.label.trim()) entry.label = s.label.trim()
         if (s.format) entry.format = s.format
+        // JDE DD enrichment — carry the rule + default the scan pulled (operator reviews + tweaks
+        // here, then in the dictionary editor). Only written when present so non-JDE stays terse.
+        if (s.rules.trim()) entry.rules = s.rules.trim()
+        if (s.rules_values.trim()) entry.rules_values = s.rules_values.trim()
+        if (s.default.trim()) entry.default = s.default.trim()
         sc.entries[it.dd_id] = entry
       }
       await api.put('/admin/config/dictionary/parsed', { dictionary: doc })
@@ -187,6 +195,8 @@ export function DictionaryScan({
                     <Th>{t('settings.dictscan.column', 'Column')}</Th>
                     <Th>{t('settings.dictscan.label', 'Label')}</Th>
                     <Th style={{ width: 120 }}>{t('settings.dictscan.format', 'Format')}</Th>
+                    <Th style={{ width: 130 }}>{t('settings.dictscan.rule', 'Rule')}</Th>
+                    <Th style={{ width: 110 }}>{t('settings.dictscan.default', 'Default')}</Th>
                     <Th style={{ width: 110 }}>{t('settings.dictscan.source', 'Source')}</Th>
                   </tr></thead>
                   <tbody>
@@ -198,6 +208,10 @@ export function DictionaryScan({
                           <Td><Mono>{it.dd_id}</Mono>{it.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists', 'exists')})</span>}<div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{it.column !== it.dd_id ? `${it.column} · ` : ''}{it.type}</div></Td>
                           <Td><Input value={s?.label ?? ''} disabled={it.exists} onChange={(e) => patch(it.dd_id, { label: e.target.value })} placeholder={it.dd_id} /></Td>
                           <Td><SearchSelect value={s?.format ?? ''} disabled={it.exists} onChange={(v) => patch(it.dd_id, { format: v })} options={FORMAT_OPTS} allowCustom /></Td>
+                          {/* Rule + default come from the JDE DD per-table query (when configured); the
+                              rule is a hint to refine in the dictionary editor, the default is editable here. */}
+                          <Td><span style={{ fontFamily: fonts.mono, fontSize: fontSize.micro, color: colors.text.muted }}>{s?.rules ? `${s.rules}${s.rules_values ? ` (${s.rules_values})` : ''}` : ''}</span></Td>
+                          <Td><Input value={s?.default ?? ''} disabled={it.exists} onChange={(e) => patch(it.dd_id, { default: e.target.value })} placeholder="—" /></Td>
                           <Td>{it.source === 'jde' ? <Tag $tone="orange">JDE&nbsp;DD</Tag> : <Tag $tone="blue">{t('settings.dictscan.inferred', 'inferred')}</Tag>}</Td>
                         </tr>
                       )
