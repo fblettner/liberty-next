@@ -462,10 +462,15 @@ class DictionaryFile(BaseModel):
             ed = self._find_enum(entry.rules_values or "", connector=connector)
             if ed is None:
                 return None
-            return {
+            enum_wire: dict[str, Any] = {
                 "kind": "enum",
                 "values": [{"value": v.value, "label": v.label_for(language)} for v in ed.values],
             }
+            # The enum set's own name — the frontend shows it as the empty-option label in a
+            # dropdown ("Security Type" instead of a bare "none") so an unset field still reads.
+            if getattr(ed, "label", None):
+                enum_wire["title"] = ed.label
+            return enum_wire
         if rule == "LOOKUP":
             lk = self._find_lookup(entry.rules_values or "", connector=connector)
             if lk is None:
@@ -477,6 +482,9 @@ class DictionaryFile(BaseModel):
                 "value": lk.value,
                 "label": lk.label,
             }
+            # The lookup's human description — used as the dropdown's empty-option label (see enum above).
+            if getattr(lk, "description", None):
+                wire["title"] = lk.description
             # Pass through the entry's static parameter bindings (v1's ly_dictionary_filters).
             # Without these the lookup query may return nothing (UDC queries need SY/RT to know
             # which UDC table to read).

@@ -39,6 +39,8 @@ import { runChain } from './actionRunner'
 type DataRow = Record<string, unknown>
 type Align = CSSProperties['textAlign']
 type EditCtrl = 'enum' | 'lookup' | 'boolean' | 'date' | 'number' | 'text'
+/** A select-filter option (code value + display label + the mono code shown beside it). */
+type FilterOpt = { value: string; label: string; mono?: string }
 
 function colHeader(c: Column): string { return c.label ?? c.name }
 // Column alignment: an explicit `align` hint wins; otherwise the natural default — booleans
@@ -208,7 +210,7 @@ function EditCell({
         value={defaultText}
         onChange={(v) => onChange(v === '' ? null : v)}
         options={opts}
-        anyLabel="—"
+        anyLabel={column.rule.title || '—'}
         placeholder=""
       />
     )
@@ -297,7 +299,7 @@ function EditCell({
         onChange={handlePick}
         options={opts}
         cellColumns={cellColumns}
-        anyLabel="—"
+        anyLabel={rule.title || '—'}
         loading={!ready}
         placeholder=""
       />
@@ -855,6 +857,52 @@ export function ResultTable({
     return { rule, data: spec ? lookupMaps.get(lookupKey(spec)) : undefined }
   }, [valuesOf, specForRule, lookupMaps])
 
+  // Filter options for a column with rules_when: the UNION across the base rule AND every conditional
+  // branch (a column can mix boolean / enum / lookup per row, so filtering by only the base rule's
+  // set misses values a conditional row holds). Codes match the column's raw value; ``byLabel`` is the
+  // variant the split enum/lookup label column filters by. null when there's no rules_when (use base).
+  const rulesWhenFilterOpts = useCallback((c: Column): { byCode: FilterOpt[]; byLabel: FilterOpt[] } | null => {
+    if (!c.rules_when || c.rules_when.length === 0) return null
+    const byCode = new Map<string, FilterOpt>()
+    const byLabel = new Map<string, FilterOpt>()
+    const add = (code: string, label: string) => {
+      const lab = label || code
+      if (code !== '' && !byCode.has(code.toLowerCase())) byCode.set(code.toLowerCase(), { value: code, label: lab, mono: code })
+      if (lab !== '' && !byLabel.has(lab.toLowerCase())) byLabel.set(lab.toLowerCase(), { value: lab, label: lab, mono: code })
+    }
+    const addRule = (rule: Column['rule'] | null, binds?: { param: string; value?: string | null; source?: string | null }[]) => {
+      if (!rule) return
+      if (rule.kind === 'boolean') {
+        add(rule.true_value, t('common.true'))
+        if (rule.false_value != null) add(rule.false_value, t('common.false'))
+      } else if (rule.kind === 'enum') {
+        for (const v of rule.values) add(v.value, v.label || v.value)
+      } else if (rule.kind === 'lookup') {
+        // Each distinct fetched map for this rule — the base spec (no binds) or one per distinct
+        // per-row bind value (all already prefetched into lookupMaps).
+        const specs = binds && binds.length
+          ? result.rows.map((row) => specForRule(rule, binds, row as Record<string, unknown>))
+          : [specForRule(rule, undefined, {})]
+        const seen = new Set<string>()
+        for (const spec of specs) {
+          if (!spec) continue
+          const k = lookupKey(spec); if (seen.has(k)) continue; seen.add(k)
+          const data = lookupMaps.get(k)
+          if (data) for (const [code, label] of data.map) add(String(code), String(label))
+        }
+      }
+    }
+    // Two passes (dedup is first-wins by code) so a SPECIFIC enum/lookup label beats a generic
+    // boolean "true"/"false" for the same code: FSRUN's "1" is "View" from an ENUM branch, not
+    // "true" from a BOOLEAN branch on another discriminator. Enum/lookup first; boolean fills the
+    // codes none of them labelled (e.g. the base Y/N).
+    const all = [{ rule: c.rule, binds: undefined as ({ param: string; value?: string | null; source?: string | null }[] | undefined) },
+      ...c.rules_when.map((rw) => ({ rule: rw.rule, binds: rw.lookup_param_binds }))]
+    for (const e of all) if (e.rule?.kind === 'enum' || e.rule?.kind === 'lookup') addRule(e.rule, e.binds)
+    for (const e of all) if (e.rule?.kind === 'boolean') addRule(e.rule)
+    return { byCode: [...byCode.values()], byLabel: [...byLabel.values()] }
+  }, [lookupMaps, result.rows, specForRule, t])
+
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
   // {normalized header text → result column name}, registering for each result column its `name`,
@@ -1214,6 +1262,9 @@ export function ResultTable({
     const out: ColumnDef<DataRow, unknown>[] = []
     for (const c of shownColumns) {
       const align = cellAlign(c)
+      // rules_when columns filter on the UNION of all branch options (see rulesWhenFilterOpts); a
+      // simple select (selectFilterFn) over codes works across the mixed boolean/enum/lookup kinds.
+      const uni = rulesWhenFilterOpts(c)
 
       if (c.rule?.kind === 'lookup') {
         const r = c.rule
@@ -1331,7 +1382,7 @@ export function ResultTable({
           header: c.hide_label ? colHeader(c) : colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
-          ...filterPropsFor('lookup', lookupOptsByCode, align, lookupCellColumns(r)),
+          ...filterPropsFor(uni ? 'enum' : 'lookup', uni ? uni.byCode : lookupOptsByCode, align, uni ? undefined : lookupCellColumns(r)),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
@@ -1344,7 +1395,7 @@ export function ResultTable({
           id: `${c.name}__lookup`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
-          ...filterPropsFor('lookup', lookupOptsByLabel, undefined, lookupCellColumns(r)),
+          ...filterPropsFor(uni ? 'enum' : 'lookup', uni ? uni.byLabel : lookupOptsByLabel, undefined, uni ? undefined : lookupCellColumns(r)),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code
@@ -1373,7 +1424,7 @@ export function ResultTable({
           header: c.hide_label ? colHeader(c) : colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
-          ...filterPropsFor('enum', optsByCode, align),
+          ...filterPropsFor('enum', uni ? uni.byCode : optsByCode, align),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
@@ -1393,7 +1444,7 @@ export function ResultTable({
             if (aw && aw.rule?.kind === 'enum') return aw.rule.values.find((x) => x.value === String(v))?.label || String(v)
             return emap?.get(String(v)) ?? String(v)
           },
-          ...filterPropsFor('enum', optsByLabel),
+          ...filterPropsFor('enum', uni ? uni.byLabel : optsByLabel),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // Derived from the "(ID)" column — read-only; reflects the current (possibly edited) code.
@@ -1410,17 +1461,18 @@ export function ResultTable({
       }
 
       const kind = filterKindOf(c)
-      const fp = filterPropsFor(kind, undefined, align)
+      // A rules_when column filters on the UNION of its branch options (mixed boolean/enum/lookup) via
+      // a plain select over codes; otherwise the base rule's filter kind.
+      const fp = filterPropsFor(uni ? 'enum' : kind, uni ? uni.byCode : undefined, align)
       out.push({
         id: c.name,
         header: colHeader(c),
         accessorFn: (row) => {
           const v = row[c.name]
-          // Honour rules_when: the boolean's true value can differ per row (a conditional BOOLEAN
-          // branch overrides the base Y/N), so resolve the active rule against the row.
-          const aw = activeRulesWhen(c.rules_when, row as Record<string, unknown>)
-          const eff = aw ? aw.rule : c.rule
-          if (eff?.kind === 'boolean') return v === null || v === undefined ? null : v === eff.true_value ? 'true' : 'false'
+          // rules_when → the union filter matches RAW codes (boolean true/false codes, enum/lookup
+          // codes), so return raw here. A pure BOOLEAN column keeps its true/false sort/filter token.
+          if (c.rules_when?.length) return v
+          if (c.rule?.kind === 'boolean') return v === null || v === undefined ? null : v === c.rule.true_value ? 'true' : 'false'
           return v
         },
         size: c.width ?? undefined,
@@ -1456,7 +1508,7 @@ export function ResultTable({
     // ``setEditTick`` on every edit) is enough — flexRender is called fresh and the new
     // ``defaultText`` flows to the SearchSelect / Checkbox / EditInput. Uncontrolled inputs
     // ignore ``defaultValue`` changes after mount, so the DOM keeps the user's typed text.
-  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span])
+  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span, rulesWhenFilterOpts])
 
   // the leftmost select + status columns — rebuild freely on edit-state changes; they hold no
   // <input>, only checkboxes/markers/buttons, so remounting them is harmless.
