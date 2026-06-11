@@ -356,6 +356,20 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         base[`LOOKUP_RETURN_PARAMS__${lkpId}`] = { label: `Return params — ${lkpId}`, values: rps.map((p) => ({ value: p, label: p, mono: p })) }
       }
     }
+    // SEQUENCE / NN columns: the ``lookup_param_binds.param`` dropdown resolves via the SAME
+    // ``LOOKUP_PARAMS__<rules_values>`` ancestor ref a lookup uses (a sequence is a lookup that
+    // returns the next id). The column points ``rules_values`` at the sequence query, so build the
+    // enum from THAT query's declared :params — a "next id per role" sequence declares ``LLUSER``.
+    {
+      const cols = Array.isArray(value.columns) ? (value.columns as Record<string, unknown>[]) : []
+      for (const c of cols) {
+        const rv = typeof c?.rules_values === 'string' ? c.rules_values : ''
+        const rk = typeof c?.rules === 'string' ? c.rules.toUpperCase() : ''
+        if (!rv || (rk !== 'SEQUENCE' && rk !== 'NN') || base[`LOOKUP_PARAMS__${rv}`]) continue
+        const vals = lookupQueryParamNames(wsConnectors, effectiveConnector, rv).map((p) => ({ value: p, label: p, mono: p }))
+        base[`LOOKUP_PARAMS__${rv}`] = { label: `Params — ${rv}`, values: vals }
+      }
+    }
     // COLUMN_GROUPS — the group ids defined on this screen, for the per-column ``group`` picker.
     // (The group editor itself — connector / query / bind dropdowns — is the dedicated
     // ColumnGroupsEditor, not a schema-enum field, so no WRITABLE_QUERIES enum is needed here.)
@@ -906,14 +920,22 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
                 }
                 const override = typeof col.rules === 'string' && col.rules ? col.rules.toUpperCase() : undefined
                 const effective = override ?? ddRule
-                // Can this column ever be a LOOKUP? base override / DD default / any rules_when entry.
+                // Can this column ever be a LOOKUP / SEQUENCE? base override / DD default / any
+                // rules_when entry. ``lookup_param_binds`` narrows BOTH a lookup query AND a sequence
+                // query (e.g. "next id for a role" binds the sequence's :ROLE from a row column), so
+                // it shows for either; ``hide_label`` / ``return_binds`` stay lookup-only.
                 const rw = Array.isArray(col.rules_when) ? (col.rules_when as Record<string, unknown>[]) : []
-                const canLookup = effective === 'LOOKUP'
-                  || rw.some((e) => typeof e?.rules === 'string' && e.rules.toUpperCase() === 'LOOKUP')
+                const ruleIs = (want: string[]) => want.includes(effective ?? '')
+                  || rw.some((e) => typeof e?.rules === 'string' && want.includes(e.rules.toUpperCase()))
+                const canLookup = ruleIs(['LOOKUP'])
+                const canBind = canLookup || ruleIs(['SEQUENCE', 'NN'])
                 return {
-                  // The Rules tab always shows (it holds the rule); hide the LOOKUP-only fields when
-                  // the column can't be a lookup — the declutter the old "Lookup tab only" gave us.
-                  hiddenFields: canLookup ? [] : ['hide_label', 'lookup_param_binds', 'return_binds'],
+                  // The Rules tab always shows (it holds the rule); hide the rule-specific fields when
+                  // they don't apply — the declutter the old "Lookup tab only" gave us.
+                  hiddenFields: [
+                    ...(canLookup ? [] : ['hide_label', 'return_binds']),
+                    ...(canBind ? [] : ['lookup_param_binds']),
+                  ],
                   fieldNotes: !override && ddRule
                     ? { rules: (
                         <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>

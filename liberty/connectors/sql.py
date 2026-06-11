@@ -1666,7 +1666,9 @@ class SQLConnector:
         # even when the dd's own rule is something else (e.g. APPS_ID is a LOOKUP target *and*
         # gets an auto-ID from ``[sequences.get_apps_id_from_…]``).
         dd_by_col: dict[str, str] = {}
+        hint_by_col: dict[str, ColumnHint] = {}
         for col in (column_hints or []):
+            hint_by_col[col.name.upper()] = col
             ddk = (col.dd if col.dd else col.name) if col.dd != "" else ""
             if ddk:
                 dd_by_col[col.name.upper()] = ddk.upper()
@@ -1691,23 +1693,28 @@ class SQLConnector:
             #   2. via the dictionary entry's ``rules = "SEQUENCE"`` / ``"NN"`` → ``rules_values``
             #      (the sequence id, looked up via :meth:`find_sequence`).
             seq_def: SequenceDef | None = None
+            hint = hint_by_col.get(k.upper())
             dd = dd_by_col.get(k.upper(), k.upper())
             seq_def = self._dict.find_sequence_by_dd_id(dd, connector=scope)
             seq_query_name: str | None = seq_def.query if seq_def is not None else None
             if seq_def is None:
                 m = meta.get(k.upper())
-                if m is None or m["rule"] not in _RULES_SEQUENCE:
+                # The column hint's own ``rules`` override drives WRITE-side resolution too (not just
+                # display): a screen can mark a column SEQUENCE / point it at a query without a
+                # dictionary-level rule (f0093's LLSEQ). Hint wins, else the dictionary entry's rule.
+                rule = (hint.rules.upper() if hint and hint.rules else None) or (m["rule"] if m else None)
+                rules_val = (hint.rules_values if hint and hint.rules_values else None) or (m["rules_values"] if m else None)
+                if rule not in _RULES_SEQUENCE:
                     continue
-                seq_ref = m["rules_values"]
-                if not seq_ref:
+                if not rules_val:
                     _log.warning(
                         "%s.%s: SEQUENCE rule on column %s has no rules_values — bind left NULL",
                         self.name, qdef.name, k,
                     )
                     continue
-                # Sequence id → SequenceDef → query name. Falls back to "treat rules_values as
-                # the query name" for legacy / hand-edited dictionaries.
-                seq_ref_str = str(seq_ref).strip()
+                # Sequence id → SequenceDef → query name. Falls back to "treat rules_values as the
+                # query name" for legacy / hand-edited dictionaries.
+                seq_ref_str = str(rules_val).strip()
                 seq_def = self._dict.find_sequence(seq_ref_str, connector=scope)
                 seq_query_name = seq_def.query if seq_def is not None else seq_ref_str
             seq_qdef = self._queries.get(seq_query_name or "")
@@ -1721,25 +1728,49 @@ class SQLConnector:
                 seq_qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
                 connector=self.name, query=seq_qdef.name, pool=self.pool_name,
             )
-            # Bind whatever the sequence query references from the *current* row — ``text()`` only
-            # binds names it sees in the SQL, so a sequence that narrows by APPS_ID picks it up
-            # automatically without extra param plumbing. Missing names → SQL NULL.
-            seq_bound = {name: out.get(name) for name in find_bind_params(seq_sql)}
+            # The column's configured param binds (``lookup_param_binds`` — the SAME field a lookup
+            # uses) → ``{PARAM: value}``. A SEQUENCE is just a lookup that returns the next id, so each
+            # bind doubles as BOTH: (a) a value for a matching ``:param`` IN the SQL, and (b) a filter
+            # on the result column of that name. So "max per role" works whether the query narrows
+            # server-side (``WHERE LLUSER = :LLUSER``) OR returns every role's max (``GROUP BY LLUSER``,
+            # and we pick the current row's). Value mode wins; source mode reads the row, with default.
+            bind_vals: dict[str, Any] = {}
+            for b in (hint.lookup_param_binds if hint is not None else []):
+                if b.value is not None:
+                    bv: Any = b.value
+                elif b.source:
+                    bv = out.get(b.source.upper())
+                    if (bv is None or bv == "") and b.default is not None:
+                        bv = b.default
+                else:
+                    continue
+                if bv is None or bv == "":
+                    continue
+                bind_vals[b.param.upper()] = bv
+            # (a) Bind each :param the SQL declares — a configured bind wins over the bare name-match.
+            seq_bound = {name: bind_vals.get(name.upper(), out.get(name)) for name in find_bind_params(seq_sql)}
             try:
                 r = await conn.execute(text(seq_sql), seq_bound)
-                row = r.first()
-                if row is None:
-                    _log.warning(
-                        "%s.%s: SEQUENCE query %r returned no rows — bind %s left NULL",
-                        self.name, qdef.name, seq_query_name, k,
-                    )
-                    continue
-                # Take the first column of the first row — sequence queries return the
-                # *next* number directly (``SELECT COALESCE(MAX(col), 0) + 1 ...``). The
-                # migration rewrites v1's ``MAX(col)``-only pattern to include ``+ 1`` so
-                # operator-written and migrated queries follow one rule.
-                next_val = row[0]
-                if isinstance(next_val, str) and next_val.strip().isdigit():
+                result_rows = r.mappings().all()
+                # (b) Filter the rows by any bind whose param is a RESULT COLUMN (the GROUP BY case) —
+                # keep the row whose ``<param>`` equals the bound value, trim-tolerant like a lookup.
+                # A bind that was an SQL ``:param`` (already narrowed server-side) isn't a result column
+                # here, so it's skipped — no double-filtering.
+                if bind_vals and result_rows:
+                    colmap = {str(c).lower(): c for c in result_rows[0].keys()}
+                    for pname, want in bind_vals.items():
+                        col = colmap.get(pname.lower())
+                        if col is None:
+                            continue
+                        result_rows = [rw for rw in result_rows if str(rw.get(col) or "").strip() == str(want).strip()]
+                # Empty set (a GROUP BY query + a brand-new discriminator → no group row) OR a NULL
+                # value (a ``MAX(...)`` without ``COALESCE`` over zero rows) both mean "no records yet"
+                # → the FIRST id, which for an auto-increment sequence is 1. Defaulting here keeps the
+                # operator's queries simple (no per-query COALESCE/WHERE rewrite needed).
+                next_val: Any = next(iter(result_rows[0].values())) if result_rows else None
+                if next_val is None or (isinstance(next_val, str) and next_val.strip() == ""):
+                    next_val = 1
+                elif isinstance(next_val, str) and next_val.strip().isdigit():
                     next_val = int(next_val)
                 out[k] = next_val
             except Exception as exc:  # noqa: BLE001 — log + fall through, NULL is acceptable here
