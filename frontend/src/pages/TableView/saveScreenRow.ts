@@ -103,7 +103,12 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
         if (groupOf(k) === grp.id && !isPw(k)) gSaved[k] = v
       }
       for (const kc of keyCols) { const v = valueFor(kc, a.savedRow); if (v != null) gSaved[kc] = v }
-      gParams = { ...gSaved, ...gvals, ...fk, ...originalKeys(gSaved) }
+      // The FK link (param_binds target → parent value) is the IMMUTABLE 1:1 key — its original value
+      // equals the parent's PK. So bind ``:<FK>_ORIGINAL`` from ``fk`` too, not only from the read
+      // result: when the FK column name differs from the parent PK (e.g. LDAP_APPS_ID vs APPS_ID) and
+      // the read query doesn't surface it, gSaved would miss it and the WHERE rebind would be NULL.
+      // ``originalKeys(fk)`` last so the authoritative parent-link value wins.
+      gParams = { ...gSaved, ...gvals, ...fk, ...originalKeys(gSaved), ...originalKeys(fk) }
     } else {
       gParams = { ...gvals, ...fk }
     }
