@@ -104,6 +104,8 @@ def test_scan_jde_forced_strips_prefix(app) -> None:
         by = {it["column"]: it for it in body["items"]}
         assert by["cust_id"]["data_item"] == "ST_ID"       # 'cust_id' minus the 2-char prefix 'cu' → 'ST_ID'
         assert by["cust_name"]["data_item"] == "ST_NAME"
+        # The dictionary id is keyed by the SHARED data item (the prefix is per-table), not the column.
+        assert by["cust_id"]["dd_id"] == "ST_ID" and by["cust_name"]["dd_id"] == "ST_NAME"
 
 
 def test_scan_by_query_describes_reversed_table(app) -> None:

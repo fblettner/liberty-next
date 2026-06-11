@@ -12,6 +12,7 @@ import styled from '@emotion/styled'
 import { X, BookText, Search } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, Checkbox, SearchSelect, SpinnerRing, Tag, type SearchSelectOption } from '../../common'
+import { TablePicker } from '../../common/SqlWizardModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -50,10 +51,16 @@ export function DictionaryScan({
 }) {
   const { t } = useTranslation()
   const { connectors } = useWorkspace()
-  // Pre-filled (table mode) from the reverse wizard, else standalone (query mode).
+  // Pre-filled from the reverse wizard (connector + table passed in), else standalone (pick a table).
   const preset = !!(initialConnector && initialTable)
   const [connector, setConnector] = useState(initialConnector ?? '')
-  const [query, setQuery] = useState('')   // standalone: an already-reversed read query
+  // Standalone: the table picked from the live pool (schema EXPRESSION + name) — same lazy picker
+  // the SQL wizard / query generator use, so a big JDE pool doesn't dump every table on open.
+  const [pickedSchema, setPickedSchema] = useState<string | null>(null)
+  const [pickedTable, setPickedTable] = useState('')
+  // JD Edwards toggle — when on, the scan strips the 2-char table prefix so the dictionary entry is
+  // keyed by the shared data item (FRDTAI → DTAI). Not persisted; defaulted from the connector name.
+  const [jde, setJde] = useState(/jde/i.test(initialConnector ?? ''))
   // The dictionary SCOPE (which app the entries live under). Usually the connector, but for a
   // cross-pool app it differs — e.g. the `nomajde` app's queries run against the `jdedwards` data
   // pool, yet its dictionary entries are `connectors.nomajde.entries`. So this is selectable.
@@ -65,34 +72,30 @@ export function DictionaryScan({
   const [status, setStatus] = useState<string | null>(null)
 
   const sqlConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql').map((c) => c.name), [connectors])
-  // Standalone query picker: the connector's already-defined READ queries — i.e. the tables
-  // you've already reversed. (Not a fresh DB introspection — that'd list every table in the
-  // schema; here we only offer what's been built.)
-  const readQueries = useMemo<SearchSelectOption[]>(() => {
-    const c = (connectors ?? []).find((x) => x.name === connector && x.type === 'sql')
-    if (!c || c.type !== 'sql') return []
-    return c.queries
-      .filter((q) => (q.statement_type ?? 'SELECT').toUpperCase() === 'SELECT')
-      .map((q) => ({ value: q.name, label: q.label || q.name, mono: q.name }))
-  }, [connectors, connector])
 
   const scan = useCallback(async () => {
-    if (!connector || (!preset && !query)) return
+    const tableName = preset ? initialTable : pickedTable
+    if (!connector || !tableName) return
     setBusy(true); setError(null); setStatus(null); setResult(null)
     try {
-      const body = preset
-        ? { connector, table: initialTable, ...(schema ? { schema } : {}), ...(scope ? { scope } : {}) }
-        : { connector, query, ...(scope ? { scope } : {}) }
+      const schemaExpr = preset ? schema : (pickedSchema ?? undefined)
+      const body = {
+        connector, table: tableName, jde,
+        ...(schemaExpr ? { schema: schemaExpr } : {}),
+        ...(scope ? { scope } : {}),
+      }
       const r = await api.post<ScanResult>('/admin/dictionary/scan', body)
       setResult(r)
       const next: Record<string, Sel> = {}
       for (const it of r.items) next[it.dd_id] = { include: !it.exists, label: it.label ?? '', format: it.format ?? '' }
       setSel(next)
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
-  }, [connector, query, preset, initialTable, schema, scope])
+  }, [connector, preset, initialTable, pickedTable, pickedSchema, schema, scope, jde])
 
-  // Auto-scan when pre-filled from the wizard.
+  // Auto-scan when pre-filled from the wizard; re-scan when the JDE toggle changes after a scan.
   useEffect(() => { if (preset) void scan() }, [preset, scan])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only on the JDE toggle
+  useEffect(() => { if (!preset && result) void scan() }, [jde])
 
   const patch = (id: string, p: Partial<Sel>) => setSel((s) => ({ ...s, [id]: { ...s[id], ...p } }))
   const chosen = result ? result.items.filter((it) => sel[it.dd_id]?.include) : []
@@ -136,26 +139,38 @@ export function DictionaryScan({
           {status && <Banner $tone="ok">{status}</Banner>}
 
           {!preset && (
-            <PickRow>
-              <Field label={t('settings.charts.connector', 'Connector')}>
-                <SearchSelect value={connector} onChange={(v) => { setConnector(v); setQuery(''); setScope(v); setResult(null) }}
-                  options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} placeholder={t('chart.spec.pick', 'Pick…')} />
-              </Field>
-              <Field label={t('settings.dictscan.query', 'Reversed table (read query)')}>
-                <SearchSelect value={query} onChange={(v) => { setQuery(v); setResult(null) }}
-                  options={readQueries}
-                  placeholder={connector ? (readQueries.length ? t('chart.spec.pick', 'Pick…') : t('settings.dictscan.noQueries', 'No read queries on this connector')) : t('settings.charts.pickConnFirst', 'Pick a connector first')} allowCustom />
-              </Field>
-              <Field label={t('settings.dictscan.scope', 'Store under (app)')}>
-                <SearchSelect value={scope} onChange={(v) => { setScope(v); setResult(null) }}
-                  options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} allowCustom
-                  placeholder={t('chart.spec.pick', 'Pick…')} />
-              </Field>
-              <Button $size="sm" $variant="primary" onClick={() => void scan()} disabled={!connector || !query || busy}>
+            <>
+              <PickRow>
+                <Field label={t('settings.charts.connector', 'Connector')}>
+                  <SearchSelect value={connector} onChange={(v) => { setConnector(v); setPickedTable(''); setPickedSchema(null); setScope(v); setResult(null); setJde(/jde/i.test(v)) }}
+                    options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} placeholder={t('chart.spec.pick', 'Pick…')} />
+                </Field>
+                <Field label={t('settings.dictscan.scope', 'Store under (app)')}>
+                  <SearchSelect value={scope} onChange={(v) => { setScope(v); setResult(null) }}
+                    options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} allowCustom
+                    placeholder={t('chart.spec.pick', 'Pick…')} />
+                </Field>
+              </PickRow>
+              {/* Lazy table picker — schema -> filter -> table, no full-catalog walk. */}
+              <div style={{ marginTop: 8 }}>
+                <Field label={t('settings.dictscan.table', 'Table to scan')}>
+                  {connector
+                    ? <TablePicker connector={connector} onPick={(p) => { setPickedSchema(p.schema); setPickedTable(p.name); setResult(null) }} />
+                    : <Muted>{t('settings.charts.pickConnFirst', 'Pick a connector first')}</Muted>}
+                  {pickedTable && <div style={{ marginTop: 4, fontSize: fontSize.sm, color: colors.text.muted }}>{pickedSchema ? `${pickedSchema}.` : ''}{pickedTable}</div>}
+                </Field>
+              </div>
+            </>
+          )}
+          {/* JD Edwards toggle — strips the 2-char table prefix so entries key on the shared data item. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+            <Checkbox checked={jde} onChange={setJde} label={t('settings.dictscan.jde', 'JD Edwards connector (strip 2-char prefix → shared data item)')} />
+            {!preset && (
+              <Button $size="sm" $variant="primary" onClick={() => void scan()} disabled={!connector || !pickedTable || busy} style={{ marginLeft: 'auto' }}>
                 {busy ? <SpinnerRing size={13} thickness={2} /> : <Search size={13} />} {t('settings.dictscan.scan', 'Scan')}
               </Button>
-            </PickRow>
-          )}
+            )}
+          </div>
 
           {result && (
             <>
@@ -180,7 +195,7 @@ export function DictionaryScan({
                       return (
                         <tr key={it.dd_id} style={it.exists ? { opacity: 0.55 } : undefined}>
                           <Td><Checkbox checked={!!s?.include} disabled={it.exists} onChange={(v) => patch(it.dd_id, { include: v })} /></Td>
-                          <Td><Mono>{it.dd_id}</Mono>{it.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists', 'exists')})</span>}<div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{it.type}{it.data_item ? ` · DD ${it.data_item}` : ''}</div></Td>
+                          <Td><Mono>{it.dd_id}</Mono>{it.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists', 'exists')})</span>}<div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{it.column !== it.dd_id ? `${it.column} · ` : ''}{it.type}</div></Td>
                           <Td><Input value={s?.label ?? ''} disabled={it.exists} onChange={(e) => patch(it.dd_id, { label: e.target.value })} placeholder={it.dd_id} /></Td>
                           <Td><SearchSelect value={s?.format ?? ''} disabled={it.exists} onChange={(v) => patch(it.dd_id, { format: v })} options={FORMAT_OPTS} allowCustom /></Td>
                           <Td>{it.source === 'jde' ? <Tag $tone="orange">JDE&nbsp;DD</Tag> : <Tag $tone="blue">{t('settings.dictscan.inferred', 'inferred')}</Tag>}</Td>
