@@ -219,6 +219,11 @@ export function CrudWizardModal({
   // (= loading) when the operator switches schemas OR the debounced name filter changes.
   useEffect(() => {
     if (!pickedSchema) { setSchema(undefined); return }
+    // For a real (picker-active) schema, wait for a filter before fetching — a blank filter on a
+    // multi-schema Oracle/JDE pool walks hundreds of tables' columns. The operator types a pattern
+    // (``%`` for all) like the SQL wizard. The single-schema ``__nopicker__`` case has nothing to
+    // narrow, so fetch immediately.
+    if (pickedSchema !== '__nopicker__' && !nameLike) { setSchema(null); return }
     let cancelled = false
     setSchema(undefined)
     const arg = pickedSchema === '__nopicker__' ? null : pickedSchema
@@ -374,16 +379,16 @@ export function CrudWizardModal({
                   />
                 </Field>
               )}
-              {/* Optional name filter — debounced free-text input. ``F009%`` style patterns
-                  are applied server-side BEFORE the per-table column walk (the slow step),
-                  so a 2000-table SY920 narrowed to a F009% prefix returns under a second.
-                  Leave blank to fetch every table in the picked schema. */}
-              {pickedSchema && (
-                <Field label={t('settings.crudWizard.nameFilter', 'Table name filter (optional)')}>
+              {/* Name filter — debounced free-text input, required before tables load on a
+                  multi-schema pool. ``F009%`` style patterns are applied server-side BEFORE the
+                  per-table column walk (the slow step), so a 2000-table SY920 narrowed to a F009%
+                  prefix returns under a second. Type ``%`` to list every table in the schema. */}
+              {pickedSchema && pickedSchema !== '__nopicker__' && (
+                <Field label={t('settings.crudWizard.nameFilter', 'Table name filter')}>
                   <Input
                     value={nameLikeRaw}
                     onChange={(e) => { setNameLikeRaw(e.target.value); setTableName('') }}
-                    placeholder={t('settings.crudWizard.nameFilterPlaceholder', "e.g. F009%, USR_%, leave blank for all")}
+                    placeholder={t('settings.crudWizard.nameFilterPlaceholder', 'e.g. F009%, USR_%, % for all')}
                   />
                 </Field>
               )}
@@ -394,9 +399,11 @@ export function CrudWizardModal({
                   options={tableOpts}
                   placeholder={!pickedSchema && schemaOpts.length > 1
                     ? t('settings.crudWizard.pickSchemaFirst', 'Pick a schema first')
-                    : schema === undefined && pickedSchema
-                      ? t('settings.crudWizard.loadingTables', 'Loading tables…')
-                      : t('common.pick')}
+                    : pickedSchema && pickedSchema !== '__nopicker__' && !nameLike
+                      ? t('settings.crudWizard.typeFilter', 'Type a filter to list tables')
+                      : schema === undefined && pickedSchema
+                        ? t('settings.crudWizard.loadingTables', 'Loading tables…')
+                        : t('common.pick')}
                   disabled={!pickedSchema && schemaOpts.length > 1}
                   loading={schema === undefined && !!pickedSchema}
                 />

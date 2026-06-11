@@ -29,7 +29,7 @@ from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError, detect_statement_type
 from liberty.connectors.config import ColumnHint
-from liberty.connectors.introspect import introspect_pool, list_pool_schemas
+from liberty.connectors.introspect import introspect_pool, list_pool_schemas, resolve_schema_token
 from liberty.connectors.sql import StreamDone, StreamMeta, StreamRows
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, public_connector, request_language, require_permission
@@ -498,6 +498,10 @@ async def sql_pool_schema(
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
     only_schema = request.query_params.get("schema") or None
+    # Resolve a ``#SCHEMA.<KEY>#`` token the builder passes from a query's FROM to the pool's real
+    # schema — otherwise the owner-match below finds nothing and the wizard shows an empty table.
+    if only_schema:
+        only_schema = resolve_schema_token(only_schema, connectors.pools.schemas(conn.pool_name))
     name_like = request.query_params.get("name_like") or None
     try:
         return await introspect_pool(
