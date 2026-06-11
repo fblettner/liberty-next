@@ -154,10 +154,6 @@ export default function DictionaryBuilder() {
   // stub); omitted for Edit. null = closed.
   const [editQueryTarget, setEditQueryTarget] = useState<{
     connector: string; queryName: string; seed?: Record<string, unknown>
-    // ``generated`` marks a query created by the Generate button: on save we refresh the connector
-    // query list only (NOT a full dict reload, which would drop the unsaved ``query`` we just set on
-    // the record). The dict record's ``query`` is pointed at it up front, so the link survives.
-    generated?: boolean
   } | null>(null)
   // Generate-query target — the lazy table picker + dict-param-driven SQL generator. null = closed.
   const [generateTarget, setGenerateTarget] = useState<{ connector: string } | null>(null)
@@ -826,10 +822,9 @@ export default function DictionaryBuilder() {
           // the SQL (shared editor + Build-a-SELECT wizard), not the whole QueryDef form.
           sqlOnly
           onClose={() => setEditQueryTarget(null)}
-          // Generated query: refresh only the connector list (preserve the unsaved record.query we
-          // just set). Otherwise reload the dictionary too so any query rename propagates into the
-          // LookupDef.query / SequenceDef.query references showing in the picker.
-          onSaved={editQueryTarget.generated ? refreshConnectors : load}
+          // Reload after an edit so any query rename propagates into the LookupDef.query /
+          // SequenceDef.query references showing in the picker.
+          onSaved={load}
         />
       )}
       {generateTarget && sel && (
@@ -842,13 +837,33 @@ export default function DictionaryBuilder() {
               .map((q) => String(q?.name ?? '')).filter(Boolean),
           )}
           onCancel={() => setGenerateTarget(null)}
-          onConfirm={({ name, sql }) => {
+          onConfirm={async ({ name, sql, params }) => {
+            // The operator already reviewed the SQL in the generator, so save the query straight to
+            // connectors.toml (fast tomllib write — no /admin/reload here; the dictionary record save
+            // reloads everything once) and point the record at it. No second editor / review step.
             const conn = generateTarget.connector
-            setGenerateTarget(null)
-            // Point the record at the new query up front, then open the bare editor (create mode)
-            // seeded with the generated SQL — review + the actual connectors write happen there.
-            setRecord(sel, { ...(section[sel] as Record<string, unknown>), query: name })
-            setEditQueryTarget({ connector: conn, queryName: name, seed: { type: 'custom', sql }, generated: true })
+            const recId = sel
+            // Type the new query by the kind being generated so it buckets into the connector's
+            // lookups / sequences section (not the generic queries section) on the server re-bucket.
+            const qType = kind === 'lookups' ? 'lookup' : kind === 'sequences' ? 'sequence' : 'custom'
+            // Declare the generated query's params (lookup key columns / sequence params) so the
+            // QueryDef carries them — the lookup binding / sequence narrowing reference them by name.
+            const paramDefs = params.filter(Boolean).map((p) => ({ name: p }))
+            setGenerateTarget(null); setBusy(true); setError(null)
+            try {
+              const d = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
+              const flat = flattenConnectorSections(d.connectors)
+              const cur = (flat[conn] ?? {}) as Record<string, unknown>
+              const arr = (Array.isArray(cur.queries) ? cur.queries : []) as Record<string, unknown>[]
+              if (!arr.some((q) => q && q.name === name)) arr.push({ name, sql, type: qType, ...(paramDefs.length ? { params: paramDefs } : {}) })
+              flat[conn] = { ...cur, queries: arr }
+              await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: flat })
+              await refreshConnectors()
+              setRecord(recId, { ...(section[recId] as Record<string, unknown>), query: name })
+              setStatus(t('settings.generateQuery.saved', 'Query "{{name}}" saved — set it on the record.', { name }))
+            } catch (e) {
+              setError(e instanceof ApiError ? e.message : String(e))
+            } finally { setBusy(false) }
           }}
         />
       )}
