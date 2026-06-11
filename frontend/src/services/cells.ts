@@ -43,8 +43,11 @@ export function ruleCell(
     return { text: '●', isNull: false, kind: truthy ? 'boolean-true' : 'boolean-false' }
   }
   if (rule.kind === 'enum') {
-    const hit = enumMaps?.get(raw)
-    return hit !== undefined ? { text: hit, isNull: false, kind: 'enum' } : { text: raw, isNull: false, kind: 'plain' }
+    // Prefer the precomputed map (base rule, built once per batch); fall back to the rule's own
+    // values so a per-row rules_when ENUM — whose values differ from the base — still resolves its
+    // label without a dedicated map.
+    const hit = enumMaps?.get(raw) ?? rule.values.find((v) => v.value === raw)?.label
+    return hit !== undefined && hit !== '' ? { text: hit, isNull: false, kind: 'enum' } : { text: raw, isNull: false, kind: 'plain' }
   }
   if (rule.kind === 'lookup') {
     if (lookupMap === undefined) return { text: raw, isNull: false, kind: 'lookup-pending' }

@@ -28,7 +28,7 @@ from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.connectors.base import ConnectorError
 from liberty.connectors.dictionary import load_dictionary
-from liberty.connectors.introspect import introspect_pool
+from liberty.connectors.introspect import introspect_pool, resolve_schema_token
 
 router = APIRouter(prefix="/admin", tags=["dictionary"])
 
@@ -103,8 +103,11 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
     # Resolve (name, type) column pairs + the pool dialect, from whichever source was given.
     cols: list[tuple[str, str | None]]
     if body.table:
+        # Resolve a portable ``#SCHEMA.<KEY>#`` token to the pool's real owner before introspecting
+        # (the table picker hands back the token when the pool maps one).
+        real_schema = resolve_schema_token(body.db_schema, registry.pools.schemas(conn.pool_name)) if body.db_schema else None
         try:
-            info = await introspect_pool(registry.pools, conn.pool_name, only_schema=body.db_schema, name_like=body.table)
+            info = await introspect_pool(registry.pools, conn.pool_name, only_schema=real_schema, name_like=body.table)
         except SQLAlchemyError as exc:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=f"schema introspection failed: {exc}") from exc
         table = next((t for t in info.get("tables", []) if str(t.get("name", "")).lower() == body.table.lower()), None)
@@ -147,9 +150,13 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
         # Dictionary ids are UPPERCASE by convention (the editors uppercase column ``name`` / ``dd``
         # via x_case, and ``find_entry`` is case-sensitive) — so a screen column ``CLA_ACTION`` only
         # resolves an entry keyed ``CLA_ACTION``. Postgres/SQLite hand back lowercase column names,
-        # so we uppercase the dd id here; otherwise the scan would mint entries that never resolve.
-        dd_id = name.upper()
-        data_item = dd_id[2:] if (is_jde and len(dd_id) > 2) else None
+        # so we uppercase here; otherwise the scan would mint entries that never resolve.
+        physical = name.upper()
+        # JDE physical columns are ``<2-char table prefix> + <data item>`` (``FRDTAI`` → ``DTAI``).
+        # The data item is SHARED across tables, so the dictionary entry is keyed by the stripped item
+        # (and queries alias the physical column back to it). Non-JDE: the id is the column itself.
+        data_item = physical[2:] if (is_jde and len(physical) > 2) else None
+        dd_id = data_item if data_item else physical
         label = dd_map.get(data_item) if data_item else None
         items.append({
             "column": name,

@@ -16,9 +16,11 @@ import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, Dicti
 import { renameKey } from '../../services/keyRename'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { lookupQueryParamNames } from './actionCandidates'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { EditQueryModal } from './EditQueryModal'
+import { GenerateQueryModal } from './GenerateQueryModal'
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -127,7 +129,7 @@ function setSection(
 export default function DictionaryBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
+  const { currentApp, refresh: refreshWorkspace, connectors: wsConnectors } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [dict, setDict] = useState<DictionaryData | null>(null)
   // Read-only — the *Lookups* form's query / value / label dropdowns read from here. We need to know
@@ -152,7 +154,13 @@ export default function DictionaryBuilder() {
   // stub); omitted for Edit. null = closed.
   const [editQueryTarget, setEditQueryTarget] = useState<{
     connector: string; queryName: string; seed?: Record<string, unknown>
+    // ``generated`` marks a query created by the Generate button: on save we refresh the connector
+    // query list only (NOT a full dict reload, which would drop the unsaved ``query`` we just set on
+    // the record). The dict record's ``query`` is pointed at it up front, so the link survives.
+    generated?: boolean
   } | null>(null)
+  // Generate-query target — the lazy table picker + dict-param-driven SQL generator. null = closed.
+  const [generateTarget, setGenerateTarget] = useState<{ connector: string } | null>(null)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -173,6 +181,14 @@ export default function DictionaryBuilder() {
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
   useEffect(load, [t])
+  // Re-fetch ONLY the connectors doc (refreshes the query dropdowns) without reloading the dict —
+  // used after the Generate flow creates a query, so the unsaved ``query`` set on the record survives.
+  const refreshConnectors = async () => {
+    try {
+      const c = await api.get<ConnectorsDoc>('/admin/config/connectors/parsed')
+      setConnectors(flattenConnectorSections(c.connectors))
+    } catch { /* silent — the operator can reload the page */ }
+  }
   // when the user changes section or scope, drop the (now-stale) selection + search
   useEffect(() => { setSel(null); setQ('') }, [kind, scope])
 
@@ -232,8 +248,10 @@ export default function DictionaryBuilder() {
     // LOOKUP_DD_FIELDS — the dictionary entries available to that effective connector (shared +
     // per-connector overlay). Drives `value` / `label` since columns are dd-named in practice.
     let effectiveConn = ''
-    if (kind === 'lookups' && sel) {
-      const rec = (overlay?.lookups?.[sel] ?? dict?.lookups?.[sel]) as Record<string, unknown> | undefined
+    if ((kind === 'lookups' || kind === 'sequences') && sel) {
+      // Sequences resolve their connector the same way lookups do — so the SequenceDef.query
+      // dropdown lists that connector's read queries instead of being empty.
+      const rec = (overlay?.[kind]?.[sel] ?? dict?.[kind]?.[sel]) as Record<string, unknown> | undefined
       const explicit = typeof rec?.connector === 'string' ? rec.connector : ''
       effectiveConn = explicit || (scope || '')
     }
@@ -295,10 +313,16 @@ export default function DictionaryBuilder() {
       const ruleKind = typeof ent?.rules === 'string' ? ent.rules.toUpperCase() : ''
       const ruleArg = typeof ent?.rules_values === 'string' ? ent.rules_values : ''
       if (ruleKind === 'LOOKUP' && ruleArg) {
-        // Lookups follow the same resolution path as entries — scope's overlay first, then shared
+        // Lookups follow the same resolution path as entries — scope's overlay first, then shared.
         const lkpRec = (overlay?.lookups?.[ruleArg] ?? dict?.lookups?.[ruleArg]) as Record<string, unknown> | undefined
-        const params = lkpRec?.params
-        if (Array.isArray(params)) lkpParamNames = params.filter((p): p is string => typeof p === 'string' && !!p)
+        if (lkpRec) {
+          // The :params you bind live on the lookup's QUERY (its declared params ∪ scanned
+          // :bind_params), NOT on the lookup record (whose ``key_columns`` are display
+          // disambiguation). Resolve lookup → connector + query → that query's params.
+          const lkpConn = (typeof lkpRec.connector === 'string' && lkpRec.connector) ? lkpRec.connector : (scope || '')
+          const qName = typeof lkpRec.query === 'string' ? lkpRec.query : ''
+          lkpParamNames = lookupQueryParamNames(wsConnectors, lkpConn, qName)
+        }
       }
     }
     base.CURRENT_LOOKUP_PARAMS = {
@@ -308,7 +332,7 @@ export default function DictionaryBuilder() {
       values: lkpParamNames.map((p) => ({ value: p, label: p })),
     }
     return base
-  }, [schemas, dict, scope, kind, sel, connectors])
+  }, [schemas, dict, scope, kind, sel, connectors, wsConnectors])
 
   // Other dictionary kinds in the current scope — drives the cross-kind warning in the
   // validator (e.g. "id '1' is also used as a lookup in this scope — runtime works but
@@ -758,6 +782,15 @@ export default function DictionaryBuilder() {
                     setEditQueryTarget({ connector: resolved, queryName: newName, seed: { type: 'custom', sql: '' } })
                   } catch { /* silent — operator can retry */ }
                 }}
+                // Generate (Lookup / Sequence only): scaffold the query from THIS record's params +
+                // a picked table. Opens the generator; its result is fed to EditQueryModal create.
+                onGenerateQuery={(kind === 'lookups' || kind === 'sequences')
+                  ? (conn) => {
+                      const resolved = conn || (scope || null)
+                      if (!resolved) return
+                      setGenerateTarget({ connector: resolved })
+                    }
+                  : undefined}
               />
             </Stack>
           ) : (
@@ -789,10 +822,34 @@ export default function DictionaryBuilder() {
           connector={editQueryTarget.connector}
           queryName={editQueryTarget.queryName}
           seed={editQueryTarget.seed}
+          // Lookup / Sequence query: the label + params live on the dictionary record, so edit just
+          // the SQL (shared editor + Build-a-SELECT wizard), not the whole QueryDef form.
+          sqlOnly
           onClose={() => setEditQueryTarget(null)}
-          // Reload the dictionary doc after a save so any query rename propagates into
-          // the LookupDef.query / SequenceDef.query references showing in the picker.
-          onSaved={load}
+          // Generated query: refresh only the connector list (preserve the unsaved record.query we
+          // just set). Otherwise reload the dictionary too so any query rename propagates into the
+          // LookupDef.query / SequenceDef.query references showing in the picker.
+          onSaved={editQueryTarget.generated ? refreshConnectors : load}
+        />
+      )}
+      {generateTarget && sel && (
+        <GenerateQueryModal
+          kind={kind as 'lookups' | 'sequences'}
+          connector={generateTarget.connector}
+          record={(section[sel] ?? {}) as Record<string, unknown>}
+          existingQueryNames={new Set(
+            (((connectors?.[generateTarget.connector]?.queries) as Record<string, unknown>[] | undefined) ?? [])
+              .map((q) => String(q?.name ?? '')).filter(Boolean),
+          )}
+          onCancel={() => setGenerateTarget(null)}
+          onConfirm={({ name, sql }) => {
+            const conn = generateTarget.connector
+            setGenerateTarget(null)
+            // Point the record at the new query up front, then open the bare editor (create mode)
+            // seeded with the generated SQL — review + the actual connectors write happen there.
+            setRecord(sel, { ...(section[sel] as Record<string, unknown>), query: name })
+            setEditQueryTarget({ connector: conn, queryName: name, seed: { type: 'custom', sql }, generated: true })
+          }}
         />
       )}
     </Shell>

@@ -161,7 +161,10 @@ class VisibleWhen(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(description="The filter column whose value gates this column's visibility.")
+    field: str = Field(
+        description="The filter column whose value gates this column's visibility.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
+    )
     value: str | list[str] = Field(description="The allowed value, or list of allowed values.")
 
     def as_dict(self) -> dict[str, Any]:
@@ -180,7 +183,7 @@ class DefaultWhen(BaseModel):
 
     field: str = Field(
         description="The sibling column whose value gates this default.",
-        json_schema_extra={"x_case": "upper"},
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     value: str | list[str] = Field(description="The discriminator value, or list of values, that triggers this default.")
     default: str = Field(description="The value forced into this column (and locked) while the condition holds.")
@@ -207,13 +210,18 @@ class ParamBind(BaseModel):
         description="Target parameter name (the ``:placeholder`` on the destination query).",
         # Param + source are column-name references. Normalise to UPPERCASE on save
         # so action chains / nested_table tabs / lookup binds all use one convention.
-        json_schema_extra={"x_case": "upper"},
+        # In a lookup_param_binds context the enclosing column/rule's ``rules_values`` picks the
+        # lookup → its query's :params (LOOKUP_PARAMS__<lookup id>). Resolves to nothing (free text)
+        # in non-lookup contexts (action / nested-table binds) — no enclosing ``rules_values``.
+        json_schema_extra={"x_case": "upper", "x_enum_ref_ancestor": {"field": "rules_values", "prefix": "LOOKUP_PARAMS__"}},
     )
     value: str | None = Field(default=None, description="Literal value to bind.")
     source: str | None = Field(
         default=None,
         description="Read the value at call time from a column / form field / chain context path.",
-        json_schema_extra={"x_case": "upper"},
+        # Offer the screen's columns as a dropdown (still free-text — a chain step can read a dotted
+        # context path like ``step1.first_row.col`` that isn't a column).
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     default: str | None = Field(
         default=None,
@@ -236,7 +244,9 @@ class ReturnBind(BaseModel):
             "A column returned by the lookup query whose value flows back — one of the lookup's "
             "``return_params`` (the picked row's column with this name)."
         ),
-        json_schema_extra={"x_case": "upper"},
+        # The enclosing column/rule's ``rules_values`` picks the lookup → its ``return_params``
+        # (LOOKUP_RETURN_PARAMS__<lookup id>), so the dropdown is narrowed to THIS lookup's fields.
+        json_schema_extra={"x_enum_ref_ancestor": {"field": "rules_values", "prefix": "LOOKUP_RETURN_PARAMS__"}, "x_case": "upper"},
     )
     column: str = Field(
         description="The screen column on this row to fill with the returned value.",
@@ -265,7 +275,7 @@ class RulesWhen(BaseModel):
 
     field: str = Field(
         description="The sibling column whose value selects the rule (e.g. FSSETY).",
-        json_schema_extra={"x_case": "upper"},
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     value: str | list[str] = Field(description="The discriminator value, or list of values, that selects this rule.")
     rules: str | None = Field(
@@ -289,6 +299,15 @@ class RulesWhen(BaseModel):
         },
         description="The rule's id: ENUM → enum id; LOOKUP → lookup id; SEQUENCE/NN → sequence id; BOOLEAN → true marker.",
     )
+    false_value: str | None = Field(
+        default=None,
+        description=(
+            "BOOLEAN-only — value to write when the checkbox is unchecked, for THIS conditional rule "
+            "(independent of the column's base false value). Blank infers it from the true value "
+            "(Y→N, 1→0, true→false)."
+        ),
+        json_schema_extra={"x_visible_when": {"field": "rules", "value": "BOOLEAN"}},
+    )
     lookup_param_binds: list["ParamBind"] = Field(
         default_factory=list,
         description=(
@@ -304,7 +323,7 @@ class RulesWhen(BaseModel):
     def as_dict(self) -> dict[str, Any]:
         return {
             "field": self.field, "value": self.value,
-            "rules": self.rules, "rules_values": self.rules_values,
+            "rules": self.rules, "rules_values": self.rules_values, "false_value": self.false_value,
             "lookup_param_binds": [b.model_dump(mode="json", exclude_none=True) for b in self.lookup_param_binds],
             "return_binds": [{"param": b.param, "column": b.column} for b in self.return_binds],
         }

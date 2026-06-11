@@ -24,7 +24,7 @@ import {
 } from '../../common'
 import ParamBindList, { type ParamBind } from './ParamBindList'
 import {
-  builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
+  builtinSourceOptions, lookupQueryParamNames, mergeCandidates, screenReadColumnOptions, targetParamOptions,
 } from './actionCandidates'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -338,6 +338,23 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
     base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
+    // Per-lookup param enums — keyed by lookup id so a nested ``lookup_param_binds.param`` /
+    // ``return_binds.param`` resolves (via ``x_enum_ref_ancestor`` on the enclosing column/rule's
+    // ``rules_values``) to exactly THAT lookup's query :params / declared return_params. One enum per
+    // lookup in scope (shared ∪ app overlay); the query's params come from the workspace connectors
+    // (declared ∪ scanned :bind_params). ``key_columns`` are deliberately NOT params (display-only).
+    for (const m of [dict?.lookups, dscope?.lookups]) {
+      if (!m) continue
+      for (const [lkpId, recRaw] of Object.entries(m)) {
+        const rec = recRaw as { connector?: unknown; query?: unknown; return_params?: unknown }
+        const lkpConn = (typeof rec.connector === 'string' && rec.connector) ? rec.connector : effectiveConnector
+        const qName = typeof rec.query === 'string' ? rec.query : ''
+        const params = lookupQueryParamNames(wsConnectors, lkpConn, qName)
+        base[`LOOKUP_PARAMS__${lkpId}`] = { label: `Params — ${lkpId}`, values: params.map((p) => ({ value: p, label: p, mono: p })) }
+        const rps = Array.isArray(rec.return_params) ? rec.return_params.filter((p): p is string => typeof p === 'string' && !!p) : []
+        base[`LOOKUP_RETURN_PARAMS__${lkpId}`] = { label: `Return params — ${lkpId}`, values: rps.map((p) => ({ value: p, label: p, mono: p })) }
+      }
+    }
     // COLUMN_GROUPS — the group ids defined on this screen, for the per-column ``group`` picker.
     // (The group editor itself — connector / query / bind dropdowns — is the dedicated
     // ColumnGroupsEditor, not a schema-enum field, so no WRITABLE_QUERIES enum is needed here.)
@@ -355,7 +372,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       values: postApplySteps.map((s) => ({ value: s.id, label: s.label ? `${s.label} (${s.id})` : s.id, mono: s.id })),
     }
     return base
-  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, app, selectedConnectorMeta, value.column_groups, postApplySteps])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, app, selectedConnectorMeta, value.column_groups, postApplySteps, wsConnectors, effectiveConnector])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so

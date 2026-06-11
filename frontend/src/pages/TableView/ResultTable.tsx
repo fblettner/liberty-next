@@ -1385,13 +1385,24 @@ export function ResultTable({
         if (!c.hide_label) out.push({
           id: `${c.name}__enum`,
           header: colHeader(c),
-          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (emap?.get(String(v)) ?? String(v)) },
+          accessorFn: (row) => {
+            const v = row[c.name]
+            if (v === null || v === undefined) return ''
+            // rules_when can swap the enum per row — resolve the active one's label.
+            const aw = activeRulesWhen(c.rules_when, row as Record<string, unknown>)
+            if (aw && aw.rule?.kind === 'enum') return aw.rule.values.find((x) => x.value === String(v))?.label || String(v)
+            return emap?.get(String(v)) ?? String(v)
+          },
           ...filterPropsFor('enum', optsByLabel),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // Derived from the "(ID)" column — read-only; reflects the current (possibly edited) code.
             const v = cur(info.row.original as DataRow, c.name)
-            const { text, kind, isNull } = ruleCell(v, c, emap, undefined)
+            // Per-row rules_when: a conditional ENUM resolves its own label (its values differ from
+            // the base enum's map), so pass the active rule + skip the base map when one matched.
+            const aw = activeRulesWhen(c.rules_when, info.row.original as Record<string, unknown>)
+            const cc = aw ? { ...c, rule: aw.rule ?? undefined } : c
+            const { text, kind, isNull } = ruleCell(v, cc, aw ? undefined : emap, undefined)
             return span(text, isNull ? 'null' : kind, align, isNull ? undefined : String(v ?? ''))
           },
         })
@@ -1404,7 +1415,11 @@ export function ResultTable({
         header: colHeader(c),
         accessorFn: (row) => {
           const v = row[c.name]
-          if (c.rule?.kind === 'boolean') return v === null || v === undefined ? null : v === c.rule.true_value ? 'true' : 'false'
+          // Honour rules_when: the boolean's true value can differ per row (a conditional BOOLEAN
+          // branch overrides the base Y/N), so resolve the active rule against the row.
+          const aw = activeRulesWhen(c.rules_when, row as Record<string, unknown>)
+          const eff = aw ? aw.rule : c.rule
+          if (eff?.kind === 'boolean') return v === null || v === undefined ? null : v === eff.true_value ? 'true' : 'false'
           return v
         },
         size: c.width ?? undefined,
@@ -1414,7 +1429,11 @@ export function ResultTable({
           if (editMode && !isGroupRow(info)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
           // Non-enum / non-lookup here (those are split out above), so no enum map is needed.
-          const { text, kind: rk, isNull } = ruleCell(v, c, undefined, undefined)
+          // Resolve rules_when per row so a conditional BOOLEAN renders with its own true/false
+          // (e.g. FSINSL's 1/0) instead of the column's base Y/N.
+          const aw = activeRulesWhen(c.rules_when, info.row.original as Record<string, unknown>)
+          const cc = aw ? { ...c, rule: aw.rule ?? undefined } : c
+          const { text, kind: rk, isNull } = ruleCell(v, cc, undefined, undefined)
           // Hover title: BOOLEAN cells (rendered as a colored bullet) get the localized "yes"/"no"
           // so the value stays accessible to keyboard / screen-reader / colorblind users.
           const titleVal = isNull ? undefined

@@ -16,11 +16,12 @@
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical, Wand2 } from 'lucide-react'
 import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
 import { SqlEditor } from './SqlEditor'
+import type { WizardStatementType } from './SqlWizardModal'
 import { colors, fontSize, fonts, radius } from '../theme'
 
 export interface JsonSchema {
@@ -56,6 +57,12 @@ export interface JsonSchema {
    *  `{field: "rules", map: {ENUM: "ENUM_IDS", LOOKUP: "LOOKUP_IDS", BOOLEAN: "BOOLEAN_TRUE_VALUES"}}`.
    *  The form watches the sibling and swaps the dropdown when it changes. */
   x_enum_ref_when?: { field: string; map: Record<string, string> }
+  /** Like `x_enum_ref`, but the ref NAME is built from a driver field found on the nearest ENCLOSING
+   *  object (this object's siblings first, then up the ancestor chain) — `<prefix><driver value>`.
+   *  Lets a deeply-nested field key its options off a parent's value, e.g. a lookup bind's `param`
+   *  resolving the enclosing column/rule's `rules_values` → that lookup's query params
+   *  (`LOOKUP_PARAMS__<lookup id>`). Falls through to no enum when no ancestor declares the field. */
+  x_enum_ref_ancestor?: { field: string; prefix: string }
   /** For a `dict[str, T]` field, the KEY is drawn from this framework-enum (the value editor stays
    *  whatever the additionalProperties type produces). e.g. `l: dict[str, str]` for translations
    *  uses `SUPPORTED_LANGUAGES` so the user picks "fr" / "Français" instead of typing a code. */
@@ -106,10 +113,29 @@ export const FrameworkEnumsContext = createContext<FrameworkEnums | null>(null)
  *  having to pass `sqlConnector` through every helper. `ConnectorsTableEditor` provides it. */
 export const SqlConnectorContext = createContext<string | undefined>(undefined)
 
+/** The statement kind of the SQL field being edited (the CRUD tab: read→SELECT, update→UPDATE,
+ *  insert→INSERT, delete→DELETE). Threaded into the SqlEditor's wizard so it builds the right kind
+ *  and locks read-only on a mismatch. `ConnectorsTableEditor` provides it per active tab; unset
+ *  elsewhere (the wizard then infers from the SQL). */
+export const SqlStatementContext = createContext<WizardStatementType | undefined>(undefined)
+
 /** Resolve a field's effective enum ref: prefer `x_enum_ref_when` (which switches by a sibling
  *  field's current value) over plain `x_enum_ref`. Returns `null` when no ref applies (the
  *  conditional rule fell through, or neither annotation is set). */
-function effectiveEnumRef(sub: JsonSchema, siblings: Record<string, unknown>): string | null {
+function effectiveEnumRef(
+  sub: JsonSchema,
+  siblings: Record<string, unknown>,
+  ancestors: Record<string, unknown>[] = [],
+): string | null {
+  if (sub.x_enum_ref_ancestor) {
+    const { field, prefix } = sub.x_enum_ref_ancestor
+    // Nearest scope that declares the driver field: this object first, then up the ancestor chain.
+    for (const scope of [siblings, ...ancestors]) {
+      const v = scope?.[field]
+      if (typeof v === 'string' && v) return prefix + v
+    }
+    return null  // no enclosing object set the driver → fall through to a plain (free-text) input
+  }
   if (sub.x_enum_ref_when) {
     const driver = siblings[sub.x_enum_ref_when.field]
     if (typeof driver === 'string') {
@@ -162,6 +188,7 @@ function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
     x_group: outer.x_group ?? branch.x_group,
     x_enum_ref: outer.x_enum_ref ?? branch.x_enum_ref,
     x_enum_ref_when: outer.x_enum_ref_when ?? branch.x_enum_ref_when,
+    x_enum_ref_ancestor: outer.x_enum_ref_ancestor ?? branch.x_enum_ref_ancestor,
     x_key_enum_ref: outer.x_key_enum_ref ?? branch.x_key_enum_ref,
     anyOf: undefined,
   } as JsonSchema
@@ -346,12 +373,13 @@ export function StringListEditor(
 // Reads the active connector from `SqlConnectorContext` (when set, schema-aware autocomplete is on).
 function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const connector = useContext(SqlConnectorContext)
+  const statementType = useContext(SqlStatementContext)
   const isMap = value != null && typeof value === 'object' && !Array.isArray(value)
   if (!isMap) {
     const text = value == null ? '' : String(value)
     return (
       <div>
-        <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} />
+        <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} statementType={statementType} />
         <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
       </div>
     )
@@ -366,7 +394,7 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
           <Row style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
-              <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} />
+              <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} statementType={statementType} />
             </div>
             {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>
@@ -492,7 +520,7 @@ function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
 }
 
 // a collapsible list of nested objects (the no-navigator fallback — params / columns / queries / …)
-function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void }) {
+function ObjectListEditor({ itemSchema, defs, value, onChange, ancestors }: { itemSchema: JsonSchema; defs: Defs; value: Record<string, unknown>[]; onChange: (v: Record<string, unknown>[]) => void; ancestors?: Record<string, unknown>[] }) {
   const [open, setOpen] = useState<number | null>(null)
   const summary = (it: Record<string, unknown>) => itemSummary(it, itemSchema, defs)
   return (
@@ -506,7 +534,7 @@ function ObjectListEditor({ itemSchema, defs, value, onChange }: { itemSchema: J
           </ItemHead>
           {open === i && (
             <ItemBody>
-              <SchemaForm schema={itemSchema} defs={defs} value={it} onChange={(v) => onChange(value.map((x, idx) => (idx === i ? v : x)))} />
+              <SchemaForm schema={itemSchema} defs={defs} value={it} onChange={(v) => onChange(value.map((x, idx) => (idx === i ? v : x)))} ancestors={ancestors} />
             </ItemBody>
           )}
         </ItemBox>
@@ -546,12 +574,16 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  */
 const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
 
-export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, hiddenFields, fieldNotes }: {
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, onGenerateQuery, hiddenGroups, hiddenFields, fieldNotes, ancestors }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
   defs?: Defs
   onNavigate?: (seg: NavSeg) => void
+  /** The chain of ENCLOSING objects (nearest first) — threaded down through nested object fields,
+   *  inline list items, and drill-in levels so a field's ``x_enum_ref_ancestor`` can read a driver
+   *  field off the nearest parent that sets it. Empty at the form root. */
+  ancestors?: Record<string, unknown>[]
   /** x_group tab names to omit entirely (the caller decides per-context — e.g. hide "Lookup"
    *  unless the column's effective rule is a lookup). Fields in a hidden group don't render. */
   hiddenGroups?: string[]
@@ -567,13 +599,15 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
    *  argument resolves from a sibling ``connector`` field; the parent may fall back to
    *  the surrounding scope.
    *
-   *    onEditQuery  — opens the existing query for editing (Edit3 icon)
-   *    onCloneQuery — prompts for a new name, clones the existing query (Copy icon)
-   *    onAddQuery   — prompts for a new name, creates a blank query (Plus icon)
+   *    onEditQuery     — opens the existing query for editing (Edit3 icon)
+   *    onCloneQuery    — prompts for a new name, clones the existing query (Copy icon)
+   *    onAddQuery      — prompts for a new name, creates a blank query (Plus icon)
+   *    onGenerateQuery — scaffolds a query from the record's params + a picked table (Wand2 icon)
    */
   onEditQuery?: (connector: string | null | undefined, queryName: string) => void
   onCloneQuery?: (connector: string | null | undefined, queryName: string) => void
   onAddQuery?: (connector: string | null | undefined) => void
+  onGenerateQuery?: (connector: string | null | undefined) => void
 }) {
   const allDefs = { ...(schema.$defs ?? {}), ...(defs ?? {}) }
   // A discriminated union (Pydantic `Widget = ChartWidget | KpiWidget` → `oneOf` + `discriminator`)
@@ -645,10 +679,17 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
   const groupNames = [...groups.keys()].filter((g) => !(hiddenGroups ?? []).includes(g))
   const showTabs = groupNames.length > 1
   const [tab, setTab] = useState(groupNames[0])
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- reset to the first tab when the *model* changes
-  // Tab resets when the *model* changes — for discriminated unions, "model" is the resolved
-  // branch's title (so switching widget type from chart→kpi snaps the tab strip back to General).
-  useEffect(() => { setTab(groupNames[0]) }, [resolvedSchema.title])
+  // Remember the active tab PER model (resolved schema title) within this form instance — the
+  // SchemaNavigator reuses one SchemaForm across drill-in/out, so when the model changes (drill into
+  // a list item, then back) we RESTORE the tab the operator last had on that model instead of always
+  // snapping to the first. Fixes "edit a column → open a rules_when → Back lands on the General tab".
+  const tabByModel = useRef<Map<string, string>>(new Map())
+  const selectTab = (g: string) => { setTab(g); tabByModel.current.set(resolvedSchema.title ?? '', g) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only re-key on model change
+  useEffect(() => {
+    const remembered = tabByModel.current.get(resolvedSchema.title ?? '')
+    setTab(remembered && groupNames.includes(remembered) ? remembered : groupNames[0])
+  }, [resolvedSchema.title])
   const activeProps = groups.get(tab) ?? groups.get(groupNames[0]) ?? []
   const enums = useContext(FrameworkEnumsContext)
 
@@ -657,7 +698,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
       {showTabs && (
         <TabsBar>
           {groupNames.map((g) => (
-            <TabBtn key={g} type="button" $active={(groups.get(tab) ? tab : groupNames[0]) === g} onClick={() => setTab(g)}>{g}</TabBtn>
+            <TabBtn key={g} type="button" $active={(groups.get(tab) ? tab : groupNames[0]) === g} onClick={() => selectTab(g)}>{g}</TabBtn>
           ))}
         </TabsBar>
       )}
@@ -685,7 +726,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         // depending on `rules`). If the field is *also* a Literal we constrain the option list to
         // that Literal's enum (the strict shape wins); otherwise it's a combobox (allowCustom —
         // typing a value the registry doesn't know commits).
-        const ref = effectiveEnumRef(sub, value)
+        const ref = effectiveEnumRef(sub, value, ancestors)
         const fe = enumFor(ref, enums)
         if (key === 'sql') {
           control = <SqlField value={cur} onChange={(v) => set(key, v)} />
@@ -731,7 +772,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
           // the caller's handler is responsible for falling back to the surrounding
           // scope). Edit / Clone require both connector + queryName; Add only needs
           // connector. Each button hides itself when its prerequisites aren't met.
-          if (ref && QUERY_ENUM_REFS.has(ref) && (onEditQuery || onCloneQuery || onAddQuery)) {
+          if (ref && QUERY_ENUM_REFS.has(ref) && (onEditQuery || onCloneQuery || onAddQuery || onGenerateQuery)) {
             const sibConn = typeof value.connector === 'string' ? value.connector : null
             const hasQuery = cur != null && String(cur) !== ''
             control = (
@@ -753,6 +794,12 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
                   <InlineActionBtn type="button" title="Add query" aria-label="Add query"
                     onClick={() => onAddQuery(sibConn)} disabled={!sibConn}>
                     <Plus size={13} />
+                  </InlineActionBtn>
+                )}
+                {onGenerateQuery && (
+                  <InlineActionBtn type="button" title="Generate query from table" aria-label="Generate query"
+                    onClick={() => onGenerateQuery(sibConn)} disabled={!sibConn}>
+                    <Wand2 size={13} />
                   </InlineActionBtn>
                 )}
               </div>
@@ -783,7 +830,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
             control = onNavigate
               ? <ObjectNavList itemSchema={items} defs={allDefs} value={objs} onChange={setArr}
                   onNavigate={(index, summary) => onNavigate({ kind: 'item', key, index, label: `${labelPlain}: ${summary}` })} />
-              : <ObjectListEditor itemSchema={items} defs={allDefs} value={objs} onChange={setArr} />
+              : <ObjectListEditor itemSchema={items} defs={allDefs} value={objs} onChange={setArr} ancestors={[value, ...(ancestors ?? [])]} />
           } else {
             control = <StringListEditor value={arr.map((x) => (x == null ? '' : String(x)))}
               onChange={(v) => set(key, v.length ? v.map((x) => applyCase(x, sub)) : undefined)} />
@@ -804,7 +851,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
             </NavListRow>
           ) : (
             <ItemBox><ItemBody style={{ borderTop: 'none' }}>
-              <SchemaForm schema={sub} defs={allDefs} value={subValue} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} />
+              <SchemaForm schema={sub} defs={allDefs} value={subValue} onChange={(v) => set(key, Object.keys(v).length ? v : undefined)} ancestors={[value, ...(ancestors ?? [])]} />
             </ItemBody></ItemBox>
           )
         } else if (sub.type === 'integer' || sub.type === 'number') {

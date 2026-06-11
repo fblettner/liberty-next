@@ -39,14 +39,15 @@ export interface NavRoot {
   }
 }
 
-export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }: {
+export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery, onGenerateQuery }: {
   root: NavRoot
   /** Forwarded to the underlying SchemaForm — fire when the operator clicks the in-line
-   *  Edit / Clone / Add buttons next to a query-bearing dropdown. Caller mounts the
-   *  EditQueryModal (with appropriate seed for clone / add) in response. */
+   *  Edit / Clone / Add / Generate buttons next to a query-bearing dropdown. Caller mounts the
+   *  EditQueryModal (with appropriate seed for clone / add) or the generator in response. */
   onEditQuery?: (connector: string | null | undefined, queryName: string) => void
   onCloneQuery?: (connector: string | null | undefined, queryName: string) => void
   onAddQuery?: (connector: string | null | undefined) => void
+  onGenerateQuery?: (connector: string | null | undefined) => void
 }) {
   const [path, setPath] = useState<NavSeg[]>([])
   useEffect(() => { setPath([]) }, [root.label])   // a different thing selected → back to the top
@@ -85,6 +86,10 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
   useEffect(() => { if (needTruncate != null) setPath((p) => p.slice(0, needTruncate)) }, [needTruncate])
 
   const cur = levels[levels.length - 1]
+  // The enclosing objects of the current level (nearest first) — so a drilled-in field's
+  // ``x_enum_ref_ancestor`` can read a driver off a parent (e.g. a lookup bind's ``param`` resolving
+  // the enclosing column/rule's ``rules_values``).
+  const ancestors = levels.slice(0, -1).map((l) => l.value).reverse()
   const go = (depth: number) => setPath((p) => p.slice(0, depth))   // depth 0 = root
 
   // Back lands on the parent level; the breadcrumb gives the full context. Both live in the pinned,
@@ -102,7 +107,8 @@ export function SchemaNavigator({ root, onEditQuery, onCloneQuery, onAddQuery }:
         backLabel={parentLabel}
         crumbs={crumbs}
       />
-      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery}
+      <SchemaForm schema={cur.schema} defs={defs} value={cur.value} onChange={cur.onChange} onNavigate={(seg) => setPath((p) => [...p, seg])} onEditQuery={onEditQuery} onCloneQuery={onCloneQuery} onAddQuery={onAddQuery} onGenerateQuery={onGenerateQuery}
+        ancestors={ancestors}
         {...(root.deriveContext?.(cur.value, cur.schema) ?? {})} />
     </div>
   )

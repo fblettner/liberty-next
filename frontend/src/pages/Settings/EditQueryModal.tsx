@@ -42,12 +42,17 @@ export interface EditQueryModalProps {
    *  Omitted → the modal stays in EDIT mode (current behaviour: load the existing query
    *  matching ``queryName`` and surface a "not found" banner if there's no match). */
   seed?: Record<string, unknown>
+  /** When true, render ONLY the ``sql`` field (the shared SqlEditor + Build-a-SELECT wizard) instead
+   *  of the whole QueryDef form. Used by the Dictionary's Lookup / Sequence query editor, where the
+   *  label / params already live on the dictionary record — the operator only needs the SQL. The
+   *  query's other fields (name, params, …) are preserved untouched across the save. */
+  sqlOnly?: boolean
 }
 
 type Connectors = ConnectorsDoc['connectors']
 type Query = Record<string, unknown>
 
-export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }: EditQueryModalProps) {
+export function EditQueryModal({ connector, queryName, onClose, onSaved, seed, sqlOnly }: EditQueryModalProps) {
   const { t } = useTranslation()
   const modals = useModals()
   const [conns, setConns] = useState<Connectors | null>(null)
@@ -106,6 +111,13 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
   const query = queryIdx >= 0 ? queries[queryIdx] : null
 
   const dirty = conns != null && JSON.stringify(conns) !== originalJson
+
+  // SQL-only mode reduces the QueryDef schema to just its ``sql`` property, so the SchemaForm renders
+  // only the editor (+ wizard). ``set('sql', …)`` spreads ``{...value}`` so the query's other fields
+  // (name, params, label, …) ride along untouched.
+  const formSchema = sqlOnly && queryDefSchema
+    ? ({ type: 'object', properties: { sql: (queryDefSchema.properties ?? {}).sql }, required: ['sql'] } as JsonSchema)
+    : queryDefSchema
 
   const updateQuery = (next: Query) => {
     if (!conns) return
@@ -170,10 +182,10 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
       saveDisabled={!dirty || !query}
       busy={busy}
       overlayZIndex={900}
-      frameStyle={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }}
+      frameStyle={{ width: 'min(820px, 95vw)', height: sqlOnly ? 'min(560px, 85vh)' : 'min(720px, 90vh)' }}
     >
       {error && <Banner $tone="error">{error}</Banner>}
-      {conns == null || queryDefSchema == null ? (
+      {conns == null || queryDefSchema == null || formSchema == null ? (
         <Centered />
       ) : query == null ? (
         <Banner $tone="info">
@@ -181,7 +193,7 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed }:
         </Banner>
       ) : (
         <SqlConnectorContext.Provider value={connector}>
-          <SchemaForm schema={queryDefSchema} defs={allDefs} value={query} onChange={(v: Query) => updateQuery(v)} />
+          <SchemaForm schema={formSchema} defs={allDefs} value={query} onChange={(v: Query) => updateQuery(v)} />
         </SqlConnectorContext.Provider>
       )}
     </EditorModalShell>

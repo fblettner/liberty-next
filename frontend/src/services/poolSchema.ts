@@ -102,6 +102,63 @@ export function findFirstReferencedTable(sql: string, schema: PoolSchema): strin
   return undefined
 }
 
+/** Every table referenced by a SQL string's top-level FROM / JOIN (paren-depth 0), as
+ *  ``{schema?, name}`` (schema split off a qualified ``SY920.F0092``). De-duplicated. Powers the
+ *  SQL editor's LAZY autocomplete — fetch only these tables' columns instead of the whole pool. */
+export function findReferencedTables(sql: string): { schema?: string; name: string }[] {
+  if (!sql) return []
+  // Match a plain ``[schema.]table`` OR a portable ``#SCHEMA.<KEY>#.<table>`` pool-schema token
+  // (the backend resolves the token to the real owner; the editor/wizard keep it for portability).
+  const re = /\b(?:FROM|JOIN|INTO|UPDATE)\s+(#SCHEMA(?:\.[A-Za-z0-9_]+)?#\.[A-Za-z_]\w*|[A-Za-z_][\w.]*)/gi
+  const depths = parenDepths(sql)
+  const out: { schema?: string; name: string }[] = []
+  const seen = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = re.exec(sql)) !== null) {
+    if ((depths[m.index] ?? 0) !== 0) continue   // inside a subquery — skip
+    const tok = m[1] ?? ''
+    let schema: string | undefined, name: string
+    const sm = tok.match(/^(#SCHEMA(?:\.[A-Za-z0-9_]+)?#)\.([A-Za-z_]\w*)$/i)
+    if (sm) { schema = sm[1]; name = sm[2] }                       // #SCHEMA.CTL#.F0004
+    else { const parts = tok.split('.'); name = parts.pop() ?? ''; schema = parts.length ? parts.pop() : undefined }
+    const key = `${(schema ?? '').toLowerCase()}.${name.toLowerCase()}`
+    if (!name || seen.has(key)) continue
+    seen.add(key)
+    out.push({ schema, name })
+  }
+  return out
+}
+
+/** Fetch ONLY the given tables' columns and assemble them into a partial :class:`PoolSchema` — the
+ *  lazy alternative to ``getPoolSchema`` for the SQL editor. Each ref is a targeted ``name_like``
+ *  fetch (scoped to its schema when qualified), so a 6-schema JDE pool resolves the 1-3 tables the
+ *  query actually touches in milliseconds instead of the 10s full-catalog walk. ``null`` → none. */
+export async function fetchTablesSchema(
+  connector: string, refs: { schema?: string; name: string }[],
+): Promise<PoolSchema | null> {
+  if (refs.length === 0) return null
+  const parts = await Promise.all(refs.map((r) => getPoolSchemaTables(connector, r.schema ?? null, r.name)))
+  const tables: PoolTable[] = []
+  const seen = new Set<string>()
+  let pool = '', dialect = ''
+  for (let i = 0; i < parts.length; i++) {
+    const r = parts[i]
+    if (!r) continue
+    pool = pool || r.pool; dialect = dialect || r.dialect
+    // The ``name_like`` fetch can return siblings (LIKE-match); keep only the table we asked for.
+    const want = refs[i].name.toLowerCase()
+    for (const tbl of r.tables) {
+      if (tbl.name.toLowerCase() !== want) continue
+      const k = `${(tbl.schema ?? '').toLowerCase()}.${tbl.name.toLowerCase()}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      tables.push(tbl)
+    }
+  }
+  if (tables.length === 0) return null
+  return { pool, dialect, tables, truncated: false }
+}
+
 /** Per-character paren-depth array (1-based after each `(`, decreased after each `)`),
  *  string-literal-aware so we don't count parens inside ``'foo (bar)'``. */
 function parenDepths(sql: string): number[] {
@@ -131,14 +188,15 @@ function parenDepths(sql: string): number[] {
 
 /** Lightweight schema-name list — used by the wizard's first dropdown. ``null`` on 403 / 502 /
  *  404 so the caller degrades gracefully (the picker shows "no schemas"). */
-const schemasCache = new Map<string, Promise<{ pool: string; dialect: string; schemas: string[] } | null>>()
-export function getPoolSchemaNames(
-  connector: string,
-): Promise<{ pool: string; dialect: string; schemas: string[] } | null> {
+// ``schema_map`` = the ``#SCHEMA.<KEY># → real schema`` mapping (empty for pools without one); lets
+// the wizard offer the portable token in its schema picker + keep it in generated SQL.
+export interface PoolSchemaNames { pool: string; dialect: string; schemas: string[]; schema_map?: Record<string, string> }
+const schemasCache = new Map<string, Promise<PoolSchemaNames | null>>()
+export function getPoolSchemaNames(connector: string): Promise<PoolSchemaNames | null> {
   let p = schemasCache.get(connector)
   if (!p) {
     p = api
-      .get<{ pool: string; dialect: string; schemas: string[] }>(`/api/sql/${encodeURIComponent(connector)}/_schemas`)
+      .get<PoolSchemaNames>(`/api/sql/${encodeURIComponent(connector)}/_schemas`)
       .catch((e) => {
         if (e instanceof ApiError) return null
         throw e

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -68,6 +69,26 @@ class TableInfo:
         if self.schema is not None:
             d["schema"] = self.schema
         return d
+
+
+_SCHEMA_TOKEN = re.compile(r"^#SCHEMA(?:\.([A-Za-z0-9_]+))?#$", re.IGNORECASE)
+
+
+def resolve_schema_token(value: str | None, pool_schemas: dict[str, str]) -> str | None:
+    """Resolve a ``#SCHEMA.<KEY>#`` placeholder (bare ``#SCHEMA#`` → the ``""`` key) to the pool's
+    real schema name via its ``schemas`` map. The config builder's SQL editor passes the PORTABLE
+    token from a query's FROM (e.g. ``#SCHEMA.CTL#.F0004``); the introspection walk needs the actual
+    owner. A plain schema name, or a token with no mapping, is returned unchanged."""
+    if not value:
+        return value
+    m = _SCHEMA_TOKEN.match(value.strip())
+    if not m or not pool_schemas:
+        return value
+    key = m.group(1) or ""
+    for k, v in pool_schemas.items():
+        if k.lower() == key.lower():
+            return v
+    return value
 
 
 def _scoped_schemas(inspector: Inspector, dialect: str, pool_schemas: dict[str, str]) -> list[str | None]:
@@ -256,7 +277,9 @@ async def list_pool_schemas(pools: PoolRegistry, pool_name: str) -> dict[str, An
     engine: AsyncEngine = pools.engine(pool_name)
     async with engine.connect() as conn:
         names = await conn.run_sync(_list_schemas_sync, dialect=dialect, pool_schemas=pool_schemas)
-    return {"pool": pool_name, "dialect": dialect, "schemas": names}
+    # ``schema_map`` — the ``#SCHEMA.<KEY># → real schema`` mapping so the builder's wizard can offer
+    # the PORTABLE token in its schema picker (and keep it in generated SQL) instead of the raw owner.
+    return {"pool": pool_name, "dialect": dialect, "schemas": names, "schema_map": dict(pool_schemas)}
 
 
 __all__ = ["ColumnInfo", "TableInfo", "introspect_pool", "list_pool_schemas", "DEFAULT_MAX_TABLES"]

@@ -15,15 +15,16 @@
 // import this file directly, so the Monaco worker import stays inside the Settings chunk.
 import '../services/monaco' // side effect: register Monaco + the SQL language; no-op when already loaded
 import MonacoEditor, { type OnChange, type OnMount } from '@monaco-editor/react'
+import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import styled from '@emotion/styled'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Wand2, Braces } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsLight } from './useIsLight'
 import { Centered } from './Spinner'
-import { findFirstReferencedTable, getPoolSchema, type PoolSchema } from '../services/poolSchema'
+import { findReferencedTables, fetchTablesSchema, getPoolSchemaNames } from '../services/poolSchema'
 import { attachPoolSchema } from '../services/sqlCompletion'
-import { SqlWizardModal } from './SqlWizardModal'
+import { SqlWizardModal, type WizardStatementType } from './SqlWizardModal'
 import { SqlTestRunner } from './SqlTestRunner'
 import { colors, fontSize, fonts, radius, EDITOR_FONT_PX } from '../theme'
 
@@ -50,6 +51,10 @@ const TokenItem = styled.button`
   & .tok { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
   & .desc { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
   &:hover { background: var(--hover-subtle); }
+`
+const TokenDivider = styled.div`
+  font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 6px 8px 2px; margin-top: 2px; border-top: 1px solid ${colors.border};
 `
 // The predefined query tokens the backend resolves at write time (liberty/connectors/sql.py:
 // _PREDEFINED_TOKENS). Inserting one writes ``{{TOKEN}}`` at the cursor; it's bound + coerced to the
@@ -84,6 +89,10 @@ export interface SqlEditorProps {
    *  columns after `<table>.`, plus the columns of any table referenced earlier in the
    *  statement when typing inside a SELECT clause. Also reveals the wizard + run buttons. */
   connector?: string
+  /** The kind of statement this slot holds (the CRUD tab: read→SELECT, update→UPDATE,
+   *  insert→INSERT, delete→DELETE). Drives the wizard: it builds that kind and opens read-only
+   *  when the current SQL's leading keyword doesn't match. Omitted → inferred from the SQL. */
+  statementType?: WizardStatementType
 }
 
 // One "row" is ~20px (Monaco's default line height at our font size) + 18px chrome for the gutter
@@ -92,21 +101,21 @@ export interface SqlEditorProps {
 const ROW_PX = 20
 const CHROME_PX = 18
 
-export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: SqlEditorProps) {
+export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, statementType }: SqlEditorProps) {
   const { t } = useTranslation()
   const isLight = useIsLight()
-  const [schema, setSchema] = useState<PoolSchema | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [runnerOpen, setRunnerOpen] = useState(false)
   const [tokenOpen, setTokenOpen] = useState(false)
   const tokenWrapRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+  const monacoRef = useRef<typeof Monaco | null>(null)
   const handleChange: OnChange = (v) => onChange(v ?? '')
-  // Insert a ``{{TOKEN}}`` at the cursor (replacing any selection), then refocus. Monaco's edit
-  // fires onChange, so the controlled `value` stays in sync. Falls back to appending if the editor
-  // hasn't mounted yet.
-  const insertToken = (tok: string) => {
-    const snippet = `{{${tok}}}`
+  // Insert a snippet at the cursor (replacing any selection), then refocus. Monaco's edit fires
+  // onChange, so the controlled `value` stays in sync. Falls back to appending if the editor hasn't
+  // mounted yet. ``insertToken`` wraps a predefined ``{{TOKEN}}``; the schema picker inserts the raw
+  // ``#SCHEMA.<KEY>#`` placeholder.
+  const insertSnippet = (snippet: string) => {
     const ed = editorRef.current
     setTokenOpen(false)
     if (ed) {
@@ -119,6 +128,20 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
     }
     onChange(value + snippet)
   }
+  const insertToken = (tok: string) => insertSnippet(`{{${tok}}}`)
+  // The connector pool's ``#SCHEMA.<KEY>#`` map (e.g. CTL → PS920CTL) — offered in the Token menu so
+  // the operator picks the portable placeholder instead of typing it. Empty for pools without a map.
+  const [schemaTokens, setSchemaTokens] = useState<{ key: string; owner: string }[]>([])
+  useEffect(() => {
+    if (!connector) { setSchemaTokens([]); return }
+    let cancelled = false
+    void getPoolSchemaNames(connector).then((s) => {
+      if (cancelled) return
+      const map = s?.schema_map ?? {}
+      setSchemaTokens(Object.entries(map).map(([key, owner]) => ({ key, owner: String(owner) })))
+    })
+    return () => { cancelled = true }
+  }, [connector])
   // Close the token menu on an outside click.
   useEffect(() => {
     if (!tokenOpen) return
@@ -128,18 +151,30 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
   }, [tokenOpen])
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
-    if (!connector) return
-    const model = editor.getModel()
-    if (!model) return
-    // Schema fetch is async — by the time it resolves the editor may have been unmounted, but
-    // attaching to a disposed model is harmless (the WeakMap entry just never gets read).
-    void getPoolSchema(connector).then((s) => {
-      if (s) {
-        attachPoolSchema(monaco, model, s)
-        setSchema(s)  // also enables the wizard button — needs the schema to populate the modal
-      }
-    })
+    monacoRef.current = monaco
   }
+  // Stable key of the referenced-table SET (qualified names) — only changes when the operator adds
+  // / removes / finishes-typing a FROM-or-JOIN table, NOT on every keystroke inside a SELECT list.
+  const refKey = useMemo(() => {
+    if (!connector) return ''
+    return findReferencedTables(value).map((r) => `${r.schema ?? ''}.${r.name}`).join('|').toLowerCase()
+  }, [connector, value])
+  // Fetch ONLY the referenced tables' columns (debounced) and (re)attach them for autocomplete.
+  // Targeted ``name_like`` fetches resolve the 1-3 tables a query touches in ms — no full-pool walk.
+  useEffect(() => {
+    if (!connector) return
+    let cancelled = false
+    const refs = findReferencedTables(value)
+    const handle = setTimeout(() => {
+      void fetchTablesSchema(connector, refs).then((s) => {
+        if (cancelled || !s) return
+        const model = editorRef.current?.getModel()
+        if (model && monacoRef.current) attachPoolSchema(monacoRef.current, model, s)
+      })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(handle) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refKey is the stable serialization of the referenced-table set
+  }, [connector, refKey])
   // Toolbar shown whenever the field is editable — the Token inserter works on any SQL field
   // (with or without a connector). The wizard / run buttons still require a connector (schema +
   // execution). A read-only / RawEditor mount keeps the bare editor — matches what shipped before.
@@ -166,12 +201,23 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
                     <span className="desc">{t(`settings.sqlEditor.${q.descKey}`, q.descFallback)}</span>
                   </TokenItem>
                 ))}
+                {schemaTokens.length > 0 && (
+                  <>
+                    <TokenDivider>{t('settings.sqlEditor.schemaTokens', 'Pool schemas')}</TokenDivider>
+                    {schemaTokens.map((s) => (
+                      <TokenItem key={s.key} type="button" onClick={() => insertSnippet(`#SCHEMA.${s.key}#`)}>
+                        <span className="tok">{`#SCHEMA.${s.key}#`}</span>
+                        <span className="desc">{s.owner}</span>
+                      </TokenItem>
+                    ))}
+                  </>
+                )}
               </TokenMenu>
             )}
           </MenuWrap>
           {connector && (
-            <ToolBtn type="button" disabled={!schema} onClick={() => setWizardOpen(true)}
-              title={schema ? t('settings.sqlEditor.wizardTitle') : t('settings.sqlEditor.wizardLoading')}>
+            <ToolBtn type="button" onClick={() => setWizardOpen(true)}
+              title={t('settings.sqlEditor.wizardTitle')}>
               <Wand2 size={11} /> {t('settings.sqlEditor.wizard')}
             </ToolBtn>
           )}
@@ -215,18 +261,14 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
       {runnerOpen && connector && canRun && (
         <SqlTestRunner connector={connector} sql={value} onClose={() => setRunnerOpen(false)} />
       )}
-      {wizardOpen && schema && (
-        <SqlWizardModal schema={schema}
-          // Best-effort seeding from the current SQL — the table being edited is usually the
-          // first one mentioned after FROM/JOIN (works for v2's `SELECT * FROM (<orig>) lib_flt`
-          // wrapper too — the inner real table is what matches the schema). Undefined → the
-          // wizard falls back to its first table.
-          initialTable={findFirstReferencedTable(value, schema)}
-          // The full existing SQL — the wizard tries to parse it (columns / WHERE / ORDER BY
-          // for the simple single-table SELECT shape the migrator emits) so opening the wizard
-          // on an existing query pre-fills its widgets instead of starting fresh + replacing
-          // a non-trivial query with ``SELECT * FROM <table>``.
+      {wizardOpen && connector && (
+        <SqlWizardModal
+          connector={connector}
+          // The full existing SQL — the wizard lazily loads each referenced table's columns and
+          // tries to parse the simple single-table SELECT shape so opening on an existing query
+          // pre-fills its widgets instead of replacing a working query with a regenerated default.
           initialSql={value}
+          statementType={statementType}
           onInsert={(sql) => { onChange(sql); setWizardOpen(false) }}
           onCancel={() => setWizardOpen(false)} />
       )}

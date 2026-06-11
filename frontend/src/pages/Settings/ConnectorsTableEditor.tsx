@@ -14,7 +14,7 @@ import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
+import { Button, Row, SchemaForm, SqlConnectorContext, SqlStatementContext, Stack, useModals, type JsonSchema } from '../../common'
 import { SubNav } from '../../common/SubNav'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
@@ -48,6 +48,10 @@ type TabKey = 'general' | CrudKind
 
 const TAB_ORDER: TabKey[] = ['general', 'get', 'put', 'post', 'delete']
 const TAB_TO_CRUD: Partial<Record<TabKey, CrudKind>> = { get: 'get', put: 'put', post: 'post', delete: 'delete' }
+// Each CRUD slot's statement kind — threaded to the slot's SQL wizard so it builds the right shape.
+const CRUD_TO_STMT: Record<CrudKind, 'SELECT' | 'UPDATE' | 'INSERT' | 'DELETE'> = {
+  get: 'SELECT', put: 'UPDATE', post: 'INSERT', delete: 'DELETE',
+}
 
 // General edits the table-level metadata that lives on the TableDef itself (label / description) —
 // `name` is renamed cross-file via the Rename button. CRUD bodies edit the CrudSlot: `sql` on the
@@ -176,18 +180,20 @@ export default function ConnectorsTableEditor({
             <Trash2 size={13} /> {t('common.delete', 'Delete')}
           </Button>
         </Row>
-        <SchemaForm
-          schema={schema}
-          defs={defs}
-          value={slot}
-          onChange={(v) => {
-            // SchemaForm returns the whole picked value; convert to a patch so we don't drop keys
-            // we didn't pick.
-            const patch: Record<string, unknown> = {}
-            for (const k of keys) patch[k] = v[k]
-            editSlot(crud, patch)
-          }}
-        />
+        <SqlStatementContext.Provider value={CRUD_TO_STMT[crud]}>
+          <SchemaForm
+            schema={schema}
+            defs={defs}
+            value={slot}
+            onChange={(v) => {
+              // SchemaForm returns the whole picked value; convert to a patch so we don't drop keys
+              // we didn't pick.
+              const patch: Record<string, unknown> = {}
+              for (const k of keys) patch[k] = v[k]
+              editSlot(crud, patch)
+            }}
+          />
+        </SqlStatementContext.Provider>
       </>
     )
   }

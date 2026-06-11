@@ -25,6 +25,7 @@ import { Checkbox } from '../../common/Checkbox'
 import { Field, Input } from '../../common/Input'
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from '../../common/Modal'
 import { SearchSelect, type SearchSelectOption } from '../../common/SearchSelect'
+import { buildCrudSql } from '../../common/sqlBuild'
 import { SqlEditor } from '../../common/SqlEditor'
 import { SqlConnectorContext } from '../../common/SchemaForm'
 import { getPoolSchemaNames, getPoolSchemaTables, findTable, type PoolSchema, type PoolTable } from '../../services/poolSchema'
@@ -115,38 +116,9 @@ export interface CrudWizardModalProps {
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
 
-// Generate the SQL for one CRUD slot. Returns '' when the slot's column set is too sparse to
-// emit a meaningful query (e.g. UPDATE with no non-key columns).
-function buildSql(opts: {
-  crud: CrudKey
-  schema: string | null
-  table: string
-  selectCols: string[]    // columns visible to SELECT / INSERT (caller's ``include`` set)
-  keyCols: string[]       // columns identifying a row (drive UPDATE / DELETE WHERE)
-}): string {
-  const fqTable = opts.schema ? `${opts.schema}.${opts.table}` : opts.table
-  if (opts.crud === 'get') {
-    if (opts.selectCols.length === 0) return ''
-    return `SELECT\n  ${opts.selectCols.join(',\n  ')}\nFROM ${fqTable}`
-  }
-  if (opts.crud === 'post') {
-    if (opts.selectCols.length === 0) return ''
-    const placeholders = opts.selectCols.map((c) => `:${c}`).join(',\n  ')
-    return `INSERT INTO ${fqTable} (\n  ${opts.selectCols.join(',\n  ')}\n) VALUES (\n  ${placeholders}\n)`
-  }
-  if (opts.crud === 'put') {
-    if (opts.keyCols.length === 0) return ''
-    const nonKey = opts.selectCols.filter((c) => !opts.keyCols.includes(c))
-    if (nonKey.length === 0) return ''
-    const sets = nonKey.map((c) => `${c} = :${c}`).join(',\n  ')
-    const where = opts.keyCols.map((c) => `${c} = :${c}_ORIGINAL`).join('\n  AND ')
-    return `UPDATE ${fqTable}\nSET\n  ${sets}\nWHERE\n  ${where}`
-  }
-  // delete
-  if (opts.keyCols.length === 0) return ''
-  const where = opts.keyCols.map((c) => `${c} = :${c}`).join('\n  AND ')
-  return `DELETE FROM ${fqTable}\nWHERE\n  ${where}`
-}
+// CRUD-statement generation lives in the shared builder so the per-slot SQL wizard scaffolds the
+// identical statement (see common/sqlBuild.ts).
+const buildSql = buildCrudSql
 
 export function CrudWizardModal({
   connector, existingQueryNames, onSave, onCancel,
@@ -219,6 +191,11 @@ export function CrudWizardModal({
   // (= loading) when the operator switches schemas OR the debounced name filter changes.
   useEffect(() => {
     if (!pickedSchema) { setSchema(undefined); return }
+    // For a real (picker-active) schema, wait for a filter before fetching — a blank filter on a
+    // multi-schema Oracle/JDE pool walks hundreds of tables' columns. The operator types a pattern
+    // (``%`` for all) like the SQL wizard. The single-schema ``__nopicker__`` case has nothing to
+    // narrow, so fetch immediately.
+    if (pickedSchema !== '__nopicker__' && !nameLike) { setSchema(null); return }
     let cancelled = false
     setSchema(undefined)
     const arg = pickedSchema === '__nopicker__' ? null : pickedSchema
@@ -374,16 +351,16 @@ export function CrudWizardModal({
                   />
                 </Field>
               )}
-              {/* Optional name filter — debounced free-text input. ``F009%`` style patterns
-                  are applied server-side BEFORE the per-table column walk (the slow step),
-                  so a 2000-table SY920 narrowed to a F009% prefix returns under a second.
-                  Leave blank to fetch every table in the picked schema. */}
-              {pickedSchema && (
-                <Field label={t('settings.crudWizard.nameFilter', 'Table name filter (optional)')}>
+              {/* Name filter — debounced free-text input, required before tables load on a
+                  multi-schema pool. ``F009%`` style patterns are applied server-side BEFORE the
+                  per-table column walk (the slow step), so a 2000-table SY920 narrowed to a F009%
+                  prefix returns under a second. Type ``%`` to list every table in the schema. */}
+              {pickedSchema && pickedSchema !== '__nopicker__' && (
+                <Field label={t('settings.crudWizard.nameFilter', 'Table name filter')}>
                   <Input
                     value={nameLikeRaw}
                     onChange={(e) => { setNameLikeRaw(e.target.value); setTableName('') }}
-                    placeholder={t('settings.crudWizard.nameFilterPlaceholder', "e.g. F009%, USR_%, leave blank for all")}
+                    placeholder={t('settings.crudWizard.nameFilterPlaceholder', 'e.g. F009%, USR_%, % for all')}
                   />
                 </Field>
               )}
@@ -394,9 +371,11 @@ export function CrudWizardModal({
                   options={tableOpts}
                   placeholder={!pickedSchema && schemaOpts.length > 1
                     ? t('settings.crudWizard.pickSchemaFirst', 'Pick a schema first')
-                    : schema === undefined && pickedSchema
-                      ? t('settings.crudWizard.loadingTables', 'Loading tables…')
-                      : t('common.pick')}
+                    : pickedSchema && pickedSchema !== '__nopicker__' && !nameLike
+                      ? t('settings.crudWizard.typeFilter', 'Type a filter to list tables')
+                      : schema === undefined && pickedSchema
+                        ? t('settings.crudWizard.loadingTables', 'Loading tables…')
+                        : t('common.pick')}
                   disabled={!pickedSchema && schemaOpts.length > 1}
                   loading={schema === undefined && !!pickedSchema}
                 />
