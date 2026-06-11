@@ -33,12 +33,13 @@ const AppBuilder = lazy(() => import('./AppBuilder'))
 // report) lives inside AppBuilder now since it's stored in app.toml.
 const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
 const ActionsBuilder = lazy(() => import('./ActionsBuilder'))
+const ConfigVersions = lazy(() => import('./ConfigVersions'))
 // NOTE: Package, Changes and Integrity moved OUT of Settings into the nomaflow area — they're
 // package/change management + config health (operations flows), not configuration. The builder
 // components still live in this folder (they share FindDependenciesModal / FindUsagesModal with the
 // other config editors); the nomaflow pages import them. See pages/Nomaflow/{Package,Changes,Integrity}Page.
 
-const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'versions'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -119,6 +120,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'theme'} onClick={() => setTab('theme')}>{t('settings.tabs.theme', 'Theme')}</TabBtn>
         <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
         <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app', 'App')}</TabBtn>
+        <TabBtn $active={tab === 'versions'} onClick={() => setTab('versions')}>{t('settings.tabs.versions', 'History')}</TabBtn>
         {/* Deterministic "apply all TOML now" — see reloadAll. Right-pushed so it reads as a global action. */}
         <ReloadWrap>
           {reloadMsg && <ReloadMsg $tone={reloadMsg.tone}>{reloadMsg.text}</ReloadMsg>}
@@ -139,6 +141,7 @@ export default function Settings() {
           : tab === 'actions' ? <ActionsBuilder />
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
+          : tab === 'versions' ? <ConfigVersions />
           : <AppBuilder />}
       </Suspense>
     </PageLayout>

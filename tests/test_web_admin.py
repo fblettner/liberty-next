@@ -1403,3 +1403,30 @@ def test_reports_templates_preview_template_parse_error(env, tmp_path, monkeypat
         r = client.post("/admin/config/reports/preview", json=body, headers=h)
         assert r.status_code == 422
         assert "parse error" in r.json()["detail"].lower()
+
+
+def test_config_versioning_endpoints(env) -> None:
+    """Snapshot store + version endpoints: list / content / download / restore, superuser-gated."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        store = app.state.config_versions
+        assert store is not None
+        v = store.snapshot(conn_toml, source="manual", who="admin")   # snapshot the live connectors.toml
+        assert v is not None and v.version_num == 1
+
+        listed = client.get("/admin/config/versions", headers=h).json()["versions"]
+        assert any(x["id"] == v.id for x in listed)
+        one = client.get("/admin/config/versions?file=connectors.toml", headers=h).json()["versions"]
+        assert len(one) == 1 and one[0]["file"] == "connectors.toml" and one[0]["who"] == "admin"
+
+        c = client.get(f"/admin/config/versions/{v.id}/content", headers=h)
+        assert c.status_code == 200 and len(c.text) > 0
+        d = client.get(f"/admin/config/versions/{v.id}/download", headers=h)
+        assert d.status_code == 200 and "attachment" in d.headers.get("content-disposition", "")
+
+        rr = client.post(f"/admin/config/versions/{v.id}/restore", headers=h)
+        assert rr.status_code == 200 and rr.json()["restored"] == "connectors.toml"
+
+        assert client.get("/admin/config/versions/999999/content", headers=h).status_code == 404
+        assert client.get("/admin/config/versions", headers=_h(client, "reader")).status_code == 403

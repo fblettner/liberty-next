@@ -22,12 +22,14 @@
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from pathlib import Path
 from typing import Annotated, Any
 
 import tomlkit
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 
 from liberty.auth.authstore import build_auth_backend
@@ -79,6 +81,20 @@ from liberty.web.rename import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 Superuser = Annotated[Principal, Depends(require_superuser)]
+
+_log = logging.getLogger("liberty.admin")
+
+
+def _snapshot_config(request: Request, path: Path) -> None:
+    """Snapshot a config file's CURRENT bytes before a save overwrites it — the input to config
+    history / diff / restore. Best-effort: a versioning failure must never block the save."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return
+    try:
+        store.snapshot(path, source="manual")
+    except Exception:  # noqa: BLE001 — never fail a save over versioning
+        _log.warning("config snapshot failed for %s", path, exc_info=True)
 
 
 @router.post("/reload", summary="Reload config")
@@ -141,6 +157,67 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "nomaflow": nomaflow_reloaded,
         "reports": new_reports.names(),
     }
+
+
+# ── config version history (filesystem snapshots; see liberty.versioning) ─────────────────
+@router.get("/config/raw", summary="Read a config file (raw)")
+async def read_config_raw(request: Request, _: Superuser, file: str) -> Response:
+    """The LIVE bytes of a config file (e.g. ``screens.toml``) — read-only, for diffing a stored
+    version against the current file. (The legacy raw *editor* was removed; this read-only peek is
+    safe and never writes.) Resolved under the config dir; path-traversal is rejected."""
+    base = request.app.state.settings.connectors.config_path.parent.resolve()
+    target = (base / file).resolve()
+    if base not in target.parents or not target.is_file():   # must live under the config dir
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="file not found")
+    return Response(content=target.read_bytes(), media_type="text/plain; charset=utf-8")
+
+
+@router.get("/config/versions", summary="List config versions")
+async def list_config_versions(request: Request, _: Superuser, file: str | None = None) -> dict[str, object]:
+    """Snapshot history — every version of *file* (e.g. ``screens.toml``), newest first; or every
+    version across all config files when *file* is omitted."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return {"versions": []}
+    base = request.app.state.settings.connectors.config_path.parent
+    return {"versions": [v.to_dict() for v in store.list_versions((base / file) if file else None)]}
+
+
+@router.get("/config/versions/{version_id}/content", summary="Get a version's content")
+async def config_version_content(version_id: int, request: Request, _: Superuser) -> Response:
+    """A version's raw TOML text — the frontend diffs two of these client-side (Monaco)."""
+    store = getattr(request.app.state, "config_versions", None)
+    data = store.content(version_id) if store is not None else None
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    return Response(content=data, media_type="text/plain; charset=utf-8")
+
+
+@router.get("/config/versions/{version_id}/download", summary="Download a version")
+async def config_version_download(version_id: int, request: Request, _: Superuser) -> Response:
+    store = getattr(request.app.state, "config_versions", None)
+    v = store.get(version_id) if store is not None else None
+    data = store.content(version_id) if store is not None else None
+    if v is None or data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    stem, suffix = Path(v.rel_path).stem, Path(v.rel_path).suffix
+    fname = f"{stem}.v{v.version_num}{suffix}"
+    return Response(content=data, media_type="application/toml",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.post("/config/versions/{version_id}/restore", summary="Restore a version")
+async def restore_config_version(version_id: int, request: Request, principal: Superuser) -> dict[str, object]:
+    """Write a version's content back to its live file (snapshotting the current one first), then
+    reload so it takes effect immediately. Returns the restored file + the reload summary."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    live = store.restore(version_id, who=principal.username)
+    if live is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    reload_result = await reload_connectors(request, principal)
+    return {"restored": live.name, "reload": reload_result}
 
 
 # The legacy ``GET / PUT /config/connectors`` raw-TOML endpoints powered the Settings →
@@ -328,6 +405,7 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
             pools[name] = vals                  # tomlkit renders a fresh [pools.<name>] table
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -434,6 +512,7 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting config is invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -488,6 +567,7 @@ async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Super
 
     path = _dictionary_path(request.app.state.settings)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -531,6 +611,7 @@ async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> d
 
     path = Path(request.app.state.settings.menus.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -678,6 +759,7 @@ async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) 
 
     path = Path(request.app.state.settings.screens.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -739,6 +821,7 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
 
     path = Path(request.app.state.settings.charts.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -792,6 +875,7 @@ async def put_actions_parsed(body: ActionsBody, request: Request, _: Superuser) 
 
     path = Path(request.app.state.settings.actions.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -851,6 +935,7 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
 
     path = Path(request.app.state.settings.dashboards.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -901,6 +986,7 @@ async def put_theme_parsed(body: ThemeBody, request: Request, _: Superuser) -> d
 
     path = Path(request.app.state.settings.theme.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path), "resolved": resolve_theme(validated.theme)}
 
@@ -998,6 +1084,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting jobs are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -1199,6 +1286,7 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting app.toml is invalid: {exc}") from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
     # Live-apply: reload settings from disk and rebuild the runtime objects the new values
@@ -1352,6 +1440,7 @@ async def put_reports_branding(
         ) from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
     # Live-apply — next render picks the new branding up without a restart.
@@ -1502,6 +1591,7 @@ async def put_reports_parsed(
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
     # Rebuild the report registry so the new templates surface immediately
@@ -1946,6 +2036,7 @@ def _apply_dictionary_entries(request: Request, payload: dict[str, Any]) -> str:
     new_text = tomli_w.dumps(validated.model_dump(exclude_defaults=True))
     parse_dictionary(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return f"merged {len(entries)} entries into {scope!r} scope"
 
@@ -2015,6 +2106,7 @@ def _apply_connector_queries(request: Request, payload: dict[str, Any]) -> str:
     # nested tables — same trade-off as put_connectors_parsed).
     connectors_tbl[connector] = existing
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return f"added/updated {len(queries)} queries on connector {connector!r}"
 
@@ -2042,6 +2134,7 @@ def _apply_screen(request: Request, payload: dict[str, Any]) -> str:
     new_text = tomli_w.dumps({"screens": doc})
     parse_screens(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return f"saved screen {app}.{screen_id}"
 
@@ -2071,6 +2164,7 @@ def _apply_menu_item(request: Request, payload: dict[str, Any]) -> str:
     new_text = tomli_w.dumps({"menus": doc})
     parse_menus(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return f"saved menu item {item['id']} under {app}"
 
@@ -2199,6 +2293,7 @@ async def _apply_chart_clone(request: Request, scope: str | None, new_id: str, c
     new_text = tomli_w.dumps({"charts": doc})
     parse_charts(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2219,6 +2314,7 @@ async def _apply_dashboard_clone(request: Request, scope: str | None, new_id: st
     new_text = tomli_w.dumps({"dashboards": doc})
     parse_dashboards(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2319,6 +2415,7 @@ async def _delete_screen(request: Request, app: str | None, screen_id: str) -> N
     import tomli_w
     new_text = tomli_w.dumps({"screens": doc})
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2345,6 +2442,7 @@ async def _delete_chart(request: Request, scope: str | None, chart_id: str) -> N
     import tomli_w
     new_text = tomli_w.dumps({"charts": doc})
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2370,6 +2468,7 @@ async def _delete_dashboard(request: Request, scope: str | None, dashboard_id: s
     import tomli_w
     new_text = tomli_w.dumps({"dashboards": doc})
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2424,6 +2523,7 @@ async def _delete_connector_queries(request: Request, connector: str, query_name
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail=f"delete leaves connector {connector!r} invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
