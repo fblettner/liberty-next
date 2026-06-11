@@ -17,7 +17,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet } from 'lucide-react'
+import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet, Trash2 } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError, authHeaders } from '../../api/client'
@@ -815,6 +815,18 @@ export function ResultTable({
   const toggleSelected = useCallback((row: DataRow) => {
     setSelected((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
   }, [])
+  // Bulk delete the ticked rows in one go (the per-row × is tedious for many): a NEW row is dropped
+  // outright, an existing row is marked for deletion (→ delete_query on Save). Clears the selection.
+  const deleteSelected = useCallback(() => {
+    const sel = [...selected]
+    if (sel.length === 0) return
+    const isNew = (r: DataRow) => newRowsRef.current.includes(r)
+    const newSel = sel.filter(isNew)
+    const existing = sel.filter((r) => !isNew(r))
+    if (newSel.length) { setNewRows((p) => p.filter((r) => !newSel.includes(r))); for (const r of newSel) editsRef.current.delete(r) }
+    if (existing.length) setDeleted((s) => { const n = new Set(s); for (const r of existing) n.add(r); return n })
+    setSelected(new Set())
+  }, [selected])
   const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
   // Paste copied rows as new rows — each is a duplicate of the row it was copied from (the clipboard
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
@@ -1699,7 +1711,6 @@ export function ResultTable({
   return (
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
-      {editMode && saveErrors.length === 0 && <Banner $tone="info">{t('table.editingHint')}{canInsert ? ` · ${t('table.pasteExcelHint', 'Paste rows from Excel with Ctrl+V')}` : ''}</Banner>}
       {canImport && (
         <input
           ref={fileRef}
@@ -1817,6 +1828,9 @@ export function ResultTable({
                   <ClipboardPaste size={13} /> {t('table.pasteRows')}{clipboard.length ? ` (${clipboard.length})` : ''}
                 </TbBtn>
               )}
+              <TbBtn onClick={deleteSelected} disabled={saving || selected.size === 0} title={t('table.deleteSelected', 'Delete selected')}>
+                <Trash2 size={13} /> {t('table.deleteSelected', 'Delete selected')}{selected.size ? ` (${selected.size})` : ''}
+              </TbBtn>
             </>
           )
         }

@@ -378,6 +378,7 @@ export function DataTable<T extends object>({
   const [colOpen, setColOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [exportAll, setExportAll] = useState(false)   // export every column, incl. hidden-by-default
   const [showFilters, setShowFilters] = useState(false)
   const colRef = useRef<HTMLDivElement>(null)
   const groupRef = useRef<HTMLDivElement>(null)
@@ -501,8 +502,10 @@ export function DataTable<T extends object>({
 
   const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.internal
   const colAlign = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.align
-  const exportRows = () => {
-    const cols = table.getVisibleLeafColumns().filter((c) => !isInternal(c))
+  const exportRows = (allColumns = false) => {
+    // ``allColumns`` exports every data column incl. the ones hidden by default — no need to unhide
+    // them in the Columns picker, export, then re-hide. Internal columns (select / status) stay out.
+    const cols = (allColumns ? table.getAllLeafColumns() : table.getVisibleLeafColumns()).filter((c) => !isInternal(c))
     const headers = cols.map((c) => colHeaderText(c))
     const rows = table.getFilteredRowModel().rows.map((row) =>
       cols.map((col) => {
@@ -600,8 +603,8 @@ export function DataTable<T extends object>({
   // virtualizer's body is everything below that. `colCount` is what each spacer row needs
   // to span — equal to the visible column count.
 
-  const exportCsv = () => {
-    const { headers, rows } = exportRows()
+  const exportCsv = (allColumns = false) => {
+    const { headers, rows } = exportRows(allColumns)
     const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
     const blob = new Blob([[headers.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n')], {
       type: 'text/csv;charset=utf-8;',
@@ -611,8 +614,8 @@ export function DataTable<T extends object>({
     URL.revokeObjectURL(url)
     setExportOpen(false)
   }
-  const exportExcel = () => {
-    const { headers, rows } = exportRows()
+  const exportExcel = (allColumns = false) => {
+    const { headers, rows } = exportRows(allColumns)
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
@@ -720,8 +723,11 @@ export function DataTable<T extends object>({
               <Download size={13} /> {t('table.export')} <ChevronDown size={11} />
             </CtrlBtn>
             <MenuPortal open={exportOpen} anchorRef={exportRef} onClose={() => setExportOpen(false)} minWidth={150}>
-                <DropdownItem onClick={exportCsv}><FileText size={13} /> CSV (.csv)</DropdownItem>
-                <DropdownItem onClick={exportExcel}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
+                <DropdownItem onClick={(e) => { e.stopPropagation(); setExportAll((v) => !v) }}>
+                  <CheckBox $on={exportAll}>{exportAll && <Check size={9} />}</CheckBox> {t('table.exportAllColumns', 'All columns (incl. hidden)')}
+                </DropdownItem>
+                <DropdownItem onClick={() => exportCsv(exportAll)}><FileText size={13} /> CSV (.csv)</DropdownItem>
+                <DropdownItem onClick={() => exportExcel(exportAll)}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
               </MenuPortal>
           </MenuWrap>
         </ActionGroup>
