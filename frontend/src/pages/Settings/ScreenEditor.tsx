@@ -330,6 +330,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         }
       }
       return [...out.entries()].map(([value, label]) => ({ value, label, mono: value }))
+        .sort((a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value))
     }
     // Dictionary metadata (enums / lookups / sequences) is scoped to the APP, not the data-pool
     // connector (matches the backend's ``dict_scope = app``) — so a cross-pool screen's
