@@ -356,6 +356,65 @@ async def test_write_when_writable(pools: PoolRegistry) -> None:
     assert (await conn.execute("count")).rows == [{"n": 4}]
 
 
+def test_pad_char_binds_right_justifies_flagged_columns() -> None:
+    """A column in ``justify_map`` is RIGHT-justified (left-padded) to its CHAR width — both the SET
+    value and the ``_ORIGINAL`` WHERE bind — so a JDE right-adjusted code matches the stored value.
+    Unflagged columns keep the default LEFT-justify (right-pad)."""
+    from liberty.connectors.sql import _pad_char_binds
+    col_types = {"KY": {"kind": "char_fixed", "length": 10}, "DESCR": {"kind": "char_fixed", "length": 5}}
+    out = _pad_char_binds(
+        {"KY": "DMY", "KY_ORIGINAL": "DMY", "DESCR": "hi"}, col_types, justify_map={"KY": " "},
+    )
+    assert out["KY"] == "       DMY"          # right-justified to width 10
+    assert out["KY_ORIGINAL"] == "       DMY"  # WHERE bind padded the same way → matches the stored key
+    assert out["DESCR"] == "hi   "             # no justify rule → left-justified (right-padded)
+
+
+def test_pad_char_binds_zero_fill_and_blank_guard() -> None:
+    from liberty.connectors.sql import _pad_char_binds
+    col_types = {"NUM": {"kind": "char_fixed", "length": 5}}
+    assert _pad_char_binds({"NUM": "42"}, col_types, justify_map={"NUM": "0"})["NUM"] == "00042"
+    # A blank value is never zero-filled — it stays the NULL/space sentinel, not "0000 ".
+    assert _pad_char_binds({"NUM": " "}, col_types, justify_map={"NUM": "0"})["NUM"] == "     "
+
+
+def test_build_justify_map_hint_overrides_dictionary() -> None:
+    """The dictionary entry's ``justify`` is the default; a column hint overrides it — ``left`` forces
+    left even when the data item is dictionary-right-adjust (KY in F0005 vs trimmed elsewhere)."""
+    from liberty.connectors.sql import _build_justify_map
+    d = DictionaryFile(entries={"KY": DictionaryEntry(justify="right_blank")})
+    hints = [
+        ColumnHint(name="DRKY", dd="KY"),                       # inherits dict → right_blank
+        ColumnHint(name="OTHERKY", dd="KY", justify="left"),    # forces left → absent from the map
+        ColumnHint(name="ZCOL", dd="KY", justify="right_zero"),  # hint wins → zero fill
+        ColumnHint(name="PLAIN", dd="NOPE"),                    # no entry → left
+    ]
+    assert _build_justify_map(hints, d, scope="x") == {"DRKY": " ", "ZCOL": "0"}
+
+
+def test_apply_dynamic_justify_from_sibling_data_item() -> None:
+    """A generic value column (justify_from) right-justifies to the WIDTH of the data item named in a
+    sibling column, per row — F00950 FSFRDV/FSTHDV ← FSDTAI. The _ORIGINAL bind follows the same item
+    (so the WHERE matches), and a non-right-adjust item leaves the value untouched (left-justified)."""
+    from liberty.connectors.sql import _apply_dynamic_justify
+    d = DictionaryFile(entries={
+        "MCU": DictionaryEntry(justify="right_blank", size=12),
+        "AN8": DictionaryEntry(size=8),  # no justify → left
+    })
+    hints = [ColumnHint(name="FSFRDV", justify_from="FSDTAI"), ColumnHint(name="FSTHDV", justify_from="FSDTAI")]
+    # Row keyed on an MCU data item → FSFRDV / FSTHDV right-justified to 12.
+    out = _apply_dynamic_justify(
+        {"FSDTAI": "MCU", "FSDTAI_ORIGINAL": "MCU", "FSFRDV": "12345", "FSFRDV_ORIGINAL": "12345", "FSTHDV": "99"},
+        hints, d, scope="x",
+    )
+    assert out["FSFRDV"] == "       12345"          # rjust to MCU's size (12)
+    assert out["FSFRDV_ORIGINAL"] == "       12345"  # WHERE bind padded the same way
+    assert out["FSTHDV"] == "          99"
+    # A left-justified data item (AN8) leaves the value alone.
+    out2 = _apply_dynamic_justify({"FSDTAI": "AN8", "FSFRDV": "P01012"}, hints, d, scope="x")
+    assert out2["FSFRDV"] == "P01012"
+
+
 @pytest.mark.asyncio
 async def test_dry_run_executes_then_rolls_back(pools: PoolRegistry) -> None:
     """``execute(dry_run=True)`` runs the write (rowcount is real) but rolls the transaction back —

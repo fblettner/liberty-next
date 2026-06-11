@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -92,6 +92,27 @@ class DictionaryEntry(BaseModel):
     default: str | None = Field(
         default=None,
         description="Initial value when a new row is added.",
+        json_schema_extra={"x_group": "Rule"},
+    )
+    justify: Literal["right_blank", "right_zero"] | None = Field(
+        default=None,
+        description=(
+            "Write-side justification for fixed-width CHAR columns — JD Edwards' F9210.FRDRUL rule. "
+            "``right_blank`` (*RAB / *RABN: right-adjust, space fill) or ``right_zero`` (*RAZ: "
+            "right-adjust, zero fill). Empty = left-justified (the default). Applied when binding "
+            "INSERT / UPDATE values and the WHERE keys, so a right-justified code (e.g. F0005's KY) "
+            "matches the stored value without an LPAD in the query. Override per column on the screen."
+        ),
+        json_schema_extra={"x_group": "Rule"},
+    )
+    size: int | None = Field(
+        default=None,
+        description=(
+            "The data item's stored width — JD Edwards' F9210.FRDTAS (e.g. MCU = 12). Used when a "
+            "GENERIC value column points at this item via the column's ``justify_from``: F00950's "
+            "FSFRDV / FSTHDV right-justify to the width of the data item named in FSDTAI, not their "
+            "own (wider) column. Empty = fall back to the column's physical width."
+        ),
         json_schema_extra={"x_group": "Rule"},
     )
     lookup_params: dict[str, str] = Field(

@@ -475,6 +475,28 @@ class ColumnHint(BaseModel):
             "bulk-edit, since it lives on the column."
         ),
     )
+    justify: Literal["right_blank", "right_zero", "left"] | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Edit"},
+        description=(
+            "Per-column override of the dictionary's write-side justification (JDE F9210.FRDRUL). "
+            "``right_blank`` / ``right_zero`` force right-adjust (space / zero fill); ``left`` forces "
+            "left-justified even when the dictionary marks the data item right-adjust — for a code "
+            "that's right-justified in one table but trimmed in others (e.g. KY: right-adjust in "
+            "F0005's UDC, plain elsewhere). Blank = inherit the dictionary entry's ``justify``."
+        ),
+    )
+    justify_from: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Edit", "x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
+        description=(
+            "GENERIC value column: take this column's right/left justification AND width PER ROW from "
+            "the data item named in another column's value. F00950's FSFRDV / FSTHDV set this to "
+            "``FSDTAI`` — at write time the framework reads FSDTAI (e.g. ``MCU``), looks up that data "
+            "item's dictionary ``justify`` + ``size``, and right-justifies the value to that width "
+            "(then the column's CHAR padding fills the rest). Replaces a per-query CASE/LPAD."
+        ),
+    )
     # ── Defaults — pre-fill / conditional forced default / conditional write ──────────────
     default: str | None = Field(
         default=None,
