@@ -31,6 +31,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
+import { ImportDialog } from './ImportDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, evalConditions, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
@@ -762,6 +763,8 @@ export function ResultTable({
 
   const dirtyCount = dirtyRows.size + newRows.length + [...deleted].filter((r) => !newRows.includes(r)).length
   const fileRef = useRef<HTMLInputElement>(null)
+  // The validated Import dialog (modal-first: it handles upload + mode + check + save internally).
+  const [importOpen, setImportOpen] = useState(false)
 
   // current values of a row (its original fields overlaid with any pending edits)
   const valuesOf = useCallback((row: DataRow): Record<string, unknown> => ({ ...row, ...editsRef.current.get(row) }), [])
@@ -924,6 +927,49 @@ export function ResultTable({
     return { byCode: [...byCode.values()], byLabel: [...byLabel.values()] }
   }, [lookupMaps, result.rows, specForRule, t])
 
+  // ── Import: SCREEN-RULE validation, reusing the grid's OWN resolution ──
+  // The DB can't tell a bad lookup/enum value from a good one (a JDE CHAR column accepts any junk),
+  // so we check each cell against its column's rule. Crucially this reuses ``activeRulesWhen`` /
+  // ``activeLookupFor`` — the exact functions that drive the grid display — so it resolves the per-row
+  // ACTIVE rule (rules_when: FSDTAI is a data item for some sec_types, a form name for others; FSDLT's
+  // Y/N flips) and matches trim-tolerantly against the already-fetched lookup. No parallel re-impl.
+  // Trimmed valid-code set per fetched lookup (keyed by spec key), built once.
+  const lookupTrimSets = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const [key, data] of lookupMaps) m.set(key, new Set([...data.map.keys()].map((k) => k.trim())))
+    return m
+  }, [lookupMaps])
+  const validateImportRow = useCallback((row: Record<string, unknown>): string[] => {
+    const errs: string[] = []
+    const dr = row as DataRow
+    for (const c of result.columns) {
+      const raw = row[c.name]
+      if (raw == null || String(raw).trim() === '') continue   // empty → DB defaults / nullability decide
+      const val = String(raw).trim()
+      const name = c.label || c.name
+      // The rule that ACTUALLY applies to this row (rules_when), not the base rule.
+      const aw = c.rules_when?.length ? activeRulesWhen(c.rules_when, row) : null
+      const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
+      if (rule?.kind === 'lookup') {
+        const { data, key } = activeLookupFor(c, dr)
+        if (!data || !key) continue   // the narrowed lookup for this row's discriminator isn't loaded
+        const set = lookupTrimSets.get(key)
+        if (set && set.size > 0 && !set.has(val)) errs.push(`${name}: “${val}” is not a valid value`)
+      } else if (rule?.kind === 'enum') {
+        if (!rule.values.some((v) => v.value === val || v.value.trim() === val)) errs.push(`${name}: “${val}” is not an allowed value`)
+      } else if (rule?.kind === 'boolean') {
+        // Only a COMPLETE boolean (both tokens) is checkable — a one-sided flag can't be validated
+        // without false positives across JDE's mixed Y/N · 0/1 · blank conventions.
+        const tv = rule.true_value
+        const fv = rule.false_value
+        if (tv != null && fv != null && val !== String(tv).trim() && val !== String(fv).trim()) {
+          errs.push(`${name}: “${val}” must be ${tv} or ${fv}`)
+        }
+      }
+    }
+    return errs
+  }, [result.columns, activeLookupFor, lookupTrimSets])
+
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
   // {normalized header text → result column name}, registering for each result column its `name`,
@@ -935,69 +981,81 @@ export function ResultTable({
   // those columns: a match becomes an **edit** of that row (→ `update_query` on Save), the rest are
   // **new** rows (→ `insert_query`). That's the v2 replacement for v1's MERGE/UPSERT `_post` queries:
   // update-or-insert is decided here, in the batch-edit model, instead of in one SQL statement.
-  const importFile = useCallback(async (file: File) => {
-    setSaveErrors([])
-    try {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      if (!ws) return
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
-      const idTag = t('table.idColumnSuffix')
-      const byHeader = new Map<string, string>() // normalized header text → result column name
-      for (const c of result.columns) {
-        const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
-        add(c.name)
-        // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
-        // description. The description isn't unique (two codes can share one), and both kinds now
-        // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
-        // (the export emits both "X (ID)" and "X"; the latter holds the description and was
-        // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
-        if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
-        add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+  // Parse + header-map a sheet into rows keyed by column name, with lookup return-fill applied — the
+  // shared front half of BOTH the in-grid import and the validated Import dialog. Returns the mapped
+  // rows, or null when the file is empty / no header matched (a no-match also sets the banner).
+  const parseImportFile = useCallback(async (file: File): Promise<Record<string, unknown>[] | null> => {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    if (!ws) return null
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
+    const idTag = t('table.idColumnSuffix')
+    const byHeader = new Map<string, string>() // normalized header text → result column name
+    for (const c of result.columns) {
+      const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
+      add(c.name)
+      // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
+      // description. The description isn't unique (two codes can share one), and both kinds now
+      // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
+      // (the export emits both "X (ID)" and "X"; the latter holds the description and was
+      // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
+      if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
+      add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+    }
+    const seeds = rows.map((r) => {
+      const out: Record<string, unknown> = {}
+      for (const [header, v] of Object.entries(r)) {
+        const col = byHeader.get(header.trim().toLowerCase())  // header text → which result column
+        if (col) out[col] = v
       }
-      const seeds = rows.map((r) => {
-        const out: Record<string, unknown> = {}
-        for (const [header, v] of Object.entries(r)) {
-          const col = byHeader.get(header.trim().toLowerCase())  // header text → which result column
-          if (col) out[col] = v
-        }
-        return out
-      }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
-      if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return }
+      return out
+    }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
+    if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return null }
 
-      // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
-      // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
-      // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
-      // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
-      // isn't loaded yet (the grid loads it when the column renders).
-      const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
-      if (returnFillCols.length > 0) {
-        for (const seed of seeds) {
-          for (const c of returnFillCols) {
-            const rule = c.rule
-            if (rule?.kind !== 'lookup') continue
-            const code = seed[c.name]
-            if (code == null || String(code).trim() === '') continue
-            const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
-            if (!data?.rows) continue
-            const valKey = rule.value
-            const want = String(code).trim()
-            const row = data.rows.find((r) => {
-              const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-              return rv != null && String(rv).trim() === want
-            })
-            if (!row) continue
-            const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
-            for (const b of c.return_binds ?? []) {
-              const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
-              const cur = seed[target]
-              if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
-              const v = lcRow.get(b.param.toLowerCase())
-              if (v !== undefined) seed[target] = v
-            }
+    // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
+    // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
+    // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
+    // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
+    // isn't loaded yet (the grid loads it when the column renders).
+    const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
+    if (returnFillCols.length > 0) {
+      for (const seed of seeds) {
+        for (const c of returnFillCols) {
+          const rule = c.rule
+          if (rule?.kind !== 'lookup') continue
+          const code = seed[c.name]
+          if (code == null || String(code).trim() === '') continue
+          const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
+          if (!data?.rows) continue
+          const valKey = rule.value
+          const want = String(code).trim()
+          const row = data.rows.find((r) => {
+            const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+            return rv != null && String(rv).trim() === want
+          })
+          if (!row) continue
+          const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
+          for (const b of c.return_binds ?? []) {
+            const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
+            const cur = seed[target]
+            if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
+            const v = lcRow.get(b.param.toLowerCase())
+            if (v !== undefined) seed[target] = v
           }
         }
       }
+    }
+    return seeds
+  }, [result.columns, lookupMaps, t])
+
+  // In-grid import (edit-mode quick add): parse + map, then merge into the bulk editor — existing
+  // rows (matched on key) become pending edits, the rest new rows. The standalone Import button opens
+  // the validated ImportDialog instead (which parses via ``parseImportFile`` itself).
+  const importFile = useCallback(async (file: File) => {
+    setSaveErrors([])
+    try {
+      const seeds = await parseImportFile(file)
+      if (!seeds) return
       if (!editMode) setEditMode(true)
 
       // Effective key columns come from the per-column ``key`` flags resolved onto the RESULT
@@ -1036,7 +1094,7 @@ export function ResultTable({
     } catch (e) {
       setSaveErrors([e instanceof Error ? e.message : String(e)])
     }
-  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, lookupMaps, t])
+  }, [parseImportFile, prependNewRows, editMode, result.columns, result.rows, keyColumns])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
@@ -1688,7 +1746,7 @@ export function ResultTable({
                 </TbBtn>
               )}
               {canImport && (
-                <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
+                <TbBtn onClick={() => setImportOpen(true)} title={t('table.import')}>
                   <Upload size={13} /> {t('table.import')}
                 </TbBtn>
               )}
@@ -1847,6 +1905,20 @@ export function ResultTable({
           ))}
           {menuError && <RowMenuErr>{menuError}</RowMenuErr>}
         </RowMenuBox>
+      )}
+      {importOpen && (
+        <ImportDialog
+          parseFile={parseImportFile}
+          validateRow={validateImportRow}
+          keyColumns={[...new Set([...result.columns.filter((c) => c.key).map((c) => c.name), ...(keyColumns ?? [])])]}
+          connector={connector}
+          insertQuery={insertQuery}
+          updateQuery={updateQuery}
+          screenApp={screen?.app}
+          screenId={screen?.id}
+          onClose={() => setImportOpen(false)}
+          onCommitted={() => { setImportOpen(false); onSaved?.() }}
+        />
       )}
     </>
   )

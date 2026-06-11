@@ -1689,8 +1689,15 @@ class SQLConnector:
         max_rows: int | None = None, user: str | None = None,
         column_hints: list[ColumnHint] | None = None, audit_table: str | None = None,
         screen_max_rows: int | None = None, dictionary_scope: str | None = None,
+        dry_run: bool = False,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
+
+        *dry_run* (writes only) runs the statement inside the transaction as usual — through the
+        full machinery (filter wrap, form rules, write_when, SEQUENCE/NN, audit mirror) so the
+        rowcount and any DB error are exactly what a real save would see — then rolls the
+        transaction back instead of committing (same ``_DryRunRollback`` trick as :meth:`test_run`).
+        The Excel-import validator uses it to try each row against the DB without mutating it.
 
         Phase 3 — per-screen behaviour (column hints / audit table / row cap) is threaded in
         by the route layer from the matching :class:`Screen` rather than read off ``QueryDef``:
@@ -1924,7 +1931,8 @@ class SQLConnector:
                 # compared to (``RLTOROLE = :FROMUSER``) still pad to that CHAR column's width.
                 bound = _pad_char_binds(bound, col_types, where_col_map=_where_bind_columns(sql_text))
 
-        async with engine.begin() as conn:
+        try:
+          async with engine.begin() as conn:
             # SEQUENCE / NN — run the named "next number" query in the *same* transaction as
             # the INSERT so a concurrent insert can't grab the same value (the surrounding
             # ``engine.begin()`` block serialises). A missing/failing sequence logs and falls
@@ -1969,6 +1977,11 @@ class SQLConnector:
                 await self._write_audit(
                     conn, qdef, stmt_type, bound, user, audit_table=audit_table, main_sql=sql_text,
                 )
+            # Validation-only: everything above ran (rowcount + any DB error are real), now undo it.
+            if dry_run:
+                raise _DryRunRollback()
+        except _DryRunRollback:
+            pass
         duration_ms = (time.perf_counter() - started) * 1000.0
         return QueryResult(
             connector=self.name,

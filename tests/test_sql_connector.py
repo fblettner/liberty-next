@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from liberty.connectors.base import (
@@ -353,6 +354,34 @@ async def test_write_when_writable(pools: PoolRegistry) -> None:
     assert result.statement_type == "INSERT"
     assert result.rowcount == 1
     assert (await conn.execute("count")).rows == [{"n": 4}]
+
+
+@pytest.mark.asyncio
+async def test_dry_run_executes_then_rolls_back(pools: PoolRegistry) -> None:
+    """``execute(dry_run=True)`` runs the write (rowcount is real) but rolls the transaction back —
+    the Excel-import validator relies on this to try each row against the DB without mutating it."""
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", sql="INSERT INTO item (id, name) VALUES (:id, :name)", writable=True),
+        QueryDef(name="count", sql="SELECT COUNT(*) AS n FROM item"),
+    )
+    before = (await conn.execute("count")).rows
+    result = await conn.execute("ins", {"id": 9, "name": "z"}, dry_run=True)
+    assert result.statement_type == "INSERT"
+    assert result.rowcount == 1                       # the INSERT really executed…
+    assert (await conn.execute("count")).rows == before  # …but left no row behind
+
+
+@pytest.mark.asyncio
+async def test_dry_run_surfaces_db_error(pools: PoolRegistry) -> None:
+    """A dry-run that violates a constraint raises the SAME DB error a real write would — that's how
+    the import validator reports a bad row instead of silently swallowing it."""
+    conn = _connector(
+        pools,
+        QueryDef(name="ins", sql="INSERT INTO item (id, name) VALUES (:id, :name)", writable=True),
+    )
+    with pytest.raises(SQLAlchemyError):
+        await conn.execute("ins", {"id": 1, "name": "dup"}, dry_run=True)  # id=1 already exists (PK clash)
 
 
 @pytest.mark.asyncio
