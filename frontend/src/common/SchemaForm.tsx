@@ -21,6 +21,7 @@ import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
 import { SqlEditor } from './SqlEditor'
+import type { WizardStatementType } from './SqlWizardModal'
 import { colors, fontSize, fonts, radius } from '../theme'
 
 export interface JsonSchema {
@@ -111,6 +112,12 @@ export const FrameworkEnumsContext = createContext<FrameworkEnums | null>(null)
  *  via context so nested SchemaForms (drill-in list items, accordions) all pick it up without
  *  having to pass `sqlConnector` through every helper. `ConnectorsTableEditor` provides it. */
 export const SqlConnectorContext = createContext<string | undefined>(undefined)
+
+/** The statement kind of the SQL field being edited (the CRUD tab: read→SELECT, update→UPDATE,
+ *  insert→INSERT, delete→DELETE). Threaded into the SqlEditor's wizard so it builds the right kind
+ *  and locks read-only on a mismatch. `ConnectorsTableEditor` provides it per active tab; unset
+ *  elsewhere (the wizard then infers from the SQL). */
+export const SqlStatementContext = createContext<WizardStatementType | undefined>(undefined)
 
 /** Resolve a field's effective enum ref: prefer `x_enum_ref_when` (which switches by a sibling
  *  field's current value) over plain `x_enum_ref`. Returns `null` when no ref applies (the
@@ -366,12 +373,13 @@ export function StringListEditor(
 // Reads the active connector from `SqlConnectorContext` (when set, schema-aware autocomplete is on).
 function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const connector = useContext(SqlConnectorContext)
+  const statementType = useContext(SqlStatementContext)
   const isMap = value != null && typeof value === 'object' && !Array.isArray(value)
   if (!isMap) {
     const text = value == null ? '' : String(value)
     return (
       <div>
-        <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} />
+        <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} statementType={statementType} />
         <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
       </div>
     )
@@ -386,7 +394,7 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
           <Row style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
-              <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} />
+              <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} statementType={statementType} />
             </div>
             {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>

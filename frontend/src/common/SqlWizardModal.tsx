@@ -21,8 +21,9 @@ import { Field, Input, PasswordInput as _pw } from './Input'  // PasswordInput u
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from './Modal'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
 import { SqlEditor } from './SqlEditor'
+import { buildCrudSql } from './sqlBuild'
 import {
-  getPoolSchemaNames, getPoolSchemaTables,
+  findReferencedTables, getPoolSchemaNames, getPoolSchemaTables,
   type PoolColumn, type PoolTable,
 } from '../services/poolSchema'
 import { colors, fontSize, fonts, radius } from '../theme'
@@ -63,6 +64,11 @@ function suggestAlias(name: string, taken: Set<string>): string {
   return a
 }
 
+// Shared modal frame size so SELECT / INSERT / UPDATE / DELETE all open at the same width + a floor
+// height — short builders (DELETE) fill to the minimum instead of collapsing; tall ones (SELECT with
+// joins) grow and the body scrolls (Modal caps at max-height: 90vh).
+const WIZARD_MODAL_STYLE = { width: 'min(900px, 95vw)', minHeight: 'min(600px, 82vh)' } as const
+
 const Section = styled.div`
   display: flex; flex-direction: column; gap: 6px;
   font-size: ${fontSize.sm}; color: ${colors.text.secondary};
@@ -79,6 +85,14 @@ const ColCheck = styled.div`
   display: inline-flex; align-items: center; gap: 6px; font-family: ${fonts.mono};
   font-size: ${fontSize.sm}; color: ${colors.text.secondary};
   & .type { color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
+`
+// A column row in the mutation builder: include checkbox (or bare name) on the left, an optional
+// "key" toggle on the right (UPDATE/DELETE WHERE).
+const MutCol = styled.div`
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
+  & .type { color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
+  & .key { display: inline-flex; align-items: center; gap: 4px; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
 `
 const RowBar = styled.div`display: flex; gap: 6px; align-items: center;`
 const SmallX = styled.button`
@@ -167,6 +181,24 @@ export function TablePicker({ connector, onPick }: { connector: string; onPick: 
   )
 }
 
+/** The kind of statement the wizard builds — a CRUD slot's tab (read→SELECT, update→UPDATE,
+ *  insert→INSERT, delete→DELETE). SELECT uses the full column/where/order/join builder; the others
+ *  reuse the shared CRUD generator (common/sqlBuild.ts). */
+export type WizardStatementType = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE'
+const STMT_TO_CRUD: Record<Exclude<WizardStatementType, 'SELECT'>, 'post' | 'put' | 'delete'> = {
+  INSERT: 'post', UPDATE: 'put', DELETE: 'delete',
+}
+
+/** The leading keyword of a statement (or 'OTHER' for CTE/MERGE/… the builder won't touch, null when
+ *  empty). Drives the read-only guard: a slot whose SQL doesn't lead with its expected keyword opens
+ *  read-only instead of being rebuilt into the wrong shape. */
+function firstSqlKeyword(sql: string): WizardStatementType | 'OTHER' | null {
+  const m = sql.trim().match(/^([A-Za-z]+)/)
+  if (!m) return null
+  const kw = m[1].toUpperCase()
+  return (kw === 'SELECT' || kw === 'INSERT' || kw === 'UPDATE' || kw === 'DELETE') ? kw : 'OTHER'
+}
+
 export interface SqlWizardModalProps {
   /** The connector — the wizard lazily introspects its pool (schema list → tables → columns). */
   connector: string
@@ -174,11 +206,24 @@ export interface SqlWizardModalProps {
    *  to parse the simple single-table SELECT shape so opening on an existing query pre-fills its
    *  widgets. A multi-table / complex query shows untouched until the operator changes a widget. */
   initialSql?: string
+  /** The slot's expected statement kind (from the CRUD tab). Omitted → inferred from the SQL's
+   *  leading keyword, defaulting to SELECT. */
+  statementType?: WizardStatementType
   onInsert: (sql: string) => void
   onCancel: () => void
 }
 
-export function SqlWizardModal({ connector, initialSql, onInsert, onCancel }: SqlWizardModalProps) {
+/** Dispatcher: pick the SELECT builder or the mutation (INSERT/UPDATE/DELETE) builder by expected
+ *  kind, and lock to read-only when the existing SQL's leading keyword doesn't match. */
+export function SqlWizardModal(props: SqlWizardModalProps) {
+  const kw = firstSqlKeyword(props.initialSql ?? '')
+  const expected: WizardStatementType = props.statementType ?? (kw && kw !== 'OTHER' ? kw : 'SELECT')
+  const forceReadOnly = kw != null && kw !== expected   // mismatch, or a CTE/MERGE/… the builder won't edit
+  if (expected === 'SELECT') return <SelectWizard {...props} forceReadOnly={forceReadOnly} />
+  return <MutationWizard {...props} crud={STMT_TO_CRUD[expected]} expected={expected} forceReadOnly={forceReadOnly} />
+}
+
+function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly }: SqlWizardModalProps & { forceReadOnly?: boolean }) {
   const { t } = useTranslation()
   // The FROM/JOIN chain — joins[0] is the base table, joins[1+] carry a join type + ON. Column ids
   // are ``<alias>.<col>`` so columns from different joined tables never collide.
@@ -191,7 +236,9 @@ export function SqlWizardModal({ connector, initialSql, onInsert, onCancel }: Sq
   // use features the builder can't represent (output-column aliases, expression columns, …). We show
   // the joins for reference + a banner, keep the original SQL in the preview, and don't let the
   // operator rebuild (which would silently drop the aliases/expressions). Edit those in SQL.
-  const [readOnly, setReadOnly] = useState(false)
+  // ``forceReadOnly`` (the SQL doesn't lead with SELECT — a write statement or a CTE/MERGE) seeds the
+  // read-only state, so the builder shows the query for reference without rebuilding it as a SELECT.
+  const [readOnly, setReadOnly] = useState(!!forceReadOnly)
   // ``userTouched`` — until the operator changes a widget, the preview shows the ORIGINAL SQL verbatim
   // (so opening on a complex/joined query the builder can't round-trip doesn't silently rewrite it).
   const [userTouched, setUserTouched] = useState(false)
@@ -204,6 +251,7 @@ export function SqlWizardModal({ connector, initialSql, onInsert, onCancel }: Sq
   // representable, pre-fills those too; when they're not (output aliases, expression columns) it marks
   // the wizard read-only so the original SQL is preserved verbatim instead of being silently rewritten.
   useEffect(() => {
+    if (forceReadOnly) return   // not a SELECT — keep the original SQL, don't parse it as one
     let cancelled = false
     const sql = initialSql ?? ''
     const chain = parseTableChain(sql)
@@ -333,11 +381,11 @@ export function SqlWizardModal({ connector, initialSql, onInsert, onCancel }: Sq
   // z-index 1000 sits above the editor modal (900) but below the global confirm/prompt overlay (2000).
   return createPortal(
     <Overlay style={{ zIndex: 1000 }}>
-      <Modal style={{ width: 'min(960px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
+      <Modal style={WIZARD_MODAL_STYLE} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{t('settings.sqlWizard.title')}</ModalHeader>
         <ModalBody>
           {/* ── tables: base FROM + JOINs (each lazily picked) ── */}
-          {!hasBase ? (
+          {readOnly && !hasBase ? null : !hasBase ? (
             <Field label={t('settings.sqlWizard.table')}>
               <TablePicker connector={connector} onPick={pickBase} />
             </Field>
@@ -418,7 +466,9 @@ export function SqlWizardModal({ connector, initialSql, onInsert, onCancel }: Sq
           )}
           {readOnly && (
             <Banner $tone="warning" style={{ marginBottom: 12 }}>
-              {t('settings.sqlWizard.readOnlyNote', "This query's SELECT list uses column aliases or expressions the builder can't edit. The joins are shown above for reference — edit the query directly in SQL.")}
+              {forceReadOnly
+                ? t('settings.sqlWizard.notSelectNote', "This isn't a simple SELECT the builder can edit — edit it directly as SQL.")
+                : t('settings.sqlWizard.readOnlyNote', "This query's SELECT list uses column aliases or expressions the builder can't edit. The joins are shown above for reference — edit the query directly in SQL.")}
             </Banner>
           )}
           {/* ── columns, grouped per table ── */}
@@ -482,6 +532,119 @@ export function SqlWizardModal({ connector, initialSql, onInsert, onCancel }: Sq
               ))}
               <MiniBtn type="button" onClick={() => onOrdersChange([...orders, { col: allColOpts[0]?.value ?? '', dir: 'ASC' }])}><Plus size={12} /> {t('settings.sqlWizard.addOrder')}</MiniBtn>
             </Section>
+          )}
+          <Section>
+            <SectionTitle>{t('settings.sqlWizard.preview')}</SectionTitle>
+            <SqlEditor value={previewSql} onChange={() => undefined} rows={6} readOnly />
+          </Section>
+        </ModalBody>
+        <ModalFooter>
+          <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
+          <Button $size="sm" $variant="primary" onClick={() => onInsert(previewSql)} disabled={!canInsert} autoFocus>
+            {t('settings.sqlWizard.insert')}
+          </Button>
+        </ModalFooter>
+      </Modal>
+    </Overlay>,
+    document.body,
+  )
+}
+
+// ─── INSERT / UPDATE / DELETE builder ───────────────────────────────────────────────────────────
+// A single-table column picker that reuses the shared CRUD generator (common/sqlBuild.ts) — the
+// SAME statement import-from-DB emits — so a slot you didn't generate at import can be scaffolded
+// here. INSERT picks the columns to write; UPDATE picks SET columns + key columns (WHERE); DELETE
+// picks key columns. ``#SCHEMA.X#`` table tokens from the picker are preserved verbatim.
+function MutationWizard({ connector, initialSql, crud, expected, forceReadOnly, onInsert, onCancel }:
+  SqlWizardModalProps & { crud: 'post' | 'put' | 'delete'; expected: WizardStatementType; forceReadOnly?: boolean }) {
+  const { t } = useTranslation()
+  const [base, setBase] = useState<{ schema: string | null; name: string; columns: PoolColumn[] } | null>(null)
+  const [included, setIncluded] = useState<Set<string>>(new Set())
+  const [keys, setKeys] = useState<Set<string>>(new Set())
+  const [userTouched, setUserTouched] = useState(false)
+  const readOnly = !!forceReadOnly
+  const touch = () => setUserTouched(true)
+
+  const seedTable = (tb: { schema: string | null; name: string; columns: PoolColumn[] }) => {
+    setBase(tb)
+    setIncluded(new Set(tb.columns.map((c) => c.name)))
+    // Guess keys from NOT NULL columns (same heuristic as the table-scaffold wizard).
+    setKeys(new Set(tb.columns.filter((c) => c.nullable === false).map((c) => c.name)))
+  }
+  // Seed the base table from the existing statement (INSERT INTO / UPDATE / DELETE FROM <table>).
+  useEffect(() => {
+    if (forceReadOnly) return
+    const r0 = findReferencedTables(initialSql ?? '')[0]
+    if (!r0) return
+    let cancelled = false
+    void getPoolSchemaTables(connector, r0.schema ?? null, r0.name).then((part) => {
+      if (cancelled) return
+      const tb = (part?.tables ?? []).find((x) => x.name.toLowerCase() === r0.name.toLowerCase())
+      if (tb) seedTable({ schema: r0.schema ?? tb.schema ?? null, name: tb.name, columns: tb.columns })
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only seed
+  }, [])
+
+  const pick = (p: PickedTable) => { touch(); seedTable({ schema: p.schema, name: p.name, columns: p.columns }) }
+  const needsInclude = crud === 'post' || crud === 'put'
+  const needsKey = crud === 'put' || crud === 'delete'
+  const toggleInc = (name: string) => { touch(); setIncluded((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n }) }
+  const toggleKey = (name: string) => { touch(); setKeys((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n }) }
+
+  const generated = base ? buildCrudSql({ crud, schema: base.schema, table: base.name, selectCols: [...included], keyCols: [...keys] }) : ''
+  const previewSql = readOnly || (!userTouched && (initialSql ?? '').trim()) ? (initialSql ?? '') : generated
+  const canInsert = !readOnly && !!generated.trim()
+
+  return createPortal(
+    <Overlay style={{ zIndex: 1000 }}>
+      <Modal style={WIZARD_MODAL_STYLE} onClick={(e) => e.stopPropagation()}>
+        <ModalHeader>{t(`settings.sqlWizard.title_${crud}`, `Build an ${expected}`)}</ModalHeader>
+        <ModalBody>
+          {readOnly ? (
+            <Banner $tone="warning" style={{ marginBottom: 12 }}>
+              {t('settings.sqlWizard.notMatchNote', "This statement doesn't start with {{kw}} — edit it directly as SQL.", { kw: expected })}
+            </Banner>
+          ) : !base ? (
+            <Field label={t('settings.sqlWizard.table')}>
+              <TablePicker connector={connector} onPick={pick} />
+            </Field>
+          ) : (
+            <>
+              <Section>
+                <RowBar>
+                  <SectionTitle style={{ flex: 1 }}>
+                    {t('settings.sqlWizard.tables', 'Tables')} — <span style={{ fontFamily: fonts.mono, textTransform: 'none' }}>{(base.schema ? `${base.schema}.` : '') + base.name}</span>
+                  </SectionTitle>
+                  <MiniBtn type="button" onClick={() => { setBase(null); touch() }}>{t('settings.sqlWizard.changeTable', 'Change table')}</MiniBtn>
+                </RowBar>
+              </Section>
+              <Section>
+                <SectionTitle>
+                  {crud === 'post' ? t('settings.sqlWizard.insertCols', 'Columns to insert')
+                    : crud === 'put' ? t('settings.sqlWizard.updateCols', 'Columns to set · key columns drive WHERE')
+                      : t('settings.sqlWizard.deleteCols', 'Key columns (drive WHERE)')}
+                </SectionTitle>
+                <ColGrid>
+                  {base.columns.map((c) => (
+                    <MutCol key={c.name}>
+                      {needsInclude ? (
+                        <Checkbox checked={included.has(c.name)} onChange={() => toggleInc(c.name)}
+                          label={<>{c.name.toUpperCase()}{c.type && <span className="type"> · {c.type}</span>}</>} />
+                      ) : (
+                        <span>{c.name.toUpperCase()}{c.type && <span className="type"> · {c.type}</span>}</span>
+                      )}
+                      {needsKey && (
+                        <span className="key">
+                          <Checkbox checked={keys.has(c.name)} onChange={() => toggleKey(c.name)} disabled={needsInclude && !included.has(c.name)} />
+                          {t('settings.sqlWizard.key', 'key')}
+                        </span>
+                      )}
+                    </MutCol>
+                  ))}
+                </ColGrid>
+              </Section>
+            </>
           )}
           <Section>
             <SectionTitle>{t('settings.sqlWizard.preview')}</SectionTitle>

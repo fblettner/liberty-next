@@ -22,9 +22,9 @@ import { Play, Wand2, Braces } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsLight } from './useIsLight'
 import { Centered } from './Spinner'
-import { findReferencedTables, fetchTablesSchema } from '../services/poolSchema'
+import { findReferencedTables, fetchTablesSchema, getPoolSchemaNames } from '../services/poolSchema'
 import { attachPoolSchema } from '../services/sqlCompletion'
-import { SqlWizardModal } from './SqlWizardModal'
+import { SqlWizardModal, type WizardStatementType } from './SqlWizardModal'
 import { SqlTestRunner } from './SqlTestRunner'
 import { colors, fontSize, fonts, radius, EDITOR_FONT_PX } from '../theme'
 
@@ -51,6 +51,10 @@ const TokenItem = styled.button`
   & .tok { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
   & .desc { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
   &:hover { background: var(--hover-subtle); }
+`
+const TokenDivider = styled.div`
+  font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 6px 8px 2px; margin-top: 2px; border-top: 1px solid ${colors.border};
 `
 // The predefined query tokens the backend resolves at write time (liberty/connectors/sql.py:
 // _PREDEFINED_TOKENS). Inserting one writes ``{{TOKEN}}`` at the cursor; it's bound + coerced to the
@@ -85,6 +89,10 @@ export interface SqlEditorProps {
    *  columns after `<table>.`, plus the columns of any table referenced earlier in the
    *  statement when typing inside a SELECT clause. Also reveals the wizard + run buttons. */
   connector?: string
+  /** The kind of statement this slot holds (the CRUD tab: read→SELECT, update→UPDATE,
+   *  insert→INSERT, delete→DELETE). Drives the wizard: it builds that kind and opens read-only
+   *  when the current SQL's leading keyword doesn't match. Omitted → inferred from the SQL. */
+  statementType?: WizardStatementType
 }
 
 // One "row" is ~20px (Monaco's default line height at our font size) + 18px chrome for the gutter
@@ -93,7 +101,7 @@ export interface SqlEditorProps {
 const ROW_PX = 20
 const CHROME_PX = 18
 
-export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: SqlEditorProps) {
+export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, statementType }: SqlEditorProps) {
   const { t } = useTranslation()
   const isLight = useIsLight()
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -103,11 +111,11 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
   const handleChange: OnChange = (v) => onChange(v ?? '')
-  // Insert a ``{{TOKEN}}`` at the cursor (replacing any selection), then refocus. Monaco's edit
-  // fires onChange, so the controlled `value` stays in sync. Falls back to appending if the editor
-  // hasn't mounted yet.
-  const insertToken = (tok: string) => {
-    const snippet = `{{${tok}}}`
+  // Insert a snippet at the cursor (replacing any selection), then refocus. Monaco's edit fires
+  // onChange, so the controlled `value` stays in sync. Falls back to appending if the editor hasn't
+  // mounted yet. ``insertToken`` wraps a predefined ``{{TOKEN}}``; the schema picker inserts the raw
+  // ``#SCHEMA.<KEY>#`` placeholder.
+  const insertSnippet = (snippet: string) => {
     const ed = editorRef.current
     setTokenOpen(false)
     if (ed) {
@@ -120,6 +128,20 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
     }
     onChange(value + snippet)
   }
+  const insertToken = (tok: string) => insertSnippet(`{{${tok}}}`)
+  // The connector pool's ``#SCHEMA.<KEY>#`` map (e.g. CTL → PS920CTL) — offered in the Token menu so
+  // the operator picks the portable placeholder instead of typing it. Empty for pools without a map.
+  const [schemaTokens, setSchemaTokens] = useState<{ key: string; owner: string }[]>([])
+  useEffect(() => {
+    if (!connector) { setSchemaTokens([]); return }
+    let cancelled = false
+    void getPoolSchemaNames(connector).then((s) => {
+      if (cancelled) return
+      const map = s?.schema_map ?? {}
+      setSchemaTokens(Object.entries(map).map(([key, owner]) => ({ key, owner: String(owner) })))
+    })
+    return () => { cancelled = true }
+  }, [connector])
   // Close the token menu on an outside click.
   useEffect(() => {
     if (!tokenOpen) return
@@ -179,6 +201,17 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
                     <span className="desc">{t(`settings.sqlEditor.${q.descKey}`, q.descFallback)}</span>
                   </TokenItem>
                 ))}
+                {schemaTokens.length > 0 && (
+                  <>
+                    <TokenDivider>{t('settings.sqlEditor.schemaTokens', 'Pool schemas')}</TokenDivider>
+                    {schemaTokens.map((s) => (
+                      <TokenItem key={s.key} type="button" onClick={() => insertSnippet(`#SCHEMA.${s.key}#`)}>
+                        <span className="tok">{`#SCHEMA.${s.key}#`}</span>
+                        <span className="desc">{s.owner}</span>
+                      </TokenItem>
+                    ))}
+                  </>
+                )}
               </TokenMenu>
             )}
           </MenuWrap>
@@ -235,6 +268,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector }: Sq
           // tries to parse the simple single-table SELECT shape so opening on an existing query
           // pre-fills its widgets instead of replacing a working query with a regenerated default.
           initialSql={value}
+          statementType={statementType}
           onInsert={(sql) => { onChange(sql); setWizardOpen(false) }}
           onCancel={() => setWizardOpen(false)} />
       )}

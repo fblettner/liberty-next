@@ -25,6 +25,7 @@ import { Checkbox } from '../../common/Checkbox'
 import { Field, Input } from '../../common/Input'
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from '../../common/Modal'
 import { SearchSelect, type SearchSelectOption } from '../../common/SearchSelect'
+import { buildCrudSql } from '../../common/sqlBuild'
 import { SqlEditor } from '../../common/SqlEditor'
 import { SqlConnectorContext } from '../../common/SchemaForm'
 import { getPoolSchemaNames, getPoolSchemaTables, findTable, type PoolSchema, type PoolTable } from '../../services/poolSchema'
@@ -115,38 +116,9 @@ export interface CrudWizardModalProps {
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
 
-// Generate the SQL for one CRUD slot. Returns '' when the slot's column set is too sparse to
-// emit a meaningful query (e.g. UPDATE with no non-key columns).
-function buildSql(opts: {
-  crud: CrudKey
-  schema: string | null
-  table: string
-  selectCols: string[]    // columns visible to SELECT / INSERT (caller's ``include`` set)
-  keyCols: string[]       // columns identifying a row (drive UPDATE / DELETE WHERE)
-}): string {
-  const fqTable = opts.schema ? `${opts.schema}.${opts.table}` : opts.table
-  if (opts.crud === 'get') {
-    if (opts.selectCols.length === 0) return ''
-    return `SELECT\n  ${opts.selectCols.join(',\n  ')}\nFROM ${fqTable}`
-  }
-  if (opts.crud === 'post') {
-    if (opts.selectCols.length === 0) return ''
-    const placeholders = opts.selectCols.map((c) => `:${c}`).join(',\n  ')
-    return `INSERT INTO ${fqTable} (\n  ${opts.selectCols.join(',\n  ')}\n) VALUES (\n  ${placeholders}\n)`
-  }
-  if (opts.crud === 'put') {
-    if (opts.keyCols.length === 0) return ''
-    const nonKey = opts.selectCols.filter((c) => !opts.keyCols.includes(c))
-    if (nonKey.length === 0) return ''
-    const sets = nonKey.map((c) => `${c} = :${c}`).join(',\n  ')
-    const where = opts.keyCols.map((c) => `${c} = :${c}_ORIGINAL`).join('\n  AND ')
-    return `UPDATE ${fqTable}\nSET\n  ${sets}\nWHERE\n  ${where}`
-  }
-  // delete
-  if (opts.keyCols.length === 0) return ''
-  const where = opts.keyCols.map((c) => `${c} = :${c}`).join('\n  AND ')
-  return `DELETE FROM ${fqTable}\nWHERE\n  ${where}`
-}
+// CRUD-statement generation lives in the shared builder so the per-slot SQL wizard scaffolds the
+// identical statement (see common/sqlBuild.ts).
+const buildSql = buildCrudSql
 
 export function CrudWizardModal({
   connector, existingQueryNames, onSave, onCancel,
