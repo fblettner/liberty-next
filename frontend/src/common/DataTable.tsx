@@ -500,7 +500,10 @@ export function DataTable<T extends object>({
     const headers = cols.map((c) => colHeaderText(c))
     const rows = table.getFilteredRowModel().rows.map((row) =>
       cols.map((col) => {
-        const v = row.getAllCells().find((c) => c.column.id === col.id)?.getValue()
+        // A column may override its export value (e.g. BOOLEAN emits the raw "1"/"0" code, not the
+        // "true"/"false" display token its accessor uses for sort/filter) so a re-import round-trips.
+        const ev = (col.columnDef.meta as FilterMeta | undefined)?.exportValue
+        const v = ev ? ev(row.original) : row.getAllCells().find((c) => c.column.id === col.id)?.getValue()
         return v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
       }),
     )

@@ -1410,6 +1410,7 @@ export function ResultTable({
       }
 
       const kind = filterKindOf(c)
+      const fp = filterPropsFor(kind, undefined, align)
       out.push({
         id: c.name,
         header: colHeader(c),
@@ -1423,7 +1424,10 @@ export function ResultTable({
           return v
         },
         size: c.width ?? undefined,
-        ...filterPropsFor(kind, undefined, align),
+        filterFn: fp.filterFn,
+        // BOOLEAN exports its raw stored code (not the "true"/"false" sort/filter token its accessor
+        // emits) so a re-import can write the value back.
+        meta: c.rule?.kind === 'boolean' ? { ...fp.meta, exportValue: (o: unknown) => (o as DataRow)[c.name] } : fp.meta,
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
           if (editMode && !isGroupRow(info)) return editCellFor(c, info)
