@@ -127,7 +127,10 @@ def _resolve_screen_field(
         if hint.rules_when:
             out["rules_when"] = [
                 {"field": w.field, "value": w.value,
-                 "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language)}
+                 "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language),
+                 # Per-rule binds (this rule's lookup gets these, not the column's base binds).
+                 "lookup_param_binds": [b.model_dump(mode="json", exclude_none=True) for b in w.lookup_param_binds],
+                 "return_binds": [{"param": b.param, "column": b.column} for b in w.return_binds]}
                 for w in hint.rules_when
             ]
         # Static flags — straight from the column (always a concrete bool on the wire).

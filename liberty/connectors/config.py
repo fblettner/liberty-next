@@ -249,11 +249,19 @@ class RulesWhen(BaseModel):
     column with ``rules`` / ``rules_values`` instead of the column's base rule. The first matching
     entry wins; no match → the base ``rules``. ``rules = ""`` → plain input (no widget) — e.g. a JDE
     alias row where the value is typed directly, not looked up. Reactive per row / form state, in the
-    dialog AND grid. Lives on the TARGET column, like ``default_when`` / ``visible_when``. Every
-    referenced lookup is still loaded ONCE (and cached) — only the per-cell rule choice is per-row.
-    The active lookup's params come from the column's shared ``lookup_param_binds`` (bound by name)."""
+    dialog AND grid. Lives on the TARGET column, like ``default_when`` / ``visible_when``.
 
-    model_config = ConfigDict(extra="forbid")
+    **Per-rule binds.** Each conditional lookup gets its OWN ``lookup_param_binds`` + ``return_binds``
+    — NOT the column's shared ones — because two rules on the same discriminator usually need
+    different params: on f00950's FSDTAI, FSSETY 6/8 → ``get_form_name`` narrowed by ``OBNM``, while
+    FSSETY 2/4 → ``get_data_item`` which must NOT be narrowed by OBNM (it would return nothing). The
+    column-level ``lookup_param_binds`` / ``return_binds`` then apply only to the BASE rule (when no
+    entry matches). Every referenced lookup is still loaded ONCE per distinct bind value (and cached);
+    only the per-cell rule choice is per-row."""
+
+    # x_summary → the editor's list row reads "FSSETY · 2/4 · get_data_item" so two entries on the
+    # same discriminator are distinguishable (without it both rows just showed "FSSETY").
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"x_summary": ["field", "value", "rules_values"]})
 
     field: str = Field(
         description="The sibling column whose value selects the rule (e.g. FSSETY).",
@@ -281,9 +289,25 @@ class RulesWhen(BaseModel):
         },
         description="The rule's id: ENUM → enum id; LOOKUP → lookup id; SEQUENCE/NN → sequence id; BOOLEAN → true marker.",
     )
+    lookup_param_binds: list["ParamBind"] = Field(
+        default_factory=list,
+        description=(
+            "Params bound into THIS rule's LOOKUP query (when ``rules = LOOKUP``) — independent of the "
+            "column's base binds and of any sibling rule's. Same shape as ``ColumnHint.lookup_param_binds``."
+        ),
+    )
+    return_binds: list["ReturnBind"] = Field(
+        default_factory=list,
+        description="Fill sibling columns from THIS rule's LOOKUP pick — independent of the column's base return_binds.",
+    )
 
     def as_dict(self) -> dict[str, Any]:
-        return {"field": self.field, "value": self.value, "rules": self.rules, "rules_values": self.rules_values}
+        return {
+            "field": self.field, "value": self.value,
+            "rules": self.rules, "rules_values": self.rules_values,
+            "lookup_param_binds": [b.model_dump(mode="json", exclude_none=True) for b in self.lookup_param_binds],
+            "return_binds": [{"param": b.param, "column": b.column} for b in self.return_binds],
+        }
 
 
 class ColumnHint(BaseModel):
@@ -476,9 +500,10 @@ class ColumnHint(BaseModel):
         default_factory=list,
         json_schema_extra={"x_group": "Rules"},
         description=(
-            "Narrow this column's lookup query by binding extra parameters. Used when the "
+            "Narrow this column's BASE lookup query by binding extra parameters. Used when the "
             "lookup depends on another field's value — e.g. picking a role narrows by the "
-            "row's current application id."
+            "row's current application id. When the column has ``rules_when`` entries, each "
+            "conditional rule carries its OWN binds — this list applies only to the base rule."
         ),
     )
     return_binds: list[ReturnBind] = Field(
@@ -489,7 +514,9 @@ class ColumnHint(BaseModel):
             "from the picked row's returned fields. Each entry maps a lookup ``return_params`` "
             "field → a target column on this screen. Applies in the dialog, the grid bulk-edit, "
             "and on Excel import (import fills only an empty target — an explicit value wins). "
-            "Example: on f00950 OBNM's lookup returns SY, bound to fill the product-code column."
+            "Example: on f00950 OBNM's lookup returns SY, bound to fill the product-code column. "
+            "With ``rules_when`` entries, each conditional rule carries its own ``return_binds``; "
+            "this applies to the base rule."
         ),
     )
     group: str | None = Field(

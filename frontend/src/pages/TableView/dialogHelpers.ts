@@ -101,6 +101,20 @@ export function applyRulesWhen<R>(
   return baseRule ?? null
 }
 
+/** The active ``rules_when`` ENTRY for the current values (the first whose {field, value} holds),
+ *  or null when none match (→ use the base rule + the column's BASE binds). Lets a caller read the
+ *  active rule AND its per-rule ``lookup_param_binds`` / ``return_binds`` together — they travel as
+ *  one entry, so a conditional lookup binds exactly the params it needs (and no sibling rule's). */
+export function activeRulesWhen<E extends { field: string; value: string | string[] }>(
+  rulesWhen: E[] | undefined,
+  values: Row,
+): E | null {
+  for (const rw of rulesWhen ?? []) {
+    if (evalConditions([{ field: rw.field, value: rw.value }], values)) return rw
+  }
+  return null
+}
+
 /** Resolve a list of ParamBinds against the current form state. `value` binds are literals;
  *  `source` binds read the live value of another field on the same form (column name,
  *  case-insensitive). Empty / missing values are dropped — the caller decides whether that

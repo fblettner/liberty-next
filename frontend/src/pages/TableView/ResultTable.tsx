@@ -32,7 +32,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { entityKeyOf, resolveBindList, forcedDefault, applyRulesWhen, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -803,25 +803,57 @@ export function ResultTable({
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
   const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
+  // Resolve a (rule, binds, rowValues) → the LookupSpec to fetch / look up. The rule's static
+  // params + the rule's PER-RULE ``lookup_param_binds`` resolved against the row. For a NON-
+  // parameterized rule (no binds) this is the single shared spec; for a parameterized one (e.g.
+  // f00950 get_form_name narrowed by OBNM) the params vary per row, so the grid fetches it once per
+  // distinct bind value and resolves each row against the matching spec. Returns null for non-lookups.
+  const specForRule = useCallback((
+    r: Column['rule'] | null | undefined,
+    binds: { param: string; value?: string | null; source?: string | null }[] | undefined,
+    rowValues: Record<string, unknown>,
+  ): LookupSpec | null => {
+    if (r?.kind !== 'lookup') return null
+    const dyn = binds && binds.length ? resolveBindList(binds, rowValues) : {}
+    return { connector: r.connector, query: r.query, value: r.value, label: r.label,
+             params: { ...(r.params ?? {}), ...dyn }, sources: r.sources }
+  }, [])
   const lookupSpecs = useMemo<LookupSpec[]>(() => {
     const out: LookupSpec[] = []
-    const specOf = (r: Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>) =>
-      // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
-      // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
-      // cache separately in services/lookups (specKey folds the params in).
-      ({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources })
+    const seen = new Set<string>()
+    const add = (spec: LookupSpec | null) => { if (!spec) return; const k = lookupKey(spec); if (!seen.has(k)) { seen.add(k); out.push(spec) } }
     for (const c of result.columns) {
-      // Every lookup a column can render — the base rule AND every rules_when alternative — so all
-      // are fetched ONCE up front (cached/shared). Per row we only PICK which one; no per-row fetch.
-      if (c.rule?.kind === 'lookup') out.push(specOf(c.rule))
-      for (const rw of c.rules_when ?? []) if (rw.rule?.kind === 'lookup') out.push(specOf(rw.rule))
+      // Every lookup a column can render — the base rule AND every rules_when alternative. A non-
+      // parameterized lookup is fetched ONCE; a parameterized rules_when lookup (its own
+      // lookup_param_binds) is fetched once per DISTINCT bind value across the rows, so each row's
+      // cell resolves against the right narrowed result (no per-cell network fetch — all cached).
+      add(specForRule(c.rule, undefined, {}))
+      for (const rw of c.rules_when ?? []) {
+        if (rw.rule?.kind !== 'lookup') continue
+        if (!rw.lookup_param_binds || rw.lookup_param_binds.length === 0) { add(specForRule(rw.rule, undefined, {})); continue }
+        for (const row of result.rows) add(specForRule(rw.rule, rw.lookup_param_binds, row as Record<string, unknown>))
+      }
     }
     return out
-  }, [result.columns])
+  }, [result.columns, result.rows, specForRule])
   // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
   // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed the
   // lookup-pick return-fill (``return_binds``) in the grid + on import, and the dropdown extras.
   const lookupMaps = useLookupTables(lookupSpecs)
+
+  // The ACTIVE lookup for a cell, resolved per row: the rules_when entry whose {field,value} holds
+  // (carrying its OWN rule + binds), else the base rule. Returns the active rule + its already-fetched
+  // LookupData (narrowed by the row's per-rule binds). Shared by display-label resolution + the edit
+  // dropdown so both pick the SAME conditional lookup for the row (f00950 FSDTAI: get_form_name for
+  // FSSETY 6/8, get_data_item for 2/4 — each with the right narrowing).
+  const activeLookupFor = useCallback((c: Column, row: DataRow): { rule: Column['rule']; data: LookupData | undefined } => {
+    const vals = valuesOf(row)
+    const aw = activeRulesWhen(c.rules_when, vals)
+    const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
+    if (rule?.kind !== 'lookup') return { rule: rule ?? undefined, data: undefined }
+    const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, vals)
+    return { rule, data: spec ? lookupMaps.get(lookupKey(spec)) : undefined }
+  }, [valuesOf, specForRule, lookupMaps])
 
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
@@ -1121,21 +1153,17 @@ export function ResultTable({
       const forced = forcedDefault(c.default_when, valuesOf(row))
       if (forced !== undefined) return span(String(forced), 'plain', cellAlign(c))
       // Per-row effective rule (rules_when): the cell's widget/lookup can differ row to row. Resolve
-      // it against this row's current values and render with the active rule (``ec``). Every possible
-      // lookup is pre-fetched, so this only PICKS the rule — no per-row fetch.
+      // the active rule + its already-fetched LookupData (narrowed by this row's per-rule binds) in
+      // one shot — every possible lookup (incl. one fetch per distinct bind value) is pre-fetched, so
+      // this only PICKS; no per-row network fetch.
+      const { rule: activeRule, data: lookupData } = activeLookupFor(c, row)
+      // ec carries the active rule AND its per-rule return_binds (the edit pick reads
+      // ``column.return_binds``), so a conditional lookup's pick fills the right siblings.
+      const awEdit = c.rules_when?.length ? activeRulesWhen(c.rules_when, valuesOf(row)) : null
       const ec: Column = c.rules_when?.length
-        ? { ...c, rule: applyRulesWhen(c.rules_when, c.rule ?? null, valuesOf(row)) ?? undefined }
+        ? { ...c, rule: activeRule ?? undefined, return_binds: awEdit ? (awEdit.return_binds ?? []) : c.return_binds }
         : c
       const v = cur(row, c.name)
-      // For LOOKUP columns, pull the already-fetched ``LookupData`` (value→label *and* raw
-      // rows) from ``lookupMaps``. The map drives the dropdown options; the rows let the
-      // pick handler resolve return_params.
-      const lookupData: LookupData | undefined = ec.rule?.kind === 'lookup'
-        ? lookupMaps.get(lookupKey({
-            connector: ec.rule.connector, query: ec.rule.query,
-            value: ec.rule.value, label: ec.rule.label, params: ec.rule.params, sources: ec.rule.sources,
-          }))
-        : undefined
       // Lookup-pick return-fill dispatcher — the picked column's ``return_binds`` already produced
       // a ``{targetColumn: value}`` map; write each to the sibling cell on the same row (resolving
       // the target to the grid's actual column name). v1's "pick OBNM, SY auto-populates", explicit.
@@ -1230,7 +1258,34 @@ export function ResultTable({
           }
           return m
         })()
+        // Resolve a label from a specific LookupData (composite by key columns, then exact, then
+        // trim-tolerant). Used for the per-row conditional path; SEP is internal so any non-data char.
+        const SEP = ''
+        const labelFromData = (ad: LookupData | undefined, kd: { source: string; column: string }[], row: DataRow, value: unknown): string | undefined => {
+          if (!ad) return undefined
+          if (kd.length && ad.rows) {
+            const rk = [...kd.map((d) => norm(cur(row, d.source))), norm(value)].join(SEP)
+            for (const lr of ad.rows) {
+              const lk = [...kd.map((d) => norm(lr[ad.byColLower.get(d.column.toLowerCase()) ?? d.column])), norm(lr[ad.vKey])].join(SEP)
+              if (lk === rk) { const lbl = lr[ad.lKey]; if (lbl != null && lbl !== '') return String(lbl) }
+            }
+          }
+          const exact = ad.map?.get(value == null ? '' : String(value))
+          if (exact != null) return exact
+          for (const lr of ad.rows ?? []) { const v = lr[ad.vKey]; if (v != null && norm(v) === norm(value)) return lr[ad.lKey] == null ? String(v) : String(lr[ad.lKey]) }
+          return undefined
+        }
         const resolveLabel = (row: DataRow, value: unknown): string | undefined => {
+          // rules_when column: resolve against the row's ACTIVE conditional lookup (which may be
+          // parameterized + fetched per distinct bind value), NOT the base rule's pre-built map.
+          if (c.rules_when?.length) {
+            const { rule: ec, data: ad } = activeLookupFor(c, row)
+            if (ec?.kind !== 'lookup') return undefined   // active rule is a plain input → no label
+            const kd = c.filter_from && c.filter_from.length > 0
+              ? c.filter_from.map((d) => ({ source: d.source, column: d.column }))
+              : (ec.key_columns ?? []).map((kc) => ({ source: kc, column: kc }))
+            return labelFromData(ad, kd, row, value)
+          }
           const raw = value == null ? '' : String(value)
           if (compositeMap) {
             const key = [...keyDeps.map((d) => norm(cur(row, d.source))), norm(value)].join(' ')

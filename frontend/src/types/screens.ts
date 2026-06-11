@@ -116,8 +116,14 @@ export interface ScreenField {
    *  and locked. First matching rule wins. Reactive on the live form. */
   default_when?: { field: string; value: string | string[]; default: string }[]
   /** Conditional rule overrides: when sibling `field` == `value`, render with `rule` (resolved, or
-   *  null → plain) instead of the field's base `rule`. First match wins; reactive on the form. */
-  rules_when?: { field: string; value: string | string[]; rule: DisplayRule | null }[]
+   *  null → plain) instead of the field's base `rule`. First match wins; reactive on the form. Each
+   *  entry carries its OWN `lookup_param_binds` + `return_binds` (independent of the column's base
+   *  binds) so two rules on the same discriminator bind different params. */
+  rules_when?: {
+    field: string; value: string | string[]; rule: DisplayRule | null
+    lookup_param_binds?: ParamBind[]
+    return_binds?: { param: string; column: string }[]
+  }[]
   /** Conditional visibility — evaluated against the form. */
   visible_when?: FieldCondition[]
   /** Conditional required — when non-empty, every predicate must hold for the field to be required. */

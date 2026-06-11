@@ -391,7 +391,16 @@ function itemSummary(it: Record<string, unknown>, itemSchema: JsonSchema, defs: 
   // source: "connector · query" rather than just the first string field). Wins when set.
   const summaryFields = resolved.x_summary ?? itemSchema.x_summary
   if (Array.isArray(summaryFields) && summaryFields.length) {
-    const parts = summaryFields.map((f) => it[f]).filter((v): v is string => typeof v === 'string' && v !== '')
+    // A summary field may be a list (e.g. a rules_when's ``value = ["6","8"]``) — join it with "/"
+    // so the row reads "FSSETY · 6/8 · get_form_name" and two entries on the same discriminator
+    // are distinguishable (a bare string field still renders as-is).
+    const parts = summaryFields
+      .map((f) => {
+        const v = it[f]
+        if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string' && x !== '').join('/')
+        return typeof v === 'string' ? v : ''
+      })
+      .filter((v) => v !== '')
     if (parts.length) return parts.join(' · ')
   }
   if (typeof it.name === 'string' && it.name) return it.name
