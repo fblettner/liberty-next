@@ -80,76 +80,76 @@ def _resolve_screen_field(
     language: str | None,
     dictionary: DictionaryFile,
 ) -> dict[str, Any]:
-    """Build the wire-ready dialog-field payload by merging the matching ``Screen.columns``
-    entry on top of the ``ScreenField``. The frontend's FieldRow reads everything from this
-    single payload — no need to walk the screen's columns separately.
+    """Build the wire-ready dialog-field payload entirely from the matching ``Screen.columns``
+    entry — the SINGLE source of truth. A ``ScreenField`` only carries ``name`` (which column to
+    render) + ``colspan`` (layout); every behaviour — label / format / rule / default / binds,
+    hidden / disabled / required, the per-mode edit locks, and the conditional ``visible_when`` /
+    ``required_when`` / ``disabled_when`` — comes from the column, resolved through the dictionary.
+    The frontend's FieldRow reads everything from this one payload, never walking the columns.
 
-    Inheritance for ``hidden`` / ``disabled`` / ``required``:
-      * If the field's value is ``True`` / ``False`` → that wins (explicit per-dialog override).
-      * If the field's value is ``None`` (or absent) → inherit the column's value (default ``False``).
-      * The wire payload always carries a concrete bool — never ``None`` — so the frontend
-        doesn't have to know about inheritance.
-
-    Display metadata (``dd`` / ``label`` / ``format`` / ``default`` / ``lookup_param_binds`` /
-    ``rule``) always comes from the column; the field doesn't override these any more.
+    (Pre-unification a field could override the column per-dialog; that whole inherit-or-override
+    layer is gone — the field is a pure reference, so there is nothing to merge.)
 
     Returns a fresh dict — never mutates the input."""
     from liberty.connectors.dictionary import DictionaryEntry
-    out = dict(raw)
-    name = (out.get("name") or "").strip()
+    name = (raw.get("name") or "").strip()
     if not name:
-        return out
-    # Find the matching ColumnHint (case-insensitive on column name).
+        return dict(raw)
+    # Start from the field name; colspan + everything else come from the column (single source of
+    # truth). A legacy field-level ``colspan`` still on the raw field is honoured as a fallback.
+    out: dict[str, Any] = {"name": raw.get("name")}
+    # Find the matching ColumnHint (case-insensitive on column name). Without one (a name that
+    # isn't in Screen.columns) the field still resolves its widget via the dictionary by ``name``.
     hint = column_hints.get(name.lower())
+    if (hint is not None and hint.colspan is not None):
+        out["colspan"] = hint.colspan
+    elif raw.get("colspan") is not None:
+        out["colspan"] = raw.get("colspan")
     if hint is not None:
-        if hint.dd is not None and not out.get("dd"):
+        if hint.dd is not None:
             out["dd"] = hint.dd
-        if hint.label and not out.get("label"):
+        if hint.label:
             out["label"] = hint.label
-        if hint.format and not out.get("format"):
+        if hint.format:
             out["format"] = hint.format
-        if hint.default and not out.get("default"):
+        if hint.default:
             out["default"] = hint.default
-        if hint.lookup_param_binds and not out.get("lookup_param_binds"):
+        if hint.lookup_param_binds:
             out["lookup_param_binds"] = [
                 b.model_dump(mode="json", exclude_none=True) for b in hint.lookup_param_binds
             ]
-        if hint.return_binds and not out.get("return_binds"):
+        if hint.return_binds:
             out["return_binds"] = [
                 {"param": b.param, "column": b.column} for b in hint.return_binds
             ]
-        if hint.default_when and not out.get("default_when"):
+        if hint.default_when:
             out["default_when"] = [w.as_dict() for w in hint.default_when]
-        if hint.rules_when and not out.get("rules_when"):
+        if hint.rules_when:
             out["rules_when"] = [
                 {"field": w.field, "value": w.value,
                  "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language)}
                 for w in hint.rules_when
             ]
-    # ── hidden / disabled / required: field's explicit value wins; else inherit column's ──
-    column_hidden = bool(hint.hidden) if hint is not None else False
-    column_disabled = bool(hint.disabled) if hint is not None else False
-    column_required = bool(hint.required) if hint is not None else False
-    # ``raw`` may carry ``None`` (the new sentinel) or be absent — both mean inherit.
-    out["hidden"] = bool(raw.get("hidden")) if raw.get("hidden") is not None else column_hidden
-    out["disabled"] = bool(raw.get("disabled")) if raw.get("disabled") is not None else column_disabled
-    out["required"] = bool(raw.get("required")) if raw.get("required") is not None else column_required
-    # Per-row-mode edit locks — field's explicit value wins, else inherit the column's (3-state,
-    # same as hidden/disabled/required). The dialog's ``fieldStateOf`` ORs these into ``disabled``
-    # based on add-vs-edit mode, matching the grid.
-    column_dis_add = bool(hint.disable_on_add) if hint is not None else False
-    column_dis_edit = bool(hint.disable_on_edit) if hint is not None else False
-    if (bool(raw.get("disable_on_add")) if raw.get("disable_on_add") is not None else column_dis_add):
-        out["disable_on_add"] = True
-    if (bool(raw.get("disable_on_edit")) if raw.get("disable_on_edit") is not None else column_dis_edit):
-        out["disable_on_edit"] = True
-    # Conditional visibility — inherit the COLUMN's ``visible_when`` when the field doesn't set its
-    # own. Column ``VisibleWhen`` ({field, value}) and field ``FieldCondition`` share the same shape;
-    # the dialog evaluates it against the live form (the discriminator is a sibling form field), so a
-    # column relevant only to e.g. security-type 3 hides in the dialog just as it does in the grid —
-    # no need to re-declare it on every dialog field. A field-level ``visible_when`` overrides.
-    if not raw.get("visible_when") and hint is not None and hint.visible_when_rules:
-        out["visible_when"] = [vw.as_dict() for vw in hint.visible_when_rules]
+        # Static flags — straight from the column (always a concrete bool on the wire).
+        out["hidden"] = bool(hint.hidden)
+        out["disabled"] = bool(hint.disabled)
+        out["required"] = bool(hint.required)
+        if hint.disable_on_add:
+            out["disable_on_add"] = True
+        if hint.disable_on_edit:
+            out["disable_on_edit"] = True
+        # Conditional rules — all evaluated by the dialog against the live form. ``visible_when`` /
+        # ``required_when`` / ``disabled_when`` share the {field, value} shape (VisibleWhen.as_dict).
+        if hint.visible_when_rules:
+            out["visible_when"] = [vw.as_dict() for vw in hint.visible_when_rules]
+        if hint.required_when:
+            out["required_when"] = [vw.as_dict() for vw in hint.required_when]
+        if hint.disabled_when:
+            out["disabled_when"] = [vw.as_dict() for vw in hint.disabled_when]
+    else:
+        out["hidden"] = False
+        out["disabled"] = False
+        out["required"] = False
     key = (out.get("dd") or name).strip()
     entry = dictionary.find_entry(key, connector=connector) if key else None
     # Effective format — hint-level wins; ``label`` already came from the hint or stays
@@ -162,17 +162,12 @@ def _resolve_screen_field(
         lbl = entry.label_for(language)
         if lbl:
             out["label"] = lbl
-    # Decide which rule applies. Hint-level override → build a transient entry from the
-    # override(s). Otherwise → use the dictionary entry's rule as-is (the SQL connector's
-    # read-column path already resolves that; the frontend can fall back to ``column.rule``
-    # if we don't ship a field-level one here).
-    # A field's OWN ``rules`` / ``rules_values`` win over the column hint's — this is how a nested
-    # form field (no column hint at all) declares its widget, and how any field overrides the
-    # column default. Fall back to the hint's when the field doesn't set them.
-    field_rules = str(raw.get("rules")).strip().upper() if raw.get("rules") else None
-    field_rules_values = str(raw.get("rules_values")).strip() if raw.get("rules_values") else None
-    hint_rules = field_rules or (hint.rules.strip().upper() if (hint and hint.rules) else None)
-    hint_rules_values = field_rules_values or (hint.rules_values.strip() if (hint and hint.rules_values) else None)
+    # Decide which rule applies. The column's ``rules`` / ``rules_values`` override → build a
+    # transient entry from them. Otherwise use the dictionary entry's rule as-is (the SQL
+    # connector's read-column path already resolves that; the frontend falls back to
+    # ``column.rule`` if we don't ship a field-level one here).
+    hint_rules = hint.rules.strip().upper() if (hint and hint.rules) else None
+    hint_rules_values = hint.rules_values.strip() if (hint and hint.rules_values) else None
     if hint_rules:
         synth = DictionaryEntry(
             label=(entry.label if entry else None),
@@ -203,18 +198,10 @@ def _resolve_screen_fields_in_dialog(
     connector: str,
     language: str | None,
     dictionary: DictionaryFile,
-    screens: ScreensFile | None = None,
-    app: str | None = None,
 ) -> dict[str, Any] | None:
-    """Walk a dumped ``ScreenDialog`` and merge each form field's display metadata from the
-    matching :class:`ColumnHint`. Per-tab logic:
-
-    * ``form`` tabs (the parent dialog's own fields) → use the parent screen's *column_hints*.
-    * ``nested_form`` tabs (a child-record form embedded in the parent dialog) → look up the
-      *nested* screen by ``(connector or app, read_query)`` and use *its* columns. The nested
-      form's fields belong to the nested screen, not the parent; without this they'd default
-      to the parent's column map (where they don't exist) and lose inherited hidden / disabled
-      / required from the nested screen's column hints (audit fields, etc.).
+    """Walk a dumped ``ScreenDialog`` and resolve each form tab's fields from the screen's
+    ``column_hints`` — every dialog field is a pure reference to one of this screen's columns
+    (the single source of truth), so every tab uses the same *column_hints* map.
 
     The dialog's hooks + per-tab actions are resolved by :func:`_resolve_dialog_prompts`
     separately."""
@@ -224,78 +211,20 @@ def _resolve_screen_fields_in_dialog(
     tabs = out.get("tabs")
     if not isinstance(tabs, list):
         return out
-    def _resolve_fields(fields: list[Any], hints: dict[str, "ColumnHint"]) -> list[Any]:
-        return [
-            _resolve_screen_field(f, column_hints=hints, connector=connector, language=language, dictionary=dictionary)
-            if isinstance(f, dict) else f
-            for f in fields
-        ]
-
-    # Locate the column-hints map for a form / nested_form whose fields belong to a (possibly
-    # different) screen identified by its read query. Empty map → fields resolve via their own
-    # ``dd`` (or name) against the dictionary, which is exactly what a from-scratch nested form
-    # relies on (it has no Screen.columns layer of its own).
-    def _hints_for_read_query(data_pool: str | None, read_query: str | None) -> dict[str, "ColumnHint"]:
-        if screens is None or not read_query:
-            return {}
-        s = _find_screen_by_read_query(screens, connector=(data_pool or connector), read_query=read_query, app=app)
-        return {h.name.lower(): h for h in s.columns} if (s is not None and s.columns) else {}
-
     new_tabs = []
     for tab in tabs:
         if not isinstance(tab, dict):
             new_tabs.append(tab); continue
-        tab_type = tab.get("type") or "form"
         new_tab = dict(tab)
-        # The tab's own field grid (form + nested_form). A nested_form tab's fields belong to its
-        # own read query, so prefer that screen's column hints; a plain form tab uses the parent's.
         if isinstance(tab.get("fields"), list):
-            tab_hints = (
-                _hints_for_read_query(tab.get("connector"), tab.get("read_query"))
-                if tab_type == "nested_form" else column_hints
-            )
-            new_tab["fields"] = _resolve_fields(tab["fields"], tab_hints)
-        # Embedded nested forms on a FORM tab — resolve EACH one's fields too, against its own read
-        # query's columns (or, failing that, each field's ``dd``). Without this their ``dd`` links
-        # never resolve and every embedded field renders as a plain text box (the bug: a nested
-        # ULFRMT linked to FRMT showed as text while the main-dialog ULFRMT rendered its rule).
-        if isinstance(tab.get("nested_forms"), list):
-            resolved_nf = []
-            for nf in tab["nested_forms"]:
-                if not (isinstance(nf, dict) and isinstance(nf.get("fields"), list)):
-                    resolved_nf.append(nf); continue
-                nf_hints = _hints_for_read_query(nf.get("connector"), nf.get("read_query"))
-                resolved_nf.append({**nf, "fields": _resolve_fields(nf["fields"], nf_hints)})
-            new_tab["nested_forms"] = resolved_nf
+            new_tab["fields"] = [
+                _resolve_screen_field(f, column_hints=column_hints, connector=connector, language=language, dictionary=dictionary)
+                if isinstance(f, dict) else f
+                for f in tab["fields"]
+            ]
         new_tabs.append(new_tab)
     out["tabs"] = new_tabs
     return out
-
-
-def _find_screen_by_read_query(
-    screens: ScreensFile, *, connector: str, read_query: str | None, app: str | None,
-) -> Screen | None:
-    """Find the screen whose ``read_query`` matches and whose effective connector
-    (``screen.connector or its app name``) equals *connector*. Returns ``None`` when no
-    match. Used to resolve nested-form tabs' fields against the nested screen's column
-    hints (the nested screen is sibling to the parent in the same screens.toml)."""
-    if not read_query:
-        return None
-    # Prefer the app the nested screen lives in (typically the same as the parent's app).
-    search_apps: list[str] = []
-    if app:
-        search_apps.append(app)
-    for other in screens.screens:
-        if other not in search_apps:
-            search_apps.append(other)
-    for app_name in search_apps:
-        for s in (screens.screens.get(app_name) or {}).values():
-            if s.read_query != read_query:
-                continue
-            eff = s.connector or app_name
-            if eff == connector:
-                return s
-    return None
 
 
 def _resolve_prompts_in_actions(
@@ -461,7 +390,6 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
 
 def _full_view(
     screen: Screen, *, app: str, language: str | None, dictionary: DictionaryFile,
-    screens: ScreensFile | None = None,
 ) -> dict[str, Any]:
     """The full screen descriptor — ``GET /api/screens/{app}/{id}``. Includes the dialog/actions/row_menu
     body so the frontend can render the form. ``model_dump(mode='json')`` drops Pydantic's defaults that
@@ -518,7 +446,6 @@ def _full_view(
         body["dialog"] = _resolve_screen_fields_in_dialog(
             body.get("dialog"), column_hints=ch,
             connector=dict_scope, language=language, dictionary=dictionary,
-            screens=screens, app=app,
         )
         body["dialog"] = _resolve_dialog_prompts(
             body.get("dialog"), connector=dict_scope, language=language, dictionary=dictionary,
@@ -635,5 +562,4 @@ async def get_screen(
         app=app,
         language=request_language(request),
         dictionary=connectors.dictionary,
-        screens=screens,
     )

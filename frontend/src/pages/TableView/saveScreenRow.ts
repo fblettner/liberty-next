@@ -16,16 +16,8 @@
 // written; the caller surfaces the error and the operator retries.
 import { api } from '../../api/client'
 import type { Column } from '../../types/connectors'
-import type { ColumnGroup, ParamBind } from '../../types/screens'
+import type { ColumnGroup } from '../../types/screens'
 import { originalKeys, resolveBindList, valueFor, withUpper, type Row } from './dialogHelpers'
-
-/** The bits of a nested form needed to cascade its child delete on parent delete — the same
- *  shape for a dialog ``nested_form`` tab and a ``FormTab.nested_forms`` embedded form. */
-export interface NestedFormDelete {
-  delete_query?: string | null
-  connector?: string | null
-  param_binds?: ParamBind[]
-}
 
 export interface SaveScreenRowArgs {
   /** The screen's effective connector (the main write queries live here). */
@@ -129,9 +121,6 @@ export interface DeleteScreenRowArgs {
   row: Row
   /** The screen's related-table write-back groups. */
   columnGroups: ColumnGroup[]
-  /** Nested-form children to delete first (those that declared a ``delete_query``). Flattened from
-   *  the dialog's ``nested_form`` tabs + every ``FormTab.nested_forms`` embedded form. */
-  nestedForms?: NestedFormDelete[]
   mainDeleteQuery?: string | null
 }
 
@@ -155,16 +144,6 @@ export async function deleteScreenRow(a: DeleteScreenRowArgs): Promise<{ rowcoun
     // off the related key columns binds them directly.
     const fk = resolveBindList(grp.param_binds, a.row)
     await api.post(`/api/sql/${enc(gConn)}/${enc(grp.delete_query)}`, { params: withUpper({ ...a.row, ...fk }) })
-  }
-  // ── nested-form children (FK-safe: before the parent) ──
-  // A nested_form tab / embedded form whose related table has no DB cascade declares a
-  // ``delete_query`` so deleting the parent doesn't orphan the child. Bound by the same
-  // ``param_binds`` as its read/write (parent column → child FK param), plus the whole parent row.
-  for (const nf of a.nestedForms ?? []) {
-    if (!nf.delete_query) continue   // no delete query → leave the child (rely on a DB cascade)
-    const nfConn = nf.connector || a.connector
-    const fk = resolveBindList(nf.param_binds ?? [], a.row)
-    await api.post(`/api/sql/${enc(nfConn)}/${enc(nf.delete_query)}`, { params: withUpper({ ...a.row, ...fk }) })
   }
   // ── main row (parent) ──
   if (!a.mainDeleteQuery) return { rowcount: 0 }

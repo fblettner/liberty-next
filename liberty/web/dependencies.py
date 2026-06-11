@@ -243,21 +243,20 @@ def _resolve_screen(state: Any, seed: Seed) -> tuple[Dependency | None, list[tup
     chart_id = getattr(screen, "chart_id", None)
     if chart_id:
         refs.append((Seed("chart", chart_id, eff_conn), f"screen {seed.scope}.{seed.name} chart_id"))
-    # Dialog tabs (form / nested_form / nested_table) + their actions / fields.
+    # Dialog tabs (form / nested_form / nested_table) + their actions / fields. Both nested kinds
+    # reference another screen by id (nested_table → ``screen``, nested_form → ``form_screen``).
     dialog = getattr(screen, "dialog", None)
     if dialog is not None:
         for tab in getattr(dialog, "tabs", None) or []:
             tab_type = getattr(tab, "type", None)
-            tab_conn = getattr(tab, "connector", None) or eff_conn
-            if tab_type == "nested_form":
-                for attr in ("read_query", "update_query", "insert_query"):
-                    v = getattr(tab, attr, None)
-                    if v:
-                        refs.append((Seed("query", v, tab_conn), f"screen {seed.scope}.{seed.name} tab[{tab.id}].{attr}"))
-            elif tab_type == "nested_table":
+            if tab_type == "nested_table":
                 target = getattr(tab, "screen", None)
                 if target:
                     refs.append((Seed("screen", target, seed.scope), f"screen {seed.scope}.{seed.name} nested_table[{tab.id}]"))
+            elif tab_type == "nested_form":
+                target = getattr(tab, "form_screen", None)
+                if target:
+                    refs.append((Seed("screen", target, seed.scope), f"screen {seed.scope}.{seed.name} nested_form[{tab.id}]"))
             # Action chains + their prompt_fields on every tab.
             for action in _iter_actions(getattr(tab, "actions", None) or []):
                 refs.extend(_refs_from_action(action, state, eff_conn, where=f"{seed.scope}.{seed.name} tab[{tab.id}]"))

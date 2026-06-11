@@ -1,7 +1,6 @@
-// Small helpers shared between ScreenDialog and the nested-tab components — pulling these out
-// of ScreenDialog so NestedFormTab / NestedTableTab can reuse the same param-bind resolution
-// and case-insensitive value lookup. The originals lived inline at the top of ScreenDialog
-// until the nested-tab slice; everything here stays type-light + side-effect-free.
+// Small helpers shared between ScreenDialog and the nested-table component — pulling these out
+// of ScreenDialog so NestedTableTab can reuse the same param-bind resolution and case-insensitive
+// value lookup. Everything here stays type-light + side-effect-free.
 import type { Column } from '../../types/connectors'
 import type { FieldCondition, ParamBind } from '../../types/screens'
 

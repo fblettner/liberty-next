@@ -1,7 +1,7 @@
 // Shared modal that opens a single query's editor from anywhere a query dropdown is rendered.
 // Every place we ask the operator to *pick* a query (Screen Editor's read/update/insert/delete,
-// the action `run_query` / `navigate` target, NestedFormTab read/update/insert, Menu item
-// targets, Dictionary's Lookup / Sequence query field) used to leave the operator stuck if they
+// the action `run_query` / `navigate` target, Menu item targets, Dictionary's Lookup / Sequence
+// query field) used to leave the operator stuck if they
 // realised the query needed tweaking — they had to leave the page, go to Settings → Connectors,
 // find the connector + query, edit it, come back. This modal lets them edit the query in place.
 //

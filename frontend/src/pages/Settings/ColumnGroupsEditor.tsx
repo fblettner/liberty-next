@@ -1,9 +1,10 @@
 // Editor for a screen's ``column_groups`` — related 1:1 tables whose JOINed columns are edited
 // INLINE (grid + dialog) and written back on Save. Each group names its write queries + the FK
 // ``param_binds`` linking the parent row; a column joins a group via ``ColumnHint.group`` (the
-// per-column dropdown in the Columns tab). The dialog-only equivalent is EmbeddedFormsEditor —
-// this one is kept dedicated for the same reason: each card computes its own connector's writable
-// query list + the FK param suggestions, and surfaces which columns are currently attached.
+// per-column dropdown in the Columns tab). This is the canonical way to embed a related editable
+// table in a screen (the old inline nested-form path was removed in favour of it). Kept dedicated
+// because each card computes its own connector's writable query list + the FK param suggestions,
+// and surfaces which columns are currently attached.
 import { useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'

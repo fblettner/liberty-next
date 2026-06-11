@@ -369,6 +369,8 @@ def _screens_with_dialog_and_column_metadata() -> str:
         name = "ROLE"
         dd = "ROLE_ID"
         default = "ADMIN"
+        required = true
+        colspan = 2
 
         [[screens.app1.users.columns.lookup_param_binds]]
         param = "ROL_APPS_ID"
@@ -382,8 +384,6 @@ def _screens_with_dialog_and_column_metadata() -> str:
 
         [[screens.app1.users.dialog.tabs.fields]]
         name = "ROLE"
-        required = true
-        colspan = 2
         """
     )
 
@@ -409,14 +409,15 @@ def app_with_dialog_columns(tmp_path):
 
 
 def test_dialog_field_inherits_metadata_from_screen_column(app_with_dialog_columns) -> None:
-    """Phase 2 — the dialog field wire payload picks up ``dd`` / ``label`` / ``default`` /
-    ``lookup_param_binds`` / ``rule`` from the matching ``Screen.columns`` entry (case-
-    insensitive name match). The frontend's FieldRow keeps reading ``field.label`` etc.
-    transparently; the metadata moved one level up, the wire shape is unchanged."""
+    """Single source of truth — the dialog field wire payload picks up EVERYTHING (``dd`` /
+    ``label`` / ``default`` / ``lookup_param_binds`` / ``rule`` / ``required`` AND the dialog
+    ``colspan``) from the matching ``Screen.columns`` entry (case-insensitive name match). The
+    field config is a bare ``{name}`` reference; the frontend's FieldRow reads ``field.label`` etc.
+    transparently — the metadata moved one level up, the wire shape is unchanged."""
     with TestClient(app_with_dialog_columns) as client:
         body = client.get("/api/screens/app1/users", headers=_h(client, "admin")).json()
         field = body["dialog"]["tabs"][0]["fields"][0]
-        # Layout bits stay on the field.
+        # required + colspan now come from the COLUMN (the field carries only ``name``).
         assert field["name"] == "ROLE" and field["required"] is True and field["colspan"] == 2
         # Display metadata merged from Screen.columns[name="ROLE"].
         assert field["dd"] == "ROLE_ID"
@@ -426,69 +427,6 @@ def test_dialog_field_inherits_metadata_from_screen_column(app_with_dialog_colum
         # Rule resolved against the dictionary (ROLE_ID has rules = "LOOKUP" → SearchSelect widget).
         assert field["rule"]["kind"] == "lookup"
         assert field["rule"]["query"] == "roles_lookup"
-
-
-def _screens_with_embedded_nested_form() -> str:
-    """A form tab with an EMBEDDED nested form (Part B). The embedded field has no Screen.columns
-    layer of its own, so it carries its ``dd`` directly — the backend must resolve that field's
-    rule too (regression: embedded nested_forms' fields were skipped → they rendered as plain text)."""
-    return textwrap.dedent(
-        """
-        [screens.app1.users]
-        label = "Users"
-        read_query = "users_get"
-
-        [screens.app1.users.dialog]
-        title = "User"
-
-        [[screens.app1.users.dialog.tabs]]
-        id = "general"
-        type = "form"
-
-        [[screens.app1.users.dialog.tabs.fields]]
-        name = "USR_ID"
-
-        [[screens.app1.users.dialog.tabs.nested_forms]]
-        id = "extra"
-        label = "Extra"
-        read_query = "users_get"
-
-        [[screens.app1.users.dialog.tabs.nested_forms.fields]]
-        name = "MYROLE"
-        dd = "ROLE_ID"
-        """
-    )
-
-
-@pytest.fixture
-def app_with_embedded_nested_form(tmp_path):
-    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
-    (tmp_path / "connectors.toml").write_text(_connectors_with_lookup_query(db_url))
-    (tmp_path / "screens.toml").write_text(_screens_with_embedded_nested_form())
-    (tmp_path / "dictionary.toml").write_text(_dictionary_toml())
-    _seed(db_url)
-    settings = Settings(
-        app=AppSettings(static_dir=""),
-        connectors=ConnectorSettings(
-            config_path=Path(tmp_path / "connectors.toml"),
-            dictionary_path=Path(tmp_path / "dictionary.toml"),
-        ),
-        screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
-        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
-        ai=AISettings(enabled=False),
-    )
-    return create_app(settings)
-
-
-def test_embedded_nested_form_field_resolves_its_dd(app_with_embedded_nested_form) -> None:
-    """An embedded nested form's field with its own ``dd`` gets its rule resolved on the wire — so
-    a nested ``MYROLE`` linked to a LOOKUP dd renders the dropdown, not a plain text box."""
-    with TestClient(app_with_embedded_nested_form) as client:
-        body = client.get("/api/screens/app1/users", headers=_h(client, "admin")).json()
-        nf = body["dialog"]["tabs"][0]["nested_forms"][0]
-        field = nf["fields"][0]
-        assert field["name"] == "MYROLE" and field["dd"] == "ROLE_ID"
-        assert field["rule"]["kind"] == "lookup"   # resolved via the field's own dd
 
 
 def test_screen_columns_resolved_on_wire(app_with_screen_columns) -> None:

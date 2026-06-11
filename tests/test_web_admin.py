@@ -644,9 +644,9 @@ def test_config_screens_parsed_preserves_tab_type_discriminator(env) -> None:
     """Regression: ``model_dump(exclude_defaults=True)`` strips the Literal ``type`` discriminator
     on nested tabs (its only-allowed value equals its default). The visual builder needs the
     discriminator to render the right Tab Settings panel — and a PUT round-trip would otherwise
-    re-validate every nested tab as FormTab and 422 on the extra keys (read_query / screen /
-    update_query / param_binds). The endpoint post-injects ``type`` for every tab + action so
-    the wire payload survives the trip."""
+    re-validate every nested tab as FormTab and 422 on the extra keys (form_screen / screen /
+    param_binds). The endpoint post-injects ``type`` for every tab + action so the wire payload
+    survives the trip."""
     app, _, _ = env
     with TestClient(app) as client:
         h = _h(client, "admin")
@@ -660,9 +660,7 @@ def test_config_screens_parsed_preserves_tab_type_discriminator(env) -> None:
                             {"id": "general", "type": "form", "fields": [{"name": "APPS_ID"}]},
                             {
                                 "id": "jd_edwards", "type": "nested_form",
-                                "read_query": "settings_jdedwards_get",
-                                "update_query": "settings_jdedwards_put",
-                                "fields": [{"name": "JDE_SY"}],
+                                "form_screen": "settings_jdedwards",
                                 "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
                             },
                             {

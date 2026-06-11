@@ -1,8 +1,7 @@
-// One field row inside a ScreenDialog / NestedFormView tab — a switch over the column's
-// resolved rule (when present) + format/type to pick the right widget. Pulled out of
-// ScreenDialog so both the top-level dialog and the editable NestedFormView share the
-// same rendering: BOOLEAN → Checkbox, ENUM → SearchSelect (rule values), LOOKUP →
-// SearchSelect (resolved options from useLookupTables), password → masked Input,
+// One field row inside a ScreenDialog tab — a switch over the column's resolved rule (when
+// present) + format/type to pick the right widget. Pulled out of ScreenDialog so the dialog
+// grid renders each field consistently: BOOLEAN → Checkbox, ENUM → SearchSelect (rule values),
+// LOOKUP → SearchSelect (resolved options from useLookupTables), password → masked Input,
 // numeric/date/text → Input of the matching type. `disabled` / `required` come pre-computed
 // from the parent (they fold both the static flag and the per-condition rule). Values are
 // kept in the parent's `formValues` map by column name (the read result's case — which is
@@ -169,7 +168,7 @@ export function FieldRow({
     // password fields, so `textValue` here is always empty when the dialog opens — the user
     // types a new value if they want to change the password, or leaves it blank to keep the
     // current one. (The submit path only includes a password field when the user typed
-    // something — see ScreenDialog.submit / NestedFormView.save.)
+    // something — see ScreenDialog.submit.)
     widget = (
       <Input
         type="password" autoComplete="new-password" required={required}

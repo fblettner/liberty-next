@@ -85,57 +85,55 @@ export interface PromptField {
   disabled_when?: FieldCondition[]
 }
 
-/** One field on a dialog tab. `name` references a column of the screen's read query. */
+/** One field on a dialog tab.
+ *
+ *  CONFIG shape (what's saved to screens.toml / edited in the Visual Designer) is just
+ *  `{ name, colspan }` — a pure reference to one of the screen's columns (the SINGLE source of
+ *  truth) plus where it sits on the tab grid. Every behaviour lives on the matching Column.
+ *
+ *  SERVED shape (what `GET /api/screens/{app}/{id}` ships to the dialog runtime) is this whole
+ *  interface: the backend flattens the referenced column's resolved display metadata onto the
+ *  field, so FieldRow reads everything from one object without walking the columns. All keys
+ *  beyond `name` / `colspan` are server-populated and read-only on the client. */
 export interface ScreenField {
   name: string
+  colspan?: number | null
+  // ── below: SERVER-RESOLVED from the referenced column; never authored in the field config ──
   dd?: string | null
   label?: string | null
-  /** Format override (v1's `col_type`) — e.g. force a column to render as a date even when the
-   *  dictionary's entry has no format. Wins over the read-column's format on this dialog. */
   format?: string | null
   hidden?: boolean
   disabled?: boolean
   required?: boolean
-  colspan?: number | null
   default?: string | null
-  /** Per-field rule override (v1's `col_rules`). When set, replaces the dictionary entry's rule
-   *  for this field on this dialog. Same kinds as DictionaryEntry.rules. */
-  rules?: string | null
-  /** The rule's argument (v1's `col_rules_values`) — enum/lookup/sequence id, etc. */
-  rules_values?: string | null
-  /** Server-resolved display rule from `rules` + `rules_values` (BOOLEAN / ENUM / LOOKUP), or
-   *  the dictionary entry's rule when no per-field override is set. Frontend prefers this over
-   *  the read-column's `rule` so a screen-level LOOKUP override actually renders as a dropdown. */
+  /** Server-resolved display rule (BOOLEAN / ENUM / LOOKUP) from the column's rule, or null. */
   rule?: DisplayRule | null
   lookup_param_binds?: ParamBind[]
   /** LOOKUP return → target-field fills: on a pick, write the picked row's ``param`` column into
-   *  the form field named ``column``. Explicit replacement for v1's auto-by-dd return mapping. */
+   *  the form field named ``column``. */
   return_binds?: { param: string; column: string }[]
-  /** Conditional forced defaults (column-level): when sibling `field` == `value`, this field is set
-   *  to `default` and locked. First matching rule wins. Reactive on the live form. */
+  /** Conditional forced defaults: when sibling `field` == `value`, this field is set to `default`
+   *  and locked. First matching rule wins. Reactive on the live form. */
   default_when?: { field: string; value: string | string[]; default: string }[]
   /** Conditional rule overrides: when sibling `field` == `value`, render with `rule` (resolved, or
    *  null → plain) instead of the field's base `rule`. First match wins; reactive on the form. */
   rules_when?: { field: string; value: string | string[]; rule: DisplayRule | null }[]
-  /** Conditional visibility (v2's port of v1's col_cdn_id) — evaluated against the form. */
+  /** Conditional visibility — evaluated against the form. */
   visible_when?: FieldCondition[]
   /** Conditional required — when non-empty, every predicate must hold for the field to be required. */
   required_when?: FieldCondition[]
   /** Conditional disabled — when non-empty, every predicate must hold for the field to be locked. */
   disabled_when?: FieldCondition[]
-  /** Read-only when ADDING a new row. 3-state: omitted/null → inherit the column's value; the
-   *  dialog's fieldStateOf ORs the resolved value into `disabled` when mode='add'. */
+  /** Read-only when ADDING a new row (ORed into `disabled` when mode='add'). */
   disable_on_add?: boolean | null
-  /** Read-only when EDITING an existing row. 3-state: omitted/null → inherit the column's value;
-   *  ORed into `disabled` when mode='edit'. */
+  /** Read-only when EDITING an existing row (ORed into `disabled` when mode='edit'). */
   disable_on_edit?: boolean | null
 }
 
 /** Common to every tab kind — title + per-mode hide flags + translations + per-tab action
  *  buttons. v2's port of v1's ``ly_dlg_col col_component='InputAction'`` rows — buttons placed
  *  inside a tab (e.g. NOMAJDE Role dialog "Roles" tab carries Import Security + Merge Roles
- *  alongside its nested table). Lives on every tab kind so a nested_form / nested_table can
- *  also carry buttons. */
+ *  alongside its nested table). Lives on every tab kind so a nested_table can also carry buttons. */
 interface TabCommon {
   id: string
   label?: string | null
@@ -146,39 +144,25 @@ interface TabCommon {
 }
 
 /** Plain field-grid tab — the original kind. `cols` wide CSS grid; `type` defaults to "form"
- *  when omitted (matches the backend's discriminator default). */
+ *  when omitted (matches the backend's discriminator default). Each field is a pure reference to
+ *  one of the screen's columns (see ScreenField). */
 export interface FormTab extends TabCommon {
   type?: 'form'
   cols?: number | null
   fields: ScreenField[]
-  /** Embedded child-record forms rendered as labelled sections below this tab's own fields, so
-   *  one tab edits the main table PLUS related tables, all saved in a single Save. Each is a full
-   *  nested_form (own queries or a `form_screen` reference + `param_binds`). */
-  nested_forms?: NestedFormTab[]
 }
 
-/** A child-record form embedded inline in this tab (v2's port of v1's "FormsDialog inside a
- *  FormsDialog"). Two modes:
- *   • REFERENCE — `form_screen` set: reuse an existing screen's form (its read/update/insert
- *     queries + fields). `read_query` / `fields` are inherited from that screen and left blank here.
- *   • INLINE — `form_screen` blank: configure the queries + fields on this tab (a self-contained
- *     form that can use queries the parent screen doesn't).
- *  Either way the parent's PK is bound into the read query via `param_binds`; the linked row (if
- *  any) populates the fields, and saving fires `update_query` (or `insert_query` when none existed). */
+/** A child-record FORM embedded inline in this tab, REFERENCE-ONLY — the form-shaped sibling of
+ *  NestedTableTab. Reuses an existing screen's form (`form_screen`): that screen owns the
+ *  read/update/insert queries AND the fields, so this tab carries only `param_binds` wiring the
+ *  parent's values (typically its PK) into the reused form. At runtime the reused form renders
+ *  inline and is saved together with the parent. (The old inline mode — own fields/queries on the
+ *  tab — was removed: it was a second place to configure columns.) */
 export interface NestedFormTab extends TabCommon {
   type: 'nested_form'
+  /** Id of the existing screen whose form this tab reuses (its read/update/insert queries + fields). */
+  form_screen: string
   connector?: string | null
-  /** Reference mode: id of the screen whose form this tab reuses. Blank → inline mode. */
-  form_screen?: string | null
-  /** Inline mode read query. Blank in reference mode (inherited from `form_screen`). */
-  read_query?: string
-  update_query?: string | null
-  insert_query?: string | null
-  /** Removes the linked child when the PARENT row is deleted (run child-first, bound by
-   *  `param_binds`). Blank → rely on a DB ON DELETE CASCADE / an `on_delete` action. */
-  delete_query?: string | null
-  cols?: number | null
-  fields: ScreenField[]
   param_binds?: ParamBind[]
 }
 

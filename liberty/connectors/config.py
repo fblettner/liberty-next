@@ -335,6 +335,11 @@ class ColumnHint(BaseModel):
         json_schema_extra={"x_group": "Display", "x_enum_ref": "COLUMN_ALIGN"},
     )
     width: int | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Fixed column width in pixels (blank = auto-size).")
+    colspan: int | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Display"},
+        description="Dialog layout: how many dialog-grid columns this field spans (blank = 1). Only affects the edit dialog, not the grid.",
+    )
     # ── Filter — grid filter panel + conditional column visibility ────────────────────────
     filter: bool = Field(default=False, json_schema_extra={"x_group": "Filter"}, description="Show this column in the table's filter panel.")
     filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filter"}, description="Cascading filters — narrow this column's options based on other filters.")
@@ -385,17 +390,27 @@ class ColumnHint(BaseModel):
     required: bool = Field(
         default=False,
         json_schema_extra={"x_group": "Edit"},
+        description="Operator must fill this column before saving.",
+    )
+    required_when: list[VisibleWhen] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Edit"},
         description=(
-            "Operator must fill this column before saving. Dialog field can override "
-            "per-dialog if needed."
+            "Conditional required — required only when every condition holds against the live form "
+            "(the dialog). Each entry is {field, value}. Empty → the static ``required`` decides."
         ),
     )
     disabled: bool = Field(
         default=False,
         json_schema_extra={"x_group": "Edit"},
+        description="Read-only — the operator sees the value but can't change it.",
+    )
+    disabled_when: list[VisibleWhen] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Edit"},
         description=(
-            "Read-only — the operator sees the value but can't change it. Dialog field can "
-            "override per-dialog if needed."
+            "Conditional read-only — locked only when every condition holds against the live form "
+            "(the dialog). Each entry is {field, value}. Empty → the static ``disabled`` decides."
         ),
     )
     disable_on_add: bool = Field(
