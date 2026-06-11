@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react'
 import {
-  Banner, Button, Field, FrameworkEnumsContext, Input, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
+  Banner, Button, Field, FrameworkEnumsContext, Input, ListRowSummaryContext, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
   type FrameworkEnums, type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import ParamBindList, { type ParamBind } from './ParamBindList'
@@ -829,6 +829,33 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // / align / rules / rules_values / default / lookup_param_binds). Same shape drives both the
   // grid editor and the dialog form. SchemaNavigator gives breadcrumb drill-down into each
   // column hint and its nested rules.
+  // Row label for the Columns tab list: ``name · dd · dictionary-label`` so a column is findable by
+  // its code, its dd id, AND its meaning (the bare code alone is opaque if you don't know it). Only
+  // decorates ColumnHint rows (has both ``name`` + ``rules`` in its schema) — nested lists inside a
+  // column (rules_when / filter_from / binds) keep their own summary.
+  const columnRowLabel = (col: Record<string, unknown>, sch: JsonSchema): string | null => {
+    const props = sch?.properties
+    if (!props || !('name' in props) || !('rules' in props)) return null
+    const name = typeof col.name === 'string' ? col.name : ''
+    if (!name) return null
+    const ddRaw = typeof col.dd === 'string' ? col.dd : undefined
+    const key = ddRaw === '' ? null : (ddRaw || name)   // dd="" opts out of the dictionary
+    let label: string | undefined
+    if (key) {
+      const dscope = dict?.connectors?.[app]
+      const entry = (dscope?.entries?.[key] ?? dscope?.entries?.[key.toUpperCase()]
+        ?? dict?.entries?.[key] ?? dict?.entries?.[key.toUpperCase()]) as Record<string, unknown> | undefined
+      if (typeof entry?.label === 'string' && entry.label) label = entry.label
+    }
+    if (!label) {   // fall back to the read query's column label
+      const sc = screenColumns?.find((c) => c.name.toLowerCase() === name.toLowerCase())
+      if (sc?.label) label = sc.label
+    }
+    const parts = [name]
+    if (ddRaw && ddRaw.toLowerCase() !== name.toLowerCase()) parts.push(ddRaw)
+    if (label) parts.push(label)
+    return parts.join(' · ')
+  }
   const renderColumns = (): ReactNode => {
     const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
     return (
@@ -839,6 +866,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
             ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
             COLUMN_GROUPS for the per-column ``group`` picker. */}
         <FrameworkEnumsContext.Provider value={augmentedEnums}>
+         <ListRowSummaryContext.Provider value={columnRowLabel}>
           <SchemaNavigator
             root={{
               label: t('settings.screens.editor.columnsCrumb', { id }),
@@ -897,6 +925,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
               },
             }}
           />
+         </ListRowSummaryContext.Provider>
         </FrameworkEnumsContext.Provider>
       </>
     )

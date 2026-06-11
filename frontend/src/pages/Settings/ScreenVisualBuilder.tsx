@@ -200,11 +200,11 @@ const Card = styled.div<{ $selected?: boolean; $hidden?: boolean; $span?: number
   & .preview { padding: 5px 8px; border-radius: ${radius.sm}; background: ${colors.bg.card};
     border: 1px solid ${colors.border}; color: ${colors.text.muted}; font-size: ${fontSize.micro};
     font-family: ${fonts.mono}; min-height: 22px; display: flex; align-items: center; gap: 6px; }
-  & .badges { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  & .badges { display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap; }
   &:hover { border-color: ${({ $selected }) => ($selected ? colors.blue.main : colors.blue.border)}; }
 `
 const Badge = styled.span<{ $tone?: 'orange' | 'red' | 'muted' | 'green' }>`
-  display: inline-block; padding: 1px 5px; border-radius: ${radius.sm}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
+  display: inline-flex; align-items: center; gap: 3px; line-height: 1.4; padding: 1px 5px; border-radius: ${radius.sm}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
   border: 1px solid ${({ $tone }) => ($tone === 'orange' ? colors.orange.border : $tone === 'red' ? colors.red.border : $tone === 'green' ? colors.green.border : colors.border)};
   color: ${({ $tone }) => ($tone === 'orange' ? colors.orange.main : $tone === 'red' ? colors.red.main : $tone === 'green' ? colors.green.main : colors.text.muted)};
   background: ${({ $tone }) => ($tone === 'orange' ? colors.orange.bg : $tone === 'red' ? colors.red.bg : $tone === 'green' ? colors.green.bg : 'transparent')};
@@ -572,7 +572,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         }
       }
       ingest(dd?.dictionary.entries as Record<string, Record<string, unknown>> | undefined)
-      const overlay = (dd?.dictionary.connectors ?? {})[connector] as { entries?: Record<string, Record<string, unknown>> } | undefined
+      // Dictionary scope is the screen's APP, NOT its data-pool connector — matches the backend's
+      // ``dict_scope = app`` (a cross-pool screen like f00950 runs on jdedwards but its DD entries
+      // live under ``connectors.nomajde``). Using the connector here left the palette + field
+      // labels empty for such screens.
+      const overlay = (dd?.dictionary.connectors ?? {})[app] as { entries?: Record<string, Record<string, unknown>> } | undefined
       ingest(overlay?.entries)
       setDdEntries(map)
     })
@@ -590,7 +594,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         })
     }
     return () => { cancelled = true }
-  }, [connector, readQuery])
+  }, [app, connector, readQuery])
 
   // ── canvas mutations ────────────────────────────────────────────────────────────────────
   const setDialog = useCallback((next: { title?: string; tabs?: Row[] } | null) => {

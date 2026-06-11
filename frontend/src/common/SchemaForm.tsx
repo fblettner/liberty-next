@@ -119,6 +119,13 @@ export const SqlConnectorContext = createContext<string | undefined>(undefined)
  *  elsewhere (the wizard then infers from the SQL). */
 export const SqlStatementContext = createContext<WizardStatementType | undefined>(undefined)
 
+/** Optional row-label decorator for the drill-in object list (``ObjectNavList``). When provided, it
+ *  gets each item + its schema and may return a richer row label (e.g. the screen Columns tab shows
+ *  ``name · dd · dictionary-label`` instead of the bare column code); ``null`` → fall back to the
+ *  default ``itemSummary``. The provider scopes which lists it applies to (it's set only around the
+ *  columns navigator), and the item/schema shape lets it act on just the intended object kind. */
+export const ListRowSummaryContext = createContext<((item: Record<string, unknown>, itemSchema: JsonSchema) => string | null) | null>(null)
+
 /** Resolve a field's effective enum ref: prefer `x_enum_ref_when` (which switches by a sibling
  *  field's current value) over plain `x_enum_ref`. Returns `null` when no ref applies (the
  *  conditional rule fell through, or neither annotation is set). */
@@ -476,7 +483,10 @@ function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
 }) {
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase()
-  const rows = value.map((it, i) => ({ i, label: itemSummary(it, itemSchema, defs) }))
+  // A caller-provided decorator (e.g. the screen Columns tab) may enrich the row label with the
+  // column's dd + dictionary label; else fall back to the schema-driven ``itemSummary``.
+  const decorate = useContext(ListRowSummaryContext)
+  const rows = value.map((it, i) => ({ i, label: decorate?.(it, itemSchema) ?? itemSummary(it, itemSchema, defs) }))
   const shown = needle ? rows.filter((r) => r.label.toLowerCase().includes(needle)) : rows
   // Drag-reorder the items (their stored order IS the display order — e.g. a screen's columns
   // render in this sequence). Disabled while filtering (the visible rows aren't the full order, so
