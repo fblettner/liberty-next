@@ -21,12 +21,12 @@
 // External data fetched on mount: dictionary.toml entries (for the connector scope) + the
 // read_query's column names (via /api/sql with _limit=0). Both cached in component state; the
 // dictionary feeds both the palette and the field-widget preview.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle, AlignLeft, Calendar, CheckSquare, ChevronLeft, ChevronRight as ChevronRightIcon, Code2,
-  Edit3, Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, PanelLeftOpen, PanelRightOpen,
+  Eye, EyeOff, FileText, Filter, Hash, Key, Layers, List, Lock, PanelLeftOpen, PanelRightOpen,
   Plus, Search, Trash2, Zap,
   type LucideIcon,
 } from 'lucide-react'
@@ -38,77 +38,17 @@ import type { ScreenDetail } from '../../types/screens'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { EditQueryModal } from './EditQueryModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { pickSchemaProperties } from './connectorTables'
 import ActionTreeView from './ActionTreeView'
-import EmbeddedFormsEditor from './EmbeddedFormsEditor'
 import { breadcrumbCrumbs, type ActionPath } from './actionPath'
 
 type Row = Record<string, unknown>
 
-// Pydantic field bucket subsets — same keys the Schema-mode editor uses (so SchemaForm renders
-// identical-looking inputs in both modes). Split into Basic (always visible) + Advanced
-// (collapsed by default) so the inspector isn't a wall of every property; operators rarely set
-// colspan / default but need ``dd`` / ``label`` / ``required`` on every field.
-// ``hidden`` / ``disabled`` / ``required`` are *inheritable* overrides — rendered through
-// ``OverrideToggle`` (3-state: Inherit / Yes / No) below, not through SchemaForm. They live
-// on ScreenField as ``bool | None`` (null = inherit the column's value), and the canvas badges
-// + dialog runtime read the effective value (field value, else column default).
-const FIELD_BASIC_KEYS = ['dd', 'label'] as const
-const FIELD_ADVANCED_KEYS = ['colspan', 'default', 'format'] as const
-const FIELD_BINDS_KEY = 'lookup_param_binds'
-const FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'disabled_when'] as const
-
-// Three-state override control for ``ScreenField`` flags that can inherit from their matching
-// ``ColumnHint``. Renders three pills: "Inherit (col: yes/no)" / "Yes" / "No" so the operator
-// can clearly see the current state, the column's default, and how to reset to inherit.
-// ``value`` semantics:
-//   * ``true``  → field explicitly overrides to *yes*
-//   * ``false`` → field explicitly overrides to *no*
-//   * ``null`` / ``undefined`` → field inherits the column's default
-const OverrideWrap = styled.div`display: flex; gap: 4px; flex-wrap: wrap; align-items: center;`
-const OverridePill = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; height: 24px;
-  border-radius: ${({ theme }) => (theme as { radius?: { sm: string } })?.radius?.sm ?? '6px'};
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-family: ${fonts.sans}; font-size: ${fontSize.micro}; cursor: pointer;
-  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
-`
-const InheritedHint = styled.span`color: ${colors.text.muted}; font-size: ${fontSize.micro}; font-style: italic; margin-left: 4px;`
-function OverrideToggle(props: {
-  label: string
-  value: boolean | null | undefined
-  inherited: boolean
-  onChange: (next: boolean | null) => void
-  inheritedYesLabel?: string   // e.g. "hidden" / "required" / "read-only"
-  inheritedNoLabel?: string    // e.g. "shown"  / "optional" / "editable"
-}) {
-  const { t } = useTranslation()
-  const { label, value, inherited, onChange, inheritedYesLabel = 'yes', inheritedNoLabel = 'no' } = props
-  const isOverridden = value === true || value === false
-  const inheritedWord = inherited ? inheritedYesLabel : inheritedNoLabel
-  return (
-    <Field label={label}>
-      <OverrideWrap>
-        <OverridePill type="button" $active={!isOverridden} onClick={() => onChange(null)}>
-          {t('settings.screens.visual.override.inherit', 'Inherit')}
-        </OverridePill>
-        <OverridePill type="button" $active={value === true} onClick={() => onChange(true)}>
-          {t('common.yes', 'Yes')}
-        </OverridePill>
-        <OverridePill type="button" $active={value === false} onClick={() => onChange(false)}>
-          {t('common.no', 'No')}
-        </OverridePill>
-        {!isOverridden && (
-          <InheritedHint>
-            {t('settings.screens.visual.override.fromColumn', 'from column: {{val}}', { val: inheritedWord })}
-          </InheritedHint>
-        )}
-      </OverrideWrap>
-    </Field>
-  )
-}
+// SINGLE SOURCE OF TRUTH: a dialog field is just ``{ name }`` — a reference to one of the screen's
+// ``columns``. EVERYTHING (label / format / rule / default / binds, hidden / disabled / required,
+// the conditional *_when rules, AND the dialog ``colspan``) lives on the matching ``ColumnHint``.
+// So the inspector, when a field is selected, edits the COLUMN (the same ColumnHint form the Schema
+// editor's Columns tab uses). Adding from the palette (Dictionary or Columns) creates / references
+// a column in place. There is no per-dialog override.
 
 // ─── styled bits ────────────────────────────────────────────────────────────────────────────
 // Shell + columns assume they're mounted inside a fixed-height container (a Modal body or a
@@ -162,8 +102,6 @@ const ColTitle = styled.div`
   font-size: ${fontSize.sm}; font-family: ${fonts.sans}; color: ${colors.text.muted};
   text-transform: uppercase; letter-spacing: 0.04em;
 `
-// Section heading + hint inside the Tab Settings panel (e.g. the Embedded forms block).
-const SubHead = styled.strong`display: block; color: ${colors.text.primary}; font-size: ${fontSize.sm}; margin-top: 4px;`
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.micro}; line-height: 1.4; margin: 2px 0 8px;`
 const SubTabs = styled.div`display: inline-flex; gap: 3px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input};`
 const SubTab = styled.button<{ $active?: boolean }>`
@@ -316,22 +254,6 @@ const CrumbBtn = styled.button<{ $active?: boolean }>`
   padding: 0; color: ${({ $active }) => ($active ? colors.text.primary : colors.blue.main)};
   font: inherit;
   &:hover { text-decoration: ${({ $active }) => ($active ? 'none' : 'underline')}; }
-`
-// Collapsible "Advanced" group — uses a styled <details>/<summary> pair so the toggle works
-// without any JS state. Closed by default; the operator opens it when they need colspan /
-// default / per-field flags.
-const AdvDetails = styled.details`
-  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; padding: 6px 10px;
-  background: ${colors.bg.input};
-  & summary {
-    list-style: none; cursor: pointer; color: ${colors.text.secondary}; font-size: ${fontSize.sm};
-    font-family: ${fonts.sans}; font-weight: 600; padding: 2px 0;
-    display: flex; align-items: center; gap: 6px;
-  }
-  & summary::-webkit-details-marker { display: none; }
-  & summary svg { color: ${colors.text.muted}; transition: transform 0.15s; }
-  &[open] summary svg { transform: rotate(90deg); }
-  & > div { padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
 `
 const EventRow = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: ${radius.sm};
@@ -510,12 +432,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // The selected tab's `type` discriminator — drives which Tab Settings fields render. A tab
   // missing ``type`` is treated as 'form' (matches the backend's `parse_screens` default).
   const tabType = (selTab && typeof selTab.type === 'string' ? selTab.type : 'form') as 'form' | 'nested_form' | 'nested_table'
-  // A nested_form is in REFERENCE mode when it carries ``form_screen`` (reuse an existing screen's
-  // form). In that mode its queries + fields are inherited, so the inline query pickers and the
-  // field canvas are hidden — the picker itself is the mode switch (pick a screen → reference;
-  // clear it → inline). ``tabHasOwnFields`` gates everything that edits this tab's OWN field grid.
-  const nestedFormIsRef = tabType === 'nested_form' && typeof selTab?.form_screen === 'string' && !!selTab.form_screen
-  const tabHasOwnFields = tabType === 'form' || (tabType === 'nested_form' && !nestedFormIsRef)
+  // ``nested_form`` is REFERENCE-ONLY — it reuses an existing screen's form (its queries + fields)
+  // and only wires ``param_binds`` from the parent, exactly like ``nested_table``. So neither nested
+  // kind has an own field grid; only a plain ``form`` tab edits fields here.
+  const tabHasOwnFields = tabType === 'form'
 
   // ── workspace + cross-screen pickers ──────────────────────────────────────────────────────
   // Dropdowns inside the Tab Settings panel read from the workspace catalog (same source the
@@ -532,52 +452,6 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // tab's queries / endpoints picker — and what the tab's read_query / update_query / etc.
   // actually run against at runtime.
   const tabEffectiveConnector = (selTab && typeof selTab.connector === 'string' && selTab.connector.trim() ? selTab.connector : connector)
-  const tabConnectorMeta = useMemo(
-    () => (wsConnectors ?? []).find((c) => c.name === tabEffectiveConnector),
-    [wsConnectors, tabEffectiveConnector],
-  )
-  const tabQueryOptions = useMemo<SearchSelectOption[]>(() => {
-    if (!tabConnectorMeta || tabConnectorMeta.type !== 'sql') return []
-    return tabConnectorMeta.queries.map((q) => ({
-      value: q.name,
-      label: q.description || q.label || q.name,
-      mono: q.name,
-    }))
-  }, [tabConnectorMeta])
-  // Helper: nested-form query picker (read_query / update_query / insert_query) — SearchSelect
-  // over the tab's effective connector + an adjacent "Edit query" pencil that raises
-  // EditQueryModal so the operator can tweak the SQL without leaving the visual designer.
-  // Same shape the Screen Editor's Queries tab uses. ``patchTab`` is bound from the closure.
-  const renderTabQueryPicker = (
-    key: 'read_query' | 'update_query' | 'insert_query' | 'delete_query',
-    opts: { required: boolean; anyLabel: string | undefined },
-  ): ReactNode => {
-    const val = (selTab && typeof selTab[key] === 'string' ? (selTab[key] as string) : '') || ''
-    return (
-      <Row gap={6} style={{ alignItems: 'center' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <SearchSelect
-            value={val}
-            options={tabQueryOptions}
-            onChange={(v) => patchTab({ [key]: v || (opts.required ? '' : null) })}
-            anyLabel={opts.anyLabel}
-            placeholder={tabConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}
-            loading={!tabConnectorMeta}
-          />
-        </div>
-        {val && tabEffectiveConnector && (
-          <Button
-            $variant="ghost"
-            $size="sm"
-            onClick={() => setEditQuery({ connector: tabEffectiveConnector, queryName: val })}
-            title={t('settings.editQuery.edit', 'Edit query')}
-          >
-            <Edit3 size={13} />
-          </Button>
-        )}
-      </Row>
-    )
-  }
   // Target-screen picker for nested_table — same-app screens, alpha sort. Cross-app references
   // aren't allowed at runtime (the nested TableView fetches against /api/screens/{app}/{id}).
   const sameAppScreenOptions = useMemo<SearchSelectOption[]>(() => {
@@ -619,16 +493,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       keep.fields = Array.isArray(selTab.fields) ? selTab.fields : []
     } else if (newType === 'nested_form') {
       keep.type = 'nested_form'
-      // Carry a reference (form_screen) across when present — e.g. a nested_table's ``screen``
-      // becomes the reference-mode form_screen, so switching table↔form keeps the chosen screen.
-      const ref = (selTab.form_screen ?? selTab.screen) as string | undefined
-      if (ref) keep.form_screen = ref
-      else keep.read_query = (selTab.read_query as string | undefined) ?? ''
-      keep.fields = Array.isArray(selTab.fields) ? selTab.fields : []
+      // Reference-only: carry the chosen screen across (a nested_table's ``screen`` becomes the
+      // reused ``form_screen``, so switching table↔form keeps the selection) + connector + binds.
+      keep.form_screen = (selTab.form_screen ?? selTab.screen) as string | undefined ?? ''
       if (selTab.connector) keep.connector = selTab.connector
-      if (selTab.update_query) keep.update_query = selTab.update_query
-      if (selTab.insert_query) keep.insert_query = selTab.insert_query
-      if (selTab.delete_query) keep.delete_query = selTab.delete_query
       if (Array.isArray(selTab.param_binds)) keep.param_binds = selTab.param_binds
     } else if (newType === 'nested_table') {
       keep.type = 'nested_table'
@@ -655,7 +523,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   }
   const updateBind = (idx: number, patch: Partial<Bind>) => {
     const next = tabBinds.slice()
-    next[idx] = { ...next[idx], ...patch }
+    // ``source`` is a parent column reference — store it UPPERCASE (canonical casing, matching
+    // Screen.columns / the dictionary / withUpper), whether picked or free-typed.
+    const norm = "source" in patch ? { ...patch, source: patch.source ? patch.source.toUpperCase() : patch.source } : patch
+    next[idx] = { ...next[idx], ...norm }
     setTabBinds(next)
   }
   const removeBind = (idx: number) => {
@@ -669,9 +540,6 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // ── external data: dictionary entries scoped to the connector + read-query columns ───────
   const [ddEntries, setDdEntries] = useState<Map<string, DictEntry> | null>(null)
   const [readColumns, setReadColumns] = useState<Column[] | null>(null)
-  // An inline nested_form tab has its OWN read query → the palette's Columns tab must offer THAT
-  // query's columns (not the parent screen's). Fetched separately when such a tab is selected.
-  const [nestedTabColumns, setNestedTabColumns] = useState<Column[] | null>(null)
   const [externalError, setExternalError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
@@ -724,24 +592,6 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     return () => { cancelled = true }
   }, [connector, readQuery])
 
-  // Columns for an INLINE nested_form tab's own read query — powers the palette's Columns tab when
-  // such a tab is selected (so the operator picks the nested query's columns, not the parent's).
-  // Reference-mode nested_forms inherit fields from the referenced screen, so they need no palette.
-  const nestedFormReadQuery = (tabType === 'nested_form' && !selTab?.form_screen && typeof selTab?.read_query === 'string')
-    ? (selTab.read_query as string) : ''
-  const nestedFormConnector = (typeof selTab?.connector === 'string' && selTab.connector.trim()
-    ? (selTab.connector as string) : connector)
-  useEffect(() => {
-    setNestedTabColumns(null)
-    if (!nestedFormReadQuery || !nestedFormConnector) return
-    let cancelled = false
-    api.get<QueryResult>(
-      `/api/sql/${encodeURIComponent(nestedFormConnector)}/${encodeURIComponent(nestedFormReadQuery)}?_limit=0`,
-    ).then((r) => { if (!cancelled) setNestedTabColumns(r.columns) })
-      .catch(() => { /* silent — the Columns tab just stays empty for this nested form */ })
-    return () => { cancelled = true }
-  }, [nestedFormConnector, nestedFormReadQuery])
-
   // ── canvas mutations ────────────────────────────────────────────────────────────────────
   const setDialog = useCallback((next: { title?: string; tabs?: Row[] } | null) => {
     if (!next || (!next.title && (!next.tabs || next.tabs.length === 0))) {
@@ -759,8 +609,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // Parent column suggestions for the Tab Settings ParamBind editor — declared HERE (not next
   // to the other tab-options memos above) because it reads from ``readColumns``, which is the
   // result of the external-data fetch above. Listing it up there would TDZ.
+  // The bind ``source`` is stored UPPERCASE — the canonical column-name casing used everywhere
+  // else (dictionary keys, Screen.columns, the save path's ``withUpper``). The SQL result folds
+  // identifiers to lowercase, so uppercase the value + mono here; the human label stays as-is.
   const parentColumnOptions = useMemo<SearchSelectOption[]>(
-    () => (readColumns ?? []).map((c) => ({ value: c.name, label: c.label || c.name, mono: c.name })),
+    () => (readColumns ?? []).map((c) => ({ value: c.name.toUpperCase(), label: c.label || c.name.toUpperCase(), mono: c.name.toUpperCase() })),
     [readColumns],
   )
   // The referenced screen's columns for a nested_table (or reference-mode nested_form) — lazy
@@ -800,39 +653,27 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   // the workspace hasn't loaded).
   const nestedTargetParams = useMemo<SearchSelectOption[]>(() => {
     if (tabType !== 'nested_form' && tabType !== 'nested_table') return []
-    let nestedReadQuery: string | undefined
-    let nestedConnector: string | undefined
-    if (tabType === 'nested_form' && !selTab?.form_screen) {
-      // Inline nested_form — binds feed the tab's OWN read_query.
-      nestedReadQuery = selTab?.read_query as string | undefined
-      nestedConnector = (selTab?.connector as string | undefined) || connector
-    } else {
-      // nested_table (``screen``) OR reference-mode nested_form (``form_screen``) — binds feed the
-      // read query of the referenced screen, resolved in the parent app first then anywhere.
-      const targetScreenId = (tabType === 'nested_form'
-        ? selTab?.form_screen
-        : selTab?.screen) as string | undefined
-      if (!targetScreenId) return []
-      // Look in the parent screen's app first, then fall back to scanning every app — the
-      // target screen could legitimately live elsewhere (operator pointing the nested_table
-      // at a cross-app screen, e.g. NOMAJDE pointing into a jdedwards screen). The same-app
-      // picker upstream filters strictly, but for the *binds* we want to resolve wherever the
-      // target actually sits.
-      const sameApp = (wsScreens ?? {})[app] ?? []
-      let target = sameApp.find((s) => s.id === targetScreenId)
-      if (!target) {
-        for (const [otherApp, list] of Object.entries(wsScreens ?? {})) {
-          if (otherApp === app) continue
-          const hit = list.find((s) => s.id === targetScreenId)
-          if (hit) { target = hit; break }
-        }
+    // Both nested kinds are reference-only — binds feed the read query of the referenced screen
+    // (nested_table → ``screen``, nested_form → ``form_screen``), resolved in the parent app first
+    // then anywhere (the target could legitimately live in another app, e.g. NOMAJDE → jdedwards).
+    const targetScreenId = (tabType === 'nested_form'
+      ? selTab?.form_screen
+      : selTab?.screen) as string | undefined
+    if (!targetScreenId) return []
+    const sameApp = (wsScreens ?? {})[app] ?? []
+    let target = sameApp.find((s) => s.id === targetScreenId)
+    if (!target) {
+      for (const [otherApp, list] of Object.entries(wsScreens ?? {})) {
+        if (otherApp === app) continue
+        const hit = list.find((s) => s.id === targetScreenId)
+        if (hit) { target = hit; break }
       }
-      if (!target) return []
-      nestedReadQuery = target.read_query
-      // The bind sends to the read query *on the target screen's effective connector* —
-      // honouring an explicit tab override first (rare but valid), else the target screen's.
-      nestedConnector = (selTab?.connector as string | undefined) || target.connector
     }
+    if (!target) return []
+    const nestedReadQuery = target.read_query
+    // The bind sends to the read query *on the target screen's effective connector* — honouring an
+    // explicit tab override first (rare but valid), else the target screen's.
+    const nestedConnector = (selTab?.connector as string | undefined) || target.connector
     const names = new Set<string>()
     const meta = nestedConnector ? (wsConnectors ?? []).find((c) => c.name === nestedConnector) : undefined
     const q = (meta && meta.type === 'sql' && nestedReadQuery)
@@ -840,11 +681,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       : undefined
     for (const p of q?.params ?? []) names.add(p.name)
     for (const b of q?.bind_params ?? []) names.add(b)
-    // ALSO offer the target SCREEN's columns — for a nested_table (or reference-mode nested_form)
-    // the bind target is a column on the referenced screen, and its read query often declares no
-    // ``:params`` (it narrows via the passed bind value). Sourcing from the screen's columns means
-    // no per-query param setup. (Inline nested_forms have no screen, so they rely on the query's
-    // params above — same trade-off the operator already understands.)
+    // ALSO offer the target SCREEN's columns — for a nested_table or nested_form the bind target is
+    // a column on the referenced screen, and its read query often declares no ``:params`` (it
+    // narrows via the passed bind value). Sourcing from the screen's columns means no per-query
+    // param setup.
     for (const c of nestedTargetScreenColumns) names.add(c)
     // Drop the FilterPanel's operator-picker placeholders — they're paired with each
     // filter-flagged column as ``:COL`` + ``:COL_op``, set by the TableView's per-column
@@ -855,31 +695,30 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       .map((n) => ({ value: n, label: n, mono: n }))
   }, [tabType, selTab, wsScreens, wsConnectors, connector, app, nestedTargetScreenColumns])
   const updateFields = useCallback((nextFields: Row[]) => updateTab(tabIdx, { fields: nextFields }), [tabIdx, updateTab])
+  // Add a field to the current tab. A field is just a ``{ name }`` reference; ALL its behaviour
+  // lives on the matching ``Screen.columns`` entry — so we ALSO ensure that column exists (creating
+  // it, optionally dd-linked, when adding from the Dictionary palette a name the columns don't have
+  // yet). One ``onChange`` writes both slices (columns + dialog) so the operator lands on the new
+  // field with its column ready to edit in the inspector. The single source of truth, in one step.
   const addFieldFromName = useCallback((fieldName: string, ddId?: string | null) => {
     if (!fieldName) return
     if (fields.some((f) => f.name === fieldName)) {
       // duplicate — just select the existing one rather than silently doing nothing.
-      const ex = fields.findIndex((f) => f.name === fieldName)
-      selectField(ex)
+      selectField(fields.findIndex((f) => f.name === fieldName))
       return
     }
-    const entry: Row = { name: fieldName }
-    if (ddId && ddId !== fieldName) entry.dd = ddId
-    const nextFields = [...fields, entry]
-    updateFields(nextFields)
-    selectField(nextFields.length - 1)
-  }, [fields, updateFields, selectField])
-  const updateField = useCallback((idx: number, patch: Row) => {
-    const next = fields.slice()
-    next[idx] = { ...next[idx], ...patch }
-    // Drop falsy optional keys so the saved TOML stays terse (matches the schema-mode editor).
-    for (const k of Object.keys(patch)) {
-      if (patch[k] === undefined || patch[k] === null || patch[k] === '' || patch[k] === false) {
-        delete (next[idx] as Row)[k]
-      }
+    const nextTabs = tabs.slice()
+    nextTabs[tabIdx] = { ...nextTabs[tabIdx], fields: [...fields, { name: fieldName }] }
+    // Ensure a matching column exists (the field's single source of truth).
+    const cols = screenColumns.slice()
+    if (!cols.some((c) => String(c.name ?? '').toLowerCase() === fieldName.toLowerCase())) {
+      const col: Row = { name: fieldName }
+      if (ddId && ddId !== fieldName) col.dd = ddId   // dictionary entry differs from the column name
+      cols.push(col)
     }
-    updateFields(next)
-  }, [fields, updateFields])
+    onChange({ ...value, columns: cols, dialog: { ...(dialog ?? {}), tabs: nextTabs } })
+    selectField(fields.length)
+  }, [fields, tabs, tabIdx, screenColumns, value, dialog, onChange, selectField])
   const deleteField = useCallback(async (idx: number) => {
     const ok = await modals.confirm({
       title: t('settings.screens.field.delete'),
@@ -937,26 +776,31 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     setTabIdx(targetTabIdx); selectField(targetFields.length); setDragIdx(null)
   }
 
-  // ── inspector sub-schemas ────────────────────────────────────────────────────────────────
-  // Pick subsets of ScreenField so each SchemaForm renders just the section it owns. **Split
-  // Basic (always visible) from Advanced (collapsible)** so the inspector isn't a wall of every
-  // property — operators rarely set colspan / default / per-field flags but always set
-  // ``dd`` / ``label`` / ``required``.
-  const fieldDef = useMemo<JsonSchema>(() => ({ ...((defs.ScreenField as JsonSchema | undefined) ?? { type: 'object' }), $defs: defs }), [defs])
-  // ``dd`` (+ label / format / rule overrides) shown for EVERY field. On the main dialog they
-  // default to blank → the field inherits from its Screen.columns entry at runtime; the operator
-  // can still override per-dialog here. A nested_form field has no column layer, so this is where
-  // it links its dictionary entry.
-  const basicPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_BASIC_KEYS as unknown as string[]), [fieldDef])
-  const advancedPropsSchema = useMemo<JsonSchema>(() => pickSchemaProperties(fieldDef, FIELD_ADVANCED_KEYS as unknown as string[]), [fieldDef])
-  const bindsSchema = useMemo<JsonSchema>(() => {
-    const out = pickSchemaProperties(fieldDef, [FIELD_BINDS_KEY] as unknown as string[])
-    return { ...out, $defs: defs }
-  }, [fieldDef, defs])
-  const conditionsSchema = useMemo<JsonSchema>(() => {
-    const out = pickSchemaProperties(fieldDef, FIELD_CONDITION_KEYS as unknown as string[])
-    return { ...out, $defs: defs }
-  }, [fieldDef, defs])
+  // ── inspector: the COLUMN editor ─────────────────────────────────────────────────────────
+  // A selected field edits its matching ``ColumnHint`` (the single source of truth) — the SAME
+  // ColumnHint schema the Schema editor's Columns tab uses, so both modes render identical inputs
+  // (General / Display / Filter / Rules / Edit / Defaults tabs). Enum dropdowns (DD_ENTRIES,
+  // DICTIONARY_RULES, …) resolve through the FrameworkEnumsContext the parent ScreenEditor provides.
+  const columnDef = useMemo<JsonSchema>(() => ({ ...((defs.ColumnHint as JsonSchema | undefined) ?? { type: 'object' }), $defs: defs }), [defs])
+  // Write a patch onto the column with the given name — merging into the existing ``Screen.columns``
+  // entry, or creating one when the field references a column that isn't listed yet (e.g. a freshly
+  // added field). Drops emptied keys so the saved TOML stays terse. Case-insensitive match on name.
+  const updateColumn = useCallback((name: string, nextCol: Row) => {
+    const key = name.toLowerCase()
+    const cols = screenColumns.slice()
+    const at = cols.findIndex((c) => String(c.name ?? '').toLowerCase() === key)
+    // Strip empty optional keys so we don't litter the TOML, but always keep ``name``.
+    const clean: Row = {}
+    for (const [k, v] of Object.entries(nextCol)) {
+      if (k === 'name') { clean[k] = v; continue }
+      if (v == null || v === '' || v === false || (Array.isArray(v) && v.length === 0)) continue
+      clean[k] = v
+    }
+    if (!clean.name) clean.name = name
+    if (at >= 0) cols[at] = clean
+    else cols.push(clean)
+    onChange({ ...value, columns: cols })
+  }, [screenColumns, value, onChange])
 
   // ── palette + canvas state ───────────────────────────────────────────────────────────────
   const [paletteSrc, setPaletteSrc] = useState<'dict' | 'cols'>('dict')
@@ -971,8 +815,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       : all
     return filtered.sort((a, b) => a.id.localeCompare(b.id))
   }, [ddEntries, paletteQ])
-  // The Columns palette source: an inline nested_form's own query columns when such a tab is
-  // selected, else the parent screen's read-query columns.
+  // The Columns palette source: the parent screen's read-query columns.
   // Column-group fields live on a related table joined into the read query — but an operator can add
   // a group field that ISN'T in the read SELECT (e.g. a write-only field whose value comes from a DD
   // default/rule). Those never come back from the read-query introspection above, so they'd be
@@ -990,10 +833,9 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     }
     return out
   }, [screenColumns, readColumns])
-  // Group fields belong to the MAIN dialog, not an inline nested-form tab — only merge for the parent.
-  const paletteColumns = nestedFormReadQuery
-    ? nestedTabColumns
-    : [...(readColumns ?? []), ...groupConfigColumns]
+  // The palette's Columns source — the parent screen's read-query columns + any group-only columns.
+  // (nested_form / nested_table tabs have no own field grid, so the palette only matters for form tabs.)
+  const paletteColumns: Column[] = [...(readColumns ?? []), ...groupConfigColumns]
   const colItems = useMemo(() => {
     if (!paletteColumns) return [] as Column[]
     const needle = paletteQ.trim().toLowerCase()
@@ -1053,7 +895,8 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
       const list = Array.isArray(selTab.fields) ? (selTab.fields as Row[]) : []
       let m = 1
       for (const f of list) {
-        const cs = Number(f.colspan ?? 1)
+        // colspan lives on the field's COLUMN now (single source of truth).
+        const cs = Number(colFor(f.name)?.colspan ?? 1)
         if (cs > m) m = cs
       }
       return m
@@ -1135,73 +978,42 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               </div>
             )}
           </Row>
-          {/* nested_form: a "Reuse a screen" picker chooses the mode. Pick a screen → REFERENCE
-              mode (inherits that screen's queries + fields; only the screen + binds are editable
-              here). Leave it "(inline)" → INLINE mode (configure connector + queries + the field
-              canvas on this tab). The picker's presence/absence IS the mode — no separate toggle. */}
+          {/* nested_form (reference-only): reuse another screen's form. Pick the screen + bind the
+              parent's values into it — exactly like nested_table, but it renders a form. The reused
+              screen owns the queries + fields; edit those on that screen. */}
           {tabType === 'nested_form' && (
             <>
-              <Field label={t('settings.screens.visual.tabSettings.reuseScreen', 'Reuse a screen')}>
-                <SearchSelect
-                  value={(selTab.form_screen as string | undefined) ?? ''}
-                  options={sameAppScreenOptions}
-                  onChange={(v) => patchTab({ form_screen: v || null })}
-                  anyLabel={t('settings.screens.visual.tabSettings.reuseScreenInline', '(inline — configure the form below)')}
-                  placeholder={t('settings.screens.visual.tabSettings.reuseScreenInline', '(inline — configure the form below)')}
-                />
-              </Field>
-              {nestedFormIsRef ? (
-                <>
-                  <Banner $tone="info">
-                    {t('settings.screens.visual.tabSettings.reuseScreenHint',
-                      'This tab reuses the "{{screen}}" screen\'s form (its queries + fields). Edit those on that screen; here you only bind the parent\'s values into it.',
-                      { screen: String(selTab.form_screen) })}
-                  </Banner>
-                  {renderTabBindsEditor()}
-                </>
-              ) : (
-                <>
-                  <Row gap={10}>
-                    <div style={{ flex: 1 }}>
-                      <Field label={t('settings.screens.visual.tabSettings.connector')}>
-                        <SearchSelect
-                          value={(selTab.connector as string | undefined) ?? ''}
-                          options={sqlConnectorOptions}
-                          onChange={(v) => patchTab({ connector: v && v !== connector ? v : null })}
-                          anyLabel={t('settings.screens.editor.connectorUseApp', { app: connector })}
-                          placeholder={connector}
-                        />
-                      </Field>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <Field label={`${t('settings.screens.editor.queries.read_query')} *`}>
-                        {renderTabQueryPicker('read_query', { required: true, anyLabel: undefined })}
-                      </Field>
-                    </div>
-                  </Row>
-                  <Row gap={10}>
-                    <div style={{ flex: 1 }}>
-                      <Field label={t('settings.screens.editor.queries.update_query')}>
-                        {renderTabQueryPicker('update_query', { required: false, anyLabel: t('common.none') })}
-                      </Field>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <Field label={t('settings.screens.editor.queries.insert_query')}>
-                        {renderTabQueryPicker('insert_query', { required: false, anyLabel: t('common.none') })}
-                      </Field>
-                    </div>
-                  </Row>
-                  <Row gap={10}>
-                    <div style={{ flex: 1 }}>
-                      <Field label={t('settings.screens.editor.queries.delete_query', 'Delete query')}>
-                        {renderTabQueryPicker('delete_query', { required: false, anyLabel: t('common.none') })}
-                      </Field>
-                    </div>
-                    <div style={{ flex: 1 }} />
-                  </Row>
-                  {renderTabBindsEditor()}
-                </>
-              )}
+              <Row gap={10}>
+                <div style={{ flex: 1 }}>
+                  <Field label={`${t('settings.screens.visual.tabSettings.reuseScreen', 'Reuse a screen')} *`}>
+                    <SearchSelect
+                      value={(selTab.form_screen as string | undefined) ?? ''}
+                      options={sameAppScreenOptions}
+                      onChange={(v) => patchTab({ form_screen: v || '' })}
+                      placeholder={t('common.pick')}
+                    />
+                  </Field>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Field label={t('settings.screens.visual.tabSettings.connector')}>
+                    <SearchSelect
+                      value={(selTab.connector as string | undefined) ?? ''}
+                      options={sqlConnectorOptions}
+                      onChange={(v) => patchTab({ connector: v && v !== connector ? v : null })}
+                      anyLabel={t('settings.screens.editor.connectorUseApp', { app: connector })}
+                      placeholder={connector}
+                    />
+                  </Field>
+                </div>
+              </Row>
+              {selTab.form_screen ? (
+                <Banner $tone="info">
+                  {t('settings.screens.visual.tabSettings.reuseScreenHint',
+                    'This tab reuses the "{{screen}}" screen\'s form (its queries + fields). Edit those on that screen; here you only bind the parent\'s values into it.',
+                    { screen: String(selTab.form_screen) })}
+                </Banner>
+              ) : null}
+              {renderTabBindsEditor()}
             </>
           )}
           {/* nested_table: target screen + connector + ParamBinds. */}
@@ -1232,28 +1044,6 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               </Row>
               {renderTabBindsEditor()}
             </>
-          )}
-          {/* form tabs only: embedded nested forms — labelled sub-forms rendered below this tab's
-              own fields. Superseded for the 1:1 case by column_groups (Columns tab), which edit a
-              related table's columns INLINE (grid + dialog). So we only surface this section when a
-              tab ALREADY has embedded forms — existing config stays fully editable, but new 1:1
-              work is steered to column groups. (Drop the ``length`` guard to re-enable adding.) */}
-          {tabType === 'form' && Array.isArray(selTab.nested_forms) && (selTab.nested_forms as Row[]).length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <SubHead>{t('settings.screens.visual.embedded.heading', 'Embedded forms')}</SubHead>
-              <Sub>{t('settings.screens.visual.embedded.hint',
-                'Child-record forms shown below this tab’s fields. Each writes its own table on Save, bound to this row’s key — no on_save action needed. For a 1:1 relationship, prefer a column group (Columns tab) so the related columns edit inline.')}</Sub>
-              <EmbeddedFormsEditor
-                value={selTab.nested_forms as Row[]}
-                onChange={(next) => patchTab({ nested_forms: next })}
-                app={app}
-                parentConnector={connector}
-                parentColumnOptions={parentColumnOptions}
-                screenOptions={sameAppScreenOptions}
-                onEditQuery={(c, q) => setEditQuery({ connector: c, queryName: q })}
-                defs={defs}
-              />
-            </div>
           )}
           {/* Per-tab actions — v2's port of v1's ``col_component='InputAction'`` rows. Toolbar
               buttons placed *inside* this tab (Roles tab on NOMASX1's settings_applications
@@ -1505,7 +1295,9 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               const dd = ddEntries?.get(ddId) ?? null
               const preview = previewFor(f, dd, column)
               const label = (column?.label as string | undefined) ?? dd?.label ?? name
-              const span = Math.max(1, Number(f.colspan ?? 1))
+              // colspan lives on the COLUMN now (single source of truth); a legacy field-level
+              // colspan is honoured as a fallback so old configs still lay out until re-saved.
+              const span = Math.max(1, Number(column?.colspan ?? f.colspan ?? 1))
               // Effective flags: field's explicit override wins; otherwise inherit the column.
               const isHidden = effective(f, 'hidden')
               const isDisabled = effective(f, 'disabled')
@@ -1581,10 +1373,10 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 {tabType === 'nested_table' && (
                   <Empty>{t('settings.screens.visual.tabSettings.nestedTableNoFields')}</Empty>
                 )}
-                {nestedFormIsRef && (
+                {tabType === 'nested_form' && (
                   <Empty>{t('settings.screens.visual.tabSettings.reuseScreenNoFields',
                     'Fields + queries come from the reused "{{screen}}" screen. Edit them on that screen.',
-                    { screen: String(selTab.form_screen) })}</Empty>
+                    { screen: String(selTab.form_screen ?? '') })}</Empty>
                 )}
                 {/* Hidden fields — collapsible group at the bottom. Migrated v1 screens often
                     have 20+ hidden columns kept around so the _put / _post queries' :NAME binds
@@ -1729,88 +1521,27 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
           />
         ) : selField ? (
           <>
-            {/* Basic — always visible, the fields operators set on every field. */}
+            {/* SINGLE SOURCE OF TRUTH — a selected field edits its matching COLUMN (the same
+                ColumnHint form the Schema editor's Columns tab uses: General / Display / Filter /
+                Rules / Edit / Defaults). Everything — label, format, rule, default, lookup binds,
+                required / hidden / disabled, the conditional *_when rules, AND the dialog ``colspan``
+                (Display group) — lives here, shared by the grid and the dialog. No field-level props. */}
             <InspSection>
               <InspTitle><FileText size={13} /> {String(selField.name ?? '')}</InspTitle>
+              <Sub>{t('settings.screens.visual.fieldIsColumn',
+                'This field renders its column. Edit everything — including its dialog span (Display ▸ Colspan) — below; the same config drives the grid.')}</Sub>
+            </InspSection>
+            {/* The column editor — identical to the Columns tab. Edits ``Screen.columns[<name>]``;
+                creates the column on first edit if the field referenced one not yet listed. */}
+            <InspSection>
+              <InspTitle><Layers size={13} /> {t('settings.screens.visual.columnConfig', 'Column configuration')}</InspTitle>
               <SchemaForm
-                schema={basicPropsSchema}
+                schema={columnDef}
                 defs={defs}
-                value={selField}
-                onChange={(v) => {
-                  const patch: Row = {}
-                  for (const k of FIELD_BASIC_KEYS) patch[k] = v[k]
-                  updateField(selFieldIdx!, patch)
-                }}
-              />
-              {/* Override toggle: required on this dialog. Inherits the column's grid-level
-                  default unless the operator explicitly sets it. */}
-              <OverrideToggle
-                label={t('settings.screens.field.required', 'Required')}
-                value={selField.required as boolean | null | undefined}
-                inherited={Boolean(colFor(selField.name)?.required)}
-                onChange={(v) => updateField(selFieldIdx!, { required: v })}
-                inheritedYesLabel={t('settings.screens.visual.override.required', 'required')}
-                inheritedNoLabel={t('settings.screens.visual.override.optional', 'optional')}
+                value={colFor(selField.name) ?? { name: String(selField.name ?? '') }}
+                onChange={(v) => updateColumn(String(selField.name ?? ''), v)}
               />
             </InspSection>
-            {/* Advanced — collapsible. Display flags + cascading lookup binds + per-field
-                conditional rules. Closed by default so the inspector isn't a wall of toggles. */}
-            <AdvDetails>
-              <summary>
-                <ChevronRightIcon size={12} />
-                {t('settings.screens.visual.inspector.advanced')}
-              </summary>
-              <div>
-                <OverrideToggle
-                  label={t('settings.screens.field.hidden', 'Hidden')}
-                  value={selField.hidden as boolean | null | undefined}
-                  inherited={Boolean(colFor(selField.name)?.hidden)}
-                  onChange={(v) => updateField(selFieldIdx!, { hidden: v })}
-                  inheritedYesLabel={t('settings.screens.visual.override.hidden', 'hidden')}
-                  inheritedNoLabel={t('settings.screens.visual.override.shown', 'shown')}
-                />
-                <OverrideToggle
-                  label={t('settings.screens.field.disabled', 'Read-only')}
-                  value={selField.disabled as boolean | null | undefined}
-                  inherited={Boolean(colFor(selField.name)?.disabled)}
-                  onChange={(v) => updateField(selFieldIdx!, { disabled: v })}
-                  inheritedYesLabel={t('settings.screens.visual.override.readOnly', 'read-only')}
-                  inheritedNoLabel={t('settings.screens.visual.override.editable', 'editable')}
-                />
-                <SchemaForm
-                  schema={advancedPropsSchema}
-                  defs={defs}
-                  value={selField}
-                  onChange={(v) => {
-                    const patch: Row = {}
-                    for (const k of FIELD_ADVANCED_KEYS) patch[k] = v[k]
-                    updateField(selFieldIdx!, patch)
-                  }}
-                />
-                <InspSection>
-                  <InspTitle><Search size={13} /> {t('settings.screens.visual.bindsTitle')}</InspTitle>
-                  <SchemaForm
-                    schema={bindsSchema}
-                    defs={defs}
-                    value={selField}
-                    onChange={(v) => updateField(selFieldIdx!, { [FIELD_BINDS_KEY]: v[FIELD_BINDS_KEY] })}
-                  />
-                </InspSection>
-                <InspSection>
-                  <InspTitle><Filter size={13} /> {t('settings.screens.field.conditional')}</InspTitle>
-                  <SchemaForm
-                    schema={conditionsSchema}
-                    defs={defs}
-                    value={selField}
-                    onChange={(v) => {
-                      const patch: Row = {}
-                      for (const k of FIELD_CONDITION_KEYS) patch[k] = v[k]
-                      updateField(selFieldIdx!, patch)
-                    }}
-                  />
-                </InspSection>
-              </div>
-            </AdvDetails>
             <InspSection>
               <InspTitle><Zap size={13} /> {t('settings.screens.visual.events.title')}</InspTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

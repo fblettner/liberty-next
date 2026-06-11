@@ -3231,10 +3231,10 @@ def migrate_screens(
                 ov["rules"] = rules_v
             if rules_values_v:
                 ov["rules_values"] = rules_values_v
-            # ``hidden`` / ``disabled`` / ``required`` are emitted on the *field* above (per
-            # dlg_col). The column's grid-side defaults come from ``ly_tbl_col`` via
-            # ``migrate_column_hints``, kept independent so a column hidden in the grid can
-            # still appear in the dialog (audit timestamps are a common case).
+            # ``hidden`` / ``disabled`` / ``required`` + ``visible_when`` are emitted on the *field*
+            # above (per dlg_col). The column's grid-side defaults come from ``ly_tbl_col`` via
+            # ``migrate_column_hints``, kept independent. (The v1 importer is legacy — its output is
+            # re-edited in the Visual Designer, which writes the unified single-source shape.)
             # Field-level lookup parameter bindings (v1 ly_dlg_filters). Same shape as field
             # binds in v1 — same shape as ColumnHint.lookup_param_binds in v2.
             binds: list[dict[str, Any]] = []
@@ -3414,12 +3414,6 @@ def migrate_screens(
 
     # ── build one Screen per ly_tables row ────────────────────────────────────
     screens: dict[str, dict[str, Any]] = {}
-    # Phase 2 — overrides collected from each nested-form tab's fields. Keyed by the *nested
-    # screen's* read-query qid (resolved against ``crud_by_qid``); merged in a post-pass below
-    # so the nested screen's ``columns`` picks up the dialog's per-field metadata (dd / label /
-    # format / rules / default / lookup_param_binds) even though the dlg_col rows live under
-    # the parent screen's frm.
-    _nested_overrides_by_qid: dict[int, dict[str, dict[str, Any]]] = {}
     for r in table_rows:
         try:
             tbl_id = int(r["tbl_id"])
@@ -3560,58 +3554,20 @@ def migrate_screens(
 
                     # Nested-tab detection: a v1 tab whose single dlg_col carries a child-widget
                     # component name (FormsDialog → inline editable form / FormsTable → inline
-                    # related-rows table) becomes a v2 NestedFormTab / NestedTableTab. The parent
-                    # dlg_col's ly_dlg_filters carry the param binds (parent column → nested
-                    # query param). Without this branch the tab would render empty in v2 — the
-                    # operator complaint that drove this slice.
+                    # related-rows table). FormsTable still maps to a v2 nested_table; the old
+                    # FormsDialog → nested_form mapping was REMOVED (v2 no longer has nested forms —
+                    # a related editable table is modelled as a column group with its own form).
+                    # A FormsDialog tab is left to fall through to a plain form tab with a warning so
+                    # the operator can re-model it as a column group; nothing renders empty silently.
                     nested_kind, nested_ref, nested_host_col = _detect_nested(cols_for_tab)
                     nested_handled = False
                     if nested_kind == "FormsDialog" and nested_ref is not None:
-                        target_frm = nested_ref
-                        target_qid = frm_query_by_frm.get(target_frm)
-                        target_cruds = crud_by_qid.get(target_qid) if target_qid is not None else None
-                        if target_cruds and target_cruds.get("GET"):
-                            tab_out["type"] = "nested_form"
-                            tab_out["read_query"] = target_cruds["GET"]
-                            for crud_src, dst_key in (("PUT", "update_query"), ("POST", "insert_query")):
-                                if crud_src in target_cruds:
-                                    tab_out[dst_key] = target_cruds[crud_src]
-                            # `connector` only when it differs from the *parent screen's*
-                            # effective connector (the screen.connector field, else app_name) —
-                            # matches the menus.toml / row-menu convention.
-                            target_pool = pool_by_qid.get(target_qid) if target_qid is not None else None
-                            effective_parent_conn = screen.get("connector") or app_name
-                            if target_pool and target_pool != effective_parent_conn:
-                                tab_out["connector"] = target_pool
-                            if t.get("tab_cols") not in (None, 0):
-                                try:
-                                    tab_out["cols"] = int(t["tab_cols"])
-                                except (TypeError, ValueError):
-                                    pass
-                            # Nested fields: every col_row on the *target* frm regardless of tab —
-                            # v1 nested forms typically have just one tab and v2 renders them
-                            # inline so tab boundaries inside the nested form are irrelevant.
-                            nested_fields: list[dict[str, Any]] = []
-                            # Nested-form columns belong to the *nested* screen, not the parent;
-                            # collect their overrides separately and stash them onto the nested
-                            # target screen below (so its ``Screen.columns`` carries them too).
-                            # When the nested target isn't a known screen, the overrides simply
-                            # don't land anywhere — which is fine, the nested form runs against
-                            # the nested screen's own columns at render time.
-                            nested_overrides: dict[str, dict[str, Any]] = {}
-                            for c in cols_by_frm_all.get(target_frm, []):
-                                fr = _migrate_field_row(c, owning_frm=target_frm, column_overrides=nested_overrides)
-                                if fr is not None:
-                                    nested_fields.append(fr)
-                            tab_out["fields"] = nested_fields
-                            # Stash for the post-loop merge — keyed by the nested target's tbl_id
-                            # (resolved below once all screen ids exist).
-                            if nested_overrides:
-                                _nested_overrides_by_qid.setdefault(target_qid, {}).update(nested_overrides) if target_qid is not None else None
-                            pb = _binds_for_col(frm_id, nested_host_col) if nested_host_col is not None else []
-                            if pb:
-                                tab_out["param_binds"] = pb
-                            nested_handled = True
+                        _log.warning(
+                            "migration: screen %s.%s tab %r is a v1 FormsDialog (nested form) — "
+                            "v2 dropped nested forms; re-model it as a column group with its own form. "
+                            "Migrated as a plain form tab.",
+                            app_name, sid, t.get("label") or tab_v1_id,
+                        )
                     elif nested_kind == "FormsTable" and nested_ref is not None:
                         target_sid = sid_by_tbl_id.get(nested_ref)
                         if target_sid:
@@ -3718,37 +3674,6 @@ def migrate_screens(
                 screen["row_menu"] = items
 
         screens[sid] = screen
-
-    # ── post-pass: merge nested-form column overrides onto each nested target screen ─────────
-    # Phase 2 — a nested_form tab on screen A points at the nested screen B's read_query; the
-    # parent A's dlg_col rows for B's fields carry per-column display metadata that belongs on
-    # B's ``columns`` list (so editing the nested form sees the same dd/rule/default as opening
-    # screen B standalone). Resolve B's screen id via its read query's qid → tbl_id, then merge.
-    if _nested_overrides_by_qid:
-        sid_by_qid: dict[int, str] = {}
-        for r in table_rows:
-            try:
-                tq_int = int(r["tbl_query_id"]); ti_int = int(r["tbl_id"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            sid_for_qid = sid_by_tbl_id.get(ti_int)
-            if sid_for_qid:
-                sid_by_qid.setdefault(tq_int, sid_for_qid)
-        for qid, overrides in _nested_overrides_by_qid.items():
-            nested_sid = sid_by_qid.get(qid)
-            if not nested_sid or nested_sid not in screens:
-                continue
-            nested_screen = screens[nested_sid]
-            nested_cols = nested_screen.get("columns") or []
-            by_name = {h["name"]: h for h in nested_cols if "name" in h}
-            for col_name, ov in overrides.items():
-                if col_name in by_name:
-                    by_name[col_name].update(ov)
-                else:
-                    new_hint = {"name": col_name, **ov}
-                    nested_cols.append(new_hint)
-                    by_name[col_name] = new_hint
-            nested_screen["columns"] = nested_cols
 
     # ── post-pass: promote a "Display Properties"-style ctx menu item into a row-click target ──
     # When a screen has no own dialog and its v1 ctx menu carries *exactly one* FormsDialog item

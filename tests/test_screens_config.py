@@ -45,27 +45,23 @@ def test_param_bind_either_mode() -> None:
 
 
 def test_screen_field_shape() -> None:
-    """ScreenField carries placement (``colspan``) + per-dialog override flags (``hidden`` /
-    ``disabled`` / ``required``) + the conditional rule lists, PLUS optional self-contained display
-    metadata (``dd`` / ``label`` / ``format`` / ``rules`` / ``rules_values`` / ``default`` /
-    ``lookup_param_binds``). The MAIN screen's fields inherit the display metadata from the matching
-    ``Screen.columns`` (set it there), but a NESTED form's fields — which reference a table with no
-    column-hint layer — carry their own ``dd`` so the dictionary resolves their rule/label/format."""
-    f = ScreenField(name="USR_ROLE_ID", hidden=False, disabled=True, required=True, colspan=2)
-    assert f.name == "USR_ROLE_ID" and f.required is True and f.colspan == 2 and f.disabled is True
+    """ScreenField is a pure REFERENCE to a ``Screen.columns`` entry: ``name`` (required) +
+    ``colspan`` (layout). Every behaviour (label / format / rule / default / binds, hidden /
+    disabled / required, the conditional *_when rules) lives on the matching column — there are
+    no per-dialog overrides. Stale override keys from before unification are silently dropped."""
+    f = ScreenField(name="USR_ROLE_ID", colspan=2)
+    assert f.name == "USR_ROLE_ID" and f.colspan == 2
     # `name` is mandatory
     with pytest.raises(Exception):
         ScreenField()  # type: ignore[call-arg]
-    # Field-level display metadata is KEPT (a nested-form field links its dd here, since it has no
-    # Screen.columns layer to inherit from).
-    withdd = ScreenField.model_validate({
+    # Leftover per-field override keys (label / rules / hidden / lookup_param_binds / …) from a
+    # pre-unification screens.toml load cleanly (extra="ignore") and are dropped — the column is
+    # authoritative, so a layout-only field stays terse on dump.
+    loaded = ScreenField.model_validate({
         "name": "JDE_SY", "dd": "SY", "label": "System", "rules": "LOOKUP",
-        "rules_values": "get_sy", "default": "920", "format": "text",
-        "lookup_param_binds": [{"param": "X", "source": "Y"}],
+        "hidden": True, "lookup_param_binds": [{"param": "X", "source": "Y"}], "colspan": 2,
     })
-    assert withdd.dd == "SY" and withdd.rules == "LOOKUP" and withdd.rules_values == "get_sy"
-    assert withdd.lookup_param_binds[0].source == "Y"
-    # A layout-only field omits all of it — stays terse on dump.
+    assert loaded.model_dump(exclude_defaults=True) == {"name": "JDE_SY", "colspan": 2}
     assert ScreenField(name="USR_ROLE_ID").model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID"}
 
 
@@ -118,16 +114,14 @@ def test_screen_dialog_and_tab() -> None:
 
 def test_nested_tab_variants() -> None:
     """The discriminated union covers three tab kinds: ``form`` (default field grid),
-    ``nested_form`` (an editable child-record form inline), ``nested_table`` (a related-rows
-    TableView inline). The discriminator routes a raw dict to the right variant."""
+    ``nested_form`` (reuse another screen's form inline, reference-only), ``nested_table``
+    (a related-rows TableView inline). The discriminator routes a raw dict to the right variant."""
     nf = NestedFormTab(
         id="jdedwards", label="JD Edwards",
-        read_query="settings_jdedwards_get", update_query="settings_jdedwards_put",
-        insert_query="settings_jdedwards_post",
-        fields=[ScreenField(name="JDE_SY"), ScreenField(name="JDE_DTA")],
+        form_screen="settings_jdedwards",
         param_binds=[ParamBind(param="APPS_ID", source="APPS_ID")],
     )
-    assert nf.type == "nested_form" and nf.read_query == "settings_jdedwards_get"
+    assert nf.type == "nested_form" and nf.form_screen == "settings_jdedwards"
     nt = NestedTableTab(
         id="activity_log", screen="settings_activity_log",
         param_binds=[ParamBind(param="ACL_APPS_ID", source="APPS_ID")],
@@ -268,10 +262,11 @@ def test_promptable_actions_carry_prompt_fields() -> None:
     assert a.prompt_fields[0].required is True  # type: ignore[union-attr]
 
 
-def test_field_condition_and_per_field_rules() -> None:
-    """``FieldCondition`` accepts a single value or a list (any matches). A field carries up to
-    three lists — ``visible_when`` / ``required_when`` / ``disabled_when`` — each AND-ed; an
-    empty list (the default) means "no condition, fall back to the static flag"."""
+def test_field_condition_and_prompt_field_rules() -> None:
+    """``FieldCondition`` accepts a single value or a list (any matches). It still drives the
+    *prompt dialog*'s conditional rules (``PromptField`` carries up to three lists —
+    ``visible_when`` / ``required_when`` / ``disabled_when``); the screen dialog's own conditional
+    rules live on the column now, not the field."""
     # single literal
     FieldCondition(field="KIND", value="PRODUCT")
     # list (membership) — what the migrator emits
@@ -282,19 +277,19 @@ def test_field_condition_and_per_field_rules() -> None:
         FieldCondition(value="x")  # type: ignore[call-arg]
     with pytest.raises(Exception):
         FieldCondition(field="X", value="y", typo=1)  # type: ignore[call-arg]
-    # Field plumbing: the three lists default to empty and round-trip when set.
-    f = ScreenField(
+    # PromptField plumbing: the three lists default to empty and round-trip when set.
+    pf = PromptField(
         name="ITM_PRICE", required=True,
         visible_when=[FieldCondition(field="KIND", value=["PRODUCT", "SERVICE"])],
         required_when=[FieldCondition(field="TIER", value="PRO")],
         disabled_when=[FieldCondition(field="LOCKED", value="Y")],
     )
-    assert [c.value for c in f.visible_when] == [["PRODUCT", "SERVICE"]]
-    assert f.required_when[0].field == "TIER"
-    assert f.disabled_when[0].value == "Y"
-    # Defaults: empty lists when nothing is set.
-    bare = ScreenField(name="X")
-    assert bare.visible_when == [] and bare.required_when == [] and bare.disabled_when == []
+    assert [c.value for c in pf.visible_when] == [["PRODUCT", "SERVICE"]]
+    assert pf.required_when[0].field == "TIER"
+    assert pf.disabled_when[0].value == "Y"
+    # A dialog field, by contrast, drops any conditional keys — the column owns them now.
+    bare = ScreenField.model_validate({"name": "X", "visible_when": [{"field": "K", "value": "P"}]})
+    assert bare.model_dump(exclude_defaults=True) == {"name": "X"}
 
 
 def test_parse_screens_injects_id_from_key() -> None:
@@ -321,11 +316,8 @@ def test_parse_screens_injects_id_from_key() -> None:
 
             [[screens.nomasx1.security_users.dialog.tabs.fields]]
             name = "USR_ROLE_ID"
+            colspan = 2
             dd = "ROL_ID"
-
-            [[screens.nomasx1.security_users.dialog.tabs.fields.lookup_param_binds]]
-            param = "ROL_APPS_ID"
-            source = "USR_APPS_ID"
             """
         )
     )
@@ -342,18 +334,17 @@ def test_parse_screens_injects_id_from_key() -> None:
     # discriminated union resolves cleanly. Backward compat for every screens.toml file
     # written before the nested-tab variants were added.
     assert isinstance(tab, FormTab) and tab.type == "form"
-    # Field-level ``dd`` + ``lookup_param_binds`` are KEPT — a field links its own dictionary entry
-    # (the main screen usually inherits via Screen.columns, but nested-form fields rely on this).
+    # A field is a pure reference: ``name`` + ``colspan``. A stale per-field ``dd`` override loads
+    # (extra="ignore") but is dropped — the column owns the dictionary link now.
     field = tab.fields[1]
-    assert field.name == "USR_ROLE_ID"
-    assert field.dd == "ROL_ID"
-    assert field.lookup_param_binds[0].source == "USR_APPS_ID"
+    assert field.name == "USR_ROLE_ID" and field.colspan == 2
+    assert field.model_dump(exclude_defaults=True) == {"name": "USR_ROLE_ID", "colspan": 2}
 
 
 def test_parse_screens_with_nested_tab_kinds() -> None:
-    """A dialog with mixed tab kinds: a plain ``form`` tab, an inline ``nested_form`` tab
-    (an editable child record), and an inline ``nested_table`` tab (a related-rows TableView).
-    Each variant validates via its discriminator + parses its variant-specific fields."""
+    """A dialog with mixed tab kinds: a plain ``form`` tab, a ``nested_form`` tab (reuse another
+    screen's form, reference-only via ``form_screen``), and a ``nested_table`` tab (a related-rows
+    TableView). Each variant validates via its discriminator + parses its variant-specific fields."""
     raw = tomllib.loads(
         textwrap.dedent(
             """
@@ -374,14 +365,9 @@ def test_parse_screens_with_nested_tab_kinds() -> None:
             type = "nested_form"
             id = "jdedwards"
             label = "JD Edwards"
-            read_query = "settings_jdedwards_get"
-            update_query = "settings_jdedwards_put"
-            insert_query = "settings_jdedwards_post"
+            form_screen = "settings_jdedwards"
             hide_on_add = true
             param_binds = [{ param = "APPS_ID", source = "APPS_ID" }]
-
-            [[screens.nomasx1.settings_applications.dialog.tabs.fields]]
-            name = "JDE_SY"
 
             [[screens.nomasx1.settings_applications.dialog.tabs]]
             type = "nested_table"
@@ -397,7 +383,7 @@ def test_parse_screens_with_nested_tab_kinds() -> None:
     tabs = sf.screens["nomasx1"]["settings_applications"].dialog.tabs
     assert [t.type for t in tabs] == ["form", "nested_form", "nested_table"]
     assert isinstance(tabs[1], NestedFormTab)
-    assert tabs[1].read_query == "settings_jdedwards_get"
+    assert tabs[1].form_screen == "settings_jdedwards"
     assert tabs[1].param_binds[0].source == "APPS_ID"
     assert isinstance(tabs[2], NestedTableTab)
     assert tabs[2].screen == "settings_activity_log"
@@ -419,12 +405,10 @@ def test_parse_screens_infers_nested_tab_type_from_keys() -> None:
                         "tabs": [
                             # No type, no nested-specific keys → form
                             {"id": "general", "fields": [{"name": "APPS_ID"}]},
-                            # No type but read_query → nested_form
+                            # No type but form_screen → nested_form (reference-only)
                             {
                                 "id": "jd_edwards",
-                                "read_query": "settings_jdedwards_get",
-                                "update_query": "settings_jdedwards_put",
-                                "fields": [{"name": "JDE_SY"}],
+                                "form_screen": "settings_jdedwards",
                                 "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}],
                             },
                             # No type but screen → nested_table
@@ -443,17 +427,17 @@ def test_parse_screens_infers_nested_tab_type_from_keys() -> None:
     tabs = sf.screens["nomasx1"]["settings_applications"].dialog.tabs  # type: ignore[union-attr]
     assert isinstance(tabs[0], FormTab) and tabs[0].id == "general"
     assert isinstance(tabs[1], NestedFormTab)
-    assert tabs[1].read_query == "settings_jdedwards_get"
-    assert tabs[1].update_query == "settings_jdedwards_put"
+    assert tabs[1].form_screen == "settings_jdedwards"
     assert tabs[1].param_binds[0].source == "APPS_ID"
     assert isinstance(tabs[2], NestedTableTab)
     assert tabs[2].screen == "settings_activity_log"
 
 
 def test_nested_form_reference_mode() -> None:
-    """A ``nested_form`` can REFERENCE an existing screen (``form_screen``) instead of inlining its
-    queries + fields. The reference is unambiguous across the type-stripped round-trip: a tab with
-    ``screen`` is a nested_table, one with ``form_screen`` (or ``read_query``) is a nested_form."""
+    """A ``nested_form`` is REFERENCE-ONLY — it reuses an existing screen's form (``form_screen``);
+    that screen owns the queries + fields, so the tab carries only the screen + ``param_binds``. The
+    reference is unambiguous across the type-stripped round-trip: a tab with ``screen`` is a
+    nested_table, one with ``form_screen`` is a nested_form."""
     raw = {
         "screens": {
             "nomasx1": {
@@ -461,7 +445,6 @@ def test_nested_form_reference_mode() -> None:
                     "read_query": "settings_applications_get",
                     "dialog": {
                         "tabs": [
-                            # Reference mode: no type, no read_query — just ``form_screen``.
                             {
                                 "id": "jd_edwards",
                                 "form_screen": "settings_jdedwards",
@@ -477,34 +460,10 @@ def test_nested_form_reference_mode() -> None:
     tab = sf.screens["nomasx1"]["settings_applications"].dialog.tabs[0]  # type: ignore[union-attr]
     assert isinstance(tab, NestedFormTab)
     assert tab.form_screen == "settings_jdedwards"
-    assert tab.read_query == ""                       # inherited from the referenced screen at runtime
     assert tab.param_binds[0].source == "APPS_ID"
-
-
-def test_form_tab_embeds_nested_forms() -> None:
-    """A ``form`` tab can carry ``nested_forms`` — embedded child forms saved alongside the main
-    table in one pass. Each is a full NestedFormTab (inline queries or a form_screen reference)."""
-    sf = parse_screens({
-        "screens": {"nomajde": {"f0092": {
-            "read_query": "f0092_get",
-            "dialog": {"tabs": [{
-                "id": "main", "type": "form",
-                "fields": [{"name": "ULUSER"}],
-                "nested_forms": [{
-                    "id": "sec", "label": "F00926",
-                    "read_query": "f00926_get", "insert_query": "f00926_post",
-                    "fields": [{"name": "SECUSER"}],
-                    "param_binds": [{"param": "USER", "source": "ULUSER"}],
-                }],
-            }]},
-        }}},
-    })
-    tab = sf.screens["nomajde"]["f0092"].dialog.tabs[0]  # type: ignore[union-attr]
-    assert isinstance(tab, FormTab)
-    assert len(tab.nested_forms) == 1
-    nf = tab.nested_forms[0]
-    assert nf.type == "nested_form" and nf.read_query == "f00926_get"
-    assert nf.param_binds[0].source == "ULUSER"
+    # A nested_form with no source screen is rejected — ``form_screen`` is required.
+    with pytest.raises(Exception):
+        NestedFormTab(id="bad")  # type: ignore[call-arg]
 
 
 def test_column_groups_and_column_group_ref() -> None:

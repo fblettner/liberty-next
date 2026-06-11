@@ -3,15 +3,14 @@
 // the existing ActionTreeView), and PUTs the merged actions.toml + reloads on Save. The action id
 // is the dict key and is read-only here (renaming needs the cross-ref cascade — a list-level op).
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Save, X, Maximize2, Minimize2, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Centered, Field, FrameworkEnumsContext, Input, ModalFooter, ModalHeader,
-  Overlay, Row as FlexRow, SearchSelect, SpinnerRing, VisualBuilderModal, useModals,
+  Banner, Button, Centered, Field, FrameworkEnumsContext, Input, SearchSelect, useModals,
   type FrameworkEnums, type JsonSchema,
 } from '../../common'
+import { EditorModalShell } from '../../common/EditorModalShell'
 import styled from '@emotion/styled'
 import ActionTreeView from './ActionTreeView'
 import { EditQueryModal } from './EditQueryModal'
@@ -124,12 +123,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
     else if (choice === 'save') await save()
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void cancel() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty])
+  // Escape is handled by EditorModalShell (→ onClose → ``cancel`` → the unsaved prompt).
 
   const params = Array.isArray(value?.params) ? (value!.params as Row[]) : []
   const setParams = (nx: Row[]) => patch({ params: nx })
@@ -192,41 +186,27 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
       </Body>
     )
 
-  return createPortal(
+  return (
     <FrameworkEnumsContext.Provider value={enums}>
-      <Overlay>
-        <VisualBuilderModal $fullscreen={fullscreen} onClick={(e) => e.stopPropagation()}>
-          <ModalHeader>
-            <FlexRow gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>
-                {t('settings.actions.designerTitle', 'Shared action')} ·{' '}
-                <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[actions.{actionId}]</span>
-              </span>
-              <FlexRow gap={8} style={{ alignItems: 'center' }}>
-                {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved', 'Unsaved changes')}</span>}
-                <Button $variant="ghost" $size="sm" onClick={() => setFullscreen((v) => !v)}
-                  title={fullscreen ? t('common.restore', 'Restore') : t('common.maximize', 'Maximize')} aria-pressed={fullscreen}>
-                  {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                </Button>
-                <Button $variant="ghost" $size="sm" onClick={() => void cancel()}>
-                  <X size={13} /> {t('common.cancel')}
-                </Button>
-              </FlexRow>
-            </FlexRow>
-          </ModalHeader>
-          {inner}
-          <ModalFooter>
-            <FlexRow gap={8}>
-              <Button onClick={() => void cancel()} $variant="ghost" $size="sm" disabled={busy}>
-                <X size={13} /> {t('common.cancel')}
-              </Button>
-              <Button $variant="primary" $size="sm" disabled={busy || !dirty} onClick={() => void save()}>
-                {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-              </Button>
-            </FlexRow>
-          </ModalFooter>
-        </VisualBuilderModal>
-      </Overlay>
+      <EditorModalShell
+        variant="visual"
+        title={(
+          <>
+            {t('settings.actions.designerTitle', 'Shared action')} ·{' '}
+            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[actions.{actionId}]</span>
+          </>
+        )}
+        onClose={() => void cancel()}
+        onSave={() => void save()}
+        dirty={dirty}
+        saveDisabled={!dirty}
+        busy={busy}
+        fullscreen={fullscreen}
+        onToggleFullscreen={() => setFullscreen((v) => !v)}
+        scrollBody={false}  /* the inner <Body> manages its own scroll */
+      >
+        {inner}
+      </EditorModalShell>
       {editQuery && (
         <EditQueryModal
           connector={editQuery.connector}
@@ -234,8 +214,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
           onClose={() => setEditQuery(null)}
         />
       )}
-    </FrameworkEnumsContext.Provider>,
-    document.body,
+    </FrameworkEnumsContext.Provider>
   )
 }
 

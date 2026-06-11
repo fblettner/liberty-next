@@ -147,8 +147,12 @@ export function SqlWizardModal({ schema, initialTable, initialSql, onInsert, onC
   // ancestor instead of the viewport — the wizard would appear offset inside the
   // editor's frame instead of centered on the screen.
   // No backdrop-click-to-close — outside clicks must not discard wizard input (Cancel / Escape).
+  // z-index 1000 — the wizard is raised from a SqlEditor that frequently lives INSIDE another
+  // modal (EditQueryModal portals at 900); the default Overlay (400) would render the wizard
+  // BEHIND it. Sit above the highest editor modal but below the global confirm/prompt overlay
+  // (2000), so a confirm fired from inside the wizard still surfaces on top.
   return createPortal(
-    <Overlay>
+    <Overlay style={{ zIndex: 1000 }}>
       <Modal style={{ width: 'min(900px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>{t('settings.sqlWizard.title')}</ModalHeader>
         <ModalBody>

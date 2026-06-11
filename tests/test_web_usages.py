@@ -48,11 +48,10 @@ def test_query_usages_includes_menu_target() -> None:
     assert "screen_read_query" in kinds  # the screen reads it too
 
 
-def test_query_usages_descends_into_column_groups_and_embedded_nested_forms() -> None:
-    """A query referenced only by a column group's write-back query, or by a nested form embedded
-    in a form tab, must NOT look unused — the reverse walk descends into the same nested screen
-    structures integrity validates. Regression for ``f00921`` (used by ``f0092``'s columns) showing
-    "0 references, safe to delete"."""
+def test_query_usages_descends_into_column_groups() -> None:
+    """A query referenced only by a column group's write-back query must NOT look unused — the
+    reverse walk descends into the same nested screen structures integrity validates. Regression
+    for ``f00921`` (used by ``f0092``'s columns) showing "0 references, safe to delete"."""
     screens = {
         "nomajde": {
             "f0092": {
@@ -61,14 +60,6 @@ def test_query_usages_descends_into_column_groups_and_embedded_nested_forms() ->
                 "column_groups": [
                     {"id": "extra", "update_query": "f00921_put", "insert_query": "f00921_post"},
                 ],
-                "dialog": {
-                    "tabs": [
-                        {"id": "main", "type": "form", "nested_forms": [
-                            {"id": "child", "type": "nested_form", "read_query": "f00922_get",
-                             "delete_query": "f00922_delete"},
-                        ]},
-                    ],
-                },
             },
         },
     }
@@ -77,10 +68,6 @@ def test_query_usages_descends_into_column_groups_and_embedded_nested_forms() ->
                for u in find_usages(state, kind="query", name="f00921_put", scope="nomajde"))
     assert any(u.type == "column_group_insert_query"
                for u in find_usages(state, kind="query", name="f00921_post", scope="nomajde"))
-    assert any(u.type == "nested_form_read_query"
-               for u in find_usages(state, kind="query", name="f00922_get", scope="nomajde"))
-    assert any(u.type == "nested_form_delete_query"
-               for u in find_usages(state, kind="query", name="f00922_delete", scope="nomajde"))
 
 
 def test_screen_usages_finds_menu_via_read_query() -> None:
@@ -149,21 +136,19 @@ def test_query_and_api_usages_descend_into_shared_actions() -> None:
     assert any("sync_user" in u.label and u.type == "action_api_call" for u in api)
 
 
-def test_query_usages_finds_dialog_tab_nested_form_delete_query() -> None:
-    """A dialog tab that IS a nested_form references its queries directly on the tab (read/update/
-    insert/DELETE) — the delete_query was missing from the scan, so a nested-form tab's delete query
-    (e.g. settings_jdedwards_delete) read as unused. Regression for that omission."""
-    screens = {"nomasx1": {"settings_applications": {
-        "connector": "nomasx1", "read_query": "settings_applications_get",
-        "dialog": {"tabs": [
-            {"id": "jde", "type": "nested_form", "connector": "jdedwards",
-             "read_query": "settings_jdedwards_get", "update_query": "settings_jdedwards_put",
-             "insert_query": "settings_jdedwards_post", "delete_query": "settings_jdedwards_delete"},
-        ]},
-    }}}
+def test_screen_usages_finds_nested_form_reference() -> None:
+    """A nested_form tab is reference-only — searching the REUSED screen (``form_screen``) must
+    surface the parent that embeds it, so renaming/auditing the reused screen sees the dependency."""
+    screens = {"nomasx1": {
+        "settings_applications": {
+            "connector": "nomasx1", "read_query": "settings_applications_get",
+            "dialog": {"tabs": [
+                {"id": "jde", "type": "nested_form", "form_screen": "settings_jdedwards",
+                 "param_binds": [{"param": "APPS_ID", "source": "APPS_ID"}]},
+            ]},
+        },
+        "settings_jdedwards": {"connector": "nomasx1", "read_query": "settings_jdedwards_get"},
+    }}
     state = _state(screens=screens)
-    assert any(u.type == "nested_form_delete_query"
-               for u in find_usages(state, kind="query", name="settings_jdedwards_delete", scope="jdedwards"))
-    # and the read/update/insert still resolve (regression guard for the whole set)
-    assert find_usages(state, kind="query", name="settings_jdedwards_get", scope="jdedwards")
-    assert find_usages(state, kind="query", name="settings_jdedwards_post", scope="jdedwards")
+    usages = find_usages(state, kind="screen", name="settings_jdedwards", scope="nomasx1")
+    assert any(u.type == "nested_table_screen" for u in usages)

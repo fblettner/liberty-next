@@ -46,6 +46,10 @@ export interface JsonSchema {
   $ref?: string
   $defs?: Record<string, JsonSchema>
   x_group?: string   // from a Pydantic Field's json_schema_extra — groups the form into tabs
+  /** Model-level (json_schema_extra on the BaseModel): field names to build a list-row summary
+   *  from, joined by " · " (skipping empty). e.g. a union source shows "connector · query" instead
+   *  of just its first string field. */
+  x_summary?: string[]
   /** This field's options come from `framework_enums[<ref>]` (renders as a SearchSelect). */
   x_enum_ref?: string
   /** Like `x_enum_ref`, but the ref is picked at render-time from a sibling field's value:
@@ -383,6 +387,22 @@ function itemSummary(it: Record<string, unknown>, itemSchema: JsonSchema, defs: 
   // fallback below returns "(unnamed)" and (worse) the row may render as String(obj) when the
   // outer array handler treats the union as a non-object items list.
   const resolved = resolveUnionBranch(itemSchema, it, defs)
+  // Model-level ``x_summary`` — explicit fields to compose the row label from (e.g. a lookup union
+  // source: "connector · query" rather than just the first string field). Wins when set.
+  const summaryFields = resolved.x_summary ?? itemSchema.x_summary
+  if (Array.isArray(summaryFields) && summaryFields.length) {
+    // A summary field may be a list (e.g. a rules_when's ``value = ["6","8"]``) — join it with "/"
+    // so the row reads "FSSETY · 6/8 · get_form_name" and two entries on the same discriminator
+    // are distinguishable (a bare string field still renders as-is).
+    const parts = summaryFields
+      .map((f) => {
+        const v = it[f]
+        if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string' && x !== '').join('/')
+        return typeof v === 'string' ? v : ''
+      })
+      .filter((v) => v !== '')
+    if (parts.length) return parts.join(' · ')
+  }
   if (typeof it.name === 'string' && it.name) return it.name
   if (typeof it.label === 'string' && it.label) {
     // Discriminated unions: prefer `<discriminator value> · <label>` (e.g. `chart · Users by app`)
@@ -526,12 +546,21 @@ export interface NavSeg { kind: 'prop' | 'item'; key: string; index?: number; la
  */
 const QUERY_ENUM_REFS = new Set<string>(['LOOKUP_QUERIES', 'CHART_QUERIES'])
 
-export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery }: {
+export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQuery, onCloneQuery, onAddQuery, hiddenGroups, hiddenFields, fieldNotes }: {
   schema: JsonSchema
   value: Record<string, unknown>
   onChange: (v: Record<string, unknown>) => void
   defs?: Defs
   onNavigate?: (seg: NavSeg) => void
+  /** x_group tab names to omit entirely (the caller decides per-context — e.g. hide "Lookup"
+   *  unless the column's effective rule is a lookup). Fields in a hidden group don't render. */
+  hiddenGroups?: string[]
+  /** Field names to omit (caller-driven, like hiddenGroups but per field) — e.g. hide the
+   *  lookup-only fields on a non-lookup column without hiding the whole Rules tab. */
+  hiddenFields?: string[]
+  /** Extra content rendered under a field, keyed by field name — e.g. "default from the data
+   *  dictionary: LOOKUP" beside the rules field. The caller computes it from external context. */
+  fieldNotes?: Record<string, ReactNode>
   /** Callbacks for the in-line query-action buttons rendered next to fields whose
    *  ``x_enum_ref`` is a query-bearing one (LOOKUP_QUERIES, CHART_QUERIES, …). All three
    *  are optional; when omitted the matching button doesn't render. The connector
@@ -613,7 +642,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
     if (!groups.has(g)) groups.set(g, [])
     groups.get(g)!.push([key, raw])
   }
-  const groupNames = [...groups.keys()]
+  const groupNames = [...groups.keys()].filter((g) => !(hiddenGroups ?? []).includes(g))
   const showTabs = groupNames.length > 1
   const [tab, setTab] = useState(groupNames[0])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reset to the first tab when the *model* changes
@@ -633,6 +662,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         </TabsBar>
       )}
       {activeProps.map(([key, raw]) => {
+        if ((hiddenFields ?? []).includes(key)) return null
         const sub = effective(raw, allDefs)
         // ``x_visible_when`` — hide this field unless a sibling matches. The form's sibling
         // ``value`` is the parent ``value`` prop. Multiple allowed values via a list. Hidden
@@ -805,6 +835,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         return (
           <div key={key} style={{ marginBottom: 14 }}>
             <Field label={label}>{control}</Field>
+            {fieldNotes?.[key]}
             {desc && <Hint>{desc}</Hint>}
           </div>
         )

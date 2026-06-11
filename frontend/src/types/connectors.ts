@@ -102,9 +102,17 @@ export type DisplayRule =
        *  Required for queries that take `:placeholder` params to even run — without these a UDC
        *  query returns nothing because SY/RT are NULL. The fetcher passes them as ?p=v on /api/sql. */
       params?: Record<string, string>
-      /** v1's ly_lkp_params with lkp_dir='OUT' — extra dd_ids the picked row writes back to
-       *  other form fields / grid cells beyond the headline ``value`` / ``label`` columns. */
+      /** Columns this lookup can flow back on a pick — the menu a column's ``return_binds`` picks
+       *  from. No longer auto-mapped by dd; the explicit mapping lives on ``Column.return_binds``. */
       return_params?: string[]
+      /** Extra result columns shown beside code + label in the dropdown (display only). */
+      display_fields?: string[]
+      /** Which display_fields get an in-dropdown facet-chip filter (subset of display_fields). */
+      filter_fields?: string[]
+      /** Multi-source union: every source `{connector, query}` (primary first) is fetched on its
+       *  own connector and the rows concatenated (UNION ALL, sorted by value) — enables combining
+       *  rows across databases. Absent for a plain single-query lookup. */
+      sources?: { connector: string; query: string }[]
       /** The lookup's declared query params double as the **key columns** that disambiguate a
        *  non-unique ``value`` (e.g. USR_ID is only unique per USR_APPS_ID). The grid resolves the
        *  label per row by matching these same-named columns — automatic, no per-column filter_from. */
@@ -122,11 +130,34 @@ export interface Column {
   /** cascading-filter deps (v1's ly_tbl_filters): when the `source` filter has a value, this
    *  column's LOOKUP options are narrowed to the rows whose `column` matches it. */
   filter_from?: { source: string; column: string }[]
+  /** LOOKUP return → target-column fills: on a pick, write the picked row's ``param`` value into
+   *  the sibling column ``column`` on the same row. Drives the grid bulk-edit + Excel import
+   *  return-fill (explicit replacement for v1's auto-by-dd return-param mapping). */
+  return_binds?: { param: string; column: string }[]
+  /** Conditional forced defaults: when sibling `field` == `value`, this column is set to `default`
+   *  and locked (read-only). First matching rule wins. Honoured by the grid + dialog. */
+  default_when?: { field: string; value: string | string[]; default: string }[]
+  /** LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column. */
+  hide_label?: boolean
+  /** Conditional rule overrides: when sibling `field` == `value`, use `rule` (a resolved display
+   *  rule, or null → plain) instead of the base `rule`. First match wins; evaluated per row/form.
+   *  Each entry carries its OWN `lookup_param_binds` + `return_binds` (independent of the column's
+   *  base binds), so two rules on the same discriminator bind different params (f00950 FSDTAI:
+   *  get_form_name narrowed by OBNM vs get_data_item with no narrow). */
+  rules_when?: {
+    field: string; value: string | string[]; rule: DisplayRule | null
+    lookup_param_binds?: { param: string; value?: string | null; source?: string | null }[]
+    return_binds?: { param: string; column: string }[]
+  }[]
   /** conditional visibility (v1's cdn_*): a list of `{field, value}` conditions, all of which must
    *  hold for the column to appear — a condition holds when its `field` server-filter is unset, or
    *  its value matches `value` (or is in `value` when it's an array). So a set filter outside the
    *  allowed set drops the column from the grid. (A bare `{field, value}` is treated as one item.) */
   visible_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[]
+  /** Write this column only when the condition holds (opt-in, independent of `visible_when`).
+   *  Backend-enforced: when set and it doesn't hold for the row, the column is written as its
+   *  type-neutral value (blank / 0) and its DD default/rule is suppressed. Blank → always written. */
+  write_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[]
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string
@@ -144,6 +175,12 @@ export interface Column {
    *  folded into this server-side). Used to stamp an action's writes with the firing row's
    *  identity so the change package groups them under that record. */
   key?: boolean
+  /** Read-only when ADDING a new row (editable on edit). Honoured by the grid bulk-editor and the
+   *  dialog — locked cells fall back to their read-only display in that mode. UI-only. */
+  disable_on_add?: boolean
+  /** Read-only when EDITING an existing row (editable on add). Per-column replacement for v1's
+   *  blanket 'lock all keys on edit'. Honoured by the grid bulk-editor and the dialog. UI-only. */
+  disable_on_edit?: boolean
 }
 
 export interface QueryResult {

@@ -63,7 +63,7 @@ const GENERAL_FORM_KEYS = [
   // screen into the app's active change package, with ``change_entity`` as its grouping label
   // and ``post_apply`` selecting the run-once steps this screen's changes need on promotion.
   'change_tracked', 'change_entity', 'post_apply',
-  'max_rows', 'auto_load', 'editable', 'uploadable',
+  'max_rows', 'auto_load', 'editable', 'uploadable', 'disable_add',
   // Default tanstack-table grouping — column(s) the grid groups by on first open. Surfaces
   // here as a multi-select bound to SCREEN_COLUMNS (the read query's columns), the same
   // ``x_enum_ref`` mechanism the Columns tab uses to pick column names.
@@ -331,7 +331,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       }
       return [...out.entries()].map(([value, label]) => ({ value, label, mono: value }))
     }
-    const dscope = dict?.connectors?.[effectiveConnector]
+    // Dictionary metadata (enums / lookups / sequences) is scoped to the APP, not the data-pool
+    // connector (matches the backend's ``dict_scope = app``) — so a cross-pool screen's
+    // rules_values dropdowns list the right ids (e.g. f00950 on jdedwards sees nomajde's lookups).
+    const dscope = dict?.connectors?.[app]
     base.ENUM_IDS = { label: 'Enums', values: mkIdValues(['label'], dict?.enums, dscope?.enums) }
     base.LOOKUP_IDS = { label: 'Lookups', values: mkIdValues(['description'], dict?.lookups, dscope?.lookups) }
     base.SEQUENCE_IDS = { label: 'Sequences', values: mkIdValues(['description'], dict?.sequences, dscope?.sequences) }
@@ -352,7 +355,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       values: postApplySteps.map((s) => ({ value: s.id, label: s.label ? `${s.label} (${s.id})` : s.id, mono: s.id })),
     }
     return base
-  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, effectiveConnector, selectedConnectorMeta, value.column_groups, postApplySteps])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, app, selectedConnectorMeta, value.column_groups, postApplySteps])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so
@@ -437,6 +440,13 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     }
     return m
   }, [value.columns])
+  // The screen's own columns as picker options — source/key candidates for a column group's FK
+  // binds. Used by the ColumnGroupsEditor (which lives on the Queries tab — a group defines a
+  // related-table JOIN + its write-back queries, so it's query structure, not display).
+  const groupColumnOptions = useMemo<SearchSelectOption[]>(
+    () => effectiveScreenColumns.filter((c) => c.name).map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name })),
+    [effectiveScreenColumns],
+  )
   // (Schema-mode sub-schemas + tab/field mutation helpers are gone — the visual builder owns
   // the dialog-tab/field editing experience now. ``setProp`` / ``dialog`` / ``setDialog`` /
   // ``createDialog`` remain since they're used by the Dialog tab's empty-state "Create dialog"
@@ -751,6 +761,49 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       {renderQueryField('update_query', false)}
       {renderQueryField('insert_query', false)}
       {renderQueryField('delete_query', false)}
+      {/* Seed the Columns tab from the read query's result columns (name + dd) in one click. Lives
+          here because it derives from the read query; only adds columns NOT already defined, so
+          it's safe to re-run after the query gains a column. */}
+      {(() => {
+        const cols = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
+        const have = new Set((cols as { name?: string }[]).map((c) => (c.name ?? '').toLowerCase()))
+        const missing = (screenColumns ?? []).filter((c) => c.name && !have.has(c.name.toLowerCase()))
+        return (
+          <Button
+            $size="sm" $variant="ghost"
+            disabled={!screenColumns || missing.length === 0}
+            onClick={() => setProp('columns', [
+              ...cols,
+              // Column names are stored UPPERCASE (write queries + dictionary use v1's uppercase
+              // ids; a Postgres read folds them lowercase, so normalize on import).
+              ...missing.map((c) => ({ name: c.name.toUpperCase(), ...(c.dd ? { dd: c.dd.toUpperCase() } : {}) })),
+            ])}
+            style={{ marginTop: 4, marginBottom: 8 }}
+          >
+            <Plus size={13} />{' '}
+            {!screenColumns
+              ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
+              : missing.length === 0
+                ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
+                : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
+          </Button>
+        )
+      })()}
+      {/* Column groups — related 1:1 tables JOINed into the read query, each with its own
+          write-back update/insert/delete queries. This is query structure (a join + its CRUD), so
+          it lives here, not on the Columns tab; columns are tagged into a group via their "Group"
+          field in the column list. */}
+      <GroupsHr />
+      <Sub>{t('settings.screens.editor.columnGroupsHint',
+        'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) on the Columns tab.')}</Sub>
+      <ColumnGroupsEditor
+        value={Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []}
+        onChange={(next) => setProp('column_groups', next.length ? next : null)}
+        screenConnector={effectiveConnector}
+        connectorOptions={connectorOptions}
+        columnOptions={groupColumnOptions}
+        columnsByGroup={columnsByGroup}
+      />
     </>
   )
 
@@ -761,57 +814,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // column hint and its nested rules.
   const renderColumns = (): ReactNode => {
     const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
-    const currentGroups = Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []
-    // Source / key candidates for the group binds + key_columns — the screen's own columns.
-    const columnOptions: SearchSelectOption[] = effectiveScreenColumns
-      .filter((c) => c.name)
-      .map((c) => ({ value: c.name, label: c.label ?? c.name, mono: c.name }))
     return (
       <>
-        {/* Related-table write-back groups (1:1) FIRST — define them, then tag columns with a
-            group in the list below. Each group names its update/insert queries + the FK binds and
-            shows which columns are attached, so the column→table mapping is visible at a glance. */}
-        <Sub>{t('settings.screens.editor.columnGroupsHint',
-          'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) in the column list below.')}</Sub>
-        <ColumnGroupsEditor
-          value={currentGroups}
-          onChange={(next) => setProp('column_groups', next.length ? next : null)}
-          screenConnector={effectiveConnector}
-          connectorOptions={connectorOptions}
-          columnOptions={columnOptions}
-          columnsByGroup={columnsByGroup}
-        />
-        <GroupsHr />
-        <Sub>{t('settings.screens.editor.columnsHint')}</Sub>
-        {/* Import columns from the read query — seed the list from the query's result columns
-            (name + dd) in one click instead of adding each by hand. Only adds columns NOT already
-            defined, so it's safe to re-run after the query gains a column. */}
-        {(() => {
-          const have = new Set(
-            (currentColumns as { name?: string }[]).map((c) => (c.name ?? '').toLowerCase()),
-          )
-          const missing = (screenColumns ?? []).filter((c) => c.name && !have.has(c.name.toLowerCase()))
-          return (
-            <Button
-              $size="sm" $variant="ghost"
-              disabled={!screenColumns || missing.length === 0}
-              onClick={() => setProp('columns', [
-                ...(currentColumns as unknown[]),
-                // Column names are stored UPPERCASE (the write queries + dictionary use v1's
-                // uppercase ids; a Postgres read folds them lowercase, so normalize on import).
-                ...missing.map((c) => ({ name: c.name.toUpperCase(), ...(c.dd ? { dd: c.dd.toUpperCase() } : {}) })),
-              ])}
-              style={{ marginBottom: 8 }}
-            >
-              <Plus size={13} />{' '}
-              {!screenColumns
-                ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
-                : missing.length === 0
-                  ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
-                  : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
-            </Button>
-          )
-        })()}
+        {/* Just the column list + drill. The "import from read query" button lives on the Queries
+            tab (it seeds from the read query), and column GROUPS live there too. */}
         {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
             ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
             COLUMN_GROUPS for the per-column ``group`` picker. */}
@@ -826,6 +832,51 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
                   ? (v.columns as unknown[])
                   : null
                 setProp('columns', next)
+              },
+              // Per-column context for the column form: resolve the column's DATA DICTIONARY rule
+              // (from the fetched dictionary) so we can (1) show the inherited default beside the
+              // RULES field when it's left blank, and (2) only show the Lookup tab when the column's
+              // effective rule is a LOOKUP (override or DD default). Only meaningful at the
+              // ColumnHint level — other drilled levels (filter_from, …) get no context.
+              deriveContext: (col, sch) => {
+                // Only at the ColumnHint level (its schema carries a ``rules`` property) — not the
+                // columns-array root or nested filter_from / bind levels.
+                if (!sch?.properties || !('rules' in sch.properties)) return {}
+                const ddName = typeof col.dd === 'string' ? col.dd : undefined
+                const name = typeof col.name === 'string' ? col.name : ''
+                const key = ddName === '' ? null : (ddName || name)  // dd="" opts out of the dictionary
+                let ddRule: string | undefined
+                let ddRuleVal: string | undefined
+                if (key) {
+                  // Dictionary scope is the screen's APP (where entries/lookups/enums live), NOT
+                  // its data-pool connector — matches the backend's ``dict_scope = app`` (a
+                  // cross-pool screen like f00950 runs on jdedwards but its DD entries are under
+                  // connectors.nomajde). Fall back to the shared top-level entries.
+                  const dscope = dict?.connectors?.[app]
+                  const entry = (dscope?.entries?.[key] ?? dscope?.entries?.[key.toUpperCase()]
+                    ?? dict?.entries?.[key] ?? dict?.entries?.[key.toUpperCase()]) as Record<string, unknown> | undefined
+                  ddRule = typeof entry?.rules === 'string' && entry.rules ? entry.rules.toUpperCase() : undefined
+                  ddRuleVal = typeof entry?.rules_values === 'string' && entry.rules_values ? entry.rules_values : undefined
+                }
+                const override = typeof col.rules === 'string' && col.rules ? col.rules.toUpperCase() : undefined
+                const effective = override ?? ddRule
+                // Can this column ever be a LOOKUP? base override / DD default / any rules_when entry.
+                const rw = Array.isArray(col.rules_when) ? (col.rules_when as Record<string, unknown>[]) : []
+                const canLookup = effective === 'LOOKUP'
+                  || rw.some((e) => typeof e?.rules === 'string' && e.rules.toUpperCase() === 'LOOKUP')
+                return {
+                  // The Rules tab always shows (it holds the rule); hide the LOOKUP-only fields when
+                  // the column can't be a lookup — the declutter the old "Lookup tab only" gave us.
+                  hiddenFields: canLookup ? [] : ['hide_label', 'lookup_param_binds', 'return_binds'],
+                  fieldNotes: !override && ddRule
+                    ? { rules: (
+                        <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
+                          {t('settings.screens.editor.ddDefaultRule', 'Data dictionary default: {{rule}}',
+                            { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
+                        </div>
+                      ) }
+                    : undefined,
+                }
               },
             }}
           />

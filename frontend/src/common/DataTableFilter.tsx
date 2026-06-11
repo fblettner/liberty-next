@@ -15,8 +15,15 @@ export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum' | 'look
 
 /** Per-column extras carried in TanStack's `columnDef.meta`. */
 export interface FilterMeta {
-  /** what filter control to show + how to interpret the filter value */
-  filter?: { kind: FilterKind; options?: { value: string; label: string }[] }
+  /** what filter control to show + how to interpret the filter value. ``options`` carry the same
+   *  shape the dialog/grid pickers use — a ``mono`` code column, the ``label``, and optional
+   *  ``cells`` (a LOOKUP's display_fields) — so SearchSelect renders the identical table.
+   *  ``cellColumns`` describes those cell columns (label + facet-filterable) for the dropdown. */
+  filter?: {
+    kind: FilterKind
+    options?: { value: string; label: string; mono?: string; cells?: string[] }[]
+    cellColumns?: { label: string; filterable?: boolean }[]
+  }
   /** header + cell text alignment (numbers → right, booleans → center, …); default left */
   align?: 'left' | 'right' | 'center'
   /** an internal helper column (the edit-mode select / status columns) — excluded from search, the Columns menu, etc. */
@@ -217,6 +224,7 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
         <SearchSelect
           value={cur}
           options={opts}
+          cellColumns={meta?.cellColumns}
           onChange={(v) => column.setFilterValue(v || undefined)}
           anyLabel={t('table.filterAny', '(any)')}
         />

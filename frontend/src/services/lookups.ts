@@ -27,6 +27,11 @@ export interface LookupSpec {
    *  at the same lookup with different SY/RT pairs (LMSG, LNGP, AT1, …) was sharing the same
    *  result page before. Different param sets are cached separately. */
   params?: Record<string, string>
+  /** Multi-source union: when present (and >1), each source `{connector, query}` is fetched on its
+   *  own connector with this spec's `value`/`label`/`params`, and the rows are concatenated
+   *  (UNION ALL, sorted by value). Lets a lookup combine rows across databases — impossible in SQL.
+   *  Absent / single → the plain single-query path. */
+  sources?: { connector: string; query: string }[]
 }
 
 export interface LookupData {
@@ -44,14 +49,21 @@ export interface LookupData {
 /** A lookup's options as `{value, label}` — optionally narrowed to rows whose `filter.column`
  *  equals `filter.value` (the cascading-filter case); duplicates by value are dropped, order
  *  follows the query. */
-export function lookupOptions(data: LookupData, filter?: { column: string; value: string }): { value: string; label: string }[] {
+export function lookupOptions(
+  data: LookupData,
+  filter?: { column: string; value: string },
+  displayFields?: string[],
+): { value: string; label: string; mono: string; cells?: string[] }[] {
   const colKey = filter ? (data.byColLower.get(filter.column.toLowerCase()) ?? filter.column) : undefined
   // Trim-tolerant cascade match: JDE pads / right-justifies UDC codes, so the dependent column
   // reads back e.g. "98  " / "      98" while the parent's selected value is "98". Compare both
   // sides trimmed — else selecting a parent narrows the child to zero rows. Display-only (the
   // option values below stay as-is; this only decides which rows show).
   const want = filter ? String(filter.value ?? '').trim() : undefined
-  const out: { value: string; label: string }[] = []
+  // The lookup's ``display_fields`` → one extra table column per field (consistent length so the
+  // dropdown's columns line up). Resolve each to its actual-case row key once.
+  const extraKeys = (displayFields ?? []).map((f) => data.byColLower.get(f.toLowerCase()) ?? f)
+  const out: { value: string; label: string; mono: string; cells?: string[] }[] = []
   const seen = new Set<string>()
   for (const row of data.rows) {
     const v = row[data.vKey]
@@ -61,9 +73,26 @@ export function lookupOptions(data: LookupData, filter?: { column: string; value
     if (seen.has(sv)) continue
     seen.add(sv)
     const l = row[data.lKey]
-    out.push({ value: sv, label: l === null || l === undefined ? sv : String(l) })
+    const base = l === null || l === undefined ? sv : String(l)
+    const cells = extraKeys.length
+      ? extraKeys.map((k) => { const x = row[k]; return x === null || x === undefined ? '' : String(x).trim() })
+      : undefined
+    // ``mono`` = the code column, ``label`` = the description, ``cells`` = display_fields. This is
+    // the ONE option shape every picker (dialog / grid / column-filter / advanced-filter) renders.
+    out.push({ value: sv, label: base, mono: sv, cells })
   }
   return out
+}
+
+/** Metadata for the extra dropdown columns (a lookup's display_fields), parallel by index to each
+ *  option's `cells`: the column label + whether it gets an in-dropdown facet-chip filter. Returns
+ *  undefined when the lookup declares no display_fields. */
+export function lookupCellColumns(
+  rule: { display_fields?: string[]; filter_fields?: string[] } | null | undefined,
+): { label: string; filterable: boolean }[] | undefined {
+  if (!rule?.display_fields?.length) return undefined
+  const filt = new Set(rule.filter_fields ?? [])
+  return rule.display_fields.map((f) => ({ label: f, filterable: filt.has(f) }))
 }
 
 function specKey(s: LookupSpec): string {
@@ -72,17 +101,61 @@ function specKey(s: LookupSpec): string {
   const p = s.params
     ? Object.keys(s.params).sort().map((k) => `${k}=${s.params![k]}`).join('&')
     : ''
-  return `${s.connector}/${s.query}/${s.value}/${s.label}?${p}`
+  // A multi-source union caches under its own key (distinct from any single source) so the combined
+  // result isn't confused with one part.
+  const u = s.sources && s.sources.length > 1
+    ? `|U:${s.sources.map((x) => `${x.connector}/${x.query}`).join(',')}`
+    : ''
+  return `${s.connector}/${s.query}/${s.value}/${s.label}?${p}${u}`
 }
 
 // Shared promise cache — survives unmounts, lasts the session. A failed fetch
 // drops the entry so a re-render gets another shot.
 const cache = new Map<string, Promise<LookupData>>()
 
+// Multi-source UNION ALL (app-level): fetch each source on ITS OWN connector (reusing the
+// single-source cache + param filtering), then concatenate. Keys are normalised to lowercase so
+// rows from an Oracle source (UPPER columns) and a Postgres source (lower) share one casing — the
+// whole reason this can't be a SQL UNION. Sorted by value (the operator's "order by value").
+async function fetchUnion(spec: LookupSpec): Promise<LookupData> {
+  const parts = await Promise.all(
+    spec.sources!.map((s) =>
+      fetchLookup({ connector: s.connector, query: s.query, value: spec.value, label: spec.label, params: spec.params }),
+    ),
+  )
+  const rows: Record<string, unknown>[] = []
+  const byColLower = new Map<string, string>()
+  for (const part of parts) {
+    for (const lc of part.byColLower.keys()) byColLower.set(lc, lc)
+    for (const row of part.rows) {
+      const norm: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(row)) norm[k.toLowerCase()] = v
+      rows.push(norm)
+    }
+  }
+  const vKey = spec.value.toLowerCase()
+  const lKey = spec.label.toLowerCase()
+  rows.sort((a, b) => String(a[vKey] ?? '').localeCompare(String(b[vKey] ?? '')))
+  const map = new Map<string, string>()
+  for (const row of rows) {
+    const v = row[vKey]
+    if (v === null || v === undefined) continue
+    const l = row[lKey]
+    map.set(String(v), l === null || l === undefined ? String(v) : String(l))
+  }
+  return { map, rows, vKey, lKey, byColLower }
+}
+
 function fetchLookup(spec: LookupSpec): Promise<LookupData> {
   const key = specKey(spec)
   let p = cache.get(key)
   if (!p) {
+    // Multi-source lookups union their parts (each on its own connector) — see fetchUnion.
+    if (spec.sources && spec.sources.length > 1) {
+      p = fetchUnion(spec).catch((e) => { cache.delete(key); throw e })
+      cache.set(key, p)
+      return p
+    }
     // Bind the lookup's static params as :placeholders on the URL (the SQL connector reads
     // them off the query string — same path the TableView's Run uses). Skip empty params so
     // they bind to NULL rather than `""` (asyncpg sometimes can't infer the type for an empty

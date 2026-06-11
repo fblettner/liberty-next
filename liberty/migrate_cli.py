@@ -411,13 +411,9 @@ def _summary(data: dict, *, command: str) -> str:
         # Slice 6b: row_menu items migrated from v1's ly_ctxmenus + ly_ctx_val + ly_ctx_filters.
         n_rowmenu_screens = sum(1 for s in screens.values() if s.get("row_menu"))
         n_rowmenu_items = sum(len(s.get("row_menu") or []) for s in screens.values())
-        # Nested tabs (v1's FormsDialog / FormsTable inside a FormsDialog) — bumped over their
-        # own count + which kind so the operator notices when migration found them.
-        n_nested_form = sum(
-            1 for s in screens.values()
-            for t in ((s.get("dialog") or {}).get("tabs") or [])
-            if t.get("type") == "nested_form"
-        )
+        # Nested-table tabs (v1's FormsTable inside a FormsDialog) — counted so the operator
+        # notices when migration found them. (v1 FormsDialog nested forms are no longer migrated
+        # to a tab type — they warn and fall through to a plain form; re-model as a column group.)
         n_nested_table = sum(
             1 for s in screens.values()
             for t in ((s.get("dialog") or {}).get("tabs") or [])
@@ -437,7 +433,7 @@ def _summary(data: dict, *, command: str) -> str:
         return (f"# migrated: {n} screen(s) for [screens.{app}] — {with_dlg} with dialog, "
                 f"{with_audit} with audit, {cross} cross-connector, {n_fields} dialog field(s), "
                 f"{n_binds} param-bind(s), {n_conds} conditional field(s), "
-                f"{n_nested_form} nested form tab(s), {n_nested_table} nested table tab(s), "
+                f"{n_nested_table} nested table tab(s), "
                 f"{n_rowmenu_screens} with row-menu ({n_rowmenu_items} items), "
                 f"{n_row_click} promoted row-click(s), {n_attached_actions} auto-attached action(s) — "
                 f"put this at config/screens.toml")

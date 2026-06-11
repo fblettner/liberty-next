@@ -22,9 +22,9 @@ import { useSio, useLockState } from '../../sio/SioContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
-import type { Action, ColumnGroup, FormTab, NestedFormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { entityKeyOf, evalConditions, type Row } from './dialogHelpers'
+import { entityKeyOf, evalConditions, forcedDefault, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
@@ -41,21 +41,21 @@ function isFormTab(tab: ScreenTab): tab is FormTab {
 
 export type DialogMode = 'edit' | 'add'
 
-/** A NestedFormView registers a save function with its parent ScreenDialog via this context.
- *  After the parent's own update/insert succeeds, ``submit()`` walks the registry and awaits
- *  each entry sequentially — same as v1's FormsDialog flow (main first, then sub-dialogs,
- *  each contributing their own write). A throwing save aborts the chain and surfaces on the
- *  parent's error banner; the dialog stays open so the operator can retry.
+/** A reference-mode NestedFormView registers a save function with its parent ScreenDialog via this
+ *  context. After the parent's own update/insert succeeds, ``submit()`` walks the registry and
+ *  awaits each entry sequentially — main row first, then each reused child form contributes its own
+ *  write. A throwing save aborts the chain and surfaces on the parent's error banner; the dialog
+ *  stays open so the operator can retry.
  *
- *  ``parentExtra`` carries values the parent write just produced that aren't in the parent's
- *  form state yet — specifically the server-assigned SEQUENCE/auto-ID PK from an ADD (returned
- *  on the insert as ``resolved_binds``). The nested saver resolves its ``source`` binds against
- *  the parent form state MERGED with these, so a child insert can tie to the parent's brand-new
- *  PK in the same Save instead of requiring the operator to save the parent first. */
+ *  ``parentExtra`` carries values the parent write just produced that aren't in the parent's form
+ *  state yet — specifically the server-assigned SEQUENCE/auto-ID PK from an ADD (returned on the
+ *  insert as ``resolved_binds``). The nested saver resolves its ``source`` binds against the parent
+ *  form state MERGED with these, so a child insert can tie to the parent's brand-new PK in the same
+ *  Save instead of requiring the operator to save the parent first. */
 export type NestedSaver = (parentExtra?: Record<string, unknown>) => Promise<void>
 export interface NestedSaversCtx {
-  /** Mount a saver under *tabId*. Idempotent — re-registering replaces the previous fn (which
-   *  is exactly what we want when NestedFormView's closure captures a new `formValues`). */
+  /** Mount a saver under *tabId*. Idempotent — re-registering replaces the previous fn (which is
+   *  exactly what we want when NestedFormView's closure captures a new `formValues`). */
   register: (tabId: string, fn: NestedSaver) => void
   unregister: (tabId: string) => void
 }
@@ -74,15 +74,6 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
-`
-// A labelled section for an embedded nested form rendered below a form tab's own fields — so one
-// tab edits the main table plus related tables. The rule + heading separate it from the main grid.
-const NestedSection = styled.div`
-  margin-top: 18px; padding-top: 14px; border-top: 1px solid ${colors.border};
-`
-const NestedSectionTitle = styled.div`
-  font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
-  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;
 `
 
 export function ScreenDialog({
@@ -170,10 +161,10 @@ export function ScreenDialog({
   useEffect(() => { setDuplicating(false) }, [open, row])
   const effMode: DialogMode = duplicating ? 'add' : mode
 
-  // Nested-form save coordination — NestedFormView components mount inside the dialog body
-  // (one per ``nested_form`` tab) and register their own save function here. Stored in a ref
-  // so re-registers (each time the nested form's closure captures a new ``formValues``) don't
-  // re-render the parent; the registry is only walked when the parent's submit() fires.
+  // Reference-mode nested-form save coordination — each NestedFormView (a ``nested_form`` tab that
+  // reuses another screen's form) registers its own save function here. Stored in a ref so
+  // re-registers (each time the nested form's closure captures a new ``formValues``) don't re-render
+  // the parent; the registry is only walked when the parent's submit() fires.
   const nestedSaversRef = useRef<Map<string, NestedSaver>>(new Map())
   const nestedSaversCtx = useMemo<NestedSaversCtx>(() => ({
     register: (id, fn) => { nestedSaversRef.current.set(id, fn) },
@@ -236,6 +227,28 @@ export function ScreenDialog({
     setTabIdx(0)
     setError(null)
   }, [open, mode, row, dlg, valueFor, colByName])
+
+  // Conditional forced defaults (column ``default_when``): when a discriminator field matches, force
+  // the target field to the rule's value (``fieldStateOf`` also locks it read-only). Reactive — it
+  // re-applies whenever the form changes, so changing the discriminator updates dependents live.
+  // Guarded by a value-diff so setting inside a formValues-watching effect doesn't loop.
+  useEffect(() => {
+    if (!dlg) return
+    setFormValues((prev) => {
+      let next = prev
+      let changed = false
+      for (const tab of dlg.tabs.filter(isFormTab)) {
+        for (const f of (tab as FormTab).fields ?? []) {
+          const forced = forcedDefault(f.default_when, prev)
+          if (forced !== undefined && String(prev[f.name] ?? '') !== String(forced)) {
+            if (!changed) { next = { ...prev }; changed = true }
+            next[f.name] = forced
+          }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [formValues, dlg])
 
   // ── record lock (Phase 9 — Socket.IO) ────────────────────────────────────────────────
   // On open in ``edit`` mode we acquire a row-level lock so a concurrent edit by another
@@ -320,19 +333,18 @@ export function ScreenDialog({
     setFormValues((p) => ({ ...p, [name]: v }))
   }, [])
 
-  // dd_id → field_name map across every FormTab. Drives the lookup-return-params write-back:
-  // when a LOOKUP pick exposes extra columns (v1's ly_lkp_params lkp_dir='OUT'), the parent
-  // looks up each return_param's dd here and writes the value to the matching sibling field.
-  // Case-insensitive (Postgres folds unquoted to lowercase). When several fields claim the
-  // same dd, the first wins — v1's convention; the operator can pin a different one via the
-  // explicit field.dd.
-  const ddToFieldName = useMemo(() => {
+  // column_name → actual field_name (case-insensitive) across every FormTab. Drives the lookup
+  // return-bind write-back: a LOOKUP pick produces a ``{targetColumn: value}`` map per the picked
+  // column's ``return_binds`` (the explicit replacement for v1's auto-by-dd return mapping); we
+  // write each value to the matching sibling field. Case-insensitive — return_binds.column is
+  // normalised uppercase, form fields keep their own case.
+  const nameToFieldName = useMemo(() => {
     const m = new Map<string, string>()
     if (!dlg) return m
     for (const tab of dlg.tabs.filter(isFormTab)) {
       for (const f of tab.fields ?? []) {
-        const dd = (f.dd || f.name).toLowerCase()
-        if (!m.has(dd)) m.set(dd, f.name)
+        const key = f.name.toLowerCase()
+        if (!m.has(key)) m.set(key, f.name)
       }
     }
     return m
@@ -341,15 +353,13 @@ export function ScreenDialog({
     setFormValues((p) => {
       const next = { ...p }
       let touched = false
-      for (const [dd, v] of Object.entries(returnValues)) {
-        const fieldName = ddToFieldName.get(dd.toLowerCase())
-        if (!fieldName) continue
-        next[fieldName] = v
+      for (const [col, v] of Object.entries(returnValues)) {
+        next[nameToFieldName.get(col.toLowerCase()) ?? col] = v
         touched = true
       }
       return touched ? next : p
     })
-  }, [ddToFieldName])
+  }, [nameToFieldName])
 
   // Imperative-from-async prompt plumbing. The chain runner pauses on actions with
   // ``prompt_fields`` and awaits ``requestPrompt`` — which sets ``pendingPrompt`` state +
@@ -592,19 +602,9 @@ export function ScreenDialog({
       // ``trim_strings`` flag on Oracle/JDE — but stale data, the wrong delete_query, or a race
       // with another deleter can also produce it. We surface as a hard error here (rather than the
       // chain's soft warning) because the operator's intent on Delete is unambiguous.
-      // Flatten every nested form (dialog ``nested_form`` tabs + each FormTab's embedded
-      // ``nested_forms``) so deleteScreenRow can cascade-delete the children that declared a
-      // ``delete_query`` (no DB cascade) before removing the parent.
-      const nestedFormDeletes = tabs.flatMap((tab) => {
-        const forms: NestedFormTab[] = isFormTab(tab)
-          ? (tab.nested_forms ?? [])
-          : (tab.type === 'nested_form' ? [tab as NestedFormTab] : [])
-        return forms.map((nf) => ({ delete_query: nf.delete_query, connector: nf.connector, param_binds: nf.param_binds }))
-      })
       const resp = await deleteScreenRow({
         connector: targetConn, row: savedRow,
         columnGroups: (screen.column_groups ?? []) as ColumnGroup[],
-        nestedForms: nestedFormDeletes,
         mainDeleteQuery: screen.delete_query,
       })
       if (resp?.rowcount === 0) {
@@ -638,8 +638,8 @@ export function ScreenDialog({
   }, [screen, savedRow, connector, runOnSaveActions, onSaved, onClose, t])
 
   // The active tab's action buttons — shown in the footer (always visible, regardless of
-  // body scroll). Each tab kind (form / nested_form / nested_table) carries its own list via
-  // the shared ``_ScreenTabBase.actions`` field.
+  // body scroll). Each tab kind (form / nested_table) carries its own list via the shared
+  // ``_ScreenTabBase.actions`` field.
   const currentTabActions: Action[] = useMemo(() => {
     const tab = tabs[Math.min(tabIdx, tabs.length - 1)] ?? null
     return ((tab?.actions ?? []) as Action[])
@@ -714,11 +714,10 @@ export function ScreenDialog({
         }))
         return
       }
-      // Nested-form saves — v1's FormsDialog inside FormsDialog flow. Walk the registry of
-      // NestedFormView savers in registration order (Map iteration is insertion order), each
-      // contributing its own ``update_query`` / ``insert_query`` against its own connector.
-      // A throwing saver aborts the chain and surfaces on the parent's banner; the main row
-      // is already written so the user can retry the nested save without re-doing the parent.
+      // Reference-mode nested-form saves — walk the registry of NestedFormView savers in
+      // registration order (Map iteration is insertion order), each contributing its own reused
+      // screen's ``update_query`` / ``insert_query``. A throwing saver aborts the chain and surfaces
+      // on the parent's banner; the main row is already written so the user can retry the nested save.
       for (const [tabId, save] of nestedSaversRef.current) {
         try {
           await save(parentExtra)
@@ -802,7 +801,14 @@ export function ScreenDialog({
     const disabledByRule = (f.disabled_when?.length ?? 0) > 0
       ? evalConditions(f.disabled_when, formValues)
       : !!f.disabled
-    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule }
+    // Per-row-mode lock (column-level): a column flagged disable_on_add is read-only while adding,
+    // disable_on_edit while editing — the SAME setting the grid bulk-editor honours. `effMode`
+    // already folds Duplicate (an edit-of → add). ORed on top of the rule/static disabled.
+    const modeLocked = effMode === 'add' ? !!f.disable_on_add : !!f.disable_on_edit
+    // A conditional forced default (default_when) currently holds → the value is system-determined,
+    // so lock the field (the reactive effect above keeps its value in sync).
+    const forcedLocked = forcedDefault(f.default_when, formValues) !== undefined
+    return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule || modeLocked || forcedLocked }
   }
 
   if (!open || !dlg) return null
@@ -863,11 +869,11 @@ export function ScreenDialog({
                   ))}
                 </TabStrip>
               )}
-              {/* Render every tab, hide inactive ones via CSS — nested-form / nested-table tabs
-                  need to stay MOUNTED across tab switches so their formValues / fetch state
-                  persists (otherwise a user editing JD Edwards, switching to Connexion, and
-                  coming back would lose their edits). FormTab content reads from the parent's
-                  shared `formValues` so it can render only the active tab safely. */}
+              {/* Render every tab, hide inactive ones via CSS — nested-form / nested-table tabs need
+                  to stay MOUNTED across tab switches so their form/fetch state + saver registration
+                  persist (otherwise a user editing JD Edwards, switching to Connexion, and coming
+                  back would lose their edits). FormTab content reads from the parent's shared
+                  `formValues` so it can render only the active tab safely. */}
               {tabs.map((tab, i) => {
                 const active = i === tabIdx
                 if (tab.type === 'nested_form') {
@@ -884,69 +890,43 @@ export function ScreenDialog({
                     </div>
                   )
                 }
-                // FormTab — lazy render: only mount when active. The state (formValues) lives
-                // on the parent, so switching tabs keeps the values intact. Filters its fields
-                // through `fieldStateOf` (visible_when / required_when / disabled_when).
-                // Plain form tabs lazy-render (perf — their field state lives on the parent, so
-                // nothing is lost on unmount). But a tab WITH embedded nested forms must STAY
-                // mounted when inactive (display:none) — each NestedFormView owns its local input +
-                // saver registration, which an unmount would discard, so switching tabs then Saving
-                // would drop the nested write. The main field grid still renders only when active
-                // (it reads ``visibleFields``, which is the ACTIVE tab's fields).
-                const embedded = (tab as FormTab).nested_forms ?? []
-                if (!active && embedded.length === 0) return null
+                // FormTab — lazy render: only mount when active. The state (formValues) lives on
+                // the parent, so switching tabs keeps the values intact. Filters its fields through
+                // `fieldStateOf` (visible_when / required_when / disabled_when).
+                if (!active) return null
                 return (
-                  <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                    {active && (
-                      <FieldGrid $cols={gridCols}>
-                        {visibleFields.map((f) => {
-                          const st = fieldStateOf(f)
-                          return (
-                            <FieldRow
-                              key={f.name}
-                              field={f}
-                              column={colByName.get(f.name.toLowerCase()) ?? null}
-                              formValues={formValues}
-                              onChange={onFieldChange}
-                              // Foreign-lock wins over per-field rules: every input is
-                              // disabled when someone else holds the row's lock. The
-                              // banner above the body explains why.
-                              disabled={st.disabled || readOnly}
-                              required={st.required}
-                              // Suppress a key column's lookup on add ONLY when it was SEEDED from
-                              // the parent (nested sub-dialog FK) — the async lookup would clobber
-                              // the seed (FK violation). Non-seeded keys keep their lookups so a
-                              // user-picked composite key works (license_csi_components: CSI is
-                              // seeded → plain; component + metric are picked → lookups).
-                              suppressLookup={effMode === 'add' && seededKeySet.has(f.name.toLowerCase())}
-                              onLookupPick={onLookupReturnValues}
-                            />
-                          )
-                        })}
-                        {visibleFields.length === 0 && embedded.length === 0 && (
-                          <CellWrap $span={gridCols}>
-                            <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
-                          </CellWrap>
-                        )}
-                      </FieldGrid>
-                    )}
-                    {/* Embedded nested forms — labelled sections below the main fields. Each mounts a
-                        NestedFormView that registers its own saver, so this one tab writes the main
-                        table + every embedded related table in a single Save (Part B). Always
-                        mounted (hidden when inactive) to keep their state + registration alive. */}
-                    {embedded.map((nf) => (
-                      <NestedSection key={nf.id}>
-                        <NestedSectionTitle>{nf.label || nf.id}</NestedSectionTitle>
-                        <NestedFormView
-                          tab={nf}
-                          parentFormValues={formValues}
-                          parentConnector={connector}
-                          app={screen.app}
-                          parentMode={mode}
-                          parentDuplicating={duplicating}
-                        />
-                      </NestedSection>
-                    ))}
+                  <div key={tab.id}>
+                    <FieldGrid $cols={gridCols}>
+                      {visibleFields.map((f) => {
+                        const st = fieldStateOf(f)
+                        return (
+                          <FieldRow
+                            key={f.name}
+                            field={f}
+                            column={colByName.get(f.name.toLowerCase()) ?? null}
+                            formValues={formValues}
+                            onChange={onFieldChange}
+                            // Foreign-lock wins over per-field rules: every input is
+                            // disabled when someone else holds the row's lock. The
+                            // banner above the body explains why.
+                            disabled={st.disabled || readOnly}
+                            required={st.required}
+                            // Suppress a key column's lookup on add ONLY when it was SEEDED from
+                            // the parent (nested sub-dialog FK) — the async lookup would clobber
+                            // the seed (FK violation). Non-seeded keys keep their lookups so a
+                            // user-picked composite key works (license_csi_components: CSI is
+                            // seeded → plain; component + metric are picked → lookups).
+                            suppressLookup={effMode === 'add' && seededKeySet.has(f.name.toLowerCase())}
+                            onLookupPick={onLookupReturnValues}
+                          />
+                        )
+                      })}
+                      {visibleFields.length === 0 && (
+                        <CellWrap $span={gridCols}>
+                          <Banner $tone="info">{t('dialog.noVisibleFields')}</Banner>
+                        </CellWrap>
+                      )}
+                    </FieldGrid>
                   </div>
                 )
               })}
@@ -1026,7 +1006,7 @@ export function ScreenDialog({
             {/* Duplicate (edit mode + insert_query) — turn this record into a new one: drop the key
                 columns, switch to add behaviour, keep the rest. Mirrors the table's bulk-edit
                 duplicate, but from inside the open form. Hidden once duplicating (effMode → add). */}
-            {effMode === 'edit' && screen.insert_query && !readOnly && (
+            {effMode === 'edit' && screen.insert_query && !screen.disable_add && !readOnly && (
               <Button
                 $size="sm"
                 $variant="ghost"

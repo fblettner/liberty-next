@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
 import { Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
-import { lookupKey, useLookupTables, lookupOptions, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupOptions, lookupCellColumns, type LookupSpec } from '../../services/lookups'
 import { colors, radius, fontSize, fonts, shadow } from '../../theme'
 
 type LookupRule = Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
@@ -127,7 +127,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
   const lookupSpecs = useMemo<LookupSpec[]>(
     () => cols.filter((c) => c.rule?.kind === 'lookup').map((c) => {
       const r = c.rule as LookupRule
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
+      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources }
     }),
     [cols],
   )
@@ -147,19 +147,16 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
   if (cols.length === 0) return null
 
   const activeCount = cols.filter((c) => (values[c.name]?.val ?? '') !== '').length
-  // lookup options: keep the query's own order (its SQL ORDER BY — usually the code) and show
-  // `<code> — <description>` so the picker carries both. If the column has a cascading dep
-  // (filter_from) whose source filter is set, narrow to the lookup rows whose `column` matches it.
+  // lookup options: the SHARED ``lookupOptions`` builder — same {value, label(code), mono(code),
+  // cells(display_fields)} shape every other picker uses, so the dropdown renders the identical
+  // table. If the column has a cascading dep (filter_from) whose source filter is set, narrow to
+  // the lookup rows whose `column` matches it.
   const lookupOptionsFor = (c: Column): SearchSelectOption[] | undefined => {
     if (c.rule?.kind !== 'lookup') return undefined
-    const data = lookupTables.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label, params: c.rule.params }))
+    const data = lookupTables.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label, params: c.rule.params, sources: c.rule.sources }))
     if (!data) return undefined
     const dep = c.filter_from?.find((d) => (values[d.source]?.val ?? '') !== '')
-    const opts = lookupOptions(data, dep ? { column: dep.column, value: values[dep.source]!.val } : undefined)
-    return opts.map(({ value, label }) => {
-      const code = value.trim()
-      return { value, label: code && code !== label ? `${code} — ${label}` : label }
-    })
+    return lookupOptions(data, dep ? { column: dep.column, value: values[dep.source]!.val } : undefined, c.rule.display_fields)
   }
   return (
     <Wrap>
@@ -183,7 +180,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
               const isLookup = c.rule?.kind === 'lookup'
               const isChoice = isEnum || isLookup  // a value-list dropdown (op is implicitly "equals")
               const cur = values[c.name] ?? { op: isChoice ? 'equals' : 'contains', val: '' }
-              const opts = isEnum && c.rule?.kind === 'enum' ? c.rule.values
+              const opts = isEnum && c.rule?.kind === 'enum' ? c.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
                 : isLookup ? lookupOptionsFor(c) : undefined
               return (
                 <div key={c.name} style={{ minWidth: 210 }}>
@@ -195,6 +192,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                           value={cur.val}
                           onChange={(val) => handleChange(c.name, { op: 'equals', val })}
                           options={opts ?? []}
+                          cellColumns={c.rule?.kind === 'lookup' ? lookupCellColumns(c.rule) : undefined}
                           anyLabel={t('table.filterAny')}
                           loading={isLookup && !opts}  /* lookup table still resolving */
                           disabled={isLookup && !opts}

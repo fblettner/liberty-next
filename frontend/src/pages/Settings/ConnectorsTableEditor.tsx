@@ -12,9 +12,10 @@
 // "Open in Screens" link in this editor's header jumps to the matching screen.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowLeft, ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
+import { ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button, Row, SchemaForm, SqlConnectorContext, Stack, useModals, type JsonSchema } from '../../common'
+import { SubNav } from '../../common/SubNav'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
   CRUD_KINDS,
@@ -25,18 +26,9 @@ import {
 } from './connectorTables'
 
 // ── styled bits ───────────────────────────────────────────────────────────────
-const Header = styled(Row)`
-  align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
-`
 const Title = styled.strong`
   font-family: ${fonts.mono}; color: ${colors.text.primary}; font-size: ${fontSize.base};
   & .muted { color: ${colors.text.muted}; font-weight: 400; margin-left: 6px; }
-`
-const BackBtn = styled.button`
-  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: ${radius.sm};
-  border: 1px solid ${colors.border}; background: ${colors.bg.card}; color: ${colors.text.secondary};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
-  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
 `
 const TabsBar = styled.div`display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
 const TabBtn = styled.button<{ $active?: boolean; $missing?: boolean }>`
@@ -224,9 +216,14 @@ export default function ConnectorsTableEditor({
   return (
     <SqlConnectorContext.Provider value={connectorName}>
     <div>
-      <Header>
-        <BackBtn type="button" onClick={onBack}><ArrowLeft size={13} /> {t('settings.tables.backToTables')}</BackBtn>
-        <Title>{table.name} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
+      <SubNav
+        onBack={onBack}
+        backLabel={t('settings.tables.backToTables')}
+        lead={false}
+        crumbs={[{ label: (
+          <Title as="span">{table.name} <span className="muted">· {filledSlots.length} {t('settings.tables.slot', { count: filledSlots.length })}</span></Title>
+        ) }]}
+        right={(
         <Row gap={6}>
           {screenLink && onOpenScreen && (
             <Button $variant="ghost" $size="sm" onClick={() => onOpenScreen(screenLink.app, screenLink.id)}
@@ -263,7 +260,8 @@ export default function ConnectorsTableEditor({
             <Trash2 size={13} /> {t('common.delete', 'Delete')}
           </Button>
         </Row>
-      </Header>
+        )}
+      />
       <TabsBar>
         {TAB_ORDER.map((k) => {
           const crud = TAB_TO_CRUD[k]

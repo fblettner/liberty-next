@@ -25,14 +25,14 @@ import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
-import { lookupKey, useLookupTables, type LookupData, type LookupSpec } from '../../services/lookups'
+import { lookupKey, useLookupTables, lookupCellColumns, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ActionPromptDialog } from './ActionPromptDialog'
-import { entityKeyOf, resolveBindList, type Row as CtxRow } from './dialogHelpers'
+import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, type Row as CtxRow } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
@@ -73,11 +73,16 @@ function editCtrlOf(c: Column): EditCtrl {
   if (isNumericish(fmt, typ)) return 'number'
   return 'text'
 }
-const filterPropsFor = (kind: FilterKind, options?: { value: string; label: string }[], align?: FilterMeta['align']) =>
+const filterPropsFor = (
+  kind: FilterKind,
+  options?: { value: string; label: string; mono?: string; cells?: string[] }[],
+  align?: FilterMeta['align'],
+  cellColumns?: { label: string; filterable?: boolean }[],
+) =>
   // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
   // ``selectFilterFn``. Boolean keeps the built-in strict ``equals``.
   kind === 'enum' || kind === 'lookup'
-    ? { filterFn: selectFilterFn, meta: { filter: { kind, options }, align } as FilterMeta }
+    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns }, align } as FilterMeta }
     : kind === 'boolean'
       ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
       : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
@@ -156,9 +161,14 @@ const RowMenuErr = styled.div`
 `
 
 function EditCell({
-  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy,
+  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns,
 }: {
   ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
+  /** The lookup's ``display_fields`` — extra row columns appended (dimmed, " · ") after each
+   *  option's label so similar codes are distinguishable, same as the dialog dropdown. */
+  displayFields?: string[]
+  /** Per-cell-column metadata (label + filterable) for the dropdown's facet-chip filter. */
+  cellColumns?: { label: string; filterable?: boolean }[]
   /** ``{value: label}`` map for LOOKUP columns — already resolved by the surrounding
    *  ``lookupMaps`` (one fetch per unique spec; v2 mirrors v1's "fetch the lookup once,
    *  populate every cell from the same set"). Undefined → not yet loaded → render a
@@ -210,7 +220,25 @@ function EditCell({
     // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
     // use the pre-projected value→label map directly — faster, no per-row scan.
     const active = (narrowBy ?? []).filter((n) => n.value != null && n.value !== '')
-    let opts: { value: string; label: string; mono: string }[]
+    // ``display_fields`` → code: [cell, cell] map, built once from the raw rows; each becomes an
+    // extra table column in the dropdown (same as the dialog picker). Consistent length so columns
+    // line up across options.
+    const cellsByCode = (() => {
+      if (!displayFields?.length || !lookupRows) return undefined
+      const valKey = rule.value
+      const m = new Map<string, string[]>()
+      for (const r of lookupRows) {
+        const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+        if (v == null) continue
+        m.set(String(v), displayFields.map((f) => {
+          const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
+          return x == null ? '' : String(x).trim()
+        }))
+      }
+      return m
+    })()
+    type Opt = { value: string; label: string; mono: string; cells?: string[] }
+    let opts: Opt[]
     if (ready && active.length > 0 && lookupRows) {
       // Case-insensitive column lookup on the raw rows: Postgres folds unquoted columns
       // to lowercase, the dictionary uses uppercase. Compare as strings (lookups are
@@ -225,31 +253,30 @@ function EditCell({
         return rv != null && String(rv).trim() === String(value).trim()
       }))
       opts = matches
-        .map((r) => {
+        .map((r): Opt | null => {
           const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
           const l = r[labKey] ?? r[labKey.toLowerCase()] ?? r[labKey.toUpperCase()]
           return v == null
             ? null
-            : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v) }
+            : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v), cells: cellsByCode?.get(String(v)) }
         })
-        .filter((o): o is { value: string; label: string; mono: string } => o !== null)
+        .filter((o): o is Opt => o !== null)
         .sort((a, b) => a.label.localeCompare(b.label))
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
         .sort(([, a], [, b]) => a.localeCompare(b))
-        .map(([value, label]) => ({ value, label, mono: value }))
+        .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
     } else {
       opts = []
     }
-    // Lookup-pick handler — writes the picked value as usual, then dispatches the rule's
-    // ``return_params`` (v1's ly_lkp_params lkp_dir='OUT'): for each return_param dd_id,
-    // find the picked row's matching column (case-insensitive) and fire
-    // ``onLookupReturnValues`` with the {dd_id: value} map. The parent (ResultTable)
-    // maps each dd to a sibling grid column and writes it to the same row.
+    // Lookup-pick handler — writes the picked value, then applies the column's ``return_binds``:
+    // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
+    // ``onLookupReturnValues`` with a ``{targetColumn: value}`` map. The parent (ResultTable)
+    // writes each to the sibling cell on the same row. Explicit replacement for v1's auto-by-dd.
     const handlePick = (picked: string) => {
       onChange(picked === '' ? null : picked)
-      const returnParams = rule.return_params ?? []
-      if (!picked || returnParams.length === 0 || !lookupRows || !onLookupReturnValues) return
+      const binds = column.return_binds ?? []
+      if (!picked || binds.length === 0 || !lookupRows || !onLookupReturnValues) return
       const valueCol = rule.value
       const row = lookupRows.find((r) => {
         const rv = r[valueCol] ?? r[valueCol.toLowerCase()] ?? r[valueCol.toUpperCase()]
@@ -258,9 +285,9 @@ function EditCell({
       if (!row) return
       const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
       const aux: Record<string, unknown> = {}
-      for (const dd of returnParams) {
-        const v = lcRow.get(dd.toLowerCase())
-        if (v !== undefined) aux[dd] = v
+      for (const b of binds) {
+        const v = lcRow.get(b.param.toLowerCase())
+        if (v !== undefined) aux[b.column] = v
       }
       if (Object.keys(aux).length > 0) onLookupReturnValues(aux)
     }
@@ -269,6 +296,7 @@ function EditCell({
         value={defaultText}
         onChange={handlePick}
         options={opts}
+        cellColumns={cellColumns}
         anyLabel="—"
         loading={!ready}
         placeholder=""
@@ -360,6 +388,18 @@ export function ResultTable({
   const { activeId } = useTabs()
   const { sharedActions } = useWorkspace()
   const canEdit = !!(updateQuery || insertQuery)
+  // Whether NEW records may be created here: an insert query exists AND the screen doesn't opt out
+  // via ``disable_add``. Gates every creation affordance (Add button, add-row / duplicate / paste /
+  // import) so an edit-only screen can keep its insert_query for the save path yet hide all the
+  // "make a new record" entry points. Edit / delete of existing rows is unaffected.
+  const canInsert = !!insertQuery && !screen?.disable_add
+  // ``Screen.editable`` (default true) gates INLINE GRID editing — the bulk-edit mode. False → the
+  // grid is view-only (a dialog, if any, still edits row-by-row). ``Screen.uploadable`` (default
+  // false) gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old
+  // behaviour: editable, not uploadable. Both were dormant before — honoured here so a screen
+  // migrated as view-only / no-import actually is.
+  const canBulkEdit = canEdit && screen?.editable !== false
+  const canImport = canInsert && !!screen?.uploadable
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
   // initial values; `mode='edit'` also drives the `:<COL>_ORIGINAL` binds inside ScreenDialog.
@@ -763,6 +803,58 @@ export function ResultTable({
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
   const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
 
+  // Resolve a (rule, binds, rowValues) → the LookupSpec to fetch / look up. The rule's static
+  // params + the rule's PER-RULE ``lookup_param_binds`` resolved against the row. For a NON-
+  // parameterized rule (no binds) this is the single shared spec; for a parameterized one (e.g.
+  // f00950 get_form_name narrowed by OBNM) the params vary per row, so the grid fetches it once per
+  // distinct bind value and resolves each row against the matching spec. Returns null for non-lookups.
+  const specForRule = useCallback((
+    r: Column['rule'] | null | undefined,
+    binds: { param: string; value?: string | null; source?: string | null }[] | undefined,
+    rowValues: Record<string, unknown>,
+  ): LookupSpec | null => {
+    if (r?.kind !== 'lookup') return null
+    const dyn = binds && binds.length ? resolveBindList(binds, rowValues) : {}
+    return { connector: r.connector, query: r.query, value: r.value, label: r.label,
+             params: { ...(r.params ?? {}), ...dyn }, sources: r.sources }
+  }, [])
+  const lookupSpecs = useMemo<LookupSpec[]>(() => {
+    const out: LookupSpec[] = []
+    const seen = new Set<string>()
+    const add = (spec: LookupSpec | null) => { if (!spec) return; const k = lookupKey(spec); if (!seen.has(k)) { seen.add(k); out.push(spec) } }
+    for (const c of result.columns) {
+      // Every lookup a column can render — the base rule AND every rules_when alternative. A non-
+      // parameterized lookup is fetched ONCE; a parameterized rules_when lookup (its own
+      // lookup_param_binds) is fetched once per DISTINCT bind value across the rows, so each row's
+      // cell resolves against the right narrowed result (no per-cell network fetch — all cached).
+      add(specForRule(c.rule, undefined, {}))
+      for (const rw of c.rules_when ?? []) {
+        if (rw.rule?.kind !== 'lookup') continue
+        if (!rw.lookup_param_binds || rw.lookup_param_binds.length === 0) { add(specForRule(rw.rule, undefined, {})); continue }
+        for (const row of result.rows) add(specForRule(rw.rule, rw.lookup_param_binds, row as Record<string, unknown>))
+      }
+    }
+    return out
+  }, [result.columns, result.rows, specForRule])
+  // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
+  // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed the
+  // lookup-pick return-fill (``return_binds``) in the grid + on import, and the dropdown extras.
+  const lookupMaps = useLookupTables(lookupSpecs)
+
+  // The ACTIVE lookup for a cell, resolved per row: the rules_when entry whose {field,value} holds
+  // (carrying its OWN rule + binds), else the base rule. Returns the active rule + its already-fetched
+  // LookupData (narrowed by the row's per-rule binds). Shared by display-label resolution + the edit
+  // dropdown so both pick the SAME conditional lookup for the row (f00950 FSDTAI: get_form_name for
+  // FSSETY 6/8, get_data_item for 2/4 — each with the right narrowing).
+  const activeLookupFor = useCallback((c: Column, row: DataRow): { rule: Column['rule']; data: LookupData | undefined } => {
+    const vals = valuesOf(row)
+    const aw = activeRulesWhen(c.rules_when, vals)
+    const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
+    if (rule?.kind !== 'lookup') return { rule: rule ?? undefined, data: undefined }
+    const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, vals)
+    return { rule, data: spec ? lookupMaps.get(lookupKey(spec)) : undefined }
+  }, [valuesOf, specForRule, lookupMaps])
+
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
   // {normalized header text → result column name}, registering for each result column its `name`,
@@ -785,7 +877,14 @@ export function ResultTable({
       const byHeader = new Map<string, string>() // normalized header text → result column name
       for (const c of result.columns) {
         const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
-        add(c.name); add(c.label); add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+        add(c.name)
+        // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
+        // description. The description isn't unique (two codes can share one), and both kinds now
+        // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
+        // (the export emits both "X (ID)" and "X"; the latter holds the description and was
+        // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
+        if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
+        add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
       }
       const seeds = rows.map((r) => {
         const out: Record<string, unknown> = {}
@@ -796,17 +895,63 @@ export function ResultTable({
         return out
       }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
       if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return }
+
+      // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
+      // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
+      // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
+      // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
+      // isn't loaded yet (the grid loads it when the column renders).
+      const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
+      if (returnFillCols.length > 0) {
+        for (const seed of seeds) {
+          for (const c of returnFillCols) {
+            const rule = c.rule
+            if (rule?.kind !== 'lookup') continue
+            const code = seed[c.name]
+            if (code == null || String(code).trim() === '') continue
+            const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
+            if (!data?.rows) continue
+            const valKey = rule.value
+            const want = String(code).trim()
+            const row = data.rows.find((r) => {
+              const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+              return rv != null && String(rv).trim() === want
+            })
+            if (!row) continue
+            const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
+            for (const b of c.return_binds ?? []) {
+              const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
+              const cur = seed[target]
+              if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
+              const v = lcRow.get(b.param.toLowerCase())
+              if (v !== undefined) seed[target] = v
+            }
+          }
+        }
+      }
       if (!editMode) setEditMode(true)
 
-      const keys = (keyColumns ?? []).filter(Boolean)
+      // Effective key columns come from the per-column ``key`` flags resolved onto the RESULT
+      // columns (the Columns-tab "key"), not ``screen.key_columns`` — that's the legacy explicit
+      // override and is usually EMPTY even when the row has a key (F00950 keys via per-column flags).
+      // An empty list meant every imported row looked new → re-import failed on duplicate-PK insert.
+      // Using the result columns also guarantees the names match the seed keys' case.
+      const keyColsFromResult = result.columns.filter((c) => c.key).map((c) => c.name)
+      const keys = (keyColsFromResult.length ? keyColsFromResult : (keyColumns ?? [])).filter(Boolean)
       const newSeeds: Record<string, unknown>[] = []
       const matched: DataRow[] = []
-      if (keys.length > 0) {
-        const keyOf = (o: Record<string, unknown>) => keys.map((k) => String(o[k] ?? '')).join(' ')
+      // Match on the key columns ACTUALLY PRESENT in the sheet. A hidden / derived key column (e.g.
+      // JDE FSSY, auto-populated from the object) isn't exported, so requiring ALL keys would make
+      // every imported row look new — and re-importing an existing row would then try to INSERT it
+      // and fail on a duplicate PK. Compare TRIMMED (JDE pads CHAR columns; the read trims them).
+      const norm = (v: unknown) => String(v ?? '').trim()
+      const matchKeys = keys.filter((k) => seeds.some((s) => k in s))
+      if (matchKeys.length > 0) {
+        const keyOf = (o: Record<string, unknown>) => matchKeys.map((k) => norm(o[k])).join(' ')
         const byKey = new Map<string, DataRow>()
         for (const row of result.rows) byKey.set(keyOf(row), row)
         for (const seed of seeds) {
-          const match = keys.every((k) => k in seed) ? byKey.get(keyOf(seed)) : undefined
+          const match = byKey.get(keyOf(seed))  // every matchKey is present in the seed by construction
           if (match) {  // overlay the imported fields onto the existing row as pending edits
             editsRef.current.set(match, { ...editsRef.current.get(match), ...seed })
             matched.push(match)
@@ -822,7 +967,7 @@ export function ResultTable({
     } catch (e) {
       setSaveErrors([e instanceof Error ? e.message : String(e)])
     }
-  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, t])
+  }, [prependNewRows, editMode, result.columns, result.rows, keyColumns, lookupMaps, t])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])
@@ -839,17 +984,29 @@ export function ResultTable({
         connector, mode, sent, savedRow, columns: result.columns, columnGroups,
         mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery,
       })
+    // The values to write for a row = its edits, plus any conditional forced default (default_when)
+    // overlaid — so a system-determined value is persisted even though the cell was read-only and
+    // never "edited". UI-only enforcement lives here (and in the dialog), not the backend.
+    const sentWithForced = (row: DataRow): Record<string, unknown> => {
+      const sent: Record<string, unknown> = { ...(editsRef.current.get(row) ?? {}) }
+      const vals = valuesOf(row)
+      for (const c of result.columns) {
+        const f = forcedDefault(c.default_when, vals)
+        if (f !== undefined) sent[c.name] = f
+      }
+      return sent
+    }
     // edited existing rows → main `_put` (+ each group's update/insert), key-aware WHERE via originals
     for (const row of dirtyRows) {
       if (deleted.has(row)) continue
       if (!updateQuery) { localErrs.push(t('table.editNoUpdate')); break }
-      jobs.push(writeRow('edit', editsRef.current.get(row) ?? {}, row))
+      jobs.push(writeRow('edit', sentWithForced(row), row))
     }
     // new rows → main `_post` (+ each group's insert): just the entered values (nothing existed before)
     for (const row of newRows) {
       if (deleted.has(row)) continue
       if (!insertQuery) { localErrs.push(t('table.editNoInsert')); break }
-      jobs.push(writeRow('add', editsRef.current.get(row) ?? {}, {}).then((r) => { newBinds.set(row, r.resolvedBinds) }))
+      jobs.push(writeRow('add', sentWithForced(row), {}).then((r) => { newBinds.set(row, r.resolvedBinds) }))
     }
     // rows marked for deletion → main `_delete` (+ each group's delete first, FK-safe): the
     // current row identifies it (it wasn't edited if it's deleted)
@@ -937,21 +1094,6 @@ export function ResultTable({
     for (const c of result.columns) if (c.rule?.kind === 'enum') m.set(c.name, enumMap(c.rule))
     return m
   }, [result.columns])
-  const lookupSpecs = useMemo<LookupSpec[]>(
-    () => result.columns.filter((c) => c.rule?.kind === 'lookup').map((c) => {
-      const r = c.rule as Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
-      // Forward the rule's static params (v1 ly_dictionary_filters → DictionaryEntry.lookup_params)
-      // so a UDC-style lookup gets its SY/RT and returns the *right* rows. Different param sets
-      // cache separately in services/lookups (specKey folds the params in).
-      return { connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }
-    }),
-    [result.columns],
-  )
-  // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
-  // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed
-  // the lookup-pick return-params write-back (v1's ly_lkp_params lkp_dir='OUT'): after a pick,
-  // the matching row's other columns flow to sibling grid cells with matching ``dd``.
-  const lookupMaps = useLookupTables(lookupSpecs)
 
   // new rows show at the TOP of the grid (newest first — `newRows` already keeps that order)
   const data = useMemo<DataRow[]>(() => (editMode ? [...newRows, ...result.rows] : result.rows), [result.rows, editMode, newRows])
@@ -996,35 +1138,38 @@ export function ResultTable({
 
   const dataCols = useMemo<ColumnDef<DataRow, unknown>[]>(() => {
     const idSuffix = ` ${t('table.idColumnSuffix')}`
-    // dd_id → column.name map across the result. Drives the lookup-return-params write-back
-    // for inline edit (v1's ly_lkp_params lkp_dir='OUT'): when a picked lookup row exposes
-    // extra columns, we write each return_param's value to the sibling grid column whose
-    // ``dd`` matches. Case-insensitive (Postgres folds unquoted to lowercase). First wins.
-    const ddToColName = new Map<string, string>()
+    // column-name → actual column.name map (case-insensitive). Resolves a lookup ``return_binds``
+    // target (normalised uppercase) to the grid's actual column name for the return-fill write.
+    const nameToColName = new Map<string, string>()
     for (const c of shownColumns) {
-      const dd = (c.dd || c.name).toLowerCase()
-      if (!ddToColName.has(dd)) ddToColName.set(dd, c.name)
+      const k = c.name.toLowerCase()
+      if (!nameToColName.has(k)) nameToColName.set(k, c.name)
     }
     const editCellFor = (c: Column, info: { row: { original: unknown } }) => {
       const row = info.row.original as DataRow
+      // Conditional forced default (default_when): when a sibling column's value triggers a rule,
+      // the cell is system-determined → render its forced value READ-ONLY (no editor). Reactive:
+      // editing the discriminator re-ticks dataCols, so this re-evaluates. Save writes it too.
+      const forced = forcedDefault(c.default_when, valuesOf(row))
+      if (forced !== undefined) return span(String(forced), 'plain', cellAlign(c))
+      // Per-row effective rule (rules_when): the cell's widget/lookup can differ row to row. Resolve
+      // the active rule + its already-fetched LookupData (narrowed by this row's per-rule binds) in
+      // one shot — every possible lookup (incl. one fetch per distinct bind value) is pre-fetched, so
+      // this only PICKS; no per-row network fetch.
+      const { rule: activeRule, data: lookupData } = activeLookupFor(c, row)
+      // ec carries the active rule AND its per-rule return_binds (the edit pick reads
+      // ``column.return_binds``), so a conditional lookup's pick fills the right siblings.
+      const awEdit = c.rules_when?.length ? activeRulesWhen(c.rules_when, valuesOf(row)) : null
+      const ec: Column = c.rules_when?.length
+        ? { ...c, rule: activeRule ?? undefined, return_binds: awEdit ? (awEdit.return_binds ?? []) : c.return_binds }
+        : c
       const v = cur(row, c.name)
-      // For LOOKUP columns, pull the already-fetched ``LookupData`` (value→label *and* raw
-      // rows) from ``lookupMaps``. The map drives the dropdown options; the rows let the
-      // pick handler resolve return_params.
-      const lookupData: LookupData | undefined = c.rule?.kind === 'lookup'
-        ? lookupMaps.get(lookupKey({
-            connector: c.rule.connector, query: c.rule.query,
-            value: c.rule.value, label: c.rule.label, params: c.rule.params,
-          }))
-        : undefined
-      // Lookup-pick return-values dispatcher — writes each return_param value to the
-      // sibling grid column whose ``dd`` matches (in the *same* row). v1's "pick FSOBNM,
-      // FSSY auto-populates" behaviour.
+      // Lookup-pick return-fill dispatcher — the picked column's ``return_binds`` already produced
+      // a ``{targetColumn: value}`` map; write each to the sibling cell on the same row (resolving
+      // the target to the grid's actual column name). v1's "pick OBNM, SY auto-populates", explicit.
       const handleLookupReturnValues = (returnValues: Record<string, unknown>) => {
-        for (const [dd, val] of Object.entries(returnValues)) {
-          const targetCol = ddToColName.get(dd.toLowerCase())
-          if (!targetCol) continue
-          editChange(row, targetCol, val)
+        for (const [col, val] of Object.entries(returnValues)) {
+          editChange(row, nameToColName.get(col.toLowerCase()) ?? col, val)
         }
       }
       // Cascading narrowing for LOOKUP cells (v1's ly_tbl_filters in bulk-edit). For each
@@ -1037,33 +1182,42 @@ export function ResultTable({
       // ``key_columns`` (same-named row column → lookup column) so the edit dropdown auto-narrows
       // to the right rows for a non-unique value, matching the grid's display disambiguation.
       const narrowBy: { column: string; value: unknown }[] | undefined =
-        c.rule?.kind !== 'lookup'
+        ec.rule?.kind !== 'lookup'
           ? undefined
           : c.filter_from && c.filter_from.length > 0
             ? c.filter_from.map((dep) => ({ column: dep.column, value: cur(row, dep.source) }))
-            : (c.rule.key_columns && c.rule.key_columns.length > 0
-                ? c.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
+            : (ec.rule.key_columns && ec.rule.key_columns.length > 0
+                ? ec.rule.key_columns.map((kc) => ({ column: kc, value: cur(row, kc) }))
                 : undefined)
       return (
         <EditCell
-          ctrl={editCtrlOf(c)}
-          column={c}
+          ctrl={editCtrlOf(ec)}
+          column={ec}
           defaultText={v === null || v === undefined ? '' : String(v)}
           onChange={(nv) => editChange(row, c.name, nv)}
           lookupOptions={lookupData?.map}
           lookupRows={lookupData?.rows}
           onLookupReturnValues={handleLookupReturnValues}
           narrowBy={narrowBy}
+          displayFields={ec.rule?.kind === 'lookup' ? ec.rule.display_fields : undefined}
+          cellColumns={ec.rule?.kind === 'lookup' ? lookupCellColumns(ec.rule) : undefined}
         />
       )
     }
+    // Per-row-mode edit lock (ColumnHint.disable_on_add / disable_on_edit): a new row (in newRows)
+    // checks disable_on_add, an existing row checks disable_on_edit. Locked → the cell falls through
+    // to its read-only display (same as non-edit mode), so the grid bulk-edit honours the SAME
+    // column setting the dialog's fieldStateOf does. Reads the live newRows via the ref — the cell
+    // renderers re-run each render, so this stays current without adding newRows to the memo deps.
+    const cellLocked = (c: Column, rowOriginal: DataRow) =>
+      newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
     const out: ColumnDef<DataRow, unknown>[] = []
     for (const c of shownColumns) {
       const align = cellAlign(c)
 
       if (c.rule?.kind === 'lookup') {
         const r = c.rule
-        const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params }))
+        const data = lookupMaps.get(lookupKey({ connector: r.connector, query: r.query, value: r.value, label: r.label, params: r.params, sources: r.sources }))
         const map = data?.map
         // Per-row label disambiguation. A lookup ``value`` need not be globally unique — e.g.
         // USR_ID repeats across apps and is only unique per USR_APPS_ID — so the value→label
@@ -1104,7 +1258,34 @@ export function ResultTable({
           }
           return m
         })()
+        // Resolve a label from a specific LookupData (composite by key columns, then exact, then
+        // trim-tolerant). Used for the per-row conditional path; SEP is internal so any non-data char.
+        const SEP = ''
+        const labelFromData = (ad: LookupData | undefined, kd: { source: string; column: string }[], row: DataRow, value: unknown): string | undefined => {
+          if (!ad) return undefined
+          if (kd.length && ad.rows) {
+            const rk = [...kd.map((d) => norm(cur(row, d.source))), norm(value)].join(SEP)
+            for (const lr of ad.rows) {
+              const lk = [...kd.map((d) => norm(lr[ad.byColLower.get(d.column.toLowerCase()) ?? d.column])), norm(lr[ad.vKey])].join(SEP)
+              if (lk === rk) { const lbl = lr[ad.lKey]; if (lbl != null && lbl !== '') return String(lbl) }
+            }
+          }
+          const exact = ad.map?.get(value == null ? '' : String(value))
+          if (exact != null) return exact
+          for (const lr of ad.rows ?? []) { const v = lr[ad.vKey]; if (v != null && norm(v) === norm(value)) return lr[ad.lKey] == null ? String(v) : String(lr[ad.lKey]) }
+          return undefined
+        }
         const resolveLabel = (row: DataRow, value: unknown): string | undefined => {
+          // rules_when column: resolve against the row's ACTIVE conditional lookup (which may be
+          // parameterized + fetched per distinct bind value), NOT the base rule's pre-built map.
+          if (c.rules_when?.length) {
+            const { rule: ec, data: ad } = activeLookupFor(c, row)
+            if (ec?.kind !== 'lookup') return undefined   // active rule is a plain input → no label
+            const kd = c.filter_from && c.filter_from.length > 0
+              ? c.filter_from.map((d) => ({ source: d.source, column: d.column }))
+              : (ec.key_columns ?? []).map((kc) => ({ source: kc, column: kc }))
+            return labelFromData(ad, kd, row, value)
+          }
           const raw = value == null ? '' : String(value)
           if (compositeMap) {
             const key = [...keyDeps.map((d) => norm(cur(row, d.source))), norm(value)].join(' ')
@@ -1122,39 +1303,48 @@ export function ResultTable({
         // Use ``data.vKey`` / ``data.lKey`` (the *actual-case* row keys — Postgres folds
         // identifiers to lowercase, so the dictionary's uppercase ``r.value`` / ``r.label``
         // don't match row keys directly).
+        // The lookup's ``display_fields`` → extra table columns in the filter dropdown too (it uses
+        // the same SearchSelect as the dialog/grid). Resolve the keys once; emit one cell per field.
+        const dispKeys = data ? (r.display_fields ?? []).map((f) => data.byColLower.get(f.toLowerCase()) ?? f) : []
+        const cellsOf = (row: Record<string, unknown>) =>
+          dispKeys.length ? dispKeys.map((k) => { const x = row[k]; return x == null ? '' : String(x).trim() }) : undefined
+        // Same option shape as the dialog/grid picker — mono CODE column, the description as label,
+        // then the display_fields cells — so the filter dropdown renders the identical table (was a
+        // single concatenated "code — label" line before).
         const lookupOptsByCode = data && data.rows
           ? data.rows.map((row) => {
               const code = row[data.vKey] == null ? '' : String(row[data.vKey])
               const label = row[data.lKey] == null ? '' : String(row[data.lKey])
-              return { value: code, label: code && label && code !== label ? `${code} — ${label}` : (label || code) }
+              return { value: code, label: label || code, mono: code, cells: cellsOf(row) }
             })
           : undefined
         const lookupOptsByLabel = data && data.rows
           ? data.rows.map((row) => {
               const code = row[data.vKey] == null ? '' : String(row[data.vKey])
               const label = row[data.lKey] == null ? '' : String(row[data.lKey])
-              return { value: label || code, label: code && label && code !== label ? `${code} — ${label}` : (label || code) }
+              return { value: label || code, label: label || code, mono: code, cells: cellsOf(row) }
             })
           : undefined
         out.push({
           id: c.name,
-          header: colHeader(c) + idSuffix,
+          // hide_label → this is the ONLY column for the field, so drop the "(ID)" suffix.
+          header: c.hide_label ? colHeader(c) : colHeader(c) + idSuffix,
           accessorFn: (row) => row[c.name],
           size: c.width ?? undefined,
-          ...filterPropsFor('lookup', lookupOptsByCode, align),
+          ...filterPropsFor('lookup', lookupOptsByCode, align, lookupCellColumns(r)),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
-            if (editMode && !isGroupRow(info)) return editCellFor(c, info)
+            if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
             const v = cur(info.row.original as DataRow, c.name)
             const { text, isNull } = ruleCell(v, { ...c, rule: undefined }, undefined, undefined)
             return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
           },
         })
-        out.push({
+        if (!c.hide_label) out.push({
           id: `${c.name}__lookup`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
-          ...filterPropsFor('lookup', lookupOptsByLabel),
+          ...filterPropsFor('lookup', lookupOptsByLabel, undefined, lookupCellColumns(r)),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code
@@ -1169,30 +1359,65 @@ export function ResultTable({
         continue
       }
 
+      if (c.rule?.kind === 'enum') {
+        // Same shape as a LOOKUP: a "(ID)" column carrying the raw CODE (editable / exported /
+        // imported) plus a derived label column (the description — read-only). The grid otherwise
+        // never shows the code, so an export couldn't round-trip; this makes ENUM behave exactly
+        // like LOOKUP — resolved by code, never by the (non-unique) description.
+        const emap = enumMaps.get(c.name)   // code → label
+        // mono CODE column + the label, matching the dialog/grid enum picker (was concatenated).
+        const optsByCode = c.rule.values.map((v) => ({ value: v.value, label: v.label || v.value, mono: v.value }))
+        const optsByLabel = c.rule.values.map((v) => ({ value: v.label || v.value, label: v.label || v.value, mono: v.value }))
+        out.push({
+          id: c.name,
+          header: c.hide_label ? colHeader(c) : colHeader(c) + idSuffix,
+          accessorFn: (row) => row[c.name],
+          size: c.width ?? undefined,
+          ...filterPropsFor('enum', optsByCode, align),
+          cell: (info) => {
+            const g = grouped(info, align); if (g) return g
+            if (editMode && !isGroupRow(info) && !cellLocked(c, info.row.original as DataRow)) return editCellFor(c, info)
+            const v = cur(info.row.original as DataRow, c.name)
+            const { text, isNull } = ruleCell(v, { ...c, rule: undefined }, undefined, undefined)
+            return span(isNull ? 'null' : text, isNull ? 'null' : 'plain', align)
+          },
+        })
+        if (!c.hide_label) out.push({
+          id: `${c.name}__enum`,
+          header: colHeader(c),
+          accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (emap?.get(String(v)) ?? String(v)) },
+          ...filterPropsFor('enum', optsByLabel),
+          cell: (info) => {
+            const g = grouped(info, align); if (g) return g
+            // Derived from the "(ID)" column — read-only; reflects the current (possibly edited) code.
+            const v = cur(info.row.original as DataRow, c.name)
+            const { text, kind, isNull } = ruleCell(v, c, emap, undefined)
+            return span(text, isNull ? 'null' : kind, align, isNull ? undefined : String(v ?? ''))
+          },
+        })
+        continue
+      }
+
       const kind = filterKindOf(c)
-      const enumMapForCol = enumMaps.get(c.name)
-      const enumOptions = c.rule?.kind === 'enum' ? c.rule.values.map((v) => ({ value: v.label, label: v.label })) : undefined
       out.push({
         id: c.name,
         header: colHeader(c),
         accessorFn: (row) => {
           const v = row[c.name]
           if (c.rule?.kind === 'boolean') return v === null || v === undefined ? null : v === c.rule.true_value ? 'true' : 'false'
-          if (c.rule?.kind === 'enum' && v != null) return enumMapForCol?.get(String(v)) ?? v
           return v
         },
         size: c.width ?? undefined,
-        ...filterPropsFor(kind, enumOptions, align),
+        ...filterPropsFor(kind, undefined, align),
         cell: (info) => {
           const g = grouped(info, align); if (g) return g
           if (editMode && !isGroupRow(info)) return editCellFor(c, info)
           const v = cur(info.row.original as DataRow, c.name)
-          const { text, kind: rk, isNull } = ruleCell(v, c, enumMapForCol, undefined)
-          // Hover title: for ENUM cells, the raw code (the visible text is the label); for
-          // BOOLEAN cells (now rendered as a colored bullet), the localized "yes"/"no" so the
-          // value stays accessible to keyboard / screen-reader / colorblind users.
+          // Non-enum / non-lookup here (those are split out above), so no enum map is needed.
+          const { text, kind: rk, isNull } = ruleCell(v, c, undefined, undefined)
+          // Hover title: BOOLEAN cells (rendered as a colored bullet) get the localized "yes"/"no"
+          // so the value stays accessible to keyboard / screen-reader / colorblind users.
           const titleVal = isNull ? undefined
-            : rk === 'enum' ? String(v ?? '')
             : rk === 'boolean-true' ? t('common.true')
             : rk === 'boolean-false' ? t('common.false')
             : undefined
@@ -1256,7 +1481,7 @@ export function ResultTable({
                 : isDel ? <StatusMark $tone="deleted" title={t('table.rowDeleted')}>−</StatusMark>
                 : isDirty ? <StatusMark $tone="dirty" title={t('table.rowEdited')}>●</StatusMark>
                 : <span style={{ width: 7 }} />}
-              {insertQuery && !isDel && (
+              {canInsert && !isDel && (
                 <RowXBtn onClick={() => duplicateRow(row)} title={t('table.duplicateRow')}><Copy size={11} /></RowXBtn>
               )}
               <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
@@ -1267,7 +1492,7 @@ export function ResultTable({
         },
       },
     ]
-  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, insertQuery, isGroupRow, t])
+  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, canInsert, isGroupRow, t])
 
   const columns = useMemo<ColumnDef<DataRow, unknown>[]>(() => [...editCols, ...dataCols], [editCols, dataCols])
 
@@ -1281,7 +1506,7 @@ export function ResultTable({
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
       {editMode && saveErrors.length === 0 && <Banner $tone="info">{t('table.editingHint')}</Banner>}
-      {insertQuery && (
+      {canImport && (
         <input
           ref={fileRef}
           type="file"
@@ -1327,19 +1552,19 @@ export function ResultTable({
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
         toolbar={
-          !canEdit && screenActions.length === 0 && !screen?.export ? undefined : !editMode ? (
+          !(canBulkEdit || (canInsert && hasDialog) || canImport || screen?.export || screenActions.length > 0) ? undefined : !editMode ? (
             <>
-              {canEdit && hasDialog && screen?.insert_query && (
+              {hasDialog && canInsert && (
                 <TbBtn $tone="primary" onClick={openDialogForAdd} title={t('dialog.addTooltip')}>
                   <Plus size={13} /> {t('table.addRow')}
                 </TbBtn>
               )}
-              {canEdit && (
+              {canBulkEdit && (
                 <TbBtn onClick={() => setEditMode(true)} title={t('table.editTip', { q: updateQuery ?? insertQuery ?? '' })}>
                   <Edit3 size={13} /> {hasDialog ? t('table.bulkEdit') : t('table.edit')}
                 </TbBtn>
               )}
-              {canEdit && insertQuery && (
+              {canImport && (
                 <TbBtn onClick={() => fileRef.current?.click()} title={t('table.import')}>
                   <Upload size={13} /> {t('table.import')}
                 </TbBtn>
@@ -1379,20 +1604,20 @@ export function ResultTable({
               <TbBtn onClick={resetEdit} disabled={saving} title={t('common.cancel')}>
                 <X size={13} /> {t('common.cancel')}
               </TbBtn>
-              {insertQuery && (
-                <>
-                  <TbBtn onClick={addRow} disabled={saving} title={t('table.addRow')}>
-                    <Plus size={13} /> {t('table.addRow')}
-                  </TbBtn>
-                  <TbBtn onClick={() => fileRef.current?.click()} disabled={saving} title={t('table.import')}>
-                    <Upload size={13} /> {t('table.import')}
-                  </TbBtn>
-                </>
+              {canInsert && (
+                <TbBtn onClick={addRow} disabled={saving} title={t('table.addRow')}>
+                  <Plus size={13} /> {t('table.addRow')}
+                </TbBtn>
+              )}
+              {canImport && (
+                <TbBtn onClick={() => fileRef.current?.click()} disabled={saving} title={t('table.import')}>
+                  <Upload size={13} /> {t('table.import')}
+                </TbBtn>
               )}
               <TbBtn onClick={copySelected} disabled={saving || selected.size === 0} title={t('table.copyRows')}>
                 <Copy size={13} /> {t('table.copyRows')}{selected.size ? ` (${selected.size})` : ''}
               </TbBtn>
-              {insertQuery && (
+              {canInsert && (
                 <TbBtn onClick={pasteRows} disabled={saving || clipboard.length === 0} title={t('table.pasteRows')}>
                   <ClipboardPaste size={13} /> {t('table.pasteRows')}{clipboard.length ? ` (${clipboard.length})` : ''}
                 </TbBtn>

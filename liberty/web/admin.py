@@ -542,7 +542,7 @@ async def get_screens_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     JSON), **except** the ``type`` discriminator on each tab / action variant which is re-injected
     after the dump — Pydantic's ``exclude_defaults=True`` would otherwise strip it (the Literal
     discriminator's only-allowed value equals its default), leaving the frontend unable to tell
-    nested_form / nested_table tabs from plain form ones AND the PUT round-trip unable to validate
+    nested_table tabs from plain form ones AND the PUT round-trip unable to validate
     (extra fields on FormTab → 422)."""
     path = Path(request.app.state.settings.screens.config_path)
     cfg = load_screens(path)

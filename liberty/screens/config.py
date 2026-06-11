@@ -74,21 +74,17 @@ class FieldCondition(BaseModel):
 
 
 class ScreenField(BaseModel):
-    """A field on a dialog tab — references a column from the screen's ``columns`` list by
-    ``name`` and adds placement (``colspan``) + per-dialog overrides.
+    """One field on a dialog tab — a pure REFERENCE to a column from the screen's ``columns``
+    list (by ``name``) plus where it sits on the tab grid (``colspan``). Nothing else.
 
-    Most fields don't need any overrides: the column already defines the label, format, rule,
-    default, lookup binds, required, and disabled. The field just says "show this column on
-    this tab, spanning N grid cells". Use the override flags only when a specific dialog needs
-    different behaviour — e.g. "this column is normally required but for this particular
-    dialog it's optional".
+    Every behaviour — label, format, rule, default, lookup binds, required, disabled, and the
+    conditional ``visible_when`` / ``required_when`` / ``disabled_when`` — lives on the matching
+    ``Screen.columns`` entry, the SINGLE source of truth edited once and shared by both the grid
+    and the dialog. (Pre-unification a field could override the column per-dialog; that whole
+    layer was removed — the column is now authoritative and the dialog just lays the columns out.)"""
 
-    Conditional rules (``visible_when`` / ``required_when`` / ``disabled_when``) fire against
-    the dialog's live form state — show / require / lock this field only when another field
-    has a given value."""
-
-    # ``extra = "ignore"`` so old screens.toml files keep loading. Operators re-migrate via
-    # ``liberty-migrate screen`` to move legacy per-field metadata onto Screen.columns.
+    # ``extra = "ignore"`` so old screens.toml files keep loading: any leftover per-field override
+    # keys (label, rules, visible_when, …) from before unification are silently dropped on load.
     model_config = ConfigDict(extra="ignore")
 
     name: str = Field(
@@ -99,85 +95,13 @@ class ScreenField(BaseModel):
         # mixed casing in the saved TOML is operator-confusing).
         json_schema_extra={"x_case": "upper"},
     )
-    hidden: bool | None = Field(
-        default=None,
-        description="Hide this field on this dialog. Leave blank to inherit from the column.",
-    )
-    disabled: bool | None = Field(
-        default=None,
-        description="Make this field read-only on this dialog. Leave blank to inherit from the column.",
-    )
-    required: bool | None = Field(
-        default=None,
-        description="Require a value on this dialog. Leave blank to inherit from the column.",
-    )
-    colspan: int | None = Field(default=None, description="How many tab-grid columns this field spans.")
-    # ── self-contained field metadata (dd / label / format / rule) ──────────────────────────────
-    # The MAIN screen's dialog fields inherit these from the matching ``Screen.columns`` entry — set
-    # them on the column, not here. But a NESTED form's fields reference a different table that has
-    # no ``Screen.columns`` layer, so they carry their own ``dd`` (→ the dictionary resolves the
-    # field's BOOLEAN/ENUM/LOOKUP rule, label, format) and optional per-field rule overrides. All
-    # optional + blank by default, so existing screens are unchanged and the backend's field
-    # resolver (``_resolve_screen_field``) keys off ``dd`` when present, else the field ``name``.
-    dd: str | None = Field(
-        default=None,
-        description="Dictionary entry this field inherits its label / format / rule from. Blank → the field ``name`` is the key. Mainly for nested-form fields (the main screen sets ``dd`` on its columns).",
-        json_schema_extra={"x_enum_ref": "DD_ENTRIES", "x_case": "upper"},
-    )
-    label: str | None = Field(default=None, description="Display label override (blank → the dictionary / column label).")
-    format: str | None = Field(
-        default=None,
-        description="Render format override (date / number / boolean / …). Blank → inherit from the dd / column.",
-        json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
-    )
-    default: str | None = Field(default=None, description="Default value pre-filled when adding a new record.")
-    rules: str | None = Field(
-        default=None,
-        json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
-        description="Per-field widget rule override (BOOLEAN / ENUM / LOOKUP / SEQUENCE). Blank → inherit from the dd.",
-    )
-    rules_values: str | None = Field(
-        default=None,
-        json_schema_extra={
-            "x_group": "Rule",
-            "x_enum_ref_when": {
-                "field": "rules",
-                "map": {"BOOLEAN": "BOOLEAN_TRUE_VALUES", "ENUM": "ENUM_IDS", "LOOKUP": "LOOKUP_IDS", "SEQUENCE": "SEQUENCE_IDS", "NN": "SEQUENCE_IDS"},
-            },
-        },
-        description="The rule's value: ENUM → enum id; LOOKUP → lookup id; SEQUENCE / NN → sequence id; BOOLEAN → the true marker.",
-    )
-    lookup_param_binds: list[ParamBind] = Field(
-        default_factory=list,
-        description="Binds for this field's LOOKUP query (when its dd / rule resolves to LOOKUP). Same shape as elsewhere.",
-    )
-    visible_when: list[FieldCondition] = Field(
-        default_factory=list,
-        description=(
-            "Show the field only when every rule matches the live form state. Leave empty to "
-            "fall back to the static ``hidden`` flag."
-        ),
-    )
-    required_when: list[FieldCondition] = Field(
-        default_factory=list,
-        description=(
-            "Conditional ``required``. When non-empty, every predicate must hold against the "
-            "live form state for the field to be required; otherwise ``required`` decides."
-        ),
-    )
-    disabled_when: list[FieldCondition] = Field(
-        default_factory=list,
-        description=(
-            "Conditional read-only. When non-empty, every predicate must hold against the live "
-            "form state for the field to be locked; otherwise ``disabled`` decides."
-        ),
-    )
+    colspan: int | None = Field(default=None, description="How many tab-grid columns this field spans (layout only).")
 
 
 class _ScreenTabBase(BaseModel):
     """Fields every tab kind shares — title + per-mode hide flags + translations + the per-tab
-    action buttons. The discriminator ``type`` selects the variant: ``form`` (the default — a
-    grid of fields), ``nested_form`` (an editable child-record form embedded inline),
+    action buttons. The discriminator ``type`` selects the variant: ``form`` (the default — a grid
+    of fields), ``nested_form`` (reuse another screen's form inline, reference-only), or
     ``nested_table`` (a related-rows TableView embedded inline). v1's ``tab_disable_add`` /
     ``tab_disable_edit`` are captured as ``hide_on_add`` / ``hide_on_edit``."""
 
@@ -205,82 +129,40 @@ class FormTab(_ScreenTabBase):
     type: Literal["form"] = "form"
     cols: int | None = Field(default=None, description="How many columns the tab's grid spans.")
     fields: list[ScreenField] = Field(default_factory=list, description="Fields shown on this tab, in display order.")
-    nested_forms: list["NestedFormTab"] = Field(
-        default_factory=list,
-        description=(
-            "Embedded child-record forms shown as labelled sections BELOW this tab's own fields — "
-            "so one tab edits the main table PLUS one or more related tables, all saved in a single "
-            "Save (no on_save action needed). Each is a full nested_form (own connector + "
-            "read/update/insert queries OR a ``form_screen`` reference, fields, and ``param_binds`` "
-            "binding the parent's PK in). Same save coordination as a stand-alone nested_form tab."
-        ),
-    )
 
 
 class NestedFormTab(_ScreenTabBase):
-    """A child-record form embedded inline in this tab — v2's port of v1's "FormsDialog inside
-    a FormsDialog". The parent's PK is bound into the nested ``read_query`` via ``param_binds``;
-    if a row comes back the nested form renders in edit mode (saving fires ``update_query``); if
-    not, the user is editing a new related record (saving fires ``insert_query``). All three
-    queries live on ``connector`` (default: the parent screen's effective connector).
+    """A child-record FORM embedded inline in this tab, REFERENCE-ONLY — the form-shaped sibling
+    of :class:`NestedTableTab`. It REUSES an existing screen's form (``form_screen``): that screen
+    owns the read/update/insert queries AND the fields, so this tab carries no fields or queries of
+    its own — only ``param_binds`` wiring the parent's values (typically its PK) into the reused
+    form. At runtime the reused form renders inline and is saved together with the parent (its own
+    update/insert queries fire on the parent's Save).
 
-    Used for cases like SETTINGS_APPLICATIONS' "JD Edwards" / "LDAP" tabs in v1: same APPS_ID,
-    extra columns on related tables. The parent screen's ``update_query`` writes its own table;
-    each nested tab takes care of its own."""
+    (The old INLINE mode — authoring fields + read/update/insert queries directly on this tab —
+    was removed: it created a SECOND place to configure columns, the exact dual-config this refactor
+    kills. Need a one-off related form? Make it a real screen and reference it here, or model a 1:1
+    related table as a column group with its own form.)"""
 
     type: Literal["nested_form"] = "nested_form"
+    form_screen: str = Field(
+        description=(
+            "ID of the existing v2 screen whose form this tab reuses (its read/update/insert "
+            "queries + fields). Required — a nested_form is always a reference."
+        ),
+    )
     connector: str | None = Field(
         default=None,
-        description="Connector hosting the nested CRUD queries; blank → the parent screen's effective connector.",
+        description="Connector that hosts the referenced screen; blank → the parent screen's effective connector.",
     )
-    form_screen: str | None = Field(
-        default=None,
-        description=(
-            "REFERENCE MODE — id of an existing v2 screen whose form this tab reuses (its "
-            "read/update/insert queries + fields), instead of configuring them inline below. When "
-            "set, ``read_query`` / ``update_query`` / ``insert_query`` / ``fields`` are inherited "
-            "from that screen and may be left blank here; ``param_binds`` still bind the parent's "
-            "values into the referenced read query. Blank → INLINE MODE (configure the queries + "
-            "fields on this tab — a self-contained form that can use queries the parent screen doesn't)."
-        ),
-    )
-    read_query: str = Field(
-        default="",
-        description="INLINE MODE: reads the linked row (0 or 1 rows after the bind narrows it). Ignored / inherited in reference mode.",
-    )
-    update_query: str | None = Field(default=None, description="Writes edits when a linked row already exists. Inherited from ``form_screen`` in reference mode.")
-    insert_query: str | None = Field(default=None, description="Writes a new linked row when none existed. Inherited from ``form_screen`` in reference mode.")
-    delete_query: str | None = Field(
-        default=None,
-        description=(
-            "Removes the linked child row when the PARENT row is deleted — the nested-form analogue "
-            "of ``ColumnGroup.delete_query``. Run before the parent delete (child first), bound by "
-            "``param_binds``. Blank → the child is left untouched (rely on a DB ``ON DELETE CASCADE`` "
-            "FK, or an ``on_delete`` action). Set it when there's no cascade, so deleting the parent "
-            "doesn't orphan the child."
-        ),
-    )
-    cols: int | None = Field(default=None, description="How many columns the nested form's grid spans.")
-    fields: list[ScreenField] = Field(default_factory=list, description="INLINE MODE: fields shown in the nested form, in display order. Inherited from ``form_screen`` in reference mode.")
     param_binds: list[ParamBind] = Field(
         default_factory=list,
         description=(
-            "Bind parent values into the nested read/update/insert queries. Typically the parent's "
-            "PK column → the nested query's matching ``:param``. Resolved at call time against the "
-            "parent dialog's live form state (same shape as ``ScreenField.lookup_param_binds``)."
+            "Bind parent values into the reused form's read/update/insert queries — typically the "
+            "parent's PK column → the form's matching ``:param``. Resolved against the parent "
+            "dialog's live form state (same shape as :class:`NestedTableTab.param_binds`)."
         ),
     )
-
-    @model_validator(mode="after")
-    def _check_form_source(self) -> "NestedFormTab":
-        """A nested_form needs a source: either ``form_screen`` (reference an existing screen) OR
-        an inline ``read_query``. Reject a tab that gives neither (it would render empty)."""
-        if not self.form_screen and not self.read_query:
-            raise ValueError(
-                f"nested_form tab '{self.id}' needs either a 'form_screen' (reference an existing "
-                "screen) or a 'read_query' (inline form) — it has neither."
-            )
-        return self
 
 
 class NestedTableTab(_ScreenTabBase):
@@ -310,9 +192,9 @@ class NestedTableTab(_ScreenTabBase):
 
 # Discriminator union of tab kinds. Pydantic picks the right subclass on the ``type`` field;
 # a tab dict missing ``type`` is patched to ``"form"`` by :func:`parse_screens` so existing
-# screens.toml files keep validating. Ungrouped: deliberately re-emit through the public
-# alias ``ScreenTab`` so external code (the migration, tests, the OpenAPI exporter) still
-# imports one name.
+# screens.toml files keep validating. ``nested_form`` is reference-only (``form_screen`` + binds),
+# the form-shaped sibling of ``nested_table``. Ungrouped: deliberately re-emit through the public
+# alias ``ScreenTab`` so external code (the migration, tests, the OpenAPI exporter) imports one name.
 ScreenTab = Annotated[Union[FormTab, NestedFormTab, NestedTableTab], Field(discriminator="type")]
 
 
@@ -1170,6 +1052,16 @@ class Screen(BaseModel):
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
     uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
+    disable_add: bool = Field(
+        default=False,
+        description=(
+            "Prevent creating NEW records on this screen, even when ``insert_query`` is set "
+            "(edit / delete of existing rows stays allowed). Hides the Add button and the "
+            "dialog's Add entry, and disables add-row / duplicate-row / paste / import in the "
+            "grid bulk-editor — every path that would insert a record. Use for a screen that "
+            "edits a fixed set of rows (e.g. a reference table seeded elsewhere)."
+        ),
+    )
     initial_group_by: list[str] = Field(
         default_factory=list,
         description=(
@@ -1396,12 +1288,11 @@ def parse_screens(data: dict[str, Any]) -> ScreensFile:
             # everything before this commit was a flat field grid, and TOML by-hand authors
             # routinely omit defaults. Pydantic's discriminated-union resolver needs the key
             # to be present to pick a branch. **Variant-specific keys also infer the kind**:
-            # a tab carrying ``screen`` resolves to nested_table, one carrying ``read_query``
-            # (without ``screen``) resolves to nested_form. This is the safety net for the PUT
-            # round-trip via /admin/config/screens/parsed — the GET strips the Literal
-            # discriminator (it matches its default and exclude_defaults drops it), so without
-            # this inference a saved nested tab would re-validate as FormTab and reject its
-            # extra keys (read_query / update_query / screen / param_binds).
+            # a tab carrying ``screen`` → nested_table; one carrying ``form_screen`` → nested_form
+            # (both are reference-only — the two screen-reference keys stay unambiguous). This is the
+            # safety net for the PUT round-trip via /admin/config/screens/parsed — the GET strips the
+            # Literal discriminator (it matches its default and exclude_defaults drops it), so without
+            # this inference a saved nested tab would re-validate as FormTab and reject its extra keys.
             dialog = screen.get("dialog")
             if isinstance(dialog, dict):
                 tabs = dialog.get("tabs")
@@ -1410,10 +1301,7 @@ def parse_screens(data: dict[str, Any]) -> ScreensFile:
                         if isinstance(tab, dict) and not tab.get("type"):
                             if isinstance(tab.get("screen"), str):
                                 tab["type"] = "nested_table"
-                            elif isinstance(tab.get("form_screen"), str) or isinstance(tab.get("read_query"), str):
-                                # ``form_screen`` → reference-mode nested_form; ``read_query`` →
-                                # inline nested_form. (``screen`` above is table-only, so the two
-                                # screen-reference keys stay unambiguous across the round-trip.)
+                            elif isinstance(tab.get("form_screen"), str):
                                 tab["type"] = "nested_form"
                             else:
                                 tab["type"] = "form"

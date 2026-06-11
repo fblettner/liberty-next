@@ -51,10 +51,6 @@ UsageType = Literal[
     "screen_update_query",      # Screen.update_query
     "screen_insert_query",      # Screen.insert_query
     "screen_delete_query",      # Screen.delete_query
-    "nested_form_read_query",   # NestedFormTab.read_query (dialog tab OR FormTab.nested_forms)
-    "nested_form_update_query", # NestedFormTab.update_query
-    "nested_form_insert_query", # NestedFormTab.insert_query
-    "nested_form_delete_query", # NestedFormTab.delete_query (child cleanup on parent delete)
     "column_group_update_query",# ColumnGroup.update_query (1:1 related-table write-back)
     "column_group_insert_query",# ColumnGroup.insert_query
     "column_group_delete_query",# ColumnGroup.delete_query
@@ -358,44 +354,6 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                             label=f"{app}.{sid} · {attr}",
                             deep_link=_screen_deep_link(app, sid),
                         ))
-                # Nested tabs reference queries with their own connector default.
-                dialog = getattr(screen, "dialog", None)
-                if dialog is not None:
-                    for tab in getattr(dialog, "tabs", None) or []:
-                        tab_conn = getattr(tab, "connector", None) or screen_conn
-                        for attr, kind in (
-                            ("read_query", "nested_form_read_query"),
-                            ("update_query", "nested_form_update_query"),
-                            ("insert_query", "nested_form_insert_query"),
-                            ("delete_query", "nested_form_delete_query"),
-                        ):
-                            v = getattr(tab, attr, None)
-                            if v == query and tab_conn == connector:
-                                out.append(Usage(
-                                    type=kind,
-                                    label=f"{app}.{sid} · tab[{tab.id}].{attr}",
-                                    deep_link=_screen_deep_link(app, sid),
-                                ))
-                        # A FormTab can EMBED nested forms (``FormTab.nested_forms``) — each a
-                        # NestedFormTab with its own read/update/insert queries + connector. The
-                        # loop above only sees tabs that *are* nested forms; these are nested
-                        # *inside* a form tab, so they need an explicit walk (integrity validates
-                        # them too — see _check_screens). Without this a query referenced only by an
-                        # embedded form looks unused.
-                        for nf in getattr(tab, "nested_forms", None) or []:
-                            nf_conn = getattr(nf, "connector", None) or tab_conn
-                            for attr, kind in (
-                                ("read_query", "nested_form_read_query"),
-                                ("update_query", "nested_form_update_query"),
-                                ("insert_query", "nested_form_insert_query"),
-                                ("delete_query", "nested_form_delete_query"),
-                            ):
-                                if getattr(nf, attr, None) == query and nf_conn == connector:
-                                    out.append(Usage(
-                                        type=kind,
-                                        label=f"{app}.{sid} · tab[{tab.id}] · form[{getattr(nf, 'id', '?')}].{attr}",
-                                        deep_link=_screen_deep_link(app, sid),
-                                    ))
                 # Column groups — a 1:1 related table edited inline and written back through the
                 # group's own update / insert / delete queries (``ColumnGroup``). Effective connector
                 # is the group's own, else the screen's. Integrity validates these (``_check_screens``);
@@ -697,8 +655,8 @@ def _find_screen_usages(state: Any, app: str, screen_id: str) -> list[Usage]:
                         label=f"{menu_app} · {item.id} → {target}",
                         deep_link=_menu_deep_link(menu_app, item.id),
                     ))
-    # NestedTableTab.screen — a parent screen embedding this one — and navigate actions that pin
-    # this screen (NavigateAction.screen) so a drill opens it specifically.
+    # NestedTableTab.screen / NestedFormTab.form_screen — a parent screen embedding this one — and
+    # navigate actions that pin this screen (NavigateAction.screen) so a drill opens it specifically.
     screens = getattr(state, "screens", None)
     if screens is not None:
         for app_p, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
@@ -706,15 +664,18 @@ def _find_screen_usages(state: Any, app: str, screen_id: str) -> list[Usage]:
                 dialog = getattr(screen, "dialog", None)
                 if dialog is not None:
                     for tab in getattr(dialog, "tabs", None) or []:
-                        if getattr(tab, "type", None) == "nested_table" and getattr(tab, "screen", None) == screen_id:
-                            # Nested-table screens are keyed by id only — they're resolved against
-                            # the parent screen's app. So a match in any app is a real reference.
-                            if app_p == app:
-                                out.append(Usage(
-                                    type="nested_table_screen",
-                                    label=f"{app_p}.{sid_p} · tab[{tab.id}]",
-                                    deep_link=_screen_deep_link(app_p, sid_p),
-                                ))
+                        ttype = getattr(tab, "type", None)
+                        # Nested screens are keyed by id only — resolved against the parent's app,
+                        # so a match in the same app is a real reference. nested_table → ``screen``,
+                        # nested_form (reference-only) → ``form_screen``.
+                        ref = (getattr(tab, "screen", None) if ttype == "nested_table"
+                               else getattr(tab, "form_screen", None) if ttype == "nested_form" else None)
+                        if ref == screen_id and app_p == app:
+                            out.append(Usage(
+                                type="nested_table_screen",
+                                label=f"{app_p}.{sid_p} · tab[{tab.id}]",
+                                deep_link=_screen_deep_link(app_p, sid_p),
+                            ))
                 # NavigateAction.screen — a row-menu / toolbar drill that pins THIS screen.
                 firing_conn = getattr(screen, "connector", None) or app_p
                 for where, action in _iter_screen_actions(screen):

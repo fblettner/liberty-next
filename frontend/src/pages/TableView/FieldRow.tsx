@@ -1,8 +1,7 @@
-// One field row inside a ScreenDialog / NestedFormView tab — a switch over the column's
-// resolved rule (when present) + format/type to pick the right widget. Pulled out of
-// ScreenDialog so both the top-level dialog and the editable NestedFormView share the
-// same rendering: BOOLEAN → Checkbox, ENUM → SearchSelect (rule values), LOOKUP →
-// SearchSelect (resolved options from useLookupTables), password → masked Input,
+// One field row inside a ScreenDialog tab — a switch over the column's resolved rule (when
+// present) + format/type to pick the right widget. Pulled out of ScreenDialog so the dialog
+// grid renders each field consistently: BOOLEAN → Checkbox, ENUM → SearchSelect (rule values),
+// LOOKUP → SearchSelect (resolved options from useLookupTables), password → masked Input,
 // numeric/date/text → Input of the matching type. `disabled` / `required` come pre-computed
 // from the parent (they fold both the static flag and the per-condition rule). Values are
 // kept in the parent's `formValues` map by column name (the read result's case — which is
@@ -13,9 +12,9 @@ import styled from '@emotion/styled'
 import { Checkbox, Field, Input, SearchSelect } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
-import { type LookupSpec, lookupKey, lookupOptions, useLookupTables } from '../../services/lookups'
+import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { type Row, resolveBindList } from './dialogHelpers'
+import { type Row, resolveBindList, applyRulesWhen, activeRulesWhen } from './dialogHelpers'
 
 export const CellWrap = styled.div<{ $span: number }>`
   grid-column: span ${({ $span }) => $span}; min-width: 0;
@@ -35,13 +34,6 @@ function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt
 // which is why matching on ``typ`` alone missed it.)
 function isDateish(fmt: string, typ: string) { return fmt === 'date' || fmt === 'jdedate' || /date|timestamp/.test(typ) }
 export function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
-
-/** Field-lookup shim — keeps the LOOKUP spec resolution call site stable. Resolves the
- *  field's ``lookup_param_binds`` against the current form values so a UDC-style narrowing
- *  query gets its sibling-field-driven params at call time. */
-function resolveBinds(field: ScreenField, formValues: Row): Record<string, string> {
-  return resolveBindList(field.lookup_param_binds, formValues)
-}
 
 export function FieldRow({
   field, column, formValues, onChange, disabled, required, suppressLookup = false, onLookupPick,
@@ -67,25 +59,31 @@ export function FieldRow({
   const value = formValues[field.name]
   const textValue = value === null || value === undefined ? '' : String(value)
   const label = field.label ?? column?.label ?? field.name
-  // Effective rule — screen-field-level override (v1 col_rules → ScreenField.rule, resolved by
-  // the backend on GET /api/screens) wins over the read column's rule (the dictionary's
-  // default). This is what fixes FSOBNM on F00950: the column has no rule but the field
-  // does (LOOKUP #9), so we pick that.
-  const effectiveRule = field.rule ?? column?.rule ?? null
+  // Active conditional rule entry (rules_when) for the live form, or null → the base rule. Carries
+  // the rule AND its PER-RULE binds, so a conditional lookup binds exactly its own params (f00950
+  // FSDTAI: FSSETY 6/8 → get_form_name narrowed by OBNM; FSSETY 2/4 → get_data_item with NO narrow).
+  const activeWhen = activeRulesWhen(field.rules_when, formValues)
+  // Effective rule — the active conditional rule, else the field's override, else the column's.
+  const effectiveRule = activeWhen ? (activeWhen.rule ?? null) : applyRulesWhen(undefined, field.rule ?? column?.rule, formValues)
+  // Effective binds — the active rule's OWN binds when a rules_when matched; otherwise the field's
+  // base ``lookup_param_binds`` / ``return_binds`` (which apply to the base rule).
+  const effBinds = activeWhen ? (activeWhen.lookup_param_binds ?? []) : (field.lookup_param_binds ?? [])
+  const effReturnBinds = activeWhen ? (activeWhen.return_binds ?? []) : (field.return_binds ?? [])
 
   // For a LOOKUP field we need a live lookup spec — the *static* params from the rule plus the
-  // dynamic ones from the field's lookup_param_binds (resolved against the current form values).
+  // dynamic ones from the active rule's lookup_param_binds (resolved against the current form values).
   const lookupSpec: LookupSpec | null = useMemo(() => {
     if (!effectiveRule || effectiveRule.kind !== 'lookup') return null
-    const dyn = resolveBinds(field, formValues)
+    const dyn = resolveBindList(effBinds, formValues)
     return {
       connector: effectiveRule.connector,
       query: effectiveRule.query,
       value: effectiveRule.value,
       label: effectiveRule.label,
       params: { ...(effectiveRule.params ?? {}), ...dyn },
+      sources: effectiveRule.sources,
     }
-  }, [effectiveRule, field, formValues])
+  }, [effectiveRule, effBinds, formValues])
   // Mount a single-spec hook unconditionally (React requires stable hook order). The spec list is
   // either [lookupSpec] (lookup field) or [] (everything else); the lookup service caches per spec
   // key so re-renders that don't change the key don't refetch.
@@ -125,17 +123,16 @@ export function FieldRow({
       />
     )
   } else if (effectiveRule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
-    const opts = lookupData ? lookupOptions(lookupData).map((o) => ({ value: o.value, label: o.label, mono: o.value })) : []
-    // Lookup pick handler — writes the picked value as usual, plus the rule's ``return_params``
-    // (v1's ly_lkp_params lkp_dir='OUT'): for each return_param dd_id, find the picked row's
-    // matching column (case-insensitive) and fire ``onLookupPick`` with the {dd_id: value} map.
-    // The parent (ScreenDialog) maps each dd to a sibling field name and writes them via
-    // ``setFormValues``. Example: pick FSOBNM, fires {SY: <picked row's SY column>}, parent
-    // writes that to FSSY (the field with dd="SY"). No-op when lookupData isn't loaded yet.
+    const opts = lookupData ? lookupOptions(lookupData, undefined, effectiveRule.display_fields) : []
+    // Lookup pick handler — writes the picked value, then applies this field's ``return_binds``:
+    // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
+    // ``onLookupPick`` with a ``{targetColumn: value}`` map. The parent (ScreenDialog) writes each
+    // to the matching sibling field. Example on f00950: pick OBNM → {FSSY: <picked row's SY>} →
+    // parent fills the product-code field. No-op when lookupData isn't loaded yet.
     const handlePick = (picked: string) => {
       onChange(field.name, picked === '' ? null : picked)
-      const returnParams = effectiveRule.return_params ?? []
-      if (!picked || returnParams.length === 0 || !lookupData || !onLookupPick) return
+      const binds = effReturnBinds
+      if (!picked || binds.length === 0 || !lookupData || !onLookupPick) return
       const valueCol = effectiveRule.value
       const row = lookupData.rows.find((r) => {
         const rv = r[valueCol] ?? r[valueCol.toLowerCase()] ?? r[valueCol.toUpperCase()]
@@ -144,9 +141,9 @@ export function FieldRow({
       if (!row) return
       const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
       const aux: Record<string, unknown> = {}
-      for (const dd of returnParams) {
-        const v = lcRow.get(dd.toLowerCase())
-        if (v !== undefined) aux[dd] = v
+      for (const b of binds) {
+        const v = lcRow.get(b.param.toLowerCase())
+        if (v !== undefined) aux[b.column] = v
       }
       if (Object.keys(aux).length > 0) onLookupPick(aux)
     }
@@ -155,6 +152,7 @@ export function FieldRow({
         value={textValue}
         onChange={handlePick}
         options={opts}
+        cellColumns={lookupCellColumns(effectiveRule)}
         anyLabel={required ? undefined : t('common.none')}
         loading={!lookupData}
         placeholder={t('common.pick')}
@@ -167,7 +165,7 @@ export function FieldRow({
     // password fields, so `textValue` here is always empty when the dialog opens — the user
     // types a new value if they want to change the password, or leaves it blank to keep the
     // current one. (The submit path only includes a password field when the user typed
-    // something — see ScreenDialog.submit / NestedFormView.save.)
+    // something — see ScreenDialog.submit.)
     widget = (
       <Input
         type="password" autoComplete="new-password" required={required}

@@ -185,30 +185,27 @@ def test_nested_form_reference_marks_target_reachable_and_validates() -> None:
     assert any("no_such_screen" in m for m in broken)        # dangling reference flagged
 
 
-def test_form_tab_embedded_nested_form_validated_and_reachable() -> None:
-    """A form tab's embedded nested_forms are validated like stand-alone ones: a missing inline
-    query is flagged, and an embedded form_screen reference marks the target reachable (not orphan)."""
+def test_nested_form_tab_reference_validated_and_reachable() -> None:
+    """A nested_form tab is reference-only (``form_screen``): a dangling reference is flagged as a
+    Broken screen reference, and a valid one marks the reused screen reachable (not orphan)."""
     state = _state(
-        conns={"nomajde": ["f0092_get", "f0092_post", "child_get"]},
+        conns={"nomajde": ["f0092_get", "child_get"]},
         screens={"nomajde": {
-            "f0092": {"connector": "nomajde", "read_query": "f0092_get", "dialog": {"tabs": [{
-                "id": "main", "type": "form", "fields": [{"name": "A"}],
-                "nested_forms": [
-                    {"id": "good", "read_query": "child_get", "fields": [{"name": "B"}],
-                     "param_binds": [{"param": "PID", "source": "A"}]},
-                    {"id": "bad", "read_query": "no_such_get", "fields": [{"name": "C"}]},
-                    {"id": "ref", "form_screen": "child_screen"},
-                ],
-            }]}},
+            "f0092": {"connector": "nomajde", "read_query": "f0092_get", "dialog": {"tabs": [
+                {"id": "main", "type": "form", "fields": [{"name": "A"}]},
+                {"id": "ref", "type": "nested_form", "form_screen": "child_screen",
+                 "param_binds": [{"param": "PID", "source": "A"}]},
+                {"id": "bad", "type": "nested_form", "form_screen": "no_such_screen"},
+            ]}},
             "child_screen": {"connector": "nomajde", "read_query": "child_get"},
         }},
         menus={"nomajde": {"items": [{"id": "u", "label": "F0092", "type": "screen", "target": "f0092"}]}},
     )
     issues = check_integrity(state)
-    missing = [i.message for i in issues if i.category == "Missing query"]
-    assert any("no_such_get" in m for m in missing)                 # bad embedded query flagged
+    broken = [i.message for i in issues if i.category == "Broken screen reference"]
+    assert any("no_such_screen" in m for m in broken)               # dangling form_screen flagged
     orphans = [i.message for i in issues if i.category == "Orphan screen"]
-    assert not any("child_screen" in m for m in orphans)            # embedded form_screen reachable
+    assert not any("child_screen" in m for m in orphans)            # reused form_screen reachable
 
 
 def test_column_group_queries_and_refs_validated() -> None:

@@ -1,7 +1,6 @@
-// Small helpers shared between ScreenDialog and the nested-tab components — pulling these out
-// of ScreenDialog so NestedFormTab / NestedTableTab can reuse the same param-bind resolution
-// and case-insensitive value lookup. The originals lived inline at the top of ScreenDialog
-// until the nested-tab slice; everything here stays type-light + side-effect-free.
+// Small helpers shared between ScreenDialog and the nested-table component — pulling these out
+// of ScreenDialog so NestedTableTab can reuse the same param-bind resolution and case-insensitive
+// value lookup. Everything here stays type-light + side-effect-free.
 import type { Column } from '../../types/connectors'
 import type { FieldCondition, ParamBind } from '../../types/screens'
 
@@ -68,6 +67,52 @@ export function evalConditions(rules: FieldCondition[] | undefined, formValues: 
     }
   }
   return true
+}
+
+/** A conditional forced-default rule (``ColumnHint.default_when``). */
+export type DefaultWhenRule = { field: string; value: string | string[]; default: string }
+
+/** The conditional forced default for a column given the current values: the FIRST rule whose
+ *  {field, value} condition holds, or undefined when none match. When defined, the caller forces
+ *  the column to this value and locks it (read-only). Reuses {@link evalConditions} for the same
+ *  trim-tolerant, case-insensitive matching. */
+export function forcedDefault(rules: DefaultWhenRule[] | undefined, values: Row): string | undefined {
+  if (!rules || rules.length === 0) return undefined
+  for (const r of rules) {
+    if (evalConditions([{ field: r.field, value: r.value }], values)) return r.default
+  }
+  return undefined
+}
+
+/** The ACTIVE display rule for a column/field given the current row/form values: the first
+ *  ``rules_when`` whose {field, value} condition holds wins (its rule may be null → plain input),
+ *  else the base rule. Generic over the rule type so it serves both the grid (Column.rule) and the
+ *  dialog (ScreenField.rule). The discriminator match reuses {@link evalConditions}. */
+export function applyRulesWhen<R>(
+  rulesWhen: { field: string; value: string | string[]; rule: R | null }[] | undefined,
+  baseRule: R | null | undefined,
+  values: Row,
+): R | null {
+  if (rulesWhen && rulesWhen.length) {
+    for (const rw of rulesWhen) {
+      if (evalConditions([{ field: rw.field, value: rw.value }], values)) return rw.rule
+    }
+  }
+  return baseRule ?? null
+}
+
+/** The active ``rules_when`` ENTRY for the current values (the first whose {field, value} holds),
+ *  or null when none match (→ use the base rule + the column's BASE binds). Lets a caller read the
+ *  active rule AND its per-rule ``lookup_param_binds`` / ``return_binds`` together — they travel as
+ *  one entry, so a conditional lookup binds exactly the params it needs (and no sibling rule's). */
+export function activeRulesWhen<E extends { field: string; value: string | string[] }>(
+  rulesWhen: E[] | undefined,
+  values: Row,
+): E | null {
+  for (const rw of rulesWhen ?? []) {
+    if (evalConditions([{ field: rw.field, value: rw.value }], values)) return rw
+  }
+  return null
 }
 
 /** Resolve a list of ParamBinds against the current form state. `value` binds are literals;

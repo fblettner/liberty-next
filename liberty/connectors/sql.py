@@ -358,6 +358,35 @@ _PREDEFINED_TOKENS = {
 }
 #: The ``{{JOBN}}`` constant — Liberty as the writing job/workstation in JDE audit columns.
 _JOBN_VALUE = "LIBERTY"
+# Formats whose "not applicable" (write_when=false) neutral value is ``0``; everything else is a
+# single space (JDE CHAR NOT-NULL safe — padded to width on Oracle, matching the coalesce step's
+# ``" "`` sentinel for empties). See ``_neutral_for_format`` / ``SQLConnector._apply_write_when``.
+_NEUTRAL_NUMERIC_FORMATS = {"integer", "number", "decimal", "currency", "jdedate", "jdetime"}
+
+
+def _neutral_for_format(fmt: str | None) -> Any:
+    """The value written for a column whose ``write_when`` does not hold — i.e. it's irrelevant to
+    this row's kind. ``0`` for numerics (incl. JDE jdedate/jdetime), a single space otherwise.
+    Mirrors JDE's own convention (an N/A security column is stored blank / 0)."""
+    if fmt and fmt.lower() in _NEUTRAL_NUMERIC_FORMATS:
+        return 0
+    return " "
+
+
+def _write_when_holds(rules: list[Any], field_value: Any) -> bool:
+    """True when EVERY ``write_when`` rule holds (AND) — a rule holds when the discriminator's
+    current value is in the rule's allowed set (trim-tolerant; value may be a scalar or a list). A
+    rule whose ``field`` is absent from the row is treated as holding (fail-open): ``write_when``
+    must never neutralise a column just because its discriminator wasn't supplied, so it can't
+    regress a write that doesn't carry that field."""
+    for r in rules:
+        v = field_value(r.field)
+        if v is None:
+            continue  # discriminator not present → can't disqualify; fail open
+        allowed = r.value if isinstance(r.value, list) else [r.value]
+        if str(v).strip() not in {str(a).strip() for a in allowed}:
+            return False
+    return True
 # ``COL = {{TOKEN}}`` — captures the assigned column (group 1, possibly schema/table-qualified or
 # quoted) so the token coerces to that column's format. Then bare ``{{TOKEN}}`` (VALUES position,
 # WHERE, …) resolves to the token's natural Python type.
@@ -776,9 +805,31 @@ class Column:
     label: str | None = None
     hidden: bool = False
     key: bool = False
+    # Per-row-mode edit locks (``ColumnHint.disable_on_add`` / ``disable_on_edit``). Surfaced so the
+    # grid bulk-editor honours the SAME column setting the dialog does — locked → the cell falls back
+    # to its read-only display in that mode. UI-only: the write path is unchanged.
+    disable_on_add: bool = False
+    disable_on_edit: bool = False
     filter: bool = False
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
+    # LOOKUP return → target-column fills (``ColumnHint.return_binds``). Each is ``{param, column}``:
+    # on a pick, the picked row's ``param`` value is written into the row's ``column``. Drives the
+    # grid bulk-edit + Excel import return-fill.
+    return_binds: list[dict[str, str]] = field(default_factory=list)
+    # Conditional forced defaults (``ColumnHint.default_when``). Each ``{field, value, default}``:
+    # when sibling ``field`` == ``value``, this column is forced to ``default`` and locked. Honoured
+    # by the grid bulk-edit + the dialog.
+    default_when: list[dict[str, Any]] = field(default_factory=list)
+    # LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column
+    # (``ColumnHint.hide_label``).
+    hide_label: bool = False
+    # Conditional RULE overrides (``ColumnHint.rules_when``). Each ``{field, value, rule}``: when
+    # sibling ``field`` == ``value``, render with ``rule`` (a fully-resolved DisplayRule, or null →
+    # plain) instead of the base ``rule``. First match wins; evaluated per row / form state. Every
+    # referenced lookup is loaded once (the rule objects just say WHICH lookup), so it's per-cell
+    # choice, not per-row fetch.
+    rules_when: list[dict[str, Any]] = field(default_factory=list)
     width: int | None = None
     align: str | None = None
     format: str | None = None
@@ -796,12 +847,24 @@ class Column:
             d["hidden"] = True
         if self.key:
             d["key"] = True
+        if self.disable_on_add:
+            d["disable_on_add"] = True
+        if self.disable_on_edit:
+            d["disable_on_edit"] = True
         if self.filter:
             d["filter"] = True
         if self.filter_from:
             d["filter_from"] = self.filter_from
         if self.visible_when:
             d["visible_when"] = self.visible_when
+        if self.return_binds:
+            d["return_binds"] = self.return_binds
+        if self.default_when:
+            d["default_when"] = self.default_when
+        if self.hide_label:
+            d["hide_label"] = True
+        if self.rules_when:
+            d["rules_when"] = self.rules_when
         if self.width is not None:
             d["width"] = self.width
         if self.align is not None:
@@ -1440,6 +1503,46 @@ class SQLConnector:
                 out[k] = _coerce_value(out[k], fmt)
         return out
 
+    def _apply_write_when(
+        self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str,
+        column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Neutralise columns whose ``write_when`` does not hold for this row — write the
+        type-neutral value (blank / 0) instead of whatever the data-dictionary default left, so a
+        field irrelevant to the row's kind isn't dirtied by an inherited default. Opt-in: a column
+        with no ``write_when`` is untouched (zero regression for existing screens). Runs AFTER the
+        form rules so it OVERRIDES any DD default that fired. Only SET-clause statements write
+        columns — a DELETE's binds are WHERE keys, left alone.
+
+        The discriminator value is read from the bound (written) value first, else *context* (the
+        full submitted params — a derived selector like ``SEC_TYPE`` may be submitted but not itself
+        a written column)."""
+        if stmt_type not in _SET_CLAUSE_STATEMENTS:
+            return bound
+        hints = column_hints or []
+        if not any(h.write_when_rules for h in hints):
+            return bound
+        meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
+        ctx_upper = {str(k).upper(): v for k, v in (context or {}).items()}
+
+        def _field_value(field: str) -> Any:
+            fu = field.upper()
+            return bound[fu] if fu in bound else ctx_upper.get(fu)
+
+        out = dict(bound)
+        for h in hints:
+            rules = h.write_when_rules
+            if not rules:
+                continue
+            col = h.name.upper()
+            if col not in out:
+                continue  # not a written column on this query
+            if _write_when_holds(rules, _field_value):
+                continue  # applicable → keep the bound value (and its DD default) as-is
+            out[col] = _neutral_for_format((meta.get(col) or {}).get("fmt"))
+        return out
+
     async def _resolve_sequences(
         self, conn: Any, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, language: str,
         column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
@@ -1651,6 +1754,14 @@ class SQLConnector:
         bound = self._apply_form_rules(
             bound, qdef, stmt_type=stmt_type, user=user, column_hints=column_hints,
             dict_scope=dict_scope,
+        )
+        # write_when: a column not applicable to this row's kind is written as its neutral value
+        # (blank / 0), overriding any DD default the form rules just applied. ``params`` is the full
+        # submitted set, so a derived discriminator (e.g. SEC_TYPE) that isn't itself a written
+        # column is still available to evaluate the condition.
+        bound = self._apply_write_when(
+            bound, qdef, stmt_type=stmt_type, column_hints=column_hints,
+            dict_scope=dict_scope, context=params,
         )
         bound.update(token_binds)  # server-resolved tokens win, untouched by form rules
         stmt = text(sql_text)
@@ -2259,6 +2370,21 @@ class SQLConnector:
         await conn.execute(text(audit_sql), bind_params)
 
 
+def _resolve_conditional_rule(
+    rules: str | None, rules_values: str | None, dictionary: DictionaryFile, *,
+    connector: str | None, language: str | None,
+) -> dict[str, Any] | None:
+    """Resolve a ``rules_when`` entry's (rules, rules_values) into a DisplayRule the same way the
+    base rule resolves — a synthetic dictionary entry → :meth:`resolve_rule`. Blank ``rules`` → None
+    (a plain input, no widget). Carries no entry-level ``lookup_params`` (the conditional lookup is a
+    DIFFERENT lookup than the column's DD entry; its dynamic params come from ``lookup_param_binds``)."""
+    r = rules.strip().upper() if rules else None
+    if not r:
+        return None
+    synth = DictionaryEntry(rules=r, rules_values=(rules_values.strip() if rules_values else None))
+    return dictionary.resolve_rule(synth, connector=connector, language=language)
+
+
 def _resolve_hint(
     h: ColumnHint, dictionary: DictionaryFile, language: str | None, *,
     connector: str | None = None, type_: str | None = None, name: str | None = None,
@@ -2298,8 +2424,21 @@ def _resolve_hint(
         rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
+        disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
+        return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],
+        default_when=[w.as_dict() for w in h.default_when],
+        hide_label=h.hide_label,
+        rules_when=[
+            {"field": w.field, "value": w.value,
+             "rule": _resolve_conditional_rule(w.rules, w.rules_values, dictionary, connector=connector, language=language),
+             # Per-rule binds (this rule's lookup gets these — the grid binds them per distinct
+             # value when fetching, so a parameterized conditional lookup resolves per row).
+             "lookup_param_binds": [b.model_dump(mode="json", exclude_none=True) for b in w.lookup_param_binds],
+             "return_binds": [{"param": b.param, "column": b.column} for b in w.return_binds]}
+            for w in h.rules_when
+        ],
         width=h.width, align=h.align, format=fmt, rule=rule,
         # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
         # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator
