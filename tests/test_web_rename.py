@@ -645,6 +645,38 @@ def test_rename_lookup_updates_matching_entry_rules_values(dict_with_sequence_an
     assert d["entries"]["STATIC_BOOL"]["rules_values"] == "Y"
 
 
+def test_rename_lookup_rewrites_screen_column_rule_refs(dict_with_sequence_and_lookup: Path, tmp_path: Path) -> None:
+    """A screen column can reference a lookup DIRECTLY — a screen-level ``rules`` override or a
+    conditional ``rules_when`` — bypassing a DD entry. rename_lookup must rewrite those in
+    screens.toml too (the old "dictionary-internal, no cross-file walk" assumption is now wrong)."""
+    dp = dict_with_sequence_and_lookup
+    sp = tmp_path / "screens.toml"
+    _write(sp, """
+        [screens.foo.users]
+        read_query = "users_get"
+
+        [[screens.foo.users.columns]]
+        name = "STATUS"
+        rules = "LOOKUP"
+        rules_values = "user_status"
+
+        [[screens.foo.users.columns]]
+        name = "STATUS2"
+
+        [[screens.foo.users.columns.rules_when]]
+        field = "STY"
+        value = "M"
+        rules = "LOOKUP"
+        rules_values = "user_status"
+    """)
+    rename_lookup("user_status", "user_status_codes", dictionary_path=dp, screens_path=sp)
+    cols = tomllib.loads(sp.read_text())["screens"]["foo"]["users"]["columns"]
+    assert cols[0]["rules_values"] == "user_status_codes"               # base rule override
+    assert cols[1]["rules_when"][0]["rules_values"] == "user_status_codes"  # conditional rule
+    # The dictionary entry still updates as before.
+    assert tomllib.loads(dp.read_text())["entries"]["STATUS"]["rules_values"] == "user_status_codes"
+
+
 # ── screen-app rename ───────────────────────────────────────────────────────────────────────
 
 

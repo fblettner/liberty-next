@@ -2579,12 +2579,14 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
             result = rename_sequence(
                 body.old_name, body.new_name,
                 dictionary_path=_dictionary_path(settings),
+                screens_path=Path(settings.screens.config_path),
                 scope=body.scope,
             )
         elif body.kind == "lookup":
             result = rename_lookup(
                 body.old_name, body.new_name,
                 dictionary_path=_dictionary_path(settings),
+                screens_path=Path(settings.screens.config_path),
                 scope=body.scope,
             )
         elif body.kind == "screen_app":

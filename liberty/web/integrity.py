@@ -185,6 +185,24 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
     screens = getattr(state, "screens", None)
     if screens is None:
         return
+    # Dictionary ids (lookup / enum / sequence) per scope — for validating a column's rule references
+    # (a screen-level ``rules`` override or a conditional ``rules_when``) point at something real.
+    dictionary = _get_dictionary(state)
+    dict_ids: dict[str, dict[str, set[str]]] = {}
+    if dictionary is not None:
+        for sc, section in _iter_dict_sections(dictionary):
+            dict_ids[sc] = {coll: set((section.get(coll) or {}).keys()) for coll in ("lookups", "enums", "sequences")}
+    _RULE_COLL = {"LOOKUP": "lookups", "ENUM": "enums", "SEQUENCE": "sequences", "NN": "sequences"}
+
+    def _check_rule_ref(app: str, sid: str, link: dict[str, Any], rules: Any, rv: Any, where: str) -> None:
+        # A column's rule scope is the screen's app (dict_scope = app), with a shared fallback.
+        coll = _RULE_COLL.get(rules.upper()) if isinstance(rules, str) else None
+        if not coll or not rv:
+            return
+        if rv not in dict_ids.get(app, {}).get(coll, set()) and rv not in dict_ids.get("shared", {}).get(coll, set()):
+            out.append(Issue("error", f"Broken {coll[:-1]} reference",
+                             f"{app}.{sid} · {where} → {rules.upper()} '{rv}' is not defined in scope '{app}' or shared", link))
+
     for app, smap in (getattr(screens, "screens", None) or {}).items():
         app_screens = idx.screens_by_app.get(app, set())
         for sid, s in smap.items():
@@ -226,6 +244,11 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                 if cg and cg not in group_ids:
                     out.append(Issue("error", "Broken column group",
                                      f"{app}.{sid} · column '{getattr(col, 'name', '?')}' group '{cg}' is not defined in column_groups", link))
+                cname = getattr(col, "name", "?")
+                # Screen-level rule override + each conditional rules_when → a real lookup/enum/sequence.
+                _check_rule_ref(app, sid, link, getattr(col, "rules", None), getattr(col, "rules_values", None), f"column '{cname}' rules")
+                for rw in getattr(col, "rules_when", None) or []:
+                    _check_rule_ref(app, sid, link, getattr(rw, "rules", None), getattr(rw, "rules_values", None), f"column '{cname}' rules_when")
             # dialog tabs — nested_table / nested_form both reference another screen by id.
             dialog = getattr(s, "dialog", None)
             for tab in (getattr(dialog, "tabs", None) or []) if dialog is not None else []:

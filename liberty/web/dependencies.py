@@ -228,11 +228,29 @@ def _resolve_screen(state: Any, seed: Seed) -> tuple[Dependency | None, list[tup
         v = getattr(screen, attr, None)
         if v:
             refs.append((Seed("query", v, eff_conn), f"screen {seed.scope}.{seed.name}.{attr}"))
-    # Column hints — each ColumnHint.dd (or its name) resolves to a DD entry.
+    # Column hints — each ColumnHint.dd (or its name) resolves to a DD entry. A screen-level rule
+    # override (``ColumnHint.rules`` + ``rules_values``) and each conditional ``rules_when`` entry
+    # can ALSO reference a lookup / enum / sequence directly (bypassing a DD entry); a package that
+    # omits those leaves broken references on import. The dict scope for a screen is its app.
+    def _rule_ref(rules: Any, rv: Any, where: str) -> None:
+        r = rules.upper() if isinstance(rules, str) else ""
+        if not rv:
+            return
+        if r == "LOOKUP":
+            refs.append((Seed("lookup", rv, seed.scope), where))
+        elif r in ("SEQUENCE", "NN"):
+            refs.append((Seed("sequence", rv, seed.scope), where))
+        elif r == "ENUM":
+            refs.append((Seed("enum", rv, seed.scope), where))
     for col in getattr(screen, "columns", None) or []:
         dd_seed = _resolve_dd_via_column_name(state, col.dd or col.name, connector=eff_conn)
         if dd_seed:
             refs.append((dd_seed, f"screen {seed.scope}.{seed.name} column {col.name}"))
+        _rule_ref(getattr(col, "rules", None), getattr(col, "rules_values", None),
+                  f"screen {seed.scope}.{seed.name} column {col.name} rules")
+        for rw in getattr(col, "rules_when", None) or []:
+            _rule_ref(getattr(rw, "rules", None), getattr(rw, "rules_values", None),
+                      f"screen {seed.scope}.{seed.name} column {col.name} rules_when")
     # Row click → another screen.
     rc_screen = getattr(screen, "row_click_screen", None)
     if rc_screen:

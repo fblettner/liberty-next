@@ -65,6 +65,8 @@ const TYPE_TITLES: Record<string, string> = {
   sequence_dd_id: 'Sequences (dd_id)',
   lookup_return_param: 'Lookup return params',
   entry_rules_values: 'Dictionary entries (rules_values)',
+  screen_column_rules_values: 'Screen columns (rule override)',
+  screen_column_rules_when: 'Screen columns (conditional rule)',
   screen_read_query: 'Screens (read query)',
   screen_update_query: 'Screens (update query)',
   screen_insert_query: 'Screens (insert query)',

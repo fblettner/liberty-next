@@ -431,19 +431,21 @@ def rename_sequence(
     new: str,
     *,
     dictionary_path: Path,
+    screens_path: Path | None = None,
     scope: str | None = None,
 ) -> RenameResult:
     """Rename a sequence id. With ``scope = None`` operates on the shared
     ``[sequences.<old>]`` top-level; with ``scope = "<conn>"`` operates on the per-connector
     overlay ``[connectors.<scope>.sequences.<old>]``. The matching ``DictionaryEntry.rules_values``
-    references (where ``rules == "SEQUENCE"`` or ``"NN"``) update in the *same scope* — a
-    sequence id is dictionary-internal so we don't need to scan other config files."""
+    references (where ``rules == "SEQUENCE"`` or ``"NN"``) update in the *same scope*, plus any
+    screen column that references the sequence directly (a ``rules`` override or a ``rules_when``)."""
     return _rename_dict_collection(
         kind="sequence",
         coll="sequences",
         ref_rules={"SEQUENCE", "NN"},
         old=old, new=new,
         dictionary_path=dictionary_path,
+        screens_path=screens_path,
         scope=scope,
     )
 
@@ -453,18 +455,20 @@ def rename_lookup(
     new: str,
     *,
     dictionary_path: Path,
+    screens_path: Path | None = None,
     scope: str | None = None,
 ) -> RenameResult:
     """Same shape as :func:`rename_sequence` — renames ``[lookups.<old>]`` (shared or scoped)
-    + every ``DictionaryEntry.rules_values`` whose ``rules == "LOOKUP"`` matches. Lookups are
-    referenced exclusively from dictionary entries (the SQL connector resolves them via the
-    entry's rules_values), so no cross-file walk is needed."""
+    + every ``DictionaryEntry.rules_values`` whose ``rules == "LOOKUP"`` matches, plus every screen
+    column that references the lookup directly via a screen-level ``rules`` override or a conditional
+    ``rules_when`` entry (these bypass the DD entry, so a dictionary-only walk would miss them)."""
     return _rename_dict_collection(
         kind="lookup",
         coll="lookups",
         ref_rules={"LOOKUP"},
         old=old, new=new,
         dictionary_path=dictionary_path,
+        screens_path=screens_path,
         scope=scope,
     )
 
@@ -478,6 +482,7 @@ def _rename_dict_collection(
     new: str,
     dictionary_path: Path,
     scope: str | None,
+    screens_path: Path | None = None,
 ) -> RenameResult:
     """Shared implementation for :func:`rename_sequence` / :func:`rename_lookup` (and any
     future "dictionary-internal" collection rename). The two functions only differ in:
@@ -554,13 +559,59 @@ def _rename_dict_collection(
                 entry["rules_values"] = new
                 n += 1
 
-    # Validate the rewritten doc before writing.
+    # Validate the rewritten dictionary doc before writing anything.
     _validate("dictionary", doc, parse_dictionary, dictionary_path)
-    import tomli_w
-    dictionary_path.write_text(tomli_w.dumps(doc), encoding="utf-8")
 
+    # 3) screens.toml — a screen-level rule override (``ColumnHint.rules`` + ``rules_values``) and a
+    #    conditional ``rules_when[].rules_values`` can reference this lookup / sequence DIRECTLY,
+    #    bypassing a DD entry, so they must be rewritten too. (The old "no cross-file walk needed"
+    #    assumption predated screen-level rule overrides + rules_when.) Scope to the matching app
+    #    (all apps for a shared rename — a per-connector overlay narrows to that connector's app).
+    n_scr = 0
+    if screens_path is not None and screens_path.exists() and screens_path.read_text(encoding="utf-8").strip():
+        s_doc = tomllib.loads(screens_path.read_text(encoding="utf-8"))
+        n_scr = _rewrite_screen_rule_values(s_doc.get("screens"), ref_rules=ref_rules, old=old, new=new, scope=scope)
+        if n_scr:
+            _validate("screens", s_doc, parse_screens, screens_path)
+            screens_path.write_text(tomli_w.dumps(s_doc), encoding="utf-8")
+        result.files[str(screens_path)] = n_scr
+
+    dictionary_path.write_text(tomli_w.dumps(doc), encoding="utf-8")
     result.files[str(dictionary_path)] = n
     return result
+
+
+def _rewrite_screen_rule_values(node: Any, *, ref_rules: set[str], old: str, new: str, scope: str | None) -> int:
+    """Update screen column references to a renamed lookup / sequence: the base ``rules_values``
+    (when ``rules`` is one of *ref_rules*) and each ``rules_when[].rules_values``. *node* is the
+    ``[screens]`` table. Scoped to the app == *scope* (all apps when *scope* is None — a shared id
+    can be referenced from any app)."""
+    if not isinstance(node, dict):
+        return 0
+    n = 0
+    for app, screen_map in node.items():
+        if scope is not None and app != scope:
+            continue
+        if not isinstance(screen_map, dict):
+            continue
+        for _sid, screen in screen_map.items():
+            if not isinstance(screen, dict):
+                continue
+            for col in screen.get("columns") or []:
+                if not isinstance(col, dict):
+                    continue
+                rules = col.get("rules")
+                if isinstance(rules, str) and rules.upper() in ref_rules and col.get("rules_values") == old:
+                    col["rules_values"] = new
+                    n += 1
+                for rw in col.get("rules_when") or []:
+                    if not isinstance(rw, dict):
+                        continue
+                    rwr = rw.get("rules")
+                    if isinstance(rwr, str) and rwr.upper() in ref_rules and rw.get("rules_values") == old:
+                        rw["rules_values"] = new
+                        n += 1
+    return n
 
 
 # ── screen-app rename ────────────────────────────────────────────────────────────────────────
