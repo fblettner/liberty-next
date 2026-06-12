@@ -473,6 +473,10 @@ echo
 printf "${BOLD}━━━ Liberty Next ($LAYOUT) is up ━━━${NC}\n"
 echo
 
+# Running version (recorded in Settings → History → Upgrades on every version change).
+VERSION=$(docker exec liberty-next python -c "import liberty;print(liberty.__version__)" 2>/dev/null || true)
+[ -n "$VERSION" ] && { echo "  Version:    ${VERSION}"; echo; }
+
 # LIBERTY_ADMIN_PASSWORD: when .env was just generated, it's exported above as a shell
 # variable (NOT written to .env — first-boot only). On a re-run with an existing .env
 # it's empty here — the existing admin user keeps its prior password.

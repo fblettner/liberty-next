@@ -1432,6 +1432,24 @@ def test_config_versioning_endpoints(env) -> None:
         assert client.get("/admin/config/versions", headers=_h(client, "reader")).status_code == 403
 
 
+def test_upgrades_and_release_notes(env) -> None:
+    """Startup records an install in the upgrade history; release-notes serves the bundled markdown."""
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # The lifespan recorded a framework install (fresh store; apps not installed in tests).
+        ups = client.get("/admin/upgrades", headers=h).json()["upgrades"]
+        assert len(ups) >= 1
+        assert ups[0]["kind"] in ("install", "upgrade") and ups[0]["to_version"] and ups[0]["component"] == "framework"
+        # Release notes — per component; the framework's bundled markdown + version.
+        comps = client.get("/admin/release-notes", headers=h).json()["components"]
+        fw = next(c for c in comps if c["component"] == "framework")
+        assert fw["version"] and fw["en"].startswith("# Liberty Next") and "## 7.0.27" in fw["en"] and fw["fr"]
+        # Both superuser-gated.
+        assert client.get("/admin/upgrades", headers=_h(client, "reader")).status_code == 403
+        assert client.get("/admin/release-notes", headers=_h(client, "reader")).status_code == 403
+
+
 def test_screen_bundle_versioning(env) -> None:
     """Phase 2 — every screen save snapshots the CHANGED screens' dependency bundle (a deploy ZIP).
     A brand-new screen captures nothing (no prior state); editing it captures its pre-edit bundle.

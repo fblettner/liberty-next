@@ -101,6 +101,7 @@ include = ["liberty*"]
 
 [tool.setuptools.package-data]
 "liberty.licensing" = ["public.pem"]
+"liberty" = ["RELEASE.md", "RELEASE.fr.md"]   # release notes shipped with the wheel (served at /admin/release-notes)
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

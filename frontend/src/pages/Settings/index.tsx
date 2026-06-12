@@ -34,12 +34,13 @@ const AppBuilder = lazy(() => import('./AppBuilder'))
 const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
 const ActionsBuilder = lazy(() => import('./ActionsBuilder'))
 const ConfigVersions = lazy(() => import('./ConfigVersions'))
+const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
 // NOTE: Package, Changes and Integrity moved OUT of Settings into the nomaflow area — they're
 // package/change management + config health (operations flows), not configuration. The builder
 // components still live in this folder (they share FindDependenciesModal / FindUsagesModal with the
 // other config editors); the nomaflow pages import them. See pages/Nomaflow/{Package,Changes,Integrity}Page.
 
-const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'versions'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'versions', 'releasenotes'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -121,6 +122,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
         <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app', 'App')}</TabBtn>
         <TabBtn $active={tab === 'versions'} onClick={() => setTab('versions')}>{t('settings.tabs.versions', 'History')}</TabBtn>
+        <TabBtn $active={tab === 'releasenotes'} onClick={() => setTab('releasenotes')}>{t('settings.tabs.releasenotes', 'Release notes')}</TabBtn>
         {/* Deterministic "apply all TOML now" — see reloadAll. Right-pushed so it reads as a global action. */}
         <ReloadWrap>
           {reloadMsg && <ReloadMsg $tone={reloadMsg.tone}>{reloadMsg.text}</ReloadMsg>}
@@ -142,6 +144,7 @@ export default function Settings() {
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
           : tab === 'versions' ? <ConfigVersions />
+          : tab === 'releasenotes' ? <ReleaseNotes />
           : <AppBuilder />}
       </Suspense>
     </PageLayout>
