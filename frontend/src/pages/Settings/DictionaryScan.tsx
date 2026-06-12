@@ -16,11 +16,19 @@ import { TablePicker } from '../../common/SqlWizardModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null; rules?: string | null; rules_values?: string | null; default?: string | null; justify?: string | null; size?: number | null }
+interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null; rules?: string | null; rules_values?: string | null; default?: string | null; justify?: string | null; size?: number | null; lookup_params?: Record<string, string> | null }
 interface ScanResult { scope: string; dialect: string | null; jde: boolean; items: ScanItem[] }
-interface Sel { include: boolean; label: string; format: string; rules: string; rules_values: string; default: string; justify: string; size: number | null }
+interface Sel { include: boolean; label: string; format: string; rules: string; rules_values: string; default: string; justify: string; size: number | null; lookup_params: string }
 
-const Box = styled(Modal)`width: min(820px, 96vw); height: min(680px, 92vh);`
+// "SY=01,RT=ST" ⇄ { SY: "01", RT: "ST" }
+const paramsToStr = (p: Record<string, string> | null | undefined) => Object.entries(p ?? {}).map(([k, v]) => `${k}=${v}`).join(',')
+function parseParams(s: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const part of s.split(',')) { const [k, ...v] = part.split('='); if (k.trim()) out[k.trim()] = v.join('=').trim() }
+  return out
+}
+
+const Box = styled(Modal)`width: min(1120px, 96vw); height: min(720px, 92vh);`
 const Header = styled.div`display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0; & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; }`
 const CloseBtn = styled.button`margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: ${radius.md}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer; &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }`
 const PickRow = styled.div`display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;`
@@ -30,13 +38,10 @@ const Td = styled.td`padding: 5px 8px; border-bottom: 1px solid ${colors.border}
 const Mono = styled.span`font-family: ${fonts.mono}; color: ${colors.text.primary};`
 const Muted = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; text-align: center; padding: 20px;`
 
-const FORMAT_OPTS: SearchSelectOption[] = [
-  { value: '', label: '(text)' },
-  { value: 'number', label: 'number' },
-  { value: 'date', label: 'date' },
-  { value: 'jdedate', label: 'jdedate' },
-  { value: 'jdetime', label: 'jdetime' },
-  { value: 'boolean', label: 'boolean' },
+// Fallback format options if the framework-enum fetch fails; otherwise the live DICTIONARY_TYPE.
+const FORMAT_FALLBACK: SearchSelectOption[] = [
+  { value: '', label: '(text)' }, { value: 'number', label: 'number' }, { value: 'date', label: 'date' },
+  { value: 'jdedate', label: 'jdedate' }, { value: 'jdetime', label: 'jdetime' }, { value: 'boolean', label: 'boolean' },
 ]
 
 export function DictionaryScan({
@@ -70,6 +75,18 @@ export function DictionaryScan({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  // Format + rule dropdowns — the same framework enums the dictionary entry form uses.
+  const [fmtOpts, setFmtOpts] = useState<SearchSelectOption[]>(FORMAT_FALLBACK)
+  const [ruleOpts, setRuleOpts] = useState<SearchSelectOption[]>([])
+  useEffect(() => {
+    void api.get<{ framework_enums?: Record<string, { values?: Array<{ value: string; label?: string }> }> }>('/admin/config/schema')
+      .then((r) => {
+        const fe = r.framework_enums ?? {}
+        const opts = (k: string): SearchSelectOption[] => (fe[k]?.values ?? []).map((o) => ({ value: o.value, label: o.label ?? o.value }))
+        const fmt = opts('DICTIONARY_TYPE'); if (fmt.length) setFmtOpts(fmt)
+        setRuleOpts(opts('DICTIONARY_RULES'))
+      }).catch(() => undefined)
+  }, [])
 
   const sqlConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql').map((c) => c.name), [connectors])
 
@@ -90,6 +107,7 @@ export function DictionaryScan({
       for (const it of r.items) next[it.dd_id] = {
         include: !it.exists, label: it.label ?? '', format: it.format ?? '',
         rules: it.rules ?? '', rules_values: it.rules_values ?? '', default: it.default ?? '', justify: it.justify ?? '', size: it.size ?? null,
+        lookup_params: paramsToStr(it.lookup_params),
       }
       setSel(next)
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
@@ -125,6 +143,7 @@ export function DictionaryScan({
         if (s.default.trim()) entry.default = s.default.trim()
         if (s.justify.trim()) entry.justify = s.justify.trim()   // JDE F9210.FRDRUL → right_blank / right_zero
         if (s.size != null) entry.size = s.size                  // JDE F9210.FRDTAS — data item width
+        if (s.lookup_params.trim()) entry.lookup_params = parseParams(s.lookup_params)   // UDC SY/RT binds
         sc.entries[it.dd_id] = entry
       }
       await api.put('/admin/config/dictionary/parsed', { dictionary: doc })
@@ -198,22 +217,27 @@ export function DictionaryScan({
                     <Th>{t('settings.dictscan.label', 'Label')}</Th>
                     <Th style={{ width: 120 }}>{t('settings.dictscan.format', 'Format')}</Th>
                     <Th style={{ width: 130 }}>{t('settings.dictscan.rule', 'Rule')}</Th>
-                    <Th style={{ width: 110 }}>{t('settings.dictscan.default', 'Default')}</Th>
-                    <Th style={{ width: 110 }}>{t('settings.dictscan.source', 'Source')}</Th>
+                    <Th style={{ width: 90 }}>{t('settings.dictscan.ruleValue', 'Rule value')}</Th>
+                    <Th style={{ width: 130 }}>{t('settings.dictscan.lookupParams', 'Lookup params')}</Th>
+                    <Th style={{ width: 96 }}>{t('settings.dictscan.default', 'Default')}</Th>
+                    <Th style={{ width: 90 }}>{t('settings.dictscan.source', 'Source')}</Th>
                   </tr></thead>
                   <tbody>
                     {result.items.map((it) => {
                       const s = sel[it.dd_id]
+                      const dis = it.exists
                       return (
                         <tr key={it.dd_id} style={it.exists ? { opacity: 0.55 } : undefined}>
-                          <Td><Checkbox checked={!!s?.include} disabled={it.exists} onChange={(v) => patch(it.dd_id, { include: v })} /></Td>
+                          <Td><Checkbox checked={!!s?.include} disabled={dis} onChange={(v) => patch(it.dd_id, { include: v })} /></Td>
                           <Td><Mono>{it.dd_id}</Mono>{it.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists', 'exists')})</span>}<div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{it.column !== it.dd_id ? `${it.column} · ` : ''}{it.type}</div></Td>
-                          <Td><Input value={s?.label ?? ''} disabled={it.exists} onChange={(e) => patch(it.dd_id, { label: e.target.value })} placeholder={it.dd_id} /></Td>
-                          <Td><SearchSelect value={s?.format ?? ''} disabled={it.exists} onChange={(v) => patch(it.dd_id, { format: v })} options={FORMAT_OPTS} allowCustom /></Td>
-                          {/* Rule + default come from the JDE DD per-table query (when configured); the
-                              rule is a hint to refine in the dictionary editor, the default is editable here. */}
-                          <Td><span style={{ fontFamily: fonts.mono, fontSize: fontSize.micro, color: colors.text.muted }}>{[s?.rules ? `${s.rules}${s.rules_values ? ` (${s.rules_values})` : ''}` : '', s?.justify ? `⇥ ${s.justify}${s?.size != null ? `/${s.size}` : ''}` : ''].filter(Boolean).join(' · ')}</span></Td>
-                          <Td><Input value={s?.default ?? ''} disabled={it.exists} onChange={(e) => patch(it.dd_id, { default: e.target.value })} placeholder="—" /></Td>
+                          <Td><Input value={s?.label ?? ''} disabled={dis} onChange={(e) => patch(it.dd_id, { label: e.target.value })} placeholder={it.dd_id} /></Td>
+                          <Td><SearchSelect value={s?.format ?? ''} disabled={dis} onChange={(v) => patch(it.dd_id, { format: v })} options={fmtOpts} allowCustom /></Td>
+                          {/* Rule / rule-value / lookup-params come from the JDE DD per-table + UDC-filter
+                              queries (when configured) and are editable here — same as the Screen Assistant. */}
+                          <Td><SearchSelect value={s?.rules ?? ''} disabled={dis} onChange={(v) => patch(it.dd_id, { rules: v })} options={ruleOpts} anyLabel={t('common.none', '(none)')} placeholder="—" /></Td>
+                          <Td><Input value={s?.rules_values ?? ''} disabled={dis || !s?.rules} onChange={(e) => patch(it.dd_id, { rules_values: e.target.value })} placeholder="—" /></Td>
+                          <Td><Input value={s?.lookup_params ?? ''} disabled={dis || s?.rules !== 'LOOKUP'} onChange={(e) => patch(it.dd_id, { lookup_params: e.target.value })} placeholder={s?.rules === 'LOOKUP' ? 'SY=01,RT=ST' : ''} /></Td>
+                          <Td><Input value={s?.default ?? ''} disabled={dis} onChange={(e) => patch(it.dd_id, { default: e.target.value })} placeholder="—" /></Td>
                           <Td>{it.source === 'jde' ? <Tag $tone="orange">JDE&nbsp;DD</Tag> : <Tag $tone="blue">{t('settings.dictscan.inferred', 'inferred')}</Tag>}</Td>
                         </tr>
                       )

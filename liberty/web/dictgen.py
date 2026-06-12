@@ -59,6 +59,17 @@ class ScanBody(BaseModel):
             "(not a bind) for the F92xx schema. Missing / erroring → ignored."
         ),
     )
+    jde_dd_filter_query: str | None = Field(
+        default="dictionary_data_items_filters_for_table_get",
+        description=(
+            "Optional per-table JDE DD **UDC filter** query — supplies a LOOKUP item's bind values "
+            "(a UDC needs SY / RT to return rows). Bound with ``:TBL_DB_NAME`` + ``:TBL_SCHEMA`` and "
+            "read for ``DD_ID, FLT_TARGET, FLT_VALUE`` (one row per param, e.g. ``SY``→``01`` and "
+            "``RT``→``ST``). Each item's ``lookup_params`` is built from these; a column that has "
+            "filter params but no explicit ``DD_RULES`` defaults to the ``LOOKUP`` rule. Use a "
+            "``#SCHEMA.<KEY>#`` token for the F92xx schema. Missing / erroring → ignored."
+        ),
+    )
 
 
 def _dictionary_path(settings: Any) -> Path:
@@ -155,6 +166,34 @@ async def _fetch_jde_dd_table(
     return out
 
 
+async def _fetch_jde_dd_filters(
+    registry: Any, conn_name: str, query_name: str, *, table: str, owner: str | None,
+) -> dict[str, dict[str, str]]:
+    """Per-table JDE **UDC filter** params: ``{DATA_ITEM (upper) → {FLT_TARGET: FLT_VALUE}}`` — the
+    static binds a UDC LOOKUP needs (``{SY: "01", RT: "ST"}``). Bound with the scanned table + owner;
+    expects ``DD_ID, FLT_TARGET, FLT_VALUE`` rows (one per param). Best-effort — empty on any error."""
+    try:
+        conn = registry.sql(conn_name)
+    except ConnectorError:
+        return {}
+    try:
+        res = await conn.execute(query_name, params={"TBL_DB_NAME": table, "TBL_SCHEMA": owner})
+    except (ConnectorError, SQLAlchemyError, KeyError, ValueError):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for row in res.rows:
+        m = {(k.upper() if isinstance(k, str) else k): v for k, v in row.items()}
+        ddid, target, value = m.get("DD_ID"), m.get("FLT_TARGET"), m.get("FLT_VALUE")
+        if ddid is None or target is None:
+            continue
+        key = str(ddid).strip().upper()
+        tgt = str(target).strip()
+        if not key or not tgt:
+            continue
+        out.setdefault(key, {})[tgt] = str(value).strip() if value is not None else ""
+    return out
+
+
 @router.post("/dictionary/scan", summary="Scan dictionary")
 async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dict[str, Any]:
     registry = request.app.state.connectors
@@ -218,6 +257,14 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
         if (is_jde and body.table and body.jde_dd_table_query)
         else {}
     )
+    # UDC LOOKUP filter params (``{dd_id → {SY, RT}}``) — the binds a UDC lookup needs at runtime.
+    filter_map = (
+        await _fetch_jde_dd_filters(
+            registry, body.connector, body.jde_dd_filter_query, table=body.table, owner=real_schema,
+        )
+        if (is_jde and body.table and body.jde_dd_filter_query)
+        else {}
+    )
 
     items: list[dict[str, Any]] = []
     for name, ctype in cols:
@@ -237,6 +284,10 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
         # Prefer the per-table JDE DD enrichment (label / format / rule / default); fall back to the
         # DTAI/DSCR label + the SQL-type-inferred format when the rich query isn't available.
         label = rich.get("label") or (dd_map.get(data_item) if data_item else None)
+        lookup_params = filter_map.get(dd_id) or {}
+        # A column with UDC filter params IS a lookup — default the rule to LOOKUP when the per-table
+        # query didn't spell out DD_RULES, so the entry is usable without hand-editing.
+        rules = rich.get("rules") or ("LOOKUP" if lookup_params else None)
         items.append({
             "column": name,
             "dd_id": dd_id,
@@ -246,11 +297,12 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
             "source": "jde" if (rich or label) else "inferred",
             "label": label or None,
             "format": rich.get("format") or _infer_format(ctype),
-            "rules": rich.get("rules"),
+            "rules": rules,
             "rules_values": rich.get("rules_values"),
             "default": rich.get("default"),
             "justify": rich.get("justify"),
             "size": rich.get("size"),
+            "lookup_params": lookup_params,
         })
 
     return {"scope": scope, "dialect": dialect, "jde": is_jde, "items": items}

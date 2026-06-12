@@ -1506,3 +1506,86 @@ def test_config_version_delete_endpoints(env) -> None:
         # Gating + unknown id.
         assert client.delete("/admin/config/versions/999999", headers=h).status_code == 404
         assert client.delete(f"/admin/config/versions/{v[0].id}", headers=_h(client, "reader")).status_code == 403
+
+
+def _scaffold_payload() -> dict:
+    """A minimal Screen-Assistant payload: an `ab` table on connector `db`, one DD entry, a screen
+    with a 2-field dialog, and a menu item."""
+    return {
+        "connector": "db",
+        "app": "myapp",
+        "table": {
+            "name": "ab",
+            "label": "Address Book",
+            "get_sql": "SELECT 1 AS AN8, 'x' AS ALPH",
+            "post_sql": "INSERT INTO ab (AN8) VALUES (:AN8)",
+            "put_sql": "UPDATE ab SET ALPH = :ALPH WHERE AN8 = :AN8",
+            "delete_sql": "DELETE FROM ab WHERE AN8 = :AN8",
+        },
+        "dictionary_scope": "db",
+        "dictionary": [
+            {"id": "AN8", "label": "Address Number", "format": "text", "justify": "right_blank", "size": 8},
+        ],
+        "screen": {
+            "id": "address_book",
+            "label": "Address Book",
+            "connector": "db",
+            "read_query": "ab_get",
+            "insert_query": "ab_post",
+            "update_query": "ab_put",
+            "delete_query": "ab_delete",
+            "columns": [{"name": "AN8", "dd": "AN8", "key": True}, {"name": "ALPH"}],
+            "dialog": {
+                "title": "Address",
+                "tabs": [{"id": "general", "label": "General", "type": "form",
+                          "fields": [{"name": "AN8"}, {"name": "ALPH"}]}],
+            },
+        },
+        "menu": {"app": "myapp", "id": "address_book", "label": "Address Book",
+                 "icon": "users", "target": "address_book", "connector": "db"},
+    }
+
+
+def test_assistant_scaffold_creates_everything(env) -> None:
+    """One POST writes the connector table + CRUD queries, a dictionary entry, the screen + dialog,
+    and the menu item — then reloads so it's all live."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h)
+        assert r.status_code == 200, r.text
+        created = r.json()["created"]
+        assert created["queries"] == ["ab_get", "ab_put", "ab_post", "ab_delete"]
+        assert created["dictionary_entries"] == ["AN8"]
+        assert created["screen"] == "myapp.address_book" and created["menu_item"] == "address_book"
+
+        # Files were written.
+        ctext = conn_toml.read_text()
+        assert 'name = "ab"' in ctext and "ab_get" not in ctext  # synthesised names aren't literal in TOML
+        assert '[connectors.db.tables]' in ctext or 'name = "ab"' in ctext
+        base = conn_toml.parent
+        assert "[connectors.db.entries.AN8]" in (base / "dictionary.toml").read_text()
+        assert "[screens.myapp.address_book]" in (base / "screens.toml").read_text()
+        assert 'target = "address_book"' in (base / "menus.toml").read_text()
+
+        # Reload made it live: the screen resolves and its read query runs.
+        after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        assert after["myapp"]["address_book"]["read_query"] == "ab_get"
+        assert client.get("/api/sql/db/ab_get", headers=h).json()["rows"] == [{"AN8": 1, "ALPH": "x"}]
+
+        # Re-posting the same scaffold collides (table already exists).
+        assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h).status_code == 409
+
+
+def test_assistant_scaffold_validation_and_gating(env) -> None:
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Unknown connector → 404.
+        bad_conn = _scaffold_payload(); bad_conn["connector"] = "nope"
+        assert client.post("/admin/assistant/scaffold", json=bad_conn, headers=h).status_code == 404
+        # Missing screen id → 422, and nothing written (the connectors file is unchanged).
+        bad_screen = _scaffold_payload(); bad_screen["screen"].pop("id")
+        assert client.post("/admin/assistant/scaffold", json=bad_screen, headers=h).status_code == 422
+        # Reader is forbidden.
+        assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=_h(client, "reader")).status_code == 403
