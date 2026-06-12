@@ -77,7 +77,7 @@ function effectiveConnector(tab: { connector?: string | null }, parentConnector:
 // nested save surfaces on the parent's banner without rolling back the main row.
 
 export function NestedFormView({
-  tab, parentFormValues, parentConnector, app, parentMode, parentDuplicating = false,
+  tab, parentFormValues, parentConnector, app, parentMode, parentDuplicating = false, parentReadOnly = false,
 }: {
   tab: NestedFormTab
   /** Live parent form state — `source` binds read from here at fetch time. */
@@ -93,6 +93,9 @@ export function NestedFormView({
   /** The parent is being DUPLICATED: keep the loaded child values but write them as a NEW child tied
    *  to the parent's new PK (insert, not update; saver fires even without a retype). */
   parentDuplicating?: boolean
+  /** The parent screen / dialog is read-only — render every field disabled and skip the saver so
+   *  this nested form can't write (matches the dialog hiding its own Save). */
+  parentReadOnly?: boolean
 }) {
   const { t } = useTranslation()
   const savers = useContext(NestedSaversContext)
@@ -252,7 +255,7 @@ export function NestedFormView({
   // captures the *latest* formValues / mode — the registry is a `Map`, so a re-register overwrites
   // the previous entry. Unregister on unmount.
   useEffect(() => {
-    if (!savers) return
+    if (!savers || parentReadOnly) return   // read-only parent: nothing here ever writes
     const save = async (parentExtra?: Row) => {
       // When the parent is DUPLICATED, ALWAYS insert a new child — never update (forced here so a
       // stale/in-flight read can't flip ``isExistingRef`` back to true and UPDATE the original).
@@ -305,7 +308,7 @@ export function NestedFormView({
     }
     savers.register(tab.id, save)
     return () => savers.unregister(tab.id)
-  }, [savers, tab.id, tab.param_binds, effFields, effUpdate, effInsert, formValues, savedRow, bound, colByName, connector, fieldStateOf, t, parentDuplicating, parentFormValues])
+  }, [savers, parentReadOnly, tab.id, tab.param_binds, effFields, effUpdate, effInsert, formValues, savedRow, bound, colByName, connector, fieldStateOf, t, parentDuplicating, parentFormValues])
 
   if (refError) return <Banner $tone="error">{refError}</Banner>
   if (!refScreen) return <LoadingRow><SpinnerRing size={14} thickness={2} /> {t('common.loading')}</LoadingRow>
@@ -330,7 +333,7 @@ export function NestedFormView({
                 column={colByName.get(f.name.toLowerCase()) ?? null}
                 formValues={formValues}
                 onChange={onFieldChange}
-                disabled={st.disabled}
+                disabled={st.disabled || parentReadOnly}
                 required={st.required}
               />
             )
@@ -350,7 +353,7 @@ export function NestedFormView({
 // read query narrowed by `param_binds` resolved against parent form state.
 
 export function NestedTableView({
-  tab, parentFormValues, parentConnector, app,
+  tab, parentFormValues, parentConnector, app, parentReadOnly = false,
 }: {
   tab: NestedTableTab
   parentFormValues: Row
@@ -359,6 +362,9 @@ export function NestedTableView({
    *  (GET /api/screens/{app}/{id}). The nested screen lives under the same app since
    *  screens.toml's [screens.<app>.<id>] keys by app. */
   app: string
+  /** The parent screen / dialog is read-only — force the embedded grid view-only too (no Add /
+   *  Delete / inline edit), even if the nested screen isn't itself flagged ``read_only``. */
+  parentReadOnly?: boolean
 }) {
   const { t } = useTranslation()
   const connector = effectiveConnector(tab, parentConnector)
@@ -399,6 +405,9 @@ export function NestedTableView({
   }, [nestedScreen, connector, boundKey, hasBinds, refreshTick])
 
   const nestedConnector = nestedScreen?.connector || connector
+  // A read-only parent forces the embedded grid view-only — flag the nested screen so ResultTable's
+  // own ``read_only`` gates (add / delete / inline edit) all turn off.
+  const effNestedScreen = parentReadOnly && nestedScreen ? { ...nestedScreen, read_only: true } : nestedScreen
 
   if (!hasBinds) return <Banner $tone="info">{t('dialog.nested.pendingBinds')}</Banner>
   if (error) return <Banner $tone="error">{error}</Banner>
@@ -416,7 +425,7 @@ export function NestedTableView({
         result={result}
         connector={nestedConnector}
         query={nestedScreen.read_query}
-        screen={nestedScreen}
+        screen={effNestedScreen}
         updateQuery={nestedScreen.update_query}
         insertQuery={nestedScreen.insert_query}
         deleteQuery={nestedScreen.delete_query}

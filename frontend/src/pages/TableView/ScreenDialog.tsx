@@ -291,7 +291,9 @@ export function ScreenDialog({
   // ``foreignLock`` clears and the form becomes editable — no reopen needed.
   const { lock: heldLock, ownedByMe } = useLockState(lockPayload)
   const foreignLock = heldLock && !ownedByMe ? heldLock : null
-  const readOnly = foreignLock != null
+  // A foreign lock OR the screen's own ``read_only`` flag makes the dialog view-only: the same
+  // gate already hides Save / Delete / Duplicate and disables every field input below.
+  const readOnly = foreignLock != null || !!screen.read_only
 
   // Acquire on open / release on close. ``cancelled`` covers a fast close while the ack
   // is still in flight — releases the lock if we happened to win it after unmount.
@@ -879,14 +881,14 @@ export function ScreenDialog({
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentMode={mode} parentDuplicating={duplicating} />
+                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentMode={mode} parentDuplicating={duplicating} parentReadOnly={readOnly} />
                     </div>
                   )
                 }
                 if (tab.type === 'nested_table') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedTableView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} />
+                      <NestedTableView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentReadOnly={readOnly} />
                     </div>
                   )
                 }

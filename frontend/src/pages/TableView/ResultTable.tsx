@@ -403,17 +403,21 @@ export function ResultTable({
   const { activeId } = useTabs()
   const { sharedActions } = useWorkspace()
   const canEdit = !!(updateQuery || insertQuery)
+  // ``read_only`` makes the WHOLE screen view-only — the hard switch that turns off every mutating
+  // affordance below (add / duplicate / paste / import / inline edit / delete-selected). Stronger
+  // than ``disable_add`` (which only blocks inserts). The row dialog enforces the same flag itself.
+  const readOnly = !!screen?.read_only
   // Whether NEW records may be created here: an insert query exists AND the screen doesn't opt out
-  // via ``disable_add``. Gates every creation affordance (Add button, add-row / duplicate / paste /
-  // import) so an edit-only screen can keep its insert_query for the save path yet hide all the
-  // "make a new record" entry points. Edit / delete of existing rows is unaffected.
-  const canInsert = !!insertQuery && !screen?.disable_add
-  // ``Screen.editable`` (default true) gates INLINE GRID editing — the bulk-edit mode. False → the
-  // grid is view-only (a dialog, if any, still edits row-by-row). ``Screen.uploadable`` (default
-  // false) gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old
-  // behaviour: editable, not uploadable. Both were dormant before — honoured here so a screen
-  // migrated as view-only / no-import actually is.
-  const canBulkEdit = canEdit && screen?.editable !== false
+  // via ``disable_add`` (or ``read_only``). Gates every creation affordance (Add button, add-row /
+  // duplicate / paste / import) so an edit-only screen can keep its insert_query for the save path
+  // yet hide all the "make a new record" entry points. Edit / delete of existing rows is unaffected.
+  const canInsert = !!insertQuery && !screen?.disable_add && !readOnly
+  // ``Screen.editable`` (default true) gates INLINE GRID editing — the bulk-edit mode (which also
+  // hosts add-row / delete-selected). False — or ``read_only`` — makes the grid view-only (a dialog,
+  // if any, still opens row-by-row but is itself read-only). ``Screen.uploadable`` (default false)
+  // gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old behaviour:
+  // editable, not uploadable. Honoured here so a screen migrated as view-only / no-import actually is.
+  const canBulkEdit = canEdit && screen?.editable !== false && !readOnly
   const canImport = canInsert && !!screen?.uploadable
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
