@@ -22,12 +22,14 @@
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from pathlib import Path
 from typing import Annotated, Any
 
 import tomlkit
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 
 from liberty.auth.authstore import build_auth_backend
@@ -79,6 +81,92 @@ from liberty.web.rename import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 Superuser = Annotated[Principal, Depends(require_superuser)]
+
+_log = logging.getLogger("liberty.admin")
+
+
+def _snapshot_config(request: Request, path: Path) -> None:
+    """Snapshot a config file's CURRENT bytes before a save overwrites it — the input to config
+    history / diff / restore. Best-effort: a versioning failure must never block the save."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return
+    try:
+        store.snapshot(path, source="manual")
+    except Exception:  # noqa: BLE001 — never fail a save over versioning
+        _log.warning("config snapshot failed for %s", path, exc_info=True)
+
+
+def _snapshot_all_config(request: Request) -> None:
+    """Snapshot EVERY config file before a cross-file mutation (rename / move / clone / delete /
+    import) — these write outside the per-section ``PUT /parsed`` path and can touch several files at
+    once, so we capture the whole pre-op state. Deduped (unchanged files skip), best-effort."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return
+    s = request.app.state.settings
+    paths = [
+        s.connectors.config_path,
+        s.connectors.dictionary_path or s.connectors.config_path.with_name("dictionary.toml"),
+        s.menus.config_path, s.screens.config_path, s.charts.config_path,
+        s.actions.config_path, s.dashboards.config_path,
+    ]
+    for p in paths:
+        if not p:
+            continue
+        try:
+            store.snapshot(Path(p), source="manual")
+        except Exception:  # noqa: BLE001 — never fail an op over versioning
+            _log.warning("config snapshot failed for %s", p, exc_info=True)
+
+
+# ── screen + dependency BUNDLE versioning (Phase 2) ───────────────────────────────────────
+# File-level versioning (above) reverts a whole TOML; a screen reverting cleanly often needs its
+# *dependency closure* too (the queries / lookups / sequences / DD entries it references). On every
+# screen save we capture, per CHANGED screen, a ZIP of that screen's pre-save dependency closure —
+# the same package the deploy tooling builds. Restoring one re-applies the bundle with the
+# ``overwrite`` strategy, which preserves ``override = true`` entities (a customer fork survives).
+# Bundles share the version store under a synthetic ``screen:<app>:<id>`` key so they never mix
+# with file history (the file-version list filters them out).
+_BUNDLE_PREFIX = "screen:"
+
+
+def _screen_bundle_key(app: str, screen_id: str) -> str:
+    return f"{_BUNDLE_PREFIX}{app}:{screen_id}"
+
+
+def _capture_screen_bundles(request: Request, new_screens: dict[str, dict[str, dict[str, Any]]]) -> None:
+    """Before a screen save overwrites ``screens.toml``, snapshot the pre-save dependency bundle of
+    each screen whose definition changed. Reads the CURRENT (still-live) ``app.state`` so the bundle
+    is the *prior* closure. Content-addressed + per-screen diffed, so unchanged screens cost nothing
+    and an identical re-save is a no-op. Best-effort: never blocks the save."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return
+    live = getattr(request.app.state, "screens", None)
+    live_apps = (getattr(live, "screens", None) or {}) if live is not None else {}
+    src = getattr(request.app.state.settings.app, "name", "liberty-next")
+    who = getattr(getattr(request, "state", None), "username", None)
+    for app, screens in (new_screens or {}).items():
+        old_app = live_apps.get(app) or {}
+        for sid, new_def in (screens or {}).items():
+            old_screen = old_app.get(sid)
+            if old_screen is None:
+                continue  # brand-new screen — no prior state to bundle (captured on its next save)
+            try:
+                if _dump_screen(old_screen) == new_def:
+                    continue  # unchanged — skip (dedupe is the real guard; this just avoids the work)
+            except Exception:  # noqa: BLE001 — a dump mismatch shouldn't skip the capture
+                pass
+            try:
+                manifest = collect_dependencies(
+                    request.app.state, [Seed(kind="screen", name=sid, scope=app)],
+                )
+                blob = build_package_zip(manifest, source_install=src)
+                store.snapshot_bytes(_screen_bundle_key(app, sid), blob, source="save", who=who,
+                                     comment=f"{app}.{sid} + {max(len(manifest.deps) - 1, 0)} dependencies")
+            except Exception:  # noqa: BLE001 — never fail a save over bundle versioning
+                _log.warning("screen bundle snapshot failed for %s.%s", app, sid, exc_info=True)
 
 
 @router.post("/reload", summary="Reload config")
@@ -141,6 +229,212 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         "nomaflow": nomaflow_reloaded,
         "reports": new_reports.names(),
     }
+
+
+# ── config version history (filesystem snapshots; see liberty.versioning) ─────────────────
+@router.get("/config/raw", summary="Read a config file (raw)")
+async def read_config_raw(request: Request, _: Superuser, file: str) -> Response:
+    """The LIVE bytes of a config file (e.g. ``screens.toml``) — read-only, for diffing a stored
+    version against the current file. (The legacy raw *editor* was removed; this read-only peek is
+    safe and never writes.) Resolved under the config dir; path-traversal is rejected."""
+    base = request.app.state.settings.connectors.config_path.parent.resolve()
+    target = (base / file).resolve()
+    if base not in target.parents or not target.is_file():   # must live under the config dir
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="file not found")
+    return Response(content=target.read_bytes(), media_type="text/plain; charset=utf-8")
+
+
+@router.get("/config/versions", summary="List config versions")
+async def list_config_versions(request: Request, _: Superuser, file: str | None = None) -> dict[str, object]:
+    """Snapshot history — every version of *file* (e.g. ``screens.toml``), newest first; or every
+    version across all config files when *file* is omitted."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return {"versions": []}
+    base = request.app.state.settings.connectors.config_path.parent
+    versions = store.list_versions((base / file) if file else None)
+    # Screen+dependency bundles live in the same store under a ``screen:`` synthetic key — keep them
+    # out of the file-history list (they have their own /config/screen-versions surface).
+    return {"versions": [v.to_dict() for v in versions if not v.rel_path.startswith(_BUNDLE_PREFIX)]}
+
+
+@router.get("/config/versions/{version_id}/content", summary="Get a version's content")
+async def config_version_content(version_id: int, request: Request, _: Superuser) -> Response:
+    """A version's raw TOML text — the frontend diffs two of these client-side (Monaco)."""
+    store = getattr(request.app.state, "config_versions", None)
+    data = store.content(version_id) if store is not None else None
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    return Response(content=data, media_type="text/plain; charset=utf-8")
+
+
+@router.get("/config/versions/{version_id}/download", summary="Download a version")
+async def config_version_download(version_id: int, request: Request, _: Superuser) -> Response:
+    store = getattr(request.app.state, "config_versions", None)
+    v = store.get(version_id) if store is not None else None
+    data = store.content(version_id) if store is not None else None
+    if v is None or data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    stem, suffix = Path(v.rel_path).stem, Path(v.rel_path).suffix
+    fname = f"{stem}.v{v.version_num}{suffix}"
+    return Response(content=data, media_type="application/toml",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.post("/config/versions/{version_id}/restore", summary="Restore a version")
+async def restore_config_version(version_id: int, request: Request, principal: Superuser) -> dict[str, object]:
+    """Write a version's content back to its live file (snapshotting the current one first), then
+    reload so it takes effect immediately. Returns the restored file + the reload summary."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    live = store.restore(version_id, who=principal.username)
+    if live is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    reload_result = await reload_connectors(request, principal)
+    return {"restored": live.name, "reload": reload_result}
+
+
+@router.delete("/config/versions/{version_id}", summary="Delete a config version")
+async def delete_config_version(version_id: int, request: Request, _: Superuser) -> dict[str, object]:
+    """Permanently delete one file-version snapshot (file + index row). Screen bundles are deleted via
+    their own endpoint — this 404s on a bundle id so the two surfaces stay separate. Does not touch
+    the live config."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    v = store.get(version_id)
+    if v is None or v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    store.delete(version_id)
+    return {"deleted": version_id}
+
+
+@router.delete("/config/versions", summary="Clear a file's version history")
+async def clear_config_versions(request: Request, _: Superuser, file: str) -> dict[str, object]:
+    """Delete EVERY stored version of one config file. The live file is untouched — only its history
+    is cleared."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    base = request.app.state.settings.connectors.config_path.parent
+    rel = store._rel(base / file)
+    if rel.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="file not found")
+    return {"deleted": store.delete_key(rel)}
+
+
+# ── screen + dependency bundle versions ───────────────────────────────────────────────────
+@router.get("/config/screen-versions", summary="List screen bundle versions")
+async def list_screen_versions(request: Request, _: Superuser,
+                               app: str | None = None, screen: str | None = None) -> dict[str, object]:
+    """Screen+dependency bundle history. Each version is the pre-save dependency closure of a screen,
+    captured automatically on every screen save. Returns ``{bundles: [{app, screen, key, versions:[…]}]}``
+    grouped by screen, newest version first. Filter to one screen with ``app`` + ``screen``."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return {"bundles": []}
+    want = _screen_bundle_key(app, screen) if app and screen else None
+    groups: dict[str, dict[str, Any]] = {}
+    for v in store.list_versions():
+        if not v.rel_path.startswith(_BUNDLE_PREFIX):
+            continue
+        if want is not None and v.rel_path != want:
+            continue
+        # rel_path == "screen:<app>:<id>" — id may contain ':' in theory, so split with maxsplit.
+        rest = v.rel_path[len(_BUNDLE_PREFIX):]
+        bapp, _, bscreen = rest.partition(":")
+        g = groups.setdefault(v.rel_path, {"app": bapp, "screen": bscreen, "key": v.rel_path, "versions": []})
+        g["versions"].append(v.to_dict())
+    return {"bundles": list(groups.values())}
+
+
+@router.get("/config/screen-versions/{version_id}/download", summary="Download a screen bundle")
+async def screen_version_download(version_id: int, request: Request, _: Superuser) -> Response:
+    """The bundle ZIP for one version — a deployable package (the same shape /admin/build-package
+    produces) of the screen + its dependency closure at that point in time."""
+    store = getattr(request.app.state, "config_versions", None)
+    v = store.get(version_id) if store is not None else None
+    data = store.content(version_id) if store is not None else None
+    if v is None or data is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    safe = v.rel_path[len(_BUNDLE_PREFIX):].replace(":", "_")
+    fname = f"{safe}.v{v.version_num}.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.get("/config/screen-versions/{version_id}/contents", summary="Inspect a screen bundle")
+async def screen_version_contents(version_id: int, request: Request, _: Superuser) -> dict[str, Any]:
+    """The dependency closure captured in a bundle version — ``{app, screen, version, created_at,
+    manifest}`` where ``manifest`` is the same ``{by_kind, counts, deps, missing, warnings}`` shape
+    the dependency-inspect UI renders, read back from the ZIP's embedded ``manifest.json``. Lets the
+    history view expand a row into its full content tree without rebuilding anything."""
+    import io
+    import json
+    import zipfile
+    store = getattr(request.app.state, "config_versions", None)
+    v = store.get(version_id) if store is not None else None
+    data = store.content(version_id) if store is not None else None
+    if v is None or data is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    rest = v.rel_path[len(_BUNDLE_PREFIX):]
+    bapp, _sep, bscreen = rest.partition(":")
+    manifest: dict[str, Any] = {"by_kind": {}, "counts": {}, "deps": [], "missing": [], "warnings": []}
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+    except (KeyError, zipfile.BadZipFile, ValueError):
+        pass  # bundle captured before manifest.json was embedded — show an empty tree
+    return {"app": bapp, "screen": bscreen, "version": v.version_num,
+            "created_at": v.created_at, "manifest": manifest}
+
+
+@router.post("/config/screen-versions/{version_id}/restore", summary="Restore a screen bundle")
+async def restore_screen_version(version_id: int, request: Request, principal: Superuser) -> dict[str, object]:
+    """Re-apply a screen's stored dependency bundle — reverts the screen *and* its captured
+    dependencies (queries / lookups / sequences / DD entries) together. Snapshots ALL config first
+    (so the restore is itself undoable), then applies the bundle with the ``overwrite`` strategy:
+    entities flagged ``override = true`` on this install are PRESERVED (a customer fork survives the
+    revert). Reloads afterwards so the change is live."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    v = store.get(version_id)
+    blob = store.content(version_id)
+    if v is None or blob is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    _snapshot_all_config(request)  # the bundle apply may touch several files — capture the pre-state
+    from liberty.web.package_import import apply_package_zip
+    try:
+        report = apply_package_zip(zip_bytes=blob, strategy="overwrite", settings=request.app.state.settings)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    reload_result = await reload_connectors(request, principal)
+    return {"restored": v.rel_path, "version": v.version_num, "report": report.to_dict(), "reload": reload_result}
+
+
+@router.delete("/config/screen-versions/{version_id}", summary="Delete a screen bundle version")
+async def delete_screen_version(version_id: int, request: Request, _: Superuser) -> dict[str, object]:
+    """Permanently delete one screen-bundle snapshot. 404s on a non-bundle id (use the file-version
+    endpoint for those)."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    v = store.get(version_id)
+    if v is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    store.delete(version_id)
+    return {"deleted": version_id}
+
+
+@router.delete("/config/screen-versions", summary="Clear a screen's bundle history")
+async def clear_screen_versions(request: Request, _: Superuser, app: str, screen: str) -> dict[str, object]:
+    """Delete EVERY bundle version for one screen — its whole dependency-snapshot history."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    return {"deleted": store.delete_key(_screen_bundle_key(app, screen))}
 
 
 # The legacy ``GET / PUT /config/connectors`` raw-TOML endpoints powered the Settings →
@@ -328,6 +622,7 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
             pools[name] = vals                  # tomlkit renders a fresh [pools.<name>] table
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -434,6 +729,7 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting config is invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -488,6 +784,7 @@ async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Super
 
     path = _dictionary_path(request.app.state.settings)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -531,6 +828,7 @@ async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> d
 
     path = Path(request.app.state.settings.menus.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -678,8 +976,153 @@ async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) 
 
     path = Path(request.app.state.settings.screens.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
+    # Per-screen dependency bundles — captured from the PRE-save app.state (still live here), so a
+    # later restore reverts the screen *with* the queries / lookups / DD entries it referenced.
+    _capture_screen_bundles(request, body.screens)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
+
+
+# ── Screen Creation Assistant — one-shot scaffold ─────────────────────────────────────────
+# The assistant ("train") collects everything in the UI, builds the SELECT/CRUD SQL client-side
+# (reusing the Query Wizard's generator), and POSTs ONE payload here. We merge it into the four
+# config files and apply atomically: every file is validated FIRST (nothing written on any failure),
+# then written through the SAME validated paths the per-section PUT endpoints use, then a single
+# reload makes the new screen live. Reuse over reinvention — this is orchestration, not new I/O.
+class ScaffoldTable(BaseModel):
+    name: str                                   # base table name → queries <name>_get/_put/_post/_delete
+    label: str | None = None
+    get_sql: str                                # the generated SELECT (read_query)
+    put_sql: str | None = None
+    post_sql: str | None = None
+    delete_sql: str | None = None
+
+
+class ScaffoldMenuItem(BaseModel):
+    app: str                                    # menu app (often == screen app)
+    id: str
+    label: str
+    icon: str | None = None
+    parent: str | None = None                   # id of an existing item to nest under (None = top level)
+    target: str                                 # the screen id
+    connector: str
+
+
+class ScaffoldBody(BaseModel):
+    connector: str                              # existing connector that receives the table/queries
+    app: str                                    # app that receives the screen
+    table: ScaffoldTable
+    dictionary_scope: str | None = None         # None / "shared" → top-level entries; else connectors.<scope>.entries
+    dictionary: list[dict[str, Any]] = []       # each entry: {id, label?, format?, justify?, size?, rules?, ...}
+    screen: dict[str, Any]                      # a parsed Screen dict (id, label, queries, columns[], dialog{tabs[]})
+    menu: ScaffoldMenuItem | None = None
+
+
+@router.post("/assistant/scaffold", summary="Scaffold a screen end-to-end")
+async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Superuser) -> dict[str, Any]:
+    """Create a connector table (+ its CRUD queries), optional dictionary entries, a screen + dialog,
+    and an optional menu item — in one validated, reload-applied pass. Used by the Screen Creation
+    Assistant. 404 if the target connector is unknown; 409 on a name collision; 422 if any merged
+    file fails validation (in which case NOTHING is written)."""
+    settings = request.app.state.settings
+
+    # ── connectors.toml: append the new table to the target connector ───────────────────────
+    cfile = load_connectors_file(Path(settings.connectors.config_path))
+    if body.connector not in cfile.connectors:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown connector {body.connector!r}")
+    conns = {name: c.model_dump(exclude_defaults=True) for name, c in cfile.connectors.items()}
+    target = conns[body.connector]
+    tables = target.setdefault("tables", [])
+    if any(isinstance(t, dict) and str(t.get("name", "")).lower() == body.table.name.lower() for t in tables):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail=f"table {body.table.name!r} already exists on connector {body.connector!r}")
+    table_entry: dict[str, Any] = {"name": body.table.name}
+    if body.table.label:
+        table_entry["label"] = body.table.label
+    table_entry["get"] = {"sql": body.table.get_sql}
+    slots: list[str] = ["get"]
+    for slot, sql in (("put", body.table.put_sql), ("post", body.table.post_sql), ("delete", body.table.delete_sql)):
+        if sql:
+            table_entry[slot] = {"sql": sql, "writable": True}
+            slots.append(slot)
+    tables.append(table_entry)
+
+    # ── dictionary.toml: merge entries (shared or per-connector scope) ───────────────────────
+    dfile = load_dictionary(_dictionary_path(settings))
+    ddict = dfile.model_dump(exclude_defaults=True)
+    created_dd: list[str] = []
+    if body.dictionary:
+        if body.dictionary_scope and body.dictionary_scope != "shared":
+            section = ddict.setdefault("connectors", {}).setdefault(body.dictionary_scope, {})
+            entries = section.setdefault("entries", {})
+        else:
+            entries = ddict.setdefault("entries", {})
+        for e in body.dictionary:
+            eid = str(e.get("id") or "").strip()
+            if not eid:
+                continue
+            entries[eid] = {k: v for k, v in e.items() if k != "id"}
+            created_dd.append(eid)
+
+    # ── screens.toml: add the screen under its app ──────────────────────────────────────────
+    sfile = load_screens(Path(settings.screens.config_path))
+    screens = {app: {sid: _dump_screen(s) for sid, s in scr.items()} for app, scr in sfile.screens.items()}
+    sid = str(body.screen.get("id") or "").strip()
+    if not sid:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="screen.id is required")
+    app_screens = screens.setdefault(body.app, {})
+    if sid in app_screens:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=f"screen {body.app}.{sid} already exists")
+    app_screens[sid] = body.screen
+
+    # ── menus.toml: append the menu item ────────────────────────────────────────────────────
+    mfile = load_menus(Path(settings.menus.config_path))
+    menus = {app: am.model_dump(exclude_defaults=True) for app, am in mfile.menus.items()}
+    if body.menu is not None:
+        app_menu = menus.setdefault(body.menu.app, {})
+        items = app_menu.setdefault("items", [])
+        if any(isinstance(it, dict) and it.get("id") == body.menu.id for it in items):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"menu item {body.menu.app}.{body.menu.id} already exists")
+        item: dict[str, Any] = {"id": body.menu.id, "label": body.menu.label, "type": "screen",
+                                "target": body.menu.target, "connector": body.menu.connector}
+        if body.menu.icon:
+            item["icon"] = body.menu.icon
+        if body.menu.parent:
+            item["parent"] = body.menu.parent
+        items.append(item)
+
+    # ── validate EVERYTHING before writing anything (no partial scaffolds) ───────────────────
+    try:
+        ConnectorsFile.model_validate({"connectors": conns})
+        DictionaryFile.model_validate(ddict)
+        parse_screens({"screens": screens})
+        MenusFile.model_validate({"menus": menus})
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"scaffold validation failed: {exc}") from exc
+
+    # ── write through the existing validated PUT paths (each snapshots its file); reload once ─
+    _snapshot_all_config(request)
+    await put_connectors_parsed(ConnectorsParsedBody(connectors=conns), request, principal)
+    if body.dictionary:
+        await put_dictionary_parsed(DictionaryBody(dictionary=ddict), request, principal)
+    await put_screens_parsed(ScreensBody(screens=screens), request, principal)
+    if body.menu is not None:
+        await put_menus_parsed(MenusBody(menus=menus), request, principal)
+    reload_result = await reload_connectors(request, principal)
+
+    return {
+        "created": {
+            "connector": body.connector,
+            "table": body.table.name,
+            "queries": [f"{body.table.name}_{s}" for s in slots],
+            "dictionary_entries": created_dd,
+            "screen": f"{body.app}.{sid}",
+            "menu_item": body.menu.id if body.menu is not None else None,
+        },
+        "reload": reload_result,
+    }
 
 
 @router.get("/config/charts/parsed", summary="Get charts config")
@@ -739,6 +1182,7 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
 
     path = Path(request.app.state.settings.charts.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -792,6 +1236,7 @@ async def put_actions_parsed(body: ActionsBody, request: Request, _: Superuser) 
 
     path = Path(request.app.state.settings.actions.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -851,6 +1296,7 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
 
     path = Path(request.app.state.settings.dashboards.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -901,6 +1347,7 @@ async def put_theme_parsed(body: ThemeBody, request: Request, _: Superuser) -> d
 
     path = Path(request.app.state.settings.theme.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path), "resolved": resolve_theme(validated.theme)}
 
@@ -998,6 +1445,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting jobs are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 
@@ -1199,6 +1647,7 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting app.toml is invalid: {exc}") from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
     # Live-apply: reload settings from disk and rebuild the runtime objects the new values
@@ -1352,6 +1801,7 @@ async def put_reports_branding(
         ) from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
     # Live-apply — next render picks the new branding up without a restart.
@@ -1502,6 +1952,7 @@ async def put_reports_parsed(
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
     # Rebuild the report registry so the new templates surface immediately
@@ -1785,6 +2236,7 @@ async def import_package_endpoint(
     Returns ``{report: {files: [...], warnings: [...], reloaded: bool}}`` with per-file
     counts of added / replaced / skipped entities. Reloads the framework after a
     successful apply so the new config is live for the next request."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     from fastapi import UploadFile, File
     from liberty.web.package_import import apply_package_zip
     if strategy not in ("merge", "overwrite", "replace_all"):
@@ -1946,6 +2398,7 @@ def _apply_dictionary_entries(request: Request, payload: dict[str, Any]) -> str:
     new_text = tomli_w.dumps(validated.model_dump(exclude_defaults=True))
     parse_dictionary(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return f"merged {len(entries)} entries into {scope!r} scope"
 
@@ -2015,6 +2468,7 @@ def _apply_connector_queries(request: Request, payload: dict[str, Any]) -> str:
     # nested tables — same trade-off as put_connectors_parsed).
     connectors_tbl[connector] = existing
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
     return f"added/updated {len(queries)} queries on connector {connector!r}"
 
@@ -2042,6 +2496,7 @@ def _apply_screen(request: Request, payload: dict[str, Any]) -> str:
     new_text = tomli_w.dumps({"screens": doc})
     parse_screens(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return f"saved screen {app}.{screen_id}"
 
@@ -2071,6 +2526,7 @@ def _apply_menu_item(request: Request, payload: dict[str, Any]) -> str:
     new_text = tomli_w.dumps({"menus": doc})
     parse_menus(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
     return f"saved menu item {item['id']} under {app}"
 
@@ -2130,6 +2586,7 @@ async def clone_with_deps_endpoint(body: CloneWithDepsBody, request: Request, _:
     Atomic per-file: dependency queries are written via _apply_connector_queries (grouped
     by connector) and the seed via the matching _apply_<kind>. Hits /admin/reload at the
     end so the new entries are live."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     if body.kind not in ("screen", "chart", "dashboard"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             detail=f"clone-with-deps doesn't support kind {body.kind!r}")
@@ -2199,6 +2656,7 @@ async def _apply_chart_clone(request: Request, scope: str | None, new_id: str, c
     new_text = tomli_w.dumps({"charts": doc})
     parse_charts(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2219,6 +2677,7 @@ async def _apply_dashboard_clone(request: Request, scope: str | None, new_id: st
     new_text = tomli_w.dumps({"dashboards": doc})
     parse_dashboards(tomllib.loads(new_text))
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2261,6 +2720,7 @@ async def delete_with_deps_endpoint(body: DeleteWithDepsBody, request: Request, 
     Order matters: the seed entity is removed FIRST (so its refs to the soon-to-be-
     deleted queries are gone), then the queries themselves. Hot-reload sees consistent
     state at each step. The final ``/admin/reload`` stitches the live registries."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     if body.kind not in ("screen", "chart", "dashboard"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             detail=f"delete-with-deps doesn't support kind {body.kind!r}")
@@ -2319,6 +2779,7 @@ async def _delete_screen(request: Request, app: str | None, screen_id: str) -> N
     import tomli_w
     new_text = tomli_w.dumps({"screens": doc})
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2345,6 +2806,7 @@ async def _delete_chart(request: Request, scope: str | None, chart_id: str) -> N
     import tomli_w
     new_text = tomli_w.dumps({"charts": doc})
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2370,6 +2832,7 @@ async def _delete_dashboard(request: Request, scope: str | None, dashboard_id: s
     import tomli_w
     new_text = tomli_w.dumps({"dashboards": doc})
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
 
 
@@ -2424,6 +2887,7 @@ async def _delete_connector_queries(request: Request, connector: str, query_name
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail=f"delete leaves connector {connector!r} invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
@@ -2563,6 +3027,7 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
     everywhere (in-flight requests still see the old registry until they finish).
     """
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         if body.kind == "connector":
@@ -2664,6 +3129,7 @@ async def move_query_between_connectors(body: MoveBody, request: Request, _: Sup
 
     Atomic — nothing is written unless every rewritten doc re-parses. Does **not** reload; the
     caller runs ``POST /admin/reload`` after to apply the change."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         result = move_query(
@@ -2725,6 +3191,7 @@ async def delete_app_endpoint(body: DeleteAppBody, request: Request, _: Superuse
 
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
     everywhere (in-flight requests still see the old registry until they finish)."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         result = delete_app(
@@ -2749,6 +3216,7 @@ async def clone_app_endpoint(body: CloneAppBody, request: Request, _: Superuser)
 
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
     everywhere (in-flight requests still see the old registry until they finish)."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         result = clone_app(

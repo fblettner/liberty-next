@@ -1052,6 +1052,17 @@ class Screen(BaseModel):
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
     uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
+    read_only: bool = Field(
+        default=False,
+        description=(
+            "Make the whole screen view-only. The runtime hides every mutating control: the "
+            "dialog's Save / Delete / Duplicate buttons, the grid's Add / Delete-selected and "
+            "inline editing, paste and Excel import, and the same controls in nested-table "
+            "editors. Stronger than ``disable_add`` (which only blocks inserts) — nothing on the "
+            "screen can write. Server-side permissions still apply independently. Use for "
+            "reference / audit screens that should never be edited from the UI."
+        ),
+    )
     disable_add: bool = Field(
         default=False,
         description=(

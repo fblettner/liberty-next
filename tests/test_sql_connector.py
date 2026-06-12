@@ -244,6 +244,69 @@ async def test_column_hint_rules_override_wins_over_dictionary(pools: PoolRegist
 
 
 @pytest.mark.asyncio
+async def test_sequence_param_bind_narrows_by_sibling_column(pools: PoolRegistry) -> None:
+    """A SEQUENCE column's ``lookup_param_binds`` binds the sequence query's :param from a sibling
+    column even when the param NAME differs (f0093's 'next id for a role' → ``:R`` from the ROLE
+    column). Without the bind the param is NULL and the sequence ignores the narrowing → returns 1."""
+    from liberty.connectors.config import ParamBind
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection, SequenceDef
+    engine = pools.engine("test")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE counter (env TEXT, role TEXT, num INTEGER)"))
+        await c.execute(text("INSERT INTO counter VALUES ('e1','r1',5),('e1','r2',9)"))
+    d = DictionaryFile(connectors={"db": DictionarySection(
+        entries={"NUM": DictionaryEntry(rules="SEQUENCE", rules_values="seq_role")},
+        sequences={"seq_role": SequenceDef(query="next_num_for_role")},
+    )})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO counter (env, role, num) VALUES (:ENV, :ROLE, :NUM)"),
+        QueryDef(name="next_num_for_role", sql="SELECT COALESCE(MAX(num), 0) + 1 AS n FROM counter WHERE role = :R"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    base = [ColumnHint(name="ENV"), ColumnHint(name="ROLE"), ColumnHint(name="NUM", dd="NUM")]
+    bound_hints = [*base[:2], ColumnHint(name="NUM", dd="NUM", lookup_param_binds=[ParamBind(param="R", source="ROLE")])]
+
+    res = await conn.execute("ins", {"ENV": "e1", "ROLE": "r2", "NUM": 0}, column_hints=bound_hints)
+    assert res.bound_params.get("NUM") == 10   # MAX(num where role='r2')=9 → 10; the bind passed r2 to :R
+
+    # Without the bind, :R stays NULL → WHERE role=NULL matches nothing → next num = 1.
+    res2 = await conn.execute("ins", {"ENV": "e1", "ROLE": "r1", "NUM": 0}, column_hints=base)
+    assert res2.bound_params.get("NUM") == 1
+
+
+@pytest.mark.asyncio
+async def test_sequence_group_by_filtered_by_param_and_hint_override(pools: PoolRegistry) -> None:
+    """f0093's exact shape: the rule is on the COLUMN HINT (the dictionary entry carries no rule), and
+    the sequence query has NO ``:param`` — it ``GROUP BY``s and returns every role's max+1. The param
+    bind doubles as a result-row FILTER (like a lookup), so the current row's role is picked. Without
+    the fixes the sequence wouldn't fire (hint-only rule) or would return the wrong group's value."""
+    from liberty.connectors.config import ParamBind
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection
+    engine = pools.engine("test")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE f0093 (lluser TEXT, llseq INTEGER)"))
+        await c.execute(text("INSERT INTO f0093 VALUES ('r1',5),('r1',7),('r2',9),('r2',3)"))
+    d = DictionaryFile(connectors={"db": DictionarySection(
+        entries={"SEQ": DictionaryEntry(label="Seq", format="number")},  # no rule — like the real SEQ entry
+    )})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="ins", writable=True, sql="INSERT INTO f0093 (lluser, llseq) VALUES (:LLUSER, :LLSEQ)"),
+        QueryDef(name="get_seq", sql="SELECT COALESCE(MAX(LLSEQ), 0) + 1 AS SEQ_VALUE, LLUSER FROM f0093 GROUP BY LLUSER"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    hints = [ColumnHint(name="LLUSER"),
+             ColumnHint(name="LLSEQ", dd="SEQ", rules="SEQUENCE", rules_values="get_seq",
+                        lookup_param_binds=[ParamBind(param="LLUSER", source="LLUSER")])]
+    res = await conn.execute("ins", {"LLUSER": "r2", "LLSEQ": 0}, column_hints=hints)
+    assert res.bound_params.get("LLSEQ") == 10   # MAX(llseq where lluser='r2')=9 → 10, the r2 group
+    res1 = await conn.execute("ins", {"LLUSER": "r1", "LLSEQ": 0}, column_hints=hints)
+    assert res1.bound_params.get("LLSEQ") == 8    # r1's max is 7 → 8 — proves the per-role filter
+    # A brand-new role has no GROUP BY row → no records yet → the FIRST id is 1 (not 0/NULL).
+    new = await conn.execute("ins", {"LLUSER": "rNEW", "LLSEQ": 0}, column_hints=hints)
+    assert new.bound_params.get("LLSEQ") == 1
+
+
+@pytest.mark.asyncio
 async def test_column_hints_match_case_insensitively(pools: PoolRegistry) -> None:
     # The database may report column names in a different case than the hints use
     # (Postgres folds unquoted identifiers to lowercase; v1's migrated col_target/dd are

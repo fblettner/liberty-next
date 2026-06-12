@@ -779,6 +779,28 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     setDialog({ ...(dialog ?? {}), tabs: next })
     setTabIdx(targetTabIdx); selectField(targetFields.length); setDragIdx(null)
   }
+  // Move the selected field to another tab via the Inspector's Tab picker (the keyboard/no-drag
+  // path for the same cross-tab move ``onTabDrop`` does). Only form tabs can hold fields, so the
+  // picker offers those; the field lands at the end of the target tab and follows the selection.
+  const moveFieldToTab = useCallback((targetTabIdx: number) => {
+    if (selFieldIdx == null || targetTabIdx === tabIdx) return
+    const movedField = fields[selFieldIdx]
+    if (!movedField) return
+    const next = tabs.slice()
+    next[tabIdx] = { ...next[tabIdx], fields: fields.filter((_, i) => i !== selFieldIdx) }
+    const targetFields = Array.isArray(next[targetTabIdx]?.fields) ? (next[targetTabIdx].fields as Row[]) : []
+    next[targetTabIdx] = { ...next[targetTabIdx], fields: [...targetFields, movedField] }
+    setDialog({ ...(dialog ?? {}), tabs: next })
+    setTabIdx(targetTabIdx); selectField(targetFields.length)
+  }, [selFieldIdx, fields, tabs, tabIdx, dialog, setDialog, selectField])
+  // Form tabs only (the kind that owns a field grid) — the move targets for the field Tab picker.
+  const formTabOptions = useMemo<SearchSelectOption[]>(
+    () => tabs
+      .map((tt, i) => ({ tt, i }))
+      .filter(({ tt }) => (typeof tt.type === 'string' ? tt.type : 'form') === 'form')
+      .map(({ tt, i }) => ({ value: String(i), label: String(tt.label ?? tt.id ?? `Tab ${i + 1}`) })),
+    [tabs],
+  )
 
   // ── inspector: the COLUMN editor ─────────────────────────────────────────────────────────
   // A selected field edits its matching ``ColumnHint`` (the single source of truth) — the SAME
@@ -1534,6 +1556,17 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               <InspTitle><FileText size={13} /> {String(selField.name ?? '')}</InspTitle>
               <Sub>{t('settings.screens.visual.fieldIsColumn',
                 'This field renders its column. Edit everything — including its dialog span (Display ▸ Colspan) — below; the same config drives the grid.')}</Sub>
+              {/* Move the field to another tab. Only shown when there's more than one form tab to
+                  move between (a drag across the tab strip does the same thing). */}
+              {formTabOptions.length > 1 && (
+                <Field label={t('settings.screens.visual.moveToTab', 'Tab')}>
+                  <SearchSelect
+                    value={String(tabIdx)}
+                    options={formTabOptions}
+                    onChange={(v) => moveFieldToTab(Number(v))}
+                  />
+                </Field>
+              )}
             </InspSection>
             {/* The column editor — identical to the Columns tab. Edits ``Screen.columns[<name>]``;
                 creates the column on first edit if the field referenced one not yet listed. */}

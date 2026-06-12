@@ -154,6 +154,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.charts = load_charts(settings.charts.config_path)
         app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
+        # Config file versioning — filesystem snapshot history (.versions/ next to the TOMLs) so the
+        # config editors can list / diff / restore prior saves. Best-effort: a store init failure must
+        # never block startup. Base dir = where the colocated config files live.
+        app.state.config_versions = None
+        try:
+            from liberty.versioning import ConfigVersionStore
+            app.state.config_versions = ConfigVersionStore(settings.connectors.config_path.parent)
+        except Exception:  # noqa: BLE001 — versioning is non-critical; log and continue
+            _log.warning("config version store unavailable", exc_info=True)
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
         # Change packages — control tables on the configured pool. None when disabled so the route
         # capture hook short-circuits. Schema is created lazily here (idempotent), like nomaflow.

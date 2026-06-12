@@ -108,7 +108,7 @@ def apply_package_zip(
     }
 
     for filename in zf.namelist():
-        if filename == "MANIFEST.md":
+        if filename in ("MANIFEST.md", "manifest.json"):  # informational metadata, not config
             continue
         target = routing.get(filename)
         if target is None:

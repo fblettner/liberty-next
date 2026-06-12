@@ -17,7 +17,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet } from 'lucide-react'
+import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet, Trash2 } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError, authHeaders } from '../../api/client'
@@ -403,17 +403,21 @@ export function ResultTable({
   const { activeId } = useTabs()
   const { sharedActions } = useWorkspace()
   const canEdit = !!(updateQuery || insertQuery)
+  // ``read_only`` makes the WHOLE screen view-only — the hard switch that turns off every mutating
+  // affordance below (add / duplicate / paste / import / inline edit / delete-selected). Stronger
+  // than ``disable_add`` (which only blocks inserts). The row dialog enforces the same flag itself.
+  const readOnly = !!screen?.read_only
   // Whether NEW records may be created here: an insert query exists AND the screen doesn't opt out
-  // via ``disable_add``. Gates every creation affordance (Add button, add-row / duplicate / paste /
-  // import) so an edit-only screen can keep its insert_query for the save path yet hide all the
-  // "make a new record" entry points. Edit / delete of existing rows is unaffected.
-  const canInsert = !!insertQuery && !screen?.disable_add
-  // ``Screen.editable`` (default true) gates INLINE GRID editing — the bulk-edit mode. False → the
-  // grid is view-only (a dialog, if any, still edits row-by-row). ``Screen.uploadable`` (default
-  // false) gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old
-  // behaviour: editable, not uploadable. Both were dormant before — honoured here so a screen
-  // migrated as view-only / no-import actually is.
-  const canBulkEdit = canEdit && screen?.editable !== false
+  // via ``disable_add`` (or ``read_only``). Gates every creation affordance (Add button, add-row /
+  // duplicate / paste / import) so an edit-only screen can keep its insert_query for the save path
+  // yet hide all the "make a new record" entry points. Edit / delete of existing rows is unaffected.
+  const canInsert = !!insertQuery && !screen?.disable_add && !readOnly
+  // ``Screen.editable`` (default true) gates INLINE GRID editing — the bulk-edit mode (which also
+  // hosts add-row / delete-selected). False — or ``read_only`` — makes the grid view-only (a dialog,
+  // if any, still opens row-by-row but is itself read-only). ``Screen.uploadable`` (default false)
+  // gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old behaviour:
+  // editable, not uploadable. Honoured here so a screen migrated as view-only / no-import actually is.
+  const canBulkEdit = canEdit && screen?.editable !== false && !readOnly
   const canImport = canInsert && !!screen?.uploadable
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -815,6 +819,18 @@ export function ResultTable({
   const toggleSelected = useCallback((row: DataRow) => {
     setSelected((s) => { const n = new Set(s); n.has(row) ? n.delete(row) : n.add(row); return n })
   }, [])
+  // Bulk delete the ticked rows in one go (the per-row × is tedious for many): a NEW row is dropped
+  // outright, an existing row is marked for deletion (→ delete_query on Save). Clears the selection.
+  const deleteSelected = useCallback(() => {
+    const sel = [...selected]
+    if (sel.length === 0) return
+    const isNew = (r: DataRow) => newRowsRef.current.includes(r)
+    const newSel = sel.filter(isNew)
+    const existing = sel.filter((r) => !isNew(r))
+    if (newSel.length) { setNewRows((p) => p.filter((r) => !newSel.includes(r))); for (const r of newSel) editsRef.current.delete(r) }
+    if (existing.length) setDeleted((s) => { const n = new Set(s); for (const r of existing) n.add(r); return n })
+    setSelected(new Set())
+  }, [selected])
   const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
   // Paste copied rows as new rows — each is a duplicate of the row it was copied from (the clipboard
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
@@ -981,72 +997,85 @@ export function ResultTable({
   // those columns: a match becomes an **edit** of that row (→ `update_query` on Save), the rest are
   // **new** rows (→ `insert_query`). That's the v2 replacement for v1's MERGE/UPSERT `_post` queries:
   // update-or-insert is decided here, in the batch-edit model, instead of in one SQL statement.
-  // Parse + header-map a sheet into rows keyed by column name, with lookup return-fill applied — the
-  // shared front half of BOTH the in-grid import and the validated Import dialog. Returns the mapped
-  // rows, or null when the file is empty / no header matched (a no-match also sets the banner).
+  // header-text → result column name, for round-tripping an export's headers (the column name, its
+  // label, and the "(ID)"-suffixed forms a lookup/enum export emits). Shared by file import AND the
+  // clipboard paste's header detection.
+  const importByHeader = useMemo(() => {
+    const idTag = t('table.idColumnSuffix')
+    const m = new Map<string, string>()
+    for (const c of result.columns) {
+      const add = (s: string | null | undefined) => { if (s) m.set(s.trim().toLowerCase(), c.name) }
+      add(c.name)
+      // A coded column (LOOKUP/ENUM) resolves by its CODE only — its description isn't unique and the
+      // code lives in the "(ID)" column the export emits. So map the code-bearing headers ("(ID)" +
+      // raw name), not the bare label (which holds the non-unique description).
+      if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
+      add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
+    }
+    return m
+  }, [result.columns, t])
+
+  // Resolve lookup ``return_binds`` on a set of mapped rows: a coded column (e.g. OBNM) with
+  // return_binds fills its mapped target columns (e.g. SY) from the matching lookup row — same effect
+  // as a dialog/grid pick, driven by the imported/pasted code. Fill-if-empty (an explicit value
+  // wins); skips silently when the lookup data isn't loaded. Mutates the rows in place.
+  const applyReturnFill = useCallback((seeds: Record<string, unknown>[]) => {
+    const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
+    if (returnFillCols.length === 0) return
+    for (const seed of seeds) {
+      for (const c of returnFillCols) {
+        const rule = c.rule
+        if (rule?.kind !== 'lookup') continue
+        const code = seed[c.name]
+        if (code == null || String(code).trim() === '') continue
+        const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
+        if (!data?.rows) continue
+        const valKey = rule.value
+        const want = String(code).trim()
+        const row = data.rows.find((r) => {
+          const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
+          return rv != null && String(rv).trim() === want
+        })
+        if (!row) continue
+        const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
+        for (const b of c.return_binds ?? []) {
+          const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
+          const cur = seed[target]
+          if (cur != null && String(cur).trim() !== '') continue  // explicit value wins
+          const v = lcRow.get(b.param.toLowerCase())
+          if (v !== undefined) seed[target] = v
+        }
+      }
+    }
+  }, [result.columns, lookupMaps])
+
+  // Parse + header-map a sheet into rows keyed by column name (with return-fill) — shared by the
+  // in-grid import and the validated Import dialog. Null when empty / no header matched (sets banner).
   const parseImportFile = useCallback(async (file: File): Promise<Record<string, unknown>[] | null> => {
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
     const ws = wb.Sheets[wb.SheetNames[0]]
     if (!ws) return null
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
-    const idTag = t('table.idColumnSuffix')
-    const byHeader = new Map<string, string>() // normalized header text → result column name
-    for (const c of result.columns) {
-      const add = (s: string | null | undefined) => { if (s) byHeader.set(s.trim().toLowerCase(), c.name) }
-      add(c.name)
-      // A coded column (LOOKUP or ENUM) resolves by its CODE only — never by its resolved
-      // description. The description isn't unique (two codes can share one), and both kinds now
-      // carry their code in the "(ID)" column the export emits. So DON'T map the bare label header
-      // (the export emits both "X (ID)" and "X"; the latter holds the description and was
-      // overwriting the code on import). Only the code-bearing headers ("(ID)" + raw name) map.
-      if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
-      add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
-    }
     const seeds = rows.map((r) => {
       const out: Record<string, unknown> = {}
       for (const [header, v] of Object.entries(r)) {
-        const col = byHeader.get(header.trim().toLowerCase())  // header text → which result column
+        const col = importByHeader.get(header.trim().toLowerCase())
         if (col) out[col] = v
       }
       return out
     }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
     if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return null }
-
-    // Resolve lookup ``return_binds`` on import: a coded column (e.g. OBNM) with return_binds
-    // fills its mapped target columns (e.g. SY) from the matching lookup row — same effect as a
-    // dialog / grid pick, but driven by the imported code. Fill-if-empty: an explicit value in the
-    // sheet wins; we only fill a target the sheet left blank. Skips silently if the lookup data
-    // isn't loaded yet (the grid loads it when the column renders).
-    const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
-    if (returnFillCols.length > 0) {
-      for (const seed of seeds) {
-        for (const c of returnFillCols) {
-          const rule = c.rule
-          if (rule?.kind !== 'lookup') continue
-          const code = seed[c.name]
-          if (code == null || String(code).trim() === '') continue
-          const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
-          if (!data?.rows) continue
-          const valKey = rule.value
-          const want = String(code).trim()
-          const row = data.rows.find((r) => {
-            const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-            return rv != null && String(rv).trim() === want
-          })
-          if (!row) continue
-          const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
-          for (const b of c.return_binds ?? []) {
-            const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
-            const cur = seed[target]
-            if (cur != null && String(cur).trim() !== '') continue  // explicit imported value wins
-            const v = lcRow.get(b.param.toLowerCase())
-            if (v !== undefined) seed[target] = v
-          }
-        }
-      }
-    }
+    applyReturnFill(seeds)
     return seeds
-  }, [result.columns, lookupMaps, t])
+  }, [importByHeader, applyReturnFill, t])
+
+  // Paste from Excel → new rows. The DataTable does the column mapping (it owns the exact visible-
+  // column set/order the export uses, so it can't drift); here we just apply the lookup return-fill
+  // and prepend the rows. Rows arrive keyed by column id, which IS the result column name.
+  const onPasteRows = useCallback((rows: Record<string, unknown>[]) => {
+    applyReturnFill(rows)
+    prependNewRows(rows)
+  }, [applyReturnFill, prependNewRows])
 
   // In-grid import (edit-mode quick add): parse + map, then merge into the bulk editor — existing
   // rows (matched on key) become pending edits, the rest new rows. The standalone Import button opens
@@ -1686,7 +1715,6 @@ export function ResultTable({
   return (
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
-      {editMode && saveErrors.length === 0 && <Banner $tone="info">{t('table.editingHint')}</Banner>}
       {canImport && (
         <input
           ref={fileRef}
@@ -1732,6 +1760,7 @@ export function ResultTable({
         // Right-click → row context menu when the screen carries any `row_menu` actions and
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
+        onPasteRows={editMode && canInsert ? onPasteRows : undefined}
         toolbar={
           !(canBulkEdit || (canInsert && hasDialog) || canImport || screen?.export || screenActions.length > 0) ? undefined : !editMode ? (
             <>
@@ -1803,6 +1832,9 @@ export function ResultTable({
                   <ClipboardPaste size={13} /> {t('table.pasteRows')}{clipboard.length ? ` (${clipboard.length})` : ''}
                 </TbBtn>
               )}
+              <TbBtn onClick={deleteSelected} disabled={saving || selected.size === 0} title={t('table.deleteSelected', 'Delete selected')}>
+                <Trash2 size={13} /> {t('table.deleteSelected', 'Delete selected')}{selected.size ? ` (${selected.size})` : ''}
+              </TbBtn>
             </>
           )
         }

@@ -66,6 +66,10 @@ function iconFor(name: string | undefined): LucideIcon | null {
   return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null
 }
 
+// The renderable icon names (sorted) — exposed so editors offer only icons the sidebar can actually
+// draw (the whitelist above), rather than the full 1500-icon lucide set.
+export const MENU_ICON_NAMES: string[] = Object.keys(ICONS).sort()
+
 const INDENT_PX = 14 // ChildrenWrap margin-left — places the rail under the parent's chevron
 const CHEVRON_W = 19 // a leaf's left padding past the row base — lines its label up with folder labels
 

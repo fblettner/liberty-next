@@ -371,6 +371,10 @@ export interface ScreenListItem {
   key_columns?: string[]
   editable: boolean
   uploadable: boolean
+  /** View-only screen — the runtime hides every mutating control: the dialog's Save / Delete /
+   *  Duplicate, the grid's Add / Delete-selected + inline editing, paste / import, and the same
+   *  controls in nested-table editors. Stronger than `disable_add` (which only blocks inserts). */
+  read_only?: boolean
   /** Prevent creating NEW records on this screen even when `insert_query` is set (edit/delete of
    *  existing rows stays allowed). Hides the Add button + dialog Add entry, and disables
    *  add-row / duplicate-row / paste / import in the grid bulk-editor. */

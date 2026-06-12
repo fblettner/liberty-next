@@ -39,16 +39,16 @@ interface WhereRow { col: string; op: WhereOp; value: string }
 
 interface OrderRow { col: string; dir: 'ASC' | 'DESC' }
 
-const JOIN_TYPES = ['INNER', 'LEFT', 'RIGHT'] as const
-type JoinType = (typeof JOIN_TYPES)[number]
+export const JOIN_TYPES = ['INNER', 'LEFT', 'RIGHT'] as const
+export type JoinType = (typeof JOIN_TYPES)[number]
 // One equi-join condition: ``<left> = <right>``, each an ``alias.col`` id (left from a preceding
 // table, right from this table). A list of these AND's together — JDE keys are often composite.
-interface JoinCond { left: string; right: string }
+export interface JoinCond { left: string; right: string }
 // One table in the FROM/JOIN chain. ``join`` is undefined for the base table (the FROM); the rest
 // carry a join type + the join condition. The condition is normally a list of equi-join pairs built
 // from the source/target dropdowns; ``raw`` holds a free-text ON instead (set when an existing query
 // uses a condition the pair model can't express — ``TRIM(x) IS NULL``, a function predicate, …).
-interface JoinTable {
+export interface JoinTable {
   schema: string | null
   name: string
   alias: string
@@ -57,7 +57,7 @@ interface JoinTable {
 }
 // A unique, stable alias for a table — the table's own name (uppercased), so a join reads clearly
 // (``F0004.DTSY``) instead of a cryptic truncation. A self-join's second copy gets a numeric suffix.
-function suggestAlias(name: string, taken: Set<string>): string {
+export function suggestAlias(name: string, taken: Set<string>): string {
   const base = (name.replace(/[^A-Za-z0-9]/g, '') || 't').toUpperCase()
   let a = base, n = 2
   while (taken.has(a.toUpperCase())) { a = `${base}${n}`; n += 1 }
@@ -690,7 +690,7 @@ function quoteIfNonNumeric(v: string): string {
   return `'${v.replace(/'/g, "''")}'`                  // SQL-quoted, single-quote-escaped
 }
 
-function generateSql(
+export function generateSql(
   joins: JoinTable[], cols: Set<string>, wheres: WhereRow[], orders: OrderRow[],
 ): string {
   if (joins.length === 0 || !joins[0].name || cols.size === 0) return ''

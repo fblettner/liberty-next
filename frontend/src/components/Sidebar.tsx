@@ -2,16 +2,18 @@
 // react-router NavLinks with lucide icons. Adapted from nomaubl's Sidebar.
 // When a workspace app is active it leads with that app's menu tree (SidebarMenu),
 // then a divider, then the framework links (Connectors / Assistant / Settings).
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight } from 'lucide-react'
+import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight, Wand2 } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import SidebarMenu from './SidebarMenu'
 import WorkspaceSelect from './WorkspaceSelect'
+
+const ScreenAssistantModal = lazy(() => import('../pages/ScreenAssistant'))
 
 const COLLAPSE_KEY = 'liberty.sidebar.collapsed'
 
@@ -99,6 +101,19 @@ const Item = styled(NavLink)<{ $collapsed: boolean }>`
   }
 `
 
+// Same look as Item, but a <button> — for framework links that open a MODAL instead of navigating
+// to a route (the Screen Assistant). No active state (it isn't a route).
+const ItemButton = styled.button<{ $collapsed: boolean }>`
+  display: flex; align-items: center; gap: 10px; border-radius: ${radius.md};
+  border: 1px solid transparent; background: transparent; cursor: pointer; width: 100%;
+  font-size: ${fontSize.base}; font-family: ${fonts.sans}; color: ${colors.text.secondary};
+  padding: ${({ $collapsed }) => ($collapsed ? '8px 0' : '8px 10px')};
+  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
+  white-space: nowrap; overflow: hidden;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
+`
+
 const GroupLabel = styled.div`
   font-size: ${fontSize.micro};
   font-weight: 700;
@@ -149,12 +164,13 @@ const CollapseBtn = styled.button<{ $collapsed: boolean }>`
 // either at the top of <Items> (no app menu) or in <FrameworkBar> (pinned below
 // a scrolling menu) by Sidebar() below.
 function FrameworkLinks({
-  collapsed, superuser, iconSize, t,
+  collapsed, superuser, iconSize, t, onOpenAssistant,
 }: {
   collapsed: boolean
   superuser: boolean
   iconSize: number
   t: (key: string) => string
+  onOpenAssistant: () => void
 }) {
   return (
     <>
@@ -164,6 +180,10 @@ function FrameworkLinks({
           Everything else is in the per-app menu trees from /api/menus. */}
       {superuser && (
         <>
+          <ItemButton type="button" $collapsed={collapsed} title={collapsed ? t('nav.assistant') : undefined} onClick={onOpenAssistant}>
+            <Wand2 size={iconSize} />
+            {!collapsed && t('nav.assistant')}
+          </ItemButton>
           <Item to="/monitoring" $collapsed={collapsed} title={collapsed ? t('nav.monitoring') : undefined}>
             <Activity size={iconSize} />
             {!collapsed && t('nav.monitoring')}
@@ -202,6 +222,8 @@ export default function Sidebar() {
     })
   }
   const iconSize = 16
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const openAssistant = () => setAssistantOpen(true)
 
   return (
     <Nav $collapsed={collapsed}>
@@ -217,12 +239,12 @@ export default function Sidebar() {
       <Items>
         {currentMenu && !collapsed
           ? <SidebarMenu menu={currentMenu} />
-          : <FrameworkLinks collapsed={collapsed} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} />}
+          : <FrameworkLinks collapsed={collapsed} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} onOpenAssistant={openAssistant} />}
       </Items>
       {currentMenu && !collapsed && (
         <FrameworkBar>
           <GroupLabel>{t('app.title')}</GroupLabel>
-          <FrameworkLinks collapsed={false} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} />
+          <FrameworkLinks collapsed={false} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} onOpenAssistant={openAssistant} />
         </FrameworkBar>
       )}
 
@@ -232,6 +254,14 @@ export default function Sidebar() {
           {!collapsed && t('common.collapse')}
         </CollapseBtn>
       </Bottom>
+
+      {/* Superuser-only wizard — a modal so it opens over anything and closes cleanly (X / Esc /
+          click-outside) without leaving a workspace tab behind. Lazy so it stays out of the shell chunk. */}
+      {assistantOpen && user?.is_superuser && (
+        <Suspense fallback={null}>
+          <ScreenAssistantModal onClose={() => setAssistantOpen(false)} />
+        </Suspense>
+      )}
     </Nav>
   )
 }

@@ -1403,3 +1403,189 @@ def test_reports_templates_preview_template_parse_error(env, tmp_path, monkeypat
         r = client.post("/admin/config/reports/preview", json=body, headers=h)
         assert r.status_code == 422
         assert "parse error" in r.json()["detail"].lower()
+
+
+def test_config_versioning_endpoints(env) -> None:
+    """Snapshot store + version endpoints: list / content / download / restore, superuser-gated."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        store = app.state.config_versions
+        assert store is not None
+        v = store.snapshot(conn_toml, source="manual", who="admin")   # snapshot the live connectors.toml
+        assert v is not None and v.version_num == 1
+
+        listed = client.get("/admin/config/versions", headers=h).json()["versions"]
+        assert any(x["id"] == v.id for x in listed)
+        one = client.get("/admin/config/versions?file=connectors.toml", headers=h).json()["versions"]
+        assert len(one) == 1 and one[0]["file"] == "connectors.toml" and one[0]["who"] == "admin"
+
+        c = client.get(f"/admin/config/versions/{v.id}/content", headers=h)
+        assert c.status_code == 200 and len(c.text) > 0
+        d = client.get(f"/admin/config/versions/{v.id}/download", headers=h)
+        assert d.status_code == 200 and "attachment" in d.headers.get("content-disposition", "")
+
+        rr = client.post(f"/admin/config/versions/{v.id}/restore", headers=h)
+        assert rr.status_code == 200 and rr.json()["restored"] == "connectors.toml"
+
+        assert client.get("/admin/config/versions/999999/content", headers=h).status_code == 404
+        assert client.get("/admin/config/versions", headers=_h(client, "reader")).status_code == 403
+
+
+def test_screen_bundle_versioning(env) -> None:
+    """Phase 2 — every screen save snapshots the CHANGED screens' dependency bundle (a deploy ZIP).
+    A brand-new screen captures nothing (no prior state); editing it captures its pre-edit bundle.
+    Bundles stay out of the file-version list and have their own list / download / restore surface."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        scr = {"nomasx1": {"f0093": {"label": "Roles", "read_query": "roles_get", "columns": [{"name": "ROL_ID"}]}}}
+
+        # First save CREATES the screen — no prior state, so no bundle yet. Reload makes it live.
+        assert client.put("/admin/config/screens/parsed", json={"screens": scr}, headers=h).status_code == 200
+        client.post("/admin/reload", headers=h)
+        assert client.get("/admin/config/screen-versions", headers=h).json()["bundles"] == []
+
+        # Editing it captures the PRE-edit bundle (one version for nomasx1.f0093).
+        scr["nomasx1"]["f0093"]["label"] = "Security Roles"
+        assert client.put("/admin/config/screens/parsed", json={"screens": scr}, headers=h).status_code == 200
+        bundles = client.get("/admin/config/screen-versions", headers=h).json()["bundles"]
+        assert len(bundles) == 1
+        b = bundles[0]
+        assert b["app"] == "nomasx1" and b["screen"] == "f0093" and len(b["versions"]) == 1
+        ver = b["versions"][0]
+        assert ver["source"] == "save"
+
+        # Bundles never leak into the file-version list (screens.toml history is separate).
+        files = client.get("/admin/config/versions", headers=h).json()["versions"]
+        assert all(not v["file"].startswith("screen:") for v in files)
+
+        # Inspect: the embedded manifest comes back grouped by kind (the screen is always present).
+        contents = client.get(f"/admin/config/screen-versions/{ver['id']}/contents", headers=h).json()
+        assert contents["app"] == "nomasx1" and contents["screen"] == "f0093"
+        assert any(d["name"] == "f0093" for d in contents["manifest"]["by_kind"].get("screen", []))
+
+        # Download is a ZIP; restore re-applies it (overwrite strategy) and reloads.
+        d = client.get(f"/admin/config/screen-versions/{ver['id']}/download", headers=h)
+        assert d.status_code == 200 and d.content[:2] == b"PK" and ".zip" in d.headers.get("content-disposition", "")
+        rr = client.post(f"/admin/config/screen-versions/{ver['id']}/restore", headers=h)
+        assert rr.status_code == 200 and rr.json()["restored"] == "screen:nomasx1:f0093"
+        assert "report" in rr.json()
+
+        # Filter to one screen; missing / wrong-kind ids 404; readers are gated.
+        assert len(client.get("/admin/config/screen-versions?app=nomasx1&screen=f0093", headers=h).json()["bundles"]) == 1
+        assert client.get("/admin/config/screen-versions?app=nomasx1&screen=nope", headers=h).json()["bundles"] == []
+        assert client.get(f"/admin/config/screen-versions/{ver['id']}/download", headers=_h(client, "reader")).status_code == 403
+        assert client.post("/admin/config/screen-versions/999999/restore", headers=h).status_code == 404
+
+        # Delete the bundle version; the file-version endpoint refuses a bundle id (separate surface).
+        assert client.delete(f"/admin/config/versions/{ver['id']}", headers=h).status_code == 404
+        assert client.delete(f"/admin/config/screen-versions/{ver['id']}", headers=h).json()["deleted"] == ver["id"]
+        assert client.get("/admin/config/screen-versions", headers=h).json()["bundles"] == []
+        assert client.delete(f"/admin/config/screen-versions/{ver['id']}", headers=h).status_code == 404
+
+
+def test_config_version_delete_endpoints(env) -> None:
+    """File-version delete + clear-history, superuser-gated; never touches the live file."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        store = app.state.config_versions
+        for text in ("a", "b", "c"):
+            conn_toml.write_text(text, encoding="utf-8")
+            store.snapshot(conn_toml, source="manual")
+        v = store.list_versions(conn_toml)
+        assert len(v) == 3
+        # Delete one version; the live file is untouched.
+        assert client.delete(f"/admin/config/versions/{v[0].id}", headers=h).json()["deleted"] == v[0].id
+        assert conn_toml.read_text() == "c"
+        assert len(store.list_versions(conn_toml)) == 2
+        # Clear the rest in one call.
+        assert client.delete("/admin/config/versions?file=connectors.toml", headers=h).json()["deleted"] == 2
+        assert store.list_versions(conn_toml) == []
+        # Gating + unknown id.
+        assert client.delete("/admin/config/versions/999999", headers=h).status_code == 404
+        assert client.delete(f"/admin/config/versions/{v[0].id}", headers=_h(client, "reader")).status_code == 403
+
+
+def _scaffold_payload() -> dict:
+    """A minimal Screen-Assistant payload: an `ab` table on connector `db`, one DD entry, a screen
+    with a 2-field dialog, and a menu item."""
+    return {
+        "connector": "db",
+        "app": "myapp",
+        "table": {
+            "name": "ab",
+            "label": "Address Book",
+            "get_sql": "SELECT 1 AS AN8, 'x' AS ALPH",
+            "post_sql": "INSERT INTO ab (AN8) VALUES (:AN8)",
+            "put_sql": "UPDATE ab SET ALPH = :ALPH WHERE AN8 = :AN8",
+            "delete_sql": "DELETE FROM ab WHERE AN8 = :AN8",
+        },
+        "dictionary_scope": "db",
+        "dictionary": [
+            {"id": "AN8", "label": "Address Number", "format": "text", "justify": "right_blank", "size": 8},
+        ],
+        "screen": {
+            "id": "address_book",
+            "label": "Address Book",
+            "connector": "db",
+            "read_query": "ab_get",
+            "insert_query": "ab_post",
+            "update_query": "ab_put",
+            "delete_query": "ab_delete",
+            "columns": [{"name": "AN8", "dd": "AN8", "key": True}, {"name": "ALPH"}],
+            "dialog": {
+                "title": "Address",
+                "tabs": [{"id": "general", "label": "General", "type": "form",
+                          "fields": [{"name": "AN8"}, {"name": "ALPH"}]}],
+            },
+        },
+        "menu": {"app": "myapp", "id": "address_book", "label": "Address Book",
+                 "icon": "users", "target": "address_book", "connector": "db"},
+    }
+
+
+def test_assistant_scaffold_creates_everything(env) -> None:
+    """One POST writes the connector table + CRUD queries, a dictionary entry, the screen + dialog,
+    and the menu item — then reloads so it's all live."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h)
+        assert r.status_code == 200, r.text
+        created = r.json()["created"]
+        assert created["queries"] == ["ab_get", "ab_put", "ab_post", "ab_delete"]
+        assert created["dictionary_entries"] == ["AN8"]
+        assert created["screen"] == "myapp.address_book" and created["menu_item"] == "address_book"
+
+        # Files were written.
+        ctext = conn_toml.read_text()
+        assert 'name = "ab"' in ctext and "ab_get" not in ctext  # synthesised names aren't literal in TOML
+        assert '[connectors.db.tables]' in ctext or 'name = "ab"' in ctext
+        base = conn_toml.parent
+        assert "[connectors.db.entries.AN8]" in (base / "dictionary.toml").read_text()
+        assert "[screens.myapp.address_book]" in (base / "screens.toml").read_text()
+        assert 'target = "address_book"' in (base / "menus.toml").read_text()
+
+        # Reload made it live: the screen resolves and its read query runs.
+        after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        assert after["myapp"]["address_book"]["read_query"] == "ab_get"
+        assert client.get("/api/sql/db/ab_get", headers=h).json()["rows"] == [{"AN8": 1, "ALPH": "x"}]
+
+        # Re-posting the same scaffold collides (table already exists).
+        assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h).status_code == 409
+
+
+def test_assistant_scaffold_validation_and_gating(env) -> None:
+    app, _, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        # Unknown connector → 404.
+        bad_conn = _scaffold_payload(); bad_conn["connector"] = "nope"
+        assert client.post("/admin/assistant/scaffold", json=bad_conn, headers=h).status_code == 404
+        # Missing screen id → 422, and nothing written (the connectors file is unchanged).
+        bad_screen = _scaffold_payload(); bad_screen["screen"].pop("id")
+        assert client.post("/admin/assistant/scaffold", json=bad_screen, headers=h).status_code == 422
+        # Reader is forbidden.
+        assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=_h(client, "reader")).status_code == 403

@@ -85,6 +85,12 @@ export interface DataTableProps<T extends object> {
    *  so the browser's native context menu doesn't appear; we don't suppress it on the table chrome
    *  itself, so headers / pagination still get their native menu. */
   onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLTableRowElement>) => void
+  /** When provided, a paste (Ctrl+V) over the grid — while NOT focused in a cell input — parses the
+   *  clipboard's TSV (an Excel copy) into rows keyed by VISIBLE column id and fires this. Mapping uses
+   *  the table's own visible leaf columns (the exact set + order the export emits), by HEADER when the
+   *  first pasted row matches column headers, else by POSITION — so it can't drift from what's shown.
+   *  The consumer (TableView) turns the rows into new bulk-edit rows. */
+  onPasteRows?: (rows: Record<string, unknown>[]) => void
 }
 
 interface SavedGrid {
@@ -326,7 +332,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu,
+  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -372,6 +378,7 @@ export function DataTable<T extends object>({
   const [colOpen, setColOpen] = useState(false)
   const [groupOpen, setGroupOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [exportAll, setExportAll] = useState(false)   // export every column, incl. hidden-by-default
   const [showFilters, setShowFilters] = useState(false)
   const colRef = useRef<HTMLDivElement>(null)
   const groupRef = useRef<HTMLDivElement>(null)
@@ -495,8 +502,10 @@ export function DataTable<T extends object>({
 
   const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.internal
   const colAlign = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.align
-  const exportRows = () => {
-    const cols = table.getVisibleLeafColumns().filter((c) => !isInternal(c))
+  const exportRows = (allColumns = false) => {
+    // ``allColumns`` exports every data column incl. the ones hidden by default — no need to unhide
+    // them in the Columns picker, export, then re-hide. Internal columns (select / status) stay out.
+    const cols = (allColumns ? table.getAllLeafColumns() : table.getVisibleLeafColumns()).filter((c) => !isInternal(c))
     const headers = cols.map((c) => colHeaderText(c))
     const rows = table.getFilteredRowModel().rows.map((row) =>
       cols.map((col) => {
@@ -509,6 +518,53 @@ export function DataTable<T extends object>({
     )
     return { headers, rows }
   }
+
+  // Paste from Excel → new rows. Maps the clipboard's TSV using the table's OWN visible leaf columns
+  // (the exact set + order the export emits — so it can't drift from what's displayed): HEADER mode
+  // when the first pasted row matches ≥2 column headers (order/label/hidden-independent), else by
+  // POSITION, with a LOOKUP/ENUM's derived label column as a skipped placeholder. Bails when a cell
+  // input is focused so a normal single-cell paste still works.
+  useEffect(() => {
+    if (!onPasteRows) return
+    const isLabelId = (id: string) => /(?:__lookup|__enum)$/.test(id)
+    const onPaste = (e: ClipboardEvent) => {
+      const ae = document.activeElement as HTMLElement | null
+      const tag = ae?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ae?.isContentEditable) return
+      const text = e.clipboardData?.getData('text/plain') ?? ''
+      if (!text || (!text.includes('\t') && !text.includes('\n'))) return
+      const lines = text.replace(/\r\n?/g, '\n').split('\n')
+      while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
+      if (lines.length === 0) return
+      const grid = lines.map((ln) => ln.split('\t'))
+      const cols = table.getVisibleLeafColumns().filter((c) => !isInternal(c))
+      const headerById = new Map<string, string>()  // header text → data column id (skip label cols)
+      for (const c of cols) if (!isLabelId(c.id)) headerById.set(colHeaderText(c).trim().toLowerCase(), c.id)
+      const first = grid[0]
+      const matched = first.filter((h) => headerById.get(h.trim().toLowerCase())).length
+      let targets: (string | null)[]
+      let body: string[][]
+      if (matched >= 2) {
+        targets = first.map((h) => headerById.get(h.trim().toLowerCase()) ?? null)
+        body = grid.slice(1)
+      } else {
+        targets = cols.map((c) => (isLabelId(c.id) ? null : c.id))
+        body = grid
+      }
+      const rows = body.map((cells) => {
+        const out: Record<string, unknown> = {}
+        cells.forEach((v, i) => { const tgt = targets[i]; if (tgt && v !== '') out[tgt] = v })
+        return out
+      }).filter((r) => Object.keys(r).length > 0)
+      if (rows.length === 0) return
+      e.preventDefault()
+      onPasteRows(rows)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isInternal/colHeaderText are stable; table is the live instance
+  }, [onPasteRows, table])
+
   // ── row virtualizer ───────────────────────────────────────────────────────────────────
   // Mount only the rows that fit (plus a small overscan window) into the DOM. The scroll
   // container is `TableScroll`; the virtualizer takes the **post-pagination** row list (so
@@ -547,8 +603,8 @@ export function DataTable<T extends object>({
   // virtualizer's body is everything below that. `colCount` is what each spacer row needs
   // to span — equal to the visible column count.
 
-  const exportCsv = () => {
-    const { headers, rows } = exportRows()
+  const exportCsv = (allColumns = false) => {
+    const { headers, rows } = exportRows(allColumns)
     const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
     const blob = new Blob([[headers.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n')], {
       type: 'text/csv;charset=utf-8;',
@@ -558,8 +614,8 @@ export function DataTable<T extends object>({
     URL.revokeObjectURL(url)
     setExportOpen(false)
   }
-  const exportExcel = () => {
-    const { headers, rows } = exportRows()
+  const exportExcel = (allColumns = false) => {
+    const { headers, rows } = exportRows(allColumns)
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
@@ -667,8 +723,11 @@ export function DataTable<T extends object>({
               <Download size={13} /> {t('table.export')} <ChevronDown size={11} />
             </CtrlBtn>
             <MenuPortal open={exportOpen} anchorRef={exportRef} onClose={() => setExportOpen(false)} minWidth={150}>
-                <DropdownItem onClick={exportCsv}><FileText size={13} /> CSV (.csv)</DropdownItem>
-                <DropdownItem onClick={exportExcel}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
+                <DropdownItem onClick={(e) => { e.stopPropagation(); setExportAll((v) => !v) }}>
+                  <CheckBox $on={exportAll}>{exportAll && <Check size={9} />}</CheckBox> {t('table.exportAllColumns', 'All columns (incl. hidden)')}
+                </DropdownItem>
+                <DropdownItem onClick={() => exportCsv(exportAll)}><FileText size={13} /> CSV (.csv)</DropdownItem>
+                <DropdownItem onClick={() => exportExcel(exportAll)}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
               </MenuPortal>
           </MenuWrap>
         </ActionGroup>
