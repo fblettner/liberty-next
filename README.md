@@ -53,6 +53,10 @@ cd release
 # Set the license key after install via Settings → App → License (encrypted at rest in app.toml).
 ```
 
+Upgrade later with [`release/upgrade.sh`](release/upgrade.sh) — it pulls the newest
+image (or `--tag X.Y.Z`), recreates the stack, waits for health, and reports the
+framework + apps version change (also journaled in **Settings → History → Upgrades**).
+
 The full deployment guide (TLS wiring, backups, upgrades, swarm, common ops) lives
 in [`release/README.md`](release/README.md).
 
@@ -152,7 +156,7 @@ git clone https://github.com/fblettner/liberty-next.git
 cd liberty-next
 python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -v               # 920+ tests
+.venv/bin/pytest -v               # 1100+ tests
 ./start.sh init-config            # seed config/*.toml from the .example files
 ./start.sh init-db                # FIRST RUN: create the auth store + `admin` user (prints password)
 ./start.sh                        # build frontend + serve on :8000
@@ -220,6 +224,31 @@ upgrades don't clobber customer forks.
 
 ---
 
+## Upgrade history & release notes
+
+Every config save is versioned (content-addressed snapshots on the persistent config
+volume), and **version changes of the software itself** are journaled too. On startup
+the running container compares its installed version against the last one it recorded
+and writes an `install` / `upgrade` entry — independently for the **framework**
+(`liberty-next`) and the **licensed apps** (`liberty-apps`). So after a `docker compose
+pull` (or [`release/upgrade.sh`](release/upgrade.sh)) you get a dated "7.0.38 → 7.0.39"
+trail, with the apps bundle tracked separately from the framework.
+
+- **Settings → History** — three toggles: **Files** (per-TOML version history with
+  diff + restore), **Screens** (screen+dependency bundles), and **Upgrades** (the
+  version timeline; selecting an entry renders that version's release notes inline,
+  with a Framework / Apps badge).
+- **Settings → Release notes** — the full changelog, EN + FR (FR falls back to EN),
+  with a per-version table of contents and a Framework / Apps switch.
+
+Release notes ship inside each wheel as `RELEASE.md` / `RELEASE.fr.md` and are served
+by `GET /admin/release-notes`; the version timeline is `GET /admin/upgrades` (both
+superuser-gated). The release workflow guarantees each released version has a
+`## <version> — <date>` section (it inserts a stub + warns when one is missing), so the
+Upgrades detail is never empty.
+
+---
+
 ## Releasing
 
 One GitHub Actions workflow, [`release.yml`](.github/workflows/release.yml), publishes
@@ -237,7 +266,9 @@ main branch push       →  release.yml runs:
                           1. Reads pyproject.toml's version
                           2. If that version is already tagged → auto-bump patch (7.0.1 → 7.0.2)
                              Else use as-is (when you manually bumped for a major/minor)
-                          3. Commits the bumped pyproject.toml back to main ([skip ci])
+                          3. Ensures liberty/RELEASE.md has a "## <version>" section
+                             (inserts a dated stub + warns if missing), then commits the
+                             bumped pyproject.toml + RELEASE.md back to main ([skip ci])
                           4. Builds + pushes multi-arch Docker to ghcr.io as <version> + :latest
                           5. Publishes sdist + wheel to PyPI
                           6. Tags v<version> + creates GitHub release with auto-notes
@@ -277,6 +308,17 @@ Run workflow → optional version input.
 - **Pre-publish failure** (build, Docker push) — fix and re-trigger; nothing is consumed.
 - **PyPI publish failure** (the only irreversible step) — the version is burned. Bump
   `pyproject.toml` to the next version and push again.
+- **Tag push fails with "refusing to allow a GitHub App to create or update workflow …
+  without `workflows` permission"** — this happens *only* on the release right after a
+  `.github/workflows/*` file changed: the `GITHUB_TOKEN` the bot uses can't push a ref
+  that carries a workflow-file change, so the final tag step is rejected (the Docker +
+  PyPI steps already ran — the version is published, just untagged). Fix: push the tag
+  yourself (you have the scope the bot lacks), e.g.
+  `git tag -a v<version> origin/main -m "Release v<version>" && git push origin v<version>`,
+  then draft the GitHub release from that tag. Pushing the tag does **not** re-trigger
+  the workflow (it triggers on `push: branches: [main]`, not tags), and it breaks the
+  cycle so the next release tags normally. To automate even this case, use a PAT with
+  `workflow` scope for the bump/tag push steps instead of `GITHUB_TOKEN`.
 
 ---
 
@@ -294,8 +336,10 @@ TanStack Table · Monaco (SQL editor) · Recharts (visualisation).
 ```
 config/      app.toml (committed) · {connectors,dictionary,menus,screens,charts,dashboards,auth,jobs}.toml (NOT committed — per-deployment)
 liberty/     main.py · config.py · crypto.py · framework_enums.py · theme.py
+             · RELEASE.md · RELEASE.fr.md  (changelog shipped in the wheel)
              · {cli,admin_cli,connectors_cli,migrate_cli,crypto_cli,license_cli}.py
              · connectors/{config,base,db,sql,api,registry,dictionary,introspect}.py
+             · versioning/  config + upgrade-history store (.versions/index.db)
              · licensing/{__init__.py, public.pem}
              · menus/config.py · screens/config.py · charts/config.py · dashboards/config.py
              · auth/{authstore,password,tokens,principal,oidc,dependencies,routes,models,db,service}.py
@@ -310,8 +354,8 @@ frontend/    Vite + React 19 + TS — built dist/ served by the backend
 .github/workflows/  release.yml — auto-publishes Docker (ghcr.io) + PyPI on every push to main
 docker/      entrypoint.sh — runtime config-init (init-db when POSTGRES_PASSWORD set)
 start.sh     run/dev helper (serve | dev | api | build | frontend | init-db | init-config | help)
-release/     deployment configs (Docker Compose light/full/swarm, install.sh, install-apps.sh)
-tests/       920+ tests
+release/     deployment configs (Docker Compose light/full/swarm, install.sh, install-apps.sh, upgrade.sh)
+tests/       1100+ tests
 docs/        PLAN.md · DEPLOYMENT.md · NOMAFLOW-UI.md · PHASE13.md
 ```
 
