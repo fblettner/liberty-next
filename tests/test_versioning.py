@@ -137,3 +137,39 @@ def test_purge_config_versions_callable(tmp_path: Path) -> None:
     removed = purge_config_versions(settings, ctx=SimpleNamespace(run_id="r1"), max_versions=1, max_age_days=0)
     assert removed == 3
     assert [v.version_num for v in ConfigVersionStore(tmp_path).list_versions(cfg)] == [4]
+
+
+def test_upgrade_history_install_then_upgrade(tmp_path: Path) -> None:
+    from liberty.versioning import record_upgrade_if_changed
+    store = ConfigVersionStore(tmp_path)
+    assert store.current_app_version() is None
+    e1 = record_upgrade_if_changed(store, "7.0.26")
+    assert e1 is not None and e1["kind"] == "install" and e1["from_version"] is None and e1["to_version"] == "7.0.26"
+    # Same version on the next start → no-op.
+    assert record_upgrade_if_changed(store, "7.0.26") is None
+    # A version bump → an upgrade row.
+    e2 = record_upgrade_if_changed(store, "7.0.27")
+    assert e2 is not None and e2["kind"] == "upgrade" and e2["from_version"] == "7.0.26" and e2["to_version"] == "7.0.27"
+    assert store.current_app_version() == "7.0.27"
+    ups = store.list_upgrades()
+    assert [u["to_version"] for u in ups] == ["7.0.27", "7.0.26"]   # newest first
+    assert ups[0]["kind"] == "upgrade" and ups[1]["kind"] == "install" and ups[0]["component"] == "framework"
+    # Survives a fresh store over the same dir.
+    assert ConfigVersionStore(tmp_path).current_app_version() == "7.0.27"
+
+
+def test_upgrade_history_components_are_independent(tmp_path: Path) -> None:
+    """Framework + apps versions are tracked separately; ``None`` apps version is skipped."""
+    from liberty.versioning import record_upgrades_if_changed
+    store = ConfigVersionStore(tmp_path)
+    # First start: framework installed, apps not installed (None).
+    rec = record_upgrades_if_changed(store, {"framework": "7.0.27", "apps": None})
+    assert [r["component"] for r in rec] == ["framework"]
+    # Later: apps installed, framework unchanged → only an apps install row.
+    rec = record_upgrades_if_changed(store, {"framework": "7.0.27", "apps": "1.0.0"})
+    assert [(r["component"], r["kind"]) for r in rec] == [("apps", "install")]
+    # Apps upgrade alone.
+    rec = record_upgrades_if_changed(store, {"framework": "7.0.27", "apps": "1.0.1"})
+    assert [(r["component"], r["kind"], r["from_version"], r["to_version"]) for r in rec] == [("apps", "upgrade", "1.0.0", "1.0.1")]
+    assert store.current_app_version("framework") == "7.0.27"
+    assert store.current_app_version("apps") == "1.0.1"

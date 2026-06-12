@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS config_version (
   UNIQUE(rel_path, version_num)
 );
 CREATE INDEX IF NOT EXISTS ix_config_version_path ON config_version(rel_path, version_num DESC);
+
+CREATE TABLE IF NOT EXISTS upgrade_history (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  component    TEXT    NOT NULL DEFAULT 'framework',  /* framework (liberty-next) | apps (liberty-apps) */
+  from_version TEXT,                  /* null on the first install */
+  to_version   TEXT    NOT NULL,
+  kind         TEXT    NOT NULL,      /* install | upgrade */
+  summary      TEXT,
+  who          TEXT,
+  created_at   TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_upgrade_history_created ON upgrade_history(component, created_at DESC, id DESC);
 """
 
 
@@ -76,6 +88,11 @@ class ConfigVersionStore:
         self._db = self.vdir / "index.db"
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            # Migration: ``component`` was added after upgrade_history shipped — add it to an older DB.
+            try:
+                c.execute("ALTER TABLE upgrade_history ADD COLUMN component TEXT NOT NULL DEFAULT 'framework'")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     # ── internals ──────────────────────────────────────────────────────────────────────────
     def _conn(self) -> sqlite3.Connection:
@@ -264,3 +281,75 @@ class ConfigVersionStore:
         live.parent.mkdir(parents=True, exist_ok=True)
         live.write_bytes(snap.read_bytes())
         return live
+
+    # ── upgrade history (application version changes) ────────────────────────────────────────
+    def current_app_version(self, component: str = "framework") -> str | None:
+        """The version *component* last moved TO — what we last ran. ``None`` when nothing has been
+        recorded yet for it (a fresh install of that component)."""
+        with self._conn() as c:
+            r = c.execute(
+                "SELECT to_version FROM upgrade_history WHERE component=? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (component,),
+            ).fetchone()
+        return r["to_version"] if r is not None else None
+
+    def record_upgrade(
+        self, *, to_version: str, kind: str, component: str = "framework",
+        from_version: str | None = None, summary: str | None = None, who: str | None = None,
+    ) -> dict[str, Any]:
+        """Append an upgrade-history row for *component* (``kind`` = ``install`` | ``upgrade``)."""
+        created = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._conn() as c:
+            cur = c.execute(
+                "INSERT INTO upgrade_history(component, from_version, to_version, kind, summary, who, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (component, from_version, to_version, kind, summary, who, created),
+            )
+            rid = int(cur.lastrowid)
+        return {
+            "id": rid, "component": component, "from_version": from_version, "to_version": to_version,
+            "kind": kind, "summary": summary, "who": who, "created_at": created,
+        }
+
+    def list_upgrades(self) -> list[dict[str, Any]]:
+        """All upgrade-history rows (every component), newest first."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, component, from_version, to_version, kind, summary, who, created_at "
+                "FROM upgrade_history ORDER BY created_at DESC, id DESC",
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def record_upgrade_if_changed(
+    store: ConfigVersionStore, running_version: str, *, component: str = "framework", who: str = "system",
+) -> dict[str, Any] | None:
+    """Record an ``install`` / ``upgrade`` row for *component* when its running version differs from the
+    last one recorded. Returns the new row, or ``None`` when unchanged. Idempotent across restarts."""
+    prev = store.current_app_version(component)
+    if prev is None:
+        return store.record_upgrade(
+            component=component, from_version=None, to_version=running_version, kind="install",
+            summary=f"First install ({running_version})", who=who,
+        )
+    if prev != running_version:
+        return store.record_upgrade(
+            component=component, from_version=prev, to_version=running_version, kind="upgrade",
+            summary=f"{prev} → {running_version}", who=who,
+        )
+    return None
+
+
+def record_upgrades_if_changed(
+    store: ConfigVersionStore, components: dict[str, str | None], *, who: str = "system",
+) -> list[dict[str, Any]]:
+    """Run :func:`record_upgrade_if_changed` for each ``{component: version}`` (skips ``None`` versions
+    — e.g. the licensed apps aren't installed). Returns the rows that were recorded."""
+    out: list[dict[str, Any]] = []
+    for comp, ver in components.items():
+        if not ver:
+            continue
+        entry = record_upgrade_if_changed(store, ver, component=comp, who=who)
+        if entry is not None:
+            out.append(entry)
+    return out

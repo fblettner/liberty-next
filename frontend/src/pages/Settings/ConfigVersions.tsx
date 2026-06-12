@@ -11,15 +11,24 @@ import { DiffEditor } from '@monaco-editor/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { RotateCcw, Download, GitCompare, FileText, LayoutGrid, ChevronRight, ChevronDown, Trash2 } from 'lucide-react'
+import { RotateCcw, Download, GitCompare, FileText, LayoutGrid, ChevronRight, ChevronDown, Trash2, ArrowUpCircle } from 'lucide-react'
 import { api, authHeaders } from '../../api/client'
 import { Button, Banner, SpinnerRing, ConfirmModal, Card } from '../../common'
+import { Markdown } from '../../common/Markdown'
 import { useIsLight } from '../../common/useIsLight'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 interface Version {
   id: number; file: string; version: number; size: number; checksum: string
   source: string; comment: string | null; who: string | null; created_at: string
+}
+interface Upgrade { id: number; component: string; from_version: string | null; to_version: string; kind: string; summary: string | null; who: string | null; created_at: string }
+// Slice the "## <version> …" section for one version out of the release-notes markdown.
+function releaseSection(md: string, version: string): string {
+  for (const p of md.split(/^## /m).slice(1)) {
+    if ((p.split('\n', 1)[0] ?? '').trim().startsWith(version)) return `## ${p}`
+  }
+  return ''
 }
 interface Bundle { app: string; screen: string; key: string; versions: Version[] }
 interface Dep { kind: string; name: string; scope: string | null }
@@ -106,7 +115,7 @@ const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleString() }
 export default function ConfigVersions() {
   const { t } = useTranslation()
   const light = useIsLight()
-  const [mode, setMode] = useState<'files' | 'screens'>('files')
+  const [mode, setMode] = useState<'files' | 'screens' | 'upgrades'>('files')
   const [versions, setVersions] = useState<Version[] | null>(null)
   const [bundles, setBundles] = useState<Bundle[] | null>(null)
   const [file, setFile] = useState<string | null>(null)        // selected file (left rail)
@@ -119,6 +128,19 @@ export default function ConfigVersions() {
   const [confirmV, setConfirmV] = useState<Version | null>(null)
   const [confirmB, setConfirmB] = useState<{ bundle: Bundle; v: Version } | null>(null)
   const [confirmDel, setConfirmDel] = useState<{ kind: 'file' | 'bundle'; v: Version; b?: Bundle } | null>(null)
+  // Upgrades: the app version-change history + the release notes (to show each upgrade's changelog).
+  const [upgrades, setUpgrades] = useState<Upgrade[] | null>(null)
+  const [releaseByComp, setReleaseByComp] = useState<Record<string, string>>({})  // component → EN markdown
+  const [selUpgrade, setSelUpgrade] = useState<number | null>(null)
+  useEffect(() => {
+    if (mode !== 'upgrades' || upgrades !== null) return
+    void api.get<{ upgrades: Upgrade[] }>('/admin/upgrades')
+      .then((r) => { setUpgrades(r.upgrades); setSelUpgrade((s) => s ?? (r.upgrades[0]?.id ?? null)) })
+      .catch(() => setUpgrades([]))
+    void api.get<{ components: Array<{ component: string; en: string }> }>('/admin/release-notes')
+      .then((r) => setReleaseByComp(Object.fromEntries(r.components.map((c) => [c.component, c.en || '']))))
+      .catch(() => undefined)
+  }, [mode, upgrades])
 
   const load = useCallback(async () => {
     try {
@@ -322,9 +344,49 @@ export default function ConfigVersions() {
         <SegBtn $active={mode === 'screens'} onClick={() => { setMode('screens'); setOpenId(null) }}>
           <LayoutGrid size={13} /> {t('versions.modeScreens', 'Screens')}
         </SegBtn>
+        <SegBtn $active={mode === 'upgrades'} onClick={() => { setMode('upgrades'); setOpenId(null) }}>
+          <ArrowUpCircle size={13} /> {t('versions.modeUpgrades', 'Upgrades')}
+        </SegBtn>
       </Seg>
 
-      {mode === 'screens' ? (
+      {mode === 'upgrades' ? (
+        upgrades === null ? <SpinnerRing /> : upgrades.length === 0 ? (
+          <Muted>{t('versions.upgradesEmpty', 'No upgrade history yet — an entry is recorded each time the application version changes.')}</Muted>
+        ) : (() => {
+          const compLabel = (c: string) => c === 'apps' ? t('versions.compApps', 'Apps') : t('versions.compFramework', 'Framework')
+          const u = upgrades.find((x) => x.id === selUpgrade) ?? upgrades[0]
+          const section = u ? releaseSection(releaseByComp[u.component] ?? '', u.to_version) : ''
+          return (
+            <Wrap>
+              <Rail>
+                {upgrades.map((up) => (
+                  <RailBtn key={up.id} $active={up.id === (u?.id ?? -1)} onClick={() => setSelUpgrade(up.id)}>
+                    <span>{up.from_version ? `${up.from_version} → ${up.to_version}` : up.to_version}</span>
+                    <span className="n">{compLabel(up.component)}</span>
+                  </RailBtn>
+                ))}
+              </Rail>
+              {u && (
+                <Stack>
+                  <Panel>
+                    <PanelHead>
+                      <Toggle as="div" style={{ cursor: 'default' }}>
+                        <Pill>{compLabel(u.component)}</Pill>
+                        <Pill>{u.kind}</Pill>
+                        <span className="v">{u.from_version ? `${u.from_version} → ${u.to_version}` : u.to_version}</span>
+                        <span className="meta">{fmtDate(u.created_at)}{u.who ? ` · ${u.who}` : ''}</span>
+                      </Toggle>
+                    </PanelHead>
+                    <PanelBody style={{ padding: '12px 14px' }}>
+                      {section ? <Markdown>{section}</Markdown> : <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.noNotes', 'No release notes for {{v}}.', { v: u.to_version })}</span>}
+                    </PanelBody>
+                  </Panel>
+                </Stack>
+              )}
+            </Wrap>
+          )
+        })()
+      ) : mode === 'screens' ? (
         bundles === null ? <SpinnerRing /> : bundles.length === 0 ? (
           <Muted>{t('versions.bundleEmpty', 'No screen history yet — a screen + its dependencies are snapshotted the next time you save it in the Designer.')}</Muted>
         ) : (
