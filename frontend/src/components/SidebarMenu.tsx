@@ -62,7 +62,7 @@ const ICONS: Record<string, LucideIcon> = {
   shield: Shield, table: Table, tag: Tag, trendingup: TrendingUp,
   user: User, usercheck: UserCheck, users: Users,
 }
-function iconFor(name: string | undefined): LucideIcon | null {
+export function iconFor(name: string | undefined): LucideIcon | null {
   return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null
 }
 

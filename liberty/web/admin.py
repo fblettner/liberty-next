@@ -1125,6 +1125,31 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
     }
 
 
+@router.get("/assistant/presets", summary="List screen-assistant table presets")
+async def list_assistant_presets(request: Request, _: Superuser, connector: str | None = None) -> dict[str, Any]:
+    """Operator-managed table presets for the Screen Assistant — a catalog of ready-made base
+    table + joins so an operator can start a screen without browsing the schema (e.g. the JDE
+    Address Book). Read from TOML under ``<config_dir>/presets/`` (recursively); each file holds a
+    ``[[presets]]`` list of ``{id, label, description?, connector?, tables: [{schema?, name, alias?,
+    join?, on?: [{left, right}]}]}`` — the first table is the base, the rest carry a join + ON.
+    Filtered by ``connector`` when given (a preset with no ``connector`` matches any)."""
+    base = Path(request.app.state.settings.connectors.config_path).parent / "presets"
+    out: list[dict[str, Any]] = []
+    if base.is_dir():
+        for f in sorted(base.rglob("*.toml")):
+            try:
+                doc = tomllib.loads(f.read_text(encoding="utf-8"))
+            except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
+                continue
+            for p in doc.get("presets", []) or []:
+                if not isinstance(p, dict) or not p.get("id") or not p.get("tables"):
+                    continue
+                if connector and p.get("connector") and p.get("connector") != connector:
+                    continue
+                out.append(p)
+    return {"presets": out}
+
+
 @router.get("/config/charts/parsed", summary="Get charts config")
 async def get_charts_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``charts.toml`` parsed and normalised — ``{path, charts: {<id>: ChartConfig

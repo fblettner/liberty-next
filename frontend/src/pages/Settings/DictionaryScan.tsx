@@ -11,14 +11,14 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { X, BookText, Search } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Input, Checkbox, SearchSelect, SpinnerRing, Tag, type SearchSelectOption } from '../../common'
+import { Overlay, Modal, ModalBody, ModalFooter, Button, Banner, Field, Checkbox, SearchSelect, SpinnerRing, Tag, type SearchSelectOption } from '../../common'
 import { TablePicker } from '../../common/SqlWizardModal'
+import { ScanProposalsTable, summarizeProposals, type ScanProposal } from './DictionaryScanTable'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, radius } from '../../theme'
 
 interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null; rules?: string | null; rules_values?: string | null; default?: string | null; justify?: string | null; size?: number | null; lookup_params?: Record<string, string> | null }
 interface ScanResult { scope: string; dialect: string | null; jde: boolean; items: ScanItem[] }
-interface Sel { include: boolean; label: string; format: string; rules: string; rules_values: string; default: string; justify: string; size: number | null; lookup_params: string }
 
 // "SY=01,RT=ST" ⇄ { SY: "01", RT: "ST" }
 const paramsToStr = (p: Record<string, string> | null | undefined) => Object.entries(p ?? {}).map(([k, v]) => `${k}=${v}`).join(',')
@@ -27,15 +27,18 @@ function parseParams(s: string): Record<string, string> {
   for (const part of s.split(',')) { const [k, ...v] = part.split('='); if (k.trim()) out[k.trim()] = v.join('=').trim() }
   return out
 }
+// One scanned column → its editable proposal (keyed by physical column).
+const toProposal = (it: ScanItem): ScanProposal => ({
+  column: it.column, dd_id: it.dd_id, exists: it.exists, type: it.type, source: it.source,
+  keep: !it.exists, label: it.label ?? '', format: it.format ?? '',
+  rules: it.rules ?? '', rules_values: it.rules_values ?? '', lookup_params: paramsToStr(it.lookup_params),
+  default: it.default ?? '', justify: it.justify ?? '', size: it.size ?? null,
+})
 
 const Box = styled(Modal)`width: min(1120px, 96vw); height: min(720px, 92vh);`
 const Header = styled.div`display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0; & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; }`
 const CloseBtn = styled.button`margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: ${radius.md}; border: 1px solid ${colors.border}; background: transparent; color: ${colors.text.muted}; cursor: pointer; &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }`
 const PickRow = styled.div`display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;`
-const Table = styled.table`width: 100%; border-collapse: collapse; font-size: ${fontSize.base};`
-const Th = styled.th`text-align: left; padding: 6px 8px; color: ${colors.text.muted}; font-weight: 600; font-size: ${fontSize.sm}; border-bottom: 1px solid ${colors.border}; position: sticky; top: 0; background: ${colors.bg.dropdown}; z-index: 1;`
-const Td = styled.td`padding: 5px 8px; border-bottom: 1px solid ${colors.border}; vertical-align: middle;`
-const Mono = styled.span`font-family: ${fonts.mono}; color: ${colors.text.primary};`
 const Muted = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; text-align: center; padding: 20px;`
 
 // Fallback format options if the framework-enum fetch fails; otherwise the live DICTIONARY_TYPE.
@@ -71,7 +74,7 @@ export function DictionaryScan({
   // pool, yet its dictionary entries are `connectors.nomajde.entries`. So this is selectable.
   const [scope, setScope] = useState(initialScope ?? initialConnector ?? '')
   const [result, setResult] = useState<ScanResult | null>(null)
-  const [sel, setSel] = useState<Record<string, Sel>>({})
+  const [sel, setSel] = useState<Record<string, ScanProposal>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -103,12 +106,8 @@ export function DictionaryScan({
       }
       const r = await api.post<ScanResult>('/admin/dictionary/scan', body)
       setResult(r)
-      const next: Record<string, Sel> = {}
-      for (const it of r.items) next[it.dd_id] = {
-        include: !it.exists, label: it.label ?? '', format: it.format ?? '',
-        rules: it.rules ?? '', rules_values: it.rules_values ?? '', default: it.default ?? '', justify: it.justify ?? '', size: it.size ?? null,
-        lookup_params: paramsToStr(it.lookup_params),
-      }
+      const next: Record<string, ScanProposal> = {}
+      for (const it of r.items) next[it.column] = toProposal(it)
       setSel(next)
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
   }, [connector, preset, initialTable, pickedTable, pickedSchema, schema, scope, jde])
@@ -118,8 +117,9 @@ export function DictionaryScan({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only on the JDE toggle
   useEffect(() => { if (!preset && result) void scan() }, [jde])
 
-  const patch = (id: string, p: Partial<Sel>) => setSel((s) => ({ ...s, [id]: { ...s[id], ...p } }))
-  const chosen = result ? result.items.filter((it) => sel[it.dd_id]?.include) : []
+  const patch = (column: string, p: Partial<ScanProposal>) => setSel((s) => ({ ...s, [column]: { ...s[column], ...p } }))
+  const proposals = result ? result.items.map((it) => sel[it.column]).filter(Boolean) : []
+  const chosen = proposals.filter((d) => d.keep && !d.exists)
 
   const save = async () => {
     if (!result || chosen.length === 0) return
@@ -131,8 +131,7 @@ export function DictionaryScan({
       doc.connectors = doc.connectors || {}
       const sc = (doc.connectors[result.scope] = doc.connectors[result.scope] || {})
       sc.entries = sc.entries || {}
-      for (const it of chosen) {
-        const s = sel[it.dd_id]
+      for (const s of chosen) {
         const entry: Record<string, unknown> = {}
         if (s.label.trim()) entry.label = s.label.trim()
         if (s.format) entry.format = s.format
@@ -144,7 +143,7 @@ export function DictionaryScan({
         if (s.justify.trim()) entry.justify = s.justify.trim()   // JDE F9210.FRDRUL → right_blank / right_zero
         if (s.size != null) entry.size = s.size                  // JDE F9210.FRDTAS — data item width
         if (s.lookup_params.trim()) entry.lookup_params = parseParams(s.lookup_params)   // UDC SY/RT binds
-        sc.entries[it.dd_id] = entry
+        sc.entries[s.dd_id] = entry
       }
       await api.put('/admin/config/dictionary/parsed', { dictionary: doc })
       await api.post('/admin/reload')
@@ -206,44 +205,11 @@ export function DictionaryScan({
               <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginTop: 4 }}>
                 {result.jde ? <Tag $tone="orange">JDE</Tag> : null}{' '}
                 {t('settings.dictscan.summary', '{{missing}} missing of {{total}} columns → scope “{{scope}}”', {
-                  missing: result.items.filter((i) => !i.exists).length, total: result.items.length, scope: result.scope,
+                  ...summarizeProposals(proposals), scope: result.scope,
                 })}
               </div>
-              <div style={{ overflowY: 'auto', flex: 1, minHeight: 0, border: `1px solid ${colors.border}`, borderRadius: radius.md, marginTop: 6 }}>
-                <Table>
-                  <thead><tr>
-                    <Th style={{ width: 36 }} />
-                    <Th>{t('settings.dictscan.column', 'Column')}</Th>
-                    <Th>{t('settings.dictscan.label', 'Label')}</Th>
-                    <Th style={{ width: 120 }}>{t('settings.dictscan.format', 'Format')}</Th>
-                    <Th style={{ width: 130 }}>{t('settings.dictscan.rule', 'Rule')}</Th>
-                    <Th style={{ width: 90 }}>{t('settings.dictscan.ruleValue', 'Rule value')}</Th>
-                    <Th style={{ width: 130 }}>{t('settings.dictscan.lookupParams', 'Lookup params')}</Th>
-                    <Th style={{ width: 96 }}>{t('settings.dictscan.default', 'Default')}</Th>
-                    <Th style={{ width: 90 }}>{t('settings.dictscan.source', 'Source')}</Th>
-                  </tr></thead>
-                  <tbody>
-                    {result.items.map((it) => {
-                      const s = sel[it.dd_id]
-                      const dis = it.exists
-                      return (
-                        <tr key={it.dd_id} style={it.exists ? { opacity: 0.55 } : undefined}>
-                          <Td><Checkbox checked={!!s?.include} disabled={dis} onChange={(v) => patch(it.dd_id, { include: v })} /></Td>
-                          <Td><Mono>{it.dd_id}</Mono>{it.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists', 'exists')})</span>}<div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{it.column !== it.dd_id ? `${it.column} · ` : ''}{it.type}</div></Td>
-                          <Td><Input value={s?.label ?? ''} disabled={dis} onChange={(e) => patch(it.dd_id, { label: e.target.value })} placeholder={it.dd_id} /></Td>
-                          <Td><SearchSelect value={s?.format ?? ''} disabled={dis} onChange={(v) => patch(it.dd_id, { format: v })} options={fmtOpts} allowCustom /></Td>
-                          {/* Rule / rule-value / lookup-params come from the JDE DD per-table + UDC-filter
-                              queries (when configured) and are editable here — same as the Screen Assistant. */}
-                          <Td><SearchSelect value={s?.rules ?? ''} disabled={dis} onChange={(v) => patch(it.dd_id, { rules: v })} options={ruleOpts} anyLabel={t('common.none', '(none)')} placeholder="—" /></Td>
-                          <Td><Input value={s?.rules_values ?? ''} disabled={dis || !s?.rules} onChange={(e) => patch(it.dd_id, { rules_values: e.target.value })} placeholder="—" /></Td>
-                          <Td><Input value={s?.lookup_params ?? ''} disabled={dis || s?.rules !== 'LOOKUP'} onChange={(e) => patch(it.dd_id, { lookup_params: e.target.value })} placeholder={s?.rules === 'LOOKUP' ? 'SY=01,RT=ST' : ''} /></Td>
-                          <Td><Input value={s?.default ?? ''} disabled={dis} onChange={(e) => patch(it.dd_id, { default: e.target.value })} placeholder="—" /></Td>
-                          <Td>{it.source === 'jde' ? <Tag $tone="orange">JDE&nbsp;DD</Tag> : <Tag $tone="blue">{t('settings.dictscan.inferred', 'inferred')}</Tag>}</Td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </Table>
+              <div style={{ flex: 1, minHeight: 0, marginTop: 6, display: 'flex' }}>
+                <ScanProposalsTable items={proposals} jde={result.jde} fmtOpts={fmtOpts} ruleOpts={ruleOpts} onPatch={patch} />
               </div>
             </>
           )}

@@ -1577,6 +1577,29 @@ def test_assistant_scaffold_creates_everything(env) -> None:
         assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h).status_code == 409
 
 
+def test_assistant_presets(env) -> None:
+    """The catalog endpoint reads TOML under <config>/presets/, filters by connector, gated."""
+    app, conn_toml, _ = env
+    presets_dir = conn_toml.parent / "presets" / "jdedwards"
+    presets_dir.mkdir(parents=True)
+    (presets_dir / "ab.toml").write_text(
+        '[[presets]]\nid = "ab"\nlabel = "Address Book"\nconnector = "jdedwards"\n'
+        '[[presets.tables]]\nschema = "#SCHEMA.DTA#"\nname = "F0101"\n\n'
+        '[[presets]]\nid = "other"\nlabel = "Other"\nconnector = "somethingelse"\n'
+        '[[presets.tables]]\nname = "X"\n',
+        encoding="utf-8",
+    )
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        all_p = client.get("/admin/assistant/presets", headers=h).json()["presets"]
+        assert {p["id"] for p in all_p} == {"ab", "other"}
+        # Filtered by connector — only matching (or connector-less) presets.
+        jde = client.get("/admin/assistant/presets?connector=jdedwards", headers=h).json()["presets"]
+        assert [p["id"] for p in jde] == ["ab"]
+        assert jde[0]["tables"][0] == {"schema": "#SCHEMA.DTA#", "name": "F0101"}
+        assert client.get("/admin/assistant/presets", headers=_h(client, "reader")).status_code == 403
+
+
 def test_assistant_scaffold_validation_and_gating(env) -> None:
     app, _, _ = env
     with TestClient(app) as client:
