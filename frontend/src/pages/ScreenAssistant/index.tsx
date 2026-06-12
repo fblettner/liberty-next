@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronLeft, Check, Wand2, ArrowRight, ArrowLeft, KeyRound, RotateCcw } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronLeft, Check, Wand2, ArrowRight, ArrowLeft, KeyRound, RotateCcw, BookOpen } from 'lucide-react'
 import { api } from '../../api/client'
 import { Banner, Button, Checkbox, Field, Input, SearchSelect, SpinnerRing, type SearchSelectOption } from '../../common'
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from '../../common/Modal'
@@ -18,22 +18,28 @@ import {
 } from '../../common/SqlWizardModal'
 import { buildCrudSql } from '../../common/sqlBuild'
 import { SqlEditor } from '../../common/SqlEditor'
-import { MENU_ICON_NAMES } from '../../components/SidebarMenu'
+import { MENU_ICON_NAMES, iconFor } from '../../components/SidebarMenu'
+import { ScanProposalsTable, summarizeProposals, type ScanProposal } from '../Settings/DictionaryScanTable'
+import { getPoolSchemaTables, type PoolColumn } from '../../services/poolSchema'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type ColId = string                                   // "ALIAS.col"
 interface WizTab { id: string; label: string; cols: ColId[] }
-// One JDE dictionary proposal row (subset of /admin/dictionary/scan items, made editable).
-interface DdItem {
-  column: string; dd_id: string; exists: boolean; keep: boolean
-  label: string; format: string; justify: string; size: number | null
-  rules: string; rules_values: string; lookup_params: string   // lookup_params as "SY=01,RT=ST"
+// A catalog preset (from GET /admin/assistant/presets) — base table + optional joins.
+interface PresetTable {
+  schema?: string | null; name: string; alias?: string; join?: string; on?: Array<{ left: string; right: string }>
+  // Fast path: describe an existing connector query (its result columns) instead of walking the DB
+  // schema. ``query`` is the query name; ``query_connector`` defaults to the source connector.
+  query?: string; query_connector?: string
 }
-
+interface Preset { id: string; label: string; description?: string; group?: string; connector?: string; tables: PresetTable[] }
 const STEPS = ['target', 'tables', 'columns', 'dictionary', 'menu', 'review'] as const
 type StepKey = (typeof STEPS)[number]
-const ICON_OPTS: SearchSelectOption[] = MENU_ICON_NAMES.map((n) => ({ value: n, label: n, mono: n }))
+const ICON_OPTS: SearchSelectOption[] = MENU_ICON_NAMES.map((n) => {
+  const I = iconFor(n)
+  return { value: n, label: n, icon: I ? <I size={15} /> : undefined }
+})
 
 // ── layout ───────────────────────────────────────────────────────────────────────────────
 const HeadBar = styled.div`display: flex; align-items: center; gap: 10px; width: 100%;`
@@ -72,8 +78,15 @@ const ColRow = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid ${colors.border};
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
   &:last-child { border-bottom: none; }
-  & .grow { flex: 1; }
+  & .grow { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+  & .nm { flex-shrink: 0; }
+  & .lbl { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .k { display: inline-flex; align-items: center; gap: 3px; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
+`
+const PaneGroup = styled.div`
+  padding: 4px 10px; background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
+  font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; position: sticky; top: 0; z-index: 1;
+  & b { color: ${colors.text.secondary}; }
 `
 const Chip = styled.button<{ $active: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: ${fontSize.sm};
@@ -81,8 +94,16 @@ const Chip = styled.button<{ $active: boolean }>`
   background: ${(p) => (p.$active ? colors.blue.bg : 'transparent')}; color: ${(p) => (p.$active ? colors.blue.main : colors.text.primary)};
 `
 const Grid2 = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px;`
-const DdGrid = styled.div`display: grid; gap: 6px 8px; align-items: center; font-size: ${fontSize.sm}; max-height: 46vh; overflow: auto;`
-const DdHead = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em;`
+// Catalog picker
+const CatGroup = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.05em; margin: 14px 0 6px; &:first-of-type { margin-top: 2px; }`
+const PresetCard = styled.button`
+  display: block; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 6px; border-radius: ${radius.md};
+  border: 1px solid ${colors.border}; background: ${colors.bg.card}; cursor: pointer;
+  &:hover { border-color: ${colors.blue.main}; background: ${colors.blue.bg}; }
+  & .lbl { font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; }
+  & .desc { font-size: ${fontSize.micro}; color: ${colors.text.secondary}; margin-top: 2px; }
+  & .tbls { font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 4px; }
+`
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 const colName = (id: ColId) => (id.split('.').slice(1).join('.') || id).toUpperCase()   // bare column name
@@ -92,6 +113,21 @@ function parseParams(s: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const part of s.split(',')) { const [k, ...v] = part.split('='); if (k.trim()) out[k.trim()] = v.join('=').trim() }
   return out
+}
+// Resolve a preset's join ref ("ALIAS.COL") to a real introspected column id. A preset references
+// columns by DATA ITEM (e.g. F03012.AN8), but JDE physical columns are prefixed (AIAN8 / ABAN8) — so
+// match exact, else "drop the 2-char table prefix" (JDE), else endsWith. Falls back to the raw ref.
+function resolveJoinRef(tables: JoinTable[], ref: string): string {
+  const dot = ref.indexOf('.')
+  if (dot < 0) return ref
+  const alias = ref.slice(0, dot)
+  const di = ref.slice(dot + 1).toUpperCase()
+  const tbl = tables.find((t) => t.alias.toLowerCase() === alias.toLowerCase())
+  if (!tbl) return ref
+  const col = tbl.columns.find((c) => c.name.toUpperCase() === di)
+    ?? tbl.columns.find((c) => c.name.length > 2 && c.name.slice(2).toUpperCase() === di)
+    ?? tbl.columns.find((c) => c.name.toUpperCase().endsWith(di))
+  return col ? `${tbl.alias}.${col.name}` : ref
 }
 
 export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
@@ -110,15 +146,20 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   // Step 2 — tables & joins
   const [joins, setJoins] = useState<JoinTable[]>([])
   const [adding, setAdding] = useState(false)
+  const [presets, setPresets] = useState<Preset[]>([])
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [catalogQ, setCatalogQ] = useState('')
 
   // Step 3 — columns → tabs
   const [tabs, setTabs] = useState<WizTab[]>(DEFAULT_TABS)
   const [activeTab, setActiveTab] = useState('general')
   const [keys, setKeys] = useState<Set<ColId>>(new Set())
+  // Dictionary labels (data item → description) so columns show their meaning, not just the code.
+  const [ddLabels, setDdLabels] = useState<Map<string, string>>(new Map())
 
   // Step 4 — JDE dictionary
   const [isJde, setIsJde] = useState(false)
-  const [ddItems, setDdItems] = useState<DdItem[] | null>(null)
+  const [ddItems, setDdItems] = useState<ScanProposal[] | null>(null)
   const [ddLoading, setDdLoading] = useState(false)
   const [fmtOpts, setFmtOpts] = useState<SearchSelectOption[]>([])
   const [ruleOpts, setRuleOpts] = useState<SearchSelectOption[]>([])
@@ -165,6 +206,97 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     resetTables(); setIsJde(false); setDdLoading(false)
     setCreateMenu(true); setMenuLabel(''); setMenuIcon('table'); setMenuParent(''); setTableName(''); setScreenLabel('')
   }
+
+  // ── step 2: catalog presets ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!connector) { setPresets([]); return }
+    void api.get<{ presets: Preset[] }>(`/admin/assistant/presets?connector=${encodeURIComponent(connector)}`)
+      .then((r) => setPresets(r.presets)).catch(() => setPresets([]))
+  }, [connector])
+
+  // Dictionary labels for the chosen connector — data-item id → description. Used in the Columns
+  // step so each column shows its meaning. Connector scope wins, then shared, then any other scope.
+  useEffect(() => {
+    if (!connector) { setDdLabels(new Map()); return }
+    type Ent = Record<string, { label?: string }>
+    void api.get<{ dictionary: { entries?: Ent; connectors?: Record<string, { entries?: Ent }> } }>('/admin/config/dictionary/parsed')
+      .then((r) => {
+        const m = new Map<string, string>()
+        const add = (e?: Ent) => { for (const [k, v] of Object.entries(e ?? {})) { const key = k.toUpperCase(); if (v?.label && !m.has(key)) m.set(key, v.label) } }
+        const d = r.dictionary
+        add(d.connectors?.[connector]?.entries)
+        add(d.entries)
+        for (const sc of Object.values(d.connectors ?? {})) add(sc.entries)
+        setDdLabels(m)
+      }).catch(() => undefined)
+  }, [connector])
+  // The dictionary description for a column id — try the physical name, then the JDE-stripped item.
+  const colLabel = useCallback((id: ColId) => {
+    const nm = colName(id)
+    return ddLabels.get(nm) ?? (nm.length > 2 ? ddLabels.get(nm.slice(2)) : undefined) ?? ''
+  }, [ddLabels])
+  // Apply a preset: introspect each table's live columns, wire the declared joins, reset downstream.
+  const applyPreset = useCallback(async (id: string) => {
+    const p = presets.find((x) => x.id === id)
+    if (!p) return
+    setBusy(true); setMsg(null)
+    try {
+      // Resolve each table's columns — describe an existing connector query when the preset names one
+      // (fast: one cheap ``_limit=0`` describe, no schema walk), else introspect the pool schema.
+      const built: JoinTable[] = []
+      const taken = new Set<string>()
+      for (const pt of p.tables) {
+        let cols: PoolColumn[] | null = null
+        let name = pt.name
+        let schema = pt.schema ?? null
+        if (pt.query) {
+          try {
+            const qc = pt.query_connector || connector
+            const r = await api.get<{ columns?: Array<{ name: string; type?: string | null }> }>(`/api/sql/${encodeURIComponent(qc)}/${encodeURIComponent(pt.query)}?_limit=0`)
+            cols = (r.columns ?? []).map((c) => ({ name: c.name, type: c.type ?? undefined }))
+          } catch { cols = null }
+        }
+        if (!cols || cols.length === 0) {
+          const part = await getPoolSchemaTables(connector, pt.schema ?? null, pt.name)
+          const tb = (part?.tables ?? []).find((x) => x.name.toLowerCase() === pt.name.toLowerCase())
+          if (!tb) { setMsg({ tone: 'err', text: t('assistant.presetMiss', { name: pt.name, defaultValue: 'Table {{name}} not found on this connector.' }) }); continue }
+          cols = tb.columns; name = tb.name; schema = pt.schema ?? tb.schema ?? null
+        }
+        const alias = pt.alias || suggestAlias(name, taken)
+        taken.add(alias.toLowerCase())
+        built.push({ schema, name, alias, columns: cols })
+      }
+      // Then wire the joins, resolving each ON ref (data item → physical column).
+      for (let i = 1; i < built.length && i < p.tables.length; i++) {
+        const pt = p.tables[i]
+        built[i].join = {
+          type: (pt.join as JoinType) ?? 'INNER',
+          conds: (pt.on ?? [{ left: '', right: '' }]).map((c) => ({
+            left: resolveJoinRef(built, c.left), right: resolveJoinRef(built, c.right),
+          })),
+        }
+      }
+      if (built.length) {
+        setJoins(built); setAdding(false)
+        setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setDdItems(null)
+        if (!tableName) setTableName(slug(p.id))
+      }
+    } finally { setBusy(false) }
+  }, [presets, connector, tableName, t])
+
+  // Catalog browser — filter by query, group by ``group``, sort groups + presets alphabetically.
+  const catalogGroups = useMemo<Array<[string, Preset[]]>>(() => {
+    const q = catalogQ.trim().toLowerCase()
+    const match = (p: Preset) => !q || [p.label, p.id, p.description ?? '', ...p.tables.map((tb) => tb.name)].some((s) => s.toLowerCase().includes(q))
+    const m = new Map<string, Preset[]>()
+    for (const p of presets) {
+      if (!match(p)) continue
+      const g = p.group || t('assistant.presetOther', 'Other')
+      const list = m.get(g) ?? []; list.push(p); m.set(g, list)
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([g, list]) => [g, list.sort((a, b) => a.label.localeCompare(b.label))] as [string, Preset[]])
+  }, [presets, catalogQ, t])
 
   // ── step 2 helpers (base + joins) ──────────────────────────────────────────────────────
   const pickBase = (tbl: PickedTable) => {
@@ -224,29 +356,37 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     if (!base) return
     setDdLoading(true); setMsg(null)
     try {
+      // Scope the scan to the target APP (same as the Dictionary editor's "Store under" picker), not
+      // the source connector — JDE entries often live under an app scope (e.g. nomajde) that uses the
+      // jdedwards pool, so scoping by connector would miss them and re-propose every column.
       const r = await api.post<{ jde: boolean; items: Array<Record<string, unknown>> }>('/admin/dictionary/scan', {
-        connector, table: base.name, db_schema: base.schema, scope: connector,
+        connector, table: base.name, db_schema: base.schema, scope: appKey,
       })
       setIsJde(!!r.jde)
-      setDdItems(r.items.map((it) => ({
+      setDdItems(r.items.map((it): ScanProposal => ({
         column: String(it.column ?? ''), dd_id: String(it.dd_id ?? it.column ?? ''),
-        exists: !!it.exists, keep: !it.exists,
+        exists: !!it.exists, keep: !it.exists, type: (it.type as string | null) ?? null,
+        source: (it.source as 'jde' | 'inferred' | undefined),
         label: String(it.label ?? ''), format: String(it.format ?? 'text'),
         justify: String(it.justify ?? ''), size: (it.size as number | null) ?? null,
-        rules: String(it.rules ?? ''), rules_values: String(it.rules_values ?? ''),
+        rules: String(it.rules ?? ''), rules_values: String(it.rules_values ?? ''), default: String(it.default ?? ''),
         // The scan returns lookup_params as { SY: "01", RT: "ST" } for UDC columns — flatten to the
         // "SY=01,RT=ST" the input edits.
         lookup_params: Object.entries((it.lookup_params as Record<string, string> | undefined) ?? {}).map(([k, v]) => `${k}=${v}`).join(','),
       })))
     } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }); setDdItems([]) }
     finally { setDdLoading(false) }
-  }, [base, connector])
+  }, [base, connector, appKey])
+  // Changing the target app (= the dictionary scope) or the base table invalidates a prior scan, so
+  // re-entering the Dictionary step re-scans against the right scope (otherwise a scan taken while the
+  // app still defaulted to the connector would wrongly report every column missing).
+  useEffect(() => { setDdItems(null) }, [appKey, base?.name, base?.schema])
   useEffect(() => { if (STEPS[step] === 'dictionary' && ddItems === null && base) void runScan() }, [step, ddItems, base, runScan])
 
-  const patchDd = (col: string, patch: Partial<DdItem>) =>
+  const patchDd = (col: string, patch: Partial<ScanProposal>) =>
     setDdItems((items) => (items ?? []).map((d) => d.column === col ? { ...d, ...patch } : d))
   const ddByCol = useMemo(() => {
-    const m = new Map<string, DdItem>()
+    const m = new Map<string, ScanProposal>()
     for (const d of ddItems ?? []) m.set(d.column.toUpperCase(), d)
     return m
   }, [ddItems])
@@ -283,7 +423,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         post_sql: assignedBase.length ? crud('post') : undefined,
         delete_sql: keyBase.length ? crud('delete') : undefined,
       },
-      dictionary_scope: connector,
+      dictionary_scope: appKey,
       dictionary: kept.map((d) => ({
         id: d.dd_id, label: d.label || undefined, format: d.format || undefined,
         ...(d.justify ? { justify: d.justify } : {}), ...(d.size != null ? { size: d.size } : {}),
@@ -323,11 +463,11 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     target: 'Target', tables: 'Tables & joins', columns: 'Columns → tabs', dictionary: 'Dictionary', menu: 'Menu', review: 'Review & create',
   }[k])
   const activeWizTab = tabs.find((tb) => tb.id === activeTab)
-  const ddCols = isJde ? 'auto 1.1fr 1.4fr 90px 84px 84px 1fr 52px' : 'auto 1.2fr 1.6fr 120px 64px'
 
   return createPortal(
-    // No click-outside / Esc close — those wiped a half-built screen by accident. Close is explicit
-    // only: the header ✕ or the footer Cancel. The backdrop still dims, it just doesn't dismiss.
+    <>
+    {/* No click-outside / Esc close — those wiped a half-built screen by accident. Close is explicit
+        only: the header ✕ or the footer Cancel. The backdrop still dims, it just doesn't dismiss. */}
     <Overlay style={{ zIndex: 1000 }}>
       <Modal style={{ width: 'min(1120px, 96vw)', height: 'min(840px, 92vh)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
@@ -363,10 +503,14 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {/* ── Step 2: tables & joins ── */}
           {STEPS[step] === 'tables' && (
             <>
-              <Section>
-                <SectionTitle>{t('assistant.preset', 'Preset')}</SectionTitle>
-                <SearchSelect value="" onChange={() => undefined} options={[]} placeholder={t('assistant.presetSoon', 'Catalog presets — coming soon')} />
-              </Section>
+              {presets.length > 0 && (
+                <Section>
+                  <SectionTitle>{t('assistant.preset', 'Start from a catalog preset')}</SectionTitle>
+                  <Button $size="sm" $variant="ghost" onClick={() => { setCatalogQ(''); setCatalogOpen(true) }} style={{ alignSelf: 'flex-start' }}>
+                    <BookOpen size={14} /> {t('assistant.browseCatalog', 'Browse catalog ({{n}})', { n: presets.length })}
+                  </Button>
+                </Section>
+              )}
               {!base ? (
                 <Field label={t('assistant.baseTable', 'Base table')}><TablePicker connector={connector} onPick={pickBase} /></Field>
               ) : (
@@ -437,9 +581,22 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                 <Pane>
                   <PaneHead><ArrowRight size={12} /> {t('assistant.available', 'Available columns')} · {available.length}</PaneHead>
                   <PaneList>
-                    {available.map((id) => (
-                      <ColRow key={id}><span className="grow">{colName(id)}</span><Mini type="button" onClick={() => moveToTab(id)}><ArrowRight size={11} /></Mini></ColRow>
-                    ))}
+                    {/* Grouped by source table so columns are easy to find in a wide join. */}
+                    {joins.map((j) => {
+                      const avail = available.filter((id) => id.startsWith(`${j.alias}.`))
+                      if (avail.length === 0) return null
+                      return (
+                        <Fragment key={j.alias}>
+                          <PaneGroup><b>{j.name}</b> · {j.alias} · {avail.length}</PaneGroup>
+                          {avail.map((id) => (
+                            <ColRow key={id}>
+                              <span className="grow"><span className="nm">{colName(id)}</span>{colLabel(id) && <span className="lbl">{colLabel(id)}</span>}</span>
+                              <Mini type="button" onClick={() => moveToTab(id)}><ArrowRight size={11} /></Mini>
+                            </ColRow>
+                          ))}
+                        </Fragment>
+                      )
+                    })}
                     {available.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.allAssigned', 'All columns assigned')}</span></ColRow>}
                   </PaneList>
                 </Pane>
@@ -448,7 +605,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                   <PaneList>
                     {(activeWizTab?.cols ?? []).map((id) => (
                       <ColRow key={id}>
-                        <span className="grow">{colName(id)}</span>
+                        <span className="grow"><span className="nm">{colName(id)}</span>{colLabel(id) && <span className="lbl">{colLabel(id)}</span>}</span>
                         <span className="k"><Checkbox checked={keys.has(id)} onChange={() => toggleKey(id)} /><KeyRound size={11} /></span>
                         <Mini type="button" onClick={() => removeFromTab(id)}><X size={11} /></Mini>
                       </ColRow>
@@ -463,30 +620,14 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {STEPS[step] === 'dictionary' && (
             ddLoading ? <SpinnerRing /> : (
               <>
+                <RowBar>
+                  <SectionTitle style={{ flex: 1 }}>
+                    {t('assistant.ddProposals', 'Proposed dictionary entries (base table)')} · {t('settings.dictscan.summary2', '{{missing}} of {{total}} missing', summarizeProposals(ddItems ?? []))} · {t('assistant.ddScope', 'scope “{{scope}}”', { scope: appKey })}
+                  </SectionTitle>
+                  <Mini type="button" onClick={() => void runScan()}>{t('assistant.rescan', 'Re-scan')}</Mini>
+                </RowBar>
                 {!isJde && <Banner $tone="info">{t('assistant.notJde', 'This pool is not JDE/Oracle — dictionary entries are inferred from column names. Review or skip.')}</Banner>}
-                <RowBar><SectionTitle style={{ flex: 1 }}>{t('assistant.ddProposals', 'Proposed dictionary entries (base table)')}</SectionTitle>
-                  <Mini type="button" onClick={() => void runScan()}>{t('assistant.rescan', 'Re-scan')}</Mini></RowBar>
-                <DdGrid style={{ gridTemplateColumns: ddCols }}>
-                  <DdHead /><DdHead>{t('assistant.ddId', 'DD / column')}</DdHead><DdHead>{t('assistant.ddLabel', 'Label')}</DdHead><DdHead>{t('assistant.ddFormat', 'Format')}</DdHead>
-                  {isJde && <><DdHead>{t('assistant.ddRules', 'Rules')}</DdHead><DdHead>{t('assistant.ddRulesVal', 'Rule value')}</DdHead><DdHead>{t('assistant.ddLookupParams', 'Lookup params')}</DdHead></>}
-                  <DdHead>{t('assistant.ddSize', 'Size')}</DdHead>
-                  {(ddItems ?? []).map((d) => (
-                    <Fragment key={d.column}>
-                      <Checkbox checked={d.keep} disabled={d.exists} onChange={() => patchDd(d.column, { keep: !d.keep })} />
-                      <Mono title={d.exists ? t('assistant.ddExists', 'already in dictionary') : ''} style={{ opacity: d.exists ? 0.5 : 1 }}>
-                        {d.dd_id}{d.column !== d.dd_id ? ` (${d.column})` : ''}
-                      </Mono>
-                      <Input value={d.label} onChange={(e) => patchDd(d.column, { label: e.target.value })} disabled={!d.keep} />
-                      <SearchSelect value={d.format} onChange={(v) => patchDd(d.column, { format: v })} options={fmtOpts} allowCustom disabled={!d.keep} placeholder="text" />
-                      {isJde && <>
-                        <SearchSelect value={d.rules} onChange={(v) => patchDd(d.column, { rules: v })} options={ruleOpts} anyLabel={t('common.none', '(none)')} disabled={!d.keep} placeholder="—" />
-                        <Input value={d.rules_values} onChange={(e) => patchDd(d.column, { rules_values: e.target.value })} disabled={!d.keep || !d.rules} placeholder="—" />
-                        <Input value={d.lookup_params} onChange={(e) => patchDd(d.column, { lookup_params: e.target.value })} disabled={!d.keep || d.rules !== 'LOOKUP'} placeholder={d.rules === 'LOOKUP' ? 'SY=01,RT=ST' : ''} />
-                      </>}
-                      <Input value={d.size == null ? '' : String(d.size)} onChange={(e) => patchDd(d.column, { size: e.target.value ? Number(e.target.value) : null })} disabled={!d.keep} />
-                    </Fragment>
-                  ))}
-                </DdGrid>
+                <ScanProposalsTable items={ddItems ?? []} jde={isJde} fmtOpts={fmtOpts} ruleOpts={ruleOpts} onPatch={patchDd} />
               </>
             )
           )}
@@ -558,7 +699,38 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           </ModalFooter>
         )}
       </Modal>
-    </Overlay>,
+    </Overlay>
+
+    {/* Catalog picker — a searchable, grouped browser so the preset list stays usable as it grows. */}
+    {catalogOpen && (
+      <Overlay style={{ zIndex: 1100 }} onClick={() => setCatalogOpen(false)}>
+        <Modal style={{ width: 'min(760px, 94vw)', height: 'min(640px, 88vh)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+          <ModalHeader>
+            <HeadBar>
+              <Title><BookOpen size={16} /> {t('assistant.catalog', 'Preset catalog')}</Title>
+              <Button $size="sm" $variant="ghost" onClick={() => setCatalogOpen(false)} title={t('common.close', 'Close')}><X size={16} /></Button>
+            </HeadBar>
+          </ModalHeader>
+          <ModalBody style={{ flex: 1, overflow: 'auto' }}>
+            <Input value={catalogQ} onChange={(e) => setCatalogQ(e.target.value)} placeholder={t('assistant.catalogSearch', 'Search presets…')} autoFocus />
+            {catalogGroups.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '20px', textAlign: 'center' }}>{t('assistant.catalogNoMatch', 'No matching presets.')}</div>}
+            {catalogGroups.map(([g, list]) => (
+              <div key={g}>
+                <CatGroup>{g}</CatGroup>
+                {list.map((p) => (
+                  <PresetCard key={p.id} type="button" onClick={() => { void applyPreset(p.id); setCatalogOpen(false) }}>
+                    <div className="lbl">{p.label}</div>
+                    {p.description && <div className="desc">{p.description}</div>}
+                    <div className="tbls">{p.tables.map((tb) => tb.name).join(p.tables.length > 1 ? ' ⨝ ' : '')}</div>
+                  </PresetCard>
+                ))}
+              </div>
+            ))}
+          </ModalBody>
+        </Modal>
+      </Overlay>
+    )}
+    </>,
     document.body,
   )
 }

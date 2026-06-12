@@ -12,7 +12,7 @@
 //  · `allowCustom` → in the search box, pressing Enter (with no matching option) commits the typed
 //    text as the value. Free-text combobox semantics — for fields where v1 emitted aliases we don't
 //    want to reject (`format`, `dialect`, …).
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -23,6 +23,9 @@ import { colors, radius, fontSize, fonts, shadow } from '../theme'
 export interface SearchSelectOption {
   value: string
   label: string
+  /** Optional leading visual (e.g. a lucide icon) rendered before the label in the trigger and each
+   *  row — for icon pickers where the name alone isn't enough to recognise the choice. */
+  icon?: ReactNode
   /** Optional secondary text rendered in a mono-font column beside `label` (typically the same as
    *  `value` for framework-enum dropdowns). When absent the option renders as a single column. */
   mono?: string
@@ -276,9 +279,10 @@ export function SearchSelect({
   const triggerLabel = (() => {
     if (loading) return <span className="lbl">{t('common.loading')}</span>
     if (current) {
-      return current.mono && current.mono !== current.label
+      const body = current.mono && current.mono !== current.label
         ? <span className="lbl"><span className="mono">{current.mono}</span> <span className="muted">{current.label}</span></span>
         : <span className="lbl">{current.label}</span>
+      return current.icon ? <>{current.icon}{body}</> : body
     }
     if (value && allowCustom) return <span className="lbl"><span className="mono">{value}</span></span>
     return <span className="lbl">{placeholder ?? ''}</span>
@@ -338,6 +342,7 @@ export function SearchSelect({
             return (
               <div key={o.value} data-index={vi.index} ref={virt.measureElement} style={style}>
                 <Item type="button" $active={o.value === value} onClick={() => pick(o.value)}>
+                  {o.icon}
                   {o.mono && o.mono !== o.label && <span className="mono">{o.mono}</span>}
                   <span className="t">{o.label}</span>
                   {o.cells?.map((c, i) => <span key={i} className="cell">{c}</span>)}
