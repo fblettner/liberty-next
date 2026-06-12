@@ -113,33 +113,55 @@ jobs:
           echo "tag=v$VERSION"    >> "$GITHUB_OUTPUT"
           echo "✔ Releasing version=$VERSION (tag=v$VERSION)"
 
-      # ── sync pyproject.toml + commit the bump (only when the workflow chose it) ──
-      - name: Bump pyproject.toml if workflow resolved a different version
+      # ── sync pyproject.toml + ensure RELEASE.md has the version section + commit ──
+      # Also guarantees the changelog stays complete: every released version gets a
+      # ``## <version> — <date>`` heading in liberty/RELEASE.md (the Settings → History →
+      # Upgrades detail renders it). A stub is inserted when missing — common on an auto-bumped
+      # patch where the version isn't known until release time — with a ::warning:: nudging the
+      # author to fill it in. A real section the author already wrote is left untouched.
+      - name: Bump pyproject.toml + ensure RELEASE.md section
         id: bump
+        env:
+          RESOLVED: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -e
-          PKG_VERSION=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
-          RESOLVED="${{ steps.ver.outputs.version }}"
-          if [ "$PKG_VERSION" = "$RESOLVED" ]; then
-            echo "pyproject.toml already at $RESOLVED — no bump needed"
-            echo "committed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          python3 - <<PY
-          import pathlib, re
-          p = pathlib.Path('pyproject.toml')
-          txt = p.read_text()
-          new = re.sub(r'(?m)^version\s*=\s*"[^"]+"', 'version = "$RESOLVED"', txt, count=1)
-          if new == txt:
-              raise SystemExit("pyproject.toml regex didn't match — version line not found")
-          p.write_text(new)
+          python3 - <<'PY'
+          import os, re, pathlib, datetime
+          resolved = os.environ["RESOLVED"]
+
+          # 1) pyproject version — bump only when the workflow resolved a different value.
+          pp = pathlib.Path("pyproject.toml")
+          txt = pp.read_text()
+          cur = re.search(r'(?m)^version\s*=\s*"([^"]+)"', txt).group(1)
+          if cur != resolved:
+              new = re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{resolved}"', txt, count=1)
+              if new == txt:
+                  raise SystemExit("pyproject.toml version line not found")
+              pp.write_text(new)
+
+          # 2) RELEASE.md must carry a "## <resolved>" section — insert a stub (newest, on top) if absent.
+          rn = pathlib.Path("liberty/RELEASE.md")
+          md = rn.read_text() if rn.exists() else "# Liberty Next — Release notes\n"
+          if not re.search(r'(?m)^##\s+' + re.escape(resolved) + r'\b', md):
+              stub = f"## {resolved} — {datetime.date.today().isoformat()}\n\n- _Release notes pending — edit liberty/RELEASE.md._\n\n"
+              m = re.search(r'(?m)^## ', md)            # before the first existing version section
+              md = (md[:m.start()] + stub + md[m.start():]) if m else (md.rstrip() + "\n\n" + stub)
+              rn.write_text(md)
+              print(f"::warning::liberty/RELEASE.md had no section for {resolved} — inserted a stub. Edit it to describe the release.")
           PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "release: ${{ steps.ver.outputs.tag }} [skip ci]"
-          git push origin HEAD:main
-          echo "committed=true" >> "$GITHUB_OUTPUT"
+
+          # Commit whatever changed (pyproject and/or RELEASE.md). Nothing changed → no commit.
+          if git diff --quiet; then
+            echo "nothing to commit"; echo "committed=false" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add pyproject.toml liberty/RELEASE.md
+            git commit -m "release: ${TAG} [skip ci]"
+            git push origin HEAD:main
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── build the Python distributions ───────────────────────────────────────
       - name: Install build tooling
