@@ -97,6 +97,29 @@ def _snapshot_config(request: Request, path: Path) -> None:
         _log.warning("config snapshot failed for %s", path, exc_info=True)
 
 
+def _snapshot_all_config(request: Request) -> None:
+    """Snapshot EVERY config file before a cross-file mutation (rename / move / clone / delete /
+    import) — these write outside the per-section ``PUT /parsed`` path and can touch several files at
+    once, so we capture the whole pre-op state. Deduped (unchanged files skip), best-effort."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return
+    s = request.app.state.settings
+    paths = [
+        s.connectors.config_path,
+        s.connectors.dictionary_path or s.connectors.config_path.with_name("dictionary.toml"),
+        s.menus.config_path, s.screens.config_path, s.charts.config_path,
+        s.actions.config_path, s.dashboards.config_path,
+    ]
+    for p in paths:
+        if not p:
+            continue
+        try:
+            store.snapshot(Path(p), source="manual")
+        except Exception:  # noqa: BLE001 — never fail an op over versioning
+            _log.warning("config snapshot failed for %s", p, exc_info=True)
+
+
 @router.post("/reload", summary="Reload config")
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
@@ -1875,6 +1898,7 @@ async def import_package_endpoint(
     Returns ``{report: {files: [...], warnings: [...], reloaded: bool}}`` with per-file
     counts of added / replaced / skipped entities. Reloads the framework after a
     successful apply so the new config is live for the next request."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     from fastapi import UploadFile, File
     from liberty.web.package_import import apply_package_zip
     if strategy not in ("merge", "overwrite", "replace_all"):
@@ -2224,6 +2248,7 @@ async def clone_with_deps_endpoint(body: CloneWithDepsBody, request: Request, _:
     Atomic per-file: dependency queries are written via _apply_connector_queries (grouped
     by connector) and the seed via the matching _apply_<kind>. Hits /admin/reload at the
     end so the new entries are live."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     if body.kind not in ("screen", "chart", "dashboard"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             detail=f"clone-with-deps doesn't support kind {body.kind!r}")
@@ -2357,6 +2382,7 @@ async def delete_with_deps_endpoint(body: DeleteWithDepsBody, request: Request, 
     Order matters: the seed entity is removed FIRST (so its refs to the soon-to-be-
     deleted queries are gone), then the queries themselves. Hot-reload sees consistent
     state at each step. The final ``/admin/reload`` stitches the live registries."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     if body.kind not in ("screen", "chart", "dashboard"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             detail=f"delete-with-deps doesn't support kind {body.kind!r}")
@@ -2663,6 +2689,7 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
     everywhere (in-flight requests still see the old registry until they finish).
     """
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         if body.kind == "connector":
@@ -2764,6 +2791,7 @@ async def move_query_between_connectors(body: MoveBody, request: Request, _: Sup
 
     Atomic — nothing is written unless every rewritten doc re-parses. Does **not** reload; the
     caller runs ``POST /admin/reload`` after to apply the change."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         result = move_query(
@@ -2825,6 +2853,7 @@ async def delete_app_endpoint(body: DeleteAppBody, request: Request, _: Superuse
 
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
     everywhere (in-flight requests still see the old registry until they finish)."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         result = delete_app(
@@ -2849,6 +2878,7 @@ async def clone_app_endpoint(body: CloneAppBody, request: Request, _: Superuser)
 
     Does **not** reload — the caller calls ``POST /admin/reload`` after to apply changes
     everywhere (in-flight requests still see the old registry until they finish)."""
+    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     settings = request.app.state.settings
     try:
         result = clone_app(

@@ -463,6 +463,10 @@ def test_rename_endpoint_renames_connector(env) -> None:
         # The file on disk reflects the new name.
         assert "[connectors.foo2]" in conn_toml.read_text()
         assert "[connectors.foo]" not in conn_toml.read_text()
+        # The cross-file rename (which bypasses the PUT /parsed save path) still snapshots config —
+        # the pre-rename connectors.toml is captured so it's revertable via the History tab.
+        snaps = client.get("/admin/config/versions?file=connectors.toml", headers=h).json()["versions"]
+        assert any("[connectors.foo]" in client.get(f"/admin/config/versions/{s['id']}/content", headers=h).text for s in snaps)
 
         # The rename does NOT auto-reload; the registry still has `foo` until we call /admin/reload.
         # After reload the new name is live.

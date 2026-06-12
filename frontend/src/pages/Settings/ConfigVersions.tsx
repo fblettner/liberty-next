@@ -7,7 +7,7 @@ import { DiffEditor } from '@monaco-editor/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { RotateCcw, Download, GitCompare } from 'lucide-react'
+import { RotateCcw, Download, GitCompare, X } from 'lucide-react'
 import { api, authHeaders } from '../../api/client'
 import { Button, Banner, SpinnerRing, ConfirmModal } from '../../common'
 import { useIsLight } from '../../common/useIsLight'
@@ -146,6 +146,9 @@ export default function ConfigVersions() {
                 <DiffBar>
                   <GitCompare size={14} />
                   <span><span className="l">{diff.leftLabel}</span> → <span className="r">{diff.rightLabel}</span></span>
+                  <Button $size="sm" $variant="ghost" onClick={() => setDiff(null)} title={t('common.close', 'Close')} style={{ marginLeft: 'auto' }}>
+                    <X size={13} />
+                  </Button>
                 </DiffBar>
                 <DiffEditor
                   height="52vh" language="ini" original={diff.left} modified={diff.right}
