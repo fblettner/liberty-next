@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -177,6 +177,75 @@ class ConfigVersionStore:
     def live_path(self, rel_path: str) -> Path:
         """The live config file a ``rel_path`` maps back to (``base / rel_path``)."""
         return self.base / rel_path
+
+    # ── delete / purge ─────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _drop(c: sqlite3.Connection, version_id: int, snapshot_path: str) -> None:
+        """Remove one version's snapshot file (best-effort) + its index row. Each version owns a
+        distinct snapshot file (``<key>.v<num>``), so unlinking it never orphans another version."""
+        try:
+            Path(snapshot_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        c.execute("DELETE FROM config_version WHERE id=?", (version_id,))
+
+    def delete(self, version_id: int) -> bool:
+        """Delete a single version (snapshot file + row). Returns False when it doesn't exist."""
+        with self._conn() as c:
+            r = c.execute(
+                "SELECT id, snapshot_path FROM config_version WHERE id=?", (version_id,),
+            ).fetchone()
+            if r is None:
+                return False
+            self._drop(c, r["id"], r["snapshot_path"])
+        return True
+
+    def delete_key(self, rel_path: str) -> int:
+        """Delete EVERY version under a key (a file's whole history, or one screen bundle's). Returns
+        the count removed."""
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, snapshot_path FROM config_version WHERE rel_path=?", (rel_path,),
+            ).fetchall()
+            for r in rows:
+                self._drop(c, r["id"], r["snapshot_path"])
+        return len(rows)
+
+    def purge(self, *, max_versions: int | None = None, max_age_days: int | None = None) -> int:
+        """Apply a retention policy across every key and return the number of versions removed.
+
+        Two independent rules, **OR-combined** — a version goes if EITHER applies:
+
+        * **count** — it falls beyond the ``max_versions`` most-recent for its key;
+        * **age** — its ``created_at`` predates ``now - max_age_days``.
+
+        The single most-recent version of each key is ALWAYS kept, so a purge never empties a key's
+        history (even when every version is older than the age cutoff). A rule with a value ``<= 0``
+        (or ``None``) is disabled; with both disabled this is a no-op."""
+        mv = max_versions if (max_versions and max_versions > 0) else None
+        cutoff = None
+        if max_age_days and max_age_days > 0:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat(timespec="seconds")
+        if mv is None and cutoff is None:
+            return 0
+        removed = 0
+        with self._conn() as c:
+            keys = [r["rel_path"] for r in c.execute(
+                "SELECT DISTINCT rel_path FROM config_version").fetchall()]
+            for key in keys:
+                rows = c.execute(
+                    "SELECT id, snapshot_path, created_at FROM config_version "
+                    "WHERE rel_path=? ORDER BY version_num DESC", (key,),
+                ).fetchall()
+                for idx, r in enumerate(rows):
+                    if idx == 0:
+                        continue  # always keep the newest version of each key
+                    too_many = mv is not None and idx >= mv
+                    too_old = cutoff is not None and r["created_at"] < cutoff
+                    if too_many or too_old:
+                        self._drop(c, r["id"], r["snapshot_path"])
+                        removed += 1
+        return removed
 
     # ── restore ────────────────────────────────────────────────────────────────────────────
     def restore(self, version_id: int, *, who: str | None = None) -> Path | None:

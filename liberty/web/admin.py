@@ -295,6 +295,35 @@ async def restore_config_version(version_id: int, request: Request, principal: S
     return {"restored": live.name, "reload": reload_result}
 
 
+@router.delete("/config/versions/{version_id}", summary="Delete a config version")
+async def delete_config_version(version_id: int, request: Request, _: Superuser) -> dict[str, object]:
+    """Permanently delete one file-version snapshot (file + index row). Screen bundles are deleted via
+    their own endpoint — this 404s on a bundle id so the two surfaces stay separate. Does not touch
+    the live config."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    v = store.get(version_id)
+    if v is None or v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
+    store.delete(version_id)
+    return {"deleted": version_id}
+
+
+@router.delete("/config/versions", summary="Clear a file's version history")
+async def clear_config_versions(request: Request, _: Superuser, file: str) -> dict[str, object]:
+    """Delete EVERY stored version of one config file. The live file is untouched — only its history
+    is cleared."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    base = request.app.state.settings.connectors.config_path.parent
+    rel = store._rel(base / file)
+    if rel.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="file not found")
+    return {"deleted": store.delete_key(rel)}
+
+
 # ── screen + dependency bundle versions ───────────────────────────────────────────────────
 @router.get("/config/screen-versions", summary="List screen bundle versions")
 async def list_screen_versions(request: Request, _: Superuser,
@@ -383,6 +412,29 @@ async def restore_screen_version(version_id: int, request: Request, principal: S
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     reload_result = await reload_connectors(request, principal)
     return {"restored": v.rel_path, "version": v.version_num, "report": report.to_dict(), "reload": reload_result}
+
+
+@router.delete("/config/screen-versions/{version_id}", summary="Delete a screen bundle version")
+async def delete_screen_version(version_id: int, request: Request, _: Superuser) -> dict[str, object]:
+    """Permanently delete one screen-bundle snapshot. 404s on a non-bundle id (use the file-version
+    endpoint for those)."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    v = store.get(version_id)
+    if v is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    store.delete(version_id)
+    return {"deleted": version_id}
+
+
+@router.delete("/config/screen-versions", summary="Clear a screen's bundle history")
+async def clear_screen_versions(request: Request, _: Superuser, app: str, screen: str) -> dict[str, object]:
+    """Delete EVERY bundle version for one screen — its whole dependency-snapshot history."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    return {"deleted": store.delete_key(_screen_bundle_key(app, screen))}
 
 
 # The legacy ``GET / PUT /config/connectors`` raw-TOML endpoints powered the Settings →

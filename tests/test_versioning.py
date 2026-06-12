@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from liberty.versioning import ConfigVersionStore
 
@@ -73,3 +74,66 @@ def test_snapshot_bytes_versions_synthetic_key(tmp_path: Path) -> None:
     assert ":" not in Path(b.snapshot_path).name
     assert store.content(a.id) == b"PK-bundle-1" and store.content(b.id) == b"PK-bundle-2"
     assert [v.version_num for v in store.list_versions(key)] == [2, 1]
+
+
+def test_delete_removes_snapshot_and_row(tmp_path: Path) -> None:
+    cfg = tmp_path / "screens.toml"
+    store = ConfigVersionStore(tmp_path)
+    _write(cfg, "a"); v1 = store.snapshot(cfg)
+    _write(cfg, "b"); v2 = store.snapshot(cfg)
+    assert v1 is not None and v2 is not None
+    snap1 = Path(v1.snapshot_path)
+    assert snap1.exists()
+    assert store.delete(v1.id) is True
+    assert not snap1.exists()                       # file gone too
+    assert [v.version_num for v in store.list_versions(cfg)] == [2]
+    assert store.delete(999999) is False            # unknown id
+
+
+def test_delete_key_clears_whole_history(tmp_path: Path) -> None:
+    cfg = tmp_path / "menus.toml"
+    store = ConfigVersionStore(tmp_path)
+    for text in ("a", "b", "c"):
+        _write(cfg, text); store.snapshot(cfg)
+    assert store.delete_key("menus.toml") == 3
+    assert store.list_versions(cfg) == []
+
+
+def test_purge_keeps_newest_and_caps_count(tmp_path: Path) -> None:
+    cfg = tmp_path / "dictionary.toml"
+    store = ConfigVersionStore(tmp_path)
+    for i in range(5):
+        _write(cfg, f"v{i}"); store.snapshot(cfg)   # 5 versions
+    # Keep the 2 most-recent — drop the older 3.
+    assert store.purge(max_versions=2) == 3
+    assert [v.version_num for v in store.list_versions(cfg)] == [5, 4]
+    # Re-purge with the same cap is a no-op (already within policy).
+    assert store.purge(max_versions=2) == 0
+    # No knobs set → no-op.
+    assert store.purge() == 0
+
+
+def test_purge_age_never_empties_a_key(tmp_path: Path) -> None:
+    cfg = tmp_path / "connectors.toml"
+    store = ConfigVersionStore(tmp_path)
+    _write(cfg, "old"); v1 = store.snapshot(cfg)
+    _write(cfg, "new"); v2 = store.snapshot(cfg)
+    assert v1 is not None and v2 is not None
+    # Backdate every row far past any cutoff; age purge must still keep the newest one.
+    with store._conn() as c:
+        c.execute("UPDATE config_version SET created_at='2000-01-01T00:00:00+00:00'")
+    assert store.purge(max_age_days=30) == 1
+    assert [v.version_num for v in store.list_versions(cfg)] == [2]
+
+
+def test_purge_config_versions_callable(tmp_path: Path) -> None:
+    # The NomaFlow callable reconstructs a store from settings.connectors.config_path and purges.
+    from liberty.jobs.maintenance import purge_config_versions
+    cfg = tmp_path / "screens.toml"
+    store = ConfigVersionStore(tmp_path)
+    for i in range(4):
+        _write(cfg, f"v{i}"); store.snapshot(cfg)
+    settings = SimpleNamespace(connectors=SimpleNamespace(config_path=cfg))
+    removed = purge_config_versions(settings, ctx=SimpleNamespace(run_id="r1"), max_versions=1, max_age_days=0)
+    assert removed == 3
+    assert [v.version_num for v in ConfigVersionStore(tmp_path).list_versions(cfg)] == [4]

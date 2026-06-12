@@ -1477,3 +1477,32 @@ def test_screen_bundle_versioning(env) -> None:
         assert client.get("/admin/config/screen-versions?app=nomasx1&screen=nope", headers=h).json()["bundles"] == []
         assert client.get(f"/admin/config/screen-versions/{ver['id']}/download", headers=_h(client, "reader")).status_code == 403
         assert client.post("/admin/config/screen-versions/999999/restore", headers=h).status_code == 404
+
+        # Delete the bundle version; the file-version endpoint refuses a bundle id (separate surface).
+        assert client.delete(f"/admin/config/versions/{ver['id']}", headers=h).status_code == 404
+        assert client.delete(f"/admin/config/screen-versions/{ver['id']}", headers=h).json()["deleted"] == ver["id"]
+        assert client.get("/admin/config/screen-versions", headers=h).json()["bundles"] == []
+        assert client.delete(f"/admin/config/screen-versions/{ver['id']}", headers=h).status_code == 404
+
+
+def test_config_version_delete_endpoints(env) -> None:
+    """File-version delete + clear-history, superuser-gated; never touches the live file."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        store = app.state.config_versions
+        for text in ("a", "b", "c"):
+            conn_toml.write_text(text, encoding="utf-8")
+            store.snapshot(conn_toml, source="manual")
+        v = store.list_versions(conn_toml)
+        assert len(v) == 3
+        # Delete one version; the live file is untouched.
+        assert client.delete(f"/admin/config/versions/{v[0].id}", headers=h).json()["deleted"] == v[0].id
+        assert conn_toml.read_text() == "c"
+        assert len(store.list_versions(conn_toml)) == 2
+        # Clear the rest in one call.
+        assert client.delete("/admin/config/versions?file=connectors.toml", headers=h).json()["deleted"] == 2
+        assert store.list_versions(conn_toml) == []
+        # Gating + unknown id.
+        assert client.delete("/admin/config/versions/999999", headers=h).status_code == 404
+        assert client.delete(f"/admin/config/versions/{v[0].id}", headers=_h(client, "reader")).status_code == 403
