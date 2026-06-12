@@ -111,9 +111,16 @@ class ConfigVersionStore:
         path = Path(path)
         if not path.exists() or not path.is_file():
             return None
-        data = path.read_bytes()
+        return self.snapshot_bytes(self._rel(path), path.read_bytes(), source=source, who=who, comment=comment)
+
+    def snapshot_bytes(
+        self, rel: str, data: bytes, *, source: str = "manual", who: str | None = None,
+        comment: str | None = None,
+    ) -> ConfigVersion | None:
+        """Snapshot arbitrary bytes under a synthetic key — used for a screen + dependency **bundle**
+        (``rel = "screen:<app>:<id>"``, ``data`` = the package ZIP). Content-addressed like a file
+        snapshot: a no-op when the bytes equal the latest version for *rel*."""
         checksum = hashlib.sha256(data).hexdigest()
-        rel = self._rel(path)
         with self._conn() as c:
             last = c.execute(
                 "SELECT version_num, checksum FROM config_version WHERE rel_path=? "
@@ -123,8 +130,8 @@ class ConfigVersionStore:
             if last is not None and last["checksum"] == checksum:
                 return None  # unchanged since the last version — skip
             num = (last["version_num"] + 1) if last is not None else 1
-            snap = self.vdir / f"{rel}.v{num}"
-            snap.parent.mkdir(parents=True, exist_ok=True)
+            safe = rel.replace("/", "_").replace(":", "_")   # synthetic keys carry ':' — flatten to a filename
+            snap = self.vdir / f"{safe}.v{num}"
             snap.write_bytes(data)
             created = datetime.now(timezone.utc).isoformat(timespec="seconds")
             cur = c.execute(

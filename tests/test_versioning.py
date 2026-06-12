@@ -57,3 +57,19 @@ def test_store_persists_across_instances(tmp_path: Path) -> None:
     # A fresh store over the same dir reads the existing SQLite index.
     again = ConfigVersionStore(tmp_path)
     assert [v.version_num for v in again.list_versions(cfg)] == [1]
+
+
+def test_snapshot_bytes_versions_synthetic_key(tmp_path: Path) -> None:
+    # Screen+dependency bundles store arbitrary bytes under a synthetic ``screen:<app>:<id>`` key.
+    store = ConfigVersionStore(tmp_path)
+    key = "screen:nomasx1:f0093"
+    a = store.snapshot_bytes(key, b"PK-bundle-1", source="save", comment="f0093 + 3 deps")
+    assert a is not None and a.version_num == 1 and a.rel_path == key
+    # Content-addressed: identical bytes → no new version.
+    assert store.snapshot_bytes(key, b"PK-bundle-1") is None
+    b = store.snapshot_bytes(key, b"PK-bundle-2", source="save")
+    assert b is not None and b.version_num == 2
+    # Synthetic filename flattens the ':' separators (no nested dirs from the key).
+    assert ":" not in Path(b.snapshot_path).name
+    assert store.content(a.id) == b"PK-bundle-1" and store.content(b.id) == b"PK-bundle-2"
+    assert [v.version_num for v in store.list_versions(key)] == [2, 1]

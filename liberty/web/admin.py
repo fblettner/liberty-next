@@ -120,6 +120,55 @@ def _snapshot_all_config(request: Request) -> None:
             _log.warning("config snapshot failed for %s", p, exc_info=True)
 
 
+# ── screen + dependency BUNDLE versioning (Phase 2) ───────────────────────────────────────
+# File-level versioning (above) reverts a whole TOML; a screen reverting cleanly often needs its
+# *dependency closure* too (the queries / lookups / sequences / DD entries it references). On every
+# screen save we capture, per CHANGED screen, a ZIP of that screen's pre-save dependency closure —
+# the same package the deploy tooling builds. Restoring one re-applies the bundle with the
+# ``overwrite`` strategy, which preserves ``override = true`` entities (a customer fork survives).
+# Bundles share the version store under a synthetic ``screen:<app>:<id>`` key so they never mix
+# with file history (the file-version list filters them out).
+_BUNDLE_PREFIX = "screen:"
+
+
+def _screen_bundle_key(app: str, screen_id: str) -> str:
+    return f"{_BUNDLE_PREFIX}{app}:{screen_id}"
+
+
+def _capture_screen_bundles(request: Request, new_screens: dict[str, dict[str, dict[str, Any]]]) -> None:
+    """Before a screen save overwrites ``screens.toml``, snapshot the pre-save dependency bundle of
+    each screen whose definition changed. Reads the CURRENT (still-live) ``app.state`` so the bundle
+    is the *prior* closure. Content-addressed + per-screen diffed, so unchanged screens cost nothing
+    and an identical re-save is a no-op. Best-effort: never blocks the save."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return
+    live = getattr(request.app.state, "screens", None)
+    live_apps = (getattr(live, "screens", None) or {}) if live is not None else {}
+    src = getattr(request.app.state.settings.app, "name", "liberty-next")
+    who = getattr(getattr(request, "state", None), "username", None)
+    for app, screens in (new_screens or {}).items():
+        old_app = live_apps.get(app) or {}
+        for sid, new_def in (screens or {}).items():
+            old_screen = old_app.get(sid)
+            if old_screen is None:
+                continue  # brand-new screen — no prior state to bundle (captured on its next save)
+            try:
+                if _dump_screen(old_screen) == new_def:
+                    continue  # unchanged — skip (dedupe is the real guard; this just avoids the work)
+            except Exception:  # noqa: BLE001 — a dump mismatch shouldn't skip the capture
+                pass
+            try:
+                manifest = collect_dependencies(
+                    request.app.state, [Seed(kind="screen", name=sid, scope=app)],
+                )
+                blob = build_package_zip(manifest, source_install=src)
+                store.snapshot_bytes(_screen_bundle_key(app, sid), blob, source="save", who=who,
+                                     comment=f"{app}.{sid} + {max(len(manifest.deps) - 1, 0)} dependencies")
+            except Exception:  # noqa: BLE001 — never fail a save over bundle versioning
+                _log.warning("screen bundle snapshot failed for %s.%s", app, sid, exc_info=True)
+
+
 @router.post("/reload", summary="Reload config")
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
     settings = request.app.state.settings
@@ -203,7 +252,10 @@ async def list_config_versions(request: Request, _: Superuser, file: str | None 
     if store is None:
         return {"versions": []}
     base = request.app.state.settings.connectors.config_path.parent
-    return {"versions": [v.to_dict() for v in store.list_versions((base / file) if file else None)]}
+    versions = store.list_versions((base / file) if file else None)
+    # Screen+dependency bundles live in the same store under a ``screen:`` synthetic key — keep them
+    # out of the file-history list (they have their own /config/screen-versions surface).
+    return {"versions": [v.to_dict() for v in versions if not v.rel_path.startswith(_BUNDLE_PREFIX)]}
 
 
 @router.get("/config/versions/{version_id}/content", summary="Get a version's content")
@@ -241,6 +293,96 @@ async def restore_config_version(version_id: int, request: Request, principal: S
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version not found")
     reload_result = await reload_connectors(request, principal)
     return {"restored": live.name, "reload": reload_result}
+
+
+# ── screen + dependency bundle versions ───────────────────────────────────────────────────
+@router.get("/config/screen-versions", summary="List screen bundle versions")
+async def list_screen_versions(request: Request, _: Superuser,
+                               app: str | None = None, screen: str | None = None) -> dict[str, object]:
+    """Screen+dependency bundle history. Each version is the pre-save dependency closure of a screen,
+    captured automatically on every screen save. Returns ``{bundles: [{app, screen, key, versions:[…]}]}``
+    grouped by screen, newest version first. Filter to one screen with ``app`` + ``screen``."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        return {"bundles": []}
+    want = _screen_bundle_key(app, screen) if app and screen else None
+    groups: dict[str, dict[str, Any]] = {}
+    for v in store.list_versions():
+        if not v.rel_path.startswith(_BUNDLE_PREFIX):
+            continue
+        if want is not None and v.rel_path != want:
+            continue
+        # rel_path == "screen:<app>:<id>" — id may contain ':' in theory, so split with maxsplit.
+        rest = v.rel_path[len(_BUNDLE_PREFIX):]
+        bapp, _, bscreen = rest.partition(":")
+        g = groups.setdefault(v.rel_path, {"app": bapp, "screen": bscreen, "key": v.rel_path, "versions": []})
+        g["versions"].append(v.to_dict())
+    return {"bundles": list(groups.values())}
+
+
+@router.get("/config/screen-versions/{version_id}/download", summary="Download a screen bundle")
+async def screen_version_download(version_id: int, request: Request, _: Superuser) -> Response:
+    """The bundle ZIP for one version — a deployable package (the same shape /admin/build-package
+    produces) of the screen + its dependency closure at that point in time."""
+    store = getattr(request.app.state, "config_versions", None)
+    v = store.get(version_id) if store is not None else None
+    data = store.content(version_id) if store is not None else None
+    if v is None or data is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    safe = v.rel_path[len(_BUNDLE_PREFIX):].replace(":", "_")
+    fname = f"{safe}.v{v.version_num}.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.get("/config/screen-versions/{version_id}/contents", summary="Inspect a screen bundle")
+async def screen_version_contents(version_id: int, request: Request, _: Superuser) -> dict[str, Any]:
+    """The dependency closure captured in a bundle version — ``{app, screen, version, created_at,
+    manifest}`` where ``manifest`` is the same ``{by_kind, counts, deps, missing, warnings}`` shape
+    the dependency-inspect UI renders, read back from the ZIP's embedded ``manifest.json``. Lets the
+    history view expand a row into its full content tree without rebuilding anything."""
+    import io
+    import json
+    import zipfile
+    store = getattr(request.app.state, "config_versions", None)
+    v = store.get(version_id) if store is not None else None
+    data = store.content(version_id) if store is not None else None
+    if v is None or data is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    rest = v.rel_path[len(_BUNDLE_PREFIX):]
+    bapp, _sep, bscreen = rest.partition(":")
+    manifest: dict[str, Any] = {"by_kind": {}, "counts": {}, "deps": [], "missing": [], "warnings": []}
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+    except (KeyError, zipfile.BadZipFile, ValueError):
+        pass  # bundle captured before manifest.json was embedded — show an empty tree
+    return {"app": bapp, "screen": bscreen, "version": v.version_num,
+            "created_at": v.created_at, "manifest": manifest}
+
+
+@router.post("/config/screen-versions/{version_id}/restore", summary="Restore a screen bundle")
+async def restore_screen_version(version_id: int, request: Request, principal: Superuser) -> dict[str, object]:
+    """Re-apply a screen's stored dependency bundle — reverts the screen *and* its captured
+    dependencies (queries / lookups / sequences / DD entries) together. Snapshots ALL config first
+    (so the restore is itself undoable), then applies the bundle with the ``overwrite`` strategy:
+    entities flagged ``override = true`` on this install are PRESERVED (a customer fork survives the
+    revert). Reloads afterwards so the change is live."""
+    store = getattr(request.app.state, "config_versions", None)
+    if store is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="config versioning is unavailable")
+    v = store.get(version_id)
+    blob = store.content(version_id)
+    if v is None or blob is None or not v.rel_path.startswith(_BUNDLE_PREFIX):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle version not found")
+    _snapshot_all_config(request)  # the bundle apply may touch several files — capture the pre-state
+    from liberty.web.package_import import apply_package_zip
+    try:
+        report = apply_package_zip(zip_bytes=blob, strategy="overwrite", settings=request.app.state.settings)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    reload_result = await reload_connectors(request, principal)
+    return {"restored": v.rel_path, "version": v.version_num, "report": report.to_dict(), "reload": reload_result}
 
 
 # The legacy ``GET / PUT /config/connectors`` raw-TOML endpoints powered the Settings →
@@ -783,6 +925,9 @@ async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) 
     path = Path(request.app.state.settings.screens.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     _snapshot_config(request, path)
+    # Per-screen dependency bundles — captured from the PRE-save app.state (still live here), so a
+    # later restore reverts the screen *with* the queries / lookups / DD entries it referenced.
+    _capture_screen_bundles(request, body.screens)
     path.write_text(new_text, encoding="utf-8")
     return {"saved": True, "path": str(path)}
 

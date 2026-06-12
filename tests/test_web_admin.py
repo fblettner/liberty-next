@@ -1430,3 +1430,50 @@ def test_config_versioning_endpoints(env) -> None:
 
         assert client.get("/admin/config/versions/999999/content", headers=h).status_code == 404
         assert client.get("/admin/config/versions", headers=_h(client, "reader")).status_code == 403
+
+
+def test_screen_bundle_versioning(env) -> None:
+    """Phase 2 — every screen save snapshots the CHANGED screens' dependency bundle (a deploy ZIP).
+    A brand-new screen captures nothing (no prior state); editing it captures its pre-edit bundle.
+    Bundles stay out of the file-version list and have their own list / download / restore surface."""
+    app, conn_toml, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        scr = {"nomasx1": {"f0093": {"label": "Roles", "read_query": "roles_get", "columns": [{"name": "ROL_ID"}]}}}
+
+        # First save CREATES the screen — no prior state, so no bundle yet. Reload makes it live.
+        assert client.put("/admin/config/screens/parsed", json={"screens": scr}, headers=h).status_code == 200
+        client.post("/admin/reload", headers=h)
+        assert client.get("/admin/config/screen-versions", headers=h).json()["bundles"] == []
+
+        # Editing it captures the PRE-edit bundle (one version for nomasx1.f0093).
+        scr["nomasx1"]["f0093"]["label"] = "Security Roles"
+        assert client.put("/admin/config/screens/parsed", json={"screens": scr}, headers=h).status_code == 200
+        bundles = client.get("/admin/config/screen-versions", headers=h).json()["bundles"]
+        assert len(bundles) == 1
+        b = bundles[0]
+        assert b["app"] == "nomasx1" and b["screen"] == "f0093" and len(b["versions"]) == 1
+        ver = b["versions"][0]
+        assert ver["source"] == "save"
+
+        # Bundles never leak into the file-version list (screens.toml history is separate).
+        files = client.get("/admin/config/versions", headers=h).json()["versions"]
+        assert all(not v["file"].startswith("screen:") for v in files)
+
+        # Inspect: the embedded manifest comes back grouped by kind (the screen is always present).
+        contents = client.get(f"/admin/config/screen-versions/{ver['id']}/contents", headers=h).json()
+        assert contents["app"] == "nomasx1" and contents["screen"] == "f0093"
+        assert any(d["name"] == "f0093" for d in contents["manifest"]["by_kind"].get("screen", []))
+
+        # Download is a ZIP; restore re-applies it (overwrite strategy) and reloads.
+        d = client.get(f"/admin/config/screen-versions/{ver['id']}/download", headers=h)
+        assert d.status_code == 200 and d.content[:2] == b"PK" and ".zip" in d.headers.get("content-disposition", "")
+        rr = client.post(f"/admin/config/screen-versions/{ver['id']}/restore", headers=h)
+        assert rr.status_code == 200 and rr.json()["restored"] == "screen:nomasx1:f0093"
+        assert "report" in rr.json()
+
+        # Filter to one screen; missing / wrong-kind ids 404; readers are gated.
+        assert len(client.get("/admin/config/screen-versions?app=nomasx1&screen=f0093", headers=h).json()["bundles"]) == 1
+        assert client.get("/admin/config/screen-versions?app=nomasx1&screen=nope", headers=h).json()["bundles"] == []
+        assert client.get(f"/admin/config/screen-versions/{ver['id']}/download", headers=_h(client, "reader")).status_code == 403
+        assert client.post("/admin/config/screen-versions/999999/restore", headers=h).status_code == 404

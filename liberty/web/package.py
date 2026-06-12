@@ -53,6 +53,11 @@ def build_package_zip(
         files["charts.toml"] = c
     if c := _build_dashboards_toml(filtered):
         files["dashboards.toml"] = c
+    # Machine-readable closure (kinds / counts / deps / missing / warnings) — informational, the
+    # same shape the dependency-inspect UI renders. Ignored by the importer (like MANIFEST.md); the
+    # version-history detail view reads it back to show what a stored bundle contains.
+    import json
+    files["manifest.json"] = json.dumps(filtered.to_dict(), indent=2)
     files["MANIFEST.md"] = _build_manifest_md(filtered, source_install=source_install, files=list(files))
 
     buf = io.BytesIO()
