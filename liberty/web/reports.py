@@ -36,10 +36,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.coercion import CoercionError, coerce_to_annotation
+from liberty.connectors.base import ConnectorError
+from liberty.connectors.introspect import list_pool_schemas
 from liberty.reports.schema import (
     OutputFormat,
     ReportContent,
     ReportDef,
+    ReportParam,
     UnknownReportError,
 )
 from liberty.reports.render import render_content
@@ -90,6 +93,99 @@ class ReportListResponse(BaseModel):
     reports: list[ReportDef]
 
 
+class ParamOption(BaseModel):
+    value: Any
+    label: str
+
+
+class ParamOptionsResponse(BaseModel):
+    options: list[ParamOption]
+
+
+# --------------------------------------------------------------------------- #
+# Param-options resolution (dropdowns)
+# --------------------------------------------------------------------------- #
+def _connector_for(opts, qparams: dict[str, str], report: ReportDef) -> str | None:
+    """Resolve the connector a dynamic option source reads from. Prefers the
+    live value of ``connector_param`` (the cascading case — e.g. the chosen
+    ``target_connector``), falls back to that param's declared default, then to
+    the literal ``connector``."""
+    if opts.connector_param:
+        live = qparams.get(opts.connector_param)
+        if live:
+            return live
+        dep = next((p for p in report.params if p.name == opts.connector_param), None)
+        if dep is not None and dep.default not in (None, ""):
+            return str(dep.default)
+    return opts.connector
+
+
+async def _resolve_options(
+    param: ReportParam, report: ReportDef, registry_conn, qparams: dict[str, str],
+) -> list[ParamOption]:
+    """Resolve a param's dropdown choices. ``registry_conn`` is the app's
+    ConnectorRegistry. Degrades to ``[]`` on a connector / query failure so the
+    form still opens (the operator can type, or fix the connector first)."""
+    opts = param.options
+    if opts is None:
+        return []
+    if opts.kind == "static":
+        return [ParamOption(value=o.value, label=o.label) for o in opts.values]
+
+    if opts.kind == "connectors":
+        names = registry_conn.pools.names() if registry_conn is not None else []
+        return [ParamOption(value=n, label=n) for n in sorted(names)]
+
+    connector = _connector_for(opts, qparams, report)
+    if not connector or registry_conn is None:
+        return []
+
+    try:
+        conn = registry_conn.sql(connector)
+    except ConnectorError:
+        return []
+
+    if opts.kind == "schemas":
+        try:
+            data = await list_pool_schemas(registry_conn.pools, conn.pool_name)
+        except Exception as exc:  # noqa: BLE001 — degrade to empty on introspection failure
+            _log.warning("reports options: schemas on %r failed: %s", connector, exc)
+            return []
+        return [ParamOption(value=s, label=s) for s in (data.get("schemas") or [])]
+
+    if opts.kind == "query":
+        if not (opts.query and opts.value_column and opts.label_column):
+            return []
+        try:
+            result = await conn.execute(opts.query, {})
+        except Exception as exc:  # noqa: BLE001 — bad query / connection → empty dropdown
+            _log.warning(
+                "reports options: query %r on %r failed (check it's a runnable query name, "
+                "e.g. a table's '<table>_get' slot): %s", opts.query, connector, exc,
+            )
+            return []
+        payload = result.to_dict()
+        rows = payload.get("rows") or []
+        cols = {c["name"].lower(): c["name"] for c in (payload.get("columns") or [])}
+        vk = cols.get(opts.value_column.lower(), opts.value_column)
+        lk = cols.get(opts.label_column.lower(), opts.label_column)
+        out: list[ParamOption] = []
+        seen: set[str] = set()
+        for row in rows:
+            v = row.get(vk)
+            if v is None:
+                continue
+            sv = str(v).strip()
+            if sv in seen:
+                continue
+            seen.add(sv)
+            lbl = row.get(lk)
+            out.append(ParamOption(value=sv, label=(str(lbl).strip() if lbl not in (None, "") else sv)))
+        return out
+
+    return []
+
+
 # --------------------------------------------------------------------------- #
 # Routes — list / metadata / run
 # --------------------------------------------------------------------------- #
@@ -126,6 +222,47 @@ async def get_report(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     _require_run_permission(principal, scope, report_id)
     return d
+
+
+@router.get(
+    "/{scope}/{report_id}/options/{param_name}",
+    summary="Resolve a param's dropdown options",
+    response_model=ParamOptionsResponse,
+)
+async def get_param_options(
+    scope: str,
+    report_id: str,
+    param_name: str,
+    request: Request,
+    principal: CurrentPrincipal,
+) -> ParamOptionsResponse:
+    """Resolve the dropdown choices for one report param.
+
+    The run form calls this for every param that declares ``options``. Cascading
+    sources (``schemas`` / ``query``) read their connector from another param's
+    *current* value — passed here as a query-string arg (e.g.
+    ``?target_connector=nomasx1``) — so changing the connector re-populates the
+    dependent dropdown. Degrades to an empty list on a connector / query failure
+    so the form never hard-fails."""
+    registry = request.app.state.reports
+    try:
+        d = registry.get(scope, report_id)
+    except UnknownReportError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    _require_run_permission(principal, scope, report_id)
+
+    param = next((p for p in d.params if p.name == param_name), None)
+    if param is None or param.options is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail=f"param {param_name!r} has no options on {scope}:{report_id}",
+        )
+
+    qparams = dict(request.query_params)
+    options = await _resolve_options(
+        param, d, getattr(request.app.state, "connectors", None), qparams,
+    )
+    return ParamOptionsResponse(options=options)
 
 
 @router.post("/{scope}/{report_id}/run", summary="Run a report")
