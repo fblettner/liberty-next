@@ -476,6 +476,23 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     () => ((defs.ScreenSummary as JsonSchema | undefined) ?? { type: 'object', properties: {} }),
     [defs],
   )
+  // Wrap ScreenValueDiff as a single drill-in property titled "Audit Trail Settings", so it
+  // renders as a labelled "edit… ›" child editor under the summary form (SchemaForm uses the
+  // property's title as the drill row's label).
+  const valueDiffNavSchema = useMemo<JsonSchema>(() => {
+    const obj = (defs.ScreenValueDiff as JsonSchema | undefined) ?? { type: 'object', properties: {} }
+    return {
+      type: 'object',
+      properties: {
+        value_diff: {
+          ...obj,
+          title: t('settings.screens.valueDiff.label', 'Audit Trail Settings'),
+          description: t('settings.screens.valueDiff.intro', 'Row value diff — name a column that holds a DML statement (the audit redo SQL); each row then expands to its field-level BEFORE / AFTER values, parsed in flight. No values table needed. Leave the SQL column blank to disable.'),
+        },
+      },
+      $defs: defs,
+    }
+  }, [defs, t])
   // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
   // "Columns in this group" chips in the ColumnGroupsEditor so the operator sees the mapping
   // without scanning the whole column list.
@@ -1010,27 +1027,42 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     )
   }
 
-  // ── Summary tab — server-aggregated rows with expandable detail ──────────────────────
+  // ── Summary tab — generic aggregation (any table) + a drill-in for the narrower,
+  //    audit-specific value_diff (a "child editor" like the Columns tab, not a separate tab). ──
   const renderSummary = (): ReactNode => {
     const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Row) : {}
+    const vd = (value.value_diff && typeof value.value_diff === 'object') ? (value.value_diff as Row) : {}
     return (
-      <>
+      <FrameworkEnumsContext.Provider value={augmentedEnums}>
         <Sub>{t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}</Sub>
         {/* Inline edit of the single ScreenSummary object. ``augmentedEnums`` resolves the
             dimension column picker against SCREEN_COLUMNS. An empty dimensions list clears the
             whole summary (so the Summary toggle disappears from the screen). */}
-        <FrameworkEnumsContext.Provider value={augmentedEnums}>
-          <SchemaForm
-            schema={summaryObjSchema}
-            defs={defs}
-            value={current}
-            onChange={(v) => {
-              const dims = Array.isArray(v.dimensions) ? (v.dimensions as unknown[]) : []
-              setProp('summary', dims.length ? v : null)
-            }}
-          />
-        </FrameworkEnumsContext.Provider>
-      </>
+        <SchemaForm
+          schema={summaryObjSchema}
+          defs={defs}
+          value={current}
+          onChange={(v) => {
+            const dims = Array.isArray(v.dimensions) ? (v.dimensions as unknown[]) : []
+            setProp('summary', dims.length ? v : null)
+          }}
+        />
+        {/* value_diff (the audit redo→BEFORE/AFTER expander) is the narrower, app-specific
+            setting, so it sits behind a labelled drill-in ("Audit Trail Settings") rather than
+            cluttering the generic summary form — same SchemaNavigator pattern the Columns tab uses. */}
+        <div style={{ borderTop: `1px solid ${colors.border}`, margin: '16px 0 12px' }} />
+        <SchemaNavigator
+          root={{
+            label: t('settings.screens.editor.summaryCrumb', { id, defaultValue: `Summary — ${id}` }),
+            schema: valueDiffNavSchema,
+            value: { value_diff: vd },
+            onChange: (v) => {
+              const next = (v.value_diff && typeof v.value_diff === 'object') ? (v.value_diff as Row) : null
+              setProp('value_diff', next && next.sql_column ? next : null)
+            },
+          }}
+        />
+      </FrameworkEnumsContext.Provider>
     )
   }
 

@@ -1003,6 +1003,27 @@ class ScreenView(BaseModel):
     )
 
 
+class ScreenValueDiff(BaseModel):
+    """Expand a row to its field-level BEFORE / AFTER values, parsed *in flight* from a column
+    that holds a DML statement (an Oracle LogMiner-style ``INSERT`` / ``UPDATE`` / ``DELETE``
+    redo). When set, the grid's rows gain a chevron whose panel shows one line per changed
+    column — no separate values table needed (so the source table can be purged and the values
+    are still reconstructable from the stored statement).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    sql_column: str = Field(
+        description="Result column holding the DML statement (the redo SQL) to parse.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    operation_column: str | None = Field(
+        default=None,
+        description="Result column holding the operation (INSERT/UPDATE/DELETE). Blank → inferred from the SQL.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+
+
 class ScreenSummaryDimension(BaseModel):
     """One grouping dimension of a screen's summary (aggregate) view."""
 
@@ -1207,6 +1228,16 @@ class Screen(BaseModel):
             "lazily loads the underlying rows on expand. Counts are computed in the database over "
             "the whole result, so they're accurate even when the grid caps rows. Use it instead of "
             "a materialised rollup table."
+        ),
+    )
+    value_diff: ScreenValueDiff | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Summary"},
+        description=(
+            "Row-level value diff — when set, each row gains a chevron whose panel parses the named "
+            "SQL column (a DML redo statement) in flight into field-level BEFORE / AFTER values. "
+            "Lets operators inspect what a change touched without a separate values table (so that "
+            "table can be purged and the detail is still reconstructable from the statement)."
         ),
     )
     treeview: ScreenTreeview | None = Field(

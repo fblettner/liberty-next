@@ -333,12 +333,13 @@ const GroupCellBtn = styled.button`
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
   & svg { color: ${colors.text.muted}; }
 `
-// Master/detail: a small chevron that prefixes the first cell, and the full-width detail row.
-const DetailToggle = styled.button`
-  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
-  margin-right: 6px; vertical-align: middle; border: none; background: none; cursor: pointer; padding: 0;
-  color: ${colors.text.muted}; flex-shrink: 0;
-  &:hover { color: ${colors.text.primary}; }
+// Master/detail: leaf-row expander — same inline chevron+value layout as GroupCellBtn (so a
+// row's value-diff chevron matches the group chevron), but normal weight (it's a data row, not
+// a group header). The full-width detail panel renders beneath in DetailTr.
+const RowExpandBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: none; cursor: pointer;
+  color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; padding: 0; text-align: left;
+  & svg { color: ${colors.text.muted}; flex-shrink: 0; }
 `
 const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
@@ -656,13 +657,14 @@ export function DataTable<T extends object>({
     // exclude such a column from the global filter — that's why the search "missed" some columns)
     getColumnCanGlobalFilter: (col) => !((col.columnDef.meta as { internal?: boolean } | undefined)?.internal),
     autoResetExpanded: false,
-    // Master/detail: let rows expand. renderDetail → any row (panel). getSubRows (lazy sub-rows)
-    // → parents with a positive count, so the chevron shows before children are fetched.
-    getRowCanExpand: renderDetail
-      ? () => true
-      : getSubRows
-        ? (row) => row.depth === 0 && (subRowCount?.(row.original) ?? getSubRows(row.original)?.length ?? 0) > 0
-        : undefined,
+    // Master/detail expansion. A top-level row in getSubRows mode is a lazy group (expands to its
+    // children, when the count is positive); any other row expands to the renderDetail panel when
+    // one is provided. Both can apply at once (summary: groups → statements → value panel).
+    getRowCanExpand: (renderDetail || getSubRows)
+      ? (row) => (getSubRows && row.depth === 0)
+        ? (subRowCount?.(row.original) ?? getSubRows(row.original)?.length ?? 0) > 0
+        : !!renderDetail
+      : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -854,7 +856,8 @@ export function DataTable<T extends object>({
     }
     const cells = row.getVisibleCells()
     const firstCellId = cells[0]?.id
-    const canDetail = !!renderDetail && !row.getIsGrouped() && row.getCanExpand()
+    // A leaf (non-group, non-lazy-parent) row expands to the renderDetail panel.
+    const canDetail = !!renderDetail && !isLazyParent && !row.getIsGrouped() && row.getCanExpand()
     return (
       <RowEl
         key={row.id} className={cls}
@@ -872,22 +875,23 @@ export function DataTable<T extends object>({
               textAlign: colAlign(cell.column),
             }}
           >
-            {/* Master/detail chevron — prefixes the first cell so any row opens its panel. */}
-            {canDetail && cell.id === firstCellId && (
-              <DetailToggle
-                type="button"
-                onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
-                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
-              >
-                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              </DetailToggle>
-            )}
             {isLazyParent && cell.id === firstCellId ? (
               <GroupCellBtn type="button" onClick={lazyToggle}>
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 <GroupCount>({subRowCount?.(row.original) ?? row.subRows.length})</GroupCount>
               </GroupCellBtn>
+            ) : canDetail && cell.id === firstCellId ? (
+              // Leaf row value-diff expander — chevron inline with the cell value (matches the
+              // group chevron's layout), normal weight.
+              <RowExpandBtn
+                type="button"
+                onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
+                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
+              >
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </RowExpandBtn>
             ) : isLazyParent ? (
               // A lazy parent's own dimension cells — always render the value. (Once expanded the
               // row has sub-rows, and with grouping enabled TanStack would mark these cells
@@ -1151,16 +1155,20 @@ export function DataTable<T extends object>({
                  because expand/collapse changes the row count + heights and the virtualizer
                  mis-measures (rows render blank). For bounded sets (aggregate summaries). */
               <>
-                {visibleRows.map((row) => (
-                  <Fragment key={row.id}>
-                    {renderRow(row)}
-                    {renderDetail && row.getIsExpanded() && !row.getIsGrouped() && (
-                      <DetailTr>
-                        <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
-                      </DetailTr>
-                    )}
-                  </Fragment>
-                ))}
+                {visibleRows.map((row) => {
+                  // Panel only for leaf rows — a lazy group parent shows its sub-rows, not a panel.
+                  const lazyParent = !!getSubRows && row.depth === 0 && row.getCanExpand()
+                  return (
+                    <Fragment key={row.id}>
+                      {renderRow(row)}
+                      {renderDetail && row.getIsExpanded() && !row.getIsGrouped() && !lazyParent && (
+                        <DetailTr>
+                          <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
+                        </DetailTr>
+                      )}
+                    </Fragment>
+                  )
+                })}
               </>
             ) : (
               <>

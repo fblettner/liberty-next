@@ -208,6 +208,15 @@ const fr: Resources = {
     viewSummary: 'Résumé',
     expand: 'Développer',
     collapse: 'Réduire',
+    valueDiff: {
+      field: 'Champ',
+      before: 'Avant',
+      after: 'Après',
+      none: 'Aucune valeur de champ n’a pu être extraite de cette instruction.',
+      summary: '{{n}} champs',
+      changed: '{{n}} modifiés',
+      changedOnly: 'Modifiés seulement',
+    },
     selectRow: 'Sélectionner la ligne',
     import: 'Importer',
     importNoMatch: 'Aucune colonne de {{file}} ne correspond à cette requête.',
@@ -1159,6 +1168,10 @@ const fr: Resources = {
       },
       summaryView: {
         intro: 'Si défini, l’écran gagne un bouton Résumé : une ligne parente par GROUP BY <dimensions> avec un comptage, et un chevron qui charge à la demande les lignes sous-jacentes. Les comptages viennent de la base sur l’ensemble du résultat. Regroupez une dimension date/horodatage (jour/mois/année) pour replier une période en une ligne. Laissez vide pour désactiver.',
+      },
+      valueDiff: {
+        label: 'Paramètres Audit Trail',
+        intro: 'Diff de valeurs — indiquez une colonne contenant une instruction DML (le SQL redo d’audit) ; chaque ligne se déplie alors sur ses valeurs AVANT / APRÈS par champ, analysées à la volée. Aucune table de valeurs nécessaire. Laissez la colonne SQL vide pour désactiver.',
       },
       // Export classeur — port v2 des ``tbl_workbook`` / ``tbl_sheet`` de v1.
       export: {
