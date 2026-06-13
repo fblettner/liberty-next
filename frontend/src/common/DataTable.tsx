@@ -885,9 +885,14 @@ export function DataTable<T extends object>({
             {isLazyParent && cell.id === firstCellId ? (
               <GroupCellBtn type="button" onClick={lazyToggle}>
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                {cell.getIsAggregated() || cell.getIsPlaceholder() ? null : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 <GroupCount>({subRowCount?.(row.original) ?? row.subRows.length})</GroupCount>
               </GroupCellBtn>
+            ) : isLazyParent ? (
+              // A lazy parent's own dimension cells — always render the value. (Once expanded the
+              // row has sub-rows, and with grouping enabled TanStack would mark these cells
+              // placeholder/aggregated; the `? null` below then blanked them on collapse.)
+              flexRender(cell.column.columnDef.cell, cell.getContext())
             ) : cell.getIsGrouped() ? (
               <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
