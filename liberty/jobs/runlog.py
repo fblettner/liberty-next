@@ -43,6 +43,21 @@ _MAX_PERSIST_CHARS = 256 * 1024  # cap the text written to the DB
 _buffers: dict[str, deque[str]] = {}
 _lock = Lock()
 
+# Per-run minimum level (levelno) for what reaches the run buffer. Lets a run pick
+# WARNING (only warnings + errors) without touching the process-global logger
+# levels — which would suppress INFO for any PARALLEL run sharing the same logger.
+# Unset → 0 (capture everything the logger emits, the historical behaviour).
+# DEBUG capture still needs the logger lowered to DEBUG (a record never emitted
+# can't be filtered back in); this only gates records that DID reach the handler.
+_run_levels: dict[str, int] = {}
+
+
+def set_run_level(run_id: str, levelno: int) -> None:
+    """Gate this run's buffer to records at *levelno* or above (e.g. ``WARNING``
+    shows only warnings + errors). Cleared by :func:`finish_run`."""
+    with _lock:
+        _run_levels[run_id] = levelno
+
 # Logger namespaces the RunLogHandler is attached to. ``liberty`` is registered
 # by :func:`install`. Plugins call :func:`register_namespace` at import time to
 # opt their own logger tree in (e.g. ``nomasx1.security`` lives outside the
@@ -80,6 +95,10 @@ class RunLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         run_id = _current_run_id.get()
         if run_id is None:
+            return
+        # Per-run level gate — drop records below the run's chosen minimum (e.g. a
+        # WARNING run skips INFO progress lines). Default 0 = keep everything.
+        if record.levelno < _run_levels.get(run_id, 0):
             return
         try:
             line = self.format(record)
@@ -184,6 +203,7 @@ def finish_run(run_id: str) -> str:
     the text to ``nomaflow_run_logs``."""
     with _lock:
         buf = _buffers.pop(run_id, None)
+        _run_levels.pop(run_id, None)
     if buf is None:
         return ""
     text = "\n".join(buf)
@@ -197,3 +217,4 @@ def discard_run(run_id: str) -> None:
     """Drop *run_id*'s buffer without returning it — a safety-net cleanup."""
     with _lock:
         _buffers.pop(run_id, None)
+        _run_levels.pop(run_id, None)

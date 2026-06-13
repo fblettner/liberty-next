@@ -20,7 +20,7 @@ def _clean_buffers():
     runlog.install()
     logging.getLogger("liberty").setLevel(logging.INFO)
     yield
-    for rid in ("run-A", "run-B", "run-ctx"):
+    for rid in ("run-A", "run-B", "run-ctx", "run-warn"):
         runlog.discard_run(rid)
 
 
@@ -65,6 +65,30 @@ def test_finish_run_returns_text_and_drops_buffer() -> None:
 
 def test_finish_run_for_unknown_run_is_empty() -> None:
     assert runlog.finish_run("never-existed") == ""
+
+
+def test_run_level_gate_drops_below_minimum() -> None:
+    """A run gated to WARNING keeps warnings/errors but drops INFO lines — without
+    touching the global logger level (so a parallel INFO run is unaffected)."""
+    log = logging.getLogger("liberty.jobs.test")
+    token = runlog.set_run_context("run-warn")
+    runlog.set_run_level("run-warn", logging.WARNING)
+    try:
+        log.info("an info progress line")
+        log.warning("a real warning")
+        log.error("an error too")
+    finally:
+        runlog.reset_run_context(token)
+
+    text = runlog.run_logs("run-warn")
+    assert text is not None
+    assert "a real warning" in text and "an error too" in text
+    assert "an info progress line" not in text
+    # The global logger level is untouched — still INFO from the fixture.
+    assert logging.getLogger("liberty").level == logging.INFO
+    # finish_run clears the per-run level too (no leak across runs reusing an id).
+    runlog.finish_run("run-warn")
+    assert runlog._run_levels.get("run-warn") is None
 
 
 def test_current_run_id_reflects_context() -> None:

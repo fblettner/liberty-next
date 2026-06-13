@@ -368,6 +368,14 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         # the ``has_*`` flags is true; flagging this lets it pull the body even on screens with
         # no dialog / row_menu / actions, purely to pick up the screen-level column hints.
         "has_columns": bool(screen.columns),
+        # Non-empty Screen.views → the grid offers shared/named views. Surfaced on the list view
+        # like has_columns so the TableView pulls the body (which carries ``views``) even on a
+        # screen whose only body content is its shared views.
+        "has_views": bool(screen.views),
+        # Server-aggregated summary view config (group-by dimensions + count). Surfaced on the
+        # list view so the TableView shows the Summary toggle + pulls the body for the dimensions.
+        "has_summary": screen.summary is not None,
+        "summary": screen.summary.model_dump(mode="json") if screen.summary else None,
         # ``dd_map`` — { dictionary_key: column_name } shipped on the list view so the dashboard
         # filter binding can resolve a filter's ``dictionary_key`` to *this* screen's matching
         # column name without fetching the full body. (Phase 3 follow-up: ColumnHint's ``dd``

@@ -32,7 +32,7 @@ function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt
 // an ISO ``YYYY-MM-DD`` string (``_from_jde_julian``) and Save re-encodes the picked date back to
 // Julian — so it edits as a real date with a calendar, not a number. (Its SQL ``typ`` is integer,
 // which is why matching on ``typ`` alone missed it.)
-function isDateish(fmt: string, typ: string) { return fmt === 'date' || fmt === 'jdedate' || /date|timestamp/.test(typ) }
+function isDateish(fmt: string, typ: string) { return /^(date|datetime|timestamp|jdedate)$/.test(fmt) || /date|timestamp/.test(typ) }
 export function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
 
 export function FieldRow({

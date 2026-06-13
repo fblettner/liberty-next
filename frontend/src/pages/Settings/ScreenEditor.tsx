@@ -88,9 +88,13 @@ type RowClickMode = 'none' | 'dialog' | 'route'
 // Phase 3 — Screen.columns drives both grid + dialog display (single source of truth). Edited
 // via SchemaNavigator on a dedicated tab.
 const COLUMNS_KEYS = ['columns'] as const
+// Named shared grid views (grid formats) — edited via SchemaNavigator on the Views tab. Each
+// view's ``columns`` / ``group_by`` / ``sort.column`` bind to SCREEN_COLUMNS the same way the
+// Columns tab's pickers do.
+const VIEWS_KEYS = ['views'] as const
 
-type TabKey = 'general' | 'queries' | 'columns' | 'dialog' | 'actions' | 'rowmenu' | 'export'
-const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'dialog', 'actions', 'rowmenu', 'export']
+type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'summary' | 'dialog' | 'actions' | 'rowmenu' | 'export'
+const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'summary', 'dialog', 'actions', 'rowmenu', 'export']
 
 // ── styled bits ─────────────────────────────────────────────────────────────
 const TabsBar = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; margin-bottom: 14px;`
@@ -458,6 +462,19 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   const columnsSchema = useMemo<JsonSchema>(
     () => ({ ...pickSchemaProperties(schema, COLUMNS_KEYS as unknown as string[]), $defs: defs }),
     [schema, defs],
+  )
+  // Views tab — edits ``Screen.views`` (named shared grid formats) via SchemaNavigator. Carries
+  // the full ``$defs`` so the nested ``sort`` (ScreenViewSort) list drills in via the breadcrumb.
+  const viewsSchema = useMemo<JsonSchema>(
+    () => ({ ...pickSchemaProperties(schema, VIEWS_KEYS as unknown as string[]), $defs: defs }),
+    [schema, defs],
+  )
+  // Summary tab — a screen has at most ONE summary, so edit the ScreenSummary object's fields
+  // inline (SchemaForm, no drill) rather than as a one-item list behind an "edit…" button. The
+  // ``dimensions`` array renders inline via SchemaForm's ObjectListEditor (no onNavigate).
+  const summaryObjSchema = useMemo<JsonSchema>(
+    () => ((defs.ScreenSummary as JsonSchema | undefined) ?? { type: 'object', properties: {} }),
+    [defs],
   )
   // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
   // "Columns in this group" chips in the ColumnGroupsEditor so the operator sees the mapping
@@ -954,6 +971,69 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     )
   }
 
+  // ── Views tab — named shared grid formats ───────────────────────────────────────────
+  // Per-row label = the view's name (+ a "default" tag) so the list reads at a glance instead of
+  // "View 1 / View 2". The ``columns`` / ``group_by`` / ``sort.column`` pickers resolve against
+  // SCREEN_COLUMNS via the same augmented-enums context the Columns tab uses.
+  const viewRowLabel = (v: Record<string, unknown>, sch: JsonSchema): string | null => {
+    const props = sch?.properties
+    if (!props || !('name' in props) || !('default' in props)) return null
+    const name = typeof v.name === 'string' ? v.name : ''
+    if (!name) return null
+    return v.default === true ? `${name} · ${t('settings.screens.views.defaultTag', 'default')}` : name
+  }
+  const renderViews = (): ReactNode => {
+    const currentViews = Array.isArray(value.views) ? (value.views as unknown[]) : []
+    return (
+      <>
+        <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
+          {t('settings.screens.views.intro', 'Named grid views (grid formats) shared with all users — each a saved set of visible columns, sort, grouping and page size. Mark one as the default to set the layout the grid opens with. Users can still save their own personal views on top.')}
+        </div>
+        <FrameworkEnumsContext.Provider value={augmentedEnums}>
+         <ListRowSummaryContext.Provider value={viewRowLabel}>
+          <SchemaNavigator
+            root={{
+              label: t('settings.screens.editor.viewsCrumb', { id, defaultValue: `Views — ${id}` }),
+              schema: viewsSchema,
+              value: { views: currentViews },
+              onChange: (v) => {
+                const next = Array.isArray(v.views) && (v.views as unknown[]).length
+                  ? (v.views as unknown[])
+                  : null
+                setProp('views', next)
+              },
+            }}
+          />
+         </ListRowSummaryContext.Provider>
+        </FrameworkEnumsContext.Provider>
+      </>
+    )
+  }
+
+  // ── Summary tab — server-aggregated rows with expandable detail ──────────────────────
+  const renderSummary = (): ReactNode => {
+    const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Row) : {}
+    return (
+      <>
+        <Sub>{t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}</Sub>
+        {/* Inline edit of the single ScreenSummary object. ``augmentedEnums`` resolves the
+            dimension column picker against SCREEN_COLUMNS. An empty dimensions list clears the
+            whole summary (so the Summary toggle disappears from the screen). */}
+        <FrameworkEnumsContext.Provider value={augmentedEnums}>
+          <SchemaForm
+            schema={summaryObjSchema}
+            defs={defs}
+            value={current}
+            onChange={(v) => {
+              const dims = Array.isArray(v.dimensions) ? (v.dimensions as unknown[]) : []
+              setProp('summary', dims.length ? v : null)
+            }}
+          />
+        </FrameworkEnumsContext.Provider>
+      </>
+    )
+  }
+
   // ── action editors (shared component) ──────────────────────────────────────────────
   // ``renderActionList`` + its inline ``renderPromptFields`` / ``renderActionOverrides`` /
   // ``actionVariantSchema`` blocks moved into ``ActionListEditor.tsx`` / ``ActionTreeView.tsx``.
@@ -1271,6 +1351,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       case 'general': return renderGeneral()
       case 'queries': return renderQueries()
       case 'columns': return renderColumns()
+      case 'views':   return renderViews()
+      case 'summary': return renderSummary()
       case 'dialog':  return renderDialog()
       case 'actions': return (
         // All action attachment points consolidated. Grouped visually by *when* they fire:

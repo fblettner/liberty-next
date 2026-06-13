@@ -189,7 +189,25 @@ const fr: Resources = {
     selectAll: 'Tout sélectionner',
     selectNone: 'Tout désélectionner',
     resetColumns: 'Réinit.',
-    resetColumnsHint: "Efface la visibilité / l'ordre enregistré pour cette table — utile quand une règle visible_when entre en conflit avec un état sauvegardé plus ancien.",
+    resetColumnsHint: "Revient à la vue par défaut de l'écran (ou à la disposition de colonnes de base si aucune) — utile quand une règle visible_when entre en conflit avec un état sauvegardé plus ancien.",
+    // Vues enregistrées (formats de grille)
+    views: 'Vues',
+    viewsEmpty: 'Aucune vue — « Enregistrer sous… » pour en créer une.',
+    viewsShared: 'Partagées',
+    viewsMine: 'Mes vues',
+    viewDefaultTag: 'défaut',
+    saveView: 'Enregistrer',
+    saveAs: 'Enregistrer sous…',
+    deleteView: 'Supprimer la vue',
+    myView: 'Ma vue',
+    saveViewTitle: 'Enregistrer la vue',
+    saveViewHint: 'Enregistre les colonnes, le tri, les filtres et le regroupement actuels comme une de vos vues (par utilisateur, vous suit sur tous vos appareils). Réutiliser un nom l’écrase.',
+    viewNamePlaceholder: 'Nom de la vue',
+    savingView: 'Enregistrement…',
+    // Vue résumé (agrégée) + détail expansible
+    viewSummary: 'Résumé',
+    expand: 'Développer',
+    collapse: 'Réduire',
     selectRow: 'Sélectionner la ligne',
     import: 'Importer',
     importNoMatch: 'Aucune colonne de {{file}} ne correspond à cette requête.',
@@ -974,7 +992,9 @@ const fr: Resources = {
       saved: 'Enregistré et rechargé. Applications avec écrans : {{apps}}',
       hint: 'Enregistrer valide chaque écran, écrit screens.toml et recharge.',
       editor: {
-        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne', export: 'Export' },
+        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', views: 'Vues', summary: 'Résumé', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne', export: 'Export' },
+        viewsCrumb: 'Vues — {{id}}',
+        summaryCrumb: 'Résumé — {{id}}',
         generalHint: "Indicateurs de comportement pour cet écran — chargement auto, table d'audit, plafond de lignes, colonnes clés. Le connecteur n'est utile que si l'écran tourne sur un connecteur différent de l'application.",
         columnsHint: "Configurez chaque colonne une seule fois — titre, format, valeur par défaut, filtrage, règles d'édition. La grille et le formulaire de dialogue utilisent les mêmes paramètres. Cliquez sur une colonne pour définir sa requête de lookup, ses filtres en cascade ou sa visibilité conditionnelle.",
         importColumns: 'Importer {{n}} colonne(s) depuis la requête de lecture',
@@ -1132,6 +1152,13 @@ const fr: Resources = {
         heading: 'Menu contextuel de ligne',
         hint: 'Affichées au clic droit sur une ligne du tableau. Les ParamBind de chaque action se résolvent contre les valeurs de la ligne cliquée.',
         empty: 'Aucune action de menu contextuel — un clic droit ne fait rien sur cet écran.',
+      },
+      views: {
+        defaultTag: 'défaut',
+        intro: 'Vues de grille nommées (formats de grille) partagées avec tous les utilisateurs — chacune un ensemble enregistré de colonnes visibles, tri, regroupement et taille de page. Marquez-en une comme défaut pour définir la disposition d’ouverture de la grille. Les utilisateurs peuvent enregistrer leurs propres vues personnelles par-dessus.',
+      },
+      summaryView: {
+        intro: 'Si défini, l’écran gagne un bouton Résumé : une ligne parente par GROUP BY <dimensions> avec un comptage, et un chevron qui charge à la demande les lignes sous-jacentes. Les comptages viennent de la base sur l’ensemble du résultat. Regroupez une dimension date/horodatage (jour/mois/année) pour replier une période en une ligne. Laissez vide pour désactiver.',
       },
       // Export classeur — port v2 des ``tbl_workbook`` / ``tbl_sheet`` de v1.
       export: {

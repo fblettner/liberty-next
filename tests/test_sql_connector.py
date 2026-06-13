@@ -2255,3 +2255,48 @@ async def test_declared_param_that_is_a_sql_bind_is_not_wrapped(pools: PoolRegis
         params=[ParamDef(name="status")],
     ))
     assert [r["id"] for r in (await conn.execute("own", {"status": "on"})).rows] == [1, 2]
+
+
+# ── summary (aggregate) view ──────────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_summary_aggregate_groups_and_counts(pools: PoolRegistry) -> None:
+    """``summary_dims`` wraps the read query into GROUP BY <dims> + COUNT(*) AS _count."""
+    conn = _connector(pools, QueryDef(name="rows", sql="SELECT id, name, status FROM item ORDER BY id"))
+    r = await conn.execute("rows", summary_dims=[("status", None)])
+    assert {c.name for c in r.columns} == {"status", "_count"}
+    by_status = {row["status"]: row["_count"] for row in r.rows}
+    assert by_status == {"on": 2, "off": 1}
+
+
+@pytest.mark.asyncio
+async def test_summary_detail_filters_to_one_group(pools: PoolRegistry) -> None:
+    """A detail request (``detail_filters``) returns just the rows of one group."""
+    conn = _connector(pools, QueryDef(name="rows", sql="SELECT id, name, status FROM item ORDER BY id"))
+    r = await conn.execute("rows", detail_filters=[("status", None, "on")])
+    assert [row["id"] for row in r.rows] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_summary_unknown_dimension_rejected(pools: PoolRegistry) -> None:
+    """A dimension that isn't one of the screen's column hints is rejected (not interpolated)."""
+    conn = _connector(pools, QueryDef(name="rows", sql="SELECT id, status FROM item"))
+    with pytest.raises(StatementNotAllowedError):
+        await conn.execute(
+            "rows", summary_dims=[("bogus", None)],
+            column_hints=[ColumnHint(name="id"), ColumnHint(name="status")],
+        )
+
+
+def test_aggregate_wrap_sql_shapes() -> None:
+    """Unit-level: the generated SQL for a day bucket + identifier rejection."""
+    from liberty.connectors.sql import _apply_aggregate_wrap, _apply_aggregate_detail_wrap
+    sql = "SELECT seg, ts FROM t ORDER BY id DESC"
+    agg = _apply_aggregate_wrap(sql, [("seg", None), ("ts", "day")], "postgres")
+    assert "COUNT(*) AS _count" in agg
+    assert "DATE_TRUNC('day', lib_agg.ts)::date AS ts" in agg
+    assert "GROUP BY lib_agg.seg, DATE_TRUNC('day', lib_agg.ts)::date" in agg
+    det = _apply_aggregate_detail_wrap(sql, [("seg", None, "g0"), ("ts", "day", "g1")], "postgres")
+    assert "(lib_det.seg = :g0)" in det and "DATE_TRUNC('day', lib_det.ts)::date = :g1" in det
+    assert det.rstrip().endswith("ORDER BY id DESC")  # original ORDER BY preserved
+    with pytest.raises(StatementNotAllowedError):
+        _apply_aggregate_wrap(sql, [("seg; DROP TABLE t", None)], "postgres")

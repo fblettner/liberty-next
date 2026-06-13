@@ -590,6 +590,64 @@ def test_parse_screens_id_mismatch_rejected() -> None:
         parse_screens({"screens": {"nomasx1": {"users": {"id": "people", "read_query": "q"}}}})
 
 
+def test_screen_views_roundtrip() -> None:
+    """Named shared views parse with their columns / sort / group_by / page_size + default flag."""
+    sf = parse_screens({"screens": {"nomasx1": {"s": {
+        "read_query": "q",
+        "views": [
+            {"name": "Wide", "default": True, "columns": ["A", "B"],
+             "sort": [{"column": "A", "desc": True}], "group_by": ["B"], "page_size": 100},
+            {"name": "Narrow", "columns": ["A"]},
+        ],
+    }}}})
+    s = sf.screens["nomasx1"]["s"]
+    assert [v.name for v in s.views] == ["Wide", "Narrow"]
+    assert s.views[0].default is True and s.views[0].sort[0].column == "A" and s.views[0].sort[0].desc is True
+    assert s.views[0].page_size == 100 and s.views[1].default is False
+
+
+def test_screen_views_reject_two_defaults() -> None:
+    with pytest.raises(Exception):
+        parse_screens({"screens": {"nomasx1": {"s": {
+            "read_query": "q",
+            "views": [{"name": "A", "default": True}, {"name": "B", "default": True}],
+        }}}})
+
+
+def test_screen_views_reject_duplicate_name() -> None:
+    with pytest.raises(Exception):
+        parse_screens({"screens": {"nomasx1": {"s": {
+            "read_query": "q",
+            "views": [{"name": "Dup"}, {"name": "Dup"}],
+        }}}})
+
+
+def test_screen_summary_roundtrip() -> None:
+    sf = parse_screens({"screens": {"nomasx1": {"s": {
+        "read_query": "q",
+        "summary": {
+            "dimensions": [{"column": "AUD_SEG_NAME"}, {"column": "AUD_DT_TRANSACTION", "bucket": "day"}],
+            "count_label": "# Changes",
+        },
+    }}}})
+    s = sf.screens["nomasx1"]["s"]
+    assert [(d.column, d.bucket) for d in s.summary.dimensions] == [("AUD_SEG_NAME", None), ("AUD_DT_TRANSACTION", "day")]
+    assert s.summary.count_label == "# Changes"
+
+
+def test_screen_summary_requires_a_dimension() -> None:
+    with pytest.raises(Exception):
+        parse_screens({"screens": {"nomasx1": {"s": {"read_query": "q", "summary": {"dimensions": []}}}}})
+
+
+def test_screen_summary_rejects_duplicate_dimension() -> None:
+    with pytest.raises(Exception):
+        parse_screens({"screens": {"nomasx1": {"s": {
+            "read_query": "q",
+            "summary": {"dimensions": [{"column": "X"}, {"column": "x"}]},
+        }}}})
+
+
 def test_load_screens_missing_file_yields_empty(tmp_path) -> None:
     assert load_screens(tmp_path / "nope.toml") == ScreensFile()
 

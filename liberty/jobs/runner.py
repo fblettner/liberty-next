@@ -33,7 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from liberty.jobs.db import JobDatabase
 from liberty.jobs.models import JobRun, RunLog, RunOverrides, RunState, StepRun, StepRunExtras
 from liberty.jobs.runlog import (
-    finish_run, registered_namespaces, reset_run_context, set_run_context,
+    finish_run, registered_namespaces, reset_run_context, set_run_context, set_run_level,
 )
 from liberty.jobs.schema import BackoffKind, Job, JobRetry, Step, StepType
 from liberty.jobs.steps.base import (
@@ -255,6 +255,11 @@ class JobRunner:
                 saved_log_levels[ns] = lg.level
                 if lg.level == logging.NOTSET or lg.level > logging.DEBUG:
                     lg.setLevel(logging.DEBUG)
+        # Gate THIS run's buffer to the chosen minimum level. Done per-run (in the
+        # RunLogHandler), not by raising the process-global logger level — raising
+        # to WARNING here would also suppress INFO for any parallel run. DEBUG keeps
+        # the min at DEBUG (records are emitted thanks to the logger-lowering above).
+        set_run_level(run.id, logging.getLevelName(effective_log_level))
 
         _log.info(
             "nomaflow.runner started job=%s run=%s trigger=%s steps=%d log_level=%s",

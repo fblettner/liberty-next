@@ -88,7 +88,7 @@ export interface JobConfig {
    *  progress markers. DEBUG also emits the full SQL of every run_query.
    *  The Run-with-parameters modal can override this per-fire without editing
    *  the TOML; the per-fire value wins. */
-  log_level?: 'INFO' | 'DEBUG'
+  log_level?: 'WARNING' | 'INFO' | 'DEBUG'
   /** Named snapshots of the Run-with-parameters modal state. The modal
    *  surfaces them as a "Preset" dropdown above the form; picking one
    *  layers its log_level / params / op_kwargs / step_enabled onto the
@@ -99,7 +99,7 @@ export interface JobConfig {
 
 export interface JobPreset {
   name: string
-  log_level?: 'INFO' | 'DEBUG' | null
+  log_level?: 'WARNING' | 'INFO' | 'DEBUG' | null
   params?: Record<string, unknown>
   op_kwargs?: Record<string, Record<string, unknown>>
   step_enabled?: Record<string, boolean>
@@ -158,7 +158,7 @@ export interface RunDetailResponse {
    *  ``{log_level, params, op_kwargs: {step: {k: v}}, step_enabled: {step: bool}}``.
    *  ``parent_chain`` is added by the runner for call_job-spawned children. */
   overrides?: {
-    log_level?: 'INFO' | 'DEBUG'
+    log_level?: 'WARNING' | 'INFO' | 'DEBUG'
     params?: Record<string, unknown>
     op_kwargs?: Record<string, Record<string, unknown>>
     step_enabled?: Record<string, boolean>

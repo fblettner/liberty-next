@@ -180,7 +180,7 @@ export default function JobsList() {
       job: JobSummary
       jobParams: Record<string, unknown>
       steps: StepConfig[]
-      logLevel: 'INFO' | 'DEBUG'
+      logLevel: 'WARNING' | 'INFO' | 'DEBUG'
       presets: import('./types').JobPreset[]
     } | null
   >(null)
@@ -191,7 +191,7 @@ export default function JobsList() {
       params?: Record<string, unknown>
       op_kwargs?: Record<string, Record<string, unknown>>
       step_enabled?: Record<string, boolean>
-      log_level?: 'INFO' | 'DEBUG'
+      log_level?: 'WARNING' | 'INFO' | 'DEBUG'
     },
   ) => {
     setBusyId(jobId); setError(null)
@@ -229,7 +229,8 @@ export default function JobsList() {
           && Object.keys(s.op_kwargs as object).length > 0,
       )
       const hasMultipleSteps = allSteps.length > 1
-      const jobLogLevel: 'INFO' | 'DEBUG' = (def?.log_level === 'DEBUG') ? 'DEBUG' : 'INFO'
+      const jobLogLevel: 'WARNING' | 'INFO' | 'DEBUG' =
+        def?.log_level === 'DEBUG' ? 'DEBUG' : def?.log_level === 'WARNING' ? 'WARNING' : 'INFO'
       if (!hasParams && !hasPythonKwargs && !hasMultipleSteps) {
         // No params + single no-kwargs step — quick-fire at the job's saved
         // log_level. Nothing the modal could usefully show (no kwargs to
@@ -566,7 +567,7 @@ function RunWithParamsModal({
   /** The job's saved log_level from jobs.toml (defaults to 'INFO'). The dropdown
    *  is seeded from this; on submit we only send log_level when the operator
    *  picked a value DIFFERENT from this saved default. */
-  jobLogLevel: 'INFO' | 'DEBUG'
+  jobLogLevel: 'WARNING' | 'INFO' | 'DEBUG'
   /** Named presets saved on the job — surfaced as a dropdown above the form.
    *  Empty array hides the dropdown. Picking a preset layers its values onto
    *  the modal state (acts like the operator typed them by hand). */
@@ -576,7 +577,7 @@ function RunWithParamsModal({
     params?: Record<string, unknown>
     op_kwargs?: Record<string, Record<string, unknown>>
     step_enabled?: Record<string, boolean>
-    log_level?: 'INFO' | 'DEBUG'
+    log_level?: 'WARNING' | 'INFO' | 'DEBUG'
   }) => Promise<void> | void
   /** "Save current state as a preset" — parent persists into jobs.toml + reloads.
    *  The current modal state is captured as a JobPreset (log_level + params +
@@ -620,7 +621,7 @@ function RunWithParamsModal({
     firstExpandable ? { [firstExpandable]: true } : {},
   )
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({ ...jobParams })
-  const [logLevel, setLogLevel] = useState<'INFO' | 'DEBUG'>(jobLogLevel)
+  const [logLevel, setLogLevel] = useState<'WARNING' | 'INFO' | 'DEBUG'>(jobLogLevel)
   const [busy, setBusy] = useState(false)
 
   const setStepKey = (stepName: string, key: string, v: unknown) => {
@@ -740,7 +741,7 @@ function RunWithParamsModal({
       params?: Record<string, unknown>
       op_kwargs?: Record<string, Record<string, unknown>>
       step_enabled?: Record<string, boolean>
-      log_level?: 'INFO' | 'DEBUG'
+      log_level?: 'WARNING' | 'INFO' | 'DEBUG'
     } = {}
     if (Object.keys(paramsDiff).length > 0) body.params = paramsDiff
     if (Object.keys(stepOverrides).length > 0) body.op_kwargs = stepOverrides
@@ -857,8 +858,11 @@ function RunWithParamsModal({
               <ParamKey>log_level</ParamKey>
               <Select
                 value={logLevel}
-                onChange={(e) => setLogLevel(e.target.value as 'INFO' | 'DEBUG')}
+                onChange={(e) => setLogLevel(e.target.value as 'WARNING' | 'INFO' | 'DEBUG')}
               >
+                <option value="WARNING">
+                  {t('nomaflow.runParams.logLevelWarning', 'WARNING — warnings + errors only')}
+                </option>
                 <option value="INFO">
                   {t('nomaflow.runParams.logLevelInfo', 'INFO — row counts + progress markers')}
                 </option>

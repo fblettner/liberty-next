@@ -951,6 +951,109 @@ class ColumnGroup(BaseModel):
     )
 
 
+class ScreenViewSort(BaseModel):
+    """One sort directive within a shared grid view."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    column: str = Field(
+        description="Result column to sort by.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    desc: bool = Field(default=False, description="Sort descending when true.")
+
+
+class ScreenView(BaseModel):
+    """A named, shared grid view (grid format) for a screen.
+
+    Shared views are authored in the Screen editor and are available to ALL users
+    (read-only). Exactly one may carry ``default=True`` — it's the layout the grid
+    opens with, unless the user's device remembers a last-opened view. A user's own
+    saved tweaks live separately, per-user, in the ``ly2_user_view`` table (see
+    :mod:`liberty.userviews`); this is only the shared catalogue.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(description="View name shown in the grid's view picker (unique within the screen).")
+    default: bool = Field(
+        default=False,
+        description="Open the grid with this view by default (only one view per screen should set it).",
+    )
+    columns: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+        description=(
+            "Visible columns, in display order. Columns omitted here are hidden in this view "
+            "(the dialog still shows every column). Empty = show all in the screen's column order."
+        ),
+    )
+    sort: list[ScreenViewSort] = Field(
+        default_factory=list,
+        description="Default sort for this view — column(s) + direction, applied in order.",
+    )
+    group_by: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+        description="Default tanstack grouping column(s) for this view (nested in order).",
+    )
+    page_size: int | None = Field(
+        default=None,
+        description="Rows per page for this view. Blank = the screen / grid default.",
+    )
+
+
+class ScreenSummaryDimension(BaseModel):
+    """One grouping dimension of a screen's summary (aggregate) view."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    column: str = Field(
+        description="Result column to group by.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    bucket: Literal["day", "month", "year"] | None = Field(
+        default=None,
+        description=(
+            "Bucket a date/timestamp column to this granularity before grouping (e.g. ``day`` "
+            "rolls every change on a day into one parent row). Blank = group by the raw value."
+        ),
+    )
+
+
+class ScreenSummary(BaseModel):
+    """A server-aggregated summary view for a screen — parent rows are
+    ``GROUP BY <dimensions>`` with a ``COUNT(*)``; expanding a parent lazily loads
+    the underlying detail rows (the screen's normal read query, filtered to that
+    group). Counts come from the database over the whole set, not the row-capped
+    grid, so they're accurate. Replaces materialised rollup tables.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    dimensions: list[ScreenSummaryDimension] = Field(
+        default_factory=list,
+        description="Columns the summary groups by, in display order (left → right).",
+    )
+    count_label: str = Field(
+        default="Count",
+        description="Header for the COUNT(*) column on the summary rows.",
+        json_schema_extra={"x_placeholder": "e.g. # Changes"},
+    )
+
+    @model_validator(mode="after")
+    def _check(self) -> "ScreenSummary":
+        if not self.dimensions:
+            raise ValueError("summary: needs at least one dimension")
+        seen: set[str] = set()
+        for d in self.dimensions:
+            key = d.column.upper()
+            if key in seen:
+                raise ValueError(f"summary: duplicate dimension column {d.column!r}")
+            seen.add(key)
+        return self
+
+
 class Screen(BaseModel):
     """A screen — list + dialog. Keyed by ``id`` within the app's screens map."""
 
@@ -1084,6 +1187,27 @@ class Screen(BaseModel):
             "refresh status at a glance instead of a flat row dump."
         ),
         json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    views: list[ScreenView] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Views"},
+        description=(
+            "Named shared grid views (grid formats) for this screen — each a saved set of visible "
+            "columns, sort, grouping and page size, available to ALL users from the grid's view "
+            "picker. Mark one ``default`` to set the layout the grid opens with. Users layer their "
+            "own per-user views on top (saved to the database, not here)."
+        ),
+    )
+    summary: ScreenSummary | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Summary"},
+        description=(
+            "Server-aggregated summary view — when set, the screen gains a Summary toggle that "
+            "shows one parent row per ``GROUP BY <dimensions>`` with a COUNT(*), and a chevron that "
+            "lazily loads the underlying rows on expand. Counts are computed in the database over "
+            "the whole result, so they're accurate even when the grid caps rows. Use it instead of "
+            "a materialised rollup table."
+        ),
     )
     treeview: ScreenTreeview | None = Field(
         default=None,
@@ -1244,6 +1368,19 @@ class Screen(BaseModel):
                         f"screen {self.id!r}: row_click_route references unknown column(s) "
                         f"{sorted(missing)!r} — known: {sorted(known)!r}"
                     )
+        # Shared view names must be unique, and at most one may be the default.
+        if self.views:
+            seen_v: set[str] = set()
+            defaults = 0
+            for v in self.views:
+                if v.name in seen_v:
+                    raise ValueError(f"screen {self.id!r}: duplicate view name {v.name!r}")
+                seen_v.add(v.name)
+                defaults += 1 if v.default else 0
+            if defaults > 1:
+                raise ValueError(
+                    f"screen {self.id!r}: {defaults} views set ``default`` — only one may be the default",
+                )
         return self
 
     def effective_key_columns(self) -> list[str]:

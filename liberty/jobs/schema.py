@@ -256,7 +256,7 @@ class JobPreset(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, description="Display label in the preset dropdown.")
-    log_level: Literal["INFO", "DEBUG"] | None = Field(
+    log_level: Literal["WARNING", "INFO", "DEBUG"] | None = Field(
         default=None,
         description="Log-level override. None → inherit the job's saved log_level.",
     )
@@ -309,9 +309,11 @@ class Job(BaseModel):
     # Per-run logging verbosity. INFO (default) gives operator-level signal —
     # row counts + business progress markers. DEBUG also emits the full SQL of
     # every run_query (useful when troubleshooting a specific job — matches v1's
-    # per-job debug flag). The Run-with-parameters modal can override this
-    # per-fire without editing the TOML; the per-fire value wins.
-    log_level: Literal["INFO", "DEBUG"] = "INFO"
+    # per-job debug flag). WARNING is the quiet end — only warnings + errors
+    # reach the run log (INFO progress lines suppressed). The Run-with-parameters
+    # modal can override this per-fire without editing the TOML; the per-fire
+    # value wins.
+    log_level: Literal["WARNING", "INFO", "DEBUG"] = "INFO"
     # Named presets of the Run-with-parameters modal state — saved by operators
     # ("DEBUG security users only", "OUT module only", …) so the next operator
     # picking the same combo clicks once. Stored inline on the job so the

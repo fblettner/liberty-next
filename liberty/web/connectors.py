@@ -115,6 +115,35 @@ def _as_int(v: Any) -> int | None:
         return None
 
 
+_SUMMARY_BUCKETS = ("day", "month", "year")
+
+
+def _parse_group_spec(spec: str) -> list[tuple[str, str | None]]:
+    """Parse a ``_group`` value — comma-separated ``COL`` or ``COL~bucket`` items — into
+    ``[(column, bucket|None)]``. Used for both the summary (GROUP BY) and detail (filter)
+    requests so the dimension list + bucketing is expressed once."""
+    out: list[tuple[str, str | None]] = []
+    for raw in spec.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        col, sep, bucket = item.partition("~")
+        b = bucket.strip().lower() if sep else None
+        out.append((col.strip(), b if b in _SUMMARY_BUCKETS else None))
+    return out
+
+
+def _pop_ci(qp: dict[str, Any], key: str) -> Any:
+    """Pop *key* from *qp* case-insensitively (the summary dimension value arrives keyed by the
+    result column name, whose case may differ from the screen's declared name)."""
+    if key in qp:
+        return qp.pop(key)
+    for k in list(qp):
+        if k.lower() == key.lower():
+            return qp.pop(k)
+    return None
+
+
 def _find_screen_for_query(
     screens: ScreensFile, connector: str, query: str,
 ) -> tuple[Screen | None, str | None, str | None]:
@@ -203,6 +232,8 @@ async def _run_sql(
     screens: ScreensFile | None = None, changesets: Any = None,
     action_context: dict[str, Any] | None = None,
     screen_hint: tuple[str, str] | None = None,
+    summary_dims: list[tuple[str, str | None]] | None = None,
+    detail_filters: list[tuple[str, str | None, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -249,7 +280,7 @@ async def _run_sql(
         result = await conn.execute(
             query, params, language=language, max_rows=max_rows, user=user,
             column_hints=column_hints, audit_table=audit_table, screen_max_rows=screen_max_rows,
-            dictionary_scope=dict_scope,
+            dictionary_scope=dict_scope, summary_dims=summary_dims, detail_filters=detail_filters,
         )
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
@@ -583,6 +614,21 @@ async def sql_query_get(
     # caller passes its own ids; absent → first-match (the historical behaviour).
     sid = qp.pop("_screen", None); sapp = qp.pop("_app", None)
     screen_hint = (sapp, sid) if (sid and sapp) else None
+    # Summary (aggregate) / detail (one group's rows). ``_group`` carries the dimension spec
+    # (``COL`` / ``COL~day``); with ``_summary`` it's the GROUP BY, otherwise it's a detail
+    # request whose dimension VALUES ride as normal params keyed by column (popped out here so
+    # they aren't also treated as filter binds). Both produce small results → never streamed.
+    summary = str(qp.pop("_summary", "") or "").lower() in {"1", "true", "yes", "y", "on"}
+    group_spec = qp.pop("_group", None)
+    summary_dims = detail_filters = None
+    if group_spec:
+        dims = _parse_group_spec(group_spec)
+        if summary:
+            summary_dims = dims
+            stream = False
+        else:
+            detail_filters = [(col, bucket, _pop_ci(qp, col)) for col, bucket in dims]
+            stream = False
     if stream:
         return _stream_sql_ndjson(
             connectors, connector, query, qp,
@@ -593,6 +639,7 @@ async def sql_query_get(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
         screens=screens, screen_hint=screen_hint,
+        summary_dims=summary_dims, detail_filters=detail_filters,
     )
 
 

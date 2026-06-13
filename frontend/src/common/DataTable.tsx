@@ -17,7 +17,7 @@
 // (the alternative is locking widths via colgroup which makes drag-reorder + content-fit
 // worse). Threshold = always — there's no behavioural cliff between small and large grids;
 // virtualization has no cost when there are only 25 rows on screen.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as XLSX from 'xlsx'
 import {
@@ -43,9 +43,18 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
+  LayoutGrid, Trash2,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
+import {
+  listGridViews, saveGridView, deleteGridView, sharedToGridView,
+  loadLastView, saveLastView,
+  type GridView, type NamedGridView, type SharedGridView, type ViewRef,
+} from '../services/gridViews'
+import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from './Modal'
+import { Button } from './Button'
+import { Input } from './Input'
 
 // "All" (Number.MAX_SAFE_INTEGER) renders every loaded row in one virtualised page — the
 // pagination chrome collapses into a single page. Useful for screens with high ``max_rows``
@@ -56,8 +65,13 @@ const PAGE_SIZE_OPTIONS: number[] = [25, 50, 100, 200, 500, 1000, PAGE_SIZE_ALL]
 export interface DataTableProps<T extends object> {
   columns: ColumnDef<T, unknown>[]
   data: T[]
-  /** A stable id → persists column visibility/order/sizes in localStorage. */
+  /** A stable, app-scoped id (e.g. `screen:<app>:<id>`) → the persistence key for the user's
+   *  saved grid views (DB) and the device's last-opened-view pointer (localStorage). */
   tableId?: string
+  /** Shared, read-only grid views from the screen config, offered in the view picker alongside
+   *  the user's own. One may be the default (applied on open unless the device remembers a
+   *  last-opened view). */
+  sharedViews?: SharedGridView[]
   /** Extra controls rendered at the left of the toolbar (e.g. an Edit toggle). */
   toolbar?: React.ReactNode
   /** Controls rendered immediately to the right of the search box (e.g. a Run button). */
@@ -85,6 +99,22 @@ export interface DataTableProps<T extends object> {
    *  so the browser's native context menu doesn't appear; we don't suppress it on the table chrome
    *  itself, so headers / pagination still get their native menu. */
   onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLTableRowElement>) => void
+  /** Master/detail: when provided, every row gets a leading chevron and expanding it renders
+   *  `renderDetail(row)` in a full-width row beneath. Generic — the consumer owns the detail
+   *  content (e.g. a lazily-fetched nested grid). Rows are rendered non-virtualized in this mode
+   *  (detail panels have variable height), so it's for bounded result sets like aggregate summaries. */
+  renderDetail?: (row: T) => React.ReactNode
+  /** Hide the toolbar row (search + Views/Filters/Group/Columns/Export). For an embedded grid —
+   *  e.g. a summary's expanded detail panel — where that chrome is noise (search via the main
+   *  table view instead). Pagination + the grid itself still render. */
+  chromeless?: boolean
+  /** Lazy master/detail rendered as native sub-rows (same columns, same row height — looks like
+   *  TanStack grouping). Parent rows show a chevron + count badge; expanding calls `onRowExpand`
+   *  to fetch children, which appear as indented rows once `getSubRows` returns them. */
+  getSubRows?: (row: T) => T[] | undefined
+  onRowExpand?: (row: T) => void
+  /** Count badge shown on a lazy parent before its children load (e.g. a server COUNT(*)). */
+  subRowCount?: (row: T) => number | undefined
   /** When provided, a paste (Ctrl+V) over the grid — while NOT focused in a cell input — parses the
    *  clipboard's TSV (an Excel copy) into rows keyed by VISIBLE column id and fires this. Mapping uses
    *  the table's own visible leaf columns (the exact set + order the export emits), by HEADER when the
@@ -93,15 +123,11 @@ export interface DataTableProps<T extends object> {
   onPasteRows?: (rows: Record<string, unknown>[]) => void
 }
 
-interface SavedGrid {
-  visibility: VisibilityState
-  order: ColumnOrderState
-}
-function loadGrid(id: string): Partial<SavedGrid> {
-  try { return JSON.parse(localStorage.getItem(`dt-${id}`) ?? '{}') } catch { return {} }
-}
-function saveGrid(id: string, s: SavedGrid) {
-  try { localStorage.setItem(`dt-${id}`, JSON.stringify(s)) } catch { /* ignore */ }
+// One-time cleanup of the obsolete `dt-*` localStorage layout (the pre-DB grid state). Grid
+// views now live in the DB (shared in the screen config, named per-user rows) + a last-opened
+// pointer; the old key is just dropped, not migrated, so it can't resurface as a phantom view.
+function dropLegacyGrid(id: string): void {
+  try { localStorage.removeItem(`dt-${id}`) } catch { /* storage disabled — nothing to drop */ }
 }
 
 // ── styled ──────────────────────────────────────────────────────────────────
@@ -233,6 +259,17 @@ const CheckBox = styled.span<{ $on: boolean }>`
   transition: background 0.12s, border-color 0.12s;
 `
 const MenuTitle = styled.div`padding: 4px 8px 6px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: ${colors.text.muted};`
+// Sub-heading inside the view picker — separates the "Shared" / "My views" groups.
+const MenuSub = styled.div<{ $first?: boolean }>`
+  padding: 6px 8px 2px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: ${colors.text.muted};
+  ${({ $first }) => ($first ? '' : `margin-top: 2px; border-top: 1px solid ${colors.border};`)}
+`
+const IconBtn = styled.button`
+  display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0;
+  border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; border-radius: 3px; padding: 0;
+  &:hover { background: var(--hover-subtle); color: ${colors.red.main}; }
+`
 const MenuHead = styled.div`display: flex; align-items: center; gap: 6px; padding: 0 2px 2px; border-bottom: 1px solid ${colors.border}; margin-bottom: 4px;`
 const MiniLink = styled.button`
   border: none; background: transparent; color: ${colors.blue.main}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
@@ -296,6 +333,14 @@ const GroupCellBtn = styled.button`
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
   & svg { color: ${colors.text.muted}; }
 `
+// Master/detail: a small chevron that prefixes the first cell, and the full-width detail row.
+const DetailToggle = styled.button`
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+  margin-right: 6px; vertical-align: middle; border: none; background: none; cursor: pointer; padding: 0;
+  color: ${colors.text.muted}; flex-shrink: 0;
+  &:hover { color: ${colors.text.primary}; }
+`
+const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
 const PaginationRow = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; flex-wrap: wrap;`
@@ -332,16 +377,14 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
-  const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
 
-  // Start from the column hints' hidden flags, then layer the user's saved choices on top — so a
-  // `hidden` hint takes effect on first load *and* survives a stale saved `{}` from before the hint
-  // existed, while still letting the user un-hide a column and have that stick.
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => ({ ...(initialColumnVisibility ?? {}), ...(saved.visibility ?? {}) }))
-  const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(saved.order ?? [])
+  // Start from the column hints' hidden flags. A saved view (shared or user) is layered on top by
+  // the load effect below; this is just the base the grid shows before any view applies.
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => ({ ...(initialColumnVisibility ?? {}) }))
+  const [columnOrder, setColumnOrder] = useState<ColumnOrderState>([])
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
@@ -400,23 +443,162 @@ export function DataTable<T extends object>({
     return () => ro.disconnect()
   }, [showFilters])
 
-  useEffect(() => {
-    if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder })
-  }, [tableId, columnVisibility, columnOrder])
+  // ── saved views (grid formats) ──────────────────────────────────────────────
+  // Two sources: SHARED views from the screen config (read-only, everyone sees them, one may be
+  // the default), and the user's OWN named views persisted per-user in the DB. localStorage keeps
+  // only a pointer to the view this device last opened — the heavy content lives in those two.
+  const sharedList = useMemo<SharedGridView[]>(() => sharedViews ?? [], [sharedViews])
+  const [userViews, setUserViews] = useState<NamedGridView[]>([])
+  const [activeView, setActiveView] = useState<ViewRef | null>(null)
+  const [viewOpen, setViewOpen] = useState(false)
+  const viewRef = useRef<HTMLDivElement>(null)
 
-  // Reset the grid's persisted visibility + order back to the screen's defaults — clears the
-  // localStorage entry *and* re-applies ``initialColumnVisibility`` (which encodes the screen's
-  // ``hidden`` flags). Needed when a screen has ``visible_when`` rules: an old saved-visibility
-  // entry can override a column the rule wants shown (or hidden) given the current filter,
-  // leaving the operator unable to see / hide a column without manually toggling it in the
-  // Columns menu. "Reset" gives them a single-click way back to the configured defaults.
-  const resetGrid = useCallback(() => {
-    if (tableId) {
-      try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ }
-    }
+  // The grid's data (non-internal) column ids in screen order — used to translate a shared
+  // view's column-name list into a TanStack visibility map.
+  const allDataColIds = useMemo(
+    () => columns
+      .filter((c) => !(c.meta as { internal?: boolean } | undefined)?.internal)
+      .map((c) => String((c as { id?: string }).id ?? (c as { accessorKey?: string }).accessorKey ?? ''))
+      .filter(Boolean),
+    [columns],
+  )
+
+  // Apply a saved view onto the grid state. A full apply (not a merge) so switching FROM a wide
+  // view TO a narrow one actually hides the extra columns; the screen's ``hidden`` defaults are
+  // layered under the view's visibility.
+  const applyView = useCallback((v: GridView) => {
+    setColumnVisibility(v.visibility ? { ...(initialColumnVisibility ?? {}), ...v.visibility } : { ...(initialColumnVisibility ?? {}) })
+    setColumnOrder(v.order ?? [])
+    setSorting(v.sorting ?? [])
+    setColumnFilters(v.filters ?? [])
+    setGrouping(v.grouping ?? [])
+    setExpanded(v.grouping?.length ? true : {})
+    setPagination((p) => ({ ...p, pageIndex: 0, pageSize: typeof v.pageSize === 'number' ? v.pageSize : initialPageSize }))
+  }, [initialColumnVisibility, initialPageSize])
+
+  // The base/default layout — the screen's configured visibility + grouping, no sort/filters.
+  const applyBase = useCallback(() => {
     setColumnVisibility({ ...(initialColumnVisibility ?? {}) })
     setColumnOrder([])
-  }, [tableId, initialColumnVisibility])
+    setSorting([])
+    setColumnFilters([])
+    setGrouping(resolvedInitialGrouping)
+    setExpanded(resolvedInitialGrouping.length ? true : {})
+    setPagination((p) => ({ ...p, pageIndex: 0, pageSize: initialPageSize }))
+  }, [initialColumnVisibility, resolvedInitialGrouping, initialPageSize])
+
+  // Resolve a view reference (shared or user) to an applicable GridView.
+  const resolveView = useCallback((ref: ViewRef): GridView | null => {
+    if (ref.scope === 'shared') {
+      const sv = sharedList.find((s) => s.name === ref.name)
+      return sv ? sharedToGridView(sv, allDataColIds) : null
+    }
+    const uv = userViews.find((u) => u.name === ref.name)
+    return uv ? uv.payload : null
+  }, [sharedList, userViews, allDataColIds])
+
+  // Select a view (or null = the base layout): apply it, mark it active, remember it on this device.
+  const selectView = useCallback((ref: ViewRef | null) => {
+    setActiveView(ref)
+    if (tableId) saveLastView(tableId, ref)
+    if (!ref) { applyBase(); return }
+    const gv = resolveView(ref)
+    applyView(gv ?? {})
+  }, [tableId, applyBase, resolveView, applyView])
+
+  // Load the user's views on mount, then open on the device's last-opened view (if it still
+  // exists) → the shared default → the base layout. Any obsolete ``dt-*`` localStorage layout is
+  // dropped (not migrated) so it can't reappear as a phantom "My view".
+  useEffect(() => {
+    if (!tableId) return
+    let cancelled = false
+    void (async () => {
+      dropLegacyGrid(tableId)
+      const uv = await listGridViews(tableId)
+      if (cancelled) return
+      setUserViews(uv)
+      const last = loadLastView(tableId)
+      const stillExists = (r: ViewRef) =>
+        r.scope === 'user' ? uv.some((u) => u.name === r.name) : sharedList.some((s) => s.name === r.name)
+      let initial: ViewRef | null = last && stillExists(last) ? last : null
+      if (!initial) {
+        const def = sharedList.find((s) => s.default)
+        if (def) initial = { scope: 'shared', name: def.name }
+      }
+      if (initial) {
+        setActiveView(initial)
+        const gv = initial.scope === 'user'
+          ? uv.find((u) => u.name === initial!.name)?.payload ?? null
+          : (() => { const sv = sharedList.find((s) => s.name === initial!.name); return sv ? sharedToGridView(sv, allDataColIds) : null })()
+        if (gv) applyView(gv)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the table identity changes
+  }, [tableId])
+
+  // The full current presentation as a GridView payload — what both Save and Save as… persist.
+  const currentView = useCallback((): GridView => ({
+    visibility: columnVisibility, order: columnOrder, sorting,
+    filters: columnFilters, grouping, pageSize: pagination.pageSize,
+  }), [columnVisibility, columnOrder, sorting, columnFilters, grouping, pagination.pageSize])
+
+  // "Save as…" — persist the current presentation under a (new or existing) name. The naming
+  // modal prefills with the active user view's name.
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const [savingView, setSavingView] = useState(false)
+  const openSaveModal = useCallback(() => {
+    setSaveName(activeView?.scope === 'user' ? activeView.name : '')
+    setSaveModalOpen(true)
+  }, [activeView])
+  const confirmSaveView = useCallback(async () => {
+    const name = saveName.trim()
+    if (!tableId || !name) return
+    setSavingView(true)
+    try {
+      await saveGridView(tableId, name, currentView())
+      const uv = await listGridViews(tableId)
+      setUserViews(uv)
+      const ref: ViewRef = { scope: 'user', name }
+      setActiveView(ref); saveLastView(tableId, ref)
+      setSaveModalOpen(false)
+    } finally { setSavingView(false) }
+  }, [tableId, saveName, currentView])
+
+  // "Save" — overwrite the active USER view in place (no modal). Shown only when the active view
+  // is one of the user's own; shared views are read-only to regular users.
+  const saveCurrentView = useCallback(async () => {
+    if (!tableId || activeView?.scope !== 'user') return
+    setSavingView(true)
+    try {
+      await saveGridView(tableId, activeView.name, currentView())
+      setUserViews(await listGridViews(tableId))
+    } finally { setSavingView(false) }
+  }, [tableId, activeView, currentView])
+
+  // Delete one of the user's own views; if it was active, fall back to the shared default / base.
+  const deleteUserView = useCallback(async (name: string) => {
+    if (!tableId) return
+    await deleteGridView(tableId, name)
+    const uv = await listGridViews(tableId)
+    setUserViews(uv)
+    if (activeView?.scope === 'user' && activeView.name === name) {
+      const def = sharedList.find((s) => s.default)
+      selectView(def ? { scope: 'shared', name: def.name } : null)
+    }
+  }, [tableId, activeView, sharedList, selectView])
+
+  // "Reset" — revert to the screen's DEFAULT shared view when one is defined, else the base
+  // screen layout. Handy when a ``visible_when`` rule conflicts with a saved layout. Doesn't
+  // delete any saved view.
+  const resetGrid = useCallback(() => {
+    const def = sharedList.find((s) => s.default)
+    if (def) { selectView({ scope: 'shared', name: def.name }); return }
+    setActiveView(null)
+    if (tableId) saveLastView(tableId, null)
+    applyBase()
+  }, [tableId, applyBase, sharedList, selectView])
 
   // Internal columns (select / status) are always pinned to the front, regardless of the user's
   // saved (data-only) column order; `columnOrder` persists only the data columns.
@@ -465,6 +647,7 @@ export function DataTable<T extends object>({
     onGroupingChange: setGrouping,
     onExpandedChange: setExpanded,
     onPaginationChange: setPagination,
+    getSubRows: getSubRows ? (row) => getSubRows(row) : undefined,
     enableColumnResizing: false,
     enableMultiSort: true, // shift-click a header adds it to the sort
     isMultiSortEvent: (e) => (e as MouseEvent).shiftKey,
@@ -473,6 +656,13 @@ export function DataTable<T extends object>({
     // exclude such a column from the global filter — that's why the search "missed" some columns)
     getColumnCanGlobalFilter: (col) => !((col.columnDef.meta as { internal?: boolean } | undefined)?.internal),
     autoResetExpanded: false,
+    // Master/detail: let rows expand. renderDetail → any row (panel). getSubRows (lazy sub-rows)
+    // → parents with a positive count, so the chevron shows before children are fetched.
+    getRowCanExpand: renderDetail
+      ? () => true
+      : getSubRows
+        ? (row) => row.depth === 0 && (subRowCount?.(row.original) ?? getSubRows(row.original)?.length ?? 0) > 0
+        : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -635,8 +825,92 @@ export function DataTable<T extends object>({
   const visibleColCount = table.getVisibleLeafColumns().length
   const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
 
+  // One data/group row. ``virtualIndex`` (virtualized path only) wires the virtualizer's
+  // measurement ref; the master/detail path renders rows directly (no virtualization) so a
+  // variable-height detail panel doesn't drift the spacer math.
+  const renderRow = (row: typeof visibleRows[number], virtualIndex?: number) => {
+    // A lazy summary parent (getSubRows mode, top level) renders group-styled — like a TanStack
+    // group row — with a chevron + count badge; its children are real sub-rows (same columns).
+    const isLazyParent = !!getSubRows && row.depth === 0 && row.getCanExpand()
+    const groupLike = row.getIsGrouped() || isLazyParent
+    const RowEl = groupLike ? GroupTr : Tr
+    const cls = groupLike ? undefined : rowClassName?.(row.original)
+    const clickable = !groupLike && onRowClick != null
+    const onClick = clickable
+      ? (e: React.MouseEvent<HTMLTableRowElement>) => {
+          if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
+          onRowClick!(row.original)
+        }
+      : undefined
+    const contextable = !groupLike && onRowContextMenu != null
+    const onContextMenu = contextable
+      ? (e: React.MouseEvent<HTMLTableRowElement>) => { e.preventDefault(); onRowContextMenu!(row.original, e) }
+      : undefined
+    // Expand a lazy parent → fetch its children once (onRowExpand), then TanStack shows them.
+    const lazyToggle = () => {
+      const willExpand = !row.getIsExpanded()
+      row.toggleExpanded()
+      if (willExpand) onRowExpand?.(row.original)
+    }
+    const cells = row.getVisibleCells()
+    const firstCellId = cells[0]?.id
+    const canDetail = !!renderDetail && !row.getIsGrouped() && row.getCanExpand()
+    return (
+      <RowEl
+        key={row.id} className={cls}
+        {...(virtualIndex != null ? { 'data-index': virtualIndex, ref: rowVirtualizer.measureElement } : {})}
+        onClick={onClick} onContextMenu={onContextMenu}
+        style={clickable ? { cursor: 'pointer' } : undefined}
+      >
+        {cells.map((cell) => (
+          <Td
+            key={cell.id}
+            style={{
+              ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
+              paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px`
+                : (getSubRows && row.depth > 0 && cell.id === firstCellId) ? `${12 + row.depth * 16}px` : undefined,
+              textAlign: colAlign(cell.column),
+            }}
+          >
+            {/* Master/detail chevron — prefixes the first cell so any row opens its panel. */}
+            {canDetail && cell.id === firstCellId && (
+              <DetailToggle
+                type="button"
+                onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
+                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
+              >
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </DetailToggle>
+            )}
+            {isLazyParent && cell.id === firstCellId ? (
+              <GroupCellBtn type="button" onClick={lazyToggle}>
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                <GroupCount>({subRowCount?.(row.original) ?? row.subRows.length})</GroupCount>
+              </GroupCellBtn>
+            ) : isLazyParent ? (
+              // A lazy parent's own dimension cells — always render the value. (Once expanded the
+              // row has sub-rows, and with grouping enabled TanStack would mark these cells
+              // placeholder/aggregated; the `? null` below then blanked them on collapse.)
+              flexRender(cell.column.columnDef.cell, cell.getContext())
+            ) : cell.getIsGrouped() ? (
+              <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                <GroupCount>({row.subRows.length})</GroupCount>
+              </GroupCellBtn>
+            ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
+              flexRender(cell.column.columnDef.cell, cell.getContext())
+            )}
+          </Td>
+        ))}
+      </RowEl>
+    )
+  }
+
   return (
     <Wrap>
+      {!chromeless && (
       <ToolbarRow>
         {toolbar}
         <SearchBox>
@@ -647,6 +921,60 @@ export function DataTable<T extends object>({
         <Spacer />
         {toolbarRight}
         <ActionGroup>
+          {(tableId || sharedList.length > 0) && (
+            <MenuWrap ref={viewRef}>
+              <CtrlBtn $active={!!activeView} onClick={() => setViewOpen((v) => !v)} title={t('table.views', 'Views')}>
+                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.views', 'Views')}
+              </CtrlBtn>
+              <MenuPortal open={viewOpen} anchorRef={viewRef} onClose={() => setViewOpen(false)} minWidth={240}>
+                <MenuHead>
+                  <MenuTitle>{t('table.views', 'Views')}</MenuTitle>
+                  <Spacer />
+                  {tableId && activeView?.scope === 'user' && (
+                    <MiniLink type="button" disabled={savingView} onClick={() => { setViewOpen(false); void saveCurrentView() }}>
+                      {t('table.saveView', 'Save')}
+                    </MiniLink>
+                  )}
+                  {tableId && (
+                    <MiniLink type="button" onClick={() => { setViewOpen(false); openSaveModal() }}>
+                      {t('table.saveAs', 'Save as…')}
+                    </MiniLink>
+                  )}
+                </MenuHead>
+                {/* The base screen layout isn't offered as a pickable view — it's just the implicit
+                    fallback when no shared default / saved view applies (the Columns-menu "Reset"
+                    returns to it). The picker lists only real views. */}
+                {sharedList.length === 0 && userViews.length === 0 && (
+                  <ColRow style={{ color: colors.text.muted }}>
+                    <ColLabel>{t('table.viewsEmpty', 'No views yet — Save as… to create one.')}</ColLabel>
+                  </ColRow>
+                )}
+                {sharedList.length > 0 && <MenuSub $first>{t('table.viewsShared', 'Shared')}</MenuSub>}
+                {sharedList.map((s) => {
+                  const on = activeView?.scope === 'shared' && activeView.name === s.name
+                  return (
+                    <ColRow key={`s:${s.name}`} onClick={() => { selectView({ scope: 'shared', name: s.name }); setViewOpen(false) }} style={{ cursor: 'pointer' }}>
+                      <CheckBox $on={on}>{on && <Check size={9} />}</CheckBox>
+                      <ColLabel>{s.name}{s.default ? ` · ${t('table.viewDefaultTag', 'default')}` : ''}</ColLabel>
+                    </ColRow>
+                  )
+                })}
+                {userViews.length > 0 && <MenuSub $first={sharedList.length === 0}>{t('table.viewsMine', 'My views')}</MenuSub>}
+                {userViews.map((u) => {
+                  const on = activeView?.scope === 'user' && activeView.name === u.name
+                  return (
+                    <ColRow key={`u:${u.name}`} style={{ cursor: 'pointer' }}>
+                      <CheckBox $on={on} onClick={() => { selectView({ scope: 'user', name: u.name }); setViewOpen(false) }}>{on && <Check size={9} />}</CheckBox>
+                      <ColLabel onClick={() => { selectView({ scope: 'user', name: u.name }); setViewOpen(false) }}>{u.name}</ColLabel>
+                      <IconBtn onClick={(e) => { e.stopPropagation(); void deleteUserView(u.name) }} title={t('table.deleteView', 'Delete view')}>
+                        <Trash2 size={12} />
+                      </IconBtn>
+                    </ColRow>
+                  )
+                })}
+              </MenuPortal>
+            </MenuWrap>
+          )}
           <CtrlBtn $active={showFilters} onClick={() => setShowFilters((v) => !v)} title={t('table.filters')}>
             <Filter size={13} /> {t('table.filters')}
           </CtrlBtn>
@@ -695,7 +1023,7 @@ export function DataTable<T extends object>({
                   <Spacer />
                   <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll', 'All')}</MiniLink>
                   <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone', 'None')}</MiniLink>
-                  {/* "Reset" wipes the saved visibility + order from localStorage and re-applies
+                  {/* "Reset" drops the active view selection and re-applies
                       the screen's defaults (the ``hidden`` hints on each column). Needed when a
                       ``visible_when`` rule drops a column based on a server filter but an older
                       saved entry still hides it — the operator would otherwise have to hunt
@@ -732,6 +1060,7 @@ export function DataTable<T extends object>({
           </MenuWrap>
         </ActionGroup>
       </ToolbarRow>
+      )}
 
       <TableScroll ref={tableScrollRef}>
         {/* Stretch-when-narrow, scroll-when-wide. ``minWidth`` = sum of natural column widths
@@ -816,6 +1145,23 @@ export function DataTable<T extends object>({
           <tbody>
             {visibleRows.length === 0 ? (
               <tr><td colSpan={visibleColCount}><Empty>{t('table.noResults')}</Empty></td></tr>
+            ) : (renderDetail || getSubRows) ? (
+              /* Master/detail: non-virtualized. renderDetail → a panel under each expanded row;
+                 getSubRows → children are already in `visibleRows` (sub-rows). Non-virtualized
+                 because expand/collapse changes the row count + heights and the virtualizer
+                 mis-measures (rows render blank). For bounded sets (aggregate summaries). */
+              <>
+                {visibleRows.map((row) => (
+                  <Fragment key={row.id}>
+                    {renderRow(row)}
+                    {renderDetail && row.getIsExpanded() && !row.getIsGrouped() && (
+                      <DetailTr>
+                        <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
+                      </DetailTr>
+                    )}
+                  </Fragment>
+                ))}
+              </>
             ) : (
               <>
                 {/* Top spacer — pushes the first visible row down to its virtual `start`
@@ -826,68 +1172,7 @@ export function DataTable<T extends object>({
                     <td colSpan={visibleColCount} />
                   </tr>
                 )}
-                {virtualItems.map((virtualItem) => {
-                  const row = visibleRows[virtualItem.index]
-                  const RowEl = row.getIsGrouped() ? GroupTr : Tr
-                  const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
-                  // Whole-row click → onRowClick. Bail if the click landed on an interactive child
-                  // (input/button/a/select/textarea — the edit-mode cells, copy buttons, group toggles,
-                  // etc.) so those keep working without firing the screen dialog underneath. Group
-                  // rows never trigger — they're a grouping affordance, not a real record.
-                  const clickable = !row.getIsGrouped() && onRowClick != null
-                  const onClick = clickable
-                    ? (e: React.MouseEvent<HTMLTableRowElement>) => {
-                        if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
-                        onRowClick!(row.original)
-                      }
-                    : undefined
-                  // Right-click on a (non-grouped) row → onRowContextMenu(row, event). We
-                  // preventDefault so the browser's native menu doesn't fight the consumer's
-                  // overlay; the consumer is expected to read `event.clientX`/`clientY` to
-                  // position the menu. Headers + pagination keep their native menu (we don't
-                  // attach this on <th> or the toolbar).
-                  const contextable = !row.getIsGrouped() && onRowContextMenu != null
-                  const onContextMenu = contextable
-                    ? (e: React.MouseEvent<HTMLTableRowElement>) => {
-                        e.preventDefault()
-                        onRowContextMenu!(row.original, e)
-                      }
-                    : undefined
-                  return (
-                    <RowEl
-                      // `data-index` + `ref={rowVirtualizer.measureElement}` let the virtualizer
-                      // measure each row's real height after layout — so a group row, an
-                      // edit-mode row with taller cell content, or a dialog-changed row that
-                      // wraps don't drift the spacer math.
-                      key={row.id} className={cls}
-                      data-index={virtualItem.index}
-                      ref={rowVirtualizer.measureElement}
-                      onClick={onClick} onContextMenu={onContextMenu}
-                      style={clickable ? { cursor: 'pointer' } : undefined}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <Td
-                          key={cell.id}
-                          style={{
-                            ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
-                            paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
-                            textAlign: colAlign(cell.column),
-                          }}
-                        >
-                          {cell.getIsGrouped() ? (
-                            <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
-                              {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              <GroupCount>({row.subRows.length})</GroupCount>
-                            </GroupCellBtn>
-                          ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
-                            flexRender(cell.column.columnDef.cell, cell.getContext())
-                          )}
-                      </Td>
-                    ))}
-                  </RowEl>
-                  )
-                })}
+                {virtualItems.map((virtualItem) => renderRow(visibleRows[virtualItem.index], virtualItem.index))}
                 {/* Bottom spacer — fills the gap between the last visible row's `end` and the
                     virtualizer's total scrollable height. Same shape as the top spacer. */}
                 {paddingBottom > 0 && (
@@ -929,6 +1214,31 @@ export function DataTable<T extends object>({
           <PagBtn onClick={() => table.setPageIndex(totalPages - 1)} disabled={!table.getCanNextPage()} title={t('common.last')}><ChevronsRight size={13} /></PagBtn>
         </PagRight>
       </PaginationRow>
+      {saveModalOpen && (
+        <Overlay onClick={() => setSaveModalOpen(false)} style={{ zIndex: 2000 }}>
+          <Modal style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>{t('table.saveViewTitle', 'Save view')}</ModalHeader>
+            <ModalBody>
+              <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
+                {t('table.saveViewHint', 'Save the current columns, sort, filters and grouping as one of your views (stored per user, follows you across devices). Reusing a name overwrites it.')}
+              </div>
+              <Input
+                autoFocus
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void confirmSaveView() }}
+                placeholder={t('table.viewNamePlaceholder', 'View name')}
+              />
+            </ModalBody>
+            <ModalFooter>
+              <Button $size="sm" $variant="ghost" onClick={() => setSaveModalOpen(false)}>{t('common.cancel')}</Button>
+              <Button $size="sm" $variant="primary" onClick={() => void confirmSaveView()} disabled={!saveName.trim() || savingView}>
+                {savingView ? t('table.savingView', 'Saving…') : t('common.save', 'Save')}
+              </Button>
+            </ModalFooter>
+          </Modal>
+        </Overlay>
+      )}
     </Wrap>
   )
 }

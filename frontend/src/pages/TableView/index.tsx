@@ -6,7 +6,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useSearchParams } from 'react-router-dom'
-import { Table as TableIcon, Play, BarChart3, Network } from 'lucide-react'
+import { Table as TableIcon, Play, BarChart3, Network, LayoutList } from 'lucide-react'
 import { api, ApiError, streamNDJSON } from '../../api/client'
 import type { Column, ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
 import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SpinnerRing, useModals } from '../../common'
@@ -25,6 +25,9 @@ const ChartView = lazy(() => import('./ChartView').then((m) => ({ default: m.Cha
 // lazy pattern for consistency. Only loads when the operator toggles to Tree mode AND only
 // surfaces as a toggle when the screen carries a ``treeview`` config.
 const TreeView = lazy(() => import('./TreeView').then((m) => ({ default: m.TreeView })))
+// Summary (server-aggregated parent rows + expandable detail) — lazy, surfaces only when the
+// screen carries a ``summary`` config. Fetches its own aggregate + per-group detail.
+const SummaryView = lazy(() => import('./SummaryView').then((m) => ({ default: m.SummaryView })))
 
 // Run / Max-rows controls — sized to sit inline with the grid's 28px-tall toolbar buttons
 // (Run goes just right of the search box, Max-rows at the far right before the Filters button).
@@ -101,7 +104,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   // current screen carries a ``treeview`` config (gate below); on screens without one the
   // toggle reads Table / Chart as before. Resets to 'table' on remount — opening a fresh
   // tab in chart or tree mode would surprise the operator.
-  const [view, setView] = useState<'table' | 'chart' | 'tree'>('table')
+  const [view, setView] = useState<'table' | 'chart' | 'tree' | 'summary'>('table')
 
   useEffect(() => {
     setMeta(null)
@@ -190,6 +193,22 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
     () => Object.fromEntries(Object.entries(filters).filter(([, f]) => f.val !== '').map(([k, f]) => [k, f.val])),
     [filters],
   )
+
+  // The run params + active server filters as a flat dict — what run() sends, also fed to the
+  // SummaryView so the aggregate + its detail respect the current filters.
+  const summaryParams = useMemo<Record<string, string>>(() => {
+    const sent: Record<string, string> = {}
+    for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
+    for (const [name, f] of Object.entries(filters)) if (f.val !== '') { sent[name] = f.val; sent[`${name}_op`] = f.op }
+    return sent
+  }, [params, filters])
+
+  // Open in Summary mode when the screen declares a summary config (the materialised-rollup
+  // replacement is the natural landing view). Fires once per screen load; the operator can
+  // still switch to Table/Chart afterwards.
+  useEffect(() => {
+    if (screen?.summary) setView('summary')
+  }, [screen])
 
   const paramNames = useMemo(() => {
     if (!meta) return [] as string[]
@@ -544,6 +563,13 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
                       <Network size={12} /> {t('table.viewTree', 'Tree')}
                     </button>
                   )}
+                  {/* Summary button gated on the screen carrying a ``summary`` config — server
+                      aggregated parent rows + expandable detail. */}
+                  {screen?.summary && (
+                    <button type="button" aria-pressed={view === 'summary'} onClick={() => setView('summary')} title={t('table.viewSummary', 'Summary')}>
+                      <LayoutList size={12} /> {t('table.viewSummary', 'Summary')}
+                    </button>
+                  )}
                 </ViewToggle>
               )}
             </Row>
@@ -561,6 +587,16 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
               // could persist across a screen swap). Same Suspense + lazy pattern as Chart.
               <Suspense fallback={<Centered />}>
                 <TreeView result={effectiveResult} screen={screen} />
+              </Suspense>
+            ) : view === 'summary' && screen?.summary ? (
+              // Summary mode — server-aggregated parent rows + lazy detail. Fetches its own
+              // aggregate (respecting the current filters), independent of effectiveResult.
+              <Suspense fallback={<Centered />}>
+                <SummaryView
+                  connector={connector} query={query} screen={screen}
+                  params={summaryParams} screenApp={screenApp} screenId={screenId}
+                  detailColumns={effectiveResult.columns}
+                />
               </Suspense>
             ) : (
               <ResultTable
