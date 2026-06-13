@@ -46,6 +46,7 @@ import {
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
+import { loadGridView, saveGridView, resetGridView, type GridView } from '../services/gridViews'
 
 // "All" (Number.MAX_SAFE_INTEGER) renders every loaded row in one virtualised page — the
 // pagination chrome collapses into a single page. Useful for screens with high ``max_rows``
@@ -97,11 +98,10 @@ interface SavedGrid {
   visibility: VisibilityState
   order: ColumnOrderState
 }
+// Legacy localStorage reader — kept only to migrate a pre-existing `dt-*` entry into the
+// DB-backed store on first load (see the load effect below); we no longer write here.
 function loadGrid(id: string): Partial<SavedGrid> {
   try { return JSON.parse(localStorage.getItem(`dt-${id}`) ?? '{}') } catch { return {} }
-}
-function saveGrid(id: string, s: SavedGrid) {
-  try { localStorage.setItem(`dt-${id}`, JSON.stringify(s)) } catch { /* ignore */ }
 }
 
 // ── styled ──────────────────────────────────────────────────────────────────
@@ -400,23 +400,74 @@ export function DataTable<T extends object>({
     return () => ro.disconnect()
   }, [showFilters])
 
-  useEffect(() => {
-    if (tableId) saveGrid(tableId, { visibility: columnVisibility, order: columnOrder })
-  }, [tableId, columnVisibility, columnOrder])
+  // Apply a saved view onto the grid state. Fields are optional so an older/narrower payload
+  // still applies; the screen's ``hidden`` defaults are layered UNDER the saved visibility so a
+  // newly-added hidden column stays hidden unless the saved view explicitly un-hides it.
+  const applyView = useCallback((v: GridView) => {
+    if (v.visibility) setColumnVisibility({ ...(initialColumnVisibility ?? {}), ...v.visibility })
+    if (v.order) setColumnOrder(v.order)
+    if (v.sorting) setSorting(v.sorting)
+    if (v.filters) setColumnFilters(v.filters)
+    if (v.grouping) { setGrouping(v.grouping); setExpanded(v.grouping.length ? true : {}) }
+    if (typeof v.pageSize === 'number') setPagination((p) => ({ ...p, pageSize: v.pageSize as number }))
+  }, [initialColumnVisibility])
 
-  // Reset the grid's persisted visibility + order back to the screen's defaults — clears the
-  // localStorage entry *and* re-applies ``initialColumnVisibility`` (which encodes the screen's
-  // ``hidden`` flags). Needed when a screen has ``visible_when`` rules: an old saved-visibility
-  // entry can override a column the rule wants shown (or hidden) given the current filter,
-  // leaving the operator unable to see / hide a column without manually toggling it in the
-  // Columns menu. "Reset" gives them a single-click way back to the configured defaults.
+  // Load the user's saved view from the DB on mount — replaces the old localStorage read.
+  // One-time migration: when there's no DB view but a legacy ``dt-*`` localStorage entry exists,
+  // import it into the DB and drop the local key, so existing layouts survive and we stop
+  // depending on localStorage. Failures degrade silently to the screen defaults.
+  useEffect(() => {
+    if (!tableId) return
+    let cancelled = false
+    void (async () => {
+      const dbView = await loadGridView(tableId)
+      if (cancelled) return
+      if (dbView) { applyView(dbView); return }
+      const legacy = loadGrid(tableId)
+      if (legacy.visibility || legacy.order) {
+        const migrated: GridView = { visibility: legacy.visibility, order: legacy.order }
+        applyView(migrated)
+        saveGridView(tableId, migrated)
+          .then(() => { try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ } })
+          .catch(() => { /* keep the local entry as a fallback if the save failed */ })
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the table identity changes
+  }, [tableId])
+
+  // Explicit "Save view": persist the FULL current presentation (visible columns + order + sort
+  // + filters + grouping + page size) for this user + table. Nothing is auto-saved — the operator
+  // chooses when the current layout becomes their default.
+  const [savingView, setSavingView] = useState(false)
+  const saveView = useCallback(async () => {
+    if (!tableId) return
+    setSavingView(true)
+    try {
+      await saveGridView(tableId, {
+        visibility: columnVisibility, order: columnOrder, sorting,
+        filters: columnFilters, grouping, pageSize: pagination.pageSize,
+      })
+    } finally { setSavingView(false) }
+  }, [tableId, columnVisibility, columnOrder, sorting, columnFilters, grouping, pagination.pageSize])
+
+  // Reset to the screen defaults — delete the saved view (DB + any legacy localStorage) and
+  // re-apply the configured visibility / grouping / page size, clearing sort & filters. Needed
+  // both as the "stop using my saved view" action and when a ``visible_when`` rule conflicts with
+  // an older saved visibility.
   const resetGrid = useCallback(() => {
     if (tableId) {
       try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ }
+      void resetGridView(tableId)
     }
     setColumnVisibility({ ...(initialColumnVisibility ?? {}) })
     setColumnOrder([])
-  }, [tableId, initialColumnVisibility])
+    setSorting([])
+    setColumnFilters([])
+    setGrouping(resolvedInitialGrouping)
+    setExpanded(resolvedInitialGrouping.length ? true : {})
+    setPagination((p) => ({ ...p, pageIndex: 0, pageSize: initialPageSize }))
+  }, [tableId, initialColumnVisibility, resolvedInitialGrouping, initialPageSize])
 
   // Internal columns (select / status) are always pinned to the front, regardless of the user's
   // saved (data-only) column order; `columnOrder` persists only the data columns.
@@ -695,7 +746,15 @@ export function DataTable<T extends object>({
                   <Spacer />
                   <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll', 'All')}</MiniLink>
                   <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone', 'None')}</MiniLink>
-                  {/* "Reset" wipes the saved visibility + order from localStorage and re-applies
+                  {/* "Save view" persists the full current presentation (columns + order + sort +
+                      filters + grouping + page size) as this user's default for this table — in the
+                      Liberty DB, not localStorage, so it follows them across devices. */}
+                  {tableId && (
+                    <MiniLink type="button" onClick={() => void saveView()} disabled={savingView} title={t('table.saveViewHint', 'Save the current columns, sort, filters and grouping as your default view for this table (stored per user, follows you across devices).')}>
+                      {savingView ? t('table.savingView', 'Saving…') : t('table.saveView', 'Save view')}
+                    </MiniLink>
+                  )}
+                  {/* "Reset" wipes the saved view (DB + any legacy localStorage) and re-applies
                       the screen's defaults (the ``hidden`` hints on each column). Needed when a
                       ``visible_when`` rule drops a column based on a server filter but an older
                       saved entry still hides it — the operator would otherwise have to hunt
