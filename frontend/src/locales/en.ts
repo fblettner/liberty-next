@@ -190,7 +190,7 @@ const en = {
     resetColumnsHint: 'Clear the saved column visibility / order for this table — handy when a visible_when rule conflicts with an older saved state.',
     // Saved views (grid formats)
     views: 'Views',
-    viewBase: 'Default',
+    viewsEmpty: 'No views yet — Save as… to create one.',
     viewsShared: 'Shared',
     viewsMine: 'My views',
     viewDefaultTag: 'default',

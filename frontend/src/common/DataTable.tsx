@@ -787,7 +787,7 @@ export function DataTable<T extends object>({
           {(tableId || sharedList.length > 0) && (
             <MenuWrap ref={viewRef}>
               <CtrlBtn $active={!!activeView} onClick={() => setViewOpen((v) => !v)} title={t('table.views', 'Views')}>
-                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.viewBase', 'Default')}
+                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.views', 'Views')}
               </CtrlBtn>
               <MenuPortal open={viewOpen} anchorRef={viewRef} onClose={() => setViewOpen(false)} minWidth={240}>
                 <MenuHead>
@@ -799,11 +799,14 @@ export function DataTable<T extends object>({
                     </MiniLink>
                   )}
                 </MenuHead>
-                {/* Base / default screen layout — always selectable to "show everything". */}
-                <ColRow onClick={() => { selectView(null); setViewOpen(false) }} style={{ cursor: 'pointer' }}>
-                  <CheckBox $on={!activeView}>{!activeView && <Check size={9} />}</CheckBox>
-                  <ColLabel>{t('table.viewBase', 'Default')}</ColLabel>
-                </ColRow>
+                {/* The base screen layout isn't offered as a pickable view — it's just the implicit
+                    fallback when no shared default / saved view applies (the Columns-menu "Reset"
+                    returns to it). The picker lists only real views. */}
+                {sharedList.length === 0 && userViews.length === 0 && (
+                  <ColRow style={{ color: colors.text.muted }}>
+                    <ColLabel>{t('table.viewsEmpty', 'No views yet — Save as… to create one.')}</ColLabel>
+                  </ColRow>
+                )}
                 {sharedList.length > 0 && <MenuSub>{t('table.viewsShared', 'Shared')}</MenuSub>}
                 {sharedList.map((s) => {
                   const on = activeView?.scope === 'shared' && activeView.name === s.name

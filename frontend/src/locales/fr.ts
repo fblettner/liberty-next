@@ -192,7 +192,7 @@ const fr: Resources = {
     resetColumnsHint: "Efface la visibilité / l'ordre enregistré pour cette table — utile quand une règle visible_when entre en conflit avec un état sauvegardé plus ancien.",
     // Vues enregistrées (formats de grille)
     views: 'Vues',
-    viewBase: 'Défaut',
+    viewsEmpty: 'Aucune vue — « Enregistrer sous… » pour en créer une.',
     viewsShared: 'Partagées',
     viewsMine: 'Mes vues',
     viewDefaultTag: 'défaut',
