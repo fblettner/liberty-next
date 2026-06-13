@@ -237,15 +237,15 @@ async def run_job_now(
         params_override = dict(raw_p)
 
     # Optional log_level — per-fire override of job.log_level (jobs.toml default).
-    # Restricted to INFO / DEBUG; anything else is a 422. None means "use the
-    # job's configured default" (which itself defaults to INFO).
+    # Restricted to WARNING / INFO / DEBUG; anything else is a 422. None means
+    # "use the job's configured default" (which itself defaults to INFO).
     log_level: str | None = None
     if body is not None and "log_level" in body:
         raw_l = body.get("log_level")
-        if not isinstance(raw_l, str) or raw_l.upper() not in ("INFO", "DEBUG"):
+        if not isinstance(raw_l, str) or raw_l.upper() not in ("WARNING", "INFO", "DEBUG"):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="`log_level` must be one of: 'INFO', 'DEBUG'",
+                detail="`log_level` must be one of: 'WARNING', 'INFO', 'DEBUG'",
             )
         log_level = raw_l.upper()
 
