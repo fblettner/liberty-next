@@ -29,6 +29,13 @@ class PoolRegistry:
         self._engines: dict[str, AsyncEngine] = {}
         self._master_key = master_key
 
+    @property
+    def master_key(self) -> str:
+        """The AES-GCM master key used for ``ENC:`` secrets — pool / API auth
+        passwords and the write-side PASSWORD dictionary rule. Empty when none
+        is configured (callers then store / read plaintext)."""
+        return self._master_key
+
     def names(self) -> list[str]:
         return list(self._configs)
 

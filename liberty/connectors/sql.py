@@ -324,6 +324,27 @@ _RULES_DEFAULTABLE = {"INSERT", "UPDATE", "MERGE"}
 # type coercion only — same treatment as an UPDATE's ``_ORIGINAL`` WHERE binds.
 _SET_CLAUSE_STATEMENTS = {"INSERT", "UPDATE", "MERGE"}
 _RULES_PASSWORD = {"PASSWORD"}
+
+
+def _remove_set_assignment(sql: str, col: str) -> tuple[str, bool]:
+    """Remove a ``<col> = :<bind>`` assignment from an UPDATE's SET clause.
+
+    Used to preserve an unchanged PASSWORD on UPDATE: dropping the assignment
+    (and its adjacent comma) leaves the stored value untouched instead of
+    overwriting it with NULL. Operates only on the SET clause (before the first
+    ``WHERE``), matches case-insensitively, and removes the trailing comma for a
+    mid-list assignment or the leading comma for the last one. Returns
+    ``(new_sql, removed?)`` — ``removed`` is False when no assignment matched."""
+    upper = sql.upper()
+    widx = upper.find(" WHERE ")
+    head, tail = (sql[:widx], sql[widx:]) if widx != -1 else (sql, "")
+    c = re.escape(col)
+    # mid-list: "<col> = :bind ,"  → drop assignment + trailing comma
+    new, n = re.subn(rf"\b{c}\s*=\s*:\w+\s*,\s*", "", head, count=1, flags=re.IGNORECASE)
+    if not n:
+        # last in list: ", <col> = :bind"  → drop leading comma + assignment
+        new, n = re.subn(rf",\s*\b{c}\s*=\s*:\w+\s*", " ", head, count=1, flags=re.IGNORECASE)
+    return (new + tail, bool(n))
 _RULES_DEFAULT = {"DEFAULT"}  # use the entry's `default` when the bind is missing/empty
 # v1 parity: a column-hint-level ``rules = "DISABLED"`` opts out of an inherited dictionary
 # rule on this specific screen. Used to keep SEQUENCE from refiring on UPDATE (we already
@@ -1470,6 +1491,41 @@ class SQLConnector:
         out = _TOKEN_RE.sub(_bare_sub, out)
         return out, binds
 
+    def _strip_blank_password_updates(
+        self, sql_text: str, qdef: QueryDef, params: dict[str, Any], *,
+        column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Drop blank PASSWORD-rule columns from an UPDATE's SET clause.
+
+        A password field left blank (or omitted) on an edit means "keep the
+        current value" — but the stored UPDATE unconditionally
+        ``SET <pw> = :<pw>``, so a blank bind would overwrite the secret with
+        NULL. For each PASSWORD column whose submitted value is blank/missing we
+        remove its assignment from the SET and drop the bind, leaving the stored
+        (encrypted) value intact. A non-blank value is kept and gets encrypted by
+        :meth:`_apply_form_rules`."""
+        meta = self._column_meta_map(qdef, column_hints=column_hints, dict_scope=dict_scope)
+        if not meta:
+            return sql_text, params
+        out = dict(params)
+        for col, m in meta.items():
+            if m["rule"] not in _RULES_PASSWORD:
+                continue
+            key = next((k for k in out if k.upper() == col), None)
+            val = out.get(key) if key is not None else None
+            if val not in (None, ""):
+                continue  # a real new password — keep it (encrypted downstream)
+            new_sql, removed = _remove_set_assignment(sql_text, col)
+            if removed:
+                sql_text = new_sql
+                if key is not None:
+                    out.pop(key, None)
+                _log.debug(
+                    "%s.%s: blank PASSWORD %s on UPDATE — preserving stored value",
+                    self.name, qdef.name, col,
+                )
+        return sql_text, out
+
     def _apply_form_rules(
         self, bound: dict[str, Any], qdef: QueryDef, *, stmt_type: str, user: str | None,
         column_hints: list[ColumnHint] | None = None, dict_scope: str | None = None,
@@ -1483,9 +1539,15 @@ class SQLConnector:
            (one value per call so every audit column in the same write lands on the same
            instant; local because JDE/Oracle SYSDATE is local — UTC would write the wrong
            day/time near midnight on a non-UTC server).
-        3. **PASSWORD** → Argon2-hash a non-empty value; blank/missing pass through as NULL
-           (the dialog already strips blank password fields from the submit body for UPDATE
-           — keeping the existing hash; INSERT with an empty password lands as NULL).
+        3. **PASSWORD** → **encrypt** a non-empty value with the master key (``ENC:`` AES-GCM),
+           so the secret can be **decrypted** when used. These are connection secrets
+           (``settings_applications.apps_password``, connector / API / LDAP / audit-source
+           passwords) that nomaflow + the pool layer must read back — NOT login credentials, so
+           they must be reversibly encrypted, never one-way hashed. Idempotent (an already-``ENC:``
+           value passes through). Blank/missing → NULL (the dialog strips blank password fields
+           from UPDATE's SET, keeping the existing value; INSERT with an empty password lands as
+           NULL). With no master key configured the value is stored as plaintext (the read side's
+           ``decrypt_or_keep`` passes plaintext through) rather than failing the save.
         4. **BOOLEAN** → bind ← ``false_value`` when null/empty (the dialog usually sends the
            proper value on uncheck, but the migration / batch-edit grid may not yet — this is
            the safety net for the Y/N case where the DB doesn't accept NULL). ``true_value``
@@ -1511,7 +1573,7 @@ class SQLConnector:
             return bound
         out = dict(bound)
         now: datetime | None = None
-        from liberty.auth.password import hash_password  # local import — avoids auth-on-startup wiring
+        from liberty.crypto import encrypt as _encrypt_secret, is_encrypted  # local — avoid import cycle
         for k, v in list(out.items()):
             ku = k.upper()
             is_original = ku.endswith("_ORIGINAL")
@@ -1556,12 +1618,24 @@ class SQLConnector:
                     out[k] = _coerce_value(now, fmt) if fmt else now
                     continue
                 if rule in _RULES_PASSWORD:
-                    if v not in (None, ""):
-                        out[k] = hash_password(str(v))
-                    else:
+                    if v in (None, ""):
                         # Blank password: leave as NULL — the dialog drops blank passwords from
                         # UPDATE's SET (migrated _put binds :PASSWORD only when the user typed one).
                         out[k] = None
+                    elif is_encrypted(str(v)):
+                        out[k] = str(v)          # already ENC: — idempotent (unchanged re-save)
+                    elif self._pools.master_key:
+                        # Reversible AES-GCM (ENC:) so the secret can be decrypted to connect.
+                        out[k] = _encrypt_secret(str(v), self._pools.master_key)
+                    else:
+                        # No master key configured — store plaintext (the read side's
+                        # decrypt_or_keep passes it through) rather than failing the save.
+                        _log.warning(
+                            "%s.%s: PASSWORD column %s has no master key — storing plaintext "
+                            "(set [crypto] master_key / LIBERTY_MASTER_KEY to encrypt at rest)",
+                            self.name, qdef.name, col_name,
+                        )
+                        out[k] = str(v)
                     continue
                 # BOOLEAN — substitute the inferred / explicit `false_value` when the dialog
                 # sends null on uncheck. The dialog's checkbox knows the rule.true_value (from
@@ -1879,6 +1953,14 @@ class SQLConnector:
         sql_text, token_binds = self._resolve_query_tokens(
             sql_text, qdef, user=user, column_hints=column_hints, dict_scope=dict_scope,
         )
+        # Preserve an unchanged password on UPDATE: a PASSWORD-rule column submitted
+        # blank (or omitted) must NOT overwrite the stored secret with NULL — drop its
+        # assignment from the SET clause so the existing encrypted value stays put.
+        # (INSERT is untouched: a blank password there lands as NULL for the new row.)
+        if stmt_type == "UPDATE":
+            sql_text, params = self._strip_blank_password_updates(
+                sql_text, qdef, params, column_hints=column_hints, dict_scope=dict_scope,
+            )
         bound = self._build_params(sql_text, qdef, params)
         # Resolve form-layer rules (LOGIN / SYSDATE / PASSWORD / DEFAULT) + coerce string
         # binds to the matching Python type for the column's resolved format. SEQUENCE / NN
