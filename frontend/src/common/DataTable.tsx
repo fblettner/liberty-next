@@ -333,12 +333,13 @@ const GroupCellBtn = styled.button`
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
   & svg { color: ${colors.text.muted}; }
 `
-// Master/detail: a small chevron that prefixes the first cell, and the full-width detail row.
-const DetailToggle = styled.button`
-  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
-  margin-right: 6px; vertical-align: middle; border: none; background: none; cursor: pointer; padding: 0;
-  color: ${colors.text.muted}; flex-shrink: 0;
-  &:hover { color: ${colors.text.primary}; }
+// Master/detail: leaf-row expander — same inline chevron+value layout as GroupCellBtn (so a
+// row's value-diff chevron matches the group chevron), but normal weight (it's a data row, not
+// a group header). The full-width detail panel renders beneath in DetailTr.
+const RowExpandBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 6px; border: none; background: none; cursor: pointer;
+  color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; padding: 0; text-align: left;
+  & svg { color: ${colors.text.muted}; flex-shrink: 0; }
 `
 const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
@@ -874,22 +875,23 @@ export function DataTable<T extends object>({
               textAlign: colAlign(cell.column),
             }}
           >
-            {/* Master/detail chevron — prefixes the first cell so any row opens its panel. */}
-            {canDetail && cell.id === firstCellId && (
-              <DetailToggle
-                type="button"
-                onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
-                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
-              >
-                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              </DetailToggle>
-            )}
             {isLazyParent && cell.id === firstCellId ? (
               <GroupCellBtn type="button" onClick={lazyToggle}>
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 <GroupCount>({subRowCount?.(row.original) ?? row.subRows.length})</GroupCount>
               </GroupCellBtn>
+            ) : canDetail && cell.id === firstCellId ? (
+              // Leaf row value-diff expander — chevron inline with the cell value (matches the
+              // group chevron's layout), normal weight.
+              <RowExpandBtn
+                type="button"
+                onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
+                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
+              >
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </RowExpandBtn>
             ) : isLazyParent ? (
               // A lazy parent's own dimension cells — always render the value. (Once expanded the
               // row has sub-rows, and with grouping enabled TanStack would mark these cells
