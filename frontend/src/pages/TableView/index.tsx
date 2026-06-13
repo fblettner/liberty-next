@@ -595,6 +595,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
                 <SummaryView
                   connector={connector} query={query} screen={screen}
                   params={summaryParams} screenApp={screenApp} screenId={screenId}
+                  detailColumns={effectiveResult.columns}
                 />
               </Suspense>
             ) : (

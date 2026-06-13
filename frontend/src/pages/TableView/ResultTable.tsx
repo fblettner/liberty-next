@@ -373,7 +373,7 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride,
 }: {
   result: QueryResult
   connector: string
@@ -402,6 +402,13 @@ export function ResultTable({
   /** Embedded (e.g. a summary's expanded detail panel): hide the toolbar chrome and don't
    *  persist view state / offer shared views (it would collide with the host screen's). */
   embedded?: boolean
+  /** Lazy sub-rows (summary parents → children as same-column rows) — forwarded to DataTable. */
+  getSubRows?: (row: DataRow) => DataRow[] | undefined
+  onRowExpand?: (row: DataRow) => void
+  subRowCount?: (row: DataRow) => number | undefined
+  /** Override the persistence key (else `screen:<app>:<id>` / `sql:<connector>:<query>`). The
+   *  summary grid passes a `:summary` suffix so its view state can't collide with the flat table's. */
+  tableId?: string
 }) {
   const { t } = useTranslation()
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
@@ -1760,10 +1767,13 @@ export function ResultTable({
         // read_query (a copy with different hidden columns), so a query-only key made them collide
         // — hiding a column on one bled into the others. Fall back to the query when there's no
         // screen (an ad-hoc query run).
-        tableId={embedded ? undefined : (screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`)}
+        tableId={embedded ? undefined : (tableIdOverride ?? (screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`))}
         sharedViews={embedded ? undefined : sharedViews}
         renderDetail={renderDetail}
         chromeless={embedded}
+        getSubRows={getSubRows}
+        onRowExpand={onRowExpand}
+        subRowCount={subRowCount}
         exportFilename={query}
         toolbarAfterSearch={runControl}
         toolbarRight={maxRowsControl}

@@ -1,113 +1,73 @@
 // Summary (aggregate) view — server-aggregated parent rows (GROUP BY <dimensions> + COUNT(*))
-// with a chevron that lazily loads each group's underlying rows. Replaces a materialised rollup
-// table: the counts come from the database over the whole result, not the row-capped grid.
+// with the underlying rows as native sub-rows (same columns, same row height — looks like
+// TanStack grouping, not a grid-in-a-grid). The count comes from the database over the whole
+// result, not the row-capped grid.
 //
-// Both levels reuse ResultTable for rendering (column hints / formatting apply): the summary
-// itself is a ResultTable fed the aggregate QueryResult + a `renderDetail` that mounts a
-// <GroupDetail> per expanded row; GroupDetail fetches that one group's rows and renders them as
-// a nested ResultTable.
-import { useEffect, useMemo, useState } from 'react'
-import styled from '@emotion/styled'
-import { useTranslation } from 'react-i18next'
+// The grid uses the DETAIL columns (dimensions moved to the front so a parent row reads
+// left→right); parent rows are the aggregate rows (only the dimension columns are populated,
+// plus a count badge); expanding one lazily fetches that group's rows and attaches them as
+// sub-rows, which TanStack renders with the same column cells.
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
 import { Centered } from '../../common'
 import { ResultTable } from './ResultTable'
-import type { QueryResult } from '../../types/connectors'
+import type { Column, QueryResult } from '../../types/connectors'
 import type { ScreenDetail, ScreenSummary } from '../../types/screens'
-import { colors, fontSize, fonts } from '../../theme'
 
-const DetailWrap = styled.div`padding: 8px 8px 8px 28px;`
-const ErrLine = styled.div`padding: 10px 12px; color: ${colors.red.main}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
+type Row = Record<string, unknown>
 
 /** ``_group`` spec — ``COL`` / ``COL~day`` — from the screen's summary dimensions. */
 function groupSpec(summary: ScreenSummary): string {
   return summary.dimensions.map((d) => (d.bucket ? `${d.column}~${d.bucket}` : d.column)).join(',')
 }
 
-/** Read a dimension's value off a summary row, case-insensitively (the aggregate result column
- *  may come back lower-cased while the config column is upper). */
-function dimValue(row: Record<string, unknown>, column: string): unknown {
+/** Read a dimension's value off a row, case-insensitively (the aggregate column may come back
+ *  lower-cased while the config column is upper). */
+function dimValue(row: Row, column: string): unknown {
   if (column in row) return row[column]
   const hit = Object.keys(row).find((k) => k.toLowerCase() === column.toLowerCase())
   return hit ? row[hit] : undefined
 }
 
 function buildQuery(base: Record<string, string>, extra: Record<string, string>): string {
-  const qs = new URLSearchParams({ ...base, ...extra })
-  return qs.toString()
-}
-
-/** One expanded group's rows — fetched on mount (collapsing unmounts; re-expanding refetches). */
-function GroupDetail({
-  connector, query, screen, summary, row, baseParams,
-}: {
-  connector: string; query: string; screen: ScreenDetail; summary: ScreenSummary
-  row: Record<string, unknown>; baseParams: Record<string, string>
-}) {
-  const { t } = useTranslation()
-  const [result, setResult] = useState<QueryResult | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    const extra: Record<string, string> = { _group: groupSpec(summary) }
-    for (const d of summary.dimensions) {
-      const v = dimValue(row, d.column)
-      extra[d.column] = v == null ? '' : String(v)
-    }
-    void (async () => {
-      try {
-        const r = await api.get<QueryResult>(
-          `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${buildQuery(baseParams, extra)}`,
-        )
-        if (!cancelled) setResult(r)
-      } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
-      }
-    })()
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- row identity is the group key; deps stable per panel
-  }, [])
-
-  if (err) return <ErrLine>{err}</ErrLine>
-  if (!result) return <Centered />
-  return (
-    <DetailWrap>
-      {result.rows.length === 0 ? (
-        <ErrLine style={{ color: colors.text.muted }}>{t('table.noResults')}</ErrLine>
-      ) : (
-        <ResultTable result={result} connector={connector} query={query} screen={screen} embedded />
-      )}
-    </DetailWrap>
-  )
+  return new URLSearchParams({ ...base, ...extra }).toString()
 }
 
 export function SummaryView({
-  connector, query, screen, params, screenApp, screenId,
+  connector, query, screen, params, screenApp, screenId, detailColumns,
 }: {
   connector: string; query: string; screen: ScreenDetail
   /** Current run params + active server filters (so the summary respects them). */
   params: Record<string, string>
   screenApp?: string; screenId?: string
+  /** The flat read query's columns — the children render in these (summary parents share them). */
+  detailColumns: Column[]
 }) {
   const summary = screen.summary as ScreenSummary
   const [result, setResult] = useState<QueryResult | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  // Params shared by the summary + every detail fetch: the run params/filters + the screen pin.
   const baseParams = useMemo<Record<string, string>>(() => ({
     ...params,
     ...(screenId ? { _screen: screenId, _app: screenApp ?? connector } : {}),
   }), [params, screenId, screenApp, connector])
 
+  // Detail columns with the summary dimensions pulled to the front, so a parent row's populated
+  // cells read left→right before the (parent-blank) detail-only columns.
+  const columns = useMemo<Column[]>(() => {
+    const order = summary.dimensions.map((d) => d.column.toLowerCase())
+    const rank = (c: Column) => { const i = order.indexOf(c.name.toLowerCase()); return i < 0 ? order.length + 1 : i }
+    return [...detailColumns].sort((a, b) => rank(a) - rank(b))
+  }, [detailColumns, summary])
+
+  // Fetch the aggregate parent rows (respecting the active filters).
   useEffect(() => {
     let cancelled = false
-    const extra = { _summary: '1', _group: groupSpec(summary) }
     void (async () => {
       setErr(null); setResult(null)
       try {
         const r = await api.get<QueryResult>(
-          `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${buildQuery(baseParams, extra)}`,
+          `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${buildQuery(baseParams, { _summary: '1', _group: groupSpec(summary) })}`,
         )
         if (!cancelled) setResult(r)
       } catch (e) {
@@ -117,36 +77,39 @@ export function SummaryView({
     return () => { cancelled = true }
   }, [connector, query, summary, baseParams])
 
-  // Label the COUNT(*) column from the config (the aggregate column has no dictionary hint).
-  const labelled = useMemo<QueryResult | null>(() => {
-    if (!result) return null
-    const count_label = summary.count_label || 'Count'
-    return {
-      ...result,
-      columns: result.columns.map((c) =>
-        c.name === '_count' ? { ...c, label: count_label, format: c.format ?? 'integer' } : c,
-      ),
+  // Lazily load one group's rows on expand, attach them as sub-rows of the parent (mutate +
+  // bump the rows array ref so TanStack recomputes while parent identities — and the expansion
+  // state — stay stable).
+  const onRowExpand = useCallback((row: Row) => {
+    if (row.__children !== undefined) return
+    const extra: Record<string, string> = { _group: groupSpec(summary) }
+    for (const d of summary.dimensions) {
+      const v = dimValue(row, d.column)
+      extra[d.column] = v == null ? '' : String(v)
     }
-  }, [result, summary])
+    const finish = (kids: Row[]) => {
+      row.__children = kids
+      setResult((prev) => (prev ? { ...prev, rows: [...prev.rows] } : prev))
+    }
+    void api.get<QueryResult>(
+      `/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(query)}?${buildQuery(baseParams, extra)}`,
+    ).then((r) => finish(r.rows as Row[])).catch(() => finish([]))
+  }, [connector, query, summary, baseParams])
+
+  const view = useMemo<QueryResult | null>(() => (result ? { ...result, columns } : null), [result, columns])
 
   if (err) return <Centered error>{err}</Centered>
-  if (!labelled) return <Centered />
+  if (!view) return <Centered />
   return (
     <ResultTable
-      key={labelled.columns.map((c) => c.name).join('|')}
-      result={labelled}
+      result={view}
       connector={connector}
       query={query}
-      renderDetail={(row) => (
-        <GroupDetail
-          connector={connector}
-          query={query}
-          screen={screen}
-          summary={summary}
-          row={row as Record<string, unknown>}
-          baseParams={baseParams}
-        />
-      )}
+      // A distinct persistence key so the summary grid's columns/views don't collide with the flat table's.
+      tableId={screenId ? `screen:${screenApp ?? connector}:${screenId}:summary` : `sql:${connector}:${query}:summary`}
+      getSubRows={(r) => r.__children as Row[] | undefined}
+      onRowExpand={(r) => onRowExpand(r as Row)}
+      subRowCount={(r) => Number((r as Row)._count) || 0}
     />
   )
 }

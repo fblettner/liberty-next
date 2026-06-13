@@ -108,6 +108,13 @@ export interface DataTableProps<T extends object> {
    *  e.g. a summary's expanded detail panel — where that chrome is noise (search via the main
    *  table view instead). Pagination + the grid itself still render. */
   chromeless?: boolean
+  /** Lazy master/detail rendered as native sub-rows (same columns, same row height — looks like
+   *  TanStack grouping). Parent rows show a chevron + count badge; expanding calls `onRowExpand`
+   *  to fetch children, which appear as indented rows once `getSubRows` returns them. */
+  getSubRows?: (row: T) => T[] | undefined
+  onRowExpand?: (row: T) => void
+  /** Count badge shown on a lazy parent before its children load (e.g. a server COUNT(*)). */
+  subRowCount?: (row: T) => number | undefined
   /** When provided, a paste (Ctrl+V) over the grid — while NOT focused in a cell input — parses the
    *  clipboard's TSV (an Excel copy) into rows keyed by VISIBLE column id and fires this. Mapping uses
    *  the table's own visible leaf columns (the exact set + order the export emits), by HEADER when the
@@ -370,7 +377,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
 
@@ -640,6 +647,7 @@ export function DataTable<T extends object>({
     onGroupingChange: setGrouping,
     onExpandedChange: setExpanded,
     onPaginationChange: setPagination,
+    getSubRows: getSubRows ? (row) => getSubRows(row) : undefined,
     enableColumnResizing: false,
     enableMultiSort: true, // shift-click a header adds it to the sort
     isMultiSortEvent: (e) => (e as MouseEvent).shiftKey,
@@ -648,9 +656,13 @@ export function DataTable<T extends object>({
     // exclude such a column from the global filter — that's why the search "missed" some columns)
     getColumnCanGlobalFilter: (col) => !((col.columnDef.meta as { internal?: boolean } | undefined)?.internal),
     autoResetExpanded: false,
-    // Master/detail: let any leaf row expand so getToggleExpandedHandler / getIsExpanded work
-    // for the detail panel (TanStack only allows expansion on rows with subRows otherwise).
-    getRowCanExpand: renderDetail ? () => true : undefined,
+    // Master/detail: let rows expand. renderDetail → any row (panel). getSubRows (lazy sub-rows)
+    // → parents with a positive count, so the chevron shows before children are fetched.
+    getRowCanExpand: renderDetail
+      ? () => true
+      : getSubRows
+        ? (row) => row.depth === 0 && (subRowCount?.(row.original) ?? getSubRows(row.original)?.length ?? 0) > 0
+        : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -817,19 +829,29 @@ export function DataTable<T extends object>({
   // measurement ref; the master/detail path renders rows directly (no virtualization) so a
   // variable-height detail panel doesn't drift the spacer math.
   const renderRow = (row: typeof visibleRows[number], virtualIndex?: number) => {
-    const RowEl = row.getIsGrouped() ? GroupTr : Tr
-    const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
-    const clickable = !row.getIsGrouped() && onRowClick != null
+    // A lazy summary parent (getSubRows mode, top level) renders group-styled — like a TanStack
+    // group row — with a chevron + count badge; its children are real sub-rows (same columns).
+    const isLazyParent = !!getSubRows && row.depth === 0 && row.getCanExpand()
+    const groupLike = row.getIsGrouped() || isLazyParent
+    const RowEl = groupLike ? GroupTr : Tr
+    const cls = groupLike ? undefined : rowClassName?.(row.original)
+    const clickable = !groupLike && onRowClick != null
     const onClick = clickable
       ? (e: React.MouseEvent<HTMLTableRowElement>) => {
           if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
           onRowClick!(row.original)
         }
       : undefined
-    const contextable = !row.getIsGrouped() && onRowContextMenu != null
+    const contextable = !groupLike && onRowContextMenu != null
     const onContextMenu = contextable
       ? (e: React.MouseEvent<HTMLTableRowElement>) => { e.preventDefault(); onRowContextMenu!(row.original, e) }
       : undefined
+    // Expand a lazy parent → fetch its children once (onRowExpand), then TanStack shows them.
+    const lazyToggle = () => {
+      const willExpand = !row.getIsExpanded()
+      row.toggleExpanded()
+      if (willExpand) onRowExpand?.(row.original)
+    }
     const cells = row.getVisibleCells()
     const firstCellId = cells[0]?.id
     const canDetail = !!renderDetail && !row.getIsGrouped() && row.getCanExpand()
@@ -845,7 +867,8 @@ export function DataTable<T extends object>({
             key={cell.id}
             style={{
               ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
-              paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
+              paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px`
+                : (getSubRows && row.depth > 0 && cell.id === firstCellId) ? `${12 + row.depth * 16}px` : undefined,
               textAlign: colAlign(cell.column),
             }}
           >
@@ -859,7 +882,13 @@ export function DataTable<T extends object>({
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               </DetailToggle>
             )}
-            {cell.getIsGrouped() ? (
+            {isLazyParent && cell.id === firstCellId ? (
+              <GroupCellBtn type="button" onClick={lazyToggle}>
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                {cell.getIsAggregated() || cell.getIsPlaceholder() ? null : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                <GroupCount>({subRowCount?.(row.original) ?? row.subRows.length})</GroupCount>
+              </GroupCellBtn>
+            ) : cell.getIsGrouped() ? (
               <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
