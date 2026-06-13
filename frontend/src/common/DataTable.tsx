@@ -17,7 +17,7 @@
 // (the alternative is locking widths via colgroup which makes drag-reorder + content-fit
 // worse). Threshold = always — there's no behavioural cliff between small and large grids;
 // virtualization has no cost when there are only 25 rows on screen.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as XLSX from 'xlsx'
 import {
@@ -99,6 +99,11 @@ export interface DataTableProps<T extends object> {
    *  so the browser's native context menu doesn't appear; we don't suppress it on the table chrome
    *  itself, so headers / pagination still get their native menu. */
   onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLTableRowElement>) => void
+  /** Master/detail: when provided, every row gets a leading chevron and expanding it renders
+   *  `renderDetail(row)` in a full-width row beneath. Generic — the consumer owns the detail
+   *  content (e.g. a lazily-fetched nested grid). Rows are rendered non-virtualized in this mode
+   *  (detail panels have variable height), so it's for bounded result sets like aggregate summaries. */
+  renderDetail?: (row: T) => React.ReactNode
   /** When provided, a paste (Ctrl+V) over the grid — while NOT focused in a cell input — parses the
    *  clipboard's TSV (an Excel copy) into rows keyed by VISIBLE column id and fires this. Mapping uses
    *  the table's own visible leaf columns (the exact set + order the export emits), by HEADER when the
@@ -317,6 +322,14 @@ const GroupCellBtn = styled.button`
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
   & svg { color: ${colors.text.muted}; }
 `
+// Master/detail: a small chevron that prefixes the first cell, and the full-width detail row.
+const DetailToggle = styled.button`
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+  margin-right: 6px; vertical-align: middle; border: none; background: none; cursor: pointer; padding: 0;
+  color: ${colors.text.muted}; flex-shrink: 0;
+  &:hover { color: ${colors.text.primary}; }
+`
+const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
 const PaginationRow = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; flex-wrap: wrap;`
@@ -353,7 +366,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
 
@@ -631,6 +644,9 @@ export function DataTable<T extends object>({
     // exclude such a column from the global filter — that's why the search "missed" some columns)
     getColumnCanGlobalFilter: (col) => !((col.columnDef.meta as { internal?: boolean } | undefined)?.internal),
     autoResetExpanded: false,
+    // Master/detail: let any leaf row expand so getToggleExpandedHandler / getIsExpanded work
+    // for the detail panel (TanStack only allows expansion on rows with subRows otherwise).
+    getRowCanExpand: renderDetail ? () => true : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -792,6 +808,67 @@ export function DataTable<T extends object>({
   const to = showAll ? totalRows : Math.min((pageIndex + 1) * pageSize, totalRows)
   const visibleColCount = table.getVisibleLeafColumns().length
   const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
+
+  // One data/group row. ``virtualIndex`` (virtualized path only) wires the virtualizer's
+  // measurement ref; the master/detail path renders rows directly (no virtualization) so a
+  // variable-height detail panel doesn't drift the spacer math.
+  const renderRow = (row: typeof visibleRows[number], virtualIndex?: number) => {
+    const RowEl = row.getIsGrouped() ? GroupTr : Tr
+    const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
+    const clickable = !row.getIsGrouped() && onRowClick != null
+    const onClick = clickable
+      ? (e: React.MouseEvent<HTMLTableRowElement>) => {
+          if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
+          onRowClick!(row.original)
+        }
+      : undefined
+    const contextable = !row.getIsGrouped() && onRowContextMenu != null
+    const onContextMenu = contextable
+      ? (e: React.MouseEvent<HTMLTableRowElement>) => { e.preventDefault(); onRowContextMenu!(row.original, e) }
+      : undefined
+    const cells = row.getVisibleCells()
+    const firstCellId = cells[0]?.id
+    const canDetail = !!renderDetail && !row.getIsGrouped() && row.getCanExpand()
+    return (
+      <RowEl
+        key={row.id} className={cls}
+        {...(virtualIndex != null ? { 'data-index': virtualIndex, ref: rowVirtualizer.measureElement } : {})}
+        onClick={onClick} onContextMenu={onContextMenu}
+        style={clickable ? { cursor: 'pointer' } : undefined}
+      >
+        {cells.map((cell) => (
+          <Td
+            key={cell.id}
+            style={{
+              ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
+              paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
+              textAlign: colAlign(cell.column),
+            }}
+          >
+            {/* Master/detail chevron — prefixes the first cell so any row opens its panel. */}
+            {canDetail && cell.id === firstCellId && (
+              <DetailToggle
+                type="button"
+                onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
+                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
+              >
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </DetailToggle>
+            )}
+            {cell.getIsGrouped() ? (
+              <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
+                {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                <GroupCount>({row.subRows.length})</GroupCount>
+              </GroupCellBtn>
+            ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
+              flexRender(cell.column.columnDef.cell, cell.getContext())
+            )}
+          </Td>
+        ))}
+      </RowEl>
+    )
+  }
 
   return (
     <Wrap>
@@ -1028,6 +1105,22 @@ export function DataTable<T extends object>({
           <tbody>
             {visibleRows.length === 0 ? (
               <tr><td colSpan={visibleColCount}><Empty>{t('table.noResults')}</Empty></td></tr>
+            ) : renderDetail ? (
+              /* Master/detail: non-virtualized (detail panels have variable height). Each
+                 expanded row is followed by a full-width detail row. For bounded result sets
+                 (aggregate summaries), not large flat tables. */
+              <>
+                {visibleRows.map((row) => (
+                  <Fragment key={row.id}>
+                    {renderRow(row)}
+                    {row.getIsExpanded() && !row.getIsGrouped() && (
+                      <DetailTr>
+                        <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
+                      </DetailTr>
+                    )}
+                  </Fragment>
+                ))}
+              </>
             ) : (
               <>
                 {/* Top spacer — pushes the first visible row down to its virtual `start`
@@ -1038,68 +1131,7 @@ export function DataTable<T extends object>({
                     <td colSpan={visibleColCount} />
                   </tr>
                 )}
-                {virtualItems.map((virtualItem) => {
-                  const row = visibleRows[virtualItem.index]
-                  const RowEl = row.getIsGrouped() ? GroupTr : Tr
-                  const cls = row.getIsGrouped() ? undefined : rowClassName?.(row.original)
-                  // Whole-row click → onRowClick. Bail if the click landed on an interactive child
-                  // (input/button/a/select/textarea — the edit-mode cells, copy buttons, group toggles,
-                  // etc.) so those keep working without firing the screen dialog underneath. Group
-                  // rows never trigger — they're a grouping affordance, not a real record.
-                  const clickable = !row.getIsGrouped() && onRowClick != null
-                  const onClick = clickable
-                    ? (e: React.MouseEvent<HTMLTableRowElement>) => {
-                        if ((e.target as HTMLElement).closest('input,button,a,select,textarea,label')) return
-                        onRowClick!(row.original)
-                      }
-                    : undefined
-                  // Right-click on a (non-grouped) row → onRowContextMenu(row, event). We
-                  // preventDefault so the browser's native menu doesn't fight the consumer's
-                  // overlay; the consumer is expected to read `event.clientX`/`clientY` to
-                  // position the menu. Headers + pagination keep their native menu (we don't
-                  // attach this on <th> or the toolbar).
-                  const contextable = !row.getIsGrouped() && onRowContextMenu != null
-                  const onContextMenu = contextable
-                    ? (e: React.MouseEvent<HTMLTableRowElement>) => {
-                        e.preventDefault()
-                        onRowContextMenu!(row.original, e)
-                      }
-                    : undefined
-                  return (
-                    <RowEl
-                      // `data-index` + `ref={rowVirtualizer.measureElement}` let the virtualizer
-                      // measure each row's real height after layout — so a group row, an
-                      // edit-mode row with taller cell content, or a dialog-changed row that
-                      // wraps don't drift the spacer math.
-                      key={row.id} className={cls}
-                      data-index={virtualItem.index}
-                      ref={rowVirtualizer.measureElement}
-                      onClick={onClick} onContextMenu={onContextMenu}
-                      style={clickable ? { cursor: 'pointer' } : undefined}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <Td
-                          key={cell.id}
-                          style={{
-                            ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
-                            paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px` : undefined,
-                            textAlign: colAlign(cell.column),
-                          }}
-                        >
-                          {cell.getIsGrouped() ? (
-                            <GroupCellBtn onClick={row.getToggleExpandedHandler()}>
-                              {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              <GroupCount>({row.subRows.length})</GroupCount>
-                            </GroupCellBtn>
-                          ) : cell.getIsAggregated() || cell.getIsPlaceholder() ? null : (
-                            flexRender(cell.column.columnDef.cell, cell.getContext())
-                          )}
-                      </Td>
-                    ))}
-                  </RowEl>
-                  )
-                })}
+                {virtualItems.map((virtualItem) => renderRow(visibleRows[virtualItem.index], virtualItem.index))}
                 {/* Bottom spacer — fills the gap between the last visible row's `end` and the
                     virtualizer's total scrollable height. Same shape as the top spacer. */}
                 {paddingBottom > 0 && (

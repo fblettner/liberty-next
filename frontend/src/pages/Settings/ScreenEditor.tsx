@@ -92,9 +92,12 @@ const COLUMNS_KEYS = ['columns'] as const
 // view's ``columns`` / ``group_by`` / ``sort.column`` bind to SCREEN_COLUMNS the same way the
 // Columns tab's pickers do.
 const VIEWS_KEYS = ['views'] as const
+// Server-aggregated summary view (group-by dimensions + count, with expandable detail). Edited
+// via SchemaNavigator on the Summary tab; dimensions bind to SCREEN_COLUMNS.
+const SUMMARY_KEYS = ['summary'] as const
 
-type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'dialog' | 'actions' | 'rowmenu' | 'export'
-const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'dialog', 'actions', 'rowmenu', 'export']
+type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'summary' | 'dialog' | 'actions' | 'rowmenu' | 'export'
+const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'summary', 'dialog', 'actions', 'rowmenu', 'export']
 
 // ── styled bits ─────────────────────────────────────────────────────────────
 const TabsBar = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; margin-bottom: 14px;`
@@ -467,6 +470,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // the full ``$defs`` so the nested ``sort`` (ScreenViewSort) list drills in via the breadcrumb.
   const viewsSchema = useMemo<JsonSchema>(
     () => ({ ...pickSchemaProperties(schema, VIEWS_KEYS as unknown as string[]), $defs: defs }),
+    [schema, defs],
+  )
+  // Summary tab — edits ``Screen.summary`` (group-by dimensions + count label) via
+  // SchemaNavigator. Carries ``$defs`` so the nested ScreenSummaryDimension list drills in.
+  const summarySchema = useMemo<JsonSchema>(
+    () => ({ ...pickSchemaProperties(schema, SUMMARY_KEYS as unknown as string[]), $defs: defs }),
     [schema, defs],
   )
   // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
@@ -1003,6 +1012,35 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     )
   }
 
+  // ── Summary tab — server-aggregated rows with expandable detail ──────────────────────
+  const renderSummary = (): ReactNode => {
+    const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Record<string, unknown>) : null
+    return (
+      <>
+        <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
+          {t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}
+        </div>
+        <FrameworkEnumsContext.Provider value={augmentedEnums}>
+          <SchemaNavigator
+            root={{
+              label: t('settings.screens.editor.summaryCrumb', { id, defaultValue: `Summary — ${id}` }),
+              schema: summarySchema,
+              value: { summary: current },
+              onChange: (v) => {
+                const next = v.summary && typeof v.summary === 'object'
+                  && Array.isArray((v.summary as Record<string, unknown>).dimensions)
+                  && ((v.summary as Record<string, unknown>).dimensions as unknown[]).length
+                  ? v.summary
+                  : null
+                setProp('summary', next)
+              },
+            }}
+          />
+        </FrameworkEnumsContext.Provider>
+      </>
+    )
+  }
+
   // ── action editors (shared component) ──────────────────────────────────────────────
   // ``renderActionList`` + its inline ``renderPromptFields`` / ``renderActionOverrides`` /
   // ``actionVariantSchema`` blocks moved into ``ActionListEditor.tsx`` / ``ActionTreeView.tsx``.
@@ -1321,6 +1359,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       case 'queries': return renderQueries()
       case 'columns': return renderColumns()
       case 'views':   return renderViews()
+      case 'summary': return renderSummary()
       case 'dialog':  return renderDialog()
       case 'actions': return (
         // All action attachment points consolidated. Grouped visually by *when* they fire:

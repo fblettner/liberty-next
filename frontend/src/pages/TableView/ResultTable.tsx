@@ -373,7 +373,7 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail,
 }: {
   result: QueryResult
   connector: string
@@ -396,6 +396,9 @@ export function ResultTable({
   /** Render this grid's Add/Edit ScreenDialog as a NESTED sub-dialog (smaller, raised z-index) —
    *  set when ResultTable is embedded inside a parent dialog's nested-table tab. */
   nestedDialog?: boolean
+  /** Master/detail: forwarded to DataTable — each row gets a chevron and expands to
+   *  `renderDetail(row)` beneath. Used by the summary view to lazily load a group's rows. */
+  renderDetail?: (row: DataRow) => React.ReactNode
 }) {
   const { t } = useTranslation()
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
@@ -1756,6 +1759,7 @@ export function ResultTable({
         // screen (an ad-hoc query run).
         tableId={screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`}
         sharedViews={sharedViews}
+        renderDetail={renderDetail}
         exportFilename={query}
         toolbarAfterSearch={runControl}
         toolbarRight={maxRowsControl}

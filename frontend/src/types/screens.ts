@@ -403,6 +403,12 @@ export interface ScreenListItem {
   /** True when ``Screen.views`` is non-empty — the grid offers shared/named views. Lets the
    *  TableView fetch the body (which carries ``views``) even on a views-only screen. */
   has_views?: boolean
+  /** True when ``Screen.summary`` is set — the TableView shows a Summary toggle (server-aggregated
+   *  parent rows with expandable detail) and fetches the body for the dimension config. */
+  has_summary?: boolean
+  /** Server-aggregated summary config — group-by dimensions + count, with lazy-loaded detail.
+   *  Surfaced on the list view so the toggle + dimension list are available without the full body. */
+  summary?: ScreenSummary | null
   /** ``dictionary_key → column_name`` map built from the screen's column hints — surfaced on the
    *  list view so dashboard filters can resolve a filter's ``dictionary_key`` to this screen's
    *  matching column name without fetching the full body. Empty / missing when the screen lists
@@ -527,6 +533,21 @@ export interface ScreenView {
   group_by?: string[]
   /** Rows per page. Null/undefined = the screen / grid default. */
   page_size?: number | null
+}
+
+/** One grouping dimension of a screen's summary (aggregate) view. */
+export interface ScreenSummaryDimension {
+  column: string
+  /** Bucket a date/timestamp column before grouping (day = roll a day's changes into one row). */
+  bucket?: 'day' | 'month' | 'year' | null
+}
+
+/** Server-aggregated summary view — parent rows are GROUP BY <dimensions> + COUNT(*), each
+ *  expandable to its underlying rows (lazily fetched). Replaces a materialised rollup table. */
+export interface ScreenSummary {
+  dimensions: ScreenSummaryDimension[]
+  /** Header for the COUNT(*) column. */
+  count_label?: string
 }
 
 /** A 1:1 related-table write-back target. The main read query JOINs the related table so its

@@ -202,6 +202,10 @@ const en = {
     saveViewHint: 'Save the current columns, sort, filters and grouping as one of your views (stored per user, follows you across devices). Reusing a name overwrites it.',
     viewNamePlaceholder: 'View name',
     savingView: 'Saving…',
+    // Summary (aggregate) view + master/detail expansion
+    viewSummary: 'Summary',
+    expand: 'Expand',
+    collapse: 'Collapse',
     selectRow: 'Select row',
     import: 'Import',
     importNoMatch: 'No columns in {{file}} matched this query.',
@@ -990,8 +994,9 @@ const en = {
       saved: 'Saved & reloaded. Screen apps: {{apps}}',
       hint: 'Save validates every screen, writes screens.toml, and reloads.',
       editor: {
-        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', views: 'Views', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu', export: 'Export' },
+        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', views: 'Views', summary: 'Summary', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu', export: 'Export' },
         viewsCrumb: 'Views — {{id}}',
+        summaryCrumb: 'Summary — {{id}}',
         generalHint: 'Behaviour flags for this screen — auto-load, audit table, row cap, key columns. The connector picker only matters when the screen runs against a different connector than the app.',
         columnsHint: 'Configure each column once — display title, format, default value, filtering, edit rules. Both the grid view and the dialog form use these. Drill into a column to set its lookup query, cascading filters, or conditional visibility.',
         importColumns: 'Import {{n}} column(s) from the read query',
@@ -1153,6 +1158,9 @@ const en = {
       views: {
         defaultTag: 'default',
         intro: 'Named grid views (grid formats) shared with all users — each a saved set of visible columns, sort, grouping and page size. Mark one as the default to set the layout the grid opens with. Users can still save their own personal views on top.',
+      },
+      summaryView: {
+        intro: 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.',
       },
       // Workbook export — v2's port of v1's ``tbl_workbook`` / ``tbl_sheet``. Configured in
       // the Export tab; the TableView shows an "Export workbooks" button when the screen has
