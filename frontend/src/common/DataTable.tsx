@@ -244,7 +244,11 @@ const CheckBox = styled.span<{ $on: boolean }>`
 `
 const MenuTitle = styled.div`padding: 4px 8px 6px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: ${colors.text.muted};`
 // Sub-heading inside the view picker — separates the "Shared" / "My views" groups.
-const MenuSub = styled.div`padding: 6px 8px 2px; margin-top: 2px; border-top: 1px solid ${colors.border}; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: ${colors.text.muted};`
+const MenuSub = styled.div<{ $first?: boolean }>`
+  padding: 6px 8px 2px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: ${colors.text.muted};
+  ${({ $first }) => ($first ? '' : `margin-top: 2px; border-top: 1px solid ${colors.border};`)}
+`
 const IconBtn = styled.button`
   display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0;
   border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; border-radius: 3px; padding: 0;
@@ -810,7 +814,7 @@ export function DataTable<T extends object>({
                     <ColLabel>{t('table.viewsEmpty', 'No views yet — Save as… to create one.')}</ColLabel>
                   </ColRow>
                 )}
-                {sharedList.length > 0 && <MenuSub>{t('table.viewsShared', 'Shared')}</MenuSub>}
+                {sharedList.length > 0 && <MenuSub $first>{t('table.viewsShared', 'Shared')}</MenuSub>}
                 {sharedList.map((s) => {
                   const on = activeView?.scope === 'shared' && activeView.name === s.name
                   return (
@@ -820,7 +824,7 @@ export function DataTable<T extends object>({
                     </ColRow>
                   )
                 })}
-                {userViews.length > 0 && <MenuSub>{t('table.viewsMine', 'My views')}</MenuSub>}
+                {userViews.length > 0 && <MenuSub $first={sharedList.length === 0}>{t('table.viewsMine', 'My views')}</MenuSub>}
                 {userViews.map((u) => {
                   const on = activeView?.scope === 'user' && activeView.name === u.name
                   return (
