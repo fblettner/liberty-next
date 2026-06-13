@@ -46,6 +46,7 @@ from liberty.web import (
     reports_router,
     screens_router,
     theme_router,
+    views_router,
 )
 
 _log = logging.getLogger("liberty")
@@ -191,6 +192,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "changesets pool %r unusable (%s) — change-package capture disabled this run",
                     settings.changesets.pool, exc,
                 )
+        # Per-user saved views (grid formats / chart specs) — durable replacement
+        # for browser localStorage, on the auth pool. Self-bootstrapping + guarded
+        # like the changesets table above so a bad/unreachable pool degrades the
+        # feature rather than failing boot (the grid then just won't persist).
+        app.state.user_views = None
+        try:
+            from liberty.userviews import UserViewStore
+            uv = UserViewStore(app.state.connectors.pools, settings.auth.pool)
+            await uv.create_schema()
+            app.state.user_views = uv
+        except Exception as exc:  # noqa: BLE001 — never let the view store take down boot
+            _log.warning(
+                "user-view store on pool %r unusable (%s) — saved grid/chart views disabled this run",
+                settings.auth.pool, exc,
+            )
+
         app.state.token_service = token_service
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
@@ -570,6 +587,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(plugins_router)
     app.include_router(reports_router)
     app.include_router(changesets_router)
+    app.include_router(views_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:
