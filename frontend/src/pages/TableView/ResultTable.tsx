@@ -23,6 +23,7 @@ import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types
 import { api, ApiError, authHeaders } from '../../api/client'
 import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
+import type { SharedGridView } from '../../services/gridViews'
 import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, lookupCellColumns, lookupOptions, type LookupData, type LookupSpec } from '../../services/lookups'
@@ -1712,6 +1713,20 @@ export function ResultTable({
     return v
   }, [result.columns])
 
+  // Shared (read-only) grid views from the screen config — offered in the grid's view picker
+  // alongside the user's own. Maps the screen's column-name spec onto the DataTable's shape.
+  const sharedViews = useMemo<SharedGridView[]>(
+    () => (screen?.views ?? []).map((v) => ({
+      name: v.name,
+      default: v.default,
+      columns: v.columns,
+      sort: v.sort?.map((s) => ({ id: s.column, desc: s.desc })),
+      grouping: v.group_by,
+      pageSize: v.page_size ?? undefined,
+    })),
+    [screen?.views],
+  )
+
   return (
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
@@ -1736,6 +1751,7 @@ export function ResultTable({
         // — hiding a column on one bled into the others. Fall back to the query when there's no
         // screen (an ad-hoc query run).
         tableId={screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`}
+        sharedViews={sharedViews}
         exportFilename={query}
         toolbarAfterSearch={runControl}
         toolbarRight={maxRowsControl}

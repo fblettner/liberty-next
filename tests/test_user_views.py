@@ -20,64 +20,64 @@ async def store(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_put_get_roundtrip(store: UserViewStore) -> None:
-    assert await store.get("alice", "grid", "app::scr::g") is None
+async def test_save_list_roundtrip(store: UserViewStore) -> None:
+    assert await store.list_views("alice", "grid", "app::scr::g") == []
     fmt = {"columns": ["A", "B"], "sort": [{"id": "A", "desc": False}], "group_by": []}
-    await store.put("alice", "grid", "app::scr::g", fmt)
-    assert await store.get("alice", "grid", "app::scr::g") == fmt
+    await store.save_view("alice", "grid", "app::scr::g", "Wide", fmt)
+    views = await store.list_views("alice", "grid", "app::scr::g")
+    assert len(views) == 1
+    assert views[0]["name"] == "Wide"
+    assert views[0]["payload"] == fmt
+    assert views[0]["updated_at"]
 
 
 @pytest.mark.asyncio
-async def test_put_upserts(store: UserViewStore) -> None:
-    await store.put("alice", "grid", "k", {"columns": ["A"]})
-    await store.put("alice", "grid", "k", {"columns": ["A", "B", "C"]})
-    got = await store.get("alice", "grid", "k")
-    assert got == {"columns": ["A", "B", "C"]}
+async def test_multiple_named_views_per_key(store: UserViewStore) -> None:
+    await store.save_view("alice", "grid", "k", "Wide", {"columns": ["A", "B", "C"]})
+    await store.save_view("alice", "grid", "k", "Narrow", {"columns": ["A"]})
+    views = await store.list_views("alice", "grid", "k")
+    assert {v["name"] for v in views} == {"Wide", "Narrow"}
+    # ordered by name
+    assert [v["name"] for v in views] == ["Narrow", "Wide"]
 
 
 @pytest.mark.asyncio
-async def test_delete_then_gone(store: UserViewStore) -> None:
-    await store.put("alice", "grid", "k", {"x": 1})
-    assert await store.delete("alice", "grid", "k") is True
-    assert await store.get("alice", "grid", "k") is None
-    assert await store.delete("alice", "grid", "k") is False  # already gone
+async def test_save_upserts_by_name(store: UserViewStore) -> None:
+    await store.save_view("alice", "grid", "k", "V", {"columns": ["A"]})
+    await store.save_view("alice", "grid", "k", "V", {"columns": ["A", "B", "C"]})
+    views = await store.list_views("alice", "grid", "k")
+    assert len(views) == 1 and views[0]["payload"] == {"columns": ["A", "B", "C"]}
+
+
+@pytest.mark.asyncio
+async def test_delete_one_named_view(store: UserViewStore) -> None:
+    await store.save_view("alice", "grid", "k", "A", {"x": 1})
+    await store.save_view("alice", "grid", "k", "B", {"x": 2})
+    assert await store.delete_view("alice", "grid", "k", "A") is True
+    assert {v["name"] for v in await store.list_views("alice", "grid", "k")} == {"B"}
+    assert await store.delete_view("alice", "grid", "k", "A") is False  # already gone
 
 
 @pytest.mark.asyncio
 async def test_isolation_by_user_kind_and_key(store: UserViewStore) -> None:
-    # Same key, different users → independent (the cross-app-collision guard's twin:
-    # the key is app-scoped AND rows are per-user).
-    await store.put("alice", "grid", "k", {"u": "a"})
-    await store.put("bob", "grid", "k", {"u": "b"})
-    assert await store.get("alice", "grid", "k") == {"u": "a"}
-    assert await store.get("bob", "grid", "k") == {"u": "b"}
-    # Same user+key, different kind → independent.
-    await store.put("alice", "chart", "k", {"c": 1})
-    assert await store.get("alice", "grid", "k") == {"u": "a"}
-    assert await store.get("alice", "chart", "k") == {"c": 1}
+    # Same key+name, different users → independent.
+    await store.save_view("alice", "grid", "k", "V", {"u": "a"})
+    await store.save_view("bob", "grid", "k", "V", {"u": "b"})
+    assert (await store.list_views("alice", "grid", "k"))[0]["payload"] == {"u": "a"}
+    assert (await store.list_views("bob", "grid", "k"))[0]["payload"] == {"u": "b"}
+    # Same user+key+name, different kind → independent.
+    await store.save_view("alice", "chart", "k", "V", {"c": 1})
+    assert (await store.list_views("alice", "grid", "k"))[0]["payload"] == {"u": "a"}
+    assert (await store.list_views("alice", "chart", "k"))[0]["payload"] == {"c": 1}
 
 
 @pytest.mark.asyncio
 async def test_app_scoped_keys_dont_collide(store: UserViewStore) -> None:
     """Same table name in two apps → distinct app-scoped keys → distinct rows."""
-    await store.put("alice", "grid", "app1::F0101::main", {"cols": [1]})
-    await store.put("alice", "grid", "app2::F0101::main", {"cols": [2]})
-    assert await store.get("alice", "grid", "app1::F0101::main") == {"cols": [1]}
-    assert await store.get("alice", "grid", "app2::F0101::main") == {"cols": [2]}
-
-
-@pytest.mark.asyncio
-async def test_list_filters_by_user_and_kind(store: UserViewStore) -> None:
-    await store.put("alice", "grid", "g1", {"a": 1})
-    await store.put("alice", "grid", "g2", {"a": 2})
-    await store.put("alice", "chart", "c1", {"a": 3})
-    await store.put("bob", "grid", "g1", {"a": 9})
-
-    all_alice = await store.list("alice")
-    assert {(v["kind"], v["view_key"]) for v in all_alice} == {("grid", "g1"), ("grid", "g2"), ("chart", "c1")}
-    grids = await store.list("alice", kind="grid")
-    assert {v["view_key"] for v in grids} == {"g1", "g2"}
-    assert all("updated_at" in v and v["payload"] for v in grids)
+    await store.save_view("alice", "grid", "app1::F0101::main", "V", {"cols": [1]})
+    await store.save_view("alice", "grid", "app2::F0101::main", "V", {"cols": [2]})
+    assert (await store.list_views("alice", "grid", "app1::F0101::main"))[0]["payload"] == {"cols": [1]}
+    assert (await store.list_views("alice", "grid", "app2::F0101::main"))[0]["payload"] == {"cols": [2]}
 
 
 # --------------------------------------------------------------------------- #
@@ -112,25 +112,25 @@ def client(tmp_path):
         yield c
 
 
-def test_api_put_get_delete(client) -> None:
-    # Nothing saved yet → payload null.
+def test_api_put_list_delete(client) -> None:
+    # Nothing saved yet → empty list.
     r = client.get("/api/views/grid", params={"key": "app::scr::g"})
-    assert r.status_code == 200 and r.json()["payload"] is None
-    # Save.
-    r = client.put("/api/views/grid", json={"key": "app::scr::g", "payload": {"columns": ["A", "B"]}})
+    assert r.status_code == 200 and r.json()["views"] == []
+    # Save two named views.
+    r = client.put("/api/views/grid", json={"key": "app::scr::g", "name": "Wide", "payload": {"columns": ["A", "B"]}})
     assert r.status_code == 200 and r.json()["ok"] is True
-    # Read back.
+    client.put("/api/views/grid", json={"key": "app::scr::g", "name": "Narrow", "payload": {"columns": ["A"]}})
+    # List back.
     r = client.get("/api/views/grid", params={"key": "app::scr::g"})
-    assert r.json()["payload"] == {"columns": ["A", "B"]}
-    # List.
-    r = client.get("/api/views", params={"kind": "grid"})
-    assert [v["view_key"] for v in r.json()["views"]] == ["app::scr::g"]
-    # Delete → reset.
-    r = client.delete("/api/views/grid", params={"key": "app::scr::g"})
+    views = r.json()["views"]
+    assert {v["name"] for v in views} == {"Wide", "Narrow"}
+    # Delete one.
+    r = client.delete("/api/views/grid", params={"key": "app::scr::g", "name": "Wide"})
     assert r.json()["deleted"] is True
-    assert client.get("/api/views/grid", params={"key": "app::scr::g"}).json()["payload"] is None
+    r = client.get("/api/views/grid", params={"key": "app::scr::g"})
+    assert {v["name"] for v in r.json()["views"]} == {"Narrow"}
 
 
 def test_api_unknown_kind_404(client) -> None:
     assert client.get("/api/views/bogus", params={"key": "k"}).status_code == 404
-    assert client.put("/api/views/bogus", json={"key": "k", "payload": {}}).status_code == 404
+    assert client.put("/api/views/bogus", json={"key": "k", "name": "V", "payload": {}}).status_code == 404

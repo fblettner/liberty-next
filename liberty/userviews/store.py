@@ -44,6 +44,7 @@ class UserView(Base):
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
     kind: Mapped[str] = mapped_column(String(32), primary_key=True)
     view_key: Mapped[str] = mapped_column(String(512), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow,
@@ -85,45 +86,41 @@ class UserViewStore:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    async def get(self, username: str, kind: str, view_key: str) -> dict | None:
-        """The saved payload for this (user, kind, key), or None."""
+    async def list_views(self, username: str, kind: str, view_key: str) -> list[dict[str, Any]]:
+        """The user's named views for one (kind, view_key) — e.g. all the grid
+        views they saved for a given screen, ``[{name, payload, updated_at}]``."""
+        stmt = (
+            select(UserView)
+            .where(UserView.username == username, UserView.kind == kind, UserView.view_key == view_key)
+            .order_by(UserView.name)
+        )
         async with self.session() as s:
-            row = await s.get(UserView, (username, kind, view_key))
-            return dict(row.payload) if row is not None else None
+            rows = (await s.execute(stmt)).scalars().all()
+        return [
+            {"name": r.name, "payload": dict(r.payload),
+             "updated_at": r.updated_at.isoformat() if r.updated_at else None}
+            for r in rows
+        ]
 
-    async def put(self, username: str, kind: str, view_key: str, payload: dict) -> None:
-        """Upsert the payload for this (user, kind, key)."""
+    async def save_view(self, username: str, kind: str, view_key: str, name: str, payload: dict) -> None:
+        """Upsert one named view for this (user, kind, key)."""
         async with self.session() as s:
-            row = await s.get(UserView, (username, kind, view_key))
+            row = await s.get(UserView, (username, kind, view_key, name))
             if row is None:
-                s.add(UserView(username=username, kind=kind, view_key=view_key, payload=payload))
+                s.add(UserView(username=username, kind=kind, view_key=view_key, name=name, payload=payload))
             else:
                 row.payload = payload
                 row.updated_at = _utcnow()
 
-    async def delete(self, username: str, kind: str, view_key: str) -> bool:
-        """Remove a saved view (reset to default). True if a row was deleted."""
+    async def delete_view(self, username: str, kind: str, view_key: str, name: str) -> bool:
+        """Delete one named view. True if a row was removed."""
         async with self.session() as s:
             res = await s.execute(
                 sa_delete(UserView).where(
                     UserView.username == username,
                     UserView.kind == kind,
                     UserView.view_key == view_key,
+                    UserView.name == name,
                 )
             )
             return (res.rowcount or 0) > 0
-
-    async def list(self, username: str, kind: str | None = None) -> list[dict[str, Any]]:
-        """Every saved view for a user (optionally filtered by kind) — for a
-        'my saved views' management surface."""
-        stmt = select(UserView).where(UserView.username == username)
-        if kind is not None:
-            stmt = stmt.where(UserView.kind == kind)
-        stmt = stmt.order_by(UserView.kind, UserView.view_key)
-        async with self.session() as s:
-            rows = (await s.execute(stmt)).scalars().all()
-        return [
-            {"kind": r.kind, "view_key": r.view_key, "payload": dict(r.payload),
-             "updated_at": r.updated_at.isoformat() if r.updated_at else None}
-            for r in rows
-        ]

@@ -951,6 +951,58 @@ class ColumnGroup(BaseModel):
     )
 
 
+class ScreenViewSort(BaseModel):
+    """One sort directive within a shared grid view."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    column: str = Field(
+        description="Result column to sort by.",
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    desc: bool = Field(default=False, description="Sort descending when true.")
+
+
+class ScreenView(BaseModel):
+    """A named, shared grid view (grid format) for a screen.
+
+    Shared views are authored in the Screen editor and are available to ALL users
+    (read-only). Exactly one may carry ``default=True`` — it's the layout the grid
+    opens with, unless the user's device remembers a last-opened view. A user's own
+    saved tweaks live separately, per-user, in the ``ly2_user_view`` table (see
+    :mod:`liberty.userviews`); this is only the shared catalogue.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(description="View name shown in the grid's view picker (unique within the screen).")
+    default: bool = Field(
+        default=False,
+        description="Open the grid with this view by default (only one view per screen should set it).",
+    )
+    columns: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+        description=(
+            "Visible columns, in display order. Columns omitted here are hidden in this view "
+            "(the dialog still shows every column). Empty = show all in the screen's column order."
+        ),
+    )
+    sort: list[ScreenViewSort] = Field(
+        default_factory=list,
+        description="Default sort for this view — column(s) + direction, applied in order.",
+    )
+    group_by: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+        description="Default tanstack grouping column(s) for this view (nested in order).",
+    )
+    page_size: int | None = Field(
+        default=None,
+        description="Rows per page for this view. Blank = the screen / grid default.",
+    )
+
+
 class Screen(BaseModel):
     """A screen — list + dialog. Keyed by ``id`` within the app's screens map."""
 
@@ -1084,6 +1136,16 @@ class Screen(BaseModel):
             "refresh status at a glance instead of a flat row dump."
         ),
         json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS"},
+    )
+    views: list[ScreenView] = Field(
+        default_factory=list,
+        json_schema_extra={"x_group": "Views"},
+        description=(
+            "Named shared grid views (grid formats) for this screen — each a saved set of visible "
+            "columns, sort, grouping and page size, available to ALL users from the grid's view "
+            "picker. Mark one ``default`` to set the layout the grid opens with. Users layer their "
+            "own per-user views on top (saved to the database, not here)."
+        ),
     )
     treeview: ScreenTreeview | None = Field(
         default=None,
@@ -1244,6 +1306,19 @@ class Screen(BaseModel):
                         f"screen {self.id!r}: row_click_route references unknown column(s) "
                         f"{sorted(missing)!r} — known: {sorted(known)!r}"
                     )
+        # Shared view names must be unique, and at most one may be the default.
+        if self.views:
+            seen_v: set[str] = set()
+            defaults = 0
+            for v in self.views:
+                if v.name in seen_v:
+                    raise ValueError(f"screen {self.id!r}: duplicate view name {v.name!r}")
+                seen_v.add(v.name)
+                defaults += 1 if v.default else 0
+            if defaults > 1:
+                raise ValueError(
+                    f"screen {self.id!r}: {defaults} views set ``default`` — only one may be the default",
+                )
         return self
 
     def effective_key_columns(self) -> list[str]:

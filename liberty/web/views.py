@@ -29,11 +29,12 @@ _KINDS = {"grid", "chart"}
 
 
 class ViewBody(BaseModel):
-    """``PUT /api/views/{kind}`` body."""
+    """``PUT /api/views/{kind}`` body — save one named view."""
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str = Field(min_length=1, max_length=512, description="App-scoped view key.")
+    key: str = Field(min_length=1, max_length=512, description="App-scoped view key (e.g. the screen/table id).")
+    name: str = Field(min_length=1, max_length=128, description="The view's name (unique per user + key).")
     payload: dict[str, Any] = Field(default_factory=dict, description="The saved view (frontend-owned JSON).")
 
 
@@ -55,34 +56,26 @@ def _check_kind(kind: str) -> None:
         )
 
 
-@router.get("/{kind}", summary="Get a saved view")
-async def get_view(kind: str, key: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
-    """The caller's saved view for *kind*/*key*. ``payload`` is null when none
-    is saved (the grid then falls back to the screen default / column config)."""
+@router.get("/{kind}", summary="List my saved views for a key")
+async def list_views(kind: str, key: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """The caller's named views for *kind*/*key* — ``{views: [{name, payload,
+    updated_at}]}``. Empty when the user has saved none (the grid then shows a
+    shared view / the column-config default)."""
     _check_kind(kind)
-    payload = await _store(request).get(principal.username, kind, key)
-    return {"kind": kind, "key": key, "payload": payload}
+    return {"kind": kind, "key": key, "views": await _store(request).list_views(principal.username, kind, key)}
 
 
-@router.get("", summary="List my saved views")
-async def list_views(request: Request, principal: CurrentPrincipal, kind: Optional[str] = None) -> dict[str, Any]:
-    """Every view the caller has saved (optionally filtered by kind)."""
-    if kind is not None:
-        _check_kind(kind)
-    return {"views": await _store(request).list(principal.username, kind)}
-
-
-@router.put("/{kind}", summary="Save a view")
+@router.put("/{kind}", summary="Save a named view")
 async def put_view(kind: str, body: ViewBody, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
-    """Save (upsert) the caller's view for *kind*/``body.key``."""
+    """Save (upsert) one of the caller's named views for *kind*/``body.key``."""
     _check_kind(kind)
-    await _store(request).put(principal.username, kind, body.key, body.payload)
-    return {"ok": True, "kind": kind, "key": body.key}
+    await _store(request).save_view(principal.username, kind, body.key, body.name, body.payload)
+    return {"ok": True, "kind": kind, "key": body.key, "name": body.name}
 
 
-@router.delete("/{kind}", summary="Reset a saved view")
-async def delete_view(kind: str, key: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
-    """Delete the caller's saved view (reset to the screen default / columns)."""
+@router.delete("/{kind}", summary="Delete one named view")
+async def delete_view(kind: str, key: str, name: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """Delete one of the caller's named views."""
     _check_kind(kind)
-    deleted = await _store(request).delete(principal.username, kind, key)
+    deleted = await _store(request).delete_view(principal.username, kind, key, name)
     return {"deleted": deleted}

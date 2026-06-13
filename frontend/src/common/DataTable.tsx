@@ -43,10 +43,18 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
+  LayoutGrid, Trash2,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
-import { loadGridView, saveGridView, resetGridView, type GridView } from '../services/gridViews'
+import {
+  listGridViews, saveGridView, deleteGridView, sharedToGridView,
+  loadLastView, saveLastView,
+  type GridView, type NamedGridView, type SharedGridView, type ViewRef,
+} from '../services/gridViews'
+import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from './Modal'
+import { Button } from './Button'
+import { Input } from './Input'
 
 // "All" (Number.MAX_SAFE_INTEGER) renders every loaded row in one virtualised page — the
 // pagination chrome collapses into a single page. Useful for screens with high ``max_rows``
@@ -57,8 +65,13 @@ const PAGE_SIZE_OPTIONS: number[] = [25, 50, 100, 200, 500, 1000, PAGE_SIZE_ALL]
 export interface DataTableProps<T extends object> {
   columns: ColumnDef<T, unknown>[]
   data: T[]
-  /** A stable id → persists column visibility/order/sizes in localStorage. */
+  /** A stable, app-scoped id (e.g. `screen:<app>:<id>`) → the persistence key for the user's
+   *  saved grid views (DB) and the device's last-opened-view pointer (localStorage). */
   tableId?: string
+  /** Shared, read-only grid views from the screen config, offered in the view picker alongside
+   *  the user's own. One may be the default (applied on open unless the device remembers a
+   *  last-opened view). */
+  sharedViews?: SharedGridView[]
   /** Extra controls rendered at the left of the toolbar (e.g. an Edit toggle). */
   toolbar?: React.ReactNode
   /** Controls rendered immediately to the right of the search box (e.g. a Run button). */
@@ -233,6 +246,13 @@ const CheckBox = styled.span<{ $on: boolean }>`
   transition: background 0.12s, border-color 0.12s;
 `
 const MenuTitle = styled.div`padding: 4px 8px 6px; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: ${colors.text.muted};`
+// Sub-heading inside the view picker — separates the "Shared" / "My views" groups.
+const MenuSub = styled.div`padding: 6px 8px 2px; margin-top: 2px; border-top: 1px solid ${colors.border}; font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: ${colors.text.muted};`
+const IconBtn = styled.button`
+  display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex-shrink: 0;
+  border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; border-radius: 3px; padding: 0;
+  &:hover { background: var(--hover-subtle); color: ${colors.red.main}; }
+`
 const MenuHead = styled.div`display: flex; align-items: center; gap: 6px; padding: 0 2px 2px; border-bottom: 1px solid ${colors.border}; margin-bottom: 4px;`
 const MiniLink = styled.button`
   border: none; background: transparent; color: ${colors.blue.main}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
@@ -332,7 +352,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
@@ -400,66 +420,41 @@ export function DataTable<T extends object>({
     return () => ro.disconnect()
   }, [showFilters])
 
-  // Apply a saved view onto the grid state. Fields are optional so an older/narrower payload
-  // still applies; the screen's ``hidden`` defaults are layered UNDER the saved visibility so a
-  // newly-added hidden column stays hidden unless the saved view explicitly un-hides it.
+  // ── saved views (grid formats) ──────────────────────────────────────────────
+  // Two sources: SHARED views from the screen config (read-only, everyone sees them, one may be
+  // the default), and the user's OWN named views persisted per-user in the DB. localStorage keeps
+  // only a pointer to the view this device last opened — the heavy content lives in those two.
+  const sharedList = useMemo<SharedGridView[]>(() => sharedViews ?? [], [sharedViews])
+  const [userViews, setUserViews] = useState<NamedGridView[]>([])
+  const [activeView, setActiveView] = useState<ViewRef | null>(null)
+  const [viewOpen, setViewOpen] = useState(false)
+  const viewRef = useRef<HTMLDivElement>(null)
+
+  // The grid's data (non-internal) column ids in screen order — used to translate a shared
+  // view's column-name list into a TanStack visibility map.
+  const allDataColIds = useMemo(
+    () => columns
+      .filter((c) => !(c.meta as { internal?: boolean } | undefined)?.internal)
+      .map((c) => String((c as { id?: string }).id ?? (c as { accessorKey?: string }).accessorKey ?? ''))
+      .filter(Boolean),
+    [columns],
+  )
+
+  // Apply a saved view onto the grid state. A full apply (not a merge) so switching FROM a wide
+  // view TO a narrow one actually hides the extra columns; the screen's ``hidden`` defaults are
+  // layered under the view's visibility.
   const applyView = useCallback((v: GridView) => {
-    if (v.visibility) setColumnVisibility({ ...(initialColumnVisibility ?? {}), ...v.visibility })
-    if (v.order) setColumnOrder(v.order)
-    if (v.sorting) setSorting(v.sorting)
-    if (v.filters) setColumnFilters(v.filters)
-    if (v.grouping) { setGrouping(v.grouping); setExpanded(v.grouping.length ? true : {}) }
-    if (typeof v.pageSize === 'number') setPagination((p) => ({ ...p, pageSize: v.pageSize as number }))
-  }, [initialColumnVisibility])
+    setColumnVisibility(v.visibility ? { ...(initialColumnVisibility ?? {}), ...v.visibility } : { ...(initialColumnVisibility ?? {}) })
+    setColumnOrder(v.order ?? [])
+    setSorting(v.sorting ?? [])
+    setColumnFilters(v.filters ?? [])
+    setGrouping(v.grouping ?? [])
+    setExpanded(v.grouping?.length ? true : {})
+    setPagination((p) => ({ ...p, pageIndex: 0, pageSize: typeof v.pageSize === 'number' ? v.pageSize : initialPageSize }))
+  }, [initialColumnVisibility, initialPageSize])
 
-  // Load the user's saved view from the DB on mount — replaces the old localStorage read.
-  // One-time migration: when there's no DB view but a legacy ``dt-*`` localStorage entry exists,
-  // import it into the DB and drop the local key, so existing layouts survive and we stop
-  // depending on localStorage. Failures degrade silently to the screen defaults.
-  useEffect(() => {
-    if (!tableId) return
-    let cancelled = false
-    void (async () => {
-      const dbView = await loadGridView(tableId)
-      if (cancelled) return
-      if (dbView) { applyView(dbView); return }
-      const legacy = loadGrid(tableId)
-      if (legacy.visibility || legacy.order) {
-        const migrated: GridView = { visibility: legacy.visibility, order: legacy.order }
-        applyView(migrated)
-        saveGridView(tableId, migrated)
-          .then(() => { try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ } })
-          .catch(() => { /* keep the local entry as a fallback if the save failed */ })
-      }
-    })()
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the table identity changes
-  }, [tableId])
-
-  // Explicit "Save view": persist the FULL current presentation (visible columns + order + sort
-  // + filters + grouping + page size) for this user + table. Nothing is auto-saved — the operator
-  // chooses when the current layout becomes their default.
-  const [savingView, setSavingView] = useState(false)
-  const saveView = useCallback(async () => {
-    if (!tableId) return
-    setSavingView(true)
-    try {
-      await saveGridView(tableId, {
-        visibility: columnVisibility, order: columnOrder, sorting,
-        filters: columnFilters, grouping, pageSize: pagination.pageSize,
-      })
-    } finally { setSavingView(false) }
-  }, [tableId, columnVisibility, columnOrder, sorting, columnFilters, grouping, pagination.pageSize])
-
-  // Reset to the screen defaults — delete the saved view (DB + any legacy localStorage) and
-  // re-apply the configured visibility / grouping / page size, clearing sort & filters. Needed
-  // both as the "stop using my saved view" action and when a ``visible_when`` rule conflicts with
-  // an older saved visibility.
-  const resetGrid = useCallback(() => {
-    if (tableId) {
-      try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ }
-      void resetGridView(tableId)
-    }
+  // The base/default layout — the screen's configured visibility + grouping, no sort/filters.
+  const applyBase = useCallback(() => {
     setColumnVisibility({ ...(initialColumnVisibility ?? {}) })
     setColumnOrder([])
     setSorting([])
@@ -467,7 +462,113 @@ export function DataTable<T extends object>({
     setGrouping(resolvedInitialGrouping)
     setExpanded(resolvedInitialGrouping.length ? true : {})
     setPagination((p) => ({ ...p, pageIndex: 0, pageSize: initialPageSize }))
-  }, [tableId, initialColumnVisibility, resolvedInitialGrouping, initialPageSize])
+  }, [initialColumnVisibility, resolvedInitialGrouping, initialPageSize])
+
+  // Resolve a view reference (shared or user) to an applicable GridView.
+  const resolveView = useCallback((ref: ViewRef): GridView | null => {
+    if (ref.scope === 'shared') {
+      const sv = sharedList.find((s) => s.name === ref.name)
+      return sv ? sharedToGridView(sv, allDataColIds) : null
+    }
+    const uv = userViews.find((u) => u.name === ref.name)
+    return uv ? uv.payload : null
+  }, [sharedList, userViews, allDataColIds])
+
+  // Select a view (or null = the base layout): apply it, mark it active, remember it on this device.
+  const selectView = useCallback((ref: ViewRef | null) => {
+    setActiveView(ref)
+    if (tableId) saveLastView(tableId, ref)
+    if (!ref) { applyBase(); return }
+    const gv = resolveView(ref)
+    applyView(gv ?? {})
+  }, [tableId, applyBase, resolveView, applyView])
+
+  // Load the user's views on mount, migrate a legacy ``dt-*`` localStorage layout once, then open
+  // on the device's last-opened view (if it still exists) → the shared default → the base layout.
+  useEffect(() => {
+    if (!tableId) return
+    let cancelled = false
+    void (async () => {
+      let uv = await listGridViews(tableId)
+      if (!uv.length) {
+        const legacy = loadGrid(tableId)
+        if (legacy.visibility || legacy.order) {
+          const name = t('table.myView', 'My view')
+          const payload: GridView = { visibility: legacy.visibility, order: legacy.order }
+          try {
+            await saveGridView(tableId, name, payload)
+            uv = [{ name, payload }]
+            try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ }
+          } catch { /* keep the local entry as a fallback if the save failed */ }
+        }
+      }
+      if (cancelled) return
+      setUserViews(uv)
+      const last = loadLastView(tableId)
+      const stillExists = (r: ViewRef) =>
+        r.scope === 'user' ? uv.some((u) => u.name === r.name) : sharedList.some((s) => s.name === r.name)
+      let initial: ViewRef | null = last && stillExists(last) ? last : null
+      if (!initial) {
+        const def = sharedList.find((s) => s.default)
+        if (def) initial = { scope: 'shared', name: def.name }
+      }
+      if (initial) {
+        setActiveView(initial)
+        const gv = initial.scope === 'user'
+          ? uv.find((u) => u.name === initial!.name)?.payload ?? null
+          : (() => { const sv = sharedList.find((s) => s.name === initial!.name); return sv ? sharedToGridView(sv, allDataColIds) : null })()
+        if (gv) applyView(gv)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the table identity changes
+  }, [tableId])
+
+  // "Save as…" — persist the FULL current presentation under a name (per user). Re-saving an
+  // existing name overwrites it. The naming modal prefills with the active user view's name.
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const [savingView, setSavingView] = useState(false)
+  const openSaveModal = useCallback(() => {
+    setSaveName(activeView?.scope === 'user' ? activeView.name : '')
+    setSaveModalOpen(true)
+  }, [activeView])
+  const confirmSaveView = useCallback(async () => {
+    const name = saveName.trim()
+    if (!tableId || !name) return
+    setSavingView(true)
+    try {
+      await saveGridView(tableId, name, {
+        visibility: columnVisibility, order: columnOrder, sorting,
+        filters: columnFilters, grouping, pageSize: pagination.pageSize,
+      })
+      const uv = await listGridViews(tableId)
+      setUserViews(uv)
+      const ref: ViewRef = { scope: 'user', name }
+      setActiveView(ref); saveLastView(tableId, ref)
+      setSaveModalOpen(false)
+    } finally { setSavingView(false) }
+  }, [tableId, saveName, columnVisibility, columnOrder, sorting, columnFilters, grouping, pagination.pageSize])
+
+  // Delete one of the user's own views; if it was active, fall back to the shared default / base.
+  const deleteUserView = useCallback(async (name: string) => {
+    if (!tableId) return
+    await deleteGridView(tableId, name)
+    const uv = await listGridViews(tableId)
+    setUserViews(uv)
+    if (activeView?.scope === 'user' && activeView.name === name) {
+      const def = sharedList.find((s) => s.default)
+      selectView(def ? { scope: 'shared', name: def.name } : null)
+    }
+  }, [tableId, activeView, sharedList, selectView])
+
+  // "Reset" — drop the active view selection and show the base/default screen layout. Handy when a
+  // ``visible_when`` rule conflicts with a saved layout. Doesn't delete any saved view.
+  const resetGrid = useCallback(() => {
+    setActiveView(null)
+    if (tableId) saveLastView(tableId, null)
+    applyBase()
+  }, [tableId, applyBase])
 
   // Internal columns (select / status) are always pinned to the front, regardless of the user's
   // saved (data-only) column order; `columnOrder` persists only the data columns.
@@ -698,6 +799,52 @@ export function DataTable<T extends object>({
         <Spacer />
         {toolbarRight}
         <ActionGroup>
+          {(tableId || sharedList.length > 0) && (
+            <MenuWrap ref={viewRef}>
+              <CtrlBtn $active={!!activeView} onClick={() => setViewOpen((v) => !v)} title={t('table.views', 'Views')}>
+                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.viewBase', 'Default')}
+              </CtrlBtn>
+              <MenuPortal open={viewOpen} anchorRef={viewRef} onClose={() => setViewOpen(false)} minWidth={240}>
+                <MenuHead>
+                  <MenuTitle>{t('table.views', 'Views')}</MenuTitle>
+                  <Spacer />
+                  {tableId && (
+                    <MiniLink type="button" onClick={() => { setViewOpen(false); openSaveModal() }}>
+                      {t('table.saveAs', 'Save as…')}
+                    </MiniLink>
+                  )}
+                </MenuHead>
+                {/* Base / default screen layout — always selectable to "show everything". */}
+                <ColRow onClick={() => { selectView(null); setViewOpen(false) }} style={{ cursor: 'pointer' }}>
+                  <CheckBox $on={!activeView}>{!activeView && <Check size={9} />}</CheckBox>
+                  <ColLabel>{t('table.viewBase', 'Default')}</ColLabel>
+                </ColRow>
+                {sharedList.length > 0 && <MenuSub>{t('table.viewsShared', 'Shared')}</MenuSub>}
+                {sharedList.map((s) => {
+                  const on = activeView?.scope === 'shared' && activeView.name === s.name
+                  return (
+                    <ColRow key={`s:${s.name}`} onClick={() => { selectView({ scope: 'shared', name: s.name }); setViewOpen(false) }} style={{ cursor: 'pointer' }}>
+                      <CheckBox $on={on}>{on && <Check size={9} />}</CheckBox>
+                      <ColLabel>{s.name}{s.default ? ` · ${t('table.viewDefaultTag', 'default')}` : ''}</ColLabel>
+                    </ColRow>
+                  )
+                })}
+                {userViews.length > 0 && <MenuSub>{t('table.viewsMine', 'My views')}</MenuSub>}
+                {userViews.map((u) => {
+                  const on = activeView?.scope === 'user' && activeView.name === u.name
+                  return (
+                    <ColRow key={`u:${u.name}`} style={{ cursor: 'pointer' }}>
+                      <CheckBox $on={on} onClick={() => { selectView({ scope: 'user', name: u.name }); setViewOpen(false) }}>{on && <Check size={9} />}</CheckBox>
+                      <ColLabel onClick={() => { selectView({ scope: 'user', name: u.name }); setViewOpen(false) }}>{u.name}</ColLabel>
+                      <IconBtn onClick={(e) => { e.stopPropagation(); void deleteUserView(u.name) }} title={t('table.deleteView', 'Delete view')}>
+                        <Trash2 size={12} />
+                      </IconBtn>
+                    </ColRow>
+                  )
+                })}
+              </MenuPortal>
+            </MenuWrap>
+          )}
           <CtrlBtn $active={showFilters} onClick={() => setShowFilters((v) => !v)} title={t('table.filters')}>
             <Filter size={13} /> {t('table.filters')}
           </CtrlBtn>
@@ -746,15 +893,7 @@ export function DataTable<T extends object>({
                   <Spacer />
                   <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll', 'All')}</MiniLink>
                   <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone', 'None')}</MiniLink>
-                  {/* "Save view" persists the full current presentation (columns + order + sort +
-                      filters + grouping + page size) as this user's default for this table — in the
-                      Liberty DB, not localStorage, so it follows them across devices. */}
-                  {tableId && (
-                    <MiniLink type="button" onClick={() => void saveView()} disabled={savingView} title={t('table.saveViewHint', 'Save the current columns, sort, filters and grouping as your default view for this table (stored per user, follows you across devices).')}>
-                      {savingView ? t('table.savingView', 'Saving…') : t('table.saveView', 'Save view')}
-                    </MiniLink>
-                  )}
-                  {/* "Reset" wipes the saved view (DB + any legacy localStorage) and re-applies
+                  {/* "Reset" drops the active view selection and re-applies
                       the screen's defaults (the ``hidden`` hints on each column). Needed when a
                       ``visible_when`` rule drops a column based on a server filter but an older
                       saved entry still hides it — the operator would otherwise have to hunt
@@ -988,6 +1127,31 @@ export function DataTable<T extends object>({
           <PagBtn onClick={() => table.setPageIndex(totalPages - 1)} disabled={!table.getCanNextPage()} title={t('common.last')}><ChevronsRight size={13} /></PagBtn>
         </PagRight>
       </PaginationRow>
+      {saveModalOpen && (
+        <Overlay onClick={() => setSaveModalOpen(false)} style={{ zIndex: 2000 }}>
+          <Modal style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>{t('table.saveViewTitle', 'Save view')}</ModalHeader>
+            <ModalBody>
+              <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
+                {t('table.saveViewHint', 'Save the current columns, sort, filters and grouping as one of your views (stored per user, follows you across devices). Reusing a name overwrites it.')}
+              </div>
+              <Input
+                autoFocus
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void confirmSaveView() }}
+                placeholder={t('table.viewNamePlaceholder', 'View name')}
+              />
+            </ModalBody>
+            <ModalFooter>
+              <Button $size="sm" $variant="ghost" onClick={() => setSaveModalOpen(false)}>{t('common.cancel')}</Button>
+              <Button $size="sm" $variant="primary" onClick={() => void confirmSaveView()} disabled={!saveName.trim() || savingView}>
+                {savingView ? t('table.savingView', 'Saving…') : t('common.save', 'Save')}
+              </Button>
+            </ModalFooter>
+          </Modal>
+        </Overlay>
+      )}
     </Wrap>
   )
 }
