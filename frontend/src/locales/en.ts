@@ -187,7 +187,7 @@ const en = {
     selectAll: 'Select all',
     selectNone: 'Select none',
     resetColumns: 'Reset',
-    resetColumnsHint: 'Clear the saved column visibility / order for this table — handy when a visible_when rule conflicts with an older saved state.',
+    resetColumnsHint: "Revert to the screen's default view (or its base column layout if none) — handy when a visible_when rule conflicts with an older saved state.",
     // Saved views (grid formats)
     views: 'Views',
     viewsEmpty: 'No views yet — Save as… to create one.',

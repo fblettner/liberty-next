@@ -547,13 +547,16 @@ export function DataTable<T extends object>({
     }
   }, [tableId, activeView, sharedList, selectView])
 
-  // "Reset" — drop the active view selection and show the base/default screen layout. Handy when a
-  // ``visible_when`` rule conflicts with a saved layout. Doesn't delete any saved view.
+  // "Reset" — revert to the screen's DEFAULT shared view when one is defined, else the base
+  // screen layout. Handy when a ``visible_when`` rule conflicts with a saved layout. Doesn't
+  // delete any saved view.
   const resetGrid = useCallback(() => {
+    const def = sharedList.find((s) => s.default)
+    if (def) { selectView({ scope: 'shared', name: def.name }); return }
     setActiveView(null)
     if (tableId) saveLastView(tableId, null)
     applyBase()
-  }, [tableId, applyBase])
+  }, [tableId, applyBase, sharedList, selectView])
 
   // Internal columns (select / status) are always pinned to the front, regardless of the user's
   // saved (data-only) column order; `columnOrder` persists only the data columns.

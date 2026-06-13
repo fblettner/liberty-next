@@ -189,7 +189,7 @@ const fr: Resources = {
     selectAll: 'Tout sélectionner',
     selectNone: 'Tout désélectionner',
     resetColumns: 'Réinit.',
-    resetColumnsHint: "Efface la visibilité / l'ordre enregistré pour cette table — utile quand une règle visible_when entre en conflit avec un état sauvegardé plus ancien.",
+    resetColumnsHint: "Revient à la vue par défaut de l'écran (ou à la disposition de colonnes de base si aucune) — utile quand une règle visible_when entre en conflit avec un état sauvegardé plus ancien.",
     // Vues enregistrées (formats de grille)
     views: 'Vues',
     viewsEmpty: 'Aucune vue — « Enregistrer sous… » pour en créer une.',
