@@ -211,6 +211,9 @@ const en = {
       before: 'Before',
       after: 'After',
       none: 'No field values could be parsed from this statement.',
+      summary: '{{n}} fields',
+      changed: '{{n}} changed',
+      changedOnly: 'Changed only',
     },
     selectRow: 'Select row',
     import: 'Import',
@@ -1000,7 +1003,7 @@ const en = {
       saved: 'Saved & reloaded. Screen apps: {{apps}}',
       hint: 'Save validates every screen, writes screens.toml, and reloads.',
       editor: {
-        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', views: 'Views', summary: 'Summary', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu', export: 'Export' },
+        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', views: 'Views', summary: 'Summary', valuediff: 'Value diff', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu', export: 'Export' },
         viewsCrumb: 'Views — {{id}}',
         summaryCrumb: 'Summary — {{id}}',
         generalHint: 'Behaviour flags for this screen — auto-load, audit table, row cap, key columns. The connector picker only matters when the screen runs against a different connector than the app.',

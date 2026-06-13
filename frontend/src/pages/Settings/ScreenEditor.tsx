@@ -93,8 +93,8 @@ const COLUMNS_KEYS = ['columns'] as const
 // Columns tab's pickers do.
 const VIEWS_KEYS = ['views'] as const
 
-type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'summary' | 'dialog' | 'actions' | 'rowmenu' | 'export'
-const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'summary', 'dialog', 'actions', 'rowmenu', 'export']
+type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'summary' | 'valuediff' | 'dialog' | 'actions' | 'rowmenu' | 'export'
+const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'summary', 'valuediff', 'dialog', 'actions', 'rowmenu', 'export']
 
 // ── styled bits ─────────────────────────────────────────────────────────────
 const TabsBar = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; margin-bottom: 14px;`
@@ -1014,10 +1014,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     )
   }
 
-  // ── Summary tab — server-aggregated rows with expandable detail + row value diff ─────
+  // ── Summary tab — server-aggregated rows with expandable detail (generic, any table) ─
   const renderSummary = (): ReactNode => {
     const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Row) : {}
-    const vd = (value.value_diff && typeof value.value_diff === 'object') ? (value.value_diff as Row) : {}
     return (
       <FrameworkEnumsContext.Provider value={augmentedEnums}>
         <Sub>{t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}</Sub>
@@ -1033,7 +1032,17 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
             setProp('summary', dims.length ? v : null)
           }}
         />
-        <div style={{ borderTop: `1px solid ${colors.border}`, margin: '14px 0 10px' }} />
+      </FrameworkEnumsContext.Provider>
+    )
+  }
+
+  // ── Value diff tab — expand a row to BEFORE/AFTER parsed from a DML-statement column ─
+  // Kept separate from Summary: summary is a generic aggregation any table can use, whereas this
+  // is the narrower "parse an audit/CDC redo column" case (e.g. nomasx1's audit_trail_query).
+  const renderValueDiff = (): ReactNode => {
+    const vd = (value.value_diff && typeof value.value_diff === 'object') ? (value.value_diff as Row) : {}
+    return (
+      <FrameworkEnumsContext.Provider value={augmentedEnums}>
         <Sub>{t('settings.screens.valueDiff.intro', 'Row value diff — name a column that holds a DML statement (the audit redo SQL); each row then expands to its field-level BEFORE / AFTER values, parsed in flight. No values table needed. Leave the SQL column blank to disable.')}</Sub>
         <SchemaForm
           schema={valueDiffObjSchema}
@@ -1364,6 +1373,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       case 'columns': return renderColumns()
       case 'views':   return renderViews()
       case 'summary': return renderSummary()
+      case 'valuediff': return renderValueDiff()
       case 'dialog':  return renderDialog()
       case 'actions': return (
         // All action attachment points consolidated. Grouped visually by *when* they fire:

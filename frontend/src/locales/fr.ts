@@ -213,6 +213,9 @@ const fr: Resources = {
       before: 'Avant',
       after: 'Après',
       none: 'Aucune valeur de champ n’a pu être extraite de cette instruction.',
+      summary: '{{n}} champs',
+      changed: '{{n}} modifiés',
+      changedOnly: 'Modifiés seulement',
     },
     selectRow: 'Sélectionner la ligne',
     import: 'Importer',
@@ -998,7 +1001,7 @@ const fr: Resources = {
       saved: 'Enregistré et rechargé. Applications avec écrans : {{apps}}',
       hint: 'Enregistrer valide chaque écran, écrit screens.toml et recharge.',
       editor: {
-        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', views: 'Vues', summary: 'Résumé', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne', export: 'Export' },
+        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', views: 'Vues', summary: 'Résumé', valuediff: 'Diff de valeurs', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne', export: 'Export' },
         viewsCrumb: 'Vues — {{id}}',
         summaryCrumb: 'Résumé — {{id}}',
         generalHint: "Indicateurs de comportement pour cet écran — chargement auto, table d'audit, plafond de lignes, colonnes clés. Le connecteur n'est utile que si l'écran tourne sur un connecteur différent de l'application.",
