@@ -1713,11 +1713,12 @@ async def test_form_rule_sysdate_stamps_now(pools: PoolRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_form_rule_password_hashes_value(pools: PoolRegistry) -> None:
-    """``rules = "PASSWORD"`` Argon2-hashes the value before binding. Blank password → NULL
-    (the dialog drops blank fields from the SET on UPDATE; INSERT with no password lands as
-    NULL, which the column should be nullable to allow). A hash starts with ``$argon2``."""
-    from liberty.auth.password import verify_password
+async def test_form_rule_password_encrypts_value(pools: PoolRegistry) -> None:
+    """``rules = "PASSWORD"`` **encrypts** the value (reversible AES-GCM ``ENC:``) so the
+    secret can be decrypted to connect — these are connection passwords, NOT login
+    credentials, so they must never be one-way hashed. Idempotent on an already-``ENC:``
+    value; blank → NULL; no master key → plaintext (not a failed save)."""
+    from liberty.crypto import decrypt, is_encrypted
     from liberty.connectors.dictionary import DictionarySection
     d = DictionaryFile(connectors={"db": DictionarySection(entries={
         "PWD": DictionaryEntry(format="password", rules="PASSWORD"),
@@ -1726,12 +1727,48 @@ async def test_form_rule_password_hashes_value(pools: PoolRegistry) -> None:
         QueryDef(name="ins", writable=True, sql="INSERT INTO item (id, name) VALUES (1, :PWD)"),
     ])
     conn = SQLConnector("db", cfg, pools, dictionary=d)
+
+    # With a master key → ENC: ciphertext that decrypts back to the plaintext.
+    pools._master_key = "test-master-key"
     out = conn._apply_form_rules({"PWD": "hunter2"}, cfg.queries[0], stmt_type="INSERT", user="x")
-    assert isinstance(out["PWD"], str) and out["PWD"].startswith("$argon2")
-    assert verify_password(out["PWD"], "hunter2")    # round-trip via the existing hasher
-    # Blank password → None (dialog drops blanks; the bind matches the dialog's intent)
+    assert is_encrypted(out["PWD"]) and decrypt(out["PWD"], "test-master-key") == "hunter2"
+    # Idempotent — re-saving an already-encrypted value passes it through unchanged.
+    again = conn._apply_form_rules({"PWD": out["PWD"]}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert again["PWD"] == out["PWD"]
+    # Blank password → None (dialog drops blanks; the bind matches the dialog's intent).
     out = conn._apply_form_rules({"PWD": ""}, cfg.queries[0], stmt_type="INSERT", user="x")
     assert out["PWD"] is None
+    # No master key → plaintext (read side's decrypt_or_keep passes it through; save never fails).
+    pools._master_key = ""
+    out = conn._apply_form_rules({"PWD": "hunter2"}, cfg.queries[0], stmt_type="INSERT", user="x")
+    assert out["PWD"] == "hunter2"
+
+
+@pytest.mark.asyncio
+async def test_blank_password_preserved_on_update(pools: PoolRegistry) -> None:
+    """A PASSWORD column submitted blank/omitted on an UPDATE must NOT overwrite the
+    stored secret with NULL — its assignment is dropped from the SET clause so the
+    existing value is preserved. A real new value is kept (and encrypted)."""
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "PWD": DictionaryEntry(format="password", rules="PASSWORD"),
+    })})
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="upd", writable=True,
+                 sql="UPDATE item SET name = :NAME, PWD = :PWD WHERE id = :ID_ORIGINAL"),
+    ])
+    conn = SQLConnector("db", cfg, pools, dictionary=d)
+    q = cfg.queries[0]
+
+    # Blank → assignment + bind dropped (other columns still update).
+    sql, params = conn._strip_blank_password_updates(q.sql, q, {"NAME": "x", "PWD": "", "ID_ORIGINAL": 1})
+    assert "PWD = :PWD" not in sql and "PWD" not in params and "name = :NAME" in sql
+    # Omitted entirely → also preserved.
+    sql, _ = conn._strip_blank_password_updates(q.sql, q, {"NAME": "x", "ID_ORIGINAL": 1})
+    assert "PWD = :PWD" not in sql
+    # A real new value → kept; _apply_form_rules then encrypts it.
+    sql, params = conn._strip_blank_password_updates(q.sql, q, {"NAME": "x", "PWD": "secret", "ID_ORIGINAL": 1})
+    assert "PWD = :PWD" in sql and params["PWD"] == "secret"
 
 
 @pytest.mark.asyncio
