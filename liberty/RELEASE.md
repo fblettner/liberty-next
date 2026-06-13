@@ -2,15 +2,24 @@
 
 ## 7.0.41 — 2026-06-13
 
-- _Release notes pending — edit liberty/RELEASE.md._
+**Reports**
+- **Run-form dropdowns** — report parameters can declare `options`, and the run dialog renders a
+  searchable select instead of a free input. Choices resolve server-side (a static list, the
+  configured connectors, a connector's schemas, or a named connector query mapped to value/label),
+  and cascade — e.g. an Application picker that lists apps by name on the chosen connector.
 
 ## 7.0.40 — 2026-06-12
 
-- _Release notes pending — edit liberty/RELEASE.md._
+**Docs**
+- README: upgrade history & release notes, `release/upgrade.sh`, and a failed-publish recovery note
+  (incl. the GitHub-App workflow-file tag-push limitation).
 
 ## 7.0.39 — 2026-06-12
 
-- _Release notes pending — edit liberty/RELEASE.md._
+**Config history**
+- **Upgrade history** tracks software version changes on startup — framework **and** licensed apps,
+  independently — surfaced under Settings → History → Upgrades with the release notes inline.
+- **Release notes** shipped in the wheel (`RELEASE.md` / `.fr`), served per component.
 
 ## 7.0.27 — 2026-06-12
 
