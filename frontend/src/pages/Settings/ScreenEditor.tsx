@@ -476,6 +476,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     () => ((defs.ScreenSummary as JsonSchema | undefined) ?? { type: 'object', properties: {} }),
     [defs],
   )
+  const valueDiffObjSchema = useMemo<JsonSchema>(
+    () => ((defs.ScreenValueDiff as JsonSchema | undefined) ?? { type: 'object', properties: {} }),
+    [defs],
+  )
   // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
   // "Columns in this group" chips in the ColumnGroupsEditor so the operator sees the mapping
   // without scanning the whole column list.
@@ -1010,27 +1014,34 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     )
   }
 
-  // ── Summary tab — server-aggregated rows with expandable detail ──────────────────────
+  // ── Summary tab — server-aggregated rows with expandable detail + row value diff ─────
   const renderSummary = (): ReactNode => {
     const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Row) : {}
+    const vd = (value.value_diff && typeof value.value_diff === 'object') ? (value.value_diff as Row) : {}
     return (
-      <>
+      <FrameworkEnumsContext.Provider value={augmentedEnums}>
         <Sub>{t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}</Sub>
         {/* Inline edit of the single ScreenSummary object. ``augmentedEnums`` resolves the
             dimension column picker against SCREEN_COLUMNS. An empty dimensions list clears the
             whole summary (so the Summary toggle disappears from the screen). */}
-        <FrameworkEnumsContext.Provider value={augmentedEnums}>
-          <SchemaForm
-            schema={summaryObjSchema}
-            defs={defs}
-            value={current}
-            onChange={(v) => {
-              const dims = Array.isArray(v.dimensions) ? (v.dimensions as unknown[]) : []
-              setProp('summary', dims.length ? v : null)
-            }}
-          />
-        </FrameworkEnumsContext.Provider>
-      </>
+        <SchemaForm
+          schema={summaryObjSchema}
+          defs={defs}
+          value={current}
+          onChange={(v) => {
+            const dims = Array.isArray(v.dimensions) ? (v.dimensions as unknown[]) : []
+            setProp('summary', dims.length ? v : null)
+          }}
+        />
+        <div style={{ borderTop: `1px solid ${colors.border}`, margin: '14px 0 10px' }} />
+        <Sub>{t('settings.screens.valueDiff.intro', 'Row value diff — name a column that holds a DML statement (the audit redo SQL); each row then expands to its field-level BEFORE / AFTER values, parsed in flight. No values table needed. Leave the SQL column blank to disable.')}</Sub>
+        <SchemaForm
+          schema={valueDiffObjSchema}
+          defs={defs}
+          value={vd}
+          onChange={(v) => setProp('value_diff', v.sql_column ? v : null)}
+        />
+      </FrameworkEnumsContext.Provider>
     )
   }
 

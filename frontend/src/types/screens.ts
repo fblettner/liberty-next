@@ -409,6 +409,9 @@ export interface ScreenListItem {
   /** Server-aggregated summary config — group-by dimensions + count, with lazy-loaded detail.
    *  Surfaced on the list view so the toggle + dimension list are available without the full body. */
   summary?: ScreenSummary | null
+  /** Row-level value diff — when set, each row expands to its field-level BEFORE/AFTER, parsed
+   *  in flight from the named SQL column. */
+  value_diff?: ScreenValueDiff | null
   /** ``dictionary_key → column_name`` map built from the screen's column hints — surfaced on the
    *  list view so dashboard filters can resolve a filter's ``dictionary_key`` to this screen's
    *  matching column name without fetching the full body. Empty / missing when the screen lists
@@ -548,6 +551,13 @@ export interface ScreenSummary {
   dimensions: ScreenSummaryDimension[]
   /** Header for the COUNT(*) column. */
   count_label?: string
+}
+
+/** Row-level value diff — expand a row to its field-level BEFORE/AFTER, parsed in flight from a
+ *  column holding a DML statement (no separate values table needed). */
+export interface ScreenValueDiff {
+  sql_column: string
+  operation_column?: string | null
 }
 
 /** A 1:1 related-table write-back target. The main read query JOINs the related table so its

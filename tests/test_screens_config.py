@@ -640,6 +640,15 @@ def test_screen_summary_requires_a_dimension() -> None:
         parse_screens({"screens": {"nomasx1": {"s": {"read_query": "q", "summary": {"dimensions": []}}}}})
 
 
+def test_screen_value_diff_roundtrip() -> None:
+    sf = parse_screens({"screens": {"nomasx1": {"s": {
+        "read_query": "q",
+        "value_diff": {"sql_column": "AUD_SQL", "operation_column": "AUD_OPERATION"},
+    }}}})
+    vd = sf.screens["nomasx1"]["s"].value_diff
+    assert vd.sql_column == "AUD_SQL" and vd.operation_column == "AUD_OPERATION"
+
+
 def test_screen_summary_rejects_duplicate_dimension() -> None:
     with pytest.raises(Exception):
         parse_screens({"screens": {"nomasx1": {"s": {

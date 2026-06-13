@@ -206,6 +206,12 @@ const en = {
     viewSummary: 'Summary',
     expand: 'Expand',
     collapse: 'Collapse',
+    valueDiff: {
+      field: 'Field',
+      before: 'Before',
+      after: 'After',
+      none: 'No field values could be parsed from this statement.',
+    },
     selectRow: 'Select row',
     import: 'Import',
     importNoMatch: 'No columns in {{file}} matched this query.',
@@ -1161,6 +1167,9 @@ const en = {
       },
       summaryView: {
         intro: 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.',
+      },
+      valueDiff: {
+        intro: 'Row value diff — name a column that holds a DML statement (the audit redo SQL); each row then expands to its field-level BEFORE / AFTER values, parsed in flight. No values table needed. Leave the SQL column blank to disable.',
       },
       // Workbook export — v2's port of v1's ``tbl_workbook`` / ``tbl_sheet``. Configured in
       // the Export tab; the TableView shows an "Export workbooks" button when the screen has

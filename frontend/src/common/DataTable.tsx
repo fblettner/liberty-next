@@ -656,13 +656,14 @@ export function DataTable<T extends object>({
     // exclude such a column from the global filter — that's why the search "missed" some columns)
     getColumnCanGlobalFilter: (col) => !((col.columnDef.meta as { internal?: boolean } | undefined)?.internal),
     autoResetExpanded: false,
-    // Master/detail: let rows expand. renderDetail → any row (panel). getSubRows (lazy sub-rows)
-    // → parents with a positive count, so the chevron shows before children are fetched.
-    getRowCanExpand: renderDetail
-      ? () => true
-      : getSubRows
-        ? (row) => row.depth === 0 && (subRowCount?.(row.original) ?? getSubRows(row.original)?.length ?? 0) > 0
-        : undefined,
+    // Master/detail expansion. A top-level row in getSubRows mode is a lazy group (expands to its
+    // children, when the count is positive); any other row expands to the renderDetail panel when
+    // one is provided. Both can apply at once (summary: groups → statements → value panel).
+    getRowCanExpand: (renderDetail || getSubRows)
+      ? (row) => (getSubRows && row.depth === 0)
+        ? (subRowCount?.(row.original) ?? getSubRows(row.original)?.length ?? 0) > 0
+        : !!renderDetail
+      : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -854,7 +855,8 @@ export function DataTable<T extends object>({
     }
     const cells = row.getVisibleCells()
     const firstCellId = cells[0]?.id
-    const canDetail = !!renderDetail && !row.getIsGrouped() && row.getCanExpand()
+    // A leaf (non-group, non-lazy-parent) row expands to the renderDetail panel.
+    const canDetail = !!renderDetail && !isLazyParent && !row.getIsGrouped() && row.getCanExpand()
     return (
       <RowEl
         key={row.id} className={cls}
@@ -1151,16 +1153,20 @@ export function DataTable<T extends object>({
                  because expand/collapse changes the row count + heights and the virtualizer
                  mis-measures (rows render blank). For bounded sets (aggregate summaries). */
               <>
-                {visibleRows.map((row) => (
-                  <Fragment key={row.id}>
-                    {renderRow(row)}
-                    {renderDetail && row.getIsExpanded() && !row.getIsGrouped() && (
-                      <DetailTr>
-                        <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
-                      </DetailTr>
-                    )}
-                  </Fragment>
-                ))}
+                {visibleRows.map((row) => {
+                  // Panel only for leaf rows — a lazy group parent shows its sub-rows, not a panel.
+                  const lazyParent = !!getSubRows && row.depth === 0 && row.getCanExpand()
+                  return (
+                    <Fragment key={row.id}>
+                      {renderRow(row)}
+                      {renderDetail && row.getIsExpanded() && !row.getIsGrouped() && !lazyParent && (
+                        <DetailTr>
+                          <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
+                        </DetailTr>
+                      )}
+                    </Fragment>
+                  )
+                })}
               </>
             ) : (
               <>

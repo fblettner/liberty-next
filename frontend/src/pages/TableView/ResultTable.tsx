@@ -24,6 +24,7 @@ import { api, ApiError, authHeaders } from '../../api/client'
 import { Banner, Checkbox, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import type { SharedGridView } from '../../services/gridViews'
+import { ValueDiffPanel } from './ValueDiffPanel'
 import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, lookupCellColumns, lookupOptions, type LookupData, type LookupSpec } from '../../services/lookups'
@@ -1744,6 +1745,15 @@ export function ResultTable({
     [screen?.views],
   )
 
+  // Row-level value diff (Screen.value_diff): expand a row to its field-level BEFORE/AFTER,
+  // parsed in flight from the SQL column. An explicit `renderDetail` prop still wins.
+  const valueDiffRender = useMemo<((row: DataRow) => React.ReactNode) | undefined>(() => {
+    const cfg = screen?.value_diff
+    if (!cfg?.sql_column) return undefined
+    return (row: DataRow) => <ValueDiffPanel row={row as Record<string, unknown>} cfg={cfg} />
+  }, [screen?.value_diff])
+  const effectiveRenderDetail = renderDetail ?? valueDiffRender
+
   return (
     <>
       {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
@@ -1769,7 +1779,7 @@ export function ResultTable({
         // screen (an ad-hoc query run).
         tableId={embedded ? undefined : (tableIdOverride ?? (screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`))}
         sharedViews={embedded ? undefined : sharedViews}
-        renderDetail={renderDetail}
+        renderDetail={effectiveRenderDetail}
         chromeless={embedded}
         getSubRows={getSubRows}
         onRowExpand={onRowExpand}
