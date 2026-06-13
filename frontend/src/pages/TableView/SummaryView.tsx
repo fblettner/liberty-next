@@ -105,6 +105,9 @@ export function SummaryView({
       result={view}
       connector={connector}
       query={query}
+      // Pass the screen so child (statement) rows keep their row menu (e.g. "Display values") +
+      // row-click drill. Parents are group rows — DataTable doesn't fire row click/menu on them.
+      screen={screen}
       // A distinct persistence key so the summary grid's columns/views don't collide with the flat table's.
       tableId={screenId ? `screen:${screenApp ?? connector}:${screenId}:summary` : `sql:${connector}:${query}:summary`}
       getSubRows={(r) => r.__children as Row[] | undefined}

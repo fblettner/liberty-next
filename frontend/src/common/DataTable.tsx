@@ -1140,15 +1140,16 @@ export function DataTable<T extends object>({
           <tbody>
             {visibleRows.length === 0 ? (
               <tr><td colSpan={visibleColCount}><Empty>{t('table.noResults')}</Empty></td></tr>
-            ) : renderDetail ? (
-              /* Master/detail: non-virtualized (detail panels have variable height). Each
-                 expanded row is followed by a full-width detail row. For bounded result sets
-                 (aggregate summaries), not large flat tables. */
+            ) : (renderDetail || getSubRows) ? (
+              /* Master/detail: non-virtualized. renderDetail → a panel under each expanded row;
+                 getSubRows → children are already in `visibleRows` (sub-rows). Non-virtualized
+                 because expand/collapse changes the row count + heights and the virtualizer
+                 mis-measures (rows render blank). For bounded sets (aggregate summaries). */
               <>
                 {visibleRows.map((row) => (
                   <Fragment key={row.id}>
                     {renderRow(row)}
-                    {row.getIsExpanded() && !row.getIsGrouped() && (
+                    {renderDetail && row.getIsExpanded() && !row.getIsGrouped() && (
                       <DetailTr>
                         <td colSpan={visibleColCount}>{renderDetail(row.original)}</td>
                       </DetailTr>
