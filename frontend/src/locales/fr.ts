@@ -196,6 +196,7 @@ const fr: Resources = {
     viewsShared: 'Partagées',
     viewsMine: 'Mes vues',
     viewDefaultTag: 'défaut',
+    saveView: 'Enregistrer',
     saveAs: 'Enregistrer sous…',
     deleteView: 'Supprimer la vue',
     myView: 'Ma vue',

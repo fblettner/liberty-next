@@ -513,8 +513,14 @@ export function DataTable<T extends object>({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the table identity changes
   }, [tableId])
 
-  // "Save as…" — persist the FULL current presentation under a name (per user). Re-saving an
-  // existing name overwrites it. The naming modal prefills with the active user view's name.
+  // The full current presentation as a GridView payload — what both Save and Save as… persist.
+  const currentView = useCallback((): GridView => ({
+    visibility: columnVisibility, order: columnOrder, sorting,
+    filters: columnFilters, grouping, pageSize: pagination.pageSize,
+  }), [columnVisibility, columnOrder, sorting, columnFilters, grouping, pagination.pageSize])
+
+  // "Save as…" — persist the current presentation under a (new or existing) name. The naming
+  // modal prefills with the active user view's name.
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [savingView, setSavingView] = useState(false)
@@ -527,17 +533,25 @@ export function DataTable<T extends object>({
     if (!tableId || !name) return
     setSavingView(true)
     try {
-      await saveGridView(tableId, name, {
-        visibility: columnVisibility, order: columnOrder, sorting,
-        filters: columnFilters, grouping, pageSize: pagination.pageSize,
-      })
+      await saveGridView(tableId, name, currentView())
       const uv = await listGridViews(tableId)
       setUserViews(uv)
       const ref: ViewRef = { scope: 'user', name }
       setActiveView(ref); saveLastView(tableId, ref)
       setSaveModalOpen(false)
     } finally { setSavingView(false) }
-  }, [tableId, saveName, columnVisibility, columnOrder, sorting, columnFilters, grouping, pagination.pageSize])
+  }, [tableId, saveName, currentView])
+
+  // "Save" — overwrite the active USER view in place (no modal). Shown only when the active view
+  // is one of the user's own; shared views are read-only to regular users.
+  const saveCurrentView = useCallback(async () => {
+    if (!tableId || activeView?.scope !== 'user') return
+    setSavingView(true)
+    try {
+      await saveGridView(tableId, activeView.name, currentView())
+      setUserViews(await listGridViews(tableId))
+    } finally { setSavingView(false) }
+  }, [tableId, activeView, currentView])
 
   // Delete one of the user's own views; if it was active, fall back to the shared default / base.
   const deleteUserView = useCallback(async (name: string) => {
@@ -800,6 +814,11 @@ export function DataTable<T extends object>({
                 <MenuHead>
                   <MenuTitle>{t('table.views', 'Views')}</MenuTitle>
                   <Spacer />
+                  {tableId && activeView?.scope === 'user' && (
+                    <MiniLink type="button" disabled={savingView} onClick={() => { setViewOpen(false); void saveCurrentView() }}>
+                      {t('table.saveView', 'Save')}
+                    </MiniLink>
+                  )}
                   {tableId && (
                     <MiniLink type="button" onClick={() => { setViewOpen(false); openSaveModal() }}>
                       {t('table.saveAs', 'Save as…')}

@@ -194,6 +194,7 @@ const en = {
     viewsShared: 'Shared',
     viewsMine: 'My views',
     viewDefaultTag: 'default',
+    saveView: 'Save',
     saveAs: 'Save as…',
     deleteView: 'Delete view',
     myView: 'My view',
