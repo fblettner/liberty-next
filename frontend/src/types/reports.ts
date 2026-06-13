@@ -4,6 +4,24 @@
 
 export type OutputFormat = 'markdown' | 'pdf'
 
+export interface ReportParamOption {
+  value: unknown
+  label: string
+}
+
+// When a param declares `options`, the run form renders a searchable dropdown and
+// resolves the choices via GET /api/reports/{scope}/{id}/options/{param}. See
+// liberty/reports/schema.py:ReportParamOptions.
+export interface ReportParamOptions {
+  kind: 'static' | 'connectors' | 'schemas' | 'query'
+  values: ReportParamOption[]
+  connector_param: string | null   // another param whose value is the connector (cascading)
+  connector: string | null
+  query: string | null
+  value_column: string | null
+  label_column: string | null
+}
+
 export interface ReportParam {
   name: string
   label: string
@@ -11,6 +29,7 @@ export interface ReportParam {
   required: boolean
   default: unknown
   description: string
+  options?: ReportParamOptions | null
 }
 
 export interface ReportDef {

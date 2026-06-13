@@ -33,9 +33,11 @@ import {
   ModalBody,
   ModalFooter,
   SpinnerRing,
+  SearchSelect,
 } from '../../common'
+import type { SearchSelectOption } from '../../common/SearchSelect'
 import { colors, fontSize, fonts } from '../../theme'
-import type { OutputFormat, ReportDef, ReportListResponse } from '../../types/reports'
+import type { OutputFormat, ReportDef, ReportParam, ReportListResponse } from '../../types/reports'
 
 // --------------------------------------------------------------------------- //
 // Styled bits — mirror nomaflow's JobsList shapes for visual consistency.
@@ -247,8 +249,10 @@ function RunReportDialog({ report, onClose }: { report: ReportDef; onClose: () =
               <Field label={p.required ? `${p.label} *` : p.label} htmlFor={`param-${p.name}`}>
                 <ParamInput
                   id={`param-${p.name}`}
+                  report={report}
                   param={p}
                   value={values[p.name]}
+                  values={values}
                   onChange={(v) => updateValue(p.name, v)}
                 />
               </Field>
@@ -297,13 +301,24 @@ function RunReportDialog({ report, onClose }: { report: ReportDef; onClose: () =
 // liberty.coercion before calling the report, so we just pass the JS value
 // shape it expects (number for int/float, boolean for bool, string for string).
 function ParamInput({
-  id, param, value, onChange,
+  id, report, param, value, values, onChange,
 }: {
   id: string
-  param: import('../../types/reports').ReportParam
+  report: ReportDef
+  param: ReportParam
   value: unknown
+  values: Record<string, unknown>
   onChange: (v: unknown) => void
 }) {
+  // A param that declares `options` renders as a searchable dropdown, its choices
+  // resolved server-side (static list / connectors / schemas / a connector query).
+  if (param.options) {
+    return (
+      <DropdownParamInput
+        report={report} param={param} value={value} values={values} onChange={onChange}
+      />
+    )
+  }
   if (param.type === 'bool') {
     return (
       <Checkbox
@@ -335,6 +350,64 @@ function ParamInput({
       type="text"
       value={value === undefined || value === null ? '' : String(value)}
       onChange={(e) => onChange(e.target.value)}
+    />
+  )
+}
+
+// A dropdown param — resolves its choices from
+// GET /api/reports/{scope}/{id}/options/{param}. Cascading sources (schemas /
+// query) read their connector from another param (`connector_param`); we pass
+// that param's current value so the dropdown re-populates when it changes
+// (e.g. pick a different target connector → the Application list refreshes).
+function DropdownParamInput({
+  report, param, value, values, onChange,
+}: {
+  report: ReportDef
+  param: ReportParam
+  value: unknown
+  values: Record<string, unknown>
+  onChange: (v: unknown) => void
+}) {
+  const { t } = useTranslation()
+  const [options, setOptions] = useState<SearchSelectOption[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const depParam = param.options?.connector_param ?? null
+  const depRaw = depParam ? values[depParam] : undefined
+  const depValue = depRaw === undefined || depRaw === null ? '' : String(depRaw)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const qs = new URLSearchParams()
+    if (depParam && depValue) qs.set(depParam, depValue)
+    const base = `/api/reports/${encodeURIComponent(report.scope)}/${encodeURIComponent(report.id)}/options/${encodeURIComponent(param.name)}`
+    const url = qs.toString() ? `${base}?${qs.toString()}` : base
+    api
+      .get<{ options: { value: unknown; label: string }[] }>(url)
+      .then((r) => {
+        if (cancelled) return
+        setOptions(
+          r.options.map((o) => {
+            const v = o.value === undefined || o.value === null ? '' : String(o.value)
+            // mono = the raw value (e.g. apps_id) shown beside the human label.
+            return { value: v, label: o.label || v, mono: v !== o.label ? v : undefined }
+          }),
+        )
+      })
+      .catch(() => { if (!cancelled) setOptions([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [report.scope, report.id, param.name, depParam, depValue])
+
+  return (
+    <SearchSelect
+      value={value === undefined || value === null ? '' : String(value)}
+      options={options}
+      onChange={(v) => onChange(v)}
+      loading={loading}
+      placeholder={t('reports.selectPlaceholder', 'Select…')}
+      anyLabel={param.required ? undefined : t('common.any', '(any)')}
     />
   )
 }

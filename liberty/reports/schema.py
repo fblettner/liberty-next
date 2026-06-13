@@ -23,6 +23,55 @@ class UnknownReportError(KeyError):
     web layer maps this to HTTP 404."""
 
 
+class ReportParamOption(BaseModel):
+    """One choice in a static dropdown (``ReportParamOptions(kind="static")``)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    value: Any = Field(description="The value submitted + passed to the callable (coerced to the param's type).")
+    label: str = Field(description="What the operator sees in the dropdown.")
+
+
+class ReportParamOptions(BaseModel):
+    """Where a param's dropdown choices come from.
+
+    The UI renders a searchable select instead of a free input when a param
+    declares this, and resolves the choices via
+    ``GET /api/reports/{scope}/{id}/options/{param}``. Four sources:
+
+    * ``static``   — the inline :attr:`values` (e.g. a language EN/FR picker).
+    * ``connectors`` — every configured connector-pool name.
+    * ``schemas``  — the schema names on a connector (the connector comes from
+      :attr:`connector_param` — another param's current value — so it cascades).
+    * ``query``    — a named query on a connector, mapped to ``{value, label}``
+      via :attr:`value_column` / :attr:`label_column`. The connector again comes
+      from :attr:`connector_param` (cascading), so e.g. an ``apps_id`` picker
+      lists ``settings_applications`` on whatever ``target_connector`` is chosen.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["static", "connectors", "schemas", "query"]
+    values: tuple[ReportParamOption, ...] = Field(
+        default_factory=tuple, description="The choices when kind='static'.",
+    )
+    connector_param: str | None = Field(
+        default=None,
+        description="Name of another param whose current value is the connector to read (schemas/query). Cascading.",
+    )
+    connector: str | None = Field(
+        default=None, description="Literal connector to read when no connector_param is set.",
+    )
+    query: str | None = Field(default=None, description="Named query to run (kind='query').")
+    value_column: str | None = Field(default=None, description="Result column → option value (kind='query').")
+    label_column: str | None = Field(default=None, description="Result column → option label (kind='query').")
+
+    @field_validator("kind")
+    @classmethod
+    def _kind_known(cls, v: str) -> str:
+        return v
+
+
 class ReportParam(BaseModel):
     """One named input the report needs at run time.
 
@@ -42,6 +91,10 @@ class ReportParam(BaseModel):
     required: bool = True
     default: Any = None
     description: str = ""
+    options: ReportParamOptions | None = Field(
+        default=None,
+        description="When set, the UI renders a dropdown and resolves its choices via the options endpoint.",
+    )
 
 
 class ReportDef(BaseModel):

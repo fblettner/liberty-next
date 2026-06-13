@@ -37,7 +37,9 @@ _STUB_REPORTS_INIT = '''
 * ``with-svg`` — returns ReportContent + a landscape SVG
 * ``raises`` — always raises, to exercise the 500 path
 """
-from liberty.reports.schema import ReportContent, ReportDef, ReportParam
+from liberty.reports.schema import (
+    ReportContent, ReportDef, ReportParam, ReportParamOption, ReportParamOptions,
+)
 
 
 def gen_markdown_only(*, apps_id: int):
@@ -59,6 +61,10 @@ def gen_with_svg(*, apps_id: int):
 
 def gen_raises(*, apps_id: int):
     raise RuntimeError(f"boom for apps_id={apps_id}")
+
+
+def gen_picker(*, lang: str = "en", conn: str = "default"):
+    return ReportContent(markdown=f"# {lang} / {conn}\\n", title="Picker", filename_base="picker")
 
 
 REPORTS = [
@@ -87,6 +93,27 @@ REPORTS = [
         callable="stub.reports:gen_raises",
         licensed=False,
         params=(ReportParam(name="apps_id", label="A", type="int", required=True),),
+    ),
+    ReportDef(
+        id="picker",
+        scope="stub",
+        title="Stub with dropdowns",
+        callable="stub.reports:gen_picker",
+        licensed=False,
+        formats=("markdown",),
+        params=(
+            ReportParam(
+                name="lang", label="Language", type="string", required=False, default="en",
+                options=ReportParamOptions(kind="static", values=(
+                    ReportParamOption(value="en", label="English"),
+                    ReportParamOption(value="fr", label="Français"),
+                )),
+            ),
+            ReportParam(
+                name="conn", label="Connector", type="string", required=False, default="default",
+                options=ReportParamOptions(kind="connectors"),
+            ),
+        ),
     ),
 ]
 '''
@@ -189,7 +216,10 @@ def test_list_returns_only_reports_caller_can_run(app_factory):
         r = client.get("/api/reports", headers=_auth_headers(token))
         assert r.status_code == 200
         ids = {(d["scope"], d["id"]) for d in r.json()["reports"]}
-        assert ids == {("stub", "markdown-only"), ("stub", "with-svg"), ("stub", "raises")}
+        assert ids == {
+            ("stub", "markdown-only"), ("stub", "with-svg"),
+            ("stub", "raises"), ("stub", "picker"),
+        }
 
 
 def test_list_filters_by_scope(app_factory):
@@ -395,3 +425,109 @@ def test_run_callable_exception_returns_500(app_factory):
         detail = r.json()["detail"]
         assert "report failed" in detail.lower()
         assert "RuntimeError" in detail
+
+
+# --------------------------------------------------------------------------- #
+# GET /api/reports/{scope}/{id}/options/{param} — dropdown resolution
+# --------------------------------------------------------------------------- #
+
+
+def test_options_static_returns_declared_values(app_factory):
+    """A static-options param resolves to its inline value/label list."""
+    app = app_factory(with_perm=True)
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.get("/api/reports/stub/picker/options/lang", headers=_auth_headers(token))
+        assert r.status_code == 200, r.text
+        opts = r.json()["options"]
+        assert opts == [
+            {"value": "en", "label": "English"},
+            {"value": "fr", "label": "Français"},
+        ]
+
+
+def test_options_connectors_lists_pools(app_factory):
+    """A ``connectors`` source lists the configured pool names — 'default' here."""
+    app = app_factory(with_perm=True)
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.get("/api/reports/stub/picker/options/conn", headers=_auth_headers(token))
+        assert r.status_code == 200, r.text
+        values = [o["value"] for o in r.json()["options"]]
+        assert "default" in values
+
+
+def test_options_404_for_param_without_options(app_factory):
+    """A param that declares no options has no options endpoint."""
+    app = app_factory(with_perm=True)
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.get("/api/reports/stub/markdown-only/options/apps_id", headers=_auth_headers(token))
+        assert r.status_code == 404
+
+
+def test_options_requires_run_permission(app_factory):
+    """Same gate as run — no permission, no options (no leaking choices)."""
+    app = app_factory(with_perm=False)
+    with TestClient(app) as client:
+        token = _login(client)
+        r = client.get("/api/reports/stub/picker/options/lang", headers=_auth_headers(token))
+        assert r.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Param-options resolver — query-kind column/row mapping (unit, no DB)
+# --------------------------------------------------------------------------- #
+def test_resolve_query_options_maps_value_label_case_insensitively():
+    """A ``query`` source maps declared value/label columns to the result rows
+    case-insensitively (declared APPS_ID/APPS_NAME vs Postgres-lowercased rows),
+    over dict rows. Regression: the bare table name isn't runnable — the report
+    must point at the '<table>_get' slot — but given a runnable query the mapping
+    must produce {value,label}."""
+    import asyncio
+    from liberty.web import reports as reports_mod
+    from liberty.reports.schema import ReportDef, ReportParam, ReportParamOptions
+
+    payload = {
+        "columns": [{"name": "apps_id"}, {"name": "apps_name"}],
+        "rows": [{"apps_id": 10, "apps_name": "Gerflor"}, {"apps_id": 20, "apps_name": "ACME"}],
+    }
+
+    class _Result:
+        def to_dict(self):
+            return payload
+
+    class _Conn:
+        pool_name = "default"
+
+        async def execute(self, query, params):
+            return _Result()
+
+    class _Pools:
+        def names(self):
+            return ["nomasx1", "default"]
+
+    class _Registry:
+        pools = _Pools()
+
+        def sql(self, name):
+            return _Conn()
+
+    param = ReportParam(
+        name="apps_id", label="A", type="int", required=True,
+        options=ReportParamOptions(
+            kind="query", connector_param="target_connector",
+            query="settings_applications_get", value_column="APPS_ID", label_column="APPS_NAME",
+        ),
+    )
+    report = ReportDef(
+        id="r", scope="s", title="t", callable="x:y", licensed=False,
+        params=(
+            param,
+            ReportParam(name="target_connector", label="C", type="string", required=False, default="nomasx1"),
+        ),
+    )
+    opts = asyncio.run(
+        reports_mod._resolve_options(param, report, _Registry(), {"target_connector": "nomasx1"})
+    )
+    assert [(o.value, o.label) for o in opts] == [("10", "Gerflor"), ("20", "ACME")]
