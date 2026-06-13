@@ -1003,7 +1003,7 @@ const en = {
       saved: 'Saved & reloaded. Screen apps: {{apps}}',
       hint: 'Save validates every screen, writes screens.toml, and reloads.',
       editor: {
-        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', views: 'Views', summary: 'Summary', valuediff: 'Value diff', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu', export: 'Export' },
+        tabs: { general: 'General', queries: 'Queries', columns: 'Columns', views: 'Views', summary: 'Summary', dialog: 'Dialog', actions: 'Actions', rowmenu: 'Row menu', export: 'Export' },
         viewsCrumb: 'Views — {{id}}',
         summaryCrumb: 'Summary — {{id}}',
         generalHint: 'Behaviour flags for this screen — auto-load, audit table, row cap, key columns. The connector picker only matters when the screen runs against a different connector than the app.',
@@ -1172,6 +1172,7 @@ const en = {
         intro: 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.',
       },
       valueDiff: {
+        label: 'Audit Trail Settings',
         intro: 'Row value diff — name a column that holds a DML statement (the audit redo SQL); each row then expands to its field-level BEFORE / AFTER values, parsed in flight. No values table needed. Leave the SQL column blank to disable.',
       },
       // Workbook export — v2's port of v1's ``tbl_workbook`` / ``tbl_sheet``. Configured in

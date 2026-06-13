@@ -1001,7 +1001,7 @@ const fr: Resources = {
       saved: 'Enregistré et rechargé. Applications avec écrans : {{apps}}',
       hint: 'Enregistrer valide chaque écran, écrit screens.toml et recharge.',
       editor: {
-        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', views: 'Vues', summary: 'Résumé', valuediff: 'Diff de valeurs', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne', export: 'Export' },
+        tabs: { general: 'Général', queries: 'Requêtes', columns: 'Colonnes', views: 'Vues', summary: 'Résumé', dialog: 'Dialogue', actions: 'Actions', rowmenu: 'Menu de ligne', export: 'Export' },
         viewsCrumb: 'Vues — {{id}}',
         summaryCrumb: 'Résumé — {{id}}',
         generalHint: "Indicateurs de comportement pour cet écran — chargement auto, table d'audit, plafond de lignes, colonnes clés. Le connecteur n'est utile que si l'écran tourne sur un connecteur différent de l'application.",
@@ -1170,6 +1170,7 @@ const fr: Resources = {
         intro: 'Si défini, l’écran gagne un bouton Résumé : une ligne parente par GROUP BY <dimensions> avec un comptage, et un chevron qui charge à la demande les lignes sous-jacentes. Les comptages viennent de la base sur l’ensemble du résultat. Regroupez une dimension date/horodatage (jour/mois/année) pour replier une période en une ligne. Laissez vide pour désactiver.',
       },
       valueDiff: {
+        label: 'Paramètres Audit Trail',
         intro: 'Diff de valeurs — indiquez une colonne contenant une instruction DML (le SQL redo d’audit) ; chaque ligne se déplie alors sur ses valeurs AVANT / APRÈS par champ, analysées à la volée. Aucune table de valeurs nécessaire. Laissez la colonne SQL vide pour désactiver.',
       },
       // Export classeur — port v2 des ``tbl_workbook`` / ``tbl_sheet`` de v1.
