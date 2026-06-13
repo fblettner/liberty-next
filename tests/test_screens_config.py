@@ -622,6 +622,32 @@ def test_screen_views_reject_duplicate_name() -> None:
         }}}})
 
 
+def test_screen_summary_roundtrip() -> None:
+    sf = parse_screens({"screens": {"nomasx1": {"s": {
+        "read_query": "q",
+        "summary": {
+            "dimensions": [{"column": "AUD_SEG_NAME"}, {"column": "AUD_DT_TRANSACTION", "bucket": "day"}],
+            "count_label": "# Changes",
+        },
+    }}}})
+    s = sf.screens["nomasx1"]["s"]
+    assert [(d.column, d.bucket) for d in s.summary.dimensions] == [("AUD_SEG_NAME", None), ("AUD_DT_TRANSACTION", "day")]
+    assert s.summary.count_label == "# Changes"
+
+
+def test_screen_summary_requires_a_dimension() -> None:
+    with pytest.raises(Exception):
+        parse_screens({"screens": {"nomasx1": {"s": {"read_query": "q", "summary": {"dimensions": []}}}}})
+
+
+def test_screen_summary_rejects_duplicate_dimension() -> None:
+    with pytest.raises(Exception):
+        parse_screens({"screens": {"nomasx1": {"s": {
+            "read_query": "q",
+            "summary": {"dimensions": [{"column": "X"}, {"column": "x"}]},
+        }}}})
+
+
 def test_load_screens_missing_file_yields_empty(tmp_path) -> None:
     assert load_screens(tmp_path / "nope.toml") == ScreensFile()
 

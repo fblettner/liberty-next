@@ -509,6 +509,73 @@ def _split_order_by(sql_text: str) -> tuple[str, str]:
     return s[:last_idx].rstrip(), s[last_idx + len("ORDER BY"):].strip()
 
 
+# ── summary (aggregate) wrap ──────────────────────────────────────────────────────
+# A screen can declare a "summary" view: parent rows are GROUP BY <dimensions> with a
+# COUNT(*), expanding one lazily loads its detail rows. Both wrap the screen's read SQL as a
+# derived table — same shape as the filter wrap above — so the count is computed in the DB
+# over the whole result, not the row-capped grid. Dimension names come from operator config
+# (the screen's summary block, relayed by the frontend) and are identifier-validated here.
+_AGG_IDENT = re.compile(r"^[A-Za-z0-9_]+$")
+_AGG_BUCKETS = ("day", "month", "year")
+
+
+def _validate_agg_column(name: str) -> str:
+    """Reject anything that isn't a bare SQL identifier — the dimension is interpolated into
+    the GROUP BY / WHERE, so it must not carry expressions, quotes, or whitespace."""
+    if not _AGG_IDENT.match(name or ""):
+        raise StatementNotAllowedError(f"summary: invalid group column {name!r}")
+    return name
+
+
+def _bucket_expr(col_ref: str, bucket: str, dialect: str) -> str:
+    """Truncate a date/timestamp *col_ref* to *bucket* granularity, per dialect."""
+    if dialect == "oracle":
+        unit = {"day": None, "month": "MM", "year": "YYYY"}.get(bucket)
+        return f"TRUNC({col_ref})" if unit is None else f"TRUNC({col_ref}, '{unit}')"
+    # postgres / sqlite — DATE_TRUNC; cast to date so the dimension reads as a clean day/period.
+    return f"DATE_TRUNC('{bucket}', {col_ref})::date"
+
+
+def _dim_ref(name: str, bucket: str | None, owner: str, dialect: str) -> str:
+    """Reference expression for a dimension (bucketed or raw), UNQUOTED so it folds
+    case-insensitively against the derived table's columns (matches the filter wrap)."""
+    ref = f"{owner}.{_validate_agg_column(name)}"
+    return _bucket_expr(ref, bucket, dialect) if bucket else ref
+
+
+def _apply_aggregate_wrap(
+    sql_text: str, dims: list[tuple[str, str | None]], dialect: str, *, count_alias: str = "_count",
+) -> str:
+    """Wrap *sql_text* as ``SELECT <dims>, COUNT(*) AS _count FROM (<body>) lib_agg
+    GROUP BY <dims> ORDER BY <dims>``. The inner ORDER BY is dropped (meaningless under
+    aggregation)."""
+    body, _order = _split_order_by(sql_text)
+    selects, groups = [], []
+    for name, bucket in dims:
+        expr = _dim_ref(name, bucket, "lib_agg", dialect)
+        selects.append(f"{expr} AS {name}")
+        groups.append(expr)
+    select_list = ", ".join(selects + [f"COUNT(*) AS {count_alias}"])
+    group_list = ", ".join(groups)
+    return (
+        f"SELECT {select_list}\nFROM (\n{body}\n) lib_agg\n"
+        f"GROUP BY {group_list}\nORDER BY {group_list}"
+    )
+
+
+def _apply_aggregate_detail_wrap(
+    sql_text: str, dims: list[tuple[str, str | None, str]], dialect: str,
+) -> str:
+    """Wrap *sql_text* to the rows of ONE summary group: ``SELECT * FROM (<body>) lib_det
+    WHERE <dim = :bind …> [ORDER BY <original>]``. *dims* carries ``(column, bucket, bind_name)``."""
+    body, order = _split_order_by(sql_text)
+    preds = [f"({_dim_ref(name, bucket, 'lib_det', dialect)} = :{bind})" for name, bucket, bind in dims]
+    out = f"SELECT * FROM (\n{body}\n) lib_det\nWHERE {' AND '.join(preds)}"
+    if order:
+        out += f"\nORDER BY {order}"
+    return out
+
+
 def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     """SQL type to cast a filter bind into for a non-text column — picked so the comparison
     can use a btree index on the column. Falls back to a wide VARCHAR when the format is
@@ -1882,6 +1949,8 @@ class SQLConnector:
         column_hints: list[ColumnHint] | None = None, audit_table: str | None = None,
         screen_max_rows: int | None = None, dictionary_scope: str | None = None,
         dry_run: bool = False,
+        summary_dims: list[tuple[str, str | None]] | None = None,
+        detail_filters: list[tuple[str, str | None, Any]] | None = None,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
@@ -1947,6 +2016,36 @@ class SQLConnector:
             sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
             dict_scope=dict_scope,
         )
+        # Summary (aggregate) wrap — only on SELECT. ``summary_dims`` → parent rows
+        # (GROUP BY + COUNT); ``detail_filters`` → the rows of one group (filter wrap already
+        # applied, so the group predicates layer on top of any active filters). The detail
+        # values are merged into ``params`` as ``:g<i>`` binds, coerced to the column's type.
+        if stmt_type == "SELECT" and (summary_dims or detail_filters):
+            dialect = self._resolve_dialect()
+            known = {h.name.upper() for h in (column_hints or [])}
+            def _check_known(col: str) -> str:
+                if known and col.upper() not in known:
+                    raise StatementNotAllowedError(
+                        f"{self.name}.{query_name}: summary column {col!r} is not a result column"
+                    )
+                return col
+            if summary_dims:
+                sql_text = _apply_aggregate_wrap(
+                    sql_text, [(_check_known(c), b) for c, b in summary_dims], dialect,
+                )
+            elif detail_filters:
+                params = dict(params or {})
+                fmt_by_col = {h.name.upper(): h.format for h in (column_hints or [])}
+                spec: list[tuple[str, str | None, str]] = []
+                for i, (col, bucket, value) in enumerate(detail_filters):
+                    bind = f"g{i}"
+                    # Bucketed dim → compare a DATE. Plain dim → coerce to the column's type
+                    # (a string bind against a numeric column fails asyncpg's strict check).
+                    fmt = "date" if bucket else fmt_by_col.get(col.upper())
+                    coerced = value if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(value, fmt)
+                    params[bind] = coerced
+                    spec.append((_check_known(col), bucket, bind))
+                sql_text = _apply_aggregate_detail_wrap(sql_text, spec, dialect)
         # Predefined ``{{TOKEN}}`` placeholders (LOGIN / SYSDATE / SYSTIME / …) → bind params,
         # format-coerced to the assigned column. Runs after the filter wrap so a wrapped SELECT is
         # covered too; the resolved binds are merged AFTER form rules so they're never overridden.

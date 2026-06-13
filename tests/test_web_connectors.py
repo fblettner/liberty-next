@@ -153,6 +153,24 @@ def test_sql_get_with_query_string_params(app) -> None:
         assert [row["id"] for row in r.json()["rows"]] == [1, 2]
 
 
+def test_sql_get_summary_and_detail(app) -> None:
+    with TestClient(app) as client:
+        # Summary: GROUP BY status + COUNT(*) → one row per status with a _count.
+        r = client.get("/api/sql/db/items?_summary=1&_group=status", headers=_h(client, "admin"))
+        assert r.status_code == 200
+        rows = r.json()["rows"]
+        assert {row["status"]: row["_count"] for row in rows} == {"on": 1, "off": 1}
+        # Detail: the group's dimension value rides as a normal param; returns just that group.
+        r = client.get("/api/sql/db/items?_group=status&status=on", headers=_h(client, "admin"))
+        assert [row["id"] for row in r.json()["rows"]] == [1]
+
+
+def test_parse_group_spec() -> None:
+    from liberty.web.connectors import _parse_group_spec
+    assert _parse_group_spec("A, B~day ,C~bogus") == [("A", None), ("B", "day"), ("C", None)]
+    assert _parse_group_spec("") == []
+
+
 @pytest.mark.parametrize(("user", "code"), [("admin", 200), ("reader", 200), ("dbuser", 200), ("nobody", 403)])
 def test_sql_permission(app, user, code) -> None:
     with TestClient(app) as client:
