@@ -63,7 +63,21 @@ const NEEDS_A = (op: OpFilter['op']) => op !== 'empty' && op !== 'notEmpty'
 
 const isEmpty = (v: unknown) => v === null || v === undefined || v === ''
 const numOf = (v: unknown) => (isEmpty(v) ? NaN : Number(v))
-const dateOf = (v: unknown) => (isEmpty(v) ? NaN : Date.parse(String(v)))
+// Day-grain compare for the `date` kind: reduce a value to a YYYYMMDD integer so a picked
+// DATE (`2026-06-13`) matches a full TIMESTAMP on that day (`2026-06-13 12:04:09`) — operators
+// filter timestamps *by date*, not by the exact instant. Reads the leading ISO date directly
+// (timezone-free, handles `YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`, `YYYY-MM-DDTHH:MM:SS`); falls
+// back to Date.parse for other renderings.
+const dayNum = (v: unknown): number => {
+  if (isEmpty(v)) return NaN
+  const s = String(v).trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (m) return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3])
+  const t = Date.parse(s)
+  if (Number.isNaN(t)) return NaN
+  const d = new Date(t)
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+}
 
 /** A `FilterFn` for text/number/date columns — interprets an {@link OpFilter}. The compare
  *  domain (string / number / date) comes from `column.columnDef.meta.filter.kind`. */
@@ -80,7 +94,7 @@ export const genericFilterFn: FilterFn<any> = (row, columnId, value) => {
     | undefined)?.filter?.kind) ?? 'text'
 
   if (kind === 'number' || kind === 'date') {
-    const conv = kind === 'date' ? dateOf : numOf
+    const conv = kind === 'date' ? dayNum : numOf
     const x = conv(v)
     const a = conv(f.a)
     if (Number.isNaN(x) || Number.isNaN(a)) return false
