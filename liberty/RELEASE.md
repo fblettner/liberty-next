@@ -1,5 +1,9 @@
 # Liberty Next — Release notes
 
+## 7.0.41 — 2026-06-13
+
+- _Release notes pending — edit liberty/RELEASE.md._
+
 ## 7.0.40 — 2026-06-12
 
 - _Release notes pending — edit liberty/RELEASE.md._
