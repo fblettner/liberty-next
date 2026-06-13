@@ -107,14 +107,11 @@ export interface DataTableProps<T extends object> {
   onPasteRows?: (rows: Record<string, unknown>[]) => void
 }
 
-interface SavedGrid {
-  visibility: VisibilityState
-  order: ColumnOrderState
-}
-// Legacy localStorage reader — kept only to migrate a pre-existing `dt-*` entry into the
-// DB-backed store on first load (see the load effect below); we no longer write here.
-function loadGrid(id: string): Partial<SavedGrid> {
-  try { return JSON.parse(localStorage.getItem(`dt-${id}`) ?? '{}') } catch { return {} }
+// One-time cleanup of the obsolete `dt-*` localStorage layout (the pre-DB grid state). Grid
+// views now live in the DB (shared in the screen config, named per-user rows) + a last-opened
+// pointer; the old key is just dropped, not migrated, so it can't resurface as a phantom view.
+function dropLegacyGrid(id: string): void {
+  try { localStorage.removeItem(`dt-${id}`) } catch { /* storage disabled — nothing to drop */ }
 }
 
 // ── styled ──────────────────────────────────────────────────────────────────
@@ -355,13 +352,11 @@ export function DataTable<T extends object>({
   columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
-  const saved = useMemo(() => (tableId ? loadGrid(tableId) : {}), [tableId])
 
-  // Start from the column hints' hidden flags, then layer the user's saved choices on top — so a
-  // `hidden` hint takes effect on first load *and* survives a stale saved `{}` from before the hint
-  // existed, while still letting the user un-hide a column and have that stick.
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => ({ ...(initialColumnVisibility ?? {}), ...(saved.visibility ?? {}) }))
-  const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(saved.order ?? [])
+  // Start from the column hints' hidden flags. A saved view (shared or user) is layered on top by
+  // the load effect below; this is just the base the grid shows before any view applies.
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => ({ ...(initialColumnVisibility ?? {}) }))
+  const [columnOrder, setColumnOrder] = useState<ColumnOrderState>([])
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
@@ -483,25 +478,15 @@ export function DataTable<T extends object>({
     applyView(gv ?? {})
   }, [tableId, applyBase, resolveView, applyView])
 
-  // Load the user's views on mount, migrate a legacy ``dt-*`` localStorage layout once, then open
-  // on the device's last-opened view (if it still exists) → the shared default → the base layout.
+  // Load the user's views on mount, then open on the device's last-opened view (if it still
+  // exists) → the shared default → the base layout. Any obsolete ``dt-*`` localStorage layout is
+  // dropped (not migrated) so it can't reappear as a phantom "My view".
   useEffect(() => {
     if (!tableId) return
     let cancelled = false
     void (async () => {
-      let uv = await listGridViews(tableId)
-      if (!uv.length) {
-        const legacy = loadGrid(tableId)
-        if (legacy.visibility || legacy.order) {
-          const name = t('table.myView', 'My view')
-          const payload: GridView = { visibility: legacy.visibility, order: legacy.order }
-          try {
-            await saveGridView(tableId, name, payload)
-            uv = [{ name, payload }]
-            try { localStorage.removeItem(`dt-${tableId}`) } catch { /* ignore */ }
-          } catch { /* keep the local entry as a fallback if the save failed */ }
-        }
-      }
+      dropLegacyGrid(tableId)
+      const uv = await listGridViews(tableId)
       if (cancelled) return
       setUserViews(uv)
       const last = loadLastView(tableId)
