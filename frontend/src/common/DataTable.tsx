@@ -104,6 +104,10 @@ export interface DataTableProps<T extends object> {
    *  content (e.g. a lazily-fetched nested grid). Rows are rendered non-virtualized in this mode
    *  (detail panels have variable height), so it's for bounded result sets like aggregate summaries. */
   renderDetail?: (row: T) => React.ReactNode
+  /** Hide the toolbar row (search + Views/Filters/Group/Columns/Export). For an embedded grid —
+   *  e.g. a summary's expanded detail panel — where that chrome is noise (search via the main
+   *  table view instead). Pagination + the grid itself still render. */
+  chromeless?: boolean
   /** When provided, a paste (Ctrl+V) over the grid — while NOT focused in a cell input — parses the
    *  clipboard's TSV (an Excel copy) into rows keyed by VISIBLE column id and fires this. Mapping uses
    *  the table's own visible leaf columns (the exact set + order the export emits), by HEADER when the
@@ -366,7 +370,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
 
@@ -872,6 +876,7 @@ export function DataTable<T extends object>({
 
   return (
     <Wrap>
+      {!chromeless && (
       <ToolbarRow>
         {toolbar}
         <SearchBox>
@@ -1021,6 +1026,7 @@ export function DataTable<T extends object>({
           </MenuWrap>
         </ActionGroup>
       </ToolbarRow>
+      )}
 
       <TableScroll ref={tableScrollRef}>
         {/* Stretch-when-narrow, scroll-when-wide. ``minWidth`` = sum of natural column widths

@@ -92,9 +92,6 @@ const COLUMNS_KEYS = ['columns'] as const
 // view's ``columns`` / ``group_by`` / ``sort.column`` bind to SCREEN_COLUMNS the same way the
 // Columns tab's pickers do.
 const VIEWS_KEYS = ['views'] as const
-// Server-aggregated summary view (group-by dimensions + count, with expandable detail). Edited
-// via SchemaNavigator on the Summary tab; dimensions bind to SCREEN_COLUMNS.
-const SUMMARY_KEYS = ['summary'] as const
 
 type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'summary' | 'dialog' | 'actions' | 'rowmenu' | 'export'
 const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'summary', 'dialog', 'actions', 'rowmenu', 'export']
@@ -472,11 +469,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     () => ({ ...pickSchemaProperties(schema, VIEWS_KEYS as unknown as string[]), $defs: defs }),
     [schema, defs],
   )
-  // Summary tab — edits ``Screen.summary`` (group-by dimensions + count label) via
-  // SchemaNavigator. Carries ``$defs`` so the nested ScreenSummaryDimension list drills in.
-  const summarySchema = useMemo<JsonSchema>(
-    () => ({ ...pickSchemaProperties(schema, SUMMARY_KEYS as unknown as string[]), $defs: defs }),
-    [schema, defs],
+  // Summary tab — a screen has at most ONE summary, so edit the ScreenSummary object's fields
+  // inline (SchemaForm, no drill) rather than as a one-item list behind an "edit…" button. The
+  // ``dimensions`` array renders inline via SchemaForm's ObjectListEditor (no onNavigate).
+  const summaryObjSchema = useMemo<JsonSchema>(
+    () => ((defs.ScreenSummary as JsonSchema | undefined) ?? { type: 'object', properties: {} }),
+    [defs],
   )
   // groupId → the columns currently tagged with it (``ColumnHint.group``) — drives the
   // "Columns in this group" chips in the ColumnGroupsEditor so the operator sees the mapping
@@ -1014,26 +1012,21 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
 
   // ── Summary tab — server-aggregated rows with expandable detail ──────────────────────
   const renderSummary = (): ReactNode => {
-    const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Record<string, unknown>) : null
+    const current = (value.summary && typeof value.summary === 'object') ? (value.summary as Row) : {}
     return (
       <>
-        <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
-          {t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}
-        </div>
+        <Sub>{t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}</Sub>
+        {/* Inline edit of the single ScreenSummary object. ``augmentedEnums`` resolves the
+            dimension column picker against SCREEN_COLUMNS. An empty dimensions list clears the
+            whole summary (so the Summary toggle disappears from the screen). */}
         <FrameworkEnumsContext.Provider value={augmentedEnums}>
-          <SchemaNavigator
-            root={{
-              label: t('settings.screens.editor.summaryCrumb', { id, defaultValue: `Summary — ${id}` }),
-              schema: summarySchema,
-              value: { summary: current },
-              onChange: (v) => {
-                const next = v.summary && typeof v.summary === 'object'
-                  && Array.isArray((v.summary as Record<string, unknown>).dimensions)
-                  && ((v.summary as Record<string, unknown>).dimensions as unknown[]).length
-                  ? v.summary
-                  : null
-                setProp('summary', next)
-              },
+          <SchemaForm
+            schema={summaryObjSchema}
+            defs={defs}
+            value={current}
+            onChange={(v) => {
+              const dims = Array.isArray(v.dimensions) ? (v.dimensions as unknown[]) : []
+              setProp('summary', dims.length ? v : null)
             }}
           />
         </FrameworkEnumsContext.Provider>

@@ -76,7 +76,7 @@ function GroupDetail({
       {result.rows.length === 0 ? (
         <ErrLine style={{ color: colors.text.muted }}>{t('table.noResults')}</ErrLine>
       ) : (
-        <ResultTable result={result} connector={connector} query={query} screen={screen} />
+        <ResultTable result={result} connector={connector} query={query} screen={screen} embedded />
       )}
     </DetailWrap>
   )
