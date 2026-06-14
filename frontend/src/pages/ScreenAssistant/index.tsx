@@ -690,6 +690,13 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                 </Chip>
               </RowBar>
 
+              {/* Resolving a catalog preset / existing query describes its columns in the DB — show it. */}
+              {busy && (
+                <RowBar style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 8 }}>
+                  <SpinnerRing size={16} /> {t('assistant.loadingCols', 'Fetching columns from the database…')}
+                </RowBar>
+              )}
+
               {sourceMode === 'query' ? (
                 !base ? (
                   <Field label={t('assistant.existingQuery', 'Existing connector query')}>
