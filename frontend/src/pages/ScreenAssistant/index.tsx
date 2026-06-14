@@ -253,8 +253,25 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     if (!p) return
     setBusy(true); setMsg(null)
     try {
+      // A query-backed preset (a single existing query on this connector) REUSES that query as-is —
+      // no new query is generated. This is the case for presets whose query ships embedded in the
+      // package: creating from the catalog (even twice) just points the screen at the existing
+      // query instead of trying to write a duplicate (which would collide). Same path as the
+      // "Existing query" source mode.
+      const only = p.tables.length === 1 ? p.tables[0] : null
+      if (only?.query && (!only.query_connector || only.query_connector === connector)) {
+        const r = await api.get<{ columns?: Array<{ name: string; type?: string | null }> }>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(only.query)}?_limit=0`)
+        const cols = (r.columns ?? []).map((c) => ({ name: c.name, type: c.type ?? undefined }))
+        if (!cols.length) { setMsg({ tone: 'err', text: t('assistant.queryNoCols', 'That query returned no columns.') }); return }
+        setSourceMode('query'); setSourceQuery(only.query)
+        setJoins([{ schema: null, name: only.query, alias: suggestAlias(only.query, new Set()), columns: cols }])
+        setAdding(false); setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setDdItems([])
+        if (!tableName) setTableName(slug(p.id))
+        return
+      }
       // Resolve each table's columns — describe an existing connector query when the preset names one
       // (fast: one cheap ``_limit=0`` describe, no schema walk), else introspect the pool schema.
+      setSourceMode('table')
       const built: JoinTable[] = []
       const taken = new Set<string>()
       for (const pt of p.tables) {
