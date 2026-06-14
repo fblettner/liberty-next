@@ -36,6 +36,9 @@ export interface SearchSelectOption {
   /** Optional grouping key — consumed by the grouped suggestion overlay in ParamBindList's
    *  ``SourcePathInput`` (chain inputs / step results / loop). SearchSelect itself ignores it. */
   group?: string
+  /** Optional hierarchy depth — when set, the option's row is indented by this many levels so a
+   *  flat list can convey a tree (e.g. a menu's parent picker). The trigger is unaffected. */
+  depth?: number
 }
 
 // Everything inside the panel shares the same 12px left inset so the trigger label, the search
@@ -342,6 +345,7 @@ export function SearchSelect({
             return (
               <div key={o.value} data-index={vi.index} ref={virt.measureElement} style={style}>
                 <Item type="button" $active={o.value === value} onClick={() => pick(o.value)}>
+                  {o.depth ? <span aria-hidden style={{ flexShrink: 0, width: o.depth * 16, borderLeft: `1px solid ${colors.border}`, alignSelf: 'stretch' }} /> : null}
                   {o.icon}
                   {o.mono && o.mono !== o.label && <span className="mono">{o.mono}</span>}
                   <span className="t">{o.label}</span>

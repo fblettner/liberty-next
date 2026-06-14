@@ -403,16 +403,37 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   const addAllToGrid = () => setGridCols((g) => [...g, ...allCols.filter((id) => !g.includes(id))])
   const removeAllFromGrid = () => setGridCols([])
 
-  // ── step 5: parent-menu options for the chosen app (sorted) ────────────────────────────
+  // ── step 5: parent-menu options for the chosen app, as a TREE ──────────────────────────
+  // The menu is a hierarchy; a flat alphabetical list makes a child sit next to a top-level item
+  // and hides where the new entry would land. Emit items depth-first in their file order, tagged
+  // with ``depth`` so the picker indents children under their parent (matching the sidebar).
   const appKey = slug(app) || connector
   useEffect(() => {
     if (STEPS[step] !== 'menu' || !appKey) return
-    void api.get<{ menus: Record<string, { items?: Array<{ id: string; label?: string }> }> }>('/admin/config/menus/parsed')
+    type RawItem = { id: string; label?: string; parent?: string | null }
+    void api.get<{ menus: Record<string, { items?: RawItem[] }> }>('/admin/config/menus/parsed')
       .then((r) => {
         const items = r.menus[appKey]?.items ?? []
-        setMenuItems(items
-          .map((it) => ({ value: it.id, label: it.label ? `${it.label} (${it.id})` : it.id, mono: it.id }))
-          .sort((a, b) => a.label.localeCompare(b.label)))
+        const byParent = new Map<string, RawItem[]>()
+        for (const it of items) {
+          const p = it.parent || ''
+          if (!byParent.has(p)) byParent.set(p, [])
+          byParent.get(p)!.push(it)
+        }
+        const out: SearchSelectOption[] = []
+        const emitted = new Set<string>()
+        const walk = (parentId: string, depth: number) => {
+          for (const it of byParent.get(parentId) ?? []) {
+            if (emitted.has(it.id)) continue   // guard against a cyclic parent ref
+            emitted.add(it.id)
+            out.push({ value: it.id, label: it.label ? `${it.label} (${it.id})` : it.id, mono: it.id, depth })
+            walk(it.id, depth + 1)
+          }
+        }
+        walk('', 0)
+        // Append any orphans (parent points at a missing item) so nothing is silently dropped.
+        for (const it of items) if (!emitted.has(it.id)) out.push({ value: it.id, label: it.label ? `${it.label} (${it.id})` : it.id, mono: it.id })
+        setMenuItems(out)
       }).catch(() => setMenuItems([]))
   }, [step, appKey])
 
