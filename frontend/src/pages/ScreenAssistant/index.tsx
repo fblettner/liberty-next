@@ -70,10 +70,12 @@ const Mini = styled.button`
   &:disabled { opacity: 0.5; cursor: default; }
 `
 const Mono = styled.span`font-family: ${fonts.mono};`
-const Dual = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start;`
-const Pane = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden; display: flex; flex-direction: column;`
-const PaneHead = styled.div`padding: 8px 10px; background: ${colors.bg.input}; font-size: ${fontSize.micro}; text-transform: uppercase; letter-spacing: 0.04em; color: ${colors.text.muted}; display: flex; align-items: center; gap: 6px;`
-const PaneList = styled.div`max-height: min(460px, 52vh); overflow-y: auto; display: flex; flex-direction: column;`
+// The two-pane picker fills the available modal height (like the long lists in Settings) instead of
+// sitting in a short box — so a wide join's column list has room to scroll.
+const Dual = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: stretch; height: calc(min(840px, 92vh) - 270px); min-height: 240px;`
+const Pane = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden; display: flex; flex-direction: column; min-height: 0;`
+const PaneHead = styled.div`padding: 8px 10px; background: ${colors.bg.input}; font-size: ${fontSize.micro}; text-transform: uppercase; letter-spacing: 0.04em; color: ${colors.text.muted}; display: flex; align-items: center; gap: 6px; flex-shrink: 0;`
+const PaneList = styled.div`flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;`
 const ColRow = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid ${colors.border};
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
@@ -83,16 +85,27 @@ const ColRow = styled.div`
   & .lbl { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .k { display: inline-flex; align-items: center; gap: 3px; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
 `
-const PaneGroup = styled.button`
-  display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; cursor: pointer;
-  padding: 4px 10px; background: ${colors.bg.dropdown}; border: none; border-bottom: 1px solid ${colors.border};
-  font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; position: sticky; top: 0; z-index: 1;
+// A collapsible group header: the name area toggles collapse; the trailing button adds the whole table.
+const PaneGroup = styled.div`
+  display: flex; align-items: center; background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
+  position: sticky; top: 0; z-index: 1;
+`
+const GroupToggle = styled.button`
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; text-align: left; cursor: pointer;
+  padding: 4px 10px; background: transparent; border: none;
+  font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted};
   & b { color: ${colors.text.secondary}; }
   & svg { flex-shrink: 0; }
   &:hover { color: ${colors.text.primary}; }
 `
+const GroupAdd = styled.button`
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; cursor: pointer; height: 24px; margin-right: 6px; padding: 0 7px;
+  border: 1px dashed ${colors.border}; border-radius: ${radius.sm}; background: transparent; color: ${colors.text.muted};
+  font-size: ${fontSize.micro}; font-family: ${fonts.sans};
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
+`
 const SearchBox = styled.div`
-  display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid ${colors.border};
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
   & > svg { color: ${colors.text.muted}; flex-shrink: 0; }
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; }
 `
@@ -156,8 +169,13 @@ function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
           const isCollapsed = !expanded.has(j.alias) && !needle   // a live search always expands matches
           return (
             <Fragment key={j.alias}>
-              <PaneGroup type="button" onClick={() => toggle(j.alias)}>
-                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<b>{j.name}</b> · {j.alias} · {avail.length}
+              <PaneGroup>
+                <GroupToggle type="button" onClick={() => toggle(j.alias)}>
+                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<b>{j.name}</b> · {j.alias} · {avail.length}
+                </GroupToggle>
+                <GroupAdd type="button" title={t('assistant.addGroup', 'Add all from this table')} onClick={() => avail.forEach((id) => onAdd(id))}>
+                  <Plus size={11} /> {t('assistant.addGroupShort', 'all')}
+                </GroupAdd>
               </PaneGroup>
               {!isCollapsed && avail.map((id) => (
                 <ColRow key={id}>
