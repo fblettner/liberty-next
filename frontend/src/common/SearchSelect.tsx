@@ -18,6 +18,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronDown, Check } from 'lucide-react'
+import { SpinnerRing } from './Spinner'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export interface SearchSelectOption {
@@ -370,7 +371,7 @@ export function SearchSelect({
     <Wrap ref={wrapRef}>
       <Trigger ref={triggerRef} type="button" $open={open} $placeholder={!current && !(allowCustom && !!value)} disabled={disabled} onClick={() => !disabled && setOpen((o) => !o)}>
         {triggerLabel}
-        <ChevronDown size={14} />
+        {loading ? <SpinnerRing size={14} /> : <ChevronDown size={14} />}
       </Trigger>
       {panel && createPortal(panel, document.body)}
     </Wrap>

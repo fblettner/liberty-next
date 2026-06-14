@@ -73,7 +73,7 @@ const Mono = styled.span`font-family: ${fonts.mono};`
 const Dual = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start;`
 const Pane = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden; display: flex; flex-direction: column;`
 const PaneHead = styled.div`padding: 8px 10px; background: ${colors.bg.input}; font-size: ${fontSize.micro}; text-transform: uppercase; letter-spacing: 0.04em; color: ${colors.text.muted}; display: flex; align-items: center; gap: 6px;`
-const PaneList = styled.div`max-height: 300px; overflow-y: auto; display: flex; flex-direction: column;`
+const PaneList = styled.div`max-height: min(460px, 52vh); overflow-y: auto; display: flex; flex-direction: column;`
 const ColRow = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid ${colors.border};
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
@@ -134,10 +134,12 @@ function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
 }) {
   const { t } = useTranslation()
   const [q, setQ] = useState('')
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // Track which groups are EXPANDED — groups start collapsed (a wide join has dozens of tables);
+  // the operator opens the one they want, or just searches across all of them.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const needle = q.trim().toLowerCase()
   const match = (id: ColId) => !needle || colName(id).toLowerCase().includes(needle) || colLabel(id).toLowerCase().includes(needle)
-  const toggle = (alias: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(alias)) n.delete(alias); else n.add(alias); return n })
+  const toggle = (alias: string) => setExpanded((s) => { const n = new Set(s); if (n.has(alias)) n.delete(alias); else n.add(alias); return n })
   const shown = ids.filter(match)
   return (
     <Pane>
@@ -151,7 +153,7 @@ function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
         {joins.map((j) => {
           const avail = ids.filter((id) => id.startsWith(`${j.alias}.`) && match(id))
           if (avail.length === 0) return null
-          const isCollapsed = collapsed.has(j.alias) && !needle   // a live search always expands matches
+          const isCollapsed = !expanded.has(j.alias) && !needle   // a live search always expands matches
           return (
             <Fragment key={j.alias}>
               <PaneGroup type="button" onClick={() => toggle(j.alias)}>
