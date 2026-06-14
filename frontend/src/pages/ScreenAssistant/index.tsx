@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
-import { Plus, X, ChevronRight, ChevronLeft, Check, Wand2, ArrowRight, ArrowLeft, KeyRound, RotateCcw, BookOpen } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronLeft, ChevronDown, Check, Wand2, ArrowRight, ArrowLeft, KeyRound, RotateCcw, BookOpen, Search } from 'lucide-react'
 import { api } from '../../api/client'
 import { Banner, Button, Checkbox, Field, Input, SearchSelect, SpinnerRing, type SearchSelectOption } from '../../common'
 import { Modal, ModalBody, ModalFooter, ModalHeader, Overlay } from '../../common/Modal'
@@ -83,10 +83,18 @@ const ColRow = styled.div`
   & .lbl { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .k { display: inline-flex; align-items: center; gap: 3px; color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
 `
-const PaneGroup = styled.div`
-  padding: 4px 10px; background: ${colors.bg.dropdown}; border-bottom: 1px solid ${colors.border};
+const PaneGroup = styled.button`
+  display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; cursor: pointer;
+  padding: 4px 10px; background: ${colors.bg.dropdown}; border: none; border-bottom: 1px solid ${colors.border};
   font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; position: sticky; top: 0; z-index: 1;
   & b { color: ${colors.text.secondary}; }
+  & svg { flex-shrink: 0; }
+  &:hover { color: ${colors.text.primary}; }
+`
+const SearchBox = styled.div`
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid ${colors.border};
+  & > svg { color: ${colors.text.muted}; flex-shrink: 0; }
+  & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; }
 `
 const Chip = styled.button<{ $active: boolean }>`
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: ${fontSize.sm};
@@ -114,6 +122,56 @@ function parseParams(s: string): Record<string, string> {
   for (const part of s.split(',')) { const [k, ...v] = part.split('='); if (k.trim()) out[k.trim()] = v.join('=').trim() }
   return out
 }
+// The left "available columns" pane shared by the Grid-view and Dialog-columns steps: columns
+// grouped by source table, each group collapsible, with a search box across name + dictionary label.
+function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
+  title: string
+  joins: JoinTable[]
+  ids: ColId[]
+  colLabel: (id: ColId) => string
+  onAdd: (id: ColId) => void
+  emptyText: string
+}) {
+  const { t } = useTranslation()
+  const [q, setQ] = useState('')
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const needle = q.trim().toLowerCase()
+  const match = (id: ColId) => !needle || colName(id).toLowerCase().includes(needle) || colLabel(id).toLowerCase().includes(needle)
+  const toggle = (alias: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(alias)) n.delete(alias); else n.add(alias); return n })
+  const shown = ids.filter(match)
+  return (
+    <Pane>
+      <PaneHead><ArrowRight size={12} /> {title} · {shown.length}{needle && shown.length !== ids.length ? `/${ids.length}` : ''}</PaneHead>
+      <SearchBox>
+        <Search size={13} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('assistant.colFilter', 'Filter columns…')} />
+        {q && <SmallX type="button" style={{ width: 22, height: 22 }} onClick={() => setQ('')}><X size={12} /></SmallX>}
+      </SearchBox>
+      <PaneList>
+        {joins.map((j) => {
+          const avail = ids.filter((id) => id.startsWith(`${j.alias}.`) && match(id))
+          if (avail.length === 0) return null
+          const isCollapsed = collapsed.has(j.alias) && !needle   // a live search always expands matches
+          return (
+            <Fragment key={j.alias}>
+              <PaneGroup type="button" onClick={() => toggle(j.alias)}>
+                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<b>{j.name}</b> · {j.alias} · {avail.length}
+              </PaneGroup>
+              {!isCollapsed && avail.map((id) => (
+                <ColRow key={id}>
+                  <span className="grow"><span className="nm">{colName(id)}</span>{colLabel(id) && <span className="lbl">{colLabel(id)}</span>}</span>
+                  <Mini type="button" onClick={() => onAdd(id)}><ArrowRight size={11} /></Mini>
+                </ColRow>
+              ))}
+            </Fragment>
+          )
+        })}
+        {shown.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{needle ? t('assistant.noColMatch', 'No matching columns') : emptyText}</span></ColRow>}
+      </PaneList>
+    </Pane>
+  )
+}
+
 // Resolve a preset's join ref ("ALIAS.COL") to a real introspected column id. A preset references
 // columns by DATA ITEM (e.g. F03012.AN8), but JDE physical columns are prefixed (AIAN8 / ABAN8) — so
 // match exact, else "drop the 2-char table prefix" (JDE), else endsWith. Falls back to the raw ref.
@@ -728,28 +786,8 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                 <Mini type="button" onClick={removeAllFromTab} disabled={(activeWizTab?.cols.length ?? 0) === 0}>{t('assistant.removeAll', '← Remove all')}</Mini>
               </RowBar>
               <Dual>
-                <Pane>
-                  <PaneHead><ArrowRight size={12} /> {t('assistant.available', 'Available columns')} · {available.length}</PaneHead>
-                  <PaneList>
-                    {/* Grouped by source table so columns are easy to find in a wide join. */}
-                    {joins.map((j) => {
-                      const avail = available.filter((id) => id.startsWith(`${j.alias}.`))
-                      if (avail.length === 0) return null
-                      return (
-                        <Fragment key={j.alias}>
-                          <PaneGroup><b>{j.name}</b> · {j.alias} · {avail.length}</PaneGroup>
-                          {avail.map((id) => (
-                            <ColRow key={id}>
-                              <span className="grow"><span className="nm">{colName(id)}</span>{colLabel(id) && <span className="lbl">{colLabel(id)}</span>}</span>
-                              <Mini type="button" onClick={() => moveToTab(id)}><ArrowRight size={11} /></Mini>
-                            </ColRow>
-                          ))}
-                        </Fragment>
-                      )
-                    })}
-                    {available.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.allAssigned', 'All columns assigned')}</span></ColRow>}
-                  </PaneList>
-                </Pane>
+                <AvailablePane title={t('assistant.available', 'Available columns')} joins={joins} ids={available}
+                  colLabel={colLabel} onAdd={moveToTab} emptyText={t('assistant.allAssigned', 'All columns assigned')} />
                 <Pane>
                   <PaneHead><ArrowLeft size={12} /> {activeWizTab?.label} · {activeWizTab?.cols.length ?? 0}</PaneHead>
                   <PaneList>
@@ -777,27 +815,8 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                 <Mini type="button" onClick={removeAllFromGrid} disabled={gridCols.length === 0}>{t('assistant.removeAll', '← Remove all')}</Mini>
               </RowBar>
               <Dual>
-                <Pane>
-                  <PaneHead><ArrowRight size={12} /> {t('assistant.gridHidden', 'Not in the view')} · {gridAvailable.length}</PaneHead>
-                  <PaneList>
-                    {joins.map((j) => {
-                      const avail = gridAvailable.filter((id) => id.startsWith(`${j.alias}.`))
-                      if (avail.length === 0) return null
-                      return (
-                        <Fragment key={j.alias}>
-                          <PaneGroup><b>{j.name}</b> · {j.alias} · {avail.length}</PaneGroup>
-                          {avail.map((id) => (
-                            <ColRow key={id}>
-                              <span className="grow"><span className="nm">{colName(id)}</span>{colLabel(id) && <span className="lbl">{colLabel(id)}</span>}</span>
-                              <Mini type="button" onClick={() => addToGrid(id)}><ArrowRight size={11} /></Mini>
-                            </ColRow>
-                          ))}
-                        </Fragment>
-                      )
-                    })}
-                    {gridAvailable.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.allInGrid', 'Every column is in the view')}</span></ColRow>}
-                  </PaneList>
-                </Pane>
+                <AvailablePane title={t('assistant.gridHidden', 'Not in the view')} joins={joins} ids={gridAvailable}
+                  colLabel={colLabel} onAdd={addToGrid} emptyText={t('assistant.allInGrid', 'Every column is in the view')} />
                 <Pane>
                   <PaneHead><ArrowLeft size={12} /> {t('assistant.gridShown', 'In the view')} · {gridCols.length}</PaneHead>
                   <PaneList>
