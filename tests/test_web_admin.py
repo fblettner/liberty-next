@@ -1595,6 +1595,46 @@ def test_assistant_scaffold_creates_everything(env) -> None:
         assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h).status_code == 409
 
 
+def test_assistant_scaffold_reuses_existing_query(env) -> None:
+    """When ``table`` is None the assistant reuses an existing connector query as the screen's
+    read source: connectors.toml is untouched (no new table/queries, no dictionary), and a
+    read-only screen is created pointing at that query."""
+    app, conn_toml, _ = env
+    payload = {
+        "connector": "db",
+        "app": "myapp",
+        "table": None,
+        "dictionary_scope": "myapp",
+        "dictionary": [],
+        "screen": {
+            "id": "the_answer",
+            "label": "The Answer",
+            "connector": "db",
+            "read_query": "answer",
+            "read_only": True,
+            "columns": [{"name": "answer"}],
+            "dialog": {"title": "Answer", "tabs": [{"id": "general", "label": "General",
+                       "type": "form", "fields": [{"name": "answer"}]}]},
+        },
+        "menu": None,
+    }
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        before = conn_toml.read_text()
+        r = client.post("/admin/assistant/scaffold", json=payload, headers=h)
+        assert r.status_code == 200, r.text
+        created = r.json()["created"]
+        assert created["table"] is None and created["queries"] == []
+        assert created["dictionary_entries"] == [] and created["screen"] == "myapp.the_answer"
+        # connectors.toml is byte-for-byte unchanged — no table/queries were appended.
+        assert conn_toml.read_text() == before
+        # The screen is live, read-only, and runs the reused query.
+        after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        s = after["myapp"]["the_answer"]
+        assert s["read_query"] == "answer" and s["read_only"] is True
+        assert client.get("/api/sql/db/answer", headers=h).json()["rows"] == [{"answer": 42}]
+
+
 def test_assistant_presets(env) -> None:
     """The catalog endpoint reads TOML under <config>/presets/, filters by connector, gated."""
     app, conn_toml, _ = env

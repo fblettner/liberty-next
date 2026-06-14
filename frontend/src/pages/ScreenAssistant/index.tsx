@@ -133,7 +133,7 @@ function resolveJoinRef(tables: JoinTable[], ref: string): string {
 export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { apps } = useWorkspace()
+  const { apps, connectors: wsConnectors } = useWorkspace()
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
@@ -143,7 +143,10 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   const [connector, setConnector] = useState('')
   const [app, setApp] = useState('')
 
-  // Step 2 — tables & joins
+  // Step 2 — tables & joins. ``sourceMode`` switches the base between a physical DB table
+  // (introspected) and an EXISTING connector query (reused as-is — no new query is written).
+  const [sourceMode, setSourceMode] = useState<'table' | 'query'>('table')
+  const [sourceQuery, setSourceQuery] = useState('')
   const [joins, setJoins] = useState<JoinTable[]>([])
   const [adding, setAdding] = useState(false)
   const [presets, setPresets] = useState<Preset[]>([])
@@ -198,12 +201,21 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   const available = useMemo(() => allCols.filter((id) => !assigned.has(id)), [allCols, assigned])
   const screenId = tableName ? slug(tableName) : ''
   const readSql = useMemo(() => generateSql(joins, assigned, [], []), [joins, assigned])
+  // Existing read queries on the picked connector — the "Existing query" source picker. Drop the
+  // writable CRUD slots (put/post/delete); only row-returning queries make sense as a read source.
+  const existingQueries = useMemo<SearchSelectOption[]>(() => {
+    const meta = (wsConnectors ?? []).find((c) => c.name === connector)
+    if (!meta || meta.type !== 'sql') return []
+    return (meta.queries ?? [])
+      .filter((q) => !q.writable)
+      .map((q) => ({ value: q.name, label: q.label || q.description || q.name, mono: q.name }))
+  }, [wsConnectors, connector])
 
   // ── reset ──────────────────────────────────────────────────────────────────────────────
-  const resetTables = () => { setJoins([]); setAdding(false); setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setDdItems(null) }
+  const resetTables = () => { setJoins([]); setAdding(false); setSourceQuery(''); setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setDdItems(null) }
   const resetAll = () => {
     setStep(0); setMsg(null); setResult(null); setConnector(''); setApp('')
-    resetTables(); setIsJde(false); setDdLoading(false)
+    setSourceMode('table'); resetTables(); setIsJde(false); setDdLoading(false)
     setCreateMenu(true); setMenuLabel(''); setMenuIcon('table'); setMenuParent(''); setTableName(''); setScreenLabel('')
   }
 
@@ -304,6 +316,22 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     setJoins([{ schema: tbl.schema, name: tbl.name, alias, columns: tbl.columns }])
     if (!tableName) setTableName(slug(tbl.name))
   }
+  // Pick an EXISTING connector query as the base: describe its result columns (cheap _limit=0),
+  // then the column / tab / menu steps work as usual. The screen reuses this query as its
+  // read_query — no new query is generated (and the dictionary scan is skipped: it isn't a table).
+  const pickQuery = useCallback(async (qname: string) => {
+    if (!qname) return
+    setBusy(true); setMsg(null)
+    try {
+      const r = await api.get<{ columns?: Array<{ name: string; type?: string | null }> }>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(qname)}?_limit=0`)
+      const cols = (r.columns ?? []).map((c) => ({ name: c.name, type: c.type ?? undefined }))
+      if (!cols.length) { setMsg({ tone: 'err', text: t('assistant.queryNoCols', 'That query returned no columns.') }); return }
+      setJoins([{ schema: null, name: qname, alias: suggestAlias(qname, new Set()), columns: cols }])
+      setSourceQuery(qname)
+      setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setDdItems([])
+      if (!tableName) setTableName(slug(qname.replace(/_get$/i, '')))
+    } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) } finally { setBusy(false) }
+  }, [connector, tableName, t])
   const addJoin = (tbl: PickedTable) => {
     setAdding(false)
     const taken = new Set(joins.map((j) => j.alias.toUpperCase()))
@@ -381,7 +409,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   // re-entering the Dictionary step re-scans against the right scope (otherwise a scan taken while the
   // app still defaulted to the connector would wrongly report every column missing).
   useEffect(() => { setDdItems(null) }, [appKey, base?.name, base?.schema])
-  useEffect(() => { if (STEPS[step] === 'dictionary' && ddItems === null && base) void runScan() }, [step, ddItems, base, runScan])
+  useEffect(() => { if (STEPS[step] === 'dictionary' && ddItems === null && base && !sourceQuery) void runScan() }, [step, ddItems, base, runScan, sourceQuery])
 
   const patchDd = (col: string, patch: Partial<ScanProposal>) =>
     setDdItems((items) => (items ?? []).map((d) => d.column === col ? { ...d, ...patch } : d))
@@ -414,9 +442,11 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     const crud = (kind: 'put' | 'post' | 'delete') =>
       buildCrudSql({ crud: kind, schema: base.schema, table: base.name, selectCols: assignedBase, keyCols: keyBase }) || undefined
     const kept = (ddItems ?? []).filter((d) => d.keep && !d.exists)
+    // Two modes: a brand-new table (generate get/put/post/delete + dictionary) or an EXISTING
+    // connector query reused as the read source (no new query, no dictionary scan, read-only screen).
     const payload = {
       connector, app: appKey,
-      table: {
+      table: sourceQuery ? null : {
         name: slug(tableName), label: screenLabel || undefined,
         get_sql: readSql,
         put_sql: keyBase.length ? crud('put') : undefined,
@@ -424,13 +454,18 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         delete_sql: keyBase.length ? crud('delete') : undefined,
       },
       dictionary_scope: appKey,
-      dictionary: kept.map((d) => ({
+      dictionary: sourceQuery ? [] : kept.map((d) => ({
         id: d.dd_id, label: d.label || undefined, format: d.format || undefined,
         ...(d.justify ? { justify: d.justify } : {}), ...(d.size != null ? { size: d.size } : {}),
         ...(d.rules ? { rules: d.rules } : {}), ...(d.rules_values ? { rules_values: d.rules_values } : {}),
         ...(d.lookup_params.trim() ? { lookup_params: parseParams(d.lookup_params) } : {}),
       })),
-      screen: {
+      screen: sourceQuery ? {
+        id: screenId, label: screenLabel || tableName, connector,
+        read_query: sourceQuery, read_only: true,
+        columns: screenColumns,
+        dialog: { title: screenLabel || tableName, tabs: tabs.filter((tb) => tb.cols.length).map((tb) => ({ id: tb.id, label: tb.label, type: 'form', fields: tb.cols.map((id) => ({ name: colName(id) })) })) },
+      } : {
         id: screenId, label: screenLabel || tableName, connector,
         read_query: `${slug(tableName)}_get`,
         ...(assignedBase.length ? { insert_query: `${slug(tableName)}_post` } : {}),
@@ -503,6 +538,34 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {/* ── Step 2: tables & joins ── */}
           {STEPS[step] === 'tables' && (
             <>
+              {/* Source: a brand-new DB table (generates CRUD queries) or an existing connector query. */}
+              <RowBar style={{ marginBottom: 4 }}>
+                <Chip $active={sourceMode === 'table'} onClick={() => { if (sourceMode !== 'table') { resetTables(); setSourceMode('table') } }}>
+                  {t('assistant.srcTable', 'Database table')}
+                </Chip>
+                <Chip $active={sourceMode === 'query'} onClick={() => { if (sourceMode !== 'query') { resetTables(); setSourceMode('query') } }}>
+                  {t('assistant.srcQuery', 'Existing query')}
+                </Chip>
+              </RowBar>
+
+              {sourceMode === 'query' ? (
+                !base ? (
+                  <Field label={t('assistant.existingQuery', 'Existing connector query')}>
+                    {existingQueries.length
+                      ? <SearchSelect value="" onChange={(v) => void pickQuery(v)} options={existingQueries} placeholder={t('common.pick', 'Pick…')} />
+                      : <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('assistant.noQueries', 'This connector has no read queries.')}</div>}
+                  </Field>
+                ) : (
+                  <Section>
+                    <SectionTitle>{t('assistant.source', 'Source')}</SectionTitle>
+                    <RowBar>
+                      <strong style={{ fontFamily: fonts.mono, fontSize: fontSize.sm, flex: 1 }}>{sourceQuery}</strong>
+                      <SmallX type="button" onClick={resetTables} title={t('common.remove', 'Remove')}><X size={13} /></SmallX>
+                    </RowBar>
+                  </Section>
+                )
+              ) : (
+              <>
               {presets.length > 0 && (
                 <Section>
                   <SectionTitle>{t('assistant.preset', 'Start from a catalog preset')}</SectionTitle>
@@ -556,6 +619,8 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                   {adding ? <TablePicker connector={connector} onPick={addJoin} />
                     : <Mini type="button" onClick={() => setAdding(true)}><Plus size={12} /> {t('assistant.addJoin', 'Add a joined table')}</Mini>}
                 </Section>
+              )}
+              </>
               )}
             </>
           )}
@@ -618,7 +683,9 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
 
           {/* ── Step 4: JDE dictionary ── */}
           {STEPS[step] === 'dictionary' && (
-            ddLoading ? <SpinnerRing /> : (
+            sourceQuery ? (
+              <Banner $tone="info">{t('assistant.ddSkipQuery', 'Reusing an existing query — its columns already carry their dictionary entries, so there is nothing to propose here.')}</Banner>
+            ) : ddLoading ? <SpinnerRing /> : (
               <>
                 <RowBar>
                   <SectionTitle style={{ flex: 1 }}>
@@ -673,16 +740,20 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                 <Section>
                   <SectionTitle>{t('assistant.summary', 'Will create')}</SectionTitle>
                   <div style={{ fontSize: fontSize.sm, color: colors.text.secondary, lineHeight: 1.7 }}>
-                    <div>· {t('assistant.sumTable', 'Connector table')} <Mono>{connector}.{slug(tableName)}</Mono> ({screenColumns.length} {t('assistant.cols', 'columns')})</div>
+                    {sourceQuery
+                      ? <div>· {t('assistant.sumQuery', 'Reuses existing query')} <Mono>{connector}.{sourceQuery}</Mono> ({t('assistant.readOnlyWord', 'read-only')})</div>
+                      : <div>· {t('assistant.sumTable', 'Connector table')} <Mono>{connector}.{slug(tableName)}</Mono> ({screenColumns.length} {t('assistant.cols', 'columns')})</div>}
                     <div>· {t('assistant.sumScreen', 'Screen + dialog')} <Mono>{appKey}.{screenId}</Mono> ({tabs.filter((tb) => tb.cols.length).length} {t('assistant.tabsWord', 'tabs')})</div>
-                    <div>· {t('assistant.sumDict', 'Dictionary entries')}: {(ddItems ?? []).filter((d) => d.keep && !d.exists).length}</div>
+                    {!sourceQuery && <div>· {t('assistant.sumDict', 'Dictionary entries')}: {(ddItems ?? []).filter((d) => d.keep && !d.exists).length}</div>}
                     {createMenu && <div>· {t('assistant.sumMenu', 'Menu item')} <Mono>{appKey}</Mono>{menuParent ? ` → ${menuParent}` : ''}</div>}
                   </div>
                 </Section>
-                <Section>
-                  <SectionTitle>{t('assistant.readPreview', 'Read query (SELECT)')}</SectionTitle>
-                  <SqlEditor value={readSql} onChange={() => undefined} rows={8} readOnly />
-                </Section>
+                {!sourceQuery && (
+                  <Section>
+                    <SectionTitle>{t('assistant.readPreview', 'Read query (SELECT)')}</SectionTitle>
+                    <SqlEditor value={readSql} onChange={() => undefined} rows={8} readOnly />
+                  </Section>
+                )}
               </>
             )
           )}
