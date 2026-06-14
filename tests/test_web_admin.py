@@ -1636,8 +1636,8 @@ def test_assistant_scaffold_reuses_existing_query(env) -> None:
 
 
 def test_assistant_scaffold_no_dialog_readonly_grid(env) -> None:
-    """A screen with no dialog is a valid read-only grid; columns may carry ``hidden`` (in the
-    screen + dialog set but off the grid). No CRUD queries are written."""
+    """A screen with no dialog is a valid read-only grid. ``columns`` lists EVERY query column;
+    a default ``view`` selects which are enabled in the grid. No CRUD queries are written."""
     app, conn_toml, _ = env
     payload = {
         "connector": "db",
@@ -1651,7 +1651,8 @@ def test_assistant_scaffold_no_dialog_readonly_grid(env) -> None:
             "connector": "db",
             "read_query": "ab_get",
             "read_only": True,
-            "columns": [{"name": "AN8"}, {"name": "ALPH", "hidden": True}],
+            "columns": [{"name": "AN8"}, {"name": "ALPH"}],   # all query columns
+            "views": [{"name": "Default", "default": True, "columns": ["AN8"]}],  # grid enables AN8 only
         },
         "menu": None,
     }
@@ -1664,7 +1665,9 @@ def test_assistant_scaffold_no_dialog_readonly_grid(env) -> None:
         after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
         s = after["myapp"]["ab_grid"]
         assert s["read_only"] is True and s.get("dialog") is None
-        assert s["columns"][1]["hidden"] is True
+        assert [c["name"] for c in s["columns"]] == ["AN8", "ALPH"]      # screen keeps all columns
+        v = s["views"][0]
+        assert v["name"] == "Default" and v["default"] is True and v["columns"] == ["AN8"]
         assert client.get("/api/sql/db/ab_get", headers=h).json()["rows"] == [{"AN8": 1, "ALPH": "x"}]
 
 

@@ -457,23 +457,28 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   }, [ddItems])
 
   // ── assemble + submit ──────────────────────────────────────────────────────────────────
+  // The screen's columns are ALL the columns the read query returns (the dialog shows every one;
+  // the grid view selects which are visible). Per-column dd + key ride here.
   const screenColumns = useMemo(() => {
-    const gridSet = new Set(gridCols)
-    // The screen's columns = the union of grid columns (shown in the table, in grid order) and the
-    // dialog columns. A dialog column that isn't in the grid is kept on the screen but written with
-    // ``hidden: true`` so it's editable in the dialog yet absent from the table view by default.
-    const order: ColId[] = [...gridCols, ...dialogOrder.filter((id) => !gridSet.has(id))]
     const seen = new Set<string>()
-    const out: Array<{ name: string; dd?: string; key?: boolean; hidden?: boolean }> = []
-    for (const id of order) {
+    const out: Array<{ name: string; dd?: string; key?: boolean }> = []
+    for (const id of allCols) {
       const nm = colName(id)
       if (seen.has(nm)) continue
       seen.add(nm)
       const dd = ddByCol.get(nm)
-      out.push({ name: nm, ...(dd && dd.keep ? { dd: dd.dd_id } : {}), ...(keys.has(id) ? { key: true } : {}), ...(!gridSet.has(id) ? { hidden: true } : {}) })
+      out.push({ name: nm, ...(dd && dd.keep ? { dd: dd.dd_id } : {}), ...(keys.has(id) ? { key: true } : {}) })
     }
     return out
-  }, [gridCols, dialogOrder, keys, ddByCol])
+  }, [allCols, keys, ddByCol])
+  // The grid selection becomes a default shared VIEW (the columns enabled in the grid, in order) —
+  // NOT a subset of screen.columns. Omitting columns from a view hides them in the grid; the screen
+  // still carries them all (and the dialog shows them all). Empty selection → no view.
+  const gridView = useMemo(() => {
+    const seen = new Set<string>(); const cols: string[] = []
+    for (const id of gridCols) { const nm = colName(id); if (!seen.has(nm)) { seen.add(nm); cols.push(nm) } }
+    return cols.length ? { name: 'Default', default: true, columns: cols } : null
+  }, [gridCols])
 
   const baseColNames = useMemo(() => new Set((base?.columns ?? []).map((c) => c.name.toUpperCase())), [base])
   const submit = async () => {
@@ -512,6 +517,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         id: screenId, label: screenLabel || tableName, connector,
         read_query: sourceQuery, read_only: true,
         columns: screenColumns,
+        ...(gridView ? { views: [gridView] } : {}),
         ...dialogBlock,
       } : {
         id: screenId, label: screenLabel || tableName, connector,
@@ -520,6 +526,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         ...(assignedBase.length ? { insert_query: `${slug(tableName)}_post` } : {}),
         ...(keyBase.length ? { update_query: `${slug(tableName)}_put`, delete_query: `${slug(tableName)}_delete` } : {}),
         columns: screenColumns,
+        ...(gridView ? { views: [gridView] } : {}),
         ...dialogBlock,
       },
       menu: createMenu ? {
@@ -544,7 +551,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   )
   const stepState = (i: number): 'done' | 'active' | 'todo' => (i < step ? 'done' : i === step ? 'active' : 'todo')
   const stepLabel = (k: StepKey) => t(`assistant.step.${k}`, {
-    target: 'Target', tables: 'Tables & joins', columns: 'Dialog columns', grid: 'Grid columns', dictionary: 'Dictionary', menu: 'Menu', review: 'Review & create',
+    target: 'Target', tables: 'Tables & joins', columns: 'Dialog columns', grid: 'Grid view', dictionary: 'Dictionary', menu: 'Menu', review: 'Review & create',
   }[k])
   const activeWizTab = tabs.find((tb) => tb.id === activeTab)
 
@@ -733,19 +740,19 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
             </>
           )}
 
-          {/* ── Step 3: grid columns (the table view) ── */}
+          {/* ── Step 3: grid view (the default view's enabled columns) ── */}
           {STEPS[step] === 'grid' && (
             <>
               <RowBar>
                 <div style={{ flex: 1, fontSize: fontSize.sm, color: colors.text.muted }}>
-                  {t('assistant.gridIntro', 'Pick the columns shown in the table view. The rest stay on the screen + dialog but are hidden from the grid.')}
+                  {t('assistant.gridIntro', 'Pick the columns enabled in the default grid view. The screen keeps every query column (and the dialog shows them all); the view just sets which are visible — users can add the rest from the grid’s column menu.')}
                 </div>
                 <Mini type="button" onClick={addAllToGrid} disabled={gridAvailable.length === 0}>{t('assistant.addAll', 'Add all available →')}</Mini>
                 <Mini type="button" onClick={removeAllFromGrid} disabled={gridCols.length === 0}>{t('assistant.removeAll', '← Remove all')}</Mini>
               </RowBar>
               <Dual>
                 <Pane>
-                  <PaneHead><ArrowRight size={12} /> {t('assistant.gridHidden', 'Hidden from the grid')} · {gridAvailable.length}</PaneHead>
+                  <PaneHead><ArrowRight size={12} /> {t('assistant.gridHidden', 'Not in the view')} · {gridAvailable.length}</PaneHead>
                   <PaneList>
                     {joins.map((j) => {
                       const avail = gridAvailable.filter((id) => id.startsWith(`${j.alias}.`))
@@ -762,11 +769,11 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                         </Fragment>
                       )
                     })}
-                    {gridAvailable.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.allInGrid', 'All columns shown in the grid')}</span></ColRow>}
+                    {gridAvailable.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.allInGrid', 'Every column is in the view')}</span></ColRow>}
                   </PaneList>
                 </Pane>
                 <Pane>
-                  <PaneHead><ArrowLeft size={12} /> {t('assistant.gridShown', 'Shown in the grid')} · {gridCols.length}</PaneHead>
+                  <PaneHead><ArrowLeft size={12} /> {t('assistant.gridShown', 'In the view')} · {gridCols.length}</PaneHead>
                   <PaneList>
                     {gridCols.map((id) => (
                       <ColRow key={id}>
@@ -774,7 +781,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                         <Mini type="button" onClick={() => removeFromGrid(id)}><X size={11} /></Mini>
                       </ColRow>
                     ))}
-                    {gridCols.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.gridEmpty', 'No columns in the grid yet')}</span></ColRow>}
+                    {gridCols.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.gridEmpty', 'No columns in the view yet')}</span></ColRow>}
                   </PaneList>
                 </Pane>
               </Dual>
@@ -846,7 +853,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                     {tabs.some((tb) => tb.cols.length)
                       ? <div>· {t('assistant.sumScreen', 'Screen + dialog')} <Mono>{appKey}.{screenId}</Mono> ({tabs.filter((tb) => tb.cols.length).length} {t('assistant.tabsWord', 'tabs')})</div>
                       : <div>· {t('assistant.sumScreenRo', 'Screen')} <Mono>{appKey}.{screenId}</Mono> ({t('assistant.readOnlyGrid', 'read-only grid, no dialog')})</div>}
-                    <div>· {t('assistant.sumCols', '{{grid}} of {{total}} columns shown in the grid', { grid: gridCols.length, total: screenColumns.length })}</div>
+                    <div>· {t('assistant.sumCols', 'Default view enables {{grid}} of {{total}} columns', { grid: gridCols.length, total: screenColumns.length })}</div>
                     {!sourceQuery && <div>· {t('assistant.sumDict', 'Dictionary entries')}: {(ddItems ?? []).filter((d) => d.keep && !d.exists).length}</div>}
                     {createMenu && <div>· {t('assistant.sumMenu', 'Menu item')} <Mono>{appKey}</Mono>{menuParent ? ` → ${menuParent}` : ''}</div>}
                   </div>
