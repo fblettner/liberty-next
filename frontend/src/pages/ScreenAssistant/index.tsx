@@ -133,7 +133,7 @@ function resolveJoinRef(tables: JoinTable[], ref: string): string {
 export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { apps, connectors: wsConnectors } = useWorkspace()
+  const { apps, connectors: wsConnectors, refresh } = useWorkspace()
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
@@ -515,13 +515,13 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
       })),
       screen: sourceQuery ? {
         id: screenId, label: screenLabel || tableName, connector,
-        read_query: sourceQuery, read_only: true,
+        read_query: sourceQuery, read_only: true, auto_load: true,
         columns: screenColumns,
         ...(gridView ? { views: [gridView] } : {}),
         ...dialogBlock,
       } : {
         id: screenId, label: screenLabel || tableName, connector,
-        read_query: `${slug(tableName)}_get`,
+        read_query: `${slug(tableName)}_get`, auto_load: true,
         ...(hasDialog ? {} : { read_only: true }),
         ...(assignedBase.length ? { insert_query: `${slug(tableName)}_post` } : {}),
         ...(keyBase.length ? { update_query: `${slug(tableName)}_put`, delete_query: `${slug(tableName)}_delete` } : {}),
@@ -536,6 +536,11 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     }
     try {
       const r = await api.post<{ created: { screen: string } }>('/admin/assistant/scaffold', payload)
+      // The backend reloaded its config, but the client's workspace (connectors / screens / menus)
+      // is still the pre-scaffold snapshot — opening the new screen against it hangs (its connector
+      // query / screen meta isn't known yet). Refresh the workspace so the new screen is resolvable
+      // without a manual browser reload.
+      refresh()
       setResult({ screen: r.created.screen })
       setMsg({ tone: 'ok', text: t('assistant.created', { screen: r.created.screen, defaultValue: 'Created {{screen}} and reloaded.' }) })
     } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) } finally { setBusy(false) }
