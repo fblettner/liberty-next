@@ -1595,6 +1595,82 @@ def test_assistant_scaffold_creates_everything(env) -> None:
         assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=h).status_code == 409
 
 
+def test_assistant_scaffold_reuses_existing_query(env) -> None:
+    """When ``table`` is None the assistant reuses an existing connector query as the screen's
+    read source: connectors.toml is untouched (no new table/queries, no dictionary), and a
+    read-only screen is created pointing at that query."""
+    app, conn_toml, _ = env
+    payload = {
+        "connector": "db",
+        "app": "myapp",
+        "table": None,
+        "dictionary_scope": "myapp",
+        "dictionary": [],
+        "screen": {
+            "id": "the_answer",
+            "label": "The Answer",
+            "connector": "db",
+            "read_query": "answer",
+            "read_only": True,
+            "columns": [{"name": "answer"}],
+            "dialog": {"title": "Answer", "tabs": [{"id": "general", "label": "General",
+                       "type": "form", "fields": [{"name": "answer"}]}]},
+        },
+        "menu": None,
+    }
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        before = conn_toml.read_text()
+        r = client.post("/admin/assistant/scaffold", json=payload, headers=h)
+        assert r.status_code == 200, r.text
+        created = r.json()["created"]
+        assert created["table"] is None and created["queries"] == []
+        assert created["dictionary_entries"] == [] and created["screen"] == "myapp.the_answer"
+        # connectors.toml is byte-for-byte unchanged — no table/queries were appended.
+        assert conn_toml.read_text() == before
+        # The screen is live, read-only, and runs the reused query.
+        after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        s = after["myapp"]["the_answer"]
+        assert s["read_query"] == "answer" and s["read_only"] is True
+        assert client.get("/api/sql/db/answer", headers=h).json()["rows"] == [{"answer": 42}]
+
+
+def test_assistant_scaffold_no_dialog_readonly_grid(env) -> None:
+    """A screen with no dialog is a valid read-only grid. ``columns`` lists EVERY query column;
+    a default ``view`` selects which are enabled in the grid. No CRUD queries are written."""
+    app, conn_toml, _ = env
+    payload = {
+        "connector": "db",
+        "app": "myapp",
+        "table": {"name": "ab", "label": "Address Book", "get_sql": "SELECT 1 AS AN8, 'x' AS ALPH"},
+        "dictionary_scope": "myapp",
+        "dictionary": [],
+        "screen": {
+            "id": "ab_grid",
+            "label": "AB",
+            "connector": "db",
+            "read_query": "ab_get",
+            "read_only": True,
+            "columns": [{"name": "AN8"}, {"name": "ALPH"}],   # all query columns
+            "views": [{"name": "Default", "default": True, "columns": ["AN8"]}],  # grid enables AN8 only
+        },
+        "menu": None,
+    }
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/admin/assistant/scaffold", json=payload, headers=h)
+        assert r.status_code == 200, r.text
+        # Only the read query was created — no put/post/delete.
+        assert r.json()["created"]["queries"] == ["ab_get"]
+        after = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        s = after["myapp"]["ab_grid"]
+        assert s["read_only"] is True and s.get("dialog") is None
+        assert [c["name"] for c in s["columns"]] == ["AN8", "ALPH"]      # screen keeps all columns
+        v = s["views"][0]
+        assert v["name"] == "Default" and v["default"] is True and v["columns"] == ["AN8"]
+        assert client.get("/api/sql/db/ab_get", headers=h).json()["rows"] == [{"AN8": 1, "ALPH": "x"}]
+
+
 def test_assistant_presets(env) -> None:
     """The catalog endpoint reads TOML under <config>/presets/, filters by connector, gated."""
     app, conn_toml, _ = env

@@ -1055,7 +1055,8 @@ class ScaffoldMenuItem(BaseModel):
 class ScaffoldBody(BaseModel):
     connector: str                              # existing connector that receives the table/queries
     app: str                                    # app that receives the screen
-    table: ScaffoldTable
+    table: ScaffoldTable | None = None          # None → reuse an EXISTING query (screen.read_query already
+                                                # points at it); no new connector table/queries are written
     dictionary_scope: str | None = None         # None / "shared" → top-level entries; else connectors.<scope>.entries
     dictionary: list[dict[str, Any]] = []       # each entry: {id, label?, format?, justify?, size?, rules?, ...}
     screen: dict[str, Any]                      # a parsed Screen dict (id, label, queries, columns[], dialog{tabs[]})
@@ -1076,20 +1077,24 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown connector {body.connector!r}")
     conns = {name: c.model_dump(exclude_defaults=True) for name, c in cfile.connectors.items()}
     target = conns[body.connector]
-    tables = target.setdefault("tables", [])
-    if any(isinstance(t, dict) and str(t.get("name", "")).lower() == body.table.name.lower() for t in tables):
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            detail=f"table {body.table.name!r} already exists on connector {body.connector!r}")
-    table_entry: dict[str, Any] = {"name": body.table.name}
-    if body.table.label:
-        table_entry["label"] = body.table.label
-    table_entry["get"] = {"sql": body.table.get_sql}
-    slots: list[str] = ["get"]
-    for slot, sql in (("put", body.table.put_sql), ("post", body.table.post_sql), ("delete", body.table.delete_sql)):
-        if sql:
-            table_entry[slot] = {"sql": sql, "writable": True}
-            slots.append(slot)
-    tables.append(table_entry)
+    # When ``table`` is given, append the new table (+ its CRUD queries). When it's None the screen
+    # reuses an EXISTING query (its ``read_query`` already names it) — connectors.toml is untouched.
+    slots: list[str] = []
+    if body.table is not None:
+        tables = target.setdefault("tables", [])
+        if any(isinstance(t, dict) and str(t.get("name", "")).lower() == body.table.name.lower() for t in tables):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"table {body.table.name!r} already exists on connector {body.connector!r}")
+        table_entry: dict[str, Any] = {"name": body.table.name}
+        if body.table.label:
+            table_entry["label"] = body.table.label
+        table_entry["get"] = {"sql": body.table.get_sql}
+        slots.append("get")
+        for slot, sql in (("put", body.table.put_sql), ("post", body.table.post_sql), ("delete", body.table.delete_sql)):
+            if sql:
+                table_entry[slot] = {"sql": sql, "writable": True}
+                slots.append(slot)
+        tables.append(table_entry)
 
     # ── dictionary.toml: merge entries (shared or per-connector scope) ───────────────────────
     dfile = load_dictionary(_dictionary_path(settings))
@@ -1147,7 +1152,8 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
 
     # ── write through the existing validated PUT paths (each snapshots its file); reload once ─
     _snapshot_all_config(request)
-    await put_connectors_parsed(ConnectorsParsedBody(connectors=conns), request, principal)
+    if body.table is not None:
+        await put_connectors_parsed(ConnectorsParsedBody(connectors=conns), request, principal)
     if body.dictionary:
         await put_dictionary_parsed(DictionaryBody(dictionary=ddict), request, principal)
     await put_screens_parsed(ScreensBody(screens=screens), request, principal)
@@ -1158,8 +1164,8 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
     return {
         "created": {
             "connector": body.connector,
-            "table": body.table.name,
-            "queries": [f"{body.table.name}_{s}" for s in slots],
+            "table": body.table.name if body.table is not None else None,
+            "queries": [f"{body.table.name}_{s}" for s in slots] if body.table is not None else [],
             "dictionary_entries": created_dd,
             "screen": f"{body.app}.{sid}",
             "menu_item": body.menu.id if body.menu is not None else None,
