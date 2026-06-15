@@ -201,6 +201,15 @@ export function ScreenDialog({
     if (!open || !dlg) return
     const seeded: Row = {}
     const original: Row = {}
+    // ``savedRow`` carries the ORIGINAL of EVERY loaded column (not just the rendered fields) so the
+    // migrated _put's WHERE ``:<COL>_ORIGINAL`` binds resolve even for hidden / non-field key columns
+    // (mirrors NestedTab). Keyed by the canonical column name so the case matches the bind; passwords
+    // are never rebound. Seeding of the visible fields happens in the loop below.
+    for (const [k, v] of Object.entries(row ?? {})) {
+      const rc = colByName.get(k.toLowerCase()) ?? null
+      if (isPassword(rc)) continue
+      original[rc?.name ?? k] = v
+    }
     // Only seed the parent's own form tabs — nested-form / nested-table tabs manage their own
     // read query + state inside the NestedFormView / NestedTableView components.
     for (const tab of dlg.tabs.filter(isFormTab)) {

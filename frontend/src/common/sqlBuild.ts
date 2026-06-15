@@ -16,25 +16,30 @@ export function buildCrudSql(opts: {
 }): string {
   const fqTable = opts.schema ? `${opts.schema}.${opts.table}` : opts.table
   if (!opts.table) return ''
+  // Upper-case column identifiers + their bind names — same convention as the SELECT wizard
+  // (generateSql): DB introspection folds case per dialect (lower on Postgres, upper on Oracle), so
+  // a generated statement reads uniformly. Unquoted, so Postgres folds it back to lowercase anyway.
+  const sel = opts.selectCols.map((c) => c.toUpperCase())
+  const keys = opts.keyCols.map((c) => c.toUpperCase())
   if (opts.crud === 'get') {
-    if (opts.selectCols.length === 0) return ''
-    return `SELECT\n  ${opts.selectCols.join(',\n  ')}\nFROM ${fqTable}`
+    if (sel.length === 0) return ''
+    return `SELECT\n  ${sel.join(',\n  ')}\nFROM ${fqTable}`
   }
   if (opts.crud === 'post') {
-    if (opts.selectCols.length === 0) return ''
-    const placeholders = opts.selectCols.map((c) => `:${c}`).join(',\n  ')
-    return `INSERT INTO ${fqTable} (\n  ${opts.selectCols.join(',\n  ')}\n) VALUES (\n  ${placeholders}\n)`
+    if (sel.length === 0) return ''
+    const placeholders = sel.map((c) => `:${c}`).join(',\n  ')
+    return `INSERT INTO ${fqTable} (\n  ${sel.join(',\n  ')}\n) VALUES (\n  ${placeholders}\n)`
   }
   if (opts.crud === 'put') {
-    if (opts.keyCols.length === 0) return ''
-    const nonKey = opts.selectCols.filter((c) => !opts.keyCols.includes(c))
+    if (keys.length === 0) return ''
+    const nonKey = sel.filter((c) => !keys.includes(c))
     if (nonKey.length === 0) return ''
     const sets = nonKey.map((c) => `${c} = :${c}`).join(',\n  ')
-    const where = opts.keyCols.map((c) => `${c} = :${c}_ORIGINAL`).join('\n  AND ')
+    const where = keys.map((c) => `${c} = :${c}_ORIGINAL`).join('\n  AND ')
     return `UPDATE ${fqTable}\nSET\n  ${sets}\nWHERE\n  ${where}`
   }
   // delete
-  if (opts.keyCols.length === 0) return ''
-  const where = opts.keyCols.map((c) => `${c} = :${c}`).join('\n  AND ')
+  if (keys.length === 0) return ''
+  const where = keys.map((c) => `${c} = :${c}`).join('\n  AND ')
   return `DELETE FROM ${fqTable}\nWHERE\n  ${where}`
 }
