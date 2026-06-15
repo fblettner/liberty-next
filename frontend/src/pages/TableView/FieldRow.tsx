@@ -91,9 +91,16 @@ export function FieldRow({
   const lookupData = lookupSpec ? lookupMaps.get(lookupKey(lookupSpec)) : undefined
 
   let widget: React.ReactNode
-  if (disabled) {
-    // Read-only echo — keep the value visible (and copyable). Boolean shows its raw code, same as
-    // every other type; no special widget here so the user sees exactly what's in the column.
+  if (disabled && effectiveRule?.kind === 'boolean') {
+    // A disabled boolean still reads as a (read-only) checkbox — matching the grid — not a raw 1/0.
+    const checked = textValue === effectiveRule.true_value
+    widget = <Checkbox checked={checked} disabled label={checked ? t('common.enabled') : t('common.disabled')} />
+  } else if (disabled && effectiveRule?.kind === 'enum') {
+    // A disabled enum shows its label, not the stored code.
+    const opt = effectiveRule.values.find((v) => v.value === textValue)
+    widget = <ReadOnlyBox aria-readonly>{opt?.label ?? (textValue || <span style={{ color: colors.text.muted }}>—</span>)}</ReadOnlyBox>
+  } else if (disabled) {
+    // Read-only echo for the remaining kinds (text / number / date / lookup) — value visible + copyable.
     widget = <ReadOnlyBox aria-readonly>{textValue || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
   } else if (effectiveRule?.kind === 'boolean') {
     const trueV = effectiveRule.true_value
