@@ -201,6 +201,15 @@ export function ScreenDialog({
     if (!open || !dlg) return
     const seeded: Row = {}
     const original: Row = {}
+    // ``savedRow`` carries the ORIGINAL of EVERY loaded column (not just the rendered fields) so the
+    // migrated _put's WHERE ``:<COL>_ORIGINAL`` binds resolve even for hidden / non-field key columns
+    // (mirrors NestedTab). Keyed by the canonical column name so the case matches the bind; passwords
+    // are never rebound. Seeding of the visible fields happens in the loop below.
+    for (const [k, v] of Object.entries(row ?? {})) {
+      const rc = colByName.get(k.toLowerCase()) ?? null
+      if (isPassword(rc)) continue
+      original[rc?.name ?? k] = v
+    }
     // Only seed the parent's own form tabs — nested-form / nested-table tabs manage their own
     // read query + state inside the NestedFormView / NestedTableView components.
     for (const tab of dlg.tabs.filter(isFormTab)) {
@@ -525,8 +534,12 @@ export function ScreenDialog({
   // close even with no edits — settings_applications hit this on every open via the
   // Connection / Audit Trail / Custom SQL tabs.
   const isDirty = useMemo(() => {
-    const keys = new Set<string>([...Object.keys(formValues), ...Object.keys(savedRow)])
-    for (const k of keys) {
+    // Compare only the EDITABLE form fields against their originals — NOT every key in savedRow.
+    // savedRow now carries every loaded column (for the _put's :<COL>_ORIGINAL binds), so iterating
+    // it would flag hidden / non-field columns (absent from formValues) as changed and pop the
+    // unsaved-changes modal on a no-op cancel. A field with any value is always in formValues
+    // (seeding adds it whenever the row value is defined), so its keys are the complete edit set.
+    for (const k of Object.keys(formValues)) {
       const cur = formValues[k]
       const curStr = cur == null ? '' : String(cur)
       // A password field with the form left blank is *not* dirty even though savedRow holds

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from liberty.connectors.base import detect_statement_type, find_bind_params
+from liberty.connectors.base import detect_statement_type, escape_literal_colons, find_bind_params
 from liberty.connectors.config import (
     ApiConnectorConfig,
     ColumnHint,
@@ -231,3 +231,25 @@ def test_find_bind_params_skips_literals_and_casts() -> None:
         "AND e = :alpha"
     )
     assert find_bind_params(sql) == ["alpha", "beta"]
+
+
+def test_escape_literal_colons() -> None:
+    from sqlalchemy import text
+    from sqlalchemy.dialects import oracle
+
+    # The reported case: ':0' inside a string literal must NOT become a bind.
+    sql = "SELECT 'host' || ':' || '0' AS A, X || ':0' AS B FROM t WHERE u = :USER"
+    esc = escape_literal_colons(sql)
+    # SQLAlchemy sees only the real bind now (not the literal colons).
+    assert set(text(esc)._bindparams.keys()) == {"USER"}
+    # ...and the compiled SQL has the backslashes stripped back to plain colons.
+    compiled = str(text(esc).compile(dialect=oracle.dialect()))
+    assert "':0'" in compiled and "\\" not in compiled
+
+    # No colon inside a literal/identifier/comment → unchanged (real binds + ::casts untouched).
+    plain = "SELECT :a, :b::text FROM t -- comment\nWHERE c = :a"
+    assert escape_literal_colons(plain) == plain
+    # The escaper and the bind scanner agree: escaping changes no real bind.
+    assert find_bind_params(escape_literal_colons(sql)) == find_bind_params(sql) == ["USER"]
+    # Idempotent.
+    assert escape_literal_colons(escape_literal_colons(sql)) == escape_literal_colons(sql)

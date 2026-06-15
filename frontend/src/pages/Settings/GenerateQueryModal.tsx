@@ -147,12 +147,18 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
     : (!valueAlias ? t('settings.generateQuery.needValue', 'Set this lookup’s value column first.') : null)
 
   const error: string | null = (() => {
-    if (missingField) return missingField
-    if (!picked) return t('settings.generateQuery.pickTable', 'Pick a table to read from.')
     const n = name.trim()
     if (!n) return t('settings.generateQuery.nameRequired', 'Name the query.')
     if (existingQueryNames.has(n)) return t('settings.generateQuery.nameExists', 'A query named "{{name}}" already exists.', { name: n })
-    if (!effectiveSql.trim()) return t('settings.generateQuery.sqlEmpty', 'The generated SQL is empty.')
+    // A table isn't required — the operator can write the SQL directly. We only need SOME SQL. When
+    // there's none yet, point them at the table generator (which needs the record's value/dd_id) or
+    // the editor below.
+    if (!effectiveSql.trim()) {
+      return missingField
+        ?? (picked
+          ? t('settings.generateQuery.sqlEmpty', 'The generated SQL is empty.')
+          : t('settings.generateQuery.pickTableOrSql', 'Pick a table to generate the SQL, or write it directly below.'))
+    }
     return null
   })()
 
@@ -195,7 +201,7 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
             {missingField ? (
               <Hint>{missingField}</Hint>
             ) : !picked ? (
-              <Hint>{t('settings.generateQuery.pickTableFirst', 'Pick a table to map its columns.')}</Hint>
+              <Hint>{t('settings.generateQuery.pickTableOptional', 'Pick a table to auto-map its columns — or skip it and write the SQL directly below.')}</Hint>
             ) : (
               params.map((p) => (
                 <MapRow key={p.alias}>
@@ -216,7 +222,7 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
               <SqlEditor value={effectiveSql} rows={10} onChange={(v) => setSqlOverride(v)} connector={connector} />
             </SqlConnectorContext.Provider>
           </Field>
-          {error && picked && <ErrorLine>{error}</ErrorLine>}
+          {error && (picked || !!effectiveSql.trim() || !!name.trim()) && <ErrorLine>{error}</ErrorLine>}
         </ModalBody>
         <ModalFooter>
           <Button $variant="ghost" $size="sm" onClick={onCancel}>{t('common.cancel')}</Button>
