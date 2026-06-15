@@ -21,7 +21,7 @@ import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadshe
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError, authHeaders } from '../../api/client'
-import { Banner, Checkbox, SearchSelect } from '../../common'
+import { Banner, Checkbox, ErrorDetails, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import type { SharedGridView } from '../../services/gridViews'
 import { ValueDiffPanel } from './ValueDiffPanel'
@@ -1756,7 +1756,11 @@ export function ResultTable({
 
   return (
     <>
-      {saveErrors.length > 0 && <Banner $tone="error">{saveErrors.join(' · ')}</Banner>}
+      {saveErrors.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {saveErrors.map((e, i) => <ErrorDetails key={i} message={e} />)}
+        </div>
+      )}
       {canImport && (
         <input
           ref={fileRef}
@@ -1945,7 +1949,7 @@ export function ResultTable({
         />
       )}
       {proxyOpen && proxyError && (
-        <Banner $tone="error">{proxyError}</Banner>
+        <ErrorDetails message={proxyError} />
       )}
       {/* Action-prompt sub-dialog (v2's port of v1's ly_act_params). Mounted at the page level so
           it floats above both the row menu and the toolbar; the runner awaits the resolver, the
