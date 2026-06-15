@@ -17,7 +17,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Copy, Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
 import { ApiError } from '../../api/client'
-import { Banner, Button, ConfirmModal, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
+import { Banner, Button, ConfirmModal, ErrorDetails, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import { useSio, useLockState } from '../../sio/SioContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { LockPayload } from '../../sio/types'
@@ -950,7 +950,7 @@ export function ScreenDialog({
               </span>
             </Banner>
           )}
-          {error && <Banner $tone="error">{error}</Banner>}
+          {error && <ErrorDetails message={error} />}
           {actionStatus && (
             <Banner $tone={actionStatus.tone}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
