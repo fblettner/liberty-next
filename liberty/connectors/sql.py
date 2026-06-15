@@ -891,11 +891,20 @@ from liberty.connectors.base import (
     StatementNotAllowedError,
     WriteNotAllowedError,
     detect_statement_type,
+    escape_literal_colons,
     find_bind_params,
 )
 from liberty.connectors.config import ColumnHint, QueryDef, SqlConnectorConfig, _crud_slot_to_querydef
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, SequenceDef
+
+
+def _text(sql: str):
+    """``sqlalchemy.text`` with colons inside string literals / identifiers / comments escaped, so a
+    literal like ``':0'`` isn't mis-parsed as a bind parameter (see ``escape_literal_colons``).
+    A no-op for SQL with no colon in those regions, so existing queries are unaffected."""
+    return text(escape_literal_colons(sql))
+
 
 # Internal sentinel raised by `test_run(dry_run=True)` on a write — forces `engine.begin()`'s
 # context manager to roll back; caught outside the `async with`. Not part of the public surface.
@@ -1891,7 +1900,7 @@ class SQLConnector:
             # (a) Bind each :param the SQL declares — a configured bind wins over the bare name-match.
             seq_bound = {name: bind_vals.get(name.upper(), out.get(name)) for name in find_bind_params(seq_sql)}
             try:
-                r = await conn.execute(text(seq_sql), seq_bound)
+                r = await conn.execute(_text(seq_sql), seq_bound)
                 result_rows = r.mappings().all()
                 # (b) Filter the rows by any bind whose param is a RESULT COLUMN (the GROUP BY case) —
                 # keep the row whose ``<param>`` equals the bound value, trim-tolerant like a lookup.
@@ -2079,7 +2088,7 @@ class SQLConnector:
             dict_scope=dict_scope, context=params,
         )
         bound.update(token_binds)  # server-resolved tokens win, untouched by form rules
-        stmt = text(sql_text)
+        stmt = _text(sql_text)
         is_select = stmt_type == "SELECT"
 
         started = time.perf_counter()
@@ -2368,7 +2377,7 @@ class SQLConnector:
             dict_scope=dict_scope,
         )
         _ = lang  # lang used only by columns hint resolution + audit (none here on SELECT)
-        stmt = text(sql_text)
+        stmt = _text(sql_text)
         engine: AsyncEngine = self._pools.engine(self.pool_name)
         _trim = self._pools.trim_strings(self.pool_name)
         self._debug_log_sql(query_name, stmt_type, sql_text, bound)
@@ -2467,7 +2476,7 @@ class SQLConnector:
         cap = max(1, min(int(max_rows if max_rows is not None else self.max_rows), self.HARD_MAX_ROWS))
         # Bind every :name token from the SQL — missing values default to SQL NULL, same as execute()
         bound = {name: (params or {}).get(name) for name in find_bind_params(sql_text)}
-        stmt = text(sql_text)
+        stmt = _text(sql_text)
         is_select = stmt_type == "SELECT"
         engine = self._pools.engine(self.pool_name)
         started = time.perf_counter()

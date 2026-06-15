@@ -218,3 +218,67 @@ def find_bind_params(sql: str) -> list[str]:
             continue
         i += 1
     return names
+
+
+def _escape_colons(seg: str) -> str:
+    """Backslash a literal colon, skipping one that's already escaped (idempotent)."""
+    if ":" not in seg:
+        return seg
+    out: list[str] = []
+    for k, ch in enumerate(seg):
+        out.append("\\:" if ch == ":" and (k == 0 or seg[k - 1] != "\\") else ch)
+    return "".join(out)
+
+
+def escape_literal_colons(sql: str) -> str:
+    """Backslash-escape every ``:`` inside a single-quoted string literal, double-quoted identifier,
+    or SQL comment — the regions where a colon is NEVER a bind parameter.
+
+    SQLAlchemy's ``text()`` bind parser is NOT literal-aware: it reads ``':0'`` as a bind named ``0``
+    (and any ``:word`` inside a literal as a bind), which then has no value and raises "A value is
+    required for bind parameter ...". The ``\\:`` escape makes ``text()`` emit a plain colon instead
+    (the backslash is stripped at compile time). Real ``:name`` binds and ``::type`` casts OUTSIDE
+    those regions are left untouched, so this is a no-op for SQL with no colon inside a
+    literal/identifier/comment. Mirrors :func:`find_bind_params`' region scan so the two stay in
+    lock-step (the contract its docstring promises).
+    """
+    if ":" not in sql:
+        return sql
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c == "'":  # single-quoted literal, '' escapes an embedded quote
+            j = i + 1
+            while j < n:
+                if sql[j] == "'":
+                    if j + 1 < n and sql[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            out.append(_escape_colons(sql[i:j]))
+            i = j
+            continue
+        if c == '"':  # quoted identifier
+            end = sql.find('"', i + 1)
+            j = n if end < 0 else end + 1
+            out.append(_escape_colons(sql[i:j]))
+            i = j
+            continue
+        if c == "-" and i + 1 < n and sql[i + 1] == "-":  # line comment (to EOL, exclusive)
+            eol = sql.find("\n", i)
+            j = n if eol < 0 else eol
+            out.append(_escape_colons(sql[i:j]))
+            i = j
+            continue
+        if c == "/" and i + 1 < n and sql[i + 1] == "*":  # block comment
+            end = sql.find("*/", i + 2)
+            j = n if end < 0 else end + 2
+            out.append(_escape_colons(sql[i:j]))
+            i = j
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
