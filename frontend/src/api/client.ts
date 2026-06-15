@@ -5,6 +5,10 @@ import i18n from "../i18n";
 
 let accessToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
+// Returns the new access token on success, or null if refresh failed. Wired by AuthContext to
+// POST /auth/refresh. When set, a 401 triggers one silent refresh + retry before giving up.
+let tokenRefresher: (() => Promise<string | null>) | null = null;
+let refreshInFlight: Promise<string | null> | null = null;
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
@@ -12,6 +16,22 @@ export function setAccessToken(token: string | null): void {
 
 export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn;
+}
+
+export function setTokenRefresher(fn: (() => Promise<string | null>) | null): void {
+  tokenRefresher = fn;
+}
+
+// Single-flight: concurrent 401s share ONE refresh attempt instead of stampeding /auth/refresh.
+function refreshOnce(): Promise<string | null> {
+  if (!tokenRefresher) return Promise.resolve(null);
+  refreshInFlight ??= tokenRefresher().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
+// Don't try to refresh the refresh/login calls themselves (would recurse / is meaningless).
+function canRefresh(path: string): boolean {
+  return !!tokenRefresher && !path.startsWith("/auth/refresh") && !path.startsWith("/auth/login");
 }
 
 export class ApiError extends Error {
@@ -48,17 +68,24 @@ async function parseError(res: Response): Promise<ApiError> {
 }
 
 async function request<T>(method: string, path: string, body?: unknown, asText = false): Promise<T> {
-  const init: RequestInit = { method, headers: authHeaders() };
-  if (body !== undefined) {
-    if (typeof body === "string") {
-      init.body = body;
-      (init.headers as Record<string, string>)["Content-Type"] = "text/plain";
-    } else {
-      init.body = JSON.stringify(body);
-      (init.headers as Record<string, string>)["Content-Type"] = "application/json";
+  // Rebuilt per attempt so the retry picks up the refreshed Bearer (authHeaders reads the latest token).
+  const build = (): RequestInit => {
+    const init: RequestInit = { method, headers: authHeaders() };
+    if (body !== undefined) {
+      if (typeof body === "string") {
+        init.body = body;
+        (init.headers as Record<string, string>)["Content-Type"] = "text/plain";
+      } else {
+        init.body = JSON.stringify(body);
+        (init.headers as Record<string, string>)["Content-Type"] = "application/json";
+      }
     }
+    return init;
+  };
+  let res = await fetch(path, build());
+  if (res.status === 401 && canRefresh(path) && (await refreshOnce())) {
+    res = await fetch(path, build());   // one silent retry with the refreshed token
   }
-  const res = await fetch(path, init);
   if (res.status === 401) {
     onUnauthorized?.();
     throw await parseError(res);
@@ -88,12 +115,14 @@ export async function streamSSE(
   onEvent: (data: unknown) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(path, {
+  const build = () => fetch(path, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
     body: JSON.stringify(body),
     signal,
   });
+  let res = await build();
+  if (res.status === 401 && canRefresh(path) && (await refreshOnce())) res = await build();
   if (res.status === 401) {
     onUnauthorized?.();
     throw await parseError(res);
@@ -146,7 +175,7 @@ export async function streamNDJSON(
   onEvent: (data: unknown) => void,
 ): Promise<void> {
   const method = init.method ?? "GET";
-  const res = await fetch(path, {
+  const build = () => fetch(path, {
     method,
     headers: authHeaders({
       Accept: "application/x-ndjson",
@@ -155,6 +184,8 @@ export async function streamNDJSON(
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     signal: init.signal,
   });
+  let res = await build();
+  if (res.status === 401 && canRefresh(path) && (await refreshOnce())) res = await build();
   if (res.status === 401) {
     onUnauthorized?.();
     throw await parseError(res);
