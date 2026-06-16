@@ -187,9 +187,21 @@ class DefaultWhen(BaseModel):
     )
     value: str | list[str] = Field(description="The discriminator value, or list of values, that triggers this default.")
     default: str = Field(description="The value forced into this column (and locked) while the condition holds.")
+    lock: bool = Field(
+        default=True,
+        description=(
+            "Lock the column (read-only) while this default holds. True (default) = force the value "
+            "AND disable the field — the value is system-determined. false = SEED the value when the "
+            "condition becomes active but leave the field editable (the operator can override it; a "
+            "good fit for a default like ``*ALL`` on a lookup column they may want to narrow)."
+        ),
+    )
 
     def as_dict(self) -> dict[str, Any]:
-        return {"field": self.field, "value": self.value, "default": self.default}
+        d: dict[str, Any] = {"field": self.field, "value": self.value, "default": self.default}
+        if not self.lock:
+            d["lock"] = False  # emit only when overriding the default so existing payloads are unchanged
+        return d
 
 
 class ParamBind(BaseModel):

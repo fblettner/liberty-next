@@ -138,7 +138,7 @@ export interface Column {
   return_binds?: { param: string; column: string }[]
   /** Conditional forced defaults: when sibling `field` == `value`, this column is set to `default`
    *  and locked (read-only). First matching rule wins. Honoured by the grid + dialog. */
-  default_when?: { field: string; value: string | string[]; default: string }[]
+  default_when?: { field: string; value: string | string[]; default: string; lock?: boolean }[]
   /** LOOKUP/ENUM: show only the code column in the grid, not the resolved-label column. */
   hide_label?: boolean
   /** Conditional rule overrides: when sibling `field` == `value`, use `rule` (a resolved display

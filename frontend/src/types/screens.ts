@@ -116,7 +116,7 @@ export interface ScreenField {
   return_binds?: { param: string; column: string }[]
   /** Conditional forced defaults: when sibling `field` == `value`, this field is set to `default`
    *  and locked. First matching rule wins. Reactive on the live form. */
-  default_when?: { field: string; value: string | string[]; default: string }[]
+  default_when?: { field: string; value: string | string[]; default: string; lock?: boolean }[]
   /** Conditional rule overrides: when sibling `field` == `value`, render with `rule` (resolved, or
    *  null → plain) instead of the field's base `rule`. First match wins; reactive on the form. Each
    *  entry carries its OWN `lookup_param_binds` + `return_binds` (independent of the column's base

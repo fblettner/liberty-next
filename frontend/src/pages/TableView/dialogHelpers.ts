@@ -69,19 +69,25 @@ export function evalConditions(rules: FieldCondition[] | undefined, formValues: 
   return true
 }
 
-/** A conditional forced-default rule (``ColumnHint.default_when``). */
-export type DefaultWhenRule = { field: string; value: string | string[]; default: string }
+/** A conditional forced-default rule (``ColumnHint.default_when``). ``lock`` (default true) forces +
+ *  disables the field; ``lock === false`` seeds the value but leaves it editable. */
+export type DefaultWhenRule = { field: string; value: string | string[]; default: string; lock?: boolean }
 
-/** The conditional forced default for a column given the current values: the FIRST rule whose
- *  {field, value} condition holds, or undefined when none match. When defined, the caller forces
- *  the column to this value and locks it (read-only). Reuses {@link evalConditions} for the same
- *  trim-tolerant, case-insensitive matching. */
-export function forcedDefault(rules: DefaultWhenRule[] | undefined, values: Row): string | undefined {
+/** The FIRST default_when rule whose {field, value} condition holds, or undefined. Caller decides
+ *  what to do with it (force the value; lock the field only when ``rule.lock !== false``). */
+export function matchedDefaultWhen(rules: DefaultWhenRule[] | undefined, values: Row): DefaultWhenRule | undefined {
   if (!rules || rules.length === 0) return undefined
   for (const r of rules) {
-    if (evalConditions([{ field: r.field, value: r.value }], values)) return r.default
+    if (evalConditions([{ field: r.field, value: r.value }], values)) return r
   }
   return undefined
+}
+
+/** The conditional forced-default value for a column given the current values (the matched rule's
+ *  ``default``), or undefined when none match. Reuses {@link evalConditions} for trim-tolerant,
+ *  case-insensitive matching. */
+export function forcedDefault(rules: DefaultWhenRule[] | undefined, values: Row): string | undefined {
+  return matchedDefaultWhen(rules, values)?.default
 }
 
 /** The ACTIVE display rule for a column/field given the current row/form values: the first
