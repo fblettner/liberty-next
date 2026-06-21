@@ -1,5 +1,11 @@
 # Liberty Next — Notes de version
 
+## 7.0.49 — 2026-06-21
+
+**Documentation**
+- Notes de version françaises (`RELEASE.fr.md`) mises à jour jusqu'à la 7.0.48 — entrées rédigées en
+  français pour les versions 7.0.39 à 7.0.48 (le fichier était resté figé à la 7.0.27).
+
 ## 7.0.48 — 2026-06-21
 
 **Écrans**

@@ -2,7 +2,9 @@
 
 ## 7.0.49 — 2026-06-21
 
-- _Release notes pending — edit liberty/RELEASE.md._
+**Docs**
+- French release notes (`RELEASE.fr.md`) brought up to date through 7.0.48 — native French entries
+  for 7.0.39–7.0.48 (the file had been frozen at 7.0.27).
 
 ## 7.0.48 — 2026-06-21
 
