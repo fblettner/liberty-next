@@ -6,20 +6,20 @@ import remarkGfm from 'remark-gfm'
 import styled from '@emotion/styled'
 import { colors, fontSize, fonts, radius } from '../theme'
 
-const Body = styled.div`
-  font-size: ${fontSize.md};
-  line-height: 1.6;
+const Body = styled.div<{ $compact?: boolean }>`
+  font-size: ${({ $compact }) => ($compact ? fontSize.base : fontSize.md)};
+  line-height: ${({ $compact }) => ($compact ? 1.5 : 1.6)};
   color: ${colors.text.secondary};
   word-break: break-word;
 
   & > :first-of-type { margin-top: 0; }
   & > :last-child { margin-bottom: 0; }
 
-  h1, h2, h3, h4 { color: ${colors.text.primary}; font-weight: 700; line-height: 1.3; margin: 14px 0 8px; }
-  h1 { font-size: ${fontSize.xl}; }
-  h2 { font-size: ${fontSize.lg}; }
-  h3 { font-size: ${fontSize.md}; }
-  h4 { font-size: ${fontSize.base}; }
+  h1, h2, h3, h4 { color: ${colors.text.primary}; font-weight: 700; line-height: 1.3; margin: ${({ $compact }) => ($compact ? '12px 0 5px' : '14px 0 8px')}; }
+  h1 { font-size: ${({ $compact }) => ($compact ? fontSize.lg : fontSize.xl)}; }
+  h2 { font-size: ${({ $compact }) => ($compact ? fontSize.md : fontSize.lg)}; }
+  h3 { font-size: ${({ $compact }) => ($compact ? fontSize.base : fontSize.md)}; }
+  h4 { font-size: ${({ $compact }) => ($compact ? fontSize.sm : fontSize.base)}; }
 
   p { margin: 0 0 8px; }
   ul, ol { margin: 0 0 8px; padding-left: 22px; }
@@ -62,9 +62,9 @@ const Body = styled.div`
   th { background: ${colors.bg.input}; color: ${colors.text.secondary}; font-weight: 600; }
 `
 
-export function Markdown({ children }: { children: string }) {
+export function Markdown({ children, compact }: { children: string; compact?: boolean }) {
   return (
-    <Body>
+    <Body $compact={compact}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
