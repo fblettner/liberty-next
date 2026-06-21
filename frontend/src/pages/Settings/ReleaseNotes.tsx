@@ -98,10 +98,10 @@ export default function ReleaseNotes() {
             ))}
           </Toc>
           <Content>
-            {intro.trim() && <Markdown>{intro}</Markdown>}
+            {intro.trim() && <Markdown compact>{intro}</Markdown>}
             {sections.map((s) => (
               <SectionBox key={s.anchor} ref={(el) => { refs.current[s.anchor] = el }}>
-                <Markdown>{s.md}</Markdown>
+                <Markdown compact>{s.md}</Markdown>
               </SectionBox>
             ))}
           </Content>

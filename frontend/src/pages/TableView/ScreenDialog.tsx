@@ -24,7 +24,7 @@ import type { LockPayload } from '../../sio/types'
 import type { Column } from '../../types/connectors'
 import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
-import { entityKeyOf, evalConditions, forcedDefault, type Row } from './dialogHelpers'
+import { entityKeyOf, evalConditions, matchedDefaultWhen, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
@@ -139,6 +139,10 @@ export function ScreenDialog({
   const [tabIdx, setTabIdx] = useState(0)
   const [formValues, setFormValues] = useState<Row>({})
   const [savedRow, setSavedRow] = useState<Row>({})  // the *original* values keyed by field name (for `:<FIELD>_ORIGINAL`)
+  // Per-field "already-seeded" baseline for editable (lock=false) default_when rules: the forced
+  // value last applied, so the seed fires once when the condition becomes active and the operator's
+  // later edits aren't clobbered. Locked defaults don't use this (they force continuously).
+  const seededRef = useRef<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Fullscreen / restore toggle for the top-level dialog — the default 900×700 envelope can be
@@ -231,32 +235,54 @@ export function ScreenDialog({
         }
       }
     }
+    // Editable (lock=false) defaults: in a true EDIT, mark the active default as already-applied so
+    // the seed doesn't overwrite the loaded value; in add / duplicate leave it unset so it seeds.
+    const baseline: Record<string, string> = {}
+    if (effMode === 'edit') {
+      for (const tab of dlg.tabs.filter(isFormTab)) {
+        for (const f of (tab as FormTab).fields ?? []) {
+          const dw = matchedDefaultWhen(f.default_when, seeded)
+          if (dw && dw.lock === false) baseline[f.name] = dw.default
+        }
+      }
+    }
+    seededRef.current = baseline
     setFormValues(seeded)
     setSavedRow(original)
     setTabIdx(0)
     setError(null)
-  }, [open, mode, row, dlg, valueFor, colByName])
+  }, [open, mode, effMode, row, dlg, valueFor, colByName])
 
-  // Conditional forced defaults (column ``default_when``): when a discriminator field matches, force
-  // the target field to the rule's value (``fieldStateOf`` also locks it read-only). Reactive — it
-  // re-applies whenever the form changes, so changing the discriminator updates dependents live.
-  // Guarded by a value-diff so setting inside a formValues-watching effect doesn't loop.
+  // Conditional forced defaults (column ``default_when``): when a discriminator field matches, set
+  // the target field to the rule's value. Reactive — re-runs as the form changes so a discriminator
+  // flip updates dependents live. Two modes per the rule's ``lock``:
+  //   • lock !== false (default): the value is system-determined — force it continuously
+  //     (``fieldStateOf`` also disables the field, so the operator never edits it).
+  //   • lock === false: SEED once when the default becomes active (its forced value differs from the
+  //     remembered baseline), then leave the field editable — the operator's edits aren't clobbered.
   useEffect(() => {
     if (!dlg) return
-    setFormValues((prev) => {
-      let next = prev
-      let changed = false
-      for (const tab of dlg.tabs.filter(isFormTab)) {
-        for (const f of (tab as FormTab).fields ?? []) {
-          const forced = forcedDefault(f.default_when, prev)
-          if (forced !== undefined && String(prev[f.name] ?? '') !== String(forced)) {
-            if (!changed) { next = { ...prev }; changed = true }
-            next[f.name] = forced
-          }
+    const updates: Record<string, unknown> = {}
+    const active = new Set<string>()
+    for (const tab of dlg.tabs.filter(isFormTab)) {
+      for (const f of (tab as FormTab).fields ?? []) {
+        const dw = matchedDefaultWhen(f.default_when, formValues)
+        if (!dw) continue
+        active.add(f.name)
+        const forced = String(dw.default)
+        if (dw.lock !== false) {
+          if (String(formValues[f.name] ?? '') !== forced) updates[f.name] = dw.default
+        } else if (seededRef.current[f.name] !== forced) {
+          // Newly active (or discriminator changed value) → seed once; thereafter leave it alone.
+          seededRef.current[f.name] = forced
+          if (String(formValues[f.name] ?? '') !== forced) updates[f.name] = dw.default
         }
       }
-      return changed ? next : prev
-    })
+    }
+    // Forget the baseline for fields whose default_when no longer matches, so a return to the
+    // condition re-seeds.
+    for (const k of Object.keys(seededRef.current)) if (!active.has(k)) delete seededRef.current[k]
+    if (Object.keys(updates).length) setFormValues((prev) => ({ ...prev, ...updates }))
   }, [formValues, dlg])
 
   // ── record lock (Phase 9 — Socket.IO) ────────────────────────────────────────────────
@@ -820,9 +846,11 @@ export function ScreenDialog({
     // disable_on_edit while editing — the SAME setting the grid bulk-editor honours. `effMode`
     // already folds Duplicate (an edit-of → add). ORed on top of the rule/static disabled.
     const modeLocked = effMode === 'add' ? !!f.disable_on_add : !!f.disable_on_edit
-    // A conditional forced default (default_when) currently holds → the value is system-determined,
-    // so lock the field (the reactive effect above keeps its value in sync).
-    const forcedLocked = forcedDefault(f.default_when, formValues) !== undefined
+    // A conditional forced default (default_when) currently holds AND it locks (lock !== false) →
+    // the value is system-determined, so disable the field. A lock=false default only seeds the
+    // value (handled by the effect above) and leaves the field editable.
+    const dw = matchedDefaultWhen(f.default_when, formValues)
+    const forcedLocked = dw !== undefined && dw.lock !== false
     return { visible: visibleByRule, required: requiredByRule, disabled: disabledByRule || modeLocked || forcedLocked }
   }
 
